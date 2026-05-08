@@ -39,6 +39,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 mod commands;
 pub mod process_util;
+pub mod proto;
 pub mod sentry_utils;
 mod telemetry;
 mod webview_recovery;
