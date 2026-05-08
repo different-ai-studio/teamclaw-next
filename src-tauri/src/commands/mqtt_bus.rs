@@ -1,4 +1,4 @@
-use crate::mqtt::{topics, ClientConfig, MqttBus, MqttClient};
+use crate::mqtt::{ClientConfig, MqttBus, MqttClient};
 use rumqttc::QoS;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MqttStatus {
     pub connected: bool,
-    pub subscribed_sessions: Vec<String>,
+    pub subscribed_topics: Vec<String>,
 }
 
 #[tauri::command]
@@ -18,6 +18,7 @@ pub async fn mqtt_connect(
     username: String,
     password: String,
     client_id: String,
+    team_id: String,
 ) -> Result<(), String> {
     let cfg = ClientConfig {
         broker_host,
@@ -25,6 +26,7 @@ pub async fn mqtt_connect(
         client_id,
         username,
         password,
+        team_id,
     };
     let client = MqttClient::connect(cfg).map_err(|e| e.to_string())?;
     *bus.client.lock().await = Some(client);
@@ -40,33 +42,32 @@ pub async fn mqtt_connect(
 #[tauri::command]
 pub async fn mqtt_subscribe(
     bus: State<'_, MqttBus>,
-    session_id: String,
+    topic: String,
 ) -> Result<(), String> {
-    let topic = topics::session_topic(&session_id);
     let client_guard = bus.client.lock().await;
     let client = client_guard.as_ref().ok_or("mqtt not connected")?;
     client
         .client
-        .subscribe(topic, QoS::AtLeastOnce)
+        .subscribe(&topic, QoS::AtLeastOnce)
         .await
         .map_err(|e| e.to_string())?;
     drop(client_guard);
-    bus.subscribed.lock().await.insert(session_id);
+    bus.subscribed.lock().await.insert(topic);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn mqtt_publish(
     bus: State<'_, MqttBus>,
-    session_id: String,
-    envelope_bytes: Vec<u8>,
+    topic: String,
+    bytes: Vec<u8>,
+    retain: bool,
 ) -> Result<(), String> {
-    let topic = topics::session_topic(&session_id);
     let client_guard = bus.client.lock().await;
     let client = client_guard.as_ref().ok_or("mqtt not connected")?;
     client
         .client
-        .publish(topic, QoS::AtLeastOnce, false, envelope_bytes)
+        .publish(&topic, QoS::AtLeastOnce, retain, bytes)
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -75,9 +76,9 @@ pub async fn mqtt_publish(
 #[tauri::command]
 pub async fn mqtt_status(bus: State<'_, MqttBus>) -> Result<MqttStatus, String> {
     let connected = bus.client.lock().await.is_some();
-    let subscribed_sessions: Vec<String> = bus.subscribed.lock().await.iter().cloned().collect();
+    let subscribed_topics: Vec<String> = bus.subscribed.lock().await.iter().cloned().collect();
     Ok(MqttStatus {
         connected,
-        subscribed_sessions,
+        subscribed_topics,
     })
 }

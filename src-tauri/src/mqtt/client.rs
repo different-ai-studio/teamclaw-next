@@ -10,6 +10,7 @@ pub struct ClientConfig {
     pub client_id: String,
     pub username: String,
     pub password: String,
+    pub team_id: String,
 }
 
 pub struct MqttClient {
@@ -25,7 +26,7 @@ impl MqttClient {
         opts.set_clean_session(false);
         opts.set_keep_alive(Duration::from_secs(30));
 
-        let lwt_topic = super::topics::device_state_topic(&cfg.client_id);
+        let lwt_topic = super::topics::device_state(&cfg.team_id, &cfg.client_id);
         let lwt_payload = serde_json::json!({"status":"offline"}).to_string().into_bytes();
         opts.set_last_will(LastWill::new(lwt_topic, lwt_payload, QoS::AtLeastOnce, true));
 
