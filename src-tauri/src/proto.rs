@@ -2,6 +2,10 @@ pub mod amux {
     include!(concat!(env!("OUT_DIR"), "/amux.rs"));
 }
 
+pub mod teamclaw {
+    include!(concat!(env!("OUT_DIR"), "/teamclaw.rs"));
+}
+
 use prost::Message;
 
 macro_rules! impl_encode {
@@ -17,3 +21,9 @@ macro_rules! impl_encode {
 }
 
 impl_encode!(amux::Envelope, amux::DeviceState, amux::RuntimeInfo);
+impl_encode!(
+    teamclaw::SessionMessageEnvelope,
+    teamclaw::LiveEventEnvelope,
+    teamclaw::RpcRequest,
+    teamclaw::RpcResponse
+);

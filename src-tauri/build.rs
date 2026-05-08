@@ -43,11 +43,13 @@ fn resolve_updater_endpoint(config: &serde_json::Value) -> Option<String> {
 }
 
 fn compile_protos() {
-    let proto = "../proto/amux.proto";
-    println!("cargo:rerun-if-changed={proto}");
+    let amux = "../proto/amux.proto";
+    let teamclaw = "../proto/teamclaw.proto";
+    println!("cargo:rerun-if-changed={amux}");
+    println!("cargo:rerun-if-changed={teamclaw}");
     prost_build::Config::new()
-        .compile_protos(&[proto], &["../proto"])
-        .expect("compile amux.proto");
+        .compile_protos(&[amux, teamclaw], &["../proto"])
+        .expect("compile amux + teamclaw protos");
 }
 
 fn main() {

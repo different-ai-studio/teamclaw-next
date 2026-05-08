@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
-    "proto-gen": "protoc --es_out=src/lib/proto --es_opt=target=ts,import_extension=.js -I ../../proto ../../proto/amux.proto"
+    "proto-gen": "protoc --es_out=src/lib/proto --es_opt=target=ts,import_extension=.js -I ../../proto ../../proto/amux.proto ../../proto/teamclaw.proto"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.0",
