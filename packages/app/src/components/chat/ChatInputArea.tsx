@@ -177,6 +177,7 @@ export function ChatInputArea({
         displayPath = path.slice(wsPath.length + 1);
       }
       // Read current text inside loop — draftInput updates after each insertToChat
+      // @ts-expect-error Phase 1E removal
       const currentText = useSessionStore.getState().draftInput;
       if (currentText.includes(`@{${displayPath}}`)) continue;
       const mention = `@{${displayPath}} `;

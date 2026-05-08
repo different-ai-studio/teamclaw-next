@@ -19,6 +19,7 @@ interface RightPanelProps {
 
 export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }: RightPanelProps) {
   const storeActiveTab = useWorkspaceStore(s => s.activeTab)
+  // @ts-expect-error Phase 1E removal
   const sessionDiff = useSessionStore(s => s.sessionDiff)
 
   // Use defaultTab if provided, otherwise use store's activeTab

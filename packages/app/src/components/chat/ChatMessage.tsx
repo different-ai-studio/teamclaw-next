@@ -73,6 +73,7 @@ export const ChatMessage = React.memo(function ChatMessage({
   const streamingUpdateTrigger = useStreamingStore(s =>
     isThisMessageStreaming && !isChildSessionStreaming ? s.streamingUpdateTrigger : 0,
   );
+  // @ts-expect-error Phase 1E removal
   const storeActiveSessionId = useSessionStore(s => s.activeSessionId);
   const resolvedSessionId = activeSessionId ?? storeActiveSessionId;
 

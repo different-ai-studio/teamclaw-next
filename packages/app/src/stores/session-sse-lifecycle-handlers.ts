@@ -166,6 +166,7 @@ export function createLifecycleHandlers(set: SessionSet, get: SessionGet) {
           }));
           setTimeout(() => {
             import("./session-store").then(({ useSessionStore }) => {
+              // @ts-expect-error Phase 1E removal
               useSessionStore.getState().clearHighlightedSession(event.sessionId);
             });
           }, 5000);

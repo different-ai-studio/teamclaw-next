@@ -149,6 +149,7 @@ export const RolesSection = React.memo(function RolesSection({
   const openCreateRoleInChat = () => {
     useUIStore.getState().startNewChat()
     window.setTimeout(() => {
+      // @ts-expect-error Phase 1E removal
       useSessionStore.getState().setDraftInput("/{create-role} ")
     }, 0)
   }

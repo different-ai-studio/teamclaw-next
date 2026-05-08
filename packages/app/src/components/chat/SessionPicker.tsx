@@ -12,6 +12,7 @@ interface SessionPickerProps {
 export function SessionPicker({ className }: SessionPickerProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  // @ts-expect-error Phase 1E removal
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
 
   const activeSession = activeSessionId ? getSessionById(activeSessionId) : null

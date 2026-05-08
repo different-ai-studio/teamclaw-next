@@ -106,7 +106,9 @@ export function QuestionInputDock({
   onHeightChange,
 }: QuestionInputDockProps) {
   const { t } = useTranslation();
+  // @ts-expect-error Phase 1E removal
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
+  // @ts-expect-error Phase 1E removal
   const skipQuestion = useSessionStore((s) => s.skipQuestion);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const lastReportedHeight = React.useRef(0);

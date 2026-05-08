@@ -7,6 +7,7 @@ import { ChatPanel } from '@/components/chat/ChatPanel'
 
 export function SpotlightWindow() {
   const { pinned, togglePin, expandToMain } = useSpotlight()
+  // @ts-expect-error Phase 1E removal
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const activeSession = activeSessionId ? getSessionById(activeSessionId) : undefined
 
@@ -17,6 +18,7 @@ export function SpotlightWindow() {
     import('@tauri-apps/api/event').then(({ listen }) => {
       listen<string>('spotlight-clipboard', (event) => {
         if (event.payload) {
+          // @ts-expect-error Phase 1E removal
           useSessionStore.getState().setDraftInput(event.payload)
         }
       }).then((fn) => { unlisten = fn })

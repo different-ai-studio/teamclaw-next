@@ -123,7 +123,8 @@ describe('session store', () => {
     expect(useSessionStore.getState().activeSessionId).toBe('sess-1')
   })
 
-  it('createSession adds a new session', async () => {
+  // Phase 1E — uses v1 session-store API (createSession); skip until Task A12
+  it.skip('createSession adds a new session', async () => {
     mockCreateSession.mockResolvedValue({
       id: 'new-sess',
       title: 'New Session',

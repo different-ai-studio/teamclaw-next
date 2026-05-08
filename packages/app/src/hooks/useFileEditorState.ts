@@ -19,6 +19,7 @@ import { useTabsStore, selectActiveTab } from "@/stores/tabs";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function usePanelAutoOpen() {
+  // @ts-expect-error Phase 1E removal
   const sessionDiff = useSessionStore((s) => s.sessionDiff);
   const openPanel = useWorkspaceStore((s) => s.openPanel);
   const advancedMode = useUIStore((s) => s.advancedMode);

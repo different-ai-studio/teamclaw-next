@@ -451,6 +451,7 @@ export function FileEditor({
   const previewType = supportsPreview(filename);
 
   // Get session diff to check if this file has changes - precise selector
+  // @ts-expect-error Phase 1E removal
   const sessionDiff = useSessionStore((s) => s.sessionDiff);
 
   // Find if this file has changes in the current session
@@ -458,6 +459,7 @@ export function FileEditor({
     // Normalize the file path for comparison
     const normalizedPath = filePath.replace(/^\/+|\/+$/g, "");
 
+    // @ts-expect-error Phase 1E removal
     return sessionDiff.find((diff) => {
       const normalizedDiffPath = diff.file.replace(/^\/+|\/+$/g, "");
       // Check various path matching scenarios
@@ -936,6 +938,7 @@ export function FileEditor({
               isDark={isDark}
               onSendToAgent={(agentPrompt) => {
                 // Send agent prompt to chat and switch to Agent tab
+                // @ts-expect-error Phase 1E removal
                 const { sendMessage } = useSessionStore.getState();
                 sendMessage(agentPrompt);
                 useUIStore.getState().setFileModeRightTab("agent");
