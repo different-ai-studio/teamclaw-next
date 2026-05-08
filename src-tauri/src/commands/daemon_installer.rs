@@ -14,7 +14,11 @@ pub async fn install_local_daemon(_supabase_jwt: String) -> Result<DaemonInstall
 
 #[tauri::command]
 pub async fn daemon_status() -> Result<DaemonInstallStatus, String> {
-    Ok(DaemonInstallStatus { installed: false, running: false, version: None })
+    Ok(DaemonInstallStatus {
+        installed: false,
+        running: false,
+        version: None,
+    })
 }
 
 #[tauri::command]
