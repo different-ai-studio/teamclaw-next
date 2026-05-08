@@ -1,4 +1,20 @@
-# TeamClaw
+# TeamClaw v2 (worktree branch: `v2/amuxd-architecture`)
+
+> **Architecture migration in progress.** This branch is the v2 rebuild described in
+> `docs/superpowers/specs/2026-05-08-amuxd-architecture-design.md`. Plan: `docs/superpowers/plans/2026-05-08-amuxd-architecture-phase-0-1-v2.md`.
+>
+> **Phase 0+1 complete (2026-05-08):** Supabase email+password auth, Rust MQTT bus,
+> ChatPanel rendering on Teamclaw_Message, send-message via LiveEventEnvelope +
+> Supabase persistence. OpenCode sidecar removed.
+>
+> **Local dev requires** `packages/app/.env.development.local` (gitignored) with:
+> - `VITE_SUPABASE_URL`
+> - `VITE_SUPABASE_ANON_KEY`
+> - `VITE_MQTT_HOST`, `VITE_MQTT_PORT`, `VITE_MQTT_USERNAME`, `VITE_MQTT_PASSWORD`
+>
+> Wire format: `proto/amux.proto` + `proto/teamclaw.proto`, vendored from
+> `/Volumes/openbeta/workspace/amux/proto/`. Topics: `amux/{team}/session/{sid}/live`.
+> Phase 2 (daemon installer + ACP runtime + agent streaming) is the next plan.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/different-ai-studio/teamclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/different-ai-studio/teamclaw/actions)
