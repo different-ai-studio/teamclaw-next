@@ -38,4 +38,6 @@ export type PromptInputContextValue = {
   mentionStartRef: React.MutableRefObject<number | null>
   // Ref to track command start position
   commandStartRef: React.MutableRefObject<number | null>
+  // Ref to track hash (#) start position
+  hashStartRef: React.MutableRefObject<number | null>
 }

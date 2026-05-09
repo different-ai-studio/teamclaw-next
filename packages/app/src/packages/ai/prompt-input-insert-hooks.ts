@@ -271,6 +271,46 @@ export function createInsertSkillMention(context: PromptInputContextValue) {
   }
 }
 
+export function createInsertHashFile(context: PromptInputContextValue) {
+  const { text, setText, onHashClose, textareaRef, hashStartRef } = context
+
+  return (filePath: string) => {
+    let lastValidHashIndex = -1
+    for (let i = text.length - 1; i >= 0; i--) {
+      if (text[i] === '#') {
+        lastValidHashIndex = i
+        break
+      }
+    }
+
+    if (lastValidHashIndex !== -1) {
+      const beforeHash = text.slice(0, lastValidHashIndex)
+      const afterHash = text.slice(lastValidHashIndex)
+      const queryEndMatch = afterHash.match(/^#[^\s]*/)
+      const queryEnd = queryEndMatch ? queryEndMatch[0].length : 1
+      const afterQuery = text.slice(lastValidHashIndex + queryEnd)
+
+      // Wire format keeps the @{path} chip token (existing serializer in
+      // ChatPanel/editable-with-file-chips already handles it).
+      const mentionText = `@{${filePath}} `
+      const newText = `${beforeHash}${mentionText}${afterQuery}`
+      setText(newText)
+
+      setTimeout(() => {
+        const editable = textareaRef.current
+        if (editable) {
+          editable.focus()
+          const targetPos = beforeHash.length + mentionText.length
+          setCursorAtPosition(editable, targetPos)
+        }
+      }, 10)
+    }
+
+    hashStartRef.current = null
+    onHashClose?.()
+  }
+}
+
 // React hooks that wrap the factory functions above
 export function useInsertMentionHook(PromptInputContext: React.Context<PromptInputContextValue | null>) {
   const context = React.useContext(PromptInputContext)
