@@ -1,6 +1,6 @@
 import * as React from 'react'
-import { User, Search } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { User, Sparkles, Search } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import {
   Command,
   CommandEmpty,
@@ -8,8 +8,10 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { useContactsStore } from '@/stores/contacts'
+import { supabase } from '@/lib/supabase-client'
+import { useSessionStore } from '@/stores/session-store'
 import { type MentionedPerson } from '@/packages/ai/prompt-input'
+import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
 
 export type { MentionedPerson }
 
@@ -18,21 +20,43 @@ interface MentionPopoverProps {
   onOpenChange: (open: boolean) => void
   searchQuery: string
   onSearchChange: (query: string) => void
-  onSelect: (person: MentionedPerson) => void
+  onSelectMember: (person: MentionedPerson) => void
+  onSelectAgent: (agent: AttachedAgent) => void
 }
 
-// Filter contacts by search query
-function filterContacts(contacts: MentionedPerson[], query: string): MentionedPerson[] {
-  if (!query) return contacts.slice(0, 15) // Show first 15 if no query
-  
-  const lowerQuery = query.toLowerCase()
-  return contacts
-    .filter(contact => {
-      const lowerName = contact.name.toLowerCase()
-      const lowerEmail = contact.email?.toLowerCase() || ''
-      return lowerName.includes(lowerQuery) || lowerEmail.includes(lowerQuery)
-    })
-    .slice(0, 15) // Limit results
+type ParticipantRow = {
+  id: string
+  actor_type: 'member' | 'agent'
+  display_name: string
+}
+
+const cache = new Map<string, { fetchedAt: number; rows: ParticipantRow[] }>()
+const CACHE_TTL_MS = 30_000
+
+/** @internal — test helper only */
+export function __clearCacheForTest() { cache.clear() }
+
+async function fetchParticipants(sessionId: string): Promise<ParticipantRow[]> {
+  const hit = cache.get(sessionId)
+  if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS) return hit.rows
+  const { data, error } = await supabase
+    .from('session_participants')
+    .select('actor_id, actors!inner(id, actor_type, display_name)')
+    .eq('session_id', sessionId)
+  if (error || !data) {
+    return []
+  }
+  const rows: ParticipantRow[] = data
+    .map((d: any) => d.actors as ParticipantRow)
+    .filter((a): a is ParticipantRow => !!a)
+  cache.set(sessionId, { fetchedAt: Date.now(), rows })
+  return rows
+}
+
+function filter(rows: ParticipantRow[], query: string): ParticipantRow[] {
+  if (!query) return rows
+  const q = query.toLowerCase()
+  return rows.filter(r => r.display_name.toLowerCase().includes(q))
 }
 
 export function MentionPopover({
@@ -40,40 +64,43 @@ export function MentionPopover({
   onOpenChange,
   searchQuery,
   onSearchChange,
-  onSelect,
+  onSelectMember,
+  onSelectAgent,
 }: MentionPopoverProps) {
-  const contacts = useContactsStore(s => s.contacts)
-  const isLoading = useContactsStore(s => s.isLoading)
+  const { t } = useTranslation()
+  const sessionId = useSessionStore(s => s.currentSessionId)
+  const [rows, setRows] = React.useState<ParticipantRow[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
-  
-  // Focus input when popover opens
+
   React.useEffect(() => {
-    if (open) {
-      // Small delay to ensure the element is rendered
-      setTimeout(() => inputRef.current?.focus(), 50)
-    }
+    if (!open || !sessionId) return
+    let cancelled = false
+    setLoading(true)
+    setError(false)
+    fetchParticipants(sessionId)
+      .then(r => { if (!cancelled) setRows(r) })
+      .catch(() => { if (!cancelled) setError(true) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [open, sessionId])
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50)
   }, [open])
-  
-  // Filter contacts based on search query
-  const filteredContacts = React.useMemo(() => {
-    return filterContacts(contacts, searchQuery)
-  }, [contacts, searchQuery])
-  
-  // Handle keyboard events
-  const handleKeyDown = React.useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      onOpenChange(false)
-    }
-  }, [onOpenChange])
-  
+
   if (!open) return null
-  
+
+  const filtered = filter(rows, searchQuery)
+  const members = filtered.filter(r => r.actor_type === 'member')
+  const agents = filtered.filter(r => r.actor_type === 'agent')
+  const isEmpty = !loading && !error && filtered.length === 0
+
   return (
-    <div 
+    <div
       className="absolute bottom-full left-0 mb-2 w-80 rounded-lg border bg-popover shadow-lg z-50"
-      onKeyDown={handleKeyDown}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onOpenChange(false) } }}
     >
       <Command shouldFilter={false}>
         <div className="flex items-center gap-2 border-b px-3 py-2">
@@ -83,40 +110,52 @@ export function MentionPopover({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search people..."
+            placeholder={t('chat.mentionPopoverTitle', 'Mention people or agents')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
-        <CommandList className="max-h-48 overflow-y-auto">
-          {isLoading ? (
-            <div className="py-4 text-center text-sm text-muted-foreground">
-              Loading contacts...
-            </div>
-          ) : filteredContacts.length === 0 ? (
-            <CommandEmpty>No contacts found.</CommandEmpty>
-          ) : (
-            <CommandGroup>
-              {filteredContacts.map((contact) => (
+        <CommandList className="max-h-60 overflow-y-auto">
+          {loading && (
+            <div className="py-4 text-center text-sm text-muted-foreground">…</div>
+          )}
+          {error && (
+            <CommandEmpty>{t('chat.mentionPopoverError', 'Failed to load participants')}</CommandEmpty>
+          )}
+          {isEmpty && (
+            <CommandEmpty>{t('chat.mentionEmptyState', 'No one to mention in this session yet')}</CommandEmpty>
+          )}
+          {members.length > 0 && (
+            <CommandGroup heading="Members">
+              {members.map(m => (
                 <CommandItem
-                  key={contact.id}
-                  value={contact.id}
+                  key={m.id}
+                  value={`m:${m.id}`}
                   onSelect={() => {
-                    onSelect(contact)
+                    onSelectMember({ id: m.id, name: m.display_name })
                     onOpenChange(false)
                   }}
                   className="flex items-center gap-2 cursor-pointer"
                 >
                   <User className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate">
-                      {contact.name}
-                    </span>
-                    {contact.email && (
-                      <span className="text-xs text-muted-foreground truncate">
-                        {contact.email}
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-sm font-medium truncate">{m.display_name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+          {agents.length > 0 && (
+            <CommandGroup heading="Agents">
+              {agents.map(a => (
+                <CommandItem
+                  key={a.id}
+                  value={`a:${a.id}`}
+                  onSelect={() => {
+                    onSelectAgent({ id: a.id, displayName: a.display_name })
+                    onOpenChange(false)
+                  }}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="h-4 w-4 text-orange-500 shrink-0" />
+                  <span className="text-sm font-medium truncate">{a.display_name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -124,40 +163,5 @@ export function MentionPopover({
         </CommandList>
       </Command>
     </div>
-  )
-}
-
-// Badge component for displaying mentioned people
-export function MentionBadge({ 
-  person, 
-  onRemove,
-  className,
-}: { 
-  person: MentionedPerson
-  onRemove?: () => void
-  className?: string 
-}) {
-  return (
-    <span 
-      className={cn(
-        "inline-flex items-center gap-1 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs",
-        className
-      )}
-    >
-      <User className="h-3 w-3" />
-      <span className="truncate max-w-[150px]">{person.name}</span>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove()
-          }}
-          className="ml-0.5 hover:text-purple-900"
-        >
-          ×
-        </button>
-      )}
-    </span>
   )
 }

@@ -3,6 +3,7 @@
  * incomplete in the test environment, which would otherwise cause unhandled
  * rejections and a non-zero exit code despite all assertions passing.
  */
+import '@testing-library/jest-dom'
 
 // --- CSS.escape (used by FileTree querySelector selectors) -----------------
 // In some Vitest worker contexts `globalThis.CSS` is undefined.
@@ -71,6 +72,15 @@ if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localSto
     configurable: true,
     writable: true,
   })
+}
+
+// --- ResizeObserver (jsdom stub — used by cmdk and other layout-aware libs) ---
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
 }
 
 // --- Element.scrollIntoView (jsdom stub) -------------------------------------

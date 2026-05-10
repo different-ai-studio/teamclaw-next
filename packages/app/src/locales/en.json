@@ -236,6 +236,7 @@
     "inputPlaceholderMention": "Mention with @, reference files with #...",
     "mentionPopoverTitle": "Mention people or agents",
     "mentionEmptyState": "No one to mention in this session yet",
+    "mentionPopoverError": "Failed to load participants",
     "resourcePopoverTitle": "Reference a file",
     "inputPlaceholderQueue": "Type to queue message...",
     "newSession": "New Session",
