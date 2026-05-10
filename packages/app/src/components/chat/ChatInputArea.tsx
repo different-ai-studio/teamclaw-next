@@ -139,6 +139,9 @@ function CommandPopoverWrapper({
   );
 }
 
+// ─── Feature flag: gates the @/# swap introduced in the mention-redesign ────
+const REDESIGN_ON = import.meta.env.VITE_MENTION_REDESIGN !== 'false';
+
 // ─── Main input area ────────────────────────────────────────────────────────
 
 interface ChatInputAreaProps {
@@ -321,22 +324,22 @@ export function ChatInputArea({
             onSubmit={handleSubmit}
             onFilesChange={handlePastedFiles}
             onFilePathsDrop={handleFilePathsDrop}
-            onHashTrigger={(query) => {
+            onHashTrigger={REDESIGN_ON ? (query) => {
               setHashSearchQuery(query);
               setFilePopoverOpen(true);
-            }}
-            onHashClose={() => {
+            } : undefined}
+            onHashClose={REDESIGN_ON ? () => {
               setFilePopoverOpen(false);
               setHashSearchQuery("");
-            }}
-            onMentionTrigger={(query) => {
-              setMentionSearchQuery(query);
-              setMentionPopoverOpen(true);
-            }}
-            onMentionClose={() => {
-              setMentionPopoverOpen(false);
-              setMentionSearchQuery("");
-            }}
+            } : undefined}
+            onMentionTrigger={REDESIGN_ON
+              ? (query) => { setMentionSearchQuery(query); setMentionPopoverOpen(true); }
+              : (query) => { setHashSearchQuery(query); setFilePopoverOpen(true); }
+            }
+            onMentionClose={REDESIGN_ON
+              ? () => { setMentionPopoverOpen(false); setMentionSearchQuery(""); }
+              : () => { setFilePopoverOpen(false); setHashSearchQuery(""); }
+            }
             onCommandTrigger={(query) => {
               setCommandSearchQuery(query);
               setCommandPopoverOpen(true);
@@ -349,7 +352,7 @@ export function ChatInputArea({
             className="relative z-10 bg-card shadow-lg"
           >
           {/* Agent chips */}
-          <AgentChipBar agents={attachedAgents} onRemove={onRemoveAgent} />
+          {REDESIGN_ON && <AgentChipBar agents={attachedAgents} onRemove={onRemoveAgent} />}
 
           {/* Image previews */}
           {imageFiles.length > 0 && (
@@ -463,12 +466,14 @@ export function ChatInputArea({
             searchQuery={hashSearchQuery}
             onSearchChange={setHashSearchQuery}
           />
-          <MentionPopoverWrapper
-            open={mentionPopoverOpen}
-            onOpenChange={setMentionPopoverOpen}
-            searchQuery={mentionSearchQuery}
-            onAttachAgent={onAttachAgent}
-          />
+          {REDESIGN_ON && (
+            <MentionPopoverWrapper
+              open={mentionPopoverOpen}
+              onOpenChange={setMentionPopoverOpen}
+              searchQuery={mentionSearchQuery}
+              onAttachAgent={onAttachAgent}
+            />
+          )}
           <CommandPopoverWrapper
             open={commandPopoverOpen}
             onOpenChange={setCommandPopoverOpen}
