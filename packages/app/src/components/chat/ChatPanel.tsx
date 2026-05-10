@@ -11,13 +11,93 @@ import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useProviderStore, type ModelOption } from "@/stores/provider";
 import { useTeamModeStore } from "@/stores/team-mode";
+import { useSuggestionsStore } from "@/stores/suggestions";
 import { useShortcutsStore } from "@/stores/shortcuts";
 import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-config";
 import { ensureRoleSkillPlugin } from "../../lib/opencode/role-plugin-installer";
+import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
+import { useAuthStore } from "@/stores/auth-store";
+import { useSessionListStore } from "@/stores/session-list-store";
+import { mqttPublish } from "@/lib/mqtt-bridge";
+import { supabase } from "@/lib/supabase-client";
+import { create as createMessage, toBinary } from "@bufbuild/protobuf";
+import {
+  MessageSchema,
+  SessionMessageEnvelopeSchema,
+  LiveEventEnvelopeSchema,
+  MessageKind,
+} from "@/lib/proto/teamclaw_pb";
+import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
+import type { PromptInputMessage } from "@/packages/ai/prompt-input";
+import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
+import type { SendMessageFilePart } from "@/lib/opencode/sdk-types";
+import { Suggestions, Suggestion } from "@/packages/ai/suggestion";
 import { Button } from "@/components/ui/button";
 
-import { ActorMessageList } from "./ActorMessageList";
-import { ActorChatInput } from "./ActorChatInput";
+import type { Message } from "@/stores/session";
+import { ChatInputArea } from "./ChatInputArea";
+import { getFileName } from "./utils/fileUtils";
+import { MessageList, type MessageListHandle } from "./MessageList";
+import { SessionErrorAlert } from "./SessionErrorAlert";
+import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
+import { TodoList } from "./TodoList";
+import { QuestionInputDock } from "./QuestionInputDock";
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveImageToWorkspace(
+  file: File,
+  workspacePath: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const { mkdir, writeFile } = await import("@tauri-apps/plugin-fs");
+    const uploadsDir = `${workspacePath}/.uploads`;
+    try {
+      await mkdir(uploadsDir, { recursive: true });
+    } catch {
+      // already exists
+    }
+    const ext = file.type.split("/")[1] || "png";
+    const timestamp = Date.now();
+    const filename = `paste-${timestamp}.${ext}`;
+    const fullPath = `${uploadsDir}/${filename}`;
+    const buffer = await file.arrayBuffer();
+    await writeFile(fullPath, new Uint8Array(buffer));
+    return fullPath;
+  } catch (err) {
+    console.error("[ChatPanel] Failed to save pasted image:", err);
+    return null;
+  }
+}
+
+const EMPTY_MESSAGES: Message[] = [];
+
+function parseSlashToken(body: string): { type: "role" | "skill" | "command"; name: string } {
+  if (body.startsWith("role:")) return { type: "role", name: body.slice("role:".length) };
+  if (body.startsWith("skill:")) return { type: "skill", name: body.slice("skill:".length) };
+  if (body.startsWith("command:")) return { type: "command", name: body.slice("command:".length) };
+  return { type: "skill", name: body };
+}
+
+function buildEnhancedChip(
+  type: "role" | "skill",
+  name: string,
+): string {
+  const label = type === "role" ? "Role" : "Skill";
+  const toolCall =
+    type === "role"
+      ? `role_load({ name: "${name}" })`
+      : `skill({ name: "${name}" })`;
+  return `[${label}: ${name}|instruction:You must call ${toolCall} before any other action.]`;
+}
 
 // ─── Main component ────────────────────────────────────────────────────────
 
@@ -29,84 +109,133 @@ interface ChatPanelProps {
 export function ChatPanel({ compact = false }: ChatPanelProps) {
   const { t } = useTranslation();
 
+  const customSuggestions = useSuggestionsStore(s => s.customSuggestions);
+  const builtInSuggestions = [
+    t("chat.suggestions.analyze", "Analyze data"),
+    t("chat.suggestions.report", "Write a report"),
+    t("chat.suggestions.skill", "Add a new skill"),
+  ];
+  const suggestions = [...builtInSuggestions, ...customSuggestions];
+
   // ── Session store selectors (reactive state only) ────────────────────
-  // @ts-expect-error Phase 1E removal
   const activeSessionId = useSessionStore(s => s.activeSessionId);
-  // @ts-expect-error Phase 1E removal
   const error = useSessionStore(s => s.error);
-  // @ts-expect-error Phase 1E removal
-  const _errorSessionId = useSessionStore(s => s.errorSessionId);
-  // @ts-expect-error Phase 1E removal
+  const errorSessionId = useSessionStore(s => s.errorSessionId);
   const isConnected = useSessionStore(s => s.isConnected);
   const streamingMessageId = useStreamingStore(s => s.streamingMessageId);
-  // @ts-expect-error Phase 1E removal
-  const _messageQueue = useSessionStore(s => s.messageQueue);
-  // @ts-expect-error Phase 1E removal
+  const messageQueue = useSessionStore(s => s.messageQueue);
   const sessionError = useSessionStore(s => s.sessionError);
-  // @ts-expect-error Phase 1E removal
   const inactivityWarning = useSessionStore(s => s.inactivityWarning);
-  // @ts-expect-error Phase 1E removal
-  const _draftInput = useSessionStore(s => s.draftInput);
-  // @ts-expect-error Phase 1E removal
-  const _todos = useSessionStore(s => s.todos);
-  // @ts-expect-error Phase 1E removal
-  const _pendingPermissions = useSessionStore(s => s.pendingPermissions);
-  // @ts-expect-error Phase 1E removal
-  const _pendingQuestions = useSessionStore(s => s.pendingQuestions);
-  // @ts-expect-error Phase 1E removal
-  const _sessions = useSessionStore(s => s.sessions);
+  const draftInput = useSessionStore(s => s.draftInput);
+  const todos = useSessionStore(s => s.todos);
+  const pendingPermissions = useSessionStore(s => s.pendingPermissions);
+  const pendingQuestions = useSessionStore(s => s.pendingQuestions);
+  const sessions = useSessionStore(s => s.sessions);
 
   // ── Archived session viewing ────────────────────────────────────────
-  // @ts-expect-error Phase 1E removal
   const viewingArchivedSessionId = useSessionStore(s => s.viewingArchivedSessionId);
-  const archivedSession = useSessionStore(s =>
-    // @ts-expect-error Phase 1E removal
+  const archivedSessionMessages = useSessionStore(s =>
     s.viewingArchivedSessionId
-      // @ts-expect-error Phase 1E removal
+      ? (s.archivedSessionMessages[s.viewingArchivedSessionId] || EMPTY_MESSAGES)
+      : EMPTY_MESSAGES
+  );
+  const archivedSession = useSessionStore(s =>
+    s.viewingArchivedSessionId
       ? s.archivedSessions.find((session) => session.id === s.viewingArchivedSessionId)
       : undefined
   );
-  // @ts-expect-error Phase 1E removal
-  const _archivedSessionError = useSessionStore(s => s.archivedSessionError);
+  const archivedSessionError = useSessionStore(s => s.archivedSessionError);
   const isViewingArchived = !!viewingArchivedSessionId;
 
   // ── Child session viewing ──────────────────────────────────────────
-  // @ts-expect-error Phase 1E removal
   const viewingChildSessionId = useSessionStore(s => s.viewingChildSessionId);
-  // @ts-expect-error Phase 1E removal
-  const _isLoadingChildMessages = useSessionStore(s => s.isLoadingChildMessages);
+  const childSessionMessages = useSessionStore(s =>
+    s.viewingChildSessionId && !s.viewingArchivedSessionId
+      ? (s.childSessionMessages[s.viewingChildSessionId] || EMPTY_MESSAGES)
+      : EMPTY_MESSAGES
+  );
+  const isLoadingChildMessages = useSessionStore(s => s.isLoadingChildMessages);
   const childStreamingContent = useStreamingStore(s =>
     viewingChildSessionId && !isViewingArchived
       ? s.childSessionStreaming[viewingChildSessionId]
       : undefined
   );
   const isViewingChild = !!viewingChildSessionId && !isViewingArchived;
+  const showInlineTodo = React.useMemo(() => {
+    if (isViewingArchived) return false;
+    if (isViewingChild) return false;
+    if (todos.length === 0 && messageQueue.length === 0) return false;
+    return !hasVisiblePendingPermissions(activeSessionId, sessions, pendingPermissions);
+  }, [activeSessionId, isViewingArchived, isViewingChild, messageQueue.length, pendingPermissions, sessions, todos]);
+  const displayedChildSessionMessages = React.useMemo(() => {
+    if (!isViewingChild || !viewingChildSessionId) return EMPTY_MESSAGES;
+
+    const hasLiveChildStreaming =
+      !!childStreamingContent &&
+      (childStreamingContent.isStreaming ||
+        !!childStreamingContent.text ||
+        !!childStreamingContent.reasoning);
+
+    if (!hasLiveChildStreaming) {
+      return childSessionMessages;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hasStreamingPlaceholder = childSessionMessages.some((message: any) => message.isStreaming);
+    if (hasStreamingPlaceholder) {
+      return childSessionMessages;
+    }
+
+    const lastTimestamp = childSessionMessages[childSessionMessages.length - 1]?.timestamp;
+    const placeholderTimestamp =
+      lastTimestamp instanceof Date
+        ? new Date(lastTimestamp.getTime() + 1)
+        : new Date();
+
+    return [
+      ...childSessionMessages,
+      {
+        id: `child-streaming-${viewingChildSessionId}`,
+        sessionId: viewingChildSessionId,
+        role: "assistant" as const,
+        content: childStreamingContent?.text || "",
+        parts: [],
+        toolCalls: [],
+        isStreaming: true,
+        timestamp: placeholderTimestamp,
+      },
+    ];
+  }, [childSessionMessages, childStreamingContent, isViewingChild, viewingChildSessionId]);
+  const activeInputQuestion = React.useMemo(() => {
+    if (!activeSessionId) return null;
+    if (isViewingArchived) return null;
+    if (isViewingChild) return null;
+    return (
+      pendingQuestions.find((question) => {
+        if (!question.sessionId) return true;
+        return (
+          resolveSessionActivityOwner(question.sessionId, sessions, question.sessionId) ===
+          activeSessionId
+        );
+      }) ||
+      null
+    );
+  }, [activeSessionId, isViewingArchived, isViewingChild, pendingQuestions, sessions]);
+
   // Actions — accessed via getState() to avoid creating subscriptions.
   // Zustand actions are stable references; subscribing to them wastes equality checks.
   const acts = useSessionStore.getState();
-  // @ts-expect-error Phase 1E removal
-  const _sendMessage = acts.sendMessage;
-  // @ts-expect-error Phase 1E removal
-  const _abortSession = acts.abortSession;
-  // @ts-expect-error Phase 1E removal
-  const _removeFromQueue = acts.removeFromQueue;
-  // @ts-expect-error Phase 1E removal
+  const sendMessage = acts.sendMessage;
+  const abortSession = acts.abortSession;
+  const removeFromQueue = acts.removeFromQueue;
   const loadSessions = acts.loadSessions;
-  // @ts-expect-error Phase 1E removal
   const resetSessions = acts.resetSessions;
-  // @ts-expect-error Phase 1E removal
   const clearSessionError = acts.clearSessionError;
-  // @ts-expect-error Phase 1E removal
   const setError = acts.setError;
-  // @ts-expect-error Phase 1E removal
   const setStoreSelectedModel = acts.setSelectedModel;
-  // @ts-expect-error Phase 1E removal
-  const _setDraftInput = acts.setDraftInput;
-  // @ts-expect-error Phase 1E removal
+  const setDraftInput = acts.setDraftInput;
   const closeArchivedSession = acts.closeArchivedSession;
-  // @ts-expect-error Phase 1E removal
   const restoreSession = acts.restoreSession;
-  // @ts-expect-error Phase 1E removal
   const setViewingChildSession = acts.setViewingChildSession;
 
   // ── Workspace store ───────────────────────────────────────────────────
@@ -116,10 +245,59 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const setOpenCodeBootstrapped = useWorkspaceStore(s => s.setOpenCodeBootstrapped);
 
   // ── Local state ───────────────────────────────────────────────────────
+  const inputValue = draftInput;
+  const setInputValue = setDraftInput;
+  const [attachedFiles, setAttachedFiles] = React.useState<string[]>([]);
+  const [attachedAgents, setAttachedAgents] = React.useState<AttachedAgent[]>([]);
+  const [imageFiles, setImageFiles] = React.useState<File[]>([]);
   const [hasSkillRestartPrompt, setHasSkillRestartPrompt] = React.useState(false);
   const [isRestartingSkillsRuntime, setIsRestartingSkillsRuntime] = React.useState(false);
   const [isRestoringArchived, setIsRestoringArchived] = React.useState(false);
   const isRestoringArchivedRef = React.useRef(false);
+
+  const isImagePath = React.useCallback((path: string) => {
+    return /\.(png|jpe?g|gif|webp|svg|bmp|ico|heic|heif)$/i.test(path);
+  }, []);
+
+  const extractImageAttachmentTokens = React.useCallback(
+    (text: string): { cleaned: string; imagePaths: string[] } => {
+      // Support tolerant attachment token parsing from pasted text.
+      // Examples:
+      // [Attachment: a.png] (path: /x/a.png)
+      // [Attachment:a.png](path:/x/a.png)
+      const attachmentPattern = /\[Attachment:\s*([^\]]+)\]\s*\(([^)]*)\)/gi;
+      const imagePaths: string[] = [];
+
+      let cleaned = text.replace(attachmentPattern, (full, _name, info) => {
+        const pathMatch = String(info).match(/path:\s*([^,)]+)/i);
+        const fullPath = pathMatch ? pathMatch[1].trim() : "";
+        if (fullPath && isImagePath(fullPath)) {
+          imagePaths.push(fullPath);
+          return "";
+        }
+        return full;
+      });
+
+      // Extra defensive pass: line-wise removal for any remaining textual
+      // attachment tokens that point to image paths.
+      const filteredLines = cleaned.split("\n").filter((line) => {
+        if (!line.includes("[Attachment:")) return true;
+        const pathMatch = line.match(/path:\s*([^)]+)\)?/i);
+        const maybePath = pathMatch ? pathMatch[1].trim() : "";
+        if (maybePath && isImagePath(maybePath)) return false;
+        return true;
+      });
+
+      cleaned = filteredLines.join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/ {2,}/g, " ")
+        .trimStart();
+
+      return { cleaned, imagePaths };
+    },
+    [isImagePath],
+  );
 
   // ── Provider store ────────────────────────────────────────────────────
   const currentModelKey = useProviderStore(s => s.currentModelKey);
@@ -151,14 +329,31 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     return found;
   }, [currentModelKey, providerModels]);
 
+  // ── Refs ───────────────────────────────────────────────────────────────
+  const messageListRef = React.useRef<MessageListHandle>(null);
+
   // ── Derived values ────────────────────────────────────────────────────
-  const activeMessages = useSessionStore(s =>
-    // @ts-expect-error Phase 1E removal
-    s.activeSessionId ? s.sessions.find((ss) => ss.id === s.activeSessionId)?.messages : undefined
+  // v2: messages live in useSessionStore.messages keyed by sessionId.
+  // Adapt each Teamclaw_Message → SDK Message shape so legacy MessageList
+  // renders unchanged. Phase 2 will replace MessageList with native render.
+  const activeMessagesRaw = useSessionStore(s =>
+    s.activeSessionId ? s.messages?.[s.activeSessionId] : undefined
+  );
+  const activeMessages = React.useMemo(
+    () => adaptTeamclawMessages(activeMessagesRaw),
+    [activeMessagesRaw],
   );
   /** Shown messages lag store during fade so old session can fade out before swap */
   const [displaySessionId, setDisplaySessionId] = React.useState<string | null>(activeSessionId);
-  const [_sessionFadeOpacity, setSessionFadeOpacity] = React.useState(1);
+  const [sessionFadeOpacity, setSessionFadeOpacity] = React.useState(1);
+
+  const displayMessagesRaw = useSessionStore((s) =>
+    displaySessionId ? s.messages?.[displaySessionId] : undefined,
+  );
+  const displayMessages = React.useMemo(
+    () => adaptTeamclawMessages(displayMessagesRaw),
+    [displayMessagesRaw],
+  );
 
   const SESSION_FADE_MS = 150;
 
@@ -314,12 +509,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     });
   }, [activeSessionId, selectedModelOption]);
 
-  // Voice input / "Add to Agent": Phase 1E — wired to ActorChatInput in Phase 2
+  // Voice input / "Add to Agent": append transcript or file mention to input
   React.useEffect(() => {
     const unregister = useVoiceInputStore.getState().registerInsertToChatHandler(
-      (_transcript) => {
-        // Phase 1E: voice-to-input wiring removed with OpenCode session store
-        // Will re-wire to ActorChatInput in Phase 2
+      (transcript) => {
+        const prev = useSessionStore.getState().draftInput;
+        // Deduplicate @{filepath} mentions — prevent double insertion
+        const mentionMatch = transcript.match(/@\{([^}]+)\}/);
+        if (mentionMatch && prev.includes(mentionMatch[0])) return;
+        setInputValue(prev + (prev ? " " : "") + transcript);
       },
     );
     return unregister;
@@ -345,11 +543,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // SSE connection is managed by SSEProvider in App.tsx (persists across mode switches)
 
   // Poll for pending permissions as fallback
-  // @ts-expect-error Phase 1E removal
   const pollPermissions = useSessionStore((s) => s.pollPermissions);
   const hasRunningTools = React.useMemo(() =>
-    // @ts-expect-error Phase 1E removal
-    (activeMessages ?? []).some((m) => m.toolCalls?.some((tc) => tc.status === "calling" || tc.status === "waiting")),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (activeMessages ?? []).some((m: any) => m.toolCalls?.some((tc: any) => tc.status === "calling" || tc.status === "waiting")),
     [activeMessages],
   );
   React.useEffect(() => {
@@ -378,8 +575,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     console.log("[ChatPanel] OpenCode bootstrapped, loading sessions for:", workspacePath);
         loadSessions(workspacePath)
       .then(() => setError(null))
-      // @ts-expect-error Phase 1E removal
-      .catch((err) =>
+      .catch((err: unknown) =>
         console.error("[ChatPanel] Failed to load sessions:", err),
       );
   }, [openCodeBootstrapped, workspacePath, loadSessions, resetSessions]);
@@ -403,6 +599,237 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // session.created and session.updated, which are handled as global events
   // in the SSE client. The SSE connection is established as soon as baseUrl
   // is available, regardless of whether a session is active.
+
+  // ── Input height change → forward to MessageList ───────────────────────
+  const handleInputHeightChange = React.useCallback((height: number) => {
+    messageListRef.current?.handleInputHeightChange(height);
+  }, []);
+
+  // ── File handling ─────────────────────────────────────────────────────
+
+  const handleFilesChange = (paths: string[]) => {
+    setAttachedFiles((prev) => [...prev, ...paths]);
+  };
+
+  const handleInputChange = React.useCallback(
+    (nextValue: string) => {
+      const { cleaned, imagePaths } = extractImageAttachmentTokens(nextValue);
+      if (imagePaths.length > 0) {
+        setAttachedFiles((prev) => {
+          const seen = new Set(prev);
+          const uniqueNew = imagePaths.filter((p) => !seen.has(p));
+          return uniqueNew.length > 0 ? [...prev, ...uniqueNew] : prev;
+        });
+      }
+      setInputValue(cleaned);
+    },
+    [extractImageAttachmentTokens, setInputValue],
+  );
+
+  // Fallback sanitizer: if input text is injected through another path,
+  // still normalize it and convert image attachment tokens into previews.
+  React.useEffect(() => {
+    if (!inputValue) return;
+    const { cleaned, imagePaths } = extractImageAttachmentTokens(inputValue);
+
+    if (imagePaths.length > 0) {
+      setAttachedFiles((prev) => {
+        const seen = new Set(prev);
+        const uniqueNew = imagePaths.filter((p) => !seen.has(p));
+        return uniqueNew.length > 0 ? [...prev, ...uniqueNew] : prev;
+      });
+    }
+
+    if (cleaned !== inputValue) {
+      setInputValue(cleaned);
+    }
+  }, [inputValue, extractImageAttachmentTokens, setInputValue]);
+
+  const removeFile = (index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleImageFilesChange = (files: File[]) => {
+    setImageFiles((prev) => [...prev, ...files]);
+  };
+
+  const removeImageFile = (index: number) => {
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // ── Submit handler ────────────────────────────────────────────────────
+
+  const handleSubmit = async (message: PromptInputMessage) => {
+    // v2: OpenCode-ready gate removed — that flag tracked a sidecar that's
+    // gone now. Single-window scope sends via MQTT + Supabase regardless.
+    const text = message.text?.trim() || "";
+    const mentions = message.mentions || [];
+    const memberIds = mentions.map((m) => m.id);
+    const agentIds = attachedAgents.map((a) => a.id);
+    const mentionActorIds = Array.from(new Set([...memberIds, ...agentIds]));
+    const isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
+
+    if (!text && attachedFiles.length === 0 && mentions.length === 0 && imageFiles.length === 0) return;
+
+    let finalContent: string;
+    const personMentions: string[] = [];
+
+    if (mentions.length > 0) {
+      for (const mention of mentions) {
+        const mentionText = mention.email
+          ? `${mention.name} (${mention.email})`
+          : mention.name;
+        personMentions.push(mentionText);
+      }
+    }
+
+    // Build final content preserving the order
+    let processedText = text;
+
+    // Replace @{filepath} with [File: filepath] inline
+    processedText = processedText.replace(/@\{([^}]+)\}/g, '[File: $1]');
+
+    // Replace unified /{type:name} inline, while keeping legacy formats readable.
+    processedText = processedText.replace(/\/\{([^}]+)\}/g, (_full, body) => {
+      const token = parseSlashToken(body);
+      if (token.type === "role") return buildEnhancedChip("role", token.name);
+      if (token.type === "command") return `[Command: ${token.name}]`;
+      return buildEnhancedChip("skill", token.name);
+    });
+    processedText = processedText.replace(/\/<([a-z0-9]+(?:-[a-z0-9]+)*)>/g, (_full, roleName) =>
+      buildEnhancedChip("role", roleName),
+    );
+    processedText = processedText.replace(/\/\[([^\]]+)\]/g, '[Command: $1]');
+
+    const parts: string[] = [];
+
+    // Add person mentions at the beginning
+    if (personMentions.length > 0) {
+      parts.push(`[Mentioned: ${personMentions.join(', ')}]`);
+    }
+
+    // Add attached files at the beginning
+    if (attachedFiles.length > 0) {
+      for (const filePath of attachedFiles) {
+        parts.push(`[Attachment: ${getFileName(filePath)}] (path: ${filePath})`);
+      }
+    }
+
+    // Add the processed text (with inline [File: ...] replacements)
+    if (processedText.trim()) {
+      parts.push(processedText.trim());
+    }
+
+    finalContent = parts.join("\n\n");
+
+    // Save pasted images to workspace and build file parts
+    let imageParts: SendMessageFilePart[] | undefined;
+    if (imageFiles.length > 0) {
+      const savedPaths: string[] = [];
+      imageParts = await Promise.all(
+        imageFiles.map(async (file) => {
+          const dataUrl = await fileToDataUrl(file);
+          // Save to workspace so agent tools can access the file
+          if (workspacePath) {
+            const savedPath = await saveImageToWorkspace(file, workspacePath);
+            if (savedPath) {
+              savedPaths.push(savedPath);
+            }
+          }
+          return {
+            type: 'file' as const,
+            url: dataUrl,
+            mime: file.type,
+            filename: file.name,
+          };
+        }),
+      );
+      // Include saved file paths in text so the agent knows where to find them
+      if (savedPaths.length > 0) {
+        for (const p of savedPaths) {
+          const name = p.split("/").pop() || "image";
+          parts.push(`[Attachment: ${name}] (path: ${p})`);
+        }
+        finalContent = parts.join("\n\n");
+      }
+    }
+
+    // v2 send: build LiveEventEnvelope, publish via MQTT, persist to
+    // Supabase, and locally append for immediate render. Drops imageParts
+    // and isPlanMode for now — single-window scope; Phase 2 wires those.
+    const outgoing = finalContent;
+    if (outgoing && outgoing.trim()) {
+      const sid = activeSessionId;
+      const authSession = useAuthStore.getState().session;
+      const sessionRow = useSessionListStore.getState().rows.find(r => r.id === sid);
+      if (sid && authSession && sessionRow) {
+        try {
+          const { data: actorRows, error: actorErr } = await supabase
+            .from("actors")
+            .select("id, team_id")
+            .eq("user_id", authSession.user.id);
+          if (actorErr) throw actorErr;
+          const matching = (actorRows ?? []).find((a) => a.team_id === sessionRow.team_id);
+          if (!matching) throw new Error(`No actor found for user in team ${sessionRow.team_id}`);
+          const senderActorId = matching.id as string;
+          const messageId = crypto.randomUUID();
+          const createdAt = BigInt(Math.floor(Date.now() / 1000));
+
+          const message = createMessage(MessageSchema, {
+            messageId,
+            sessionId: sid,
+            senderActorId,
+            kind: MessageKind.TEXT,
+            content: outgoing,
+            createdAt,
+          });
+          const sessionMsg = createMessage(SessionMessageEnvelopeSchema, {
+            message,
+            mentionActorIds,
+          });
+          const live = createMessage(LiveEventEnvelopeSchema, {
+            eventId: crypto.randomUUID(),
+            eventType: "message.created",
+            sessionId: sid,
+            actorId: senderActorId,
+            sentAt: createdAt,
+            body: toBinary(SessionMessageEnvelopeSchema, sessionMsg),
+          });
+          await mqttPublish(
+            `amux/${sessionRow.team_id}/session/${sid}/live`,
+            toBinary(LiveEventEnvelopeSchema, live),
+            false,
+          );
+          const { error: insErr } = await supabase.from("messages").insert({
+            id: messageId,
+            team_id: sessionRow.team_id,
+            session_id: sid,
+            sender_actor_id: senderActorId,
+            kind: "text",
+            content: outgoing,
+            metadata: { mention_actor_ids: mentionActorIds },
+          });
+          if (insErr) throw insErr;
+          useSessionStore.getState().appendMessage(sid, message);
+        } catch (e) {
+          console.error("[ChatPanel] send failed:", e);
+        }
+      }
+    }
+
+    setInputValue("");
+    setAttachedFiles([]);
+    setAttachedAgents([]);
+    setImageFiles([]);
+  };
+
+  const handleSuggestionClick = React.useCallback(
+    (suggestion: string) => {
+      // Keep all quick suggestions visually consistent with slash skill selection.
+      setInputValue(`/{${suggestion}} `);
+    },
+    [setInputValue],
+  );
 
   const handleRestartSkillsRuntime = React.useCallback(async () => {
     if (!workspacePath) return;
@@ -437,6 +864,68 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
   }, [restoreSession, viewingArchivedSessionId]);
 
+  // ── Empty state with suggestions ──────────────────────────────────────
+  const emptyState = React.useMemo(() => (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center text-center",
+        compact ? "py-8 px-2" : "py-20",
+      )}
+    >
+      <h2
+        className={cn(
+          "mb-1 font-semibold",
+          compact ? "text-sm" : "text-xl",
+        )}
+      >
+        {compact ? t("chat.agent", "Agent") : t("chat.startNewChat", "Start a New Chat")}
+      </h2>
+      <p
+        className={cn(
+          "text-muted-foreground",
+          compact ? "text-xs mb-2" : "text-sm mb-6",
+        )}
+      >
+        {compact
+          ? t("chat.askAboutFile", "Ask questions about the file")
+          : t("chat.askAnything", "Ask me anything, or choose a suggestion below")}
+      </p>
+      {!compact && (
+        <Suggestions>
+          {suggestions.map((suggestion) => (
+            <Suggestion
+              key={suggestion}
+              suggestion={suggestion}
+              onClick={() => handleSuggestionClick(suggestion)}
+            />
+          ))}
+        </Suggestions>
+      )}
+    </div>
+  ), [compact, t, suggestions, handleSuggestionClick]);
+
+  const visibleSessionError =
+    sessionError?.sessionId && sessionError.sessionId === displaySessionId
+      ? sessionError
+      : null;
+  const visibleError =
+    error && errorSessionId && errorSessionId === displaySessionId
+      ? error
+      : null;
+
+  const messageBottomContent = !isViewingChild ? (
+    visibleSessionError ? (
+      <SessionErrorAlert
+        error={visibleSessionError}
+        onDismiss={clearSessionError}
+      />
+    ) : visibleError ? (
+      <SessionErrorAlert
+        error={visibleError}
+        onDismiss={() => setError(null)}
+      />
+    ) : null
+  ) : null;
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -529,7 +1018,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30">
           <button
             type="button"
-            // @ts-expect-error Phase 1E removal
             onClick={() => useSessionStore.getState().setViewingChildSession(null)}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -562,13 +1050,120 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         </div>
       )}
 
-      {/* ─── Message List — Phase 1: actor-model render ────────────────── */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <ActorMessageList />
+      {/* ─── Message List (fade on session switch; input stays stable) ─── */}
+      <div
+        className={cn(
+          "flex-1 min-h-0 flex flex-col overflow-hidden",
+          "transition-opacity duration-150 ease-in-out motion-reduce:transition-none",
+        )}
+        style={{ opacity: isViewingArchived || isViewingChild ? 1 : sessionFadeOpacity }}
+      >
+        {isViewingArchived ? (
+          <MessageList
+            ref={messageListRef}
+            messages={archivedSessionMessages}
+            activeSessionId={viewingArchivedSessionId}
+            isStreaming={false}
+            streamingMessageId={null}
+            compact={compact}
+            sessionDirectory={archivedSession?.directory}
+          />
+        ) : isViewingChild ? (
+          isLoadingChildMessages ? (
+            <div className="flex items-center justify-center flex-1">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <MessageList
+              ref={messageListRef}
+              messages={displayedChildSessionMessages}
+              activeSessionId={viewingChildSessionId}
+              isStreaming={!!childStreamingContent?.isStreaming}
+              streamingMessageId={null}
+              compact={compact}
+            />
+          )
+        ) : (
+          <MessageList
+            ref={messageListRef}
+            messages={displayMessages ?? []}
+            activeSessionId={displaySessionId}
+            isStreaming={isStreaming}
+            streamingMessageId={streamingMessageId}
+            compact={compact}
+            emptyState={emptyState}
+            bottomContent={messageBottomContent}
+          />
+        )}
       </div>
 
-      {/* ─── Input Area — Phase 1: MQTT publish + Supabase insert ───────── */}
-      <ActorChatInput />
+      {/* ─── Input Area (with Permission & Error UI above it) ─────────── */}
+      {isViewingArchived ? (
+        <div className="border-t border-border bg-background px-3 py-3">
+          {archivedSessionError && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0">
+                <div className="font-medium">
+                  {t("chat.archivedSessionLoadError", "Could not load archived session")}
+                </div>
+                <div className="break-words text-xs text-destructive/80">
+                  {archivedSessionError}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+            {t("chat.restoreArchivedHint", "Restore this session to continue chatting")}
+          </div>
+        </div>
+      ) : !isViewingChild && (
+        activeInputQuestion ? (
+          <QuestionInputDock
+            compact={compact}
+            pendingQuestion={activeInputQuestion}
+            onHeightChange={handleInputHeightChange}
+          />
+        ) : (
+          <ChatInputArea
+            compact={compact}
+            inputValue={inputValue}
+            onInputChange={handleInputChange}
+            attachedFiles={attachedFiles}
+            onFilesChange={handleFilesChange}
+            onRemoveFile={removeFile}
+            attachedAgents={attachedAgents}
+            onAttachAgent={(a) => setAttachedAgents((prev) =>
+              prev.some((x) => x.id === a.id) ? prev : [...prev, a]
+            )}
+            onRemoveAgent={(id) => setAttachedAgents((prev) => prev.filter((x) => x.id !== id))}
+            imageFiles={imageFiles}
+            onImageFilesChange={handleImageFilesChange}
+            onRemoveImageFile={removeImageFile}
+            onSubmit={handleSubmit}
+            isStreaming={isStreaming}
+            onAbort={abortSession}
+            messageQueue={messageQueue}
+            onRemoveFromQueue={removeFromQueue}
+            onHeightChange={handleInputHeightChange}
+            headerContent={
+              <>
+                {showInlineTodo ? (
+                  <TodoList
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    todos={todos as any}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    queue={messageQueue as any}
+                    onRemoveFromQueue={removeFromQueue}
+                    variant="inline"
+                  />
+                ) : null}
+                <PendingPermissionInline />
+              </>
+            }
+          />
+        )
+      )}
     </div>
   );
 }
