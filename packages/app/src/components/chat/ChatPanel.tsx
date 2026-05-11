@@ -889,6 +889,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         agentActorIds: picks.agentActorIds,
       });
 
+      // Refresh session-list-store so sendIntoSession can find the new row.
+      // (Method is `load`, not `loadSessions` — earlier optional-chain call
+      // was silently a no-op.)
+      await useSessionListStore.getState().load();
       // Switch to the new session (triggers SSE subscriptions + loads session row)
       await useUIStore.getState().switchToSession(sessionId);
 
@@ -896,9 +900,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       const deferredMessage = pendingFirstMessage;
       setPendingFirstMessage(null);
 
-      // Give React a tick to propagate the new session row into session-list-store
-      // before sendIntoSession looks it up.
-      setTimeout(() => { void sendIntoSession(sessionId, deferredMessage); }, 50);
+      // Send into the freshly-created session.
+      await sendIntoSession(sessionId, deferredMessage);
     } catch (e) {
       console.error('[ChatPanel] session creation failed:', e);
       const { toast } = await import('sonner');
