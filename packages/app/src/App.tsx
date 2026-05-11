@@ -779,8 +779,28 @@ function AppContent() {
             } else if (event?.case === "thinking") {
               const text = (event.value as { text?: string })?.text ?? "";
               useV2StreamingStore.getState().appendThinking(sid, actorId, text);
+            } else if (event?.case === "toolUse") {
+              const tu = event.value as {
+                toolId?: string;
+                toolName?: string;
+                description?: string;
+                params?: Record<string, string>;
+              };
+              useV2StreamingStore.getState().pushToolUse(sid, actorId, {
+                toolId: tu.toolId ?? "",
+                toolName: tu.toolName ?? "",
+                description: tu.description ?? "",
+                params: tu.params ?? {},
+              });
+            } else if (event?.case === "toolResult") {
+              const tr = event.value as { toolId?: string; success?: boolean; summary?: string };
+              useV2StreamingStore.getState().completeToolUse(sid, actorId, {
+                toolId: tr.toolId ?? "",
+                success: !!tr.success,
+                summary: tr.summary ?? "",
+              });
             }
-            // Other variants: silently ignored for MVP
+            // Other variants (error, permissionRequest, statusChange, todoUpdate, availableCommands, raw): MVP no-op
           }
         });
         if (cancelled) {

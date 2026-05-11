@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Loader2, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
+import { ThinkingBlock } from "./ThinkingBlock";
+import { ToolCallCard } from "./ToolCallCard";
 
 export function StreamingAgentBubble({
   entry,
@@ -12,6 +13,8 @@ export function StreamingAgentBubble({
 }) {
   const hasOutput = entry.outputText.length > 0;
   const hasThinking = entry.thinkingText.length > 0;
+  const hasToolCalls = entry.toolCalls.length > 0;
+
   return (
     <div className="flex items-start gap-2 px-4 py-3">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -22,22 +25,26 @@ export function StreamingAgentBubble({
           <span className="text-sm font-medium">{displayName}</span>
           <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
         </div>
+
         {hasThinking && (
-          <div className="mb-2 rounded-md bg-muted/40 px-2 py-1 text-[12px] text-muted-foreground italic whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
-            {entry.thinkingText}
+          <ThinkingBlock content={entry.thinkingText} isStreaming />
+        )}
+
+        {hasToolCalls && (
+          <div className="space-y-1">
+            {entry.toolCalls.map((tc) => (
+              <ToolCallCard key={tc.id} toolCall={tc} />
+            ))}
           </div>
         )}
+
         {hasOutput && (
-          <div
-            className={cn(
-              "text-sm whitespace-pre-wrap break-words",
-              !hasOutput && "text-muted-foreground italic",
-            )}
-          >
+          <div className="text-sm whitespace-pre-wrap break-words">
             {entry.outputText}
           </div>
         )}
-        {!hasOutput && !hasThinking && (
+
+        {!hasOutput && !hasThinking && !hasToolCalls && (
           <div className="text-sm text-muted-foreground italic">Working...</div>
         )}
       </div>
