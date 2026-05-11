@@ -121,9 +121,11 @@ function normalizeJsxText(text: string): string {
 
 const IGNORED_RENDERED_TEXT_LITERALS = new Set([
   'Esc',
+  'actors',
   'added',
   'content',
   'git',
+  'ideas',
   'knowledge',
   'removed',
   'session',
