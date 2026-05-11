@@ -2483,5 +2483,15 @@
   },
   "team": {
     "viewerReadOnly": "Read-only mode — you don't have edit permissions"
+  },
+  "actors": {
+    "loading": "Loading actors...",
+    "empty": "No actors in this team yet",
+    "error": "Failed to load actors"
+  },
+  "ideas": {
+    "loading": "Loading ideas...",
+    "empty": "No ideas yet",
+    "error": "Failed to load ideas"
   }
 }

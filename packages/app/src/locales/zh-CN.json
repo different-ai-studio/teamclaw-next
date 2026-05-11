@@ -2483,5 +2483,15 @@
   },
   "team": {
     "viewerReadOnly": "只读模式 - 你没有编辑权限"
+  },
+  "actors": {
+    "loading": "正在加载成员...",
+    "empty": "团队暂无成员",
+    "error": "加载成员失败"
+  },
+  "ideas": {
+    "loading": "正在加载想法...",
+    "empty": "暂无想法",
+    "error": "加载想法失败"
   }
 }
