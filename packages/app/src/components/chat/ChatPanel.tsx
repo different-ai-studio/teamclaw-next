@@ -18,6 +18,7 @@ import { ensureRoleSkillPlugin } from "../../lib/opencode/role-plugin-installer"
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
 import { useAuthStore } from "@/stores/auth-store";
 import { useSessionListStore } from "@/stores/session-list-store";
+import { useUIStore } from "@/stores/ui";
 import { mqttPublish } from "@/lib/mqtt-bridge";
 import { supabase } from "@/lib/supabase-client";
 import { create as createMessage, toBinary } from "@bufbuild/protobuf";
@@ -43,6 +44,7 @@ import { PendingPermissionInline, hasVisiblePendingPermissions } from "./Permiss
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
 import { SessionActorSheet } from "./SessionActorSheet";
+import { NewSessionActorPicker } from "./NewSessionActorPicker";
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -251,6 +253,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const [attachedFiles, setAttachedFiles] = React.useState<string[]>([]);
   const [attachedAgents, setAttachedAgents] = React.useState<AttachedAgent[]>([]);
   const [actorSheetOpen, setActorSheetOpen] = React.useState(false);
+  const [pendingFirstMessage, setPendingFirstMessage] = React.useState<PromptInputMessage | null>(null);
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId));
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
   // When activeSessionId is null (brand-new chat), fall back to any row's
@@ -667,7 +670,12 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   // ── Submit handler ────────────────────────────────────────────────────
 
-  const handleSubmit = async (message: PromptInputMessage) => {
+  /**
+   * Core send logic — takes an EXPLICIT sid so it can be called both from
+   * the normal handleSubmit path (activeSessionId) and from the picker-confirm
+   * path (freshly-created sessionId).  Must NOT close over activeSessionId.
+   */
+  const sendIntoSession = async (sid: string, message: PromptInputMessage) => {
     // v2: OpenCode-ready gate removed — that flag tracked a sidecar that's
     // gone now. Single-window scope sends via MQTT + Supabase regardless.
     const text = message.text?.trim() || "";
@@ -675,7 +683,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     const memberIds = mentions.map((m) => m.id);
     const agentIds = attachedAgents.map((a) => a.id);
     const mentionActorIds = Array.from(new Set([...memberIds, ...agentIds]));
-    const isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
+    const _isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
 
     if (!text && attachedFiles.length === 0 && mentions.length === 0 && imageFiles.length === 0) return;
 
@@ -731,10 +739,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     finalContent = parts.join("\n\n");
 
     // Save pasted images to workspace and build file parts
-    let imageParts: SendMessageFilePart[] | undefined;
+    let _imageParts: SendMessageFilePart[] | undefined;
     if (imageFiles.length > 0) {
       const savedPaths: string[] = [];
-      imageParts = await Promise.all(
+      _imageParts = await Promise.all(
         imageFiles.map(async (file) => {
           const dataUrl = await fileToDataUrl(file);
           // Save to workspace so agent tools can access the file
@@ -767,23 +775,22 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     // and isPlanMode for now — single-window scope; Phase 2 wires those.
     const outgoing = finalContent;
     if (outgoing && outgoing.trim()) {
-      const sid = activeSessionId;
       const authSession = useAuthStore.getState().session;
-      const sessionRow = useSessionListStore.getState().rows.find(r => r.id === sid);
-      if (sid && authSession && sessionRow) {
+      const currentSessionRow = useSessionListStore.getState().rows.find(r => r.id === sid);
+      if (sid && authSession && currentSessionRow) {
         try {
           const { data: actorRows, error: actorErr } = await supabase
             .from("actors")
             .select("id, team_id")
             .eq("user_id", authSession.user.id);
           if (actorErr) throw actorErr;
-          const matching = (actorRows ?? []).find((a) => a.team_id === sessionRow.team_id);
-          if (!matching) throw new Error(`No actor found for user in team ${sessionRow.team_id}`);
+          const matching = (actorRows ?? []).find((a) => a.team_id === currentSessionRow.team_id);
+          if (!matching) throw new Error(`No actor found for user in team ${currentSessionRow.team_id}`);
           const senderActorId = matching.id as string;
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
 
-          const message = createMessage(MessageSchema, {
+          const msg = createMessage(MessageSchema, {
             messageId,
             sessionId: sid,
             senderActorId,
@@ -792,7 +799,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             createdAt,
           });
           const sessionMsg = createMessage(SessionMessageEnvelopeSchema, {
-            message,
+            message: msg,
             mentionActorIds,
           });
           const live = createMessage(LiveEventEnvelopeSchema, {
@@ -804,13 +811,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             body: toBinary(SessionMessageEnvelopeSchema, sessionMsg),
           });
           await mqttPublish(
-            `amux/${sessionRow.team_id}/session/${sid}/live`,
+            `amux/${currentSessionRow.team_id}/session/${sid}/live`,
             toBinary(LiveEventEnvelopeSchema, live),
             false,
           );
           const { error: insErr } = await supabase.from("messages").insert({
             id: messageId,
-            team_id: sessionRow.team_id,
+            team_id: currentSessionRow.team_id,
             session_id: sid,
             sender_actor_id: senderActorId,
             kind: "text",
@@ -818,7 +825,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             metadata: { mention_actor_ids: mentionActorIds },
           });
           if (insErr) throw insErr;
-          useSessionStore.getState().appendMessage(sid, message);
+          useSessionStore.getState().appendMessage(sid, msg);
         } catch (e) {
           console.error("[ChatPanel] send failed:", e);
         }
@@ -829,6 +836,79 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     setAttachedFiles([]);
     setAttachedAgents([]);
     setImageFiles([]);
+  };
+
+  const handleSubmit = async (message: PromptInputMessage) => {
+    if (!activeSessionId) {
+      // No session yet — open the picker; defer the actual send.
+      setPendingFirstMessage(message);
+      return;
+    }
+    await sendIntoSession(activeSessionId, message);
+  };
+
+  // ── New-session picker handlers ────────────────────────────────────────
+
+  const handlePickerConfirm = async (picks: { memberActorIds: string[]; agentActorIds: string[] }) => {
+    if (!pendingFirstMessage) return;
+
+    const teamIdForSend = sheetTeamId;
+    if (!teamIdForSend) {
+      console.error('[ChatPanel] no team_id available; cannot create session');
+      setPendingFirstMessage(null);
+      return;
+    }
+
+    const authSession = useAuthStore.getState().session;
+    if (!authSession?.user?.id) {
+      console.error('[ChatPanel] no auth session');
+      setPendingFirstMessage(null);
+      return;
+    }
+    const { data: actorRows } = await supabase
+      .from('actors')
+      .select('id, team_id')
+      .eq('user_id', authSession.user.id);
+    const myActor = (actorRows ?? []).find((a: { id: string; team_id: string }) => a.team_id === teamIdForSend);
+    if (!myActor) {
+      console.error('[ChatPanel] no actor record for user in team', teamIdForSend);
+      setPendingFirstMessage(null);
+      return;
+    }
+
+    const titleSource = (pendingFirstMessage.text ?? '').trim() || 'New chat';
+
+    try {
+      const { createSessionWithParticipants } = await import('@/lib/session-create');
+      const allAdditional = Array.from(new Set([...picks.memberActorIds, ...picks.agentActorIds]));
+      const { sessionId } = await createSessionWithParticipants({
+        teamId: teamIdForSend,
+        creatorActorId: myActor.id,
+        title: titleSource,
+        additionalActorIds: allAdditional,
+        agentActorIds: picks.agentActorIds,
+      });
+
+      // Switch to the new session (triggers SSE subscriptions + loads session row)
+      await useUIStore.getState().switchToSession(sessionId);
+
+      // Replay the deferred send into the new session.
+      const deferredMessage = pendingFirstMessage;
+      setPendingFirstMessage(null);
+
+      // Give React a tick to propagate the new session row into session-list-store
+      // before sendIntoSession looks it up.
+      setTimeout(() => { void sendIntoSession(sessionId, deferredMessage); }, 50);
+    } catch (e) {
+      console.error('[ChatPanel] session creation failed:', e);
+      const { toast } = await import('sonner');
+      toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
+      setPendingFirstMessage(null);
+    }
+  };
+
+  const handlePickerCancel = () => {
+    setPendingFirstMessage(null);
   };
 
   const handleSuggestionClick = React.useCallback(
@@ -999,6 +1079,14 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         onOpenChange={setActorSheetOpen}
         sessionId={activeSessionId}
         teamId={sheetTeamId}
+      />
+
+      <NewSessionActorPicker
+        open={!!pendingFirstMessage}
+        onCancel={handlePickerCancel}
+        onConfirm={(picks) => { void handlePickerConfirm(picks); }}
+        teamId={sheetTeamId ?? ''}
+        selfActorId={null}
       />
 
       {/* Inactivity warning - task still running but no events */}

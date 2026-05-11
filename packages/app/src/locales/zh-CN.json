@@ -288,6 +288,16 @@
       "addAgentAria": "添加 Agent",
       "addError": "添加 Agent 失败",
       "addNeedsSession": "请先发一条消息以创建会话"
+    },
+    "newSessionPicker": {
+      "title": "选择参与者",
+      "desc": "选择要加入此会话的成员和 Agent，或跳过单独开始。",
+      "loading": "加载中...",
+      "error": "加载参与者失败",
+      "empty": "团队暂无成员或 Agent",
+      "skip": "跳过",
+      "send": "发送",
+      "createError": "创建会话失败"
     }
   },
   "onboarding": {

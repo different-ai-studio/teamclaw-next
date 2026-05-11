@@ -288,6 +288,16 @@
       "addAgentAria": "Add agent",
       "addError": "Failed to add agent",
       "addNeedsSession": "Send a message first to create the session"
+    },
+    "newSessionPicker": {
+      "title": "Pick collaborators",
+      "desc": "Select members and agents to add to this session, or skip to start alone.",
+      "loading": "Loading...",
+      "error": "Failed to load actors",
+      "empty": "No team members or agents available",
+      "skip": "Skip",
+      "send": "Send",
+      "createError": "Failed to create session"
     }
   },
   "onboarding": {
