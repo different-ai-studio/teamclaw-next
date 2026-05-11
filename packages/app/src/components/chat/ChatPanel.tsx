@@ -1076,11 +1076,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const messageBottomContent = !isViewingChild ? (
     <>
       {v2Streams.map(entry => (
-        <StreamingAgentBubble
-          key={entry.actorId}
-          entry={entry}
-          displayName={entry.actorId.slice(0, 8)}
-        />
+        <StreamingAgentBubble key={entry.actorId} entry={entry} />
       ))}
       {visibleSessionError ? (
         <SessionErrorAlert
