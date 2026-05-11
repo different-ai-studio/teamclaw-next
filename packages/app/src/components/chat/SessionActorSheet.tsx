@@ -4,6 +4,8 @@ import { Loader2, Users, User as UserIcon, Sparkles } from 'lucide-react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { supabase } from '@/lib/supabase-client'
 import { cn } from '@/lib/utils'
+import { useRuntimeStateStore } from '@/stores/runtime-state-store'
+import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,24 +28,57 @@ function isOnline(lastActiveAt: string | null): boolean {
   return Date.now() - t < 5 * 60 * 1000
 }
 
-function computeDotColor(actor: Row): string {
+function computeDotStateAndAnimation(
+  actor: Row,
+  runtimeInfo: RuntimeInfo | undefined,
+): { color: string; breathing: boolean } {
   if (actor.actor_type === 'member') {
-    return isOnline(actor.last_active_at) ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+    return {
+      color: isOnline(actor.last_active_at) ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+      breathing: false,
+    }
   }
-  // agent
-  const s = actor.agent_status
-  if (s === 'active' || s === 'idle') return 'bg-emerald-500'
-  if (s === 'error') return 'bg-red-500'
-  return 'bg-muted-foreground/40'
+  // Agent
+  if (!runtimeInfo) {
+    return { color: 'bg-muted-foreground/40', breathing: false }
+  }
+  switch (runtimeInfo.state) {
+    case RuntimeLifecycle.FAILED:
+      return { color: 'bg-red-500', breathing: false }
+    case RuntimeLifecycle.STARTING:
+    case RuntimeLifecycle.STOPPED:
+    case RuntimeLifecycle.UNKNOWN:
+      return { color: 'bg-muted-foreground/40', breathing: false }
+    case RuntimeLifecycle.ACTIVE:
+      switch (runtimeInfo.status) {
+        case AgentStatus.ACTIVE:
+          return { color: 'bg-emerald-500', breathing: true }
+        case AgentStatus.IDLE:
+          return { color: 'bg-emerald-500', breathing: false }
+        case AgentStatus.ERROR:
+          return { color: 'bg-red-500', breathing: false }
+        default:
+          return { color: 'bg-muted-foreground/40', breathing: false }
+      }
+    default:
+      return { color: 'bg-muted-foreground/40', breathing: false }
+  }
 }
 
 // ── ActorRowView ───────────────────────────────────────────────────────────
 
-function ActorRowView({ actor }: { actor: Row }) {
+function ActorRowView({
+  actor,
+  runtimeInfo,
+}: {
+  actor: Row
+  runtimeInfo?: RuntimeInfo
+}) {
   const isAgent = actor.actor_type === 'agent'
   const initials = actor.display_name?.slice(0, 2).toUpperCase() || ''
-  const dotColor = computeDotColor(actor)
-  const subline = isAgent ? (actor.agent_kind || '') : (actor.member_status || '')
+  const { color: dotColor, breathing } = computeDotStateAndAnimation(actor, runtimeInfo)
+  const modelName = isAgent ? (runtimeInfo?.currentModel || null) : null
+  const subline = isAgent ? (modelName || actor.agent_kind || '') : (actor.member_status || '')
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
@@ -58,6 +93,7 @@ function ActorRowView({ actor }: { actor: Row }) {
           className={cn(
             'absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-background',
             dotColor,
+            breathing && 'animate-pulse',
           )}
         />
       </div>
@@ -84,6 +120,9 @@ export function SessionActorSheet({ open, onOpenChange, sessionId }: SessionActo
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(false)
   const [actors, setActors] = React.useState<Row[]>([])
+  const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
+
+  const runtimeStates = useRuntimeStateStore(s => s.byRuntimeId)
 
   React.useEffect(() => {
     if (!open || !sessionId) return
@@ -109,6 +148,7 @@ export function SessionActorSheet({ open, onOpenChange, sessionId }: SessionActo
 
       if (actorIds.length === 0) {
         setActors([])
+        setAgentToRuntimeId(new Map())
         setLoading(false)
         return
       }
@@ -127,7 +167,25 @@ export function SessionActorSheet({ open, onOpenChange, sessionId }: SessionActo
         return
       }
 
+      // Step 3: fetch agent_runtimes for live RuntimeInfo mapping
+      const { data: runtimeRows, error: runtimeErr } = await supabase
+        .from('agent_runtimes')
+        .select('agent_id, runtime_id, status, current_model')
+        .eq('session_id', sessionId)
+
+      if (cancelled) return
+      if (runtimeErr) {
+        console.error('[SessionActorSheet] agent_runtimes fetch failed (non-fatal)', runtimeErr)
+        // Non-fatal: agents will fall back to static agent_status
+      }
+
+      const runtimeMap = new Map<string, string>()
+      for (const r of (runtimeRows ?? [])) {
+        if (r.agent_id && r.runtime_id) runtimeMap.set(r.agent_id, r.runtime_id)
+      }
+
       setActors((actorData ?? []) as Row[])
+      setAgentToRuntimeId(runtimeMap)
       setLoading(false)
     })()
     return () => {
@@ -182,9 +240,11 @@ export function SessionActorSheet({ open, onOpenChange, sessionId }: SessionActo
                   <div className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
                     {t('chat.mentionGroupAgents', 'Agents')}
                   </div>
-                  {agents.map((a) => (
-                    <ActorRowView key={a.id} actor={a} />
-                  ))}
+                  {agents.map((a) => {
+                    const runtimeId = agentToRuntimeId.get(a.id)
+                    const info = runtimeId ? runtimeStates[runtimeId]?.info : undefined
+                    return <ActorRowView key={a.id} actor={a} runtimeInfo={info} />
+                  })}
                 </>
               )}
             </>
