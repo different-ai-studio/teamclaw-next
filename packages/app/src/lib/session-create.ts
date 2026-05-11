@@ -29,7 +29,7 @@ export async function createSessionWithParticipants(args: CreateSessionArgs): Pr
       id: sessionId,
       team_id: args.teamId,
       created_by_actor_id: args.creatorActorId,
-      mode: 'team',
+      mode: 'collab',
       title: trimmedTitle,
     })
   if (sessionErr) throw new Error(`Failed to create session: ${sessionErr.message}`)
