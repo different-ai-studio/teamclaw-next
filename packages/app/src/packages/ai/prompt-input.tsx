@@ -396,6 +396,7 @@ export function PromptInputTextarea({
 
   // Check for # hash trigger
   const checkHashTrigger = React.useCallback((newText: string, cursorPos: number) => {
+    if (!onHashTrigger) return  // OFF-path: rollback flag sets this callback to undefined
     const textBeforeCursor = newText.slice(0, cursorPos)
     const lastHashIndex = textBeforeCursor.lastIndexOf('#')
     

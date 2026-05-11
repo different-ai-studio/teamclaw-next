@@ -17,6 +17,7 @@ import {
 } from "@/packages/ai/prompt-input";
 import {
   createInsertHashFile,
+  createInsertFileMention,
   createInsertMention,
   createInsertAgentMention,
   type AttachedAgent,
@@ -56,16 +57,18 @@ function FileMentionPopoverWrapper({
   onOpenChange,
   searchQuery,
   onSearchChange,
+  useHashTrigger,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  useHashTrigger: boolean;
 }) {
   const context = usePromptInputContext();
   const insertFileMention = React.useMemo(
-    () => createInsertHashFile(context),
-    [context],
+    () => useHashTrigger ? createInsertHashFile(context) : createInsertFileMention(context),
+    [context, useHashTrigger],
   );
 
   return (
@@ -465,6 +468,7 @@ export function ChatInputArea({
             onOpenChange={setFilePopoverOpen}
             searchQuery={hashSearchQuery}
             onSearchChange={setHashSearchQuery}
+            useHashTrigger={REDESIGN_ON}
           />
           {REDESIGN_ON && (
             <MentionPopoverWrapper
