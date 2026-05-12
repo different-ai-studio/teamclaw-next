@@ -816,16 +816,29 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     const outgoing = finalContent;
     if (outgoing && outgoing.trim()) {
       const authSession = useAuthStore.getState().session;
-      const currentSessionRow = useSessionListStore.getState().rows.find(r => r.id === sid);
-      if (sid && authSession && currentSessionRow) {
+      // Resolve the session's team_id. Prefer the cached row (fast path);
+      // if the session was just created and isn't in `rows` yet (or got
+      // pushed off the top-50 slice), query supabase directly so we
+      // don't silently drop the send.
+      let teamIdForSend: string | null =
+        useSessionListStore.getState().rows.find(r => r.id === sid)?.team_id ?? null;
+      if (!teamIdForSend && sid) {
+        const { data: sessionRow } = await supabase
+          .from("sessions")
+          .select("team_id")
+          .eq("id", sid)
+          .maybeSingle();
+        teamIdForSend = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
+      }
+      if (sid && authSession && teamIdForSend) {
         try {
           const { data: actorRows, error: actorErr } = await supabase
             .from("actors")
             .select("id, team_id")
             .eq("user_id", authSession.user.id);
           if (actorErr) throw actorErr;
-          const matching = (actorRows ?? []).find((a) => a.team_id === currentSessionRow.team_id);
-          if (!matching) throw new Error(`No actor found for user in team ${currentSessionRow.team_id}`);
+          const matching = (actorRows ?? []).find((a) => a.team_id === teamIdForSend);
+          if (!matching) throw new Error(`No actor found for user in team ${teamIdForSend}`);
           const senderActorId = matching.id as string;
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
@@ -851,13 +864,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             body: toBinary(SessionMessageEnvelopeSchema, sessionMsg),
           });
           await mqttPublish(
-            `amux/${currentSessionRow.team_id}/session/${sid}/live`,
+            `amux/${teamIdForSend}/session/${sid}/live`,
             toBinary(LiveEventEnvelopeSchema, live),
             false,
           );
           const { error: insErr } = await supabase.from("messages").insert({
             id: messageId,
-            team_id: currentSessionRow.team_id,
+            team_id: teamIdForSend,
             session_id: sid,
             sender_actor_id: senderActorId,
             kind: "text",
