@@ -9,7 +9,7 @@ import {
   RuntimeLifecycle,
 } from '@/lib/proto/amux_pb'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { SessionActorSheet } from '../SessionActorSheet'
+import { SessionActorPanel } from '../SessionActorSheet'
 
 const mockRuntimeStart = vi.fn().mockResolvedValue({ accepted: true, runtimeId: 'rt-new', sessionId: 'sess-1', rejectedReason: '' })
 vi.mock('@/lib/teamclaw-rpc', () => ({
@@ -159,7 +159,7 @@ describe('SessionActorSheet', () => {
         { id: 'a-1', actor_type: 'agent', display_name: 'Reviewer', member_status: null, agent_status: 'idle', agent_kind: 'claude', last_active_at: null },
       ],
     )
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
     expect(screen.getByText('Reviewer')).toBeInTheDocument()
     expect(screen.getByText(/members/i)).toBeInTheDocument()
@@ -168,12 +168,12 @@ describe('SessionActorSheet', () => {
 
   it('shows empty state when session has no participants', async () => {
     mockJoinedRows([], [])
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
     await waitFor(() => expect(screen.getByText(/no participants in this session/i)).toBeInTheDocument())
   })
 
   it('does not fetch when sessionId is null', async () => {
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId={null} teamId={null} />)
+    render(<SessionActorPanel sessionId={null} teamId={null} />)
     // Brief wait to ensure no fetch fires
     await new Promise(r => setTimeout(r, 50))
     expect(supabaseFrom).not.toHaveBeenCalled()
@@ -206,7 +206,7 @@ describe('SessionActorSheet', () => {
       [{ agent_id: 'a-1', runtime_id: '05532480', status: 'running', current_model: 'claude-opus-4-7' }],
     )
 
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
     await waitFor(() => expect(screen.getByText('Reviewer')).toBeInTheDocument())
 
     // Model name appears in subline
@@ -229,7 +229,7 @@ describe('SessionActorSheet', () => {
       [],
     )
 
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
     await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
 
     // There should be exactly 2 remove buttons: one for 'Other' (m-2) and one for 'Bot' (a-1)
@@ -249,7 +249,7 @@ describe('SessionActorSheet', () => {
       [],
     )
 
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
     await waitFor(() => expect(screen.getByText('Other')).toBeInTheDocument())
 
     // Click the remove button on the non-self row
@@ -279,7 +279,7 @@ describe('SessionActorSheet', () => {
       [{ id: 'a-1', display_name: 'Bot', actor_type: 'agent' }],
     )
 
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId="team-1" />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
 
     // The Agents heading and + button should appear since there's a candidate
@@ -301,7 +301,7 @@ describe('SessionActorSheet', () => {
       [{ id: 'a-1', display_name: 'Bot', actor_type: 'agent' }],
     )
 
-    render(<SessionActorSheet open={true} onOpenChange={() => {}} sessionId="sess-1" teamId="team-1" />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByRole('button', { name: /add agent/i })).toBeInTheDocument())
 
     const addBtn = screen.getByRole('button', { name: /add agent/i })

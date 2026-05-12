@@ -1,17 +1,19 @@
 import { SessionDiffPanel } from '@/components/chat/SessionDiffPanel'
 import { SessionList } from '@/components/chat/SessionList'
+import { SessionActorPanel } from '@/components/chat/SessionActorSheet'
 import { FileBrowser } from '@/components/workspace/FileBrowser'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { KnowledgeBrowser } from '@/components/knowledge/KnowledgeBrowser'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
+import { useSessionListStore } from '@/stores/session-list-store'
 import type { FileDiff } from '@/lib/opencode/sdk-types'
 import type { ComponentProps } from 'react'
 
 interface RightPanelProps {
   diff?: FileDiff[]
   // Override the active tab from store
-  defaultTab?: 'diff' | 'files' | 'session' | 'shortcuts' | 'knowledge'
+  defaultTab?: 'diff' | 'files' | 'session' | 'shortcuts' | 'knowledge' | 'actors'
   // Compact mode for file mode layout
   compact?: boolean
   knowledgeBrowserProps?: ComponentProps<typeof KnowledgeBrowser>
@@ -19,15 +21,18 @@ interface RightPanelProps {
 
 export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }: RightPanelProps) {
   const storeActiveTab = useWorkspaceStore(s => s.activeTab)
-  // @ts-expect-error Phase 1E removal
   const sessionDiff = useSessionStore(s => s.sessionDiff)
+  const activeSessionId = useSessionStore(s => s.activeSessionId)
+  const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId))
+  const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null)
+  const teamIdForActors = sessionRow?.team_id ?? fallbackTeamId
 
   // Use defaultTab if provided, otherwise use store's activeTab
   const activeTab = defaultTab || storeActiveTab
   const diffData = diff ?? sessionDiff
 
   return (
-    <div className={`h-full overflow-auto ${activeTab === 'files' || activeTab === 'session' ? '' : (compact ? 'p-1' : 'p-2')}`}>
+    <div className={`h-full overflow-auto ${activeTab === 'files' || activeTab === 'session' || activeTab === 'actors' ? '' : (compact ? 'p-1' : 'p-2')}`}>
       {activeTab === 'shortcuts' && (
         <ShortcutsPanel />
       )}
@@ -42,6 +47,9 @@ export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }:
       )}
       {activeTab === 'knowledge' && (
         <KnowledgeBrowser {...knowledgeBrowserProps} />
+      )}
+      {activeTab === 'actors' && (
+        <SessionActorPanel sessionId={activeSessionId} teamId={teamIdForActors} />
       )}
     </div>
   )

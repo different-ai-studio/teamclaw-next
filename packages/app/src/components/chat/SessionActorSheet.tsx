@@ -1,7 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, Plus, Users, User as UserIcon, Sparkles, X } from 'lucide-react'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -135,16 +134,22 @@ function ActorRowView({
   )
 }
 
-// ── SessionActorSheet ──────────────────────────────────────────────────────
+// ── SessionActorPanel ──────────────────────────────────────────────────────
+// Renders inline (e.g., inside the workspace RightPanel) — no Sheet wrapper.
+// Visibility is controlled by the parent panel; this component just renders
+// the list + handlers + confirm dialog.
 
-export interface SessionActorSheetProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+export interface SessionActorPanelProps {
   sessionId: string | null
   teamId: string | null
 }
 
-export function SessionActorSheet({ open, onOpenChange, sessionId, teamId }: SessionActorSheetProps) {
+export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps) {
+  // Effect-trigger gate: when the panel mounts we want the same "open"
+  // semantics as the old Sheet had (clear stale rows, refetch on
+  // session/team change). The component is always "open" while mounted,
+  // so we read the same flag from a hardcoded true below.
+  const open = true
   const { t } = useTranslation()
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(false)
@@ -401,12 +406,11 @@ export function SessionActorSheet({ open, onOpenChange, sessionId, teamId }: Ses
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-full sm:w-96 p-0 flex flex-col">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle>{t('chat.actorSheet.title', 'Actors')}</SheetTitle>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-3 border-b">
+          <h2 className="text-sm font-semibold">{t('chat.actorSheet.title', 'Actors')}</h2>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
             {loading && (
               <div className="flex flex-col items-center justify-center py-12 text-sm text-muted-foreground">
                 <Loader2 className="mb-2 h-5 w-5 animate-spin" />
@@ -486,9 +490,8 @@ export function SessionActorSheet({ open, onOpenChange, sessionId, teamId }: Ses
                 )}
               </>
             )}
-          </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      </div>
 
       <AlertDialog open={!!pendingRemove} onOpenChange={(open) => { if (!open) setPendingRemove(null) }}>
         <AlertDialogContent>

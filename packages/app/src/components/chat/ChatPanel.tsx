@@ -43,7 +43,6 @@ import { SessionErrorAlert } from "./SessionErrorAlert";
 import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
-import { SessionActorSheet } from "./SessionActorSheet";
 import { NewSessionActorPicker } from "./NewSessionActorPicker";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
@@ -269,11 +268,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const setInputValue = setDraftInput;
   const [attachedFiles, setAttachedFiles] = React.useState<string[]>([]);
   const [attachedAgents, setAttachedAgents] = React.useState<AttachedAgent[]>([]);
-  // Actor sheet open state lives in useUIStore so the App.tsx header
-  // trigger (Users icon next to BookOpen / FolderGit) and the sheet
-  // mount here can share it.
-  const actorSheetOpen = useUIStore((s) => s.actorSheetOpen);
-  const setActorSheetOpen = useUIStore((s) => s.setActorSheetOpen);
   const [pendingFirstMessage, setPendingFirstMessage] = React.useState<PromptInputMessage | null>(null);
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId));
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
@@ -1160,14 +1154,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         </div>
       )}
 
-      {/* SessionActorSheet — trigger lives in App.tsx header next to
-       *  Knowledge / Changes; open state is shared via useUIStore. */}
-      <SessionActorSheet
-        open={actorSheetOpen}
-        onOpenChange={setActorSheetOpen}
-        sessionId={activeSessionId}
-        teamId={sheetTeamId}
-      />
+      {/* Actors panel mounts in RightPanel for the 'actors' tab; trigger
+       *  lives in App.tsx header alongside Knowledge / Changes. */}
 
       <NewSessionActorPicker
         open={!!pendingFirstMessage}

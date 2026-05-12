@@ -5,57 +5,6 @@ import { ensureGitignoreEntries } from '@/lib/gitignore-manager'
 import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from '@/lib/build-config'
 import { useTeamModeStore } from './team-mode'
 
-const ROOT_ADVANCED_MODE_DIRECTORIES = new Set([TEAMCLAW_DIR, '.opencode'])
-const ROOT_ADVANCED_MODE_FILES = new Set(['opencode.json', 'config.json'])
-const TEAM_REPO_ADVANCED_MODE_DIRECTORIES = new Set([
-  '_feedback',
-  '_meta',
-  '_secrets',
-  '.git',
-  '.leaderboard',
-])
-
-function normalizeFileTreePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '')
-}
-
-function relativeWorkspacePath(path: string, workspacePath: string): string {
-  const normalizedPath = normalizeFileTreePath(path)
-  const normalizedWorkspace = normalizeFileTreePath(workspacePath)
-  if (normalizedPath === normalizedWorkspace) return ''
-  if (!normalizedPath.startsWith(`${normalizedWorkspace}/`)) return normalizedPath
-  return normalizedPath.slice(normalizedWorkspace.length + 1)
-}
-
-export function shouldHideFileTreeEntry(
-  node: Pick<FileNode, 'name' | 'path' | 'type'>,
-  workspacePath: string,
-  advancedMode: boolean,
-): boolean {
-  if (advancedMode) return false
-
-  const relPath = relativeWorkspacePath(node.path, workspacePath)
-  const isRootEntry = !relPath.includes('/')
-  if (isRootEntry && node.type === 'directory' && ROOT_ADVANCED_MODE_DIRECTORIES.has(node.name)) {
-    return true
-  }
-  if (isRootEntry && node.type === 'file' && ROOT_ADVANCED_MODE_FILES.has(node.name)) {
-    return true
-  }
-
-  const teamInternalDirPrefix = `${TEAM_REPO_DIR}/`
-  if (
-    node.type === 'directory' &&
-    relPath.startsWith(teamInternalDirPrefix) &&
-    !relPath.slice(teamInternalDirPrefix.length).includes('/') &&
-    TEAM_REPO_ADVANCED_MODE_DIRECTORIES.has(node.name)
-  ) {
-    return true
-  }
-
-  return false
-}
-
 // Start watching a directory for file changes
 async function startWatching(path: string): Promise<boolean> {
   if (!isTauri()) return false;
@@ -110,7 +59,7 @@ export interface FileNode {
 }
 
 // Right panel tab type
-export type RightPanelTab = "diff" | "files" | "shortcuts" | "knowledge";
+export type RightPanelTab = "diff" | "files" | "shortcuts" | "knowledge" | "actors";
 
 // Undo operation types for file operations
 interface UndoOperation {
@@ -628,15 +577,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const nodes = await readWorkspaceDirectory(workspacePath, fullPath);
       console.log("[Workspace] Found", nodes.length, "entries");
 
-      let advancedMode = false;
-      try {
-        const { useUIStore } = await import('./ui');
-        advancedMode = useUIStore.getState().advancedMode;
-      } catch { /* keep basic mode */ }
-
-      const visibleNodes = nodes.filter(
-        (node) => !shouldHideFileTreeEntry(node, workspacePath, advancedMode),
-      );
+      const visibleNodes = [...nodes];
 
       visibleNodes.sort((a, b) => {
         // Always put teamclaw-team first

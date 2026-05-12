@@ -597,7 +597,6 @@ function AppContent() {
   const mainContentLayout = useUIStore((s) => s.mainContentLayout);
   const openSettings = useUIStore((s) => s.openSettings);
   const embeddedSettingsSection = useUIStore((s) => s.embeddedSettingsSection);
-  const actorSheetOpenInHeader = useUIStore((s) => s.actorSheetOpen);
   const closeEmbeddedSettingsSection = useUIStore(
     (s) => s.closeEmbeddedSettingsSection,
   );
@@ -1463,8 +1462,8 @@ function AppContent() {
               <HeaderPanelTab
                 icon={Users}
                 label={t("chat.actorSheet.title", "Actors")}
-                isActive={actorSheetOpenInHeader}
-                onClick={() => useUIStore.getState().toggleActorSheet()}
+                isActive={isPanelOpen && activeTab === "actors"}
+                onClick={() => isPanelOpen && activeTab === "actors" ? closePanel() : openPanel("actors")}
               />
               <HeaderPanelTab
                 icon={BookOpen}
