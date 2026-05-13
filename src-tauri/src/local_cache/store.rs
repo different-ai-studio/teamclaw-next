@@ -695,12 +695,15 @@ impl LocalCacheStore {
         let conn = self.conn.lock().await;
         for r in rows {
             conn.execute(
+                // Conflict on the natural key (session_id, actor_id) because
+                // session-create writes a synthesized "sess:actor" id locally
+                // before Supabase sync brings the real UUID. Both refer to
+                // the same logical participant — keep the latest id.
                 "INSERT INTO session_participant
                     (id, session_id, actor_id, joined_at, created_at, updated_at, deleted_at, synced_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
-                 ON CONFLICT(id) DO UPDATE SET
-                    session_id = excluded.session_id,
-                    actor_id   = excluded.actor_id,
+                 ON CONFLICT(session_id, actor_id) DO UPDATE SET
+                    id         = excluded.id,
                     joined_at  = excluded.joined_at,
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at,
