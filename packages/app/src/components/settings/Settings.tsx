@@ -20,6 +20,7 @@ import {
   Bookmark,
   ChevronDown,
   Loader2,
+  Database,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -67,6 +68,7 @@ const advancedSections: Section[] = [
   { id: 'knowledge', label: 'Knowledge Base', labelKey: 'settings.nav.knowledge', icon: BookOpen, color: 'text-cyan-500' },
   { id: 'deps', label: 'Dependencies', labelKey: 'settings.nav.deps', icon: Package, color: 'text-teal-500' },
   { id: 'privacy', label: 'Privacy & Telemetry', labelKey: 'settings.nav.privacy', icon: Shield, color: 'text-slate-500' },
+  { id: 'cache', label: 'Local Cache', labelKey: 'settings.nav.cache', icon: Database, color: 'text-teal-500' },
 ]
 
 function UpdateButton() {

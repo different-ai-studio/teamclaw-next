@@ -135,6 +135,11 @@ export async function loadActorsForTeam(
   return invoke("local_cache_actor_load_team", { teamId, includeDeleted });
 }
 
+export async function loadActorsByIds(ids: string[]): Promise<ActorRow[]> {
+  if (!isTauri() || ids.length === 0) return [];
+  return invoke("local_cache_actor_load_by_ids", { ids });
+}
+
 export async function softDeleteActor(
   id: string,
   deletedAt: string,

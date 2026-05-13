@@ -84,6 +84,15 @@ pub async fn local_cache_actor_soft_delete(
     db.actor_soft_delete(&id, &deleted_at).await
 }
 
+#[tauri::command]
+pub async fn local_cache_actor_load_by_ids(
+    state: tauri::State<'_, LocalCacheState>,
+    ids: Vec<String>,
+) -> Result<Vec<ActorRow>, String> {
+    let db = get_db(&state).await?;
+    db.actor_load_by_ids(&ids).await
+}
+
 // ─── session commands ─────────────────────────────────────────────────────
 
 #[tauri::command]

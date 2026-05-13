@@ -1,25 +1,69 @@
 import * as React from "react";
 import { supabase } from "@/lib/supabase-client";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
+import { loadActorsByIds, upsertActorsBatch } from "@/lib/local-cache";
+import { isTauri } from "@/lib/utils";
 
 const actorDisplayNameCache = new Map<string, string>();
 const inflightLookups = new Map<string, Promise<string | null>>();
 
 async function lookupActorDisplayName(actorId: string): Promise<string | null> {
+  // 1. Memory cache hit — instant
   const cached = actorDisplayNameCache.get(actorId);
   if (cached) return cached;
+
   const inflight = inflightLookups.get(actorId);
   if (inflight) return inflight;
 
   const p = (async () => {
+    // 2. Local libsql cache hit — fast (Tauri only)
+    if (isTauri()) {
+      const local = await loadActorsByIds([actorId]);
+      if (local.length > 0 && local[0].displayName) {
+        actorDisplayNameCache.set(actorId, local[0].displayName);
+        return local[0].displayName;
+      }
+    }
+
+    // 3. Supabase fallback — upsert result into local cache
     const { data, error } = await supabase
       .from("actor_directory")
-      .select("display_name")
+      .select("id, team_id, actor_type, display_name, avatar_url, member_status, agent_status, created_at, updated_at")
       .eq("id", actorId)
       .maybeSingle();
     if (error || !data) return null;
-    const name = (data as { display_name?: string }).display_name ?? null;
-    if (name) actorDisplayNameCache.set(actorId, name);
+    const row = data as {
+      id: string;
+      team_id: string;
+      actor_type: string;
+      display_name?: string;
+      avatar_url?: string | null;
+      member_status?: string | null;
+      agent_status?: string | null;
+      created_at: string;
+      updated_at: string;
+    };
+    const name = row.display_name ?? null;
+    if (name) {
+      actorDisplayNameCache.set(actorId, name);
+      // Back-fill the local cache so next lookup hits tier 2
+      if (isTauri()) {
+        void upsertActorsBatch([{
+          id: row.id,
+          teamId: row.team_id,
+          actorType: row.actor_type,
+          displayName: name,
+          avatarUrl: row.avatar_url ?? null,
+          memberStatus: row.member_status ?? null,
+          agentStatus: row.agent_status ?? null,
+          metadataJson: null,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          deletedAt: null,
+          syncedAt: new Date().toISOString(),
+        }]).catch((e) => console.warn("[actor-display-name] cache upsert:", e));
+      }
+    }
     return name;
   })();
   inflightLookups.set(actorId, p);

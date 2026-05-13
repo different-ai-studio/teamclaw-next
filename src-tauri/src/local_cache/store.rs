@@ -514,6 +514,55 @@ impl LocalCacheStore {
         Ok(result)
     }
 
+    /// Load actor rows by a list of IDs (non-deleted only).
+    /// Returns an empty vec if `ids` is empty or none match.
+    pub async fn actor_load_by_ids(&self, ids: &[String]) -> Result<Vec<ActorRow>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        // Build "?,?,?" placeholders
+        let placeholders = ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, team_id, actor_type, display_name, avatar_url, member_status,
+                    agent_status, metadata_json, created_at, updated_at, deleted_at, synced_at
+             FROM actor WHERE id IN ({}) AND deleted_at IS NULL",
+            placeholders
+        );
+        let bind_vals: Vec<Value> = ids.iter().map(|s| Value::Text(s.clone())).collect();
+        let mut rows = conn
+            .query(&sql, bind_vals)
+            .await
+            .map_err(|e| format!("actor_load_by_ids: {}", e))?;
+        let mut result = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("actor_load_by_ids row: {}", e))?
+        {
+            result.push(ActorRow {
+                id: row.get::<String>(0).unwrap_or_default(),
+                team_id: row.get::<String>(1).unwrap_or_default(),
+                actor_type: row.get::<String>(2).unwrap_or_default(),
+                display_name: row.get::<String>(3).unwrap_or_default(),
+                avatar_url: row.get::<String>(4).ok().filter(|s| !s.is_empty()),
+                member_status: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
+                agent_status: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
+                metadata_json: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(8).unwrap_or_default(),
+                updated_at: row.get::<String>(9).unwrap_or_default(),
+                deleted_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
+                synced_at: row.get::<String>(11).unwrap_or_default(),
+            });
+        }
+        Ok(result)
+    }
+
     pub async fn actor_soft_delete(&self, id: &str, deleted_at: &str) -> Result<(), String> {
         let now = deleted_at.to_string();
         let conn = self.conn.lock().await;

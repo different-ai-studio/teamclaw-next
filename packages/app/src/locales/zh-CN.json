@@ -2527,5 +2527,19 @@
     "loading": "正在加载想法...",
     "empty": "暂无想法",
     "error": "加载想法失败"
+  },
+  "settings": {
+    "nav": {
+      "cache": "本地缓存"
+    },
+    "cache": {
+      "title": "本地缓存",
+      "description": "管理让界面即时加载的本地数据库。数据会在后台从服务器同步。",
+      "refreshAll": "刷新所有数据",
+      "refreshAllDescription": "清除此团队的本地缓存并重新从服务器下载所有数据。当数据看起来过期时使用。",
+      "refreshAllRunning": "正在刷新…",
+      "refreshAllDone": "完成 — 缓存已刷新。",
+      "noTeam": "尚未加载团队。"
+    }
   }
 }

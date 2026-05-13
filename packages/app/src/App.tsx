@@ -106,7 +106,13 @@ import { create } from "zustand";
 import {
   insertAgentRuntimeEvent,
   loadAgentRuntimeEvents,
+  upsertMessagesBatch,
+  type MessageRow,
 } from "@/lib/local-cache";
+import { syncActorsForTeam } from "@/lib/sync/actor-sync";
+import { syncMessagesForSession } from "@/lib/sync/message-sync";
+import { syncParticipantsForSession } from "@/lib/sync/session-participant-sync";
+import { syncSessionsForTeam } from "@/lib/sync/session-sync";
 import { initOpenCodeClient } from "@/lib/opencode/sdk-client";
 import {
   startOpenCode,
@@ -782,32 +788,53 @@ function AppContent() {
             } else {
               useSessionStore.getState().appendMessage(sid, decoded.message);
             }
-            // Cache non-canonical kinds locally so they survive session reload.
-            const m = decoded.message;
-            if (
-              m.kind === MessageKind.AGENT_TOOL_CALL ||
-              m.kind === MessageKind.AGENT_TOOL_RESULT ||
-              m.kind === MessageKind.AGENT_THINKING
-            ) {
+            // Write ALL incoming messages into the unified `message` table
+            // (origin="mqtt-live"). This replaces the old agent_runtime_event
+            // writes for tool-call/result/thinking kinds.
+            // The insertAgentRuntimeEvent table stays alive for backwards compat
+            // but is no longer the primary read path.
+            // TODO(cleanup): remove insertAgentRuntimeEvent writes once all
+            //   clients have upgraded past this version and the old read path
+            //   in history loader above is cleaned up.
+            {
+              const m = decoded.message;
               const kindStr =
                 m.kind === MessageKind.AGENT_TOOL_CALL
                   ? "agent_tool_call"
                   : m.kind === MessageKind.AGENT_TOOL_RESULT
                     ? "agent_tool_result"
-                    : "agent_thinking";
-              insertAgentRuntimeEvent({
+                    : m.kind === MessageKind.AGENT_THINKING
+                      ? "agent_thinking"
+                      : m.kind === MessageKind.AGENT_REPLY
+                        ? "agent_reply"
+                        : m.kind === MessageKind.SYSTEM
+                          ? "system"
+                          : "text";
+              const teamId =
+                useSessionListStore.getState().rows.find(
+                  (r) => r.id === sid,
+                )?.team_id ?? "";
+              const now = new Date().toISOString();
+              const msgRow: MessageRow = {
                 id: m.messageId,
+                teamId,
                 sessionId: m.sessionId,
-                // TODO(daemon-turn-id): read m.turnId once daemon ships the proto field
-                turnId: null,
+                turnId: m.turnId || null,
                 senderActorId: m.senderActorId || null,
+                replyToMessageId: null,
                 kind: kindStr,
                 content: m.content,
                 metadataJson: null,
                 model: m.model || null,
+                mentionsJson: null,
+                origin: "mqtt-live",
                 createdAt: new Date(Number(m.createdAt) * 1000).toISOString(),
-              }).catch((e) => {
-                console.warn("[agent-events] insert failed:", e);
+                updatedAt: now,
+                deletedAt: null,
+                syncedAt: now,
+              };
+              upsertMessagesBatch([msgRow]).catch((e) => {
+                console.warn("[cache] message upsert failed:", e);
               });
             }
             return;
@@ -909,6 +936,20 @@ function AppContent() {
         // Runtime state store: subscribe to daemon-published RuntimeInfo retains.
         await initRuntimeStateStore(firstTeamId);
         console.log('[runtime-state] initialized for team', firstTeamId);
+
+        // Background: sync actor directory into local cache so display-name
+        // lookups hit libsql instead of Supabase on subsequent renders.
+        void syncActorsForTeam(firstTeamId).catch((e) =>
+          console.warn('[cache-sync] actor sync failed:', e),
+        );
+
+        // Background: sync sessions into local cache.
+        void syncSessionsForTeam(firstTeamId).then(() => {
+          // Reload session list from merged local cache after sync finishes.
+          void useSessionListStore.getState().load();
+        }).catch((e) =>
+          console.warn('[cache-sync] session sync failed:', e),
+        );
       } catch (err) {
         console.error("[MQTT] receiver wiring failed:", err);
       }
@@ -963,36 +1004,96 @@ function AppContent() {
     void ensureSessionLiveSubscribed(row.team_id, row.id);
   }, [activeSessionIdForSubscribe, userId, firstTeamId]);
 
-  // v2 Phase 1: load message history from Supabase whenever the active
-  // session changes. Single-window scope: no realtime sub here, we just
-  // pull on session-select. New outgoing messages append locally via
-  // ActorChatInput; new MQTT messages append via the receiver wired above.
+  // v2 Phase 1 → local-first: load message history whenever the active
+  // session changes.
+  //   1. Tauri: hydrate immediately from local libsql cache (no Supabase wait).
+  //   2. Background: delta-sync from Supabase (watermark-based), upsert local,
+  //      re-render if anything new arrived.
+  //   3. Non-Tauri: full Supabase pull (unchanged behaviour).
+  // agent_runtime_event table is no longer read here — those rows were written
+  // with origin="mqtt-live" into the message table by new envelope handler code.
+  // TODO(cleanup): remove agent_runtime_event table once all clients have
+  // upgraded past this version.
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   useEffect(() => {
     if (!currentSessionId) return;
     let cancelled = false;
+    const kindMap: Record<string, MessageKind> = {
+      text: MessageKind.TEXT,
+      system: MessageKind.SYSTEM,
+      agent_thinking: MessageKind.AGENT_THINKING,
+      agent_tool_call: MessageKind.AGENT_TOOL_CALL,
+      agent_tool_result: MessageKind.AGENT_TOOL_RESULT,
+      agent_reply: MessageKind.AGENT_REPLY,
+    };
+
+    function cacheRowToProto(r: {
+      id: string;
+      sessionId: string;
+      senderActorId?: string | null;
+      kind: string;
+      content: string;
+      model?: string | null;
+      createdAt: string;
+    }) {
+      return createMessage(MessageSchema, {
+        messageId: r.id,
+        sessionId: r.sessionId,
+        senderActorId: r.senderActorId ?? "",
+        kind: kindMap[r.kind] ?? MessageKind.TEXT,
+        content: r.content ?? "",
+        model: r.model ?? "",
+        createdAt: BigInt(Math.floor(new Date(r.createdAt).getTime() / 1000)),
+      });
+    }
+
     void (async () => {
-      const [supabaseResult, cachedEvents] = await Promise.all([
-        supabase
-          .from("messages")
-          .select("id, session_id, sender_actor_id, kind, content, model, created_at")
-          .eq("session_id", currentSessionId)
-          .order("created_at", { ascending: true }),
-        loadAgentRuntimeEvents(currentSessionId),
-      ]);
+      if (isTauri()) {
+        // ── Phase 1: instant render from local cache ──────────────────
+        const { loadMessagesForSession } = await import("@/lib/local-cache");
+        const localMsgs = await loadMessagesForSession(currentSessionId);
+        if (cancelled) return;
+        if (localMsgs.length > 0) {
+          useSessionStore.getState().setMessages(
+            currentSessionId,
+            localMsgs.map(cacheRowToProto),
+          );
+        }
+
+        // ── Phase 2: background delta sync from Supabase ─────────────
+        const teamId =
+          useSessionListStore.getState().rows.find(
+            (r) => r.id === currentSessionId,
+          )?.team_id ?? "";
+        const synced = await syncMessagesForSession(
+          currentSessionId,
+          teamId,
+        );
+        if (cancelled) return;
+        if (synced > 0) {
+          // Re-read from local cache to surface the newly-synced rows
+          const fresh = await loadMessagesForSession(currentSessionId);
+          if (!cancelled) {
+            useSessionStore.getState().setMessages(
+              currentSessionId,
+              fresh.map(cacheRowToProto),
+            );
+          }
+        }
+        return;
+      }
+
+      // ── Non-Tauri: full Supabase pull (unchanged) ─────────────────
+      const supabaseResult = await supabase
+        .from("messages")
+        .select("id, session_id, sender_actor_id, kind, content, model, created_at")
+        .eq("session_id", currentSessionId)
+        .order("created_at", { ascending: true });
       if (cancelled) return;
       if (supabaseResult.error) {
         console.warn("[history] load failed:", supabaseResult.error.message);
         return;
       }
-      const kindMap: Record<string, MessageKind> = {
-        text: MessageKind.TEXT,
-        system: MessageKind.SYSTEM,
-        agent_thinking: MessageKind.AGENT_THINKING,
-        agent_tool_call: MessageKind.AGENT_TOOL_CALL,
-        agent_tool_result: MessageKind.AGENT_TOOL_RESULT,
-        agent_reply: MessageKind.AGENT_REPLY,
-      };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const supabaseMsgs = (supabaseResult.data ?? []).map((r: any) =>
         createMessage(MessageSchema, {
@@ -1005,27 +1106,7 @@ function AppContent() {
           createdAt: BigInt(Math.floor(new Date(r.created_at).getTime() / 1000)),
         }),
       );
-      const cachedMsgs = cachedEvents.map((r) =>
-        createMessage(MessageSchema, {
-          messageId: r.id,
-          sessionId: r.sessionId,
-          senderActorId: r.senderActorId ?? "",
-          kind: kindMap[r.kind] ?? MessageKind.TEXT,
-          content: r.content,
-          model: r.model ?? "",
-          createdAt: BigInt(Math.floor(new Date(r.createdAt).getTime() / 1000)),
-        }),
-      );
-      // Merge by created_at ASC. Dedup by messageId (supabase rows take priority).
-      const seen = new Set<string>();
-      const merged = [...supabaseMsgs, ...cachedMsgs]
-        .filter((m) => {
-          if (seen.has(m.messageId)) return false;
-          seen.add(m.messageId);
-          return true;
-        })
-        .sort((a, b) => Number(a.createdAt - b.createdAt));
-      useSessionStore.getState().setMessages(currentSessionId, merged);
+      useSessionStore.getState().setMessages(currentSessionId, supabaseMsgs);
     })();
     return () => {
       cancelled = true;

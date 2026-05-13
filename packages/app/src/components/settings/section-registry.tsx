@@ -20,6 +20,7 @@ import { PermissionManagementSection } from './PermissionManagementSection'
 import { VoiceSection } from './VoiceSection'
 import { LeaderboardSection } from './LeaderboardSection'
 import { ShortcutsSection } from '@/components/shortcuts/ShortcutsSection'
+import { CacheSection } from './CacheSection'
 
 export const SETTINGS_SECTION_COMPONENTS: Record<SettingsSection, React.ComponentType> = {
   llm: LLMSection,
@@ -41,6 +42,7 @@ export const SETTINGS_SECTION_COMPONENTS: Record<SettingsSection, React.Componen
   permissions: PermissionManagementSection,
   leaderboard: LeaderboardSection,
   shortcuts: ShortcutsSection,
+  cache: CacheSection,
 }
 
 export function SettingsSectionBody({ section }: { section: SettingsSection }) {

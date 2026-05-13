@@ -553,6 +553,7 @@ pub fn run() {
             commands::local_stats::reset_local_stats,
             local_cache::commands::local_cache_actor_upsert_batch,
             local_cache::commands::local_cache_actor_load_team,
+            local_cache::commands::local_cache_actor_load_by_ids,
             local_cache::commands::local_cache_actor_soft_delete,
             local_cache::commands::local_cache_session_upsert_batch,
             local_cache::commands::local_cache_session_load_team,

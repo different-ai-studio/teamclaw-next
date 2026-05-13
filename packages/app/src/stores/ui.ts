@@ -14,7 +14,7 @@ export type FileModeRightTab = 'shortcuts' | 'changes' | 'files' | 'agent'
 export type DefaultPrimaryTab = 'session' | 'actors' | 'ideas' | 'shortcuts'
 export type DefaultMoreDestination = 'automation' | 'rolesSkills' | 'settings'
 
-export type SettingsSection = 'llm' | 'general' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts'
+export type SettingsSection = 'llm' | 'general' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts' | 'cache'
 
 /** Sections that can be opened in the main column from the workspace sidebar strip. */
 export type EmbeddedSidebarSettingsSection = 'automation' | 'rolesSkills'

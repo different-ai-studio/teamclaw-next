@@ -2527,5 +2527,19 @@
     "loading": "Loading ideas...",
     "empty": "No ideas yet",
     "error": "Failed to load ideas"
+  },
+  "settings": {
+    "nav": {
+      "cache": "Local Cache"
+    },
+    "cache": {
+      "title": "Local Cache",
+      "description": "Manage the local database that makes screens load instantly. Data is synced from the server in the background.",
+      "refreshAll": "Refresh all data",
+      "refreshAllDescription": "Clears the local cache for this team and re-downloads everything from the server. Useful if data looks stale.",
+      "refreshAllRunning": "Refreshing…",
+      "refreshAllDone": "Done — cache refreshed.",
+      "noTeam": "No team loaded yet."
+    }
   }
 }
