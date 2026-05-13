@@ -942,7 +942,7 @@ function AppContent() {
     void (async () => {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, session_id, sender_actor_id, kind, content, created_at")
+        .select("id, session_id, sender_actor_id, kind, content, model, created_at")
         .eq("session_id", currentSessionId)
         .order("created_at", { ascending: true });
       if (cancelled) return;
@@ -966,6 +966,7 @@ function AppContent() {
           senderActorId: r.sender_actor_id,
           kind: kindMap[r.kind] ?? MessageKind.TEXT,
           content: r.content ?? "",
+          model: r.model ?? "",
           createdAt: BigInt(Math.floor(new Date(r.created_at).getTime() / 1000)),
         }),
       );

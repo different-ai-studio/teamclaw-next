@@ -31,6 +31,7 @@ export function adaptTeamclawMessageToSdk(m: TeamclawMessage): SdkMessage {
     senderActorId: m.senderActorId,
     role: kindToRole(m.kind),
     content: m.content,
+    modelID: m.model || undefined,
     parts: [
       {
         id: `${m.messageId}-p0`,

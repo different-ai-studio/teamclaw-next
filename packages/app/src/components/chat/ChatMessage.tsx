@@ -206,7 +206,11 @@ export const ChatMessage = React.memo(function ChatMessage({
 
   return (
     <div className={cn("group/msg", isToolCallOnly ? "mb-0.5" : "mb-1.5")} data-testid="chat-message" data-message-role={message.role}>
-      <ActorLabel senderActorId={message.senderActorId} isUser={isUser} />
+      <ActorLabel
+        senderActorId={message.senderActorId}
+        modelOverride={message.modelID}
+        isUser={isUser}
+      />
       {/* Thinking indicator - MUST be first for assistant messages during streaming */}
       {showThinkingOnly && !hasReasoning && (
         <div className="flex items-start gap-2 pl-1 mb-2">
@@ -363,13 +367,19 @@ export const ChatMessage = React.memo(function ChatMessage({
  * when no senderActorId is available (legacy v1 messages). */
 function ActorLabel({
   senderActorId,
+  modelOverride,
   isUser,
 }: {
   senderActorId: string | undefined;
+  modelOverride: string | undefined;
   isUser: boolean;
 }) {
   const name = useActorDisplayName(senderActorId);
-  const model = useAgentModelByActor(isUser ? null : senderActorId);
+  // Prefer the model captured on the message itself (historically accurate);
+  // fall back to the runtime's live currentModel when the message predates
+  // the model column or wasn't stamped.
+  const liveModel = useAgentModelByActor(isUser ? null : senderActorId);
+  const model = modelOverride || liveModel;
   if (!senderActorId || !name) return null;
   return (
     <div
