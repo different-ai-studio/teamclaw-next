@@ -137,16 +137,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const sessions = useSessionStore(s => s.sessions);
 
   // ── V2 agent streaming (acp.event deltas) ───────────────────────────
-  // Select byKey directly (stable reference when nothing changes) and filter in useMemo.
+  // Only render ACTIVE bubbles. On finalize, the envelope handler appends
+  // the completed reply to useSessionStore.messages — the regular
+  // ChatMessage takes over chronological placement, and the bubble
+  // disappears so multiple turns don't clobber prior replies.
   const v2StreamsByKey = useV2StreamingStore(s => s.byKey);
-  // Render both active streams AND finalized stubs — once finalize() lands,
-  // the bubble keeps thinking + tool_calls + final content visible (and the
-  // spinner is hidden inside the bubble based on entry.active). When a new
-  // turn starts, the entry is reset to active=true and re-fills.
   const v2Streams = React.useMemo(
     () =>
       Object.values(v2StreamsByKey).filter(
-        e => e.sessionId === activeSessionId,
+        e => e.sessionId === activeSessionId && e.active,
       ),
     [v2StreamsByKey, activeSessionId],
   );

@@ -768,15 +768,14 @@ function AppContent() {
               ? streamingStore.byKey[`${sid}::${senderActorId}`]
               : undefined;
             if (streamKey) {
-              // Agent reply for an in-flight (or just-finalized) stream:
-              // finalize the bubble in-place so thinking + tool_calls
-              // stay visible alongside the canonical reply text. Skip
-              // appendMessage to avoid a duplicate plain ChatMessage
-              // alongside the rich bubble.
+              // Agent reply for an in-flight stream: finalize the streaming
+              // bubble (marks inactive) AND append to the regular message
+              // store so the completed reply survives subsequent turns.
+              // The bubble disappears on inactive (filtered in ChatPanel);
+              // the ChatMessage takes its place in chronological order.
               streamingStore.finalize(sid, senderActorId!, decoded.message.content);
+              useSessionStore.getState().appendMessage(sid, decoded.message);
             } else {
-              // Non-agent message (member chat) or first-time agent stub:
-              // append normally so it renders as a regular ChatMessage.
               useSessionStore.getState().appendMessage(sid, decoded.message);
             }
             return;
