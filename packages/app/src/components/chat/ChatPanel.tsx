@@ -17,6 +17,7 @@ import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-confi
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
 import { useAuthStore } from "@/stores/auth-store";
 import { useSessionListStore } from "@/stores/session-list-store";
+import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
 import { useUIStore } from "@/stores/ui";
 import { mqttPublish } from "@/lib/mqtt-bridge";
 import { supabase } from "@/lib/supabase-client";
@@ -43,6 +44,7 @@ import { PendingPermissionInline, hasVisiblePendingPermissions } from "./Permiss
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
 import { NewSessionActorPicker } from "./NewSessionActorPicker";
+import { SessionContinueBanner } from "./SessionContinueBanner";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 
@@ -119,6 +121,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     t("chat.suggestions.skill", "Add a new skill"),
   ];
   const suggestions = [...builtInSuggestions, ...customSuggestions];
+
+  // ── UI store selectors ───────────────────────────────────────────────
+  const draftPreselectedActor = useUIStore(s => s.draftPreselectedActor);
 
   // ── Session store selectors (reactive state only) ────────────────────
   const activeSessionId = useSessionStore(s => s.activeSessionId);
@@ -267,7 +272,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const inputValue = draftInput;
   const setInputValue = setDraftInput;
   const [attachedFiles, setAttachedFiles] = React.useState<string[]>([]);
-  const [engagedAgent, setEngagedAgent] = React.useState<AttachedAgent | null>(null);
+  // engagedAgent is per-session: stored in a zustand slice keyed by
+  // sessionId, so switching away from a session and back restores its
+  // engaged agent rather than carrying one across sessions globally.
+  // For brand-new chats (activeSessionId === null), engagedAgent is null.
+  const engagedAgent = useEngagedAgentStore((s) =>
+    activeSessionId ? s.bySession[activeSessionId] ?? null : null,
+  );
+  const setEngagedAgentForSession = React.useCallback(
+    (agent: AttachedAgent | null) => {
+      const sid = useSessionStore.getState().activeSessionId;
+      if (!sid) return;
+      useEngagedAgentStore.getState().setEngagedAgent(sid, agent);
+    },
+    [],
+  );
   // Dedupe runtimeStart RPCs across re-engages within the same session.
   const ensuredRuntimesRef = React.useRef<Set<string>>(new Set());
   const [pendingFirstMessage, setPendingFirstMessage] = React.useState<PromptInputMessage | null>(null);
@@ -389,9 +408,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     if (activeSessionId === null) {
       setDisplaySessionId(null);
       setSessionFadeOpacity(1);
-      // Brand-new chat: clear leftover engaged agent from prior session so
-      // the dock doesn't keep showing the previous session's agent name.
-      setEngagedAgent(null);
+      // engagedAgent is per-session now; no need to clear here — the
+      // selector returns null for null sessionId automatically.
     }
     // Switching session invalidates the runtime-ensured memo — different
     // (session, agent) pairs should each get their own runtimeStart.
@@ -542,6 +560,54 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       console.warn("[ChatPanel] Failed to sync gateway session model:", error);
     });
   }, [activeSessionId, selectedModelOption]);
+
+  // ── Per-actor draft persistence ──────────────────────────────────────
+  // When the user taps an actor in the Actors tab without sending anything
+  // and then navigates away (different actor, settings, etc.), their
+  // typed-but-unsent text persists in localStorage keyed by actor id and
+  // is restored next time they preselect the same actor.
+  const draftStorageKey = draftPreselectedActor
+    ? `teamclaw-actor-draft:${draftPreselectedActor.id}`
+    : null;
+  const justRestoredDraftRef = React.useRef(false);
+
+  // Restore saved draft when actor changes.
+  React.useEffect(() => {
+    if (!draftStorageKey) return;
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(draftStorageKey);
+    } catch {
+      /* localStorage disabled */
+    }
+    if (saved != null && saved !== inputValue) {
+      justRestoredDraftRef.current = true;
+      setInputValue(saved);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftStorageKey]);
+
+  // Debounced persist on input change. Skips the tick immediately after a
+  // restore so we don't overwrite what we just read.
+  React.useEffect(() => {
+    if (!draftStorageKey) return;
+    if (justRestoredDraftRef.current) {
+      justRestoredDraftRef.current = false;
+      return;
+    }
+    const handle = setTimeout(() => {
+      try {
+        if (inputValue) {
+          localStorage.setItem(draftStorageKey, inputValue);
+        } else {
+          localStorage.removeItem(draftStorageKey);
+        }
+      } catch {
+        /* localStorage disabled */
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [draftStorageKey, inputValue]);
 
   // Voice input / "Add to Agent": append transcript or file mention to input
   React.useEffect(() => {
@@ -884,34 +950,56 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (!activeSessionId) {
-      // No session yet — open the picker; defer the actual send.
+      // No session yet. Two paths:
+      //   1. Actor-draft mode (user tapped an actor row → draftPreselectedActor
+      //      is set): skip the picker, create the session with that one actor
+      //      and send straight away.
+      //   2. Otherwise: open the picker; the picker's confirm calls back into
+      //      the same creation routine via handlePickerConfirm.
+      if (draftPreselectedActor) {
+        const picks =
+          draftPreselectedActor.kind === 'agent'
+            ? {
+                agents: [{ id: draftPreselectedActor.id, displayName: draftPreselectedActor.displayName }],
+                members: [],
+              }
+            : {
+                agents: [],
+                members: [{ id: draftPreselectedActor.id, displayName: draftPreselectedActor.displayName }],
+              };
+        try {
+          localStorage.removeItem(`teamclaw-actor-draft:${draftPreselectedActor.id}`);
+        } catch {
+          /* localStorage disabled */
+        }
+        useUIStore.getState().clearActorDraft();
+        await createSessionAndSendFirst(message, picks);
+        return;
+      }
       setPendingFirstMessage(message);
       return;
     }
     await sendIntoSession(activeSessionId, message);
   };
 
-  // ── New-session picker handlers ────────────────────────────────────────
-
-  const handlePickerConfirm = async (
+  // ── New-session creation: shared by the picker confirm path and the
+  //    actor-draft (preselected actor) path ───────────────────────────────
+  const createSessionAndSendFirst = async (
+    firstMessage: PromptInputMessage,
     picks: {
       members: { id: string; displayName: string }[]
       agents: { id: string; displayName: string }[]
     },
   ) => {
-    if (!pendingFirstMessage) return;
-
     const teamIdForSend = sheetTeamId;
     if (!teamIdForSend) {
       console.error('[ChatPanel] no team_id available; cannot create session');
-      setPendingFirstMessage(null);
       return;
     }
 
     const authSession = useAuthStore.getState().session;
     if (!authSession?.user?.id) {
       console.error('[ChatPanel] no auth session');
-      setPendingFirstMessage(null);
       return;
     }
     const { data: actorRows } = await supabase
@@ -921,15 +1009,25 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     const myActor = (actorRows ?? []).find((a: { id: string; team_id: string }) => a.team_id === teamIdForSend);
     if (!myActor) {
       console.error('[ChatPanel] no actor record for user in team', teamIdForSend);
-      setPendingFirstMessage(null);
       return;
     }
 
-    const titleSource = (pendingFirstMessage.text ?? '').trim() || 'New chat';
+    // Initial title: "ActorName (HH:mm)" when we have exactly one
+    // preselected actor (so multiple sessions to the same actor stay
+    // distinguishable in the list until agent auto-rename kicks in).
+    // Otherwise fall back to the message text or a generic placeholder.
+    const soloActor =
+      picks.members.length + picks.agents.length === 1
+        ? picks.members[0] ?? picks.agents[0]
+        : null;
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const now = new Date();
+    const hhmm = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const titleSource = soloActor
+      ? `${soloActor.displayName} (${hhmm})`
+      : (firstMessage.text ?? '').trim() || 'New chat';
 
     try {
-      // 1. Synchronously insert sessions + session_participants. This is the
-      //    "hot path" — user wants to see the chat view immediately.
       const { createSessionShell, startAgentRuntimesAsync } = await import('@/lib/session-create');
       const memberIds = picks.members.map((m) => m.id);
       const agentIds = picks.agents.map((a) => a.id);
@@ -941,45 +1039,33 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         additionalActorIds: allAdditional,
       });
 
-      // 2. Subscribe to the new session's live topic BEFORE publishing the
-      //    first message. Otherwise the daemon's acp.event stream + final
-      //    message.created can arrive before the reactive per-rows
-      //    subscribe effect catches up, and the stream is silently lost
-      //    (user sees nothing until they switch sessions and supabase
-      //    re-loads the persisted final reply).
+      // Subscribe to the new session's live topic before publishing the
+      // first message — otherwise the daemon's acp.event + message.created
+      // can arrive before the reactive per-rows subscribe catches up.
       const { ensureSessionLiveSubscribed } = await import('@/App');
       await ensureSessionLiveSubscribed(teamIdForSend, sessionId);
 
-      // 3. Refresh session-list-store so the new row appears in the left
-      //    sidebar AND sendIntoSession can find it by id. createSessionShell
-      //    already upserted into local libsql, so load() hydrates the new
-      //    row from cache instantly before the Supabase delta returns.
+      // Refresh session-list-store so the new row appears in the sidebar
+      // and sendIntoSession can find it by id.
       await useSessionListStore.getState().load();
-      // 4. Highlight the new session in the sidebar (auto-clears after 4s).
       useSessionStore.getState().addHighlightedSession(sessionId);
-      // 5. Switch to the new session (UI now shows the chat view).
       await useUIStore.getState().switchToSession(sessionId);
 
-      // 4. Replay the deferred first message immediately. Auto-engage +
-      //    auto-mention ONLY when the user picked exactly one actor and
-      //    that actor is an agent — anything more ambiguous (multi-agent,
-      //    or agent+member) leaves the dock empty and routing to the user.
-      const deferredMessage = pendingFirstMessage;
-      setPendingFirstMessage(null);
-      const soleActor =
+      // Auto-engage + auto-mention ONLY when there's exactly one agent
+      // (no members). Anything more ambiguous leaves the dock empty and
+      // routes to the user.
+      const soleAgent =
         picks.members.length === 0 && picks.agents.length === 1
           ? picks.agents[0]
           : null;
-      if (soleActor) {
-        setEngagedAgent(soleActor);
+      if (soleAgent) {
+        useEngagedAgentStore.getState().setEngagedAgent(sessionId, soleAgent);
       }
-      const autoMentionAgents: AttachedAgent[] = soleActor ? [soleActor] : [];
-      await sendIntoSession(sessionId, deferredMessage, autoMentionAgents);
+      const autoMentionAgents: AttachedAgent[] = soleAgent ? [soleAgent] : [];
+      await sendIntoSession(sessionId, firstMessage, autoMentionAgents);
 
-      // 5. Fire-and-forget: spawn agent runtimes in the background. UI
-      //    has already moved into the new session; the RuntimeInfo retain
-      //    subscription will update the actor sheet's status dot when
-      //    each runtime comes up.
+      // Fire-and-forget runtime spawn — UI has already moved into the
+      // session; status dots update via RuntimeInfo subscriptions.
       if (picks.agents.length > 0) {
         void startAgentRuntimesAsync({
           sessionId,
@@ -991,8 +1077,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       console.error('[ChatPanel] session creation failed:', e);
       const { toast } = await import('sonner');
       toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
-      setPendingFirstMessage(null);
     }
+  };
+
+  // ── New-session picker handlers ────────────────────────────────────────
+
+  const handlePickerConfirm = async (
+    picks: {
+      members: { id: string; displayName: string }[]
+      agents: { id: string; displayName: string }[]
+    },
+  ) => {
+    if (!pendingFirstMessage) return;
+    const message = pendingFirstMessage;
+    setPendingFirstMessage(null);
+    await createSessionAndSendFirst(message, picks);
   };
 
   const handlePickerCancel = () => {
@@ -1031,44 +1130,85 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   }, [restoreSession, viewingArchivedSessionId]);
 
   // ── Empty state with suggestions ──────────────────────────────────────
-  const emptyState = React.useMemo(() => (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center text-center",
-        compact ? "py-8 px-2" : "py-20",
-      )}
-    >
-      <h2
+  // Two variants:
+  //   1. Actor-draft: user tapped an actor row, so the implicit recipient
+  //      is known. Show the actor's name as the heading and skip the
+  //      generic suggestions.
+  //   2. Generic: show "Start a New Chat" + suggestions; first message
+  //      triggers NewSessionActorPicker.
+  const emptyState = React.useMemo(() => {
+    if (draftPreselectedActor) {
+      return (
+        <div
+          className={cn(
+            "flex flex-col items-center justify-center text-center",
+            compact ? "py-8 px-2" : "py-20",
+          )}
+        >
+          <h2
+            className={cn(
+              "mb-1 font-semibold",
+              compact ? "text-sm" : "text-xl",
+            )}
+          >
+            {draftPreselectedActor.displayName}
+          </h2>
+          <p
+            className={cn(
+              "text-muted-foreground",
+              compact ? "text-xs" : "text-sm",
+            )}
+          >
+            {draftPreselectedActor.kind === 'agent'
+              ? t('chat.draftWithAgentHint', 'Send a message to start a session with this agent')
+              : t('chat.draftWithMemberHint', 'Send a message to start a session with this member')}
+          </p>
+          <SessionContinueBanner
+            actorId={draftPreselectedActor.id}
+            actorName={draftPreselectedActor.displayName}
+          />
+        </div>
+      );
+    }
+    return (
+      <div
         className={cn(
-          "mb-1 font-semibold",
-          compact ? "text-sm" : "text-xl",
+          "flex flex-col items-center justify-center text-center",
+          compact ? "py-8 px-2" : "py-20",
         )}
       >
-        {compact ? t("chat.agent", "Agent") : t("chat.startNewChat", "Start a New Chat")}
-      </h2>
-      <p
-        className={cn(
-          "text-muted-foreground",
-          compact ? "text-xs mb-2" : "text-sm mb-6",
+        <h2
+          className={cn(
+            "mb-1 font-semibold",
+            compact ? "text-sm" : "text-xl",
+          )}
+        >
+          {compact ? t("chat.agent", "Agent") : t("chat.startNewChat", "Start a New Chat")}
+        </h2>
+        <p
+          className={cn(
+            "text-muted-foreground",
+            compact ? "text-xs mb-2" : "text-sm mb-6",
+          )}
+        >
+          {compact
+            ? t("chat.askAboutFile", "Ask questions about the file")
+            : t("chat.askAnything", "Ask me anything, or choose a suggestion below")}
+        </p>
+        {!compact && (
+          <Suggestions>
+            {suggestions.map((suggestion) => (
+              <Suggestion
+                key={suggestion}
+                suggestion={suggestion}
+                onClick={() => handleSuggestionClick(suggestion)}
+              />
+            ))}
+          </Suggestions>
         )}
-      >
-        {compact
-          ? t("chat.askAboutFile", "Ask questions about the file")
-          : t("chat.askAnything", "Ask me anything, or choose a suggestion below")}
-      </p>
-      {!compact && (
-        <Suggestions>
-          {suggestions.map((suggestion) => (
-            <Suggestion
-              key={suggestion}
-              suggestion={suggestion}
-              onClick={() => handleSuggestionClick(suggestion)}
-            />
-          ))}
-        </Suggestions>
-      )}
-    </div>
-  ), [compact, t, suggestions, handleSuggestionClick]);
+      </div>
+    );
+  }, [compact, t, suggestions, handleSuggestionClick, draftPreselectedActor]);
 
   const visibleSessionError =
     sessionError?.sessionId && sessionError.sessionId === displaySessionId
@@ -1316,7 +1456,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onRemoveFile={removeFile}
             engagedAgent={engagedAgent}
             onEngageAgent={(a) => {
-              setEngagedAgent(a);
+              setEngagedAgentForSession(a);
               // Bootstrap a runtime for this (session, agent) if we haven't
               // already — otherwise the daemon has no process to deliver
               // the mention to and AgentSelectorDock has no RuntimeInfo
@@ -1341,7 +1481,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                 }
               })();
             }}
-            onClearAgent={() => setEngagedAgent(null)}
+            onClearAgent={() => setEngagedAgentForSession(null)}
             imageFiles={imageFiles}
             onImageFilesChange={handleImageFilesChange}
             onRemoveImageFile={removeImageFile}
