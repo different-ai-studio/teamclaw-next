@@ -102,7 +102,6 @@ impl PtyHandle {
         let data_event = format!("terminal://{}/data", handle.id);
         let exit_event = format!("terminal://{}/exit", handle.id);
         let ring = handle.ring.clone();
-        let weak = Arc::downgrade(&handle);
 
         std::thread::Builder::new()
             .name(format!("pty-reader-{}", &handle.id))
@@ -134,20 +133,13 @@ impl PtyHandle {
                     }
                 }));
 
-                let exit_code = if let Some(h) = weak.upgrade() {
-                    let mut child = h.child.lock().unwrap();
-                    match child.wait() {
-                        Ok(status) => status.exit_code() as i32,
-                        Err(_) => -1,
-                    }
-                } else {
-                    -1
+                let exit_code = match handle.child.lock().unwrap().wait() {
+                    Ok(status) => status.exit_code() as i32,
+                    Err(_) => -1,
                 };
 
-                if let Some(h) = weak.upgrade() {
-                    *h.status.lock().unwrap() = TerminalStatus::Exited;
-                    *h.exit_code.lock().unwrap() = Some(exit_code);
-                }
+                *handle.exit_code.lock().unwrap() = Some(exit_code);
+                *handle.status.lock().unwrap() = TerminalStatus::Exited;
 
                 let code = if result.is_err() { Some(-1) } else { Some(exit_code) };
                 (emit.emit_exit)(&exit_event, code);
