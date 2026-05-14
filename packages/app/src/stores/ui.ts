@@ -99,7 +99,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   actorSheetOpen: false,
   spotlightMode: false,
   settingsInitialSection: null,
-  sidebarFilter: { kind: 'all' } as SidebarFilter,
+  sidebarFilter: { kind: 'all' },
   ideasSectionCollapsed: false,
   actorsSectionCollapsed: false,
   draftIdeaId: null,
@@ -154,7 +154,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({
       currentView: 'chat',
       settingsInitialSection: null,
-      sidebarFilter: { kind: 'all' } as SidebarFilter,
+      sidebarFilter: { kind: 'all' },
+      draftIdeaId: null,
     })
     const isStacked = get().mainContentLayout === 'stacked'
 
