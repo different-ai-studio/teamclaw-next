@@ -311,6 +311,7 @@ pub fn run() {
         .manage(commands::version_commands::VersionStoreState::default())
         .manage(commands::shared_secrets::SharedSecretsState::default())
         .manage::<crate::mqtt::MqttBus>(std::sync::Arc::new(crate::mqtt::MqttBusInner::new()))
+        .manage(std::sync::Arc::new(crate::terminal::Registry::new()))
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::show_in_folder,
@@ -450,6 +451,12 @@ pub fn run() {
             commands::git::git_checkout_file,
             commands::git::git_show_file,
             commands::git::git_log_file,
+            commands::terminal::terminal_close,
+            commands::terminal::terminal_list,
+            commands::terminal::terminal_open,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_subscribe,
+            commands::terminal::terminal_write,
             commands::team::get_team_status,
             commands::team::update_team_llm_config,
             commands::team::team_check_git_installed,
@@ -1063,6 +1070,11 @@ pub fn run() {
                     // but we don't want to block exit for up to 10s on a network
                     // request (the aptabase HTTP timeout) if the server is slow.
                     let _ = app.track_event("app_exited", None);
+                }
+                tauri::RunEvent::ExitRequested { .. } => {
+                    if let Some(registry) = app.try_state::<std::sync::Arc<crate::terminal::Registry>>() {
+                        registry.kill_all();
+                    }
                 }
                 _ => {}
             }
