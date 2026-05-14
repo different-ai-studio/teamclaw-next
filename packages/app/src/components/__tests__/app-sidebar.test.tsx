@@ -216,6 +216,14 @@ vi.mock('@/components/panel/RightPanel', () => ({
   ),
 }))
 
+vi.mock('@/components/sidebar/NavRail', () => ({
+  NavRail: () => <div data-testid="nav-rail" />,
+}))
+
+vi.mock('@/components/sidebar/SessionListColumn', () => ({
+  SessionListColumn: () => <div data-testid="session-list-column" />,
+}))
+
 import { AppSidebar } from '@/components/app-sidebar'
 
 describe('AppSidebar', () => {
@@ -314,10 +322,11 @@ describe('AppSidebar', () => {
     expect(buttons.length).toBeGreaterThan(2)
   })
 
-  it('with workspace UI variant shows Shortcuts in the quick access list', () => {
+  it('workspace variant renders NavRail + SessionListColumn', () => {
     uiVariantMocks.workspaceShell = true
     render(<AppSidebar />)
-    expect(screen.getByText('Shortcuts')).toBeDefined()
+    expect(screen.getByTestId('nav-rail')).toBeDefined()
+    expect(screen.getByTestId('session-list-column')).toBeDefined()
   })
 
   it('default mode renders the default bottom navigation instead of the mixed quick access list', () => {
@@ -513,22 +522,6 @@ describe('AppSidebar', () => {
     render(<AppSidebar />)
     expect(screen.getByText('Settings')).toBeDefined()
     expect(screen.queryByText('设置')).toBeNull()
-  })
-
-  it('workspace mode only scrolls the session list area', () => {
-    uiVariantMocks.workspaceShell = true
-
-    const { container } = render(<AppSidebar />)
-
-    expect(screen.getByTestId('sidebar-content').getAttribute('class')).toContain('overflow-hidden')
-
-    const sessionScrollRegion = container.querySelector('[data-testid="sidebar-session-scroll"]')
-    expect(sessionScrollRegion).not.toBeNull()
-    expect(sessionScrollRegion!.getAttribute('class')).toContain('overflow-y-auto')
-    expect(sessionScrollRegion!.textContent).toContain('Session One')
-    expect(sessionScrollRegion!.textContent).toContain('Session Two')
-    expect(sessionScrollRegion!.textContent).not.toContain('Shortcuts')
-    expect(sessionScrollRegion!.textContent).not.toContain('New Chat')
   })
 
   it('workspace variant preserves the settings footer row', () => {
