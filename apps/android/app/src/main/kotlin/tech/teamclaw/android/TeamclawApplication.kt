@@ -3,9 +3,11 @@ package tech.teamclaw.android
 import android.app.Application
 import io.github.jan.supabase.SupabaseClient
 import io.sentry.android.core.SentryAndroid
+import tech.teamclaw.android.core.auth.ActorStore
 import tech.teamclaw.android.core.auth.OnboardingCoordinator
 import tech.teamclaw.android.core.auth.SessionDetailStore
 import tech.teamclaw.android.core.auth.SessionListStore
+import tech.teamclaw.android.core.auth.SupabaseActorRepository
 import tech.teamclaw.android.core.auth.SupabaseMessagesRepository
 import tech.teamclaw.android.core.auth.SupabaseOnboardingStore
 import tech.teamclaw.android.core.auth.SupabaseSessionsRepository
@@ -34,6 +36,8 @@ class TeamclawApplication : Application() {
     lateinit var sessionListStoreFactory: (teamId: String) -> SessionListStore
         private set
     lateinit var sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore
+        private set
+    lateinit var actorStoreFactory: (teamId: String) -> ActorStore
         private set
 
     override fun onCreate() {
@@ -67,5 +71,7 @@ class TeamclawApplication : Application() {
         sessionDetailStoreFactory = { teamId, sessionId, actorId ->
             SessionDetailStore(teamId, sessionId, actorId, messagesRepo)
         }
+        val actorRepo = SupabaseActorRepository(supabaseClient)
+        actorStoreFactory = { teamId -> ActorStore(teamId, actorRepo) }
     }
 }

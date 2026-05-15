@@ -12,6 +12,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import tech.teamclaw.android.core.auth.ActorStore
 import tech.teamclaw.android.core.auth.OnboardingCoordinator
 import tech.teamclaw.android.core.auth.OnboardingRoute
 import tech.teamclaw.android.core.auth.SessionDetailStore
@@ -22,8 +23,10 @@ import tech.teamclaw.android.core.model.SessionRecord
 import tech.teamclaw.android.feature.onboarding.ChooseAuthScreen
 import tech.teamclaw.android.feature.onboarding.CreateTeamScreen
 import tech.teamclaw.android.feature.onboarding.InviteJoinSheet
+import tech.teamclaw.android.feature.onboarding.InviteMemberSheet
 import tech.teamclaw.android.feature.onboarding.LobsterSplashScreen
 import tech.teamclaw.android.feature.onboarding.LoginScreen
+import tech.teamclaw.android.feature.onboarding.MembersScreen
 import tech.teamclaw.android.feature.onboarding.OnboardingErrorScreen
 import tech.teamclaw.android.feature.onboarding.SessionDetailScreen
 import tech.teamclaw.android.feature.onboarding.SessionListScreen
@@ -36,6 +39,7 @@ fun TeamclawNavHost(
     googleHandler: GoogleSignInHandler,
     sessionListStoreFactory: (teamId: String) -> SessionListStore,
     sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore,
+    actorStoreFactory: (teamId: String) -> ActorStore,
 ) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val activity = LocalContext.current as ComponentActivity
@@ -75,6 +79,7 @@ fun TeamclawNavHost(
                     currentActorId = actorId,
                     sessionListStoreFactory = sessionListStoreFactory,
                     sessionDetailStoreFactory = sessionDetailStoreFactory,
+                    actorStoreFactory = actorStoreFactory,
                 )
             }
         }
@@ -89,14 +94,24 @@ private fun ReadyFlow(
     currentActorId: String,
     sessionListStoreFactory: (teamId: String) -> SessionListStore,
     sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore,
+    actorStoreFactory: (teamId: String) -> ActorStore,
 ) {
     var openSession by remember { mutableStateOf<SessionRecord?>(null) }
+    var showMembers by remember { mutableStateOf(false) }
     val listStore = remember(teamId) { sessionListStoreFactory(teamId) }
     val listState by listStore.state.collectAsStateWithLifecycle()
     LaunchedEffect(teamId) { listStore.reload() }
 
     val active = openSession
-    if (active == null) {
+    if (showMembers) {
+        MembersFlow(
+            coordinator = coordinator,
+            teamId = teamId,
+            teamName = teamName,
+            actorStoreFactory = actorStoreFactory,
+            onBack = { showMembers = false },
+        )
+    } else if (active == null) {
         SessionListScreen(
             teamName = teamName,
             sessions = listState.sessions,
@@ -104,6 +119,7 @@ private fun ReadyFlow(
             errorMessage = listState.errorMessage,
             onRefresh = { coordinator.launch { listStore.reload() } },
             onSessionClick = { openSession = it },
+            onMembers = { showMembers = true },
             onSignOut = { coordinator.launch { coordinator.signOut() } },
         )
     } else {
@@ -121,6 +137,44 @@ private fun ReadyFlow(
             errorMessage = detailState.errorMessage,
             onSend = { text -> coordinator.launch { detailStore.send(text) } },
             onBack = { openSession = null },
+        )
+    }
+}
+
+@Composable
+private fun MembersFlow(
+    coordinator: OnboardingCoordinator,
+    teamId: String,
+    teamName: String,
+    actorStoreFactory: (teamId: String) -> ActorStore,
+    onBack: () -> Unit,
+) {
+    val store = remember(teamId) { actorStoreFactory(teamId) }
+    val s by store.state.collectAsStateWithLifecycle()
+    var showInvite by remember { mutableStateOf(false) }
+    LaunchedEffect(teamId) { store.reload() }
+
+    MembersScreen(
+        teamName = teamName,
+        actors = s.actors,
+        isLoading = s.isLoading,
+        errorMessage = s.errorMessage,
+        onRefresh = { coordinator.launch { store.reload() } },
+        onInvite = { showInvite = true },
+        onBack = onBack,
+    )
+
+    if (showInvite) {
+        InviteMemberSheet(
+            isInviting = s.isInviting,
+            errorMessage = s.errorMessage,
+            lastInvite = s.lastInvite,
+            onDismiss = {
+                showInvite = false
+                store.clearLastInvite()
+            },
+            onSubmit = { input -> coordinator.launch { store.createInvite(input) } },
+            onClearLastInvite = { store.clearLastInvite() },
         )
     }
 }
