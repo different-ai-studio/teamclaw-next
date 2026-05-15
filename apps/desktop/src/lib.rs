@@ -259,6 +259,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Restore window size + position across launches. Per-window state is
+        // keyed by window label and stored under the OS app-data dir.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         // NOTE: aptabase is registered in the setup() closure below so that
         // the Tokio runtime is available when its internal `tokio::spawn` runs.
         .plugin(

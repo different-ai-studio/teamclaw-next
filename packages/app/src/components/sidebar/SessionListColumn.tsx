@@ -23,6 +23,7 @@ import { SessionSearchDialog } from '@/components/sidebar/session-search-dialog'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/date-format'
+import { useTypeAhead } from '@/hooks/use-type-ahead'
 import { buildSessionListActivityMap, type SessionListActivity } from '@/lib/session-list-activity'
 import { loadSessionIdsForActor } from '@/lib/session-by-actor'
 import {
@@ -344,6 +345,19 @@ export function SessionListColumn() {
   }
 
   const handleSelectSession = (id: string) => useUIStore.getState().switchToSession(id)
+
+  // Native list type-ahead: with no input focused, typing letters / digits /
+  // CJK jumps to the first session whose title starts with the buffer.
+  const typeAheadItems = React.useMemo(
+    () => filteredRows.map((r) => ({ id: r.id, label: r.title })),
+    [filteredRows],
+  )
+  useTypeAhead({
+    enabled: filteredRows.length > 0,
+    items: typeAheadItems,
+    onMatch: handleSelectSession,
+  })
+
   const handleStartRename = (e: React.SyntheticEvent, id: string) => { e.stopPropagation(); setRenamingSessionId(id) }
   const handleRenameConfirm = async (id: string, newTitle: string) => {
     const current = listRows.find((r) => r.id === id)?.title
