@@ -26,6 +26,8 @@ class MainActivity : ComponentActivity() {
                     sessionListStoreFactory = app.sessionListStoreFactory,
                     sessionDetailStoreFactory = app.sessionDetailStoreFactory,
                     actorStoreFactory = app.actorStoreFactory,
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
                 )
             }
         }

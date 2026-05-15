@@ -38,6 +38,7 @@ fun SessionListScreen(
     onRefresh: () -> Unit,
     onSessionClick: (SessionRecord) -> Unit,
     onMembers: () -> Unit,
+    onSettings: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -49,6 +50,7 @@ fun SessionListScreen(
             onSignOut = onSignOut,
             onRefresh = onRefresh,
             onMembers = onMembers,
+            onSettings = onSettings,
         )
 
         if (!errorMessage.isNullOrEmpty()) {
@@ -88,12 +90,16 @@ private fun SessionListTopBar(
     teamName: String,
     onRefresh: () -> Unit,
     onMembers: () -> Unit,
+    onSettings: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        TextButton(onClick = onSettings, modifier = Modifier.testTag("sessionList.settingsButton")) {
+            Text("⚙", color = Hai.Basalt, style = MaterialTheme.typography.headlineMedium)
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text("Sessions", style = MaterialTheme.typography.headlineMedium, color = Hai.Onyx)
             Text(teamName, style = MaterialTheme.typography.bodySmall, color = Hai.Basalt)
@@ -102,9 +108,6 @@ private fun SessionListTopBar(
             Text("Actors", color = Hai.Cinnabar)
         }
         TextButton(onClick = onRefresh) { Text("Refresh", color = Hai.Cinnabar) }
-        TextButton(onClick = onSignOut, modifier = Modifier.testTag("sessionList.signOutButton")) {
-            Text("Sign out", color = Hai.Basalt)
-        }
     }
 }
 
@@ -163,7 +166,7 @@ private fun SessionListPreview() {
                 ),
             ),
             isLoading = false, errorMessage = null,
-            onRefresh = {}, onSessionClick = {}, onSignOut = {}, onMembers = {},
+            onRefresh = {}, onSessionClick = {}, onSignOut = {}, onMembers = {}, onSettings = {},
         )
     }
 }

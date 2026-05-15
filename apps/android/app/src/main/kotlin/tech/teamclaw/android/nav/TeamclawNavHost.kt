@@ -20,6 +20,7 @@ import tech.teamclaw.android.core.auth.SessionListStore
 import tech.teamclaw.android.core.auth.apple.AppleSignInHandler
 import tech.teamclaw.android.core.auth.google.GoogleSignInHandler
 import tech.teamclaw.android.core.model.SessionRecord
+import tech.teamclaw.android.core.model.TeamSummary
 import tech.teamclaw.android.feature.onboarding.ChooseAuthScreen
 import tech.teamclaw.android.feature.onboarding.CreateTeamScreen
 import tech.teamclaw.android.feature.onboarding.InviteJoinSheet
@@ -30,6 +31,8 @@ import tech.teamclaw.android.feature.onboarding.MembersScreen
 import tech.teamclaw.android.feature.onboarding.OnboardingErrorScreen
 import tech.teamclaw.android.feature.onboarding.SessionDetailScreen
 import tech.teamclaw.android.feature.onboarding.SessionListScreen
+import tech.teamclaw.android.feature.onboarding.SettingsScreen
+import tech.teamclaw.android.feature.onboarding.SettingsViewState
 import tech.teamclaw.android.feature.onboarding.WelcomeScreen
 
 @Composable
@@ -40,6 +43,8 @@ fun TeamclawNavHost(
     sessionListStoreFactory: (teamId: String) -> SessionListStore,
     sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore,
     actorStoreFactory: (teamId: String) -> ActorStore,
+    versionName: String,
+    versionCode: Int,
 ) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val activity = LocalContext.current as ComponentActivity
@@ -74,12 +79,14 @@ fun TeamclawNavHost(
             } else {
                 ReadyFlow(
                     coordinator = coordinator,
-                    teamId = team.id,
-                    teamName = team.name,
+                    team = team,
+                    isAnonymous = state.isAnonymous,
                     currentActorId = actorId,
                     sessionListStoreFactory = sessionListStoreFactory,
                     sessionDetailStoreFactory = sessionDetailStoreFactory,
                     actorStoreFactory = actorStoreFactory,
+                    versionName = versionName,
+                    versionCode = versionCode,
                 )
             }
         }
@@ -89,21 +96,43 @@ fun TeamclawNavHost(
 @Composable
 private fun ReadyFlow(
     coordinator: OnboardingCoordinator,
-    teamId: String,
-    teamName: String,
+    team: TeamSummary,
+    isAnonymous: Boolean,
     currentActorId: String,
     sessionListStoreFactory: (teamId: String) -> SessionListStore,
     sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore,
     actorStoreFactory: (teamId: String) -> ActorStore,
+    versionName: String,
+    versionCode: Int,
 ) {
+    val teamId = team.id
+    val teamName = team.name
     var openSession by remember { mutableStateOf<SessionRecord?>(null) }
     var showMembers by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     val listStore = remember(teamId) { sessionListStoreFactory(teamId) }
     val listState by listStore.state.collectAsStateWithLifecycle()
     LaunchedEffect(teamId) { listStore.reload() }
 
     val active = openSession
-    if (showMembers) {
+    if (showSettings) {
+        SettingsScreen(
+            state = SettingsViewState(
+                teamName = teamName,
+                teamRole = team.role.replaceFirstChar { it.uppercase() },
+                displayName = if (isAnonymous) "Anonymous" else "Signed-in user",
+                isAnonymous = isAnonymous,
+                versionName = versionName,
+                versionCode = versionCode,
+            ),
+            onBack = { showSettings = false },
+            onUpgradeAccount = { /* P7+ : open upgrade flow */ },
+            onSignOut = {
+                showSettings = false
+                coordinator.launch { coordinator.signOut() }
+            },
+        )
+    } else if (showMembers) {
         MembersFlow(
             coordinator = coordinator,
             teamId = teamId,
@@ -120,6 +149,7 @@ private fun ReadyFlow(
             onRefresh = { coordinator.launch { listStore.reload() } },
             onSessionClick = { openSession = it },
             onMembers = { showMembers = true },
+            onSettings = { showSettings = true },
             onSignOut = { coordinator.launch { coordinator.signOut() } },
         )
     } else {
