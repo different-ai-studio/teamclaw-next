@@ -8,6 +8,10 @@ import type {
 import { ScoringEngine } from '@/lib/telemetry/scoring-engine'
 import { buildSessionReport } from '@/lib/telemetry/report-builder'
 import { useSessionStore } from '@/stores/session'
+import { insertFeedback } from '@/lib/telemetry/supabase-feedback'
+import { supabase } from '@/lib/supabase-client'
+import { useCurrentTeamStore } from '@/stores/current-team'
+import { useAuthStore } from '@/stores/auth-store'
 // Permissive proxy until the amuxd daemon client is wired up;
 // telemetry's session-report builder is non-functional.
 // TODO(amuxd): wire to daemon
@@ -61,6 +65,25 @@ interface TelemetryState {
   generateAllSessionReports: (workspacePath?: string) => Promise<void>
   exportTeamData: (force?: boolean) => void
   destroy: () => void
+}
+
+// ─── Supabase actor-ID resolver ─────────────────────────────────────────
+
+/**
+ * Return the current user's actor ID for the current team, or null if not
+ * available. Looks up from the `actors` table keyed on auth.uid() + team_id.
+ */
+async function resolveActorId(teamId: string): Promise<string | null> {
+  const userId = useAuthStore.getState().session?.user?.id
+  if (!userId) return null
+  const { data } = await supabase
+    .from('actors')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('team_id', teamId)
+    .limit(1)
+    .maybeSingle()
+  return data?.id ?? null
 }
 
 // ─── Internal state ──────────────────────────────────────────────────────
@@ -179,13 +202,18 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   },
 
   setFeedback: async (sessionId: string, messageId: string, rating: FeedbackRating) => {
-    if (!isTauri()) return
-
     try {
-      await invoke('telemetry_set_feedback', {
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
+      const actorId = await resolveActorId(teamId)
+      if (!actorId) return
+
+      await insertFeedback({
+        actorId,
+        teamId,
         sessionId,
         messageId,
-        rating,
+        kind: rating, // FeedbackRating = 'positive' | 'negative' matches FeedbackKind
       })
 
       set((state) => {
@@ -213,10 +241,19 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   },
 
   removeFeedback: async (sessionId: string, messageId: string) => {
-    if (!isTauri()) return
-
     try {
-      await invoke('telemetry_remove_feedback', { sessionId, messageId })
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
+      const actorId = await resolveActorId(teamId)
+      if (!actorId) return
+
+      const { error } = await supabase
+        .from('actor_message_feedback')
+        .delete()
+        .eq('actor_id', actorId)
+        .eq('team_id', teamId)
+        .eq('message_id', messageId)
+      if (error) console.warn('[telemetry] removeFeedback', error.message)
 
       set((state) => {
         const cache = new Map(state.feedbackCache)
@@ -235,24 +272,27 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   },
 
   loadFeedbacks: async (sessionId: string) => {
-    if (!isTauri()) return
-
     try {
-      const feedbacks = await invoke<Array<{ message_id: string; rating: string; star_rating?: number | null }>>(
-        'telemetry_get_feedbacks',
-        { sessionId },
-      )
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
+
+      const { data, error } = await supabase
+        .from('actor_message_feedback')
+        .select('message_id, kind, star_rating')
+        .eq('team_id', teamId)
+        .eq('session_id', sessionId)
+      if (error) { console.warn('[telemetry] loadFeedbacks', error.message); return }
 
       set((state) => {
-        const cache = new Map(state.feedbackCache)
-        const starCache = new Map(state.starRatingCache)
-        for (const fb of feedbacks) {
-          cache.set(fb.message_id, fb.rating as FeedbackRating)
-          if (fb.star_rating != null && fb.star_rating >= 1 && fb.star_rating <= 5) {
-            starCache.set(fb.message_id, fb.star_rating as StarRating)
+        const fb = new Map(state.feedbackCache)
+        const sr = new Map(state.starRatingCache)
+        for (const r of data ?? []) {
+          if (r.message_id) {
+            fb.set(r.message_id, r.kind as FeedbackRating)
+            if (r.star_rating != null) sr.set(r.message_id, r.star_rating as StarRating)
           }
         }
-        return { feedbackCache: cache, starRatingCache: starCache }
+        return { feedbackCache: fb, starRatingCache: sr }
       })
     } catch (err) {
       console.error('[telemetry] Failed to load feedbacks:', err)
@@ -264,12 +304,27 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   },
 
   setStarRating: async (sessionId: string, messageId: string, rating: StarRating) => {
-    if (!isTauri()) return
-
     try {
-      await invoke('telemetry_set_star_rating', {
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
+      const actorId = await resolveActorId(teamId)
+      if (!actorId) return
+
+      // Delete any prior star_rating row for this message (idempotent re-rate)
+      await supabase
+        .from('actor_message_feedback')
+        .delete()
+        .eq('actor_id', actorId)
+        .eq('team_id', teamId)
+        .eq('message_id', messageId)
+        .not('star_rating', 'is', null)
+
+      await insertFeedback({
+        actorId,
+        teamId,
         sessionId,
         messageId,
+        kind: rating >= 3 ? 'positive' : 'negative',
         starRating: rating,
       })
 
@@ -298,10 +353,20 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   },
 
   removeStarRating: async (sessionId: string, messageId: string) => {
-    if (!isTauri()) return
-
     try {
-      await invoke('telemetry_remove_star_rating', { sessionId, messageId })
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
+      const actorId = await resolveActorId(teamId)
+      if (!actorId) return
+
+      const { error } = await supabase
+        .from('actor_message_feedback')
+        .delete()
+        .eq('actor_id', actorId)
+        .eq('team_id', teamId)
+        .eq('message_id', messageId)
+        .not('star_rating', 'is', null)
+      if (error) console.warn('[telemetry] removeStarRating', error.message)
 
       set((state) => {
         const cache = new Map(state.starRatingCache)
