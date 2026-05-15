@@ -14,6 +14,7 @@ interface State {
   saving: boolean;
   error: string | null;
   load: () => Promise<void>;
+  reloadAndSwitchTo: (teamId: string) => Promise<void>;
   rename: (newName: string) => Promise<boolean>;
 }
 
@@ -44,6 +45,30 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     const row = data?.[0];
     set({
       team: row ? { id: row.id, name: row.name, slug: row.slug } : null,
+      loading: false,
+    });
+  },
+
+  reloadAndSwitchTo: async (teamId: string) => {
+    const session = useAuthStore.getState().session;
+    if (!session) {
+      set({ team: null, loading: false, error: null });
+      return;
+    }
+
+    set({ loading: true, error: null });
+    const { data, error } = await supabase
+      .from("teams")
+      .select("id, name, slug")
+      .eq("id", teamId)
+      .single();
+
+    if (error) {
+      set({ loading: false, error: error.message });
+      return;
+    }
+    set({
+      team: data ? { id: data.id, name: data.name, slug: data.slug } : null,
       loading: false,
     });
   },

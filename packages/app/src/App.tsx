@@ -114,6 +114,9 @@ import { syncMessagesForSession } from "@/lib/sync/message-sync";
 import { syncParticipantsForSession } from "@/lib/sync/session-participant-sync";
 import { syncSessionsForTeam } from "@/lib/sync/session-sync";
 import { Button } from "@/components/ui/button";
+import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
+import { parseInviteDeeplink, claimInviteToken } from "@/lib/invite-deeplink";
+import { useCurrentTeamStore } from "@/stores/current-team";
 
 // Module-level set of session/live topics we've already MQTT-subscribed to.
 // Lives outside the React tree so that the App.tsx mount effect + the
@@ -1696,6 +1699,33 @@ function App() {
       mod.setupPluginListeners?.();
       console.log('[App] tauri-plugin-mcp listeners initialized');
     }).catch(() => {});
+  }, []);
+
+  // ── Deeplink: teamclaw://invite?token=… ───────────────────────────────────
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+
+    async function handle(urls: string[]) {
+      for (const raw of urls) {
+        const token = parseInviteDeeplink(raw);
+        if (!token) continue;
+        try {
+          const claim = await claimInviteToken(token);
+          await useCurrentTeamStore.getState().reloadAndSwitchTo(claim.teamId);
+        } catch (err) {
+          console.error('[invite] claim failed', err);
+        }
+      }
+    }
+
+    // Cold start — link that launched the app
+    getCurrent().then((urls) => { if (urls) handle(urls); }).catch(() => {});
+
+    // Hot delivery while app is already open
+    onOpenUrl(handle).then((u) => { unlisten = u; }).catch(() => {});
+
+    return () => { unlisten?.(); };
   }, []);
 
   // Extracted hooks — initialization, setup guide, telemetry consent
