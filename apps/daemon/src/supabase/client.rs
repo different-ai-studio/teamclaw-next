@@ -738,6 +738,46 @@ impl SupabaseClient {
         })
     }
 
+    /// Look up the `binding` URI of a gateway session by its
+    /// SQL-minted `acp_session_id`. Returns `None` if no row matches or
+    /// the row's `binding` is NULL (non-gateway session).
+    ///
+    /// Used by `AmuxdAcpHandle::resolve_or_spawn` to recover the binding
+    /// needed for the per-session MCP config (so the `send` tool's
+    /// default target points back at the correct chat) when the channel
+    /// layer only has the logical session id on hand.
+    pub async fn get_session_binding_by_acp_id(
+        &self,
+        acp_session_id: &str,
+    ) -> SupabaseResult<Option<String>> {
+        let token = self.access_token().await?;
+        let url = format!(
+            "{}/rest/v1/sessions?acp_session_id=eq.{}&select=binding",
+            self.cfg.url, acp_session_id
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("apikey", &self.cfg.anon_key)
+            .bearer_auth(&token)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: format!("get_session_binding_by_acp_id: {text}"),
+            });
+        }
+        #[derive(Deserialize)]
+        struct Row {
+            binding: Option<String>,
+        }
+        let rows: Vec<Row> = resp.json().await?;
+        Ok(rows.into_iter().next().and_then(|r| r.binding))
+    }
+
     /// Resolve (or create) the `sessions` row for a gateway binding.
     /// Returns `(session_id, acp_session_id, created)`.
     #[allow(clippy::too_many_arguments)]

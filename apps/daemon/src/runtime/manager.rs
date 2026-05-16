@@ -1,13 +1,88 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::adapter;
 use super::handle::RuntimeHandle;
+use crate::config::DaemonConfig;
 use crate::proto::amux;
 use crate::runtime::turn_aggregator::TurnAggregator;
 use crate::supabase::{AgentRuntimeUpsert, SupabaseClient};
 use chrono::Utc;
+
+/// Sanitise an arbitrary logical-session-id string into a filename-safe
+/// component. The gateway-minted acp_session_id values that drive the
+/// path here are already hex, but we accept anything and replace
+/// non-alphanumeric chars with `_` so callers can safely include
+/// binding-derived ids without worrying about `/` or `:`.
+fn sanitize_for_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Path of the per-session MCP config file emitted before claude-code
+/// is spawned. Filename is keyed by `logical_session_id` (the amuxd-side
+/// session key — for gateway sessions this is the SQL-minted
+/// `acp_session_id` hex) so the same file is reused if the runtime is
+/// re-spawned under the same logical id (e.g. after `/reset`).
+pub fn gateway_mcp_config_path(logical_session_id: &str) -> PathBuf {
+    DaemonConfig::config_dir()
+        .join("mcp-configs")
+        .join(format!("{}.json", sanitize_for_filename(logical_session_id)))
+}
+
+/// Write the per-session MCP config that points claude-code at
+/// amuxd's own `mcp-server` subcommand. The resulting file path is
+/// passed to claude via `--mcp-config <path>`.
+///
+/// `logical_session_id` is what AmuxdAcpHandle uses as its map key
+/// (gateway → SQL-minted acp_session_id); the MCP server forwards it
+/// back to amuxd in the `mcp-send` envelope so the right channel can
+/// be routed. `binding` is the URI for the gateway chat the session
+/// is bound to — used as the default target for the `send` tool.
+fn write_gateway_mcp_config(
+    logical_session_id: &str,
+    binding: &str,
+) -> crate::error::Result<PathBuf> {
+    let path = gateway_mcp_config_path(logical_session_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            crate::error::AmuxError::Agent(format!(
+                "write_gateway_mcp_config: mkdir {}: {e}",
+                parent.display()
+            ))
+        })?;
+    }
+    let amuxd_bin = std::env::current_exe().map_err(|e| {
+        crate::error::AmuxError::Agent(format!("current_exe(): {e}"))
+    })?;
+    let sock = DaemonConfig::sock_path();
+    let cfg = serde_json::json!({
+        "mcpServers": {
+            "amuxd-send": {
+                "command": amuxd_bin.to_string_lossy(),
+                "args": [
+                    "mcp-server",
+                    format!("--session-id={}", logical_session_id),
+                    format!("--binding={}", binding),
+                    format!("--sock={}", sock.to_string_lossy()),
+                ],
+            }
+        }
+    });
+    let body = serde_json::to_string_pretty(&cfg).map_err(|e| {
+        crate::error::AmuxError::Agent(format!("write_gateway_mcp_config: serialize: {e}"))
+    })?;
+    std::fs::write(&path, body).map_err(|e| {
+        crate::error::AmuxError::Agent(format!(
+            "write_gateway_mcp_config: write {}: {e}",
+            path.display()
+        ))
+    })?;
+    Ok(path)
+}
 
 /// Translate a gateway-facing short model name ("sonnet", "opus", "haiku")
 /// to the full ACP model id used by `claude-agent-acp`. Returns `None` for
@@ -106,6 +181,7 @@ impl RuntimeManager {
             supabase_workspace_id,
             supabase_session_id,
             None,
+            None,
         )
         .await
     }
@@ -115,6 +191,9 @@ impl RuntimeManager {
     /// `set_model` override the gateway recorded before the first prompt.
     /// `initial_model_override` is a full model id (e.g. "claude-sonnet-4-6"),
     /// not a short name — callers map short names via `model_id_for_short_name`.
+    /// `mcp_config_path`, when `Some`, is forwarded as `--mcp-config <path>`
+    /// to the spawned claude-code so it can call amuxd's `send` tool.
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn_agent_with_model(
         &mut self,
         agent_type: amux::AgentType,
@@ -124,6 +203,7 @@ impl RuntimeManager {
         supabase_workspace_id: Option<&str>,
         supabase_session_id: Option<&str>,
         initial_model_override: Option<String>,
+        mcp_config_path: Option<PathBuf>,
     ) -> crate::error::Result<String> {
         let agent_id = Uuid::new_v4().to_string()[..8].to_string();
         let mut handle = RuntimeHandle::new(
@@ -149,6 +229,7 @@ impl RuntimeManager {
             None,
             acp_session_id_tx,
             initial_model_override.clone(),
+            mcp_config_path,
         )?;
 
         handle.cmd_tx = Some(cmd_tx);
@@ -246,6 +327,7 @@ impl RuntimeManager {
             initial_model_tx,
             Some(acp_session_id.to_string()),
             acp_session_id_tx,
+            None,
             None,
         )?;
         handle.cmd_tx = Some(cmd_tx);
@@ -605,14 +687,26 @@ impl RuntimeManager {
     /// Spawn an ACP-backed agent for a freshly-bound gateway conversation.
     /// Used by `AmuxdAcpHandle::create_session`. The returned String is the
     /// agent's `acp_session_id`, which the gateway persists on its `Binding`.
+    ///
+    /// `logical_session_id` is the amuxd-side key the caller maps to the
+    /// real ACP UUID (for gateway sessions this is the SQL-minted
+    /// `acp_session_id` hex). It's used to name the per-session MCP config
+    /// file and is forwarded back to amuxd by the spawned `mcp-server`.
     pub async fn create_gateway_session(
         &mut self,
         team_id: &str,
+        logical_session_id: &str,
         binding: &str,
         title: &str,
     ) -> crate::error::Result<String> {
-        self.create_gateway_session_with_model(team_id, binding, title, None)
-            .await
+        self.create_gateway_session_with_model(
+            team_id,
+            logical_session_id,
+            binding,
+            title,
+            None,
+        )
+        .await
     }
 
     /// Variant of `create_gateway_session` that honours a per-session model
@@ -626,6 +720,7 @@ impl RuntimeManager {
     pub async fn create_gateway_session_with_model(
         &mut self,
         _team_id: &str,
+        logical_session_id: &str,
         binding: &str,
         _title: &str,
         model_override: Option<(String, String)>,
@@ -648,6 +743,26 @@ impl RuntimeManager {
             .as_ref()
             .map(|(_provider, model)| model_id_for_short_name(model).unwrap_or(model.clone()));
 
+        // Write the MCP config BEFORE spawning claude-code so the
+        // `--mcp-config` path it gets points at a real file. The config
+        // mounts amuxd's own `mcp-server` subcommand which exposes the
+        // `send` tool for proactive replies/file uploads back to the
+        // gateway chat. Failures here are non-fatal — we still spawn
+        // the agent (without the send tool) and log a warning so a
+        // misconfigured config dir doesn't block gateway messaging.
+        let mcp_cfg_path = match write_gateway_mcp_config(logical_session_id, binding) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    binding,
+                    logical_session_id,
+                    "create_gateway_session: MCP config write failed; agent will spawn without send tool"
+                );
+                None
+            }
+        };
+
         let workspace_id = format!("gateway:{binding}");
         let agent_id = self
             .spawn_agent_with_model(
@@ -658,6 +773,7 @@ impl RuntimeManager {
                 None,
                 None,
                 initial_model,
+                mcp_cfg_path,
             )
             .await?;
 

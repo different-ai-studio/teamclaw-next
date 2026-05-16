@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use acp::Agent as _; // bring trait methods into scope
@@ -421,6 +422,7 @@ fn extract_text(content: &acp::ContentBlock) -> String {
 /// `initial_model_tx` receives `Some(model_id)` if the model was applied
 /// successfully, or `None` if no models are configured for `agent_type` or
 /// the ACP `set_session_model` call failed.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_acp_agent(
     binary: String,
     worktree: String,
@@ -436,6 +438,11 @@ pub fn spawn_acp_agent(
     // spawn. Pass a full model id ("claude-sonnet-4-6"), not a short name —
     // callers translate short names via `model_id_for_short_name`.
     initial_model_override: Option<String>,
+    // When `Some`, the path is forwarded as `--mcp-config <path>` to the
+    // underlying claude-code child. Gateway sessions use this to mount
+    // amuxd's own `mcp-server` subcommand so the agent can call the
+    // `send` tool. Bare/native runtimes pass `None`.
+    mcp_config_path: Option<PathBuf>,
 ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
 
@@ -467,6 +474,7 @@ pub fn spawn_acp_agent(
                     resume_acp_session_id,
                     acp_session_id_tx,
                     initial_model_override,
+                    mcp_config_path,
                 )
                 .await
                 {
@@ -497,6 +505,7 @@ pub fn spawn_acp_agent(
 }
 
 /// The main ACP session loop running inside a LocalSet.
+#[allow(clippy::too_many_arguments)]
 async fn run_acp_session(
     binary: String,
     worktree: String,
@@ -508,6 +517,7 @@ async fn run_acp_session(
     resume_acp_session_id: Option<String>,
     acp_session_id_tx: oneshot::Sender<String>,
     initial_model_override: Option<String>,
+    mcp_config_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     // Spawn the ACP agent process
     // Use claude-agent-acp wrapper (Node.js) which speaks ACP JSON-RPC over stdio
@@ -519,6 +529,13 @@ async fn run_acp_session(
     } else {
         tokio::process::Command::new(&binary)
     };
+    // Forward per-session MCP config to the underlying claude-code so the
+    // agent can call amuxd's `send` tool. The wrapper passes unknown args
+    // through to claude.
+    if let Some(ref cfg_path) = mcp_config_path {
+        cmd.arg("--mcp-config").arg(cfg_path);
+        info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config");
+    }
     let mut child = cmd
         .current_dir(&worktree)
         .stdin(std::process::Stdio::piped())
