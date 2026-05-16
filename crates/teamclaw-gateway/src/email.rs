@@ -1620,6 +1620,49 @@ fn process_and_reply_sync(
         }
     }
 
+    // Detect slash commands in the email body. /help and /sessions are
+    // handled without resolving a session; /stop, /reset, /model dispatch
+    // after session resolve below.
+    let trimmed_body = message_content.trim();
+    let slash_lower = if !trimmed_body.is_empty() && trimmed_body.starts_with('/') {
+        // Only consider the first line for slash-detection (emails often have
+        // signatures/quotes underneath).
+        trimmed_body
+            .lines()
+            .next()
+            .map(|l| l.trim().to_lowercase())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let is_help_slash =
+        slash_lower == "/help" || slash_lower.starts_with("/help ");
+    let is_sessions_slash =
+        slash_lower == "/sessions" || slash_lower.starts_with("/sessions ");
+    let is_session_slash = slash_lower == "/stop"
+        || slash_lower == "/reset"
+        || slash_lower == "/model"
+        || slash_lower.starts_with("/model ");
+
+    if is_help_slash {
+        let help_text = "Available commands:\n\
+            /help - Show this help\n\
+            /model [provider/model] - List or switch models\n\
+            /reset - Reset the conversation context\n\
+            /stop - Stop the current turn";
+        let _ = send_reply_sync(config, email, help_text, access_token)?;
+        return Ok(());
+    }
+    if is_sessions_slash {
+        let _ = send_reply_sync(
+            config,
+            email,
+            "This command is not supported in v2 yet.",
+            access_token,
+        )?;
+        return Ok(());
+    }
+
     // ============ amuxd ACP + ChannelStore path ============
     let thread_key = build_thread_session_key(email)
         .strip_prefix("email:thread:")
@@ -1645,6 +1688,7 @@ fn process_and_reply_sync(
     let store = gateway.store.clone();
     let acp = gateway.acp.clone();
     let message_content_for_async = message_content.clone();
+    let slash_lower_for_async = slash_lower.clone();
 
     let (acp_session_id, session_id, outgoing_reply_text) = rt_handle.block_on(async {
         let external_actor_id = store
@@ -1668,6 +1712,21 @@ fn process_and_reply_sync(
             .add_participant(&outcome.session_id, &external_actor_id)
             .await
             .map_err(|e| format!("add_participant: {e}"))?;
+
+        // Slash-command dispatch — /stop /reset /model — against the resolved session.
+        if is_session_slash {
+            let reply_text = dispatch_session_slash_cmd_email(
+                &acp,
+                &slash_lower_for_async,
+                &outcome.acp_session_id,
+            )
+            .await;
+            return Ok::<_, String>((
+                outcome.acp_session_id,
+                outcome.session_id,
+                reply_text,
+            ));
+        }
 
         let msg_id_opt = if incoming_message_id.is_empty() {
             None
@@ -1757,6 +1816,63 @@ fn process_and_reply_sync(
 
     println!("[Email] Reply sent to {}", email.from);
     Ok(())
+}
+
+/// Dispatch /stop, /reset, /model against a resolved acp session id.
+/// Returns the user-facing reply text. Used by the email IMAP processing path.
+async fn dispatch_session_slash_cmd_email(
+    acp: &Arc<dyn AcpHandle>,
+    lower_content: &str,
+    acp_session_id: &str,
+) -> String {
+    let session = acp_session_id.to_string();
+    if lower_content == "/stop" {
+        return match acp.cancel(&session).await {
+            Ok(_) => "⏹ Stopped current turn.".to_string(),
+            Err(e) => format!("⚠️ Could not stop: {e}"),
+        };
+    }
+    if lower_content == "/reset" {
+        return match acp.reset_session(&session).await {
+            Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
+            Err(e) => format!("⚠️ Could not reset: {e}"),
+        };
+    }
+    if lower_content == "/model" {
+        return match acp.list_models().await {
+            Ok(models) => {
+                if models.is_empty() {
+                    "No models available.".to_string()
+                } else {
+                    let body = models
+                        .iter()
+                        .map(|m| {
+                            format!("- {}/{} - {}", m.provider, m.model, m.display_name)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        "Available models:\n{body}\n\nUsage: /model <provider>/<model>"
+                    )
+                }
+            }
+            Err(e) => format!("Could not list models: {e}"),
+        };
+    }
+    if let Some(arg) = lower_content.strip_prefix("/model ") {
+        let arg = arg.trim();
+        let (provider, model) = match arg.split_once('/') {
+            Some((p, m)) => (p, m),
+            None => ("anthropic", arg),
+        };
+        return match acp.set_model(&session, provider, model).await {
+            Ok(_) => format!(
+                "Switched to {provider}/{model}. Note: conversation context was cleared."
+            ),
+            Err(e) => format!("Could not switch model: {e}"),
+        };
+    }
+    format!("Unknown command: {lower_content}")
 }
 
 fn send_rejection_reply_sync(

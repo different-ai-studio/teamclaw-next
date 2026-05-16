@@ -1084,39 +1084,29 @@ async fn handle_message_event(event: &serde_json::Value, ctx: &HandlerContext) {
         }
     }
 
-    let locale = i18n::get_locale(&ctx.workspace_path);
+    let _locale = i18n::get_locale(&ctx.workspace_path);
 
-    // Handle /reset — no-op in v2 (server-managed sessions, no client cache).
-    if clean_text.eq_ignore_ascii_case("/reset") {
-        if let Ok(token) = token_manager.get_tenant_token().await {
-            let _ = reply_feishu_message(
-                &token,
-                &message_id,
-                &i18n::t(i18n::MsgKey::SessionReset, locale),
-            )
-            .await;
-        }
-        return;
-    }
-
-    // /model, /sessions, /stop — depended on opencode HTTP; not yet supported in v2.
+    // /sessions is intentionally NOT supported in v2.
     let lower = clean_text.to_lowercase();
-    if clean_text.eq_ignore_ascii_case("/model")
-        || lower.starts_with("/model ")
-        || clean_text.eq_ignore_ascii_case("/sessions")
-        || lower.starts_with("/sessions ")
-        || clean_text.eq_ignore_ascii_case("/stop")
-    {
+    if clean_text.eq_ignore_ascii_case("/sessions") || lower.starts_with("/sessions ") {
         if let Ok(token) = token_manager.get_tenant_token().await {
             let _ = reply_feishu_message(
                 &token,
                 &message_id,
-                "Model switching not yet supported in amuxd; configure via daemon.toml.",
+                "This command is not supported in v2 yet.",
             )
             .await;
         }
         return;
     }
+
+    // /stop /reset /model fall through to the session-resolve path below
+    // (they require a resolved acp_session_id). Dispatch happens after
+    // ensure_session.
+    let is_session_slash = lower == "/stop"
+        || lower == "/reset"
+        || lower == "/model"
+        || lower.starts_with("/model ");
 
     // Build the binding URI: feishu://{app_id}/{chat_id}
     let binding = crate::binding::feishu(&ctx.app_id, &chat_id);
@@ -1191,6 +1181,16 @@ async fn handle_message_event(event: &serde_json::Value, ctx: &HandlerContext) {
         .await
     {
         eprintln!("[Feishu] add_participant failed: {}", e);
+    }
+
+    // Slash-command dispatch — /stop /reset /model — against the resolved session.
+    if is_session_slash {
+        let reply_text =
+            dispatch_session_slash_cmd_feishu(&ctx.acp, &lower, &outcome.acp_session_id).await;
+        if let Ok(token) = token_manager.get_tenant_token().await {
+            let _ = reply_feishu_message(&token, &message_id, &reply_text).await;
+        }
+        return;
     }
 
     if let Err(e) = ctx
@@ -1367,6 +1367,63 @@ fn extract_post_text(content: &serde_json::Value) -> String {
         }
     }
     texts.join("").trim().to_string()
+}
+
+/// Dispatch /stop, /reset, or /model against the resolved acp session.
+/// Returns the user-facing reply text.
+async fn dispatch_session_slash_cmd_feishu(
+    acp: &Arc<dyn AcpHandle>,
+    lower_content: &str,
+    acp_session_id: &str,
+) -> String {
+    let session = acp_session_id.to_string();
+    if lower_content == "/stop" {
+        return match acp.cancel(&session).await {
+            Ok(_) => "⏹ Stopped current turn.".to_string(),
+            Err(e) => format!("⚠️ Could not stop: {e}"),
+        };
+    }
+    if lower_content == "/reset" {
+        return match acp.reset_session(&session).await {
+            Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
+            Err(e) => format!("⚠️ Could not reset: {e}"),
+        };
+    }
+    if lower_content == "/model" {
+        return match acp.list_models().await {
+            Ok(models) => {
+                if models.is_empty() {
+                    "No models available.".to_string()
+                } else {
+                    let body = models
+                        .iter()
+                        .map(|m| {
+                            format!("• `{}/{}` — {}", m.provider, m.model, m.display_name)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        "Available models:\n{body}\n\nUsage: `/model <provider>/<model>`"
+                    )
+                }
+            }
+            Err(e) => format!("⚠️ Could not list models: {e}"),
+        };
+    }
+    if let Some(arg) = lower_content.strip_prefix("/model ") {
+        let arg = arg.trim();
+        let (provider, model) = match arg.split_once('/') {
+            Some((p, m)) => (p, m),
+            None => ("anthropic", arg),
+        };
+        return match acp.set_model(&session, provider, model).await {
+            Ok(_) => format!(
+                "✅ Switched to `{provider}/{model}`. **Note: conversation context was cleared.**"
+            ),
+            Err(e) => format!("⚠️ Could not switch model: {e}"),
+        };
+    }
+    format!("Unknown command: {lower_content}")
 }
 
 /// Reply to a Feishu message. Returns the reply message_id on success.

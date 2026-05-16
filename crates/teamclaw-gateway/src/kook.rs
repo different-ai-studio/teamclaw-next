@@ -882,6 +882,62 @@ impl KookGateway {
         }
     }
 
+    /// Dispatch /stop, /reset, /model against a resolved acp session id.
+    async fn dispatch_session_slash_cmd(
+        &self,
+        lower_content: &str,
+        acp_session_id: &str,
+    ) -> String {
+        let session = acp_session_id.to_string();
+        if lower_content == "/stop" {
+            return match self.acp.cancel(&session).await {
+                Ok(_) => "⏹ Stopped current turn.".to_string(),
+                Err(e) => format!("⚠️ Could not stop: {e}"),
+            };
+        }
+        if lower_content == "/reset" {
+            return match self.acp.reset_session(&session).await {
+                Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
+                Err(e) => format!("⚠️ Could not reset: {e}"),
+            };
+        }
+        if lower_content == "/model" {
+            return match self.acp.list_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        "No models available.".to_string()
+                    } else {
+                        let body = models
+                            .iter()
+                            .map(|m| {
+                                format!("• `{}/{}` — {}", m.provider, m.model, m.display_name)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        format!(
+                            "Available models:\n{body}\n\nUsage: `/model <provider>/<model>`"
+                        )
+                    }
+                }
+                Err(e) => format!("⚠️ Could not list models: {e}"),
+            };
+        }
+        if let Some(arg) = lower_content.strip_prefix("/model ") {
+            let arg = arg.trim();
+            let (provider, model) = match arg.split_once('/') {
+                Some((p, m)) => (p, m),
+                None => ("anthropic", arg),
+            };
+            return match self.acp.set_model(&session, provider, model).await {
+                Ok(_) => format!(
+                    "✅ Switched to `{provider}/{model}`. **Note: conversation context was cleared.**"
+                ),
+                Err(e) => format!("⚠️ Could not switch model: {e}"),
+            };
+        }
+        format!("Unknown command: {lower_content}")
+    }
+
     /// Process message and send reply via amuxd ACP + ChannelStore.
     async fn process_and_reply(&self, msg: &KookMessageData) -> Result<(), String> {
         // Strip bot mention from content (like Discord strips <@BOTID>)
@@ -895,38 +951,29 @@ impl KookGateway {
 
         let locale = i18n::get_locale(&self.workspace_path);
 
-        // Handle /reset — no-op in v2 (server-managed sessions, no client cache to clear).
-        if content.eq_ignore_ascii_case("/reset") {
-            let _ = self
-                .send_reply(msg, &i18n::t(i18n::MsgKey::SessionReset, locale))
-                .await;
-            return Ok(());
-        }
-
-        // /model, /sessions, /stop — depended on opencode HTTP; not yet supported in v2.
-        let lower = content.to_lowercase();
-        if content.eq_ignore_ascii_case("/model")
-            || lower.starts_with("/model ")
-            || content.eq_ignore_ascii_case("/sessions")
-            || lower.starts_with("/sessions ")
-            || content.eq_ignore_ascii_case("/stop")
-        {
-            let _ = self
-                .send_reply(
-                    msg,
-                    "Model switching not yet supported in amuxd; configure via daemon.toml.",
-                )
-                .await;
-            return Ok(());
-        }
-
-        // /help — preserved.
+        // /help — early-out: no session resolution needed.
         if content.eq_ignore_ascii_case("/help") {
             let _ = self
                 .send_reply(msg, &i18n::t(i18n::MsgKey::HelpKook, locale))
                 .await;
             return Ok(());
         }
+
+        // /sessions is intentionally NOT supported in v2.
+        let lower = content.to_lowercase();
+        if content.eq_ignore_ascii_case("/sessions") || lower.starts_with("/sessions ") {
+            let _ = self
+                .send_reply(msg, "This command is not supported in v2 yet.")
+                .await;
+            return Ok(());
+        }
+
+        // /stop /reset /model fall through to the session-resolve path; they
+        // need a resolved acp_session_id. Dispatch happens after ensure_session.
+        let is_session_slash = lower == "/stop"
+            || lower == "/reset"
+            || lower == "/model"
+            || lower.starts_with("/model ");
 
         // Build the binding URI. For DMs the scope is "dm"; for guild channels
         // the scope is the guild id.
@@ -1002,6 +1049,15 @@ impl KookGateway {
             .await
         {
             eprintln!("[KOOK] add_participant failed: {}", e);
+        }
+
+        // Slash-command dispatch — /stop /reset /model — against the resolved session.
+        if is_session_slash {
+            let reply_text = self
+                .dispatch_session_slash_cmd(&lower, &outcome.acp_session_id)
+                .await;
+            let _ = self.send_reply(msg, &reply_text).await;
+            return Ok(());
         }
 
         if let Err(e) = self

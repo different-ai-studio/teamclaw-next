@@ -1194,16 +1194,26 @@ impl WeComGateway {
             return;
         }
 
-        // Check for slash commands (text only)
+        // Check for slash commands (text only). /help and unknown commands
+        // are handled without resolving a session; /stop /reset /model fall
+        // through to the regular session-resolve path below.
         let trimmed = text_content.trim();
         if !trimmed.is_empty() && trimmed.starts_with('/') {
-            if let Err(e) = self
-                .handle_slash_command(trimmed, &req_id, &ws_sink)
-                .await
-            {
-                eprintln!("[WeCom] Slash command error: {}", e);
+            let lower = trimmed.to_lowercase();
+            let needs_session = lower == "/stop"
+                || lower == "/reset"
+                || lower == "/model"
+                || lower.starts_with("/model ");
+            if !needs_session {
+                if let Err(e) = self
+                    .handle_slash_command(trimmed, &req_id, &ws_sink)
+                    .await
+                {
+                    eprintln!("[WeCom] Slash command error: {}", e);
+                }
+                return;
             }
-            return;
+            // /stop /reset /model — fall through; dispatch happens after session resolve.
         }
 
         // Determine chat type and build binding URI per spec:
@@ -1295,6 +1305,23 @@ impl WeComGateway {
             eprintln!("[WeCom] add_participant failed: {}", e);
         }
 
+        // Slash-command dispatch — /stop /reset /model — against the resolved session.
+        let trimmed_for_cmd = text_content.trim();
+        if trimmed_for_cmd.starts_with('/') {
+            let lower = trimmed_for_cmd.to_lowercase();
+            if lower == "/stop"
+                || lower == "/reset"
+                || lower == "/model"
+                || lower.starts_with("/model ")
+            {
+                let reply_text = self
+                    .dispatch_session_slash_cmd(&lower, &outcome.acp_session_id)
+                    .await;
+                let _ = self.send_reply(&req_id, &reply_text, &ws_sink).await;
+                return;
+            }
+        }
+
         if let Err(e) = self
             .store
             .record_message(
@@ -1346,6 +1373,63 @@ impl WeComGateway {
         !tracker.is_duplicate(msg_id)
     }
 
+    /// Dispatch /stop, /reset, /model against a resolved acp session id.
+    /// Returns the user-facing reply text.
+    async fn dispatch_session_slash_cmd(
+        &self,
+        lower_content: &str,
+        acp_session_id: &str,
+    ) -> String {
+        let session = acp_session_id.to_string();
+        if lower_content == "/stop" {
+            return match self.acp.cancel(&session).await {
+                Ok(_) => "⏹ Stopped current turn.".to_string(),
+                Err(e) => format!("⚠️ Could not stop: {e}"),
+            };
+        }
+        if lower_content == "/reset" {
+            return match self.acp.reset_session(&session).await {
+                Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
+                Err(e) => format!("⚠️ Could not reset: {e}"),
+            };
+        }
+        if lower_content == "/model" {
+            return match self.acp.list_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        "No models available.".to_string()
+                    } else {
+                        let body = models
+                            .iter()
+                            .map(|m| {
+                                format!("• `{}/{}` — {}", m.provider, m.model, m.display_name)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        format!(
+                            "Available models:\n{body}\n\nUsage: `/model <provider>/<model>`"
+                        )
+                    }
+                }
+                Err(e) => format!("⚠️ Could not list models: {e}"),
+            };
+        }
+        if let Some(arg) = lower_content.strip_prefix("/model ") {
+            let arg = arg.trim();
+            let (provider, model) = match arg.split_once('/') {
+                Some((p, m)) => (p, m),
+                None => ("anthropic", arg),
+            };
+            return match self.acp.set_model(&session, provider, model).await {
+                Ok(_) => format!(
+                    "✅ Switched to `{provider}/{model}`. **Note: conversation context was cleared.**"
+                ),
+                Err(e) => format!("⚠️ Could not switch model: {e}"),
+            };
+        }
+        format!("Unknown command: {lower_content}")
+    }
+
     async fn handle_slash_command(
         &self,
         content: &str,
@@ -1358,13 +1442,10 @@ impl WeComGateway {
 
         let reply = match cmd.as_str() {
             "/help" => i18n::t(i18n::MsgKey::HelpWecom, locale),
-            // /reset in v2 is a no-op: there is no client-side session-id cache to clear.
-            "/reset" => i18n::t(i18n::MsgKey::SessionReset, locale),
-            // /model, /sessions, /stop relied on opencode HTTP and are not yet
-            // supported in v2 (model switching is configured via daemon.toml).
-            "/model" | "/sessions" | "/stop" => {
-                "Model switching not yet supported in amuxd; configure via daemon.toml.".to_string()
-            }
+            // /stop, /reset, /model now route through the session-resolve
+            // path; they should never reach this branch. /sessions is
+            // intentionally unsupported in v2.
+            "/sessions" => "This command is not supported in v2 yet.".to_string(),
             _ => i18n::t(i18n::MsgKey::UnknownCommand(&cmd), locale),
         };
 

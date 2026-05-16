@@ -699,11 +699,25 @@ impl WeChatGateway {
             return Ok(());
         }
 
-        // Handle slash commands
+        // Handle slash commands. /help and /sessions are answered without
+        // resolving a session; /stop, /reset, /model fall through to the
+        // session-resolve path below (they need a resolved acp_session_id).
+        let mut is_session_slash = false;
+        let mut slash_lower = String::new();
         if !trimmed.is_empty() && trimmed.starts_with('/') {
-            let reply = self.handle_slash_command(trimmed, locale).await;
-            let _ = self.send_to_user(sender_id, &reply).await;
-            return Ok(());
+            let lower = trimmed.to_lowercase();
+            let needs_session = lower == "/stop"
+                || lower == "/reset"
+                || lower == "/model"
+                || lower.starts_with("/model ");
+            if needs_session {
+                is_session_slash = true;
+                slash_lower = lower;
+            } else {
+                let reply = self.handle_slash_command(trimmed, locale).await;
+                let _ = self.send_to_user(sender_id, &reply).await;
+                return Ok(());
+            }
         }
 
         // WeChat-iLink is DM-only — no group concept on personal WeChat, so no @-mention filter.
@@ -745,6 +759,15 @@ impl WeChatGateway {
             .await
         {
             eprintln!("[WeChat] add_participant failed: {}", e);
+        }
+
+        // Slash-command dispatch — /stop /reset /model — against the resolved session.
+        if is_session_slash {
+            let reply_text = self
+                .dispatch_session_slash_cmd(&slash_lower, &outcome.acp_session_id)
+                .await;
+            let _ = self.send_to_user(sender_id, &reply_text).await;
+            return Ok(());
         }
 
         if let Err(e) = self
@@ -791,13 +814,67 @@ impl WeChatGateway {
 
         match cmd.as_str() {
             "/help" => i18n::t(i18n::MsgKey::HelpWechat, locale),
-            // /reset is a no-op in v2 — sessions are server-managed via amuxd, no client cache to clear.
-            "/reset" => i18n::t(i18n::MsgKey::SessionReset, locale),
-            // /model, /sessions, /stop depended on opencode HTTP. Not yet supported in v2.
-            "/model" | "/sessions" | "/stop" => {
-                "This command is not supported in v2 yet.".to_string()
-            }
+            // /stop, /reset, /model now route through the session-resolve
+            // path and never reach this branch. /sessions is intentionally
+            // unsupported in v2.
+            "/sessions" => "This command is not supported in v2 yet.".to_string(),
             _ => i18n::t(i18n::MsgKey::UnknownCommand(&cmd), locale),
         }
+    }
+
+    /// Dispatch /stop, /reset, /model against a resolved acp session id.
+    async fn dispatch_session_slash_cmd(
+        &self,
+        lower_content: &str,
+        acp_session_id: &str,
+    ) -> String {
+        let session = acp_session_id.to_string();
+        if lower_content == "/stop" {
+            return match self.acp.cancel(&session).await {
+                Ok(_) => "⏹ Stopped current turn.".to_string(),
+                Err(e) => format!("⚠️ Could not stop: {e}"),
+            };
+        }
+        if lower_content == "/reset" {
+            return match self.acp.reset_session(&session).await {
+                Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
+                Err(e) => format!("⚠️ Could not reset: {e}"),
+            };
+        }
+        if lower_content == "/model" {
+            return match self.acp.list_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        "No models available.".to_string()
+                    } else {
+                        let body = models
+                            .iter()
+                            .map(|m| {
+                                format!("• `{}/{}` — {}", m.provider, m.model, m.display_name)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        format!(
+                            "Available models:\n{body}\n\nUsage: `/model <provider>/<model>`"
+                        )
+                    }
+                }
+                Err(e) => format!("⚠️ Could not list models: {e}"),
+            };
+        }
+        if let Some(arg) = lower_content.strip_prefix("/model ") {
+            let arg = arg.trim();
+            let (provider, model) = match arg.split_once('/') {
+                Some((p, m)) => (p, m),
+                None => ("anthropic", arg),
+            };
+            return match self.acp.set_model(&session, provider, model).await {
+                Ok(_) => format!(
+                    "✅ Switched to `{provider}/{model}`. **Note: conversation context was cleared.**"
+                ),
+                Err(e) => format!("⚠️ Could not switch model: {e}"),
+            };
+        }
+        format!("Unknown command: {lower_content}")
     }
 }

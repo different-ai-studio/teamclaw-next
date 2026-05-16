@@ -238,31 +238,31 @@ impl DiscordHandler {
             return;
         }
 
-        // Handle /reset (still useful: clears local processed-message tracker
-        // is a no-op; in v2 there is no client-side session-id cache to clear).
-        if content.eq_ignore_ascii_case("/reset") {
+        // /help — early-out: no session resolution needed.
+        if content.eq_ignore_ascii_case("/help") {
             let locale = i18n::get_locale(&self.workspace_path);
-            let reply_text = i18n::t(i18n::MsgKey::SessionReset, locale);
-            let _ = msg.reply(&ctx.http, &reply_text).await;
-            return;
-        }
-
-        // /model, /stop, /sessions — slash-style commands that depended on opencode HTTP.
-        // Not yet supported in v2.
-        if content.eq_ignore_ascii_case("/model")
-            || content.to_lowercase().starts_with("/model ")
-            || content.eq_ignore_ascii_case("/stop")
-            || content.eq_ignore_ascii_case("/sessions")
-            || content.to_lowercase().starts_with("/sessions ")
-        {
             let _ = msg
-                .reply(
-                    &ctx.http,
-                    "This command is not supported in v2 yet.",
-                )
+                .reply(&ctx.http, &i18n::t(i18n::MsgKey::HelpDiscord, locale))
                 .await;
             return;
         }
+
+        // /sessions is intentionally NOT supported in v2; stub it out with a
+        // clear message so users aren't left hanging.
+        if content.eq_ignore_ascii_case("/sessions")
+            || content.to_lowercase().starts_with("/sessions ")
+        {
+            let _ = msg
+                .reply(&ctx.http, "This command is not supported in v2 yet.")
+                .await;
+            return;
+        }
+
+        let lower = content.to_lowercase();
+        let is_slash_cmd = lower == "/stop"
+            || lower == "/reset"
+            || lower == "/model"
+            || lower.starts_with("/model ");
 
         // Build the binding URI using application id (the bot's own user id)
         // and the channel id (works for both DMs and guild channels).
@@ -339,6 +339,15 @@ impl DiscordHandler {
             eprintln!("[Discord] add_participant failed: {}", e);
         }
 
+        // Slash-command dispatch — runs against the resolved acp_session_id.
+        if is_slash_cmd {
+            let reply_text = self
+                .dispatch_session_slash_cmd(&lower, &outcome.acp_session_id)
+                .await;
+            let _ = msg.reply(&ctx.http, &reply_text).await;
+            return;
+        }
+
         if let Err(e) = self
             .store
             .record_message(
@@ -413,6 +422,67 @@ impl DiscordHandler {
         }
 
         drop(typing);
+    }
+
+    /// Dispatch a /stop, /reset, or /model command against the resolved
+    /// amuxd session. Returns the user-facing reply text.
+    ///
+    /// `lower_content` is the original chat content already lowercased & trimmed.
+    /// For `/model <arg>` the arg is parsed off `lower_content`.
+    async fn dispatch_session_slash_cmd(
+        &self,
+        lower_content: &str,
+        acp_session_id: &str,
+    ) -> String {
+        let session = acp_session_id.to_string();
+        if lower_content == "/stop" {
+            return match self.acp.cancel(&session).await {
+                Ok(_) => "⏹ Stopped current turn.".to_string(),
+                Err(e) => format!("⚠️ Could not stop: {e}"),
+            };
+        }
+        if lower_content == "/reset" {
+            return match self.acp.reset_session(&session).await {
+                Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
+                Err(e) => format!("⚠️ Could not reset: {e}"),
+            };
+        }
+        if lower_content == "/model" {
+            return match self.acp.list_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        "No models available.".to_string()
+                    } else {
+                        let body = models
+                            .iter()
+                            .map(|m| {
+                                format!("• `{}/{}` — {}", m.provider, m.model, m.display_name)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        format!(
+                            "Available models:\n{body}\n\nUsage: `/model <provider>/<model>`"
+                        )
+                    }
+                }
+                Err(e) => format!("⚠️ Could not list models: {e}"),
+            };
+        }
+        if let Some(arg) = lower_content.strip_prefix("/model ") {
+            let arg = arg.trim();
+            let (provider, model) = match arg.split_once('/') {
+                Some((p, m)) => (p, m),
+                None => ("anthropic", arg),
+            };
+            return match self.acp.set_model(&session, provider, model).await {
+                Ok(_) => format!(
+                    "✅ Switched to `{provider}/{model}`. **Note: conversation context was cleared.**"
+                ),
+                Err(e) => format!("⚠️ Could not switch model: {e}"),
+            };
+        }
+        // Caller should have filtered this out.
+        format!("Unknown command: {lower_content}")
     }
 
     /// Update gateway status
@@ -589,16 +659,106 @@ impl EventHandler for DiscordHandler {
             }
 
             let locale = i18n::get_locale(&self.workspace_path);
-            let content = match command.data.name.as_str() {
-                "reset" => {
-                    // v2 sessions are server-managed; there is no client-side cache to clear.
-                    i18n::t(i18n::MsgKey::SessionReset, locale)
+
+            // Build the slash-command synthetic chat content so we can reuse
+            // dispatch_session_slash_cmd. e.g. `/model anthropic/claude-3.5`.
+            let name = command.data.name.as_str();
+            let synthetic = match name {
+                "reset" => Some("/reset".to_string()),
+                "stop" => Some("/stop".to_string()),
+                "model" => {
+                    let arg = command.data.options.iter().find_map(|opt| {
+                        if opt.name == "name" {
+                            match &opt.value {
+                                serenity::all::CommandDataOptionValue::String(s) => {
+                                    Some(s.clone())
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    });
+                    match arg {
+                        None => Some("/model".to_string()),
+                        Some(a) if a.trim().is_empty() => Some("/model".to_string()),
+                        Some(a) => Some(format!("/model {}", a.trim())),
+                    }
                 }
-                "model" | "stop" | "sessions" => {
-                    "This command is not supported in v2 yet.".to_string()
+                _ => None,
+            };
+
+            let content = if let Some(syn) = synthetic {
+                // For /stop /reset /model we need a resolved acp_session_id.
+                // Build the binding and ensure session exist.
+                let bot_id_value = *self.bot_user_id.read().await;
+                let application_id = match bot_id_value {
+                    Some(id) => id.to_string(),
+                    None => match ctx.http.get_current_user().await {
+                        Ok(user) => user.id.to_string(),
+                        Err(e) => {
+                            let edit = EditInteractionResponse::new()
+                                .content(format!("Error: bot not ready: {}", e));
+                            let _ = command.edit_response(&ctx.http, edit).await;
+                            return;
+                        }
+                    },
+                };
+                let binding =
+                    crate::binding::discord(&application_id, &command.channel_id.to_string());
+                let urn = crate::binding::urn_discord_user(&command.user.id.to_string());
+                let display = command.user.name.clone();
+
+                let external_actor_id = match self
+                    .store
+                    .ensure_external_actor(&self.team_id, "discord", &urn, &display)
+                    .await
+                {
+                    Ok(id) => id,
+                    Err(e) => {
+                        let edit = EditInteractionResponse::new()
+                            .content(format!("Error (actor): {}", e));
+                        let _ = command.edit_response(&ctx.http, edit).await;
+                        return;
+                    }
+                };
+
+                let is_dm = command.guild_id.is_none();
+                let session_title = if is_dm {
+                    format!("Discord DM: {}", display)
+                } else {
+                    format!("Discord: #{}", command.channel_id)
+                };
+
+                let outcome = match self
+                    .store
+                    .ensure_session(
+                        &self.team_id,
+                        &binding,
+                        &session_title,
+                        &self.primary_agent_actor_id,
+                        &self.agent_owner_actor_ids,
+                        &[external_actor_id.clone()],
+                    )
+                    .await
+                {
+                    Ok(o) => o,
+                    Err(e) => {
+                        let edit = EditInteractionResponse::new()
+                            .content(format!("Error (session): {}", e));
+                        let _ = command.edit_response(&ctx.http, edit).await;
+                        return;
+                    }
+                };
+
+                self.dispatch_session_slash_cmd(&syn.to_lowercase(), &outcome.acp_session_id)
+                    .await
+            } else {
+                match name {
+                    "help" => i18n::t(i18n::MsgKey::HelpDiscord, locale),
+                    "sessions" => "This command is not supported in v2 yet.".to_string(),
+                    other => i18n::t(i18n::MsgKey::UnknownCommand(other), locale),
                 }
-                "help" => i18n::t(i18n::MsgKey::HelpDiscord, locale),
-                name => i18n::t(i18n::MsgKey::UnknownCommand(name), locale),
             };
 
             // Edit the deferred response with the actual content
