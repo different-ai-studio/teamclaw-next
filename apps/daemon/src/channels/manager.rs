@@ -12,8 +12,9 @@ use tokio::sync::Mutex;
 
 use teamclaw_gateway::{
     AcpHandle, ChannelStore, DiscordConfig, DiscordGateway, EmailConfig, EmailGateway,
-    EmailProvider, FeishuConfig, FeishuGateway, KookConfig, KookDmConfig, KookGateway,
-    WeChatConfig, WeChatGateway, WeComConfig, WeComGateway,
+    EmailGatewayStatus, EmailProvider, FeishuConfig, FeishuGateway, FeishuGatewayStatus,
+    GatewayStatus, KookConfig, KookDmConfig, KookGateway, KookGatewayStatus, WeChatConfig,
+    WeChatGateway, WeChatGatewayStatus, WeComConfig, WeComGateway, WeComGatewayStatus,
 };
 
 use crate::config::{
@@ -215,20 +216,81 @@ impl ChannelManager {
         }
     }
 
-    /// Snapshot which channels are currently running (gateway slot is `Some`).
-    /// Returned as a tuple of `(platform, connected)` pairs in a stable order
+    /// Snapshot which channels have reached their native connected state.
+    /// Returned as a tuple of `(platform, connected, last_error)` in a stable order
     /// matching the six supported channels. Used by the `channel-status`
     /// sock command so the desktop UI can show per-channel state without
     /// reaching into gateway internals.
-    pub async fn status_snapshot(&self) -> Vec<(&'static str, bool)> {
+    pub async fn status_snapshot(&self) -> Vec<(&'static str, bool, Option<String>)> {
         let running = self.running.lock().await;
+        let discord = match running.discord.as_ref() {
+            Some(g) => {
+                let status = g.get_status().await;
+                (
+                    status.status == GatewayStatus::Connected,
+                    status.error_message,
+                )
+            }
+            None => (false, None),
+        };
+        let wecom = match running.wecom.as_ref() {
+            Some(g) => {
+                let status = g.get_status().await;
+                (
+                    status.status == WeComGatewayStatus::Connected,
+                    status.error_message,
+                )
+            }
+            None => (false, None),
+        };
+        let feishu = match running.feishu.as_ref() {
+            Some(g) => {
+                let status = g.get_status().await;
+                (
+                    status.status == FeishuGatewayStatus::Connected,
+                    status.error_message,
+                )
+            }
+            None => (false, None),
+        };
+        let kook = match running.kook.as_ref() {
+            Some(g) => {
+                let status = g.get_status().await;
+                (
+                    status.status == KookGatewayStatus::Connected,
+                    status.error_message,
+                )
+            }
+            None => (false, None),
+        };
+        let wechat = match running.wechat.as_ref() {
+            Some(g) => {
+                let status = g.get_status().await;
+                (
+                    status.status == WeChatGatewayStatus::Connected,
+                    status.error_message,
+                )
+            }
+            None => (false, None),
+        };
+        let email = match running.email.as_ref() {
+            Some(g) => {
+                let status = g.get_status().await;
+                (
+                    status.status == EmailGatewayStatus::Connected,
+                    status.error_message,
+                )
+            }
+            None => (false, None),
+        };
+
         vec![
-            ("discord", running.discord.is_some()),
-            ("wecom", running.wecom.is_some()),
-            ("feishu", running.feishu.is_some()),
-            ("kook", running.kook.is_some()),
-            ("wechat", running.wechat.is_some()),
-            ("email", running.email.is_some()),
+            ("discord", discord.0, discord.1),
+            ("wecom", wecom.0, wecom.1),
+            ("feishu", feishu.0, feishu.1),
+            ("kook", kook.0, kook.1),
+            ("wechat", wechat.0, wechat.1),
+            ("email", email.0, email.1),
         ]
     }
 

@@ -534,7 +534,13 @@ async fn run_acp_session(
     // through to claude.
     if let Some(ref cfg_path) = mcp_config_path {
         cmd.arg("--mcp-config").arg(cfg_path);
-        info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config");
+        // Headless gateway agents need: (a) auto-accept for built-in edits so
+        // Write/Bash don't stall on permission prompts no one can answer, and
+        // (b) explicit allowlist for the `send` MCP tool so claude doesn't
+        // silently hide it behind a default-deny gate.
+        cmd.arg("--permission-mode").arg("acceptEdits");
+        cmd.arg("--allowedTools").arg("mcp__amuxd-send__send");
+        info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config + acceptEdits + send allowlist");
     }
     let mut child = cmd
         .current_dir(&worktree)

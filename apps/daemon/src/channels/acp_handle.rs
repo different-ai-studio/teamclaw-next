@@ -90,16 +90,24 @@ impl AmuxdAcpHandle {
             }
         }
 
-        // Recover the binding URI for this logical session so the spawned
-        // MCP server can default `send` calls back to the originating chat.
-        // A missing binding is non-fatal — we still spawn the agent under
-        // an empty default so basic prompt/reply still works.
-        let binding = self
+        // Recover the supabase session UUID + binding URI for this logical
+        // session. The UUID is needed so the spawned runtime can carry it
+        // on its handle, which is what daemon::server::target_sessions falls
+        // back to when routing agent envelopes (otherwise gateway-spawned
+        // runtimes — which never get written into the local SessionStore —
+        // appear bound-less and their envelopes get dropped). The binding
+        // feeds the per-session MCP config so `send` defaults to the
+        // originating chat. A missing row is non-fatal; we still spawn so
+        // basic prompt/reply works.
+        let (supabase_session_id, binding) = match self
             .supabase
-            .get_session_binding_by_acp_id(session)
+            .get_gateway_session_by_acp_id(session)
             .await
-            .map_err(|e| AcpError::Create(format!("binding lookup: {e}")))?
-            .unwrap_or_default();
+            .map_err(|e| AcpError::Create(format!("session lookup: {e}")))?
+        {
+            Some((id, bind)) => (Some(id), bind.unwrap_or_default()),
+            None => (None, String::new()),
+        };
 
         // Consult per-session override so the spawn picks up the desired
         // model. Stored as (provider, model); only model is threaded through
@@ -118,6 +126,7 @@ impl AmuxdAcpHandle {
                 &binding,
                 "Gateway session",
                 model_arg,
+                supabase_session_id.as_deref(),
             )
             .await
             .map_err(|e| AcpError::Create(e.to_string()))?

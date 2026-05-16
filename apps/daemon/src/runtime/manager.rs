@@ -705,6 +705,7 @@ impl RuntimeManager {
             binding,
             title,
             None,
+            None,
         )
         .await
     }
@@ -724,6 +725,7 @@ impl RuntimeManager {
         binding: &str,
         _title: &str,
         model_override: Option<(String, String)>,
+        supabase_session_id: Option<&str>,
     ) -> crate::error::Result<String> {
         // Gateway sessions don't yet have a "real" workspace concept — they
         // run against a freshly-created scratch dir so the ACP process has a
@@ -771,7 +773,7 @@ impl RuntimeManager {
                 "",
                 &workspace_id,
                 None,
-                None,
+                supabase_session_id,
                 initial_model,
                 mcp_cfg_path,
             )

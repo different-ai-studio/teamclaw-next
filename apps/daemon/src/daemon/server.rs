@@ -333,25 +333,25 @@ impl DaemonServer {
             }
         };
 
-        let connected: Vec<(&'static str, bool)> = match self.channel_mgr.as_ref() {
+        let connected: Vec<(&'static str, bool, Option<String>)> = match self.channel_mgr.as_ref() {
             Some(mgr) => mgr.status_snapshot().await,
             None => vec![
-                ("discord", false),
-                ("wecom", false),
-                ("feishu", false),
-                ("kook", false),
-                ("wechat", false),
-                ("email", false),
+                ("discord", false, None),
+                ("wecom", false, None),
+                ("feishu", false, None),
+                ("kook", false, None),
+                ("wechat", false, None),
+                ("email", false, None),
             ],
         };
 
         let statuses: Vec<ChannelStatus> = connected
             .into_iter()
-            .map(|(platform, connected)| ChannelStatus {
+            .map(|(platform, connected, last_error)| ChannelStatus {
                 platform,
                 enabled: enabled_flag(platform),
                 connected,
-                last_error: None,
+                last_error,
             })
             .collect();
 
@@ -934,13 +934,32 @@ impl DaemonServer {
     /// Returns an empty vec for ambient/bare-agent spawns where
     /// `session_id` was never set; callers fall back to the
     /// legacy per-runtime events topic in that case.
-    fn target_sessions(&self, agent_id: &str) -> Vec<String> {
-        self.sessions
+    ///
+    /// Gateway-spawned runtimes never reach `apply_start_runtime` and
+    /// therefore have no entry in the local SessionStore. They carry the
+    /// supabase session UUID on their in-memory `RuntimeHandle` instead,
+    /// so when the persisted lookup misses we fall back to RuntimeManager.
+    async fn target_sessions(&self, agent_id: &str) -> Vec<String> {
+        if let Some(sid) = self
+            .sessions
             .find_by_id(agent_id)
             .map(|s| s.session_id.clone())
             .filter(|s| !s.is_empty())
-            .map(|sid| vec![sid])
-            .unwrap_or_default()
+        {
+            return vec![sid];
+        }
+        let live = self
+            .agents
+            .lock()
+            .await
+            .get_handle(agent_id)
+            .map(|h| h.session_id.clone())
+            .unwrap_or_default();
+        if live.is_empty() {
+            Vec::new()
+        } else {
+            vec![live]
+        }
     }
 
     async fn forward_agent_event(&mut self, agent_id: &str, mut acp_event: amux::AcpEvent) {
@@ -1104,7 +1123,7 @@ impl DaemonServer {
         // `message.created`, and (for AGENT_REPLY only) persisted to
         // Supabase `messages`. ACP `acp.event` envelopes still flow through
         // the unchanged publish path below for streaming UI.
-        let collab_sessions = self.target_sessions(agent_id);
+        let collab_sessions = self.target_sessions(agent_id).await;
         if !collab_sessions.is_empty() {
             let emitted = {
                 let mut agents = self.agents.lock().await;
@@ -1408,7 +1427,7 @@ impl DaemonServer {
             warn!(agent_id, "no teamclaw client; dropping envelope");
             return;
         };
-        let sessions = self.target_sessions(agent_id);
+        let sessions = self.target_sessions(agent_id).await;
         if sessions.is_empty() {
             warn!(agent_id, "agent has no bound session; dropping envelope");
             return;

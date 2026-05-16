@@ -738,21 +738,22 @@ impl SupabaseClient {
         })
     }
 
-    /// Look up the `binding` URI of a gateway session by its
-    /// SQL-minted `acp_session_id`. Returns `None` if no row matches or
-    /// the row's `binding` is NULL (non-gateway session).
+    /// Look up the `sessions.id` and `binding` URI of a gateway session by
+    /// its SQL-minted `acp_session_id`. Returns `None` if no row matches.
+    /// `binding` may be `None` on the returned tuple's second slot for
+    /// non-gateway sessions (the row exists but `binding` is NULL).
     ///
-    /// Used by `AmuxdAcpHandle::resolve_or_spawn` to recover the binding
-    /// needed for the per-session MCP config (so the `send` tool's
-    /// default target points back at the correct chat) when the channel
-    /// layer only has the logical session id on hand.
-    pub async fn get_session_binding_by_acp_id(
+    /// Used by `AmuxdAcpHandle::resolve_or_spawn` to recover both the
+    /// supabase session UUID (so envelope routing has a target) and the
+    /// binding URI (so the per-session MCP config knows the default chat
+    /// for `send`) from the only id the channel layer carries.
+    pub async fn get_gateway_session_by_acp_id(
         &self,
         acp_session_id: &str,
-    ) -> SupabaseResult<Option<String>> {
+    ) -> SupabaseResult<Option<(String, Option<String>)>> {
         let token = self.access_token().await?;
         let url = format!(
-            "{}/rest/v1/sessions?acp_session_id=eq.{}&select=binding",
+            "{}/rest/v1/sessions?acp_session_id=eq.{}&select=id,binding",
             self.cfg.url, acp_session_id
         );
         let resp = self
@@ -767,15 +768,16 @@ impl SupabaseClient {
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
-                message: format!("get_session_binding_by_acp_id: {text}"),
+                message: format!("get_gateway_session_by_acp_id: {text}"),
             });
         }
         #[derive(Deserialize)]
         struct Row {
+            id: String,
             binding: Option<String>,
         }
         let rows: Vec<Row> = resp.json().await?;
-        Ok(rows.into_iter().next().and_then(|r| r.binding))
+        Ok(rows.into_iter().next().map(|r| (r.id, r.binding)))
     }
 
     /// Resolve (or create) the `sessions` row for a gateway binding.
@@ -968,32 +970,21 @@ impl SupabaseClient {
         &self,
         agent_actor_id: &str,
     ) -> SupabaseResult<Vec<String>> {
-        let token = self.access_token().await?;
-        let url = format!(
-            "{}/rest/v1/agent_member_access?agent_id=eq.{}&permission_level=eq.admin&select=member_id",
-            self.cfg.url, agent_actor_id
-        );
-        let resp = self
-            .http
-            .get(&url)
-            .header("apikey", &self.cfg.anon_key)
-            .bearer_auth(&token)
-            .send()
-            .await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(SupabaseError::Rpc {
-                code: Some(status.as_u16().to_string()),
-                message: format!("list_agent_admin_member_actor_ids: {text}"),
-            });
+        #[derive(Serialize)]
+        struct Req<'a> {
+            p_agent_actor_id: &'a str,
         }
         #[derive(Deserialize)]
         struct Row {
-            member_id: String,
+            member_actor_id: String,
         }
-        let rows: Vec<Row> = resp.json().await?;
-        Ok(rows.into_iter().map(|r| r.member_id).collect())
+        let rows: Vec<Row> = self
+            .rpc(
+                "list_agent_admin_member_actor_ids",
+                &Req { p_agent_actor_id: agent_actor_id },
+            )
+            .await?;
+        Ok(rows.into_iter().map(|r| r.member_actor_id).collect())
     }
 
     /// Add (or ignore-if-present) a participant on `session_participants`.
