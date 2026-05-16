@@ -298,8 +298,8 @@ importers:
         specifier: ^4.1.18
         version: 4.2.2
       '@tailwindcss/oxide-darwin-x64':
-        specifier: ^4.1.18
-        version: 4.2.2
+        specifier: ^4.3.0
+        version: 4.3.0
       '@tailwindcss/oxide-linux-arm64-gnu':
         specifier: ^4.1.18
         version: 4.2.2
@@ -2309,6 +2309,12 @@ packages:
     cpu: [x64]
     os: [darwin]
 
+  '@tailwindcss/oxide-darwin-x64@4.3.0':
+    resolution: {integrity: sha512-N6CUmu4a6bKVADfw77p+iw6Yd9Q3OBhe0veaDX+QazfuVYlQsHfDgxBrsjQ/IW+zywL8mTrNd0SdJT/zgtvMdA==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [darwin]
+
   '@tailwindcss/oxide-freebsd-x64@4.2.2':
     resolution: {integrity: sha512-YUqUgrGMSu2CDO82hzlQ5qSb5xmx3RUrke/QgnoEx7KvmRJHQuZHZmZTLSuuHwFf0DJPybFMXMYf+WJdxHy/nQ==}
     engines: {node: '>= 20'}
@@ -2969,6 +2975,7 @@ packages:
 
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
+    deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
   '@upsetjs/venn.js@2.0.0':
     resolution: {integrity: sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw==}
@@ -7806,7 +7813,10 @@ snapshots:
 
   '@tailwindcss/oxide-darwin-arm64@4.2.2': {}
 
-  '@tailwindcss/oxide-darwin-x64@4.2.2': {}
+  '@tailwindcss/oxide-darwin-x64@4.2.2':
+    optional: true
+
+  '@tailwindcss/oxide-darwin-x64@4.3.0': {}
 
   '@tailwindcss/oxide-freebsd-x64@4.2.2':
     optional: true
