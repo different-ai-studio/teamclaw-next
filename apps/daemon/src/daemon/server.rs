@@ -81,6 +81,16 @@ enum SockCommand {
         platform: String,
         config_json: String,
     },
+    /// Proactive send request from the `amuxd mcp-server` bridge running
+    /// as a child of an ACP agent. `payload` is the raw JSON envelope the
+    /// bridge wrote to the sock; the daemon parses out binding + channel
+    /// + target overrides + content. `reply_tx` receives a single line of
+    /// JSON (`{ "ok": true, "result": ... }` or
+    /// `{ "ok": false, "error": ... }`) the listener writes back.
+    McpSend {
+        payload: serde_json::Value,
+        reply_tx: oneshot::Sender<String>,
+    },
     Unknown(String),
 }
 
@@ -345,6 +355,58 @@ impl DaemonServer {
             .collect();
 
         serde_json::to_string(&statuses).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Handle a `mcp-send` JSON envelope from the `amuxd mcp-server` bridge.
+    /// Parses the binding URI (e.g. `wecom://{corp}/{agent}/{kind}/{id}`) to
+    /// derive the default channel + target, applies any explicit overrides,
+    /// then routes the send through `ChannelManager::dispatch_send`. Returns
+    /// a JSON-friendly success/error value (the listener serializes it).
+    async fn handle_mcp_send(
+        &self,
+        payload: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let binding = payload
+            .get("binding")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("mcp-send: missing 'binding'"))?;
+        let message = payload.get("message").and_then(|v| v.as_str());
+        let file_path = payload.get("file_path").and_then(|v| v.as_str());
+        let target_override = payload.get("target_override").and_then(|v| v.as_str());
+        let channel_override = payload.get("channel_override").and_then(|v| v.as_str());
+
+        if message.map(|s| s.is_empty()).unwrap_or(true) && file_path.is_none() {
+            anyhow::bail!("mcp-send: at least one of 'message' or 'file_path' is required");
+        }
+
+        let (default_channel, default_target) = parse_binding_to_target(binding)?;
+        let channel = channel_override.unwrap_or(default_channel);
+        let target_owned: String;
+        let target = match target_override {
+            Some(t) => t,
+            None => match default_target {
+                Some(t) => {
+                    target_owned = t;
+                    target_owned.as_str()
+                }
+                None => anyhow::bail!(
+                    "mcp-send: binding '{binding}' has no default target — pass an explicit 'target' override"
+                ),
+            },
+        };
+
+        let mgr = self
+            .channel_mgr
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("channel manager not running"))?;
+        mgr.dispatch_send(channel, target, message, file_path).await?;
+
+        Ok(serde_json::json!({
+            "channel": channel,
+            "target": target,
+            "message_sent": message.map(|s| !s.is_empty()).unwrap_or(false),
+            "file_sent": file_path.is_some(),
+        }))
     }
 
     /// Persist a new per-platform channel config (parsed from the second line
@@ -629,6 +691,13 @@ impl DaemonServer {
                             }
                             Some(SockCommand::ChannelSave { platform, config_json }) => {
                                 self.save_channel_config(&platform, &config_json).await;
+                            }
+                            Some(SockCommand::McpSend { payload, reply_tx }) => {
+                                let resp = match self.handle_mcp_send(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
                             }
                             Some(SockCommand::Unknown(line)) => {
                                 warn!("amuxd.sock: unknown control command: {line:?}");
@@ -2903,6 +2972,53 @@ pub fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Map a session binding URI to a `(channel, default_target)` pair. The
+/// channel scheme determines the platform; the rest of the URI determines
+/// the per-platform target shape used by `ChannelManager::dispatch_send`
+/// (`user:<id>` or `chat:<id>`).
+///
+/// Binding shapes (from `crates/teamclaw-gateway/src/binding.rs`):
+///   wecom://{corp_id}/{agent_id}/single/{userid}
+///   wecom://{corp_id}/{agent_id}/external-single/{ext_userid}
+///   wecom://{corp_id}/{agent_id}/group/{chat_id}
+///   feishu://{app_id}/{chat_id}
+///   discord://{application_id}/{channel_id}
+///   kook://{scope}/{channel_id}
+///   wechat://{ilink_account}/single/{from_user_id}
+///   email://{account_key}/thread/{thread_key}
+///
+/// Only WeCom defaults are wired in this commit (M1 scope); other channels
+/// return `Ok((channel, None))` so the agent can still send by providing an
+/// explicit `target` override even before per-channel dispatch lands.
+fn parse_binding_to_target(binding: &str) -> anyhow::Result<(&'static str, Option<String>)> {
+    let (scheme, rest) = binding
+        .split_once("://")
+        .ok_or_else(|| anyhow::anyhow!("binding missing scheme: {binding}"))?;
+    let parts: Vec<&str> = rest.split('/').collect();
+    match scheme {
+        "wecom" => {
+            // wecom://{corp_id}/{agent_id}/{single|external-single|group}/{id}
+            if parts.len() < 4 {
+                anyhow::bail!("wecom binding malformed: {binding}");
+            }
+            let kind = parts[2];
+            let id = parts[3];
+            let target = match kind {
+                "single" | "external-single" => format!("user:{id}"),
+                "group" => format!("chat:{id}"),
+                other => anyhow::bail!("unknown wecom binding kind: {other}"),
+            };
+            Ok(("wecom", Some(target)))
+        }
+        "feishu" => Ok(("feishu", None)),
+        "discord" => Ok(("discord", None)),
+        "kook" => Ok(("kook", None)),
+        "wechat" => Ok(("wechat", None)),
+        "email" => Ok(("email", None)),
+        other => anyhow::bail!("unknown binding scheme: {other}"),
+    }
+}
+
 /// Bind `amuxd.sock` and spawn a task that accepts connections, reads a
 /// single newline-terminated control command per connection, and forwards
 /// the parsed `SockCommand` to the daemon's main loop via `tx`. Stale
@@ -2946,6 +3062,65 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                             Ok(0) => {}
                             Ok(_) => {
                                 let head = first_line.trim();
+
+                                // JSON envelopes (currently just `mcp-send`)
+                                // are framed differently from the legacy
+                                // line-based control protocol — sniff the
+                                // first byte and branch.
+                                if head.starts_with('{') {
+                                    let parsed: Result<serde_json::Value, _> =
+                                        serde_json::from_str(head);
+                                    match parsed {
+                                        Ok(v) => {
+                                            let cmd = v
+                                                .get("cmd")
+                                                .and_then(|c| c.as_str())
+                                                .unwrap_or("");
+                                            if cmd == "mcp-send" {
+                                                let (reply_tx, reply_rx) = oneshot::channel();
+                                                if tx
+                                                    .send(SockCommand::McpSend {
+                                                        payload: v,
+                                                        reply_tx,
+                                                    })
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                                match reply_rx.await {
+                                                    Ok(body) => {
+                                                        let mut stream = reader.into_inner();
+                                                        if let Err(e) =
+                                                            stream.write_all(body.as_bytes()).await
+                                                        {
+                                                            warn!(
+                                                                "amuxd.sock: mcp-send write failed: {e}"
+                                                            );
+                                                            return;
+                                                        }
+                                                        let _ = stream.write_all(b"\n").await;
+                                                        let _ = stream.shutdown().await;
+                                                    }
+                                                    Err(_) => {
+                                                        warn!(
+                                                            "amuxd.sock: mcp-send reply dropped"
+                                                        );
+                                                    }
+                                                }
+                                            } else {
+                                                warn!(
+                                                    "amuxd.sock: unknown JSON cmd: {cmd:?}"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("amuxd.sock: JSON parse failed: {e}");
+                                        }
+                                    }
+                                    return;
+                                }
+
                                 match head {
                                     "channel-reload" => {
                                         let _ = tx.send(SockCommand::ChannelReload).await;

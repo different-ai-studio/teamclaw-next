@@ -2152,6 +2152,64 @@ impl WeComGateway {
             .await
     }
 
+    /// Proactive send wrapper for the `amuxd mcp-server` MCP `send` tool.
+    /// `user_id` is a WeCom internal/external userid; chat_type is fixed at
+    /// 1 (single chat). Optionally uploads + sends a file before the text.
+    pub async fn send_to_user_with_optional_media(
+        &self,
+        user_id: &str,
+        text: &str,
+        media: Option<(Vec<u8>, String)>,
+    ) -> Result<(), String> {
+        if let Some((bytes, filename)) = media {
+            let ws_sink = self
+                .shared_ws_sink
+                .read()
+                .await
+                .clone()
+                .ok_or_else(|| "WeCom gateway is not connected.".to_string())?;
+            let media_type = detect_media_type(&filename);
+            let media_id = self
+                .upload_media(&bytes, &filename, media_type, &ws_sink)
+                .await?;
+            self.send_media_to_chat(user_id, 1, &media_id, media_type)
+                .await?;
+        }
+        if !text.is_empty() {
+            self.send_chat_message(user_id, 1, text).await?;
+        }
+        Ok(())
+    }
+
+    /// Proactive send wrapper for the `amuxd mcp-server` MCP `send` tool.
+    /// `chat_id` is a WeCom group chat id; chat_type is fixed at 2 (group).
+    /// Optionally uploads + sends a file before the text.
+    pub async fn send_to_chat_with_optional_media(
+        &self,
+        chat_id: &str,
+        text: &str,
+        media: Option<(Vec<u8>, String)>,
+    ) -> Result<(), String> {
+        if let Some((bytes, filename)) = media {
+            let ws_sink = self
+                .shared_ws_sink
+                .read()
+                .await
+                .clone()
+                .ok_or_else(|| "WeCom gateway is not connected.".to_string())?;
+            let media_type = detect_media_type(&filename);
+            let media_id = self
+                .upload_media(&bytes, &filename, media_type, &ws_sink)
+                .await?;
+            self.send_media_to_chat(chat_id, 2, &media_id, media_type)
+                .await?;
+        }
+        if !text.is_empty() {
+            self.send_chat_message(chat_id, 2, text).await?;
+        }
+        Ok(())
+    }
+
     /// Send a media message proactively to a chat (image/voice/video/file).
     pub async fn send_media_to_chat(
         &self,
@@ -2188,6 +2246,23 @@ impl WeComGateway {
             .map_err(|e| format!("Failed to send {}: {}", media_type, e))
     }
 
+}
+
+/// Map a filename to a WeCom `msgtype` string (`image` / `voice` / `video` /
+/// `file`). Used by the proactive-send wrappers (and the MCP `send` tool)
+/// to pick the right upload protocol from a bare file path.
+fn detect_media_type(filename: &str) -> &'static str {
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" => "image",
+        "mp3" | "amr" | "wav" | "ogg" | "m4a" | "aac" => "voice",
+        "mp4" | "mov" | "avi" | "mkv" | "wmv" => "video",
+        _ => "file",
+    }
 }
 
 /// Send a proactive message to a WeCom conversation.

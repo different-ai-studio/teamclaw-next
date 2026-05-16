@@ -155,6 +155,13 @@ fn main() -> anyhow::Result<()> {
             let path = config::DaemonConfig::default_path();
             cli::channel::run(args, &path)?;
         }
+        Commands::McpServer(args) => {
+            let sock = args
+                .sock
+                .clone()
+                .unwrap_or_else(config::DaemonConfig::sock_path);
+            cli::mcp_server::run(&args.session_id, &args.binding, &sock)?;
+        }
         Commands::TestClient { config, action } => {
             tracing_subscriber::fmt()
                 .with_env_filter(

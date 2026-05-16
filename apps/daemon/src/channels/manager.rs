@@ -156,6 +156,65 @@ impl ChannelManager {
         Ok(())
     }
 
+    /// Send a proactive message and/or file to a channel target. Called by
+    /// `DaemonServer::handle_mcp_send` after parsing the binding URI from
+    /// the bridging `amuxd mcp-server` subcommand.
+    ///
+    /// `target` shape is `user:<id>` or `chat:<id>`; per-channel adapters
+    /// translate that into native IDs (for WeCom, `user` → single chat with
+    /// chat_type=1, `chat` → group chat with chat_type=2). M1 wires WeCom
+    /// only — other channels return an explanatory error until they're
+    /// ported in a follow-up.
+    pub async fn dispatch_send(
+        &self,
+        channel: &str,
+        target: &str,
+        message: Option<&str>,
+        file_path: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let running = self.running.lock().await;
+        match channel {
+            "wecom" => {
+                let g = running
+                    .wecom
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("wecom not running"))?;
+                let (kind, id) = parse_send_target(target)?;
+                let media: Option<(Vec<u8>, String)> = match file_path {
+                    Some(p) => {
+                        let bytes = tokio::fs::read(p)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("read {p}: {e}"))?;
+                        let filename = std::path::Path::new(p)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("file")
+                            .to_string();
+                        Some((bytes, filename))
+                    }
+                    None => None,
+                };
+                let text = message.unwrap_or("");
+                let result = match kind {
+                    "user" => {
+                        g.send_to_user_with_optional_media(id, text, media)
+                            .await
+                    }
+                    "chat" => {
+                        g.send_to_chat_with_optional_media(id, text, media)
+                            .await
+                    }
+                    other => anyhow::bail!("unknown target kind: {other}"),
+                };
+                result.map_err(|e| anyhow::anyhow!("wecom send: {e}"))
+            }
+            "feishu" | "discord" | "kook" | "wechat" | "email" => {
+                anyhow::bail!("{channel}: send not yet implemented in v2; only WeCom is wired")
+            }
+            other => anyhow::bail!("unknown channel: {other}"),
+        }
+    }
+
     /// Snapshot which channels are currently running (gateway slot is `Some`).
     /// Returned as a tuple of `(platform, connected)` pairs in a stable order
     /// matching the six supported channels. Used by the `channel-status`
@@ -341,5 +400,35 @@ impl ChannelManager {
         gw.set_config(cfg).await;
         gw.start().await.map_err(|e| anyhow::anyhow!(e))?;
         Ok(gw)
+    }
+}
+
+/// Parse a `user:<id>` / `chat:<id>` target string into `(kind, id)`.
+fn parse_send_target(target: &str) -> anyhow::Result<(&str, &str)> {
+    target
+        .split_once(':')
+        .ok_or_else(|| anyhow::anyhow!("target must be 'user:<id>' or 'chat:<id>', got: {target}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_send_target;
+
+    #[test]
+    fn parses_user_target() {
+        assert_eq!(parse_send_target("user:alice").unwrap(), ("user", "alice"));
+    }
+
+    #[test]
+    fn parses_chat_target() {
+        assert_eq!(
+            parse_send_target("chat:wrkgrp_123").unwrap(),
+            ("chat", "wrkgrp_123")
+        );
+    }
+
+    #[test]
+    fn rejects_unstructured_target() {
+        assert!(parse_send_target("alice").is_err());
     }
 }
