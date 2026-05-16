@@ -430,6 +430,12 @@ pub fn spawn_acp_agent(
     initial_model_tx: oneshot::Sender<Option<String>>,
     resume_acp_session_id: Option<String>,
     acp_session_id_tx: oneshot::Sender<String>,
+    // When `Some`, the ACP session is initialised on this model id instead of
+    // the first entry from `available_models_for(agent_type)`. Used by the
+    // gateway adapter to honour per-session `set_model` overrides on first
+    // spawn. Pass a full model id ("claude-sonnet-4-6"), not a short name —
+    // callers translate short names via `model_id_for_short_name`.
+    initial_model_override: Option<String>,
 ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
 
@@ -460,6 +466,7 @@ pub fn spawn_acp_agent(
                     initial_model_tx,
                     resume_acp_session_id,
                     acp_session_id_tx,
+                    initial_model_override,
                 )
                 .await
                 {
@@ -500,6 +507,7 @@ async fn run_acp_session(
     initial_model_tx: oneshot::Sender<Option<String>>,
     resume_acp_session_id: Option<String>,
     acp_session_id_tx: oneshot::Sender<String>,
+    initial_model_override: Option<String>,
 ) -> anyhow::Result<()> {
     // Spawn the ACP agent process
     // Use claude-agent-acp wrapper (Node.js) which speaks ACP JSON-RPC over stdio
@@ -617,22 +625,27 @@ async fn run_acp_session(
     // Report the ACP session_id back to the caller
     let _ = acp_session_id_tx.send(session_id.to_string());
 
-    // Apply the default model from the hardcoded list before any prompt runs.
-    // This ensures the very first turn is on the chosen model.
+    // Apply the initial model before any prompt runs. Precedence:
+    //   1. `initial_model_override` (gateway `set_model` chose this on spawn)
+    //   2. first entry from `available_models_for(agent_type)` (default)
+    // Either way we send `session/set_model` and report the id we landed on.
     let initial_model: Option<String> = {
-        let models = crate::runtime::models::available_models_for(agent_type);
-        if let Some(first) = models.first() {
+        let chosen = initial_model_override.or_else(|| {
+            let models = crate::runtime::models::available_models_for(agent_type);
+            models.first().map(|m| m.id.clone())
+        });
+        if let Some(model_id) = chosen {
             let req = acp::SetSessionModelRequest::new(
                 session_id.clone(),
-                acp::ModelId::new(first.id.clone()),
+                acp::ModelId::new(model_id.clone()),
             );
             match conn.set_session_model(req).await {
                 Ok(_) => {
-                    info!(model_id = %first.id, "ACP initial set_session_model applied");
-                    Some(first.id.clone())
+                    info!(model_id = %model_id, "ACP initial set_session_model applied");
+                    Some(model_id)
                 }
                 Err(e) => {
-                    warn!(error = %e, "initial set_session_model failed");
+                    warn!(error = %e, model_id = %model_id, "initial set_session_model failed");
                     None
                 }
             }

@@ -100,6 +100,7 @@ fn main() -> anyhow::Result<()> {
                     initial_model_tx,
                     None,
                     acp_session_id_tx,
+                    None,
                 )?;
 
                 println!("--- Streaming events (Ctrl+C to stop) ---\n");

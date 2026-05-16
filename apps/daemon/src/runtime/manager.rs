@@ -9,6 +9,20 @@ use crate::runtime::turn_aggregator::TurnAggregator;
 use crate::supabase::{AgentRuntimeUpsert, SupabaseClient};
 use chrono::Utc;
 
+/// Translate a gateway-facing short model name ("sonnet", "opus", "haiku")
+/// to the full ACP model id used by `claude-agent-acp`. Returns `None` for
+/// unknown short names so callers can fall through to passing the input
+/// verbatim (supports full ids like "claude-sonnet-4-6" without a separate
+/// validation branch).
+pub fn model_id_for_short_name(short: &str) -> Option<String> {
+    match short {
+        "sonnet" => Some("claude-sonnet-4-6".to_string()),
+        "opus" => Some("claude-opus-4-7".to_string()),
+        "haiku" => Some("claude-haiku-4-5".to_string()),
+        _ => None,
+    }
+}
+
 pub struct RuntimeManager {
     agents: HashMap<String, RuntimeHandle>,
     pub aggregators: std::collections::HashMap<String, TurnAggregator>,
@@ -84,6 +98,33 @@ impl RuntimeManager {
         supabase_workspace_id: Option<&str>,
         supabase_session_id: Option<&str>,
     ) -> crate::error::Result<String> {
+        self.spawn_agent_with_model(
+            agent_type,
+            worktree,
+            prompt,
+            workspace_id,
+            supabase_workspace_id,
+            supabase_session_id,
+            None,
+        )
+        .await
+    }
+
+    /// Variant of `spawn_agent` that pins the initial ACP model. Used by
+    /// `create_gateway_session_with_model` to honour a per-session
+    /// `set_model` override the gateway recorded before the first prompt.
+    /// `initial_model_override` is a full model id (e.g. "claude-sonnet-4-6"),
+    /// not a short name — callers map short names via `model_id_for_short_name`.
+    pub async fn spawn_agent_with_model(
+        &mut self,
+        agent_type: amux::AgentType,
+        worktree: &str,
+        prompt: &str,
+        workspace_id: &str,
+        supabase_workspace_id: Option<&str>,
+        supabase_session_id: Option<&str>,
+        initial_model_override: Option<String>,
+    ) -> crate::error::Result<String> {
         let agent_id = Uuid::new_v4().to_string()[..8].to_string();
         let mut handle = RuntimeHandle::new(
             agent_id.clone(),
@@ -107,6 +148,7 @@ impl RuntimeManager {
             initial_model_tx,
             None,
             acp_session_id_tx,
+            initial_model_override.clone(),
         )?;
 
         handle.cmd_tx = Some(cmd_tx);
@@ -204,6 +246,7 @@ impl RuntimeManager {
             initial_model_tx,
             Some(acp_session_id.to_string()),
             acp_session_id_tx,
+            None,
         )?;
         handle.cmd_tx = Some(cmd_tx);
         handle.status = amux::AgentStatus::Active;
@@ -396,6 +439,21 @@ impl RuntimeManager {
         handle.cancel().await
     }
 
+    /// Cancel the in-flight turn for the agent identified by `acp_sid`
+    /// (the 36-char uuid stored on `RuntimeHandle.acp_session_id`).
+    /// Used by `AmuxdAcpHandle::cancel` to translate a gateway-side logical
+    /// id (resolved via `logical_to_acp`) into a runtime handle without
+    /// the gateway needing to know about the daemon's 8-char `agent_id`.
+    pub async fn cancel_by_acp_session(&mut self, acp_sid: &str) -> crate::error::Result<()> {
+        let agent_id = self.agent_id_by_acp_session(acp_sid).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!("no runtime for acp_session_id {acp_sid}"))
+        })?;
+        let handle = self.agents.get(&agent_id).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!("handle missing for agent_id {agent_id}"))
+        })?;
+        handle.cancel().await
+    }
+
     /// Resolve a permission request for an agent.
     pub async fn resolve_permission(
         &mut self,
@@ -549,9 +607,28 @@ impl RuntimeManager {
     /// agent's `acp_session_id`, which the gateway persists on its `Binding`.
     pub async fn create_gateway_session(
         &mut self,
+        team_id: &str,
+        binding: &str,
+        title: &str,
+    ) -> crate::error::Result<String> {
+        self.create_gateway_session_with_model(team_id, binding, title, None)
+            .await
+    }
+
+    /// Variant of `create_gateway_session` that honours a per-session model
+    /// override. The gateway's `AmuxdAcpHandle` resolves the override from
+    /// its `model_override` map and passes it as `(provider, model)`. We
+    /// translate the short name ("sonnet"/"opus"/"haiku") into the full ACP
+    /// model id ("claude-sonnet-4-6", …) via `model_id_for_short_name`
+    /// before threading through to the adapter. `provider` is currently
+    /// unused (claude-code adapter == anthropic) but kept on the signature
+    /// for future multi-provider routing.
+    pub async fn create_gateway_session_with_model(
+        &mut self,
         _team_id: &str,
         binding: &str,
         _title: &str,
+        model_override: Option<(String, String)>,
     ) -> crate::error::Result<String> {
         // Gateway sessions don't yet have a "real" workspace concept — they
         // run against a freshly-created scratch dir so the ACP process has a
@@ -567,15 +644,20 @@ impl RuntimeManager {
             ))
         })?;
 
+        let initial_model: Option<String> = model_override
+            .as_ref()
+            .map(|(_provider, model)| model_id_for_short_name(model).unwrap_or(model.clone()));
+
         let workspace_id = format!("gateway:{binding}");
         let agent_id = self
-            .spawn_agent(
+            .spawn_agent_with_model(
                 amux::AgentType::ClaudeCode,
                 &worktree,
                 "",
                 &workspace_id,
                 None,
                 None,
+                initial_model,
             )
             .await?;
 

@@ -238,6 +238,7 @@ impl DaemonServer {
             manager: self.agents.clone(),
             logical_to_acp: Arc::new(AsyncMutex::new(HashMap::new())),
             team_id: team_id.clone(),
+            model_override: Arc::new(AsyncMutex::new(HashMap::new())),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
             client: Arc::new(self.supabase.clone()),
