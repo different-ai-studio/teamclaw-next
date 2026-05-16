@@ -32,6 +32,13 @@
 > Phase 2 (daemon installer + ACP runtime + agent streaming + permission flow) is
 > the next plan and where the compat shim should be peeled off as those UI paths
 > get rewired.
+>
+> **Backend provider direction:** v2 currently uses Supabase as the authority for
+> auth, teams, actors, sessions, messages, invites, runtime cursors, and
+> attachment metadata. The planned open-source evolution is to keep Supabase as
+> one official backend provider, then introduce provider boundaries before adding
+> alternatives such as local SQLite, TrailBase, PocketBase, or plain Postgres.
+> See `docs/architecture/v2.md` §3.5.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/different-ai-studio/teamclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/different-ai-studio/teamclaw/actions)
