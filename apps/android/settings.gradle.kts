@@ -16,6 +16,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "teamclaw-android"
 
-include(":core:design", ":core:model", ":core:deeplink", ":core:network", ":core:auth")
+include(":core:design", ":core:model", ":core:deeplink", ":core:network", ":core:auth", ":core:proto")
 include(":feature:onboarding")
 include(":app")
