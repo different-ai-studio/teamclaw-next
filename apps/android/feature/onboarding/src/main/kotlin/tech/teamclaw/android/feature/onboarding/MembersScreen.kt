@@ -1,6 +1,7 @@
 package tech.teamclaw.android.feature.onboarding
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ fun MembersScreen(
     errorMessage: String?,
     onRefresh: () -> Unit,
     onInvite: () -> Unit,
+    onActorClick: (ActorRecord) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -68,7 +70,7 @@ fun MembersScreen(
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().testTag("members.list")) {
                 items(items = actors, key = { it.id }) { actor ->
-                    ActorRow(actor)
+                    ActorRow(actor, onClick = { onActorClick(actor) })
                     HorizontalDivider(color = Hai.Hairline)
                 }
             }
@@ -100,9 +102,11 @@ private fun MembersTopBar(
 }
 
 @Composable
-private fun ActorRow(actor: ActorRecord) {
+private fun ActorRow(actor: ActorRecord, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -154,7 +158,7 @@ private fun MembersPreview() {
                     System.currentTimeMillis(), 0L, 0L, null, null, "codex", "online"),
             ),
             isLoading = false, errorMessage = null,
-            onRefresh = {}, onInvite = {}, onBack = {},
+            onRefresh = {}, onInvite = {}, onActorClick = {}, onBack = {},
         )
     }
 }

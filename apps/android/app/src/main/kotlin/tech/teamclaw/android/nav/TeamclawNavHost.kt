@@ -29,6 +29,9 @@ import tech.teamclaw.android.feature.onboarding.ChooseAuthScreen
 import tech.teamclaw.android.feature.onboarding.CreateTeamScreen
 import tech.teamclaw.android.feature.onboarding.InviteJoinSheet
 import tech.teamclaw.android.feature.onboarding.InviteMemberSheet
+import tech.teamclaw.android.core.model.ActorRecord
+import tech.teamclaw.android.core.model.InviteKind
+import tech.teamclaw.android.feature.onboarding.ActorDetailScreen
 import tech.teamclaw.android.feature.onboarding.LobsterSplashScreen
 import tech.teamclaw.android.feature.onboarding.LoginScreen
 import tech.teamclaw.android.feature.onboarding.MembersScreen
@@ -262,7 +265,40 @@ private fun MembersFlow(
     val store = remember(teamId) { actorStoreFactory(teamId) }
     val s by store.state.collectAsStateWithLifecycle()
     var showInvite by remember { mutableStateOf(false) }
+    var openActor by remember { mutableStateOf<ActorRecord?>(null) }
     LaunchedEffect(teamId) { store.reload() }
+
+    val activeActor = openActor
+    if (activeActor != null) {
+        ActorDetailScreen(
+            actor = activeActor,
+            rotatedInvite = s.lastInvite,
+            isBusy = s.isInviting,
+            errorMessage = s.errorMessage,
+            onBack = {
+                openActor = null
+                store.clearLastInvite()
+            },
+            onRotate = {
+                coordinator.launch {
+                    store.rotateActor(
+                        actorId = activeActor.id,
+                        displayName = activeActor.displayName,
+                        kind = if (activeActor.isAgent) InviteKind.AGENT else InviteKind.MEMBER,
+                        agentKind = activeActor.agentKind,
+                    )
+                }
+            },
+            onRemove = {
+                coordinator.launch {
+                    store.removeActor(activeActor.id)
+                    openActor = null
+                }
+            },
+            onDismissInvite = { store.clearLastInvite() },
+        )
+        return
+    }
 
     MembersScreen(
         teamName = teamName,
@@ -271,6 +307,7 @@ private fun MembersFlow(
         errorMessage = s.errorMessage,
         onRefresh = { coordinator.launch { store.reload() } },
         onInvite = { showInvite = true },
+        onActorClick = { openActor = it },
         onBack = onBack,
     )
 

@@ -16,6 +16,7 @@ import tech.teamclaw.android.core.model.InviteCreated
 interface ActorRepository {
     suspend fun listActors(teamId: String): List<ActorRecord>
     suspend fun createInvite(teamId: String, input: InviteCreateInput): InviteCreated
+    suspend fun removeActor(actorId: String)
 }
 
 class SupabaseActorRepository(
@@ -57,6 +58,13 @@ class SupabaseActorRepository(
             token = row.token,
             expiresAtMs = row.expiresAt.toEpochMilliseconds(),
             deeplink = teamclawDeeplink(row.deeplink),
+        )
+    }
+
+    override suspend fun removeActor(actorId: String) {
+        client.postgrest.rpc(
+            "remove_team_actor",
+            buildJsonObject { put("p_actor_id", actorId) },
         )
     }
 
