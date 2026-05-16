@@ -87,6 +87,24 @@ class TeamclawApplication : Application() {
                 repository = messagesRepo,
                 realtimeSignal = mqttService.subscribeAsSignal(topic),
                 realtimeEvents = mqttService.subscribeAsEvents(topic),
+                permissionPublisher = { deviceId, runtimeId, requestId, grant ->
+                    val commandTopic =
+                        "amux/${teamId.ifEmpty { "teamclaw" }}/device/$deviceId/runtime/$runtimeId/commands"
+                    val command = amux.AcpCommand(
+                        grant_permission = if (grant) amux.AcpGrantPermission(request_id = requestId) else null,
+                        deny_permission = if (!grant) amux.AcpDenyPermission(request_id = requestId) else null,
+                    )
+                    val envelope = amux.RuntimeCommandEnvelope(
+                        runtime_id = runtimeId,
+                        device_id = deviceId,
+                        peer_id = "android-${actorId.take(8)}",
+                        command_id = java.util.UUID.randomUUID().toString().lowercase(),
+                        timestamp = System.currentTimeMillis(),
+                        sender_actor_id = actorId,
+                        acp_command = command,
+                    )
+                    mqttService.publish(commandTopic, envelope.encode())
+                },
             )
         }
         val actorRepo = SupabaseActorRepository(supabaseClient)

@@ -54,6 +54,17 @@ sealed interface DecodedEvent {
         val message: String,
     ) : DecodedEvent
 
+    data class PermissionRequest(
+        override val runtimeId: String,
+        override val timestampMs: Long,
+        override val sequence: Long,
+        /** From Envelope.device_id — needed to route grant/deny back. */
+        val deviceId: String,
+        val requestId: String,
+        val toolName: String,
+        val description: String,
+    ) : DecodedEvent
+
     data class Unknown(
         override val runtimeId: String,
         override val timestampMs: Long,
@@ -71,12 +82,14 @@ object SessionEventDecoder {
         val ts = envelope.timestamp
         val seq = envelope.sequence.toLong()
         val rid = envelope.runtime_id
-        return mapEvent(acp, rid, ts, seq)
+        val did = envelope.device_id
+        return mapEvent(acp, rid, did, ts, seq)
     }
 
     private fun mapEvent(
         event: AcpEvent,
         runtimeId: String,
+        deviceId: String,
         timestampMs: Long,
         sequence: Long,
     ): DecodedEvent {
@@ -104,6 +117,15 @@ object SessionEventDecoder {
         }
         event.error?.let {
             return DecodedEvent.Error(runtimeId, timestampMs, sequence, it.message)
+        }
+        event.permission_request?.let {
+            return DecodedEvent.PermissionRequest(
+                runtimeId, timestampMs, sequence,
+                deviceId = deviceId,
+                requestId = it.request_id,
+                toolName = it.tool_name,
+                description = it.description,
+            )
         }
         return DecodedEvent.Unknown(
             runtimeId, timestampMs, sequence,

@@ -254,6 +254,9 @@ private fun ReadyFlow(
             },
             onBack = { openSession = null },
             onStartVoiceInput = onStartVoiceInput,
+            onPermissionResponse = { request, grant ->
+                coordinator.launch { detailStore.respondToPermission(request, grant) }
+            },
         )
     }
 }

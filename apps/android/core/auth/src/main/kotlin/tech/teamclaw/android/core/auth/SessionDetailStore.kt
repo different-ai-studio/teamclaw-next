@@ -23,6 +23,13 @@ class SessionDetailStore(
     private val realtimeSignal: Flow<Unit>? = null,
     /** Optional decoded-event stream — typically [MqttService.subscribeAsEvents]. */
     private val realtimeEvents: Flow<DecodedEvent>? = null,
+    /** Publish a permission grant/deny back to the daemon. Null in tests. */
+    private val permissionPublisher: (suspend (
+        deviceId: String,
+        runtimeId: String,
+        requestId: String,
+        grant: Boolean,
+    ) -> Unit)? = null,
 ) {
     data class UiState(
         val messages: List<MessageRecord> = emptyList(),
@@ -98,6 +105,21 @@ class SessionDetailStore(
             }
         } catch (t: Throwable) {
             _state.update { it.copy(errorMessage = t.message, isLoading = false) }
+        }
+    }
+
+    suspend fun respondToPermission(request: DecodedEvent.PermissionRequest, grant: Boolean) {
+        val publisher = permissionPublisher ?: return
+        runCatching {
+            publisher(request.deviceId, request.runtimeId, request.requestId, grant)
+        }
+        // Drop the request from liveEvents either way — user has answered.
+        _state.update {
+            it.copy(
+                liveEvents = it.liveEvents.filterNot {
+                    e -> e is DecodedEvent.PermissionRequest && e.requestId == request.requestId
+                },
+            )
         }
     }
 

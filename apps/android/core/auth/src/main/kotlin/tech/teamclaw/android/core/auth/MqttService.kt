@@ -74,6 +74,23 @@ class MqttService(
     }
 
     /**
+     * Publish [payload] to [topic] at QoS AT_LEAST_ONCE. No-op when the
+     * client isn't connected — callers should treat publish failures as
+     * recoverable (the daemon retries via outbox semantics on its side).
+     */
+    suspend fun publish(topic: String, payload: ByteArray) {
+        val c = client ?: return
+        runCatching {
+            c.publishWith()
+                .topic(topic)
+                .qos(MqttQos.AT_LEAST_ONCE)
+                .payload(payload)
+                .send()
+                .await()
+        }
+    }
+
+    /**
      * Rebuild the connection after the auth provider rotated the access
      * token. iOS does this on each AuthState.tokenRefreshed because the
      * broker stops accepting publishes once the JWT used as the CONNECT

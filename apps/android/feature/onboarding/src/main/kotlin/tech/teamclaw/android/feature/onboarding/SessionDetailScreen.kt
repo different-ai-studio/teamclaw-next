@@ -54,6 +54,7 @@ fun SessionDetailScreen(
     onSend: (text: String, mentionActorIds: List<String>) -> Unit,
     onBack: () -> Unit,
     onStartVoiceInput: ((onResult: (String) -> Unit) -> Unit)? = null,
+    onPermissionResponse: ((DecodedEvent.PermissionRequest, grant: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var draft by remember { mutableStateOf("") }
@@ -99,7 +100,15 @@ fun SessionDetailScreen(
                     MessageBubble(message = msg, isMine = msg.senderActorId == currentActorId)
                 }
                 items(items = liveEvents, key = { "live-${it.sequence}-${it.timestampMs}" }) { evt ->
-                    LiveEventBubble(evt)
+                    if (evt is DecodedEvent.PermissionRequest) {
+                        PermissionRequestBubble(
+                            event = evt,
+                            onGrant = { onPermissionResponse?.invoke(evt, true) },
+                            onDeny = { onPermissionResponse?.invoke(evt, false) },
+                        )
+                    } else {
+                        LiveEventBubble(evt)
+                    }
                 }
             }
         }
@@ -137,6 +146,49 @@ fun SessionDetailScreen(
 }
 
 @Composable
+private fun PermissionRequestBubble(
+    event: DecodedEvent.PermissionRequest,
+    onGrant: () -> Unit,
+    onDeny: () -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.widthIn(max = 340.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Hai.Cinnabar.copy(alpha = 0.10f))
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Permission requested",
+                style = MaterialTheme.typography.labelLarge,
+                color = Hai.CinnabarDeep,
+            )
+            Text(
+                "${event.toolName.ifBlank { "tool" }} — ${event.description.ifBlank { "approve to continue" }}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Hai.Onyx,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onGrant,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Hai.Cinnabar),
+                    modifier = Modifier.weight(1f).testTag("permission.approveButton"),
+                ) { Text("Approve") }
+                Button(
+                    onClick = onDeny,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Hai.Basalt),
+                    modifier = Modifier.weight(1f).testTag("permission.denyButton"),
+                ) { Text("Deny") }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
 private fun LiveEventBubble(event: DecodedEvent) {
     val accent = when (event) {
         is DecodedEvent.Thinking -> Hai.Slate
@@ -144,6 +196,7 @@ private fun LiveEventBubble(event: DecodedEvent) {
         is DecodedEvent.ToolUse -> Hai.Sage
         is DecodedEvent.ToolResult -> Hai.Sage
         is DecodedEvent.Error -> Hai.CinnabarDeep
+        is DecodedEvent.PermissionRequest -> Hai.Cinnabar
         is DecodedEvent.Unknown -> Hai.Slate
     }
     val (badge, body) = when (event) {
@@ -157,6 +210,7 @@ private fun LiveEventBubble(event: DecodedEvent) {
             val tag = if (event.success) "Tool result" else "Tool failed"
             tag to event.summary
         }
+        is DecodedEvent.PermissionRequest -> "Permission" to event.description
         is DecodedEvent.Error -> "Error" to event.message
         is DecodedEvent.Unknown -> "Event" to event.variantTag
     }
