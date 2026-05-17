@@ -8,12 +8,6 @@ public extension Notification.Name {
     static let amuxApnsTokenReady = Notification.Name("amuxApnsTokenReady")
 }
 
-/// Holds a weak handle to the active SessionFocus tracker so willPresent can
-/// suppress a banner when the user is already viewing that session.
-public enum CurrentSessionFocus {
-    nonisolated(unsafe) public static var sessionID: String?
-}
-
 final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions:

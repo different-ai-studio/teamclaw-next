@@ -22,24 +22,29 @@ public struct SessionDetailView: View {
     @State private var isMemberSheetPresented: Bool = false
     @State private var isAddAgentSheetPresented: Bool = false
     @State private var isAddMemberSheetPresented: Bool = false
+    @State private var muted = false
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
+    private let pushPrefs: (any PushPreferencesAPI)?
 
     let connectedAgentsStore: ConnectedAgentsStore?
 
     public init(runtime: Runtime, mqtt: MQTTService, hub: MQTTMessageHub, peerId: String,
-                connectedAgentsStore: ConnectedAgentsStore? = nil) {
+                connectedAgentsStore: ConnectedAgentsStore? = nil,
+                pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: runtime, mqtt: mqtt, hub: hub, peerId: peerId,
             connectedAgentsStore: connectedAgentsStore))
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = nil
+        self.pushPrefs = pushPrefs
     }
 
     public init(session: Session, mqtt: MQTTService, hub: MQTTMessageHub, peerId: String,
                 teamclawService: TeamclawService?,
-                connectedAgentsStore: ConnectedAgentsStore? = nil) {
+                connectedAgentsStore: ConnectedAgentsStore? = nil,
+                pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: nil, mqtt: mqtt, hub: hub, teamID: session.teamId,
             peerId: peerId, session: session,
@@ -47,6 +52,7 @@ public struct SessionDetailView: View {
             connectedAgentsStore: connectedAgentsStore))
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = teamclawService
+        self.pushPrefs = pushPrefs
     }
 
     public var body: some View {
@@ -139,12 +145,48 @@ public struct SessionDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isMemberSheetPresented = true
+                Menu {
+                    Button {
+                        isMemberSheetPresented = true
+                    } label: {
+                        Label("Members", systemImage: "person.2")
+                    }
+                    if pushPrefs != nil {
+                        Button {
+                            Task {
+                                let next = !muted
+                                muted = next
+                                let sessionID = viewModel.session?.sessionId ?? ""
+                                try? await pushPrefs?.setSessionMuted(sessionID: sessionID, muted: next)
+                            }
+                        } label: {
+                            Label(
+                                muted ? "Unmute notifications" : "Mute notifications",
+                                systemImage: muted ? "bell" : "bell.slash"
+                            )
+                        }
+                    }
                 } label: {
-                    Image(systemName: "person.2")
+                    Image(systemName: "ellipsis.circle")
                 }
-                .accessibilityLabel("Members")
+                .accessibilityLabel("Session options")
+                .task {
+                    let sessionID = viewModel.session?.sessionId ?? ""
+                    if let api = pushPrefs, !sessionID.isEmpty {
+                        muted = (try? await api.isSessionMuted(sessionID: sessionID)) ?? false
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if let sid = viewModel.session?.sessionId {
+                CurrentSessionFocus.sessionID = sid
+            }
+        }
+        .onDisappear {
+            if let sid = viewModel.session?.sessionId,
+               CurrentSessionFocus.sessionID == sid {
+                CurrentSessionFocus.sessionID = nil
             }
         }
         // Tab-bar visibility is hoisted to the parent NavigationStack
