@@ -4,26 +4,26 @@ import { render } from '@testing-library/react'
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k, i18n: { language: 'en', changeLanguage: vi.fn() } }),
 }))
-vi.mock('@/stores/shortcuts', () => ({
-  useShortcutsStore: Object.assign(
-    vi.fn(() => ({
-      nodes: [],
-      addNode: vi.fn(),
-      updateNode: vi.fn(),
-      deleteNode: vi.fn(),
-      batchMove: vi.fn(),
-      getTree: vi.fn(() => []),
-      getChildren: vi.fn(() => []),
-    })),
-    {
-      getState: () => ({
-        nodes: [],
-        getChildren: vi.fn(() => []),
-      }),
-    }
-  ),
-  ShortcutNode: {},
-}))
+vi.mock('@/stores/shortcuts', () => {
+  const storeState = {
+    personalNodes: [] as unknown[],
+    teamNodes: [] as unknown[],
+    addNode: vi.fn().mockResolvedValue('id'),
+    updateNode: vi.fn().mockResolvedValue(undefined),
+    deleteNode: vi.fn().mockResolvedValue(undefined),
+    batchMove: vi.fn().mockResolvedValue(undefined),
+    getChildren: vi.fn(() => []),
+  }
+  const useShortcutsStore: any = vi.fn((selector?: (s: typeof storeState) => unknown) => {
+    return selector ? selector(storeState) : storeState
+  })
+  useShortcutsStore.getState = () => storeState
+  return {
+    useShortcutsStore,
+    buildTree: vi.fn(() => []),
+    ShortcutNode: {},
+  }
+})
 vi.mock('@/components/ui/button', () => ({
   Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
 }))

@@ -24,6 +24,7 @@ import { useTeamModeStore } from "@/stores/team-mode";
 import { useTeamOssStore } from "@/stores/team-oss";
 import { useTeamMembersStore } from "@/stores/team-members";
 import { useShortcutsStore } from "@/stores/shortcuts";
+import { useCurrentTeamStore } from "@/stores/current-team";
 import { useCronStore } from "@/stores/cron";
 import { initOpenCodeClient } from "@/lib/opencode/sdk-client";
 import {
@@ -495,17 +496,18 @@ export function useGitReposInit() {
         // Tauri not available, skip
       });
 
-    // Load team shortcuts after team config
-    import("@/lib/team-shortcuts")
-      .then(({ loadTeamShortcutsFile }) => {
-        return loadTeamShortcutsFile(workspacePath);
-      })
-      .then((teamShortcuts) => {
-        useShortcutsStore.getState().setTeamNodes(teamShortcuts || []);
-      })
-      .catch((err: unknown) => {
-        console.warn("[App] Failed to load team shortcuts (non-critical):", err);
-      });
+    // Hydrate shortcuts: first paint from local cache, then refresh from Supabase.
+    void (async () => {
+      try {
+        const store = useShortcutsStore.getState();
+        await store.hydrateFromCache();
+        await store.loadPersonal();
+        const teamId = useCurrentTeamStore.getState().team?.id ?? null;
+        if (teamId) await store.loadTeamForCurrentTeam(teamId);
+      } catch (err: unknown) {
+        console.warn("[App] Failed to load shortcuts (non-critical):", err);
+      }
+    })();
 
     void (async () => {
       try {

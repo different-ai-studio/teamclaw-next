@@ -6,7 +6,6 @@ mod env_vars;
 mod knowledge;
 mod roles;
 mod send;
-mod shortcuts;
 mod sync;
 
 use clap::Parser;
@@ -40,14 +39,14 @@ fn tool_definitions() -> Value {
     json!([
         {
             "name": "get_my_capabilities",
-            "description": "Query the AI agent's configured capabilities including channels, role, shortcuts, team members, environment variables, team info, and cron jobs.",
+            "description": "Query the AI agent's configured capabilities including channels, role, team members, environment variables, team info, and cron jobs.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "category": {
                         "type": "string",
                         "description": "Optional category filter",
-                        "enum": ["channels", "role", "shortcuts", "team_members", "env_vars", "team_info", "cron_jobs"]
+                        "enum": ["channels", "role", "team_members", "env_vars", "team_info", "cron_jobs"]
                     }
                 }
             }
@@ -133,45 +132,6 @@ fn tool_definitions() -> Value {
                             "bestEffort": { "type": "boolean" }
                         },
                         "required": ["mode", "channel", "to"]
-                    }
-                },
-                "required": ["action"]
-            }
-        },
-        {
-            "name": "manage_shortcuts",
-            "description": "Create, update, or delete agent shortcuts.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "The action to perform.",
-                        "enum": ["create", "update", "delete"]
-                    },
-                    "id": {
-                        "type": "string",
-                        "description": "Shortcut ID (required for update/delete)."
-                    },
-                    "label": {
-                        "type": "string",
-                        "description": "Display label for the shortcut."
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Shortcut type (e.g. 'prompt', 'skill', 'url')."
-                    },
-                    "target": {
-                        "type": "string",
-                        "description": "The shortcut target value."
-                    },
-                    "icon": {
-                        "type": "string",
-                        "description": "Optional icon name or URL."
-                    },
-                    "parent_id": {
-                        "type": "string",
-                        "description": "Optional parent shortcut ID for nested shortcuts."
                     }
                 },
                 "required": ["action"]
@@ -410,13 +370,6 @@ async fn handle_request(req: &Value, workspace: &str, api_port: u16) -> Option<V
                     }
                 }
                 "manage_cron_job" => match cron::handle(workspace, api_port, &arguments).await {
-                    Ok(v) => {
-                        let text = serde_json::to_string_pretty(&v).unwrap_or_default();
-                        tool_ok(&text)
-                    }
-                    Err(e) => tool_err(&e),
-                },
-                "manage_shortcuts" => match shortcuts::handle(workspace, &arguments).await {
                     Ok(v) => {
                         let text = serde_json::to_string_pretty(&v).unwrap_or_default();
                         tool_ok(&text)

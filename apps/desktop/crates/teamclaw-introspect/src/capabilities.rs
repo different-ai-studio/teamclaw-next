@@ -43,7 +43,6 @@ pub async fn handle(workspace: &str, arguments: &Value) -> Result<Value, String>
         None => build_overview(workspace),
         Some("channels") => build_channels(workspace),
         Some("role") => build_role(workspace),
-        Some("shortcuts") => build_shortcuts(workspace),
         Some("team_members") => build_team_members(workspace),
         Some("env_vars") => build_env_vars(workspace),
         Some("team_info") => build_team_info(workspace),
@@ -68,15 +67,6 @@ fn build_overview(workspace: &str) -> Result<Value, String> {
             unbound.push(name);
         }
     }
-
-    let personal_shortcuts_count = config
-        .get("shortcuts")
-        .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    let team_shortcuts_tree = crate::config::read_team_shortcuts(workspace).unwrap_or_default();
-    let team_shortcuts_count = crate::config::count_tree_nodes(&team_shortcuts_tree);
-    let shortcuts_total = personal_shortcuts_count + team_shortcuts_count;
 
     let env_vars = config
         .get("envVars")
@@ -111,11 +101,6 @@ fn build_overview(workspace: &str) -> Result<Value, String> {
         },
         "roles": {
             "count": role_count
-        },
-        "shortcuts": {
-            "count": shortcuts_total,
-            "personal_count": personal_shortcuts_count,
-            "team_count": team_shortcuts_count
         },
         "team_members": {
             "count": member_count
@@ -240,29 +225,6 @@ fn build_role(workspace: &str) -> Result<Value, String> {
     let roles = crate::config::read_roles(workspace)?;
     Ok(json!({
         "available_roles": roles
-    }))
-}
-
-// ─── Shortcuts ───────────────────────────────────────────────────────────────
-
-fn build_shortcuts(workspace: &str) -> Result<Value, String> {
-    let config = crate::config::read_teamclaw_config(workspace)?;
-    let personal = config
-        .get("shortcuts")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let team = crate::config::read_team_shortcuts(workspace).unwrap_or_default();
-    let team_total = crate::config::count_tree_nodes(&team);
-    Ok(json!({
-        "personal": {
-            "count": personal.len(),
-            "items": personal
-        },
-        "team": {
-            "count": team_total,
-            "items": team
-        }
     }))
 }
 

@@ -31,25 +31,42 @@ vi.mock('@/stores/workspace', () => ({
   }),
 }))
 
-vi.mock('@/lib/team-shortcuts', () => ({
-  loadTeamShortcutsFile: vi.fn(async () => []),
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: Object.assign(
+    vi.fn((selector?: any) => {
+      const state = { team: null }
+      return selector ? selector(state) : state
+    }),
+    {
+      getState: () => ({ team: null }),
+    },
+  ),
 }))
 
 describe('SidebarSecondColumn', () => {
   beforeEach(() => {
     useShortcutsStore.setState({
-      nodes: [
+      personalNodes: [
         {
           id: 'shortcut-1',
-          label: 'Docs',
-          order: 0,
+          scope: 'personal',
+          ownerMemberId: null,
+          teamId: null,
           parentId: null,
+          label: 'Docs',
+          icon: null,
+          order: 0,
           type: 'link',
           target: 'https://docs.example.com',
+          createdAt: '',
+          updatedAt: '',
         },
       ],
       teamNodes: [],
-      currentShortcutRoles: [],
+      loading: false,
+      loadedAt: null,
+      teamRoles: null,
+      shortcutVisibility: null,
     })
   })
 

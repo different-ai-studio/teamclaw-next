@@ -2,7 +2,6 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import type { TeamMember } from '../lib/git/types'
-import { useShortcutsStore } from './shortcuts'
 import { useWorkspaceStore } from './workspace'
 
 type MemberRole = 'owner' | 'manager' | 'editor' | 'viewer'
@@ -41,20 +40,6 @@ interface TeamMembersState {
   reset: () => void
 }
 
-function normalizeShortcutRoles(roles: string[] | null | undefined): string[] {
-  if (!Array.isArray(roles)) return []
-  return roles.filter((role): role is string => typeof role === 'string' && role.trim().length > 0)
-}
-
-function syncCurrentShortcutRoles(members: TeamMember[], currentNodeId: string | null): void {
-  const currentMember = currentNodeId
-    ? members.find((member) => member.nodeId === currentNodeId)
-    : undefined
-  useShortcutsStore.getState().setCurrentShortcutRoles(
-    normalizeShortcutRoles(currentMember?.shortcutsRole),
-  )
-}
-
 function getWorkspaceArgs() {
   const workspacePath = useWorkspaceStore.getState().workspacePath
   return workspacePath ? { workspacePath } : {}
@@ -74,9 +59,7 @@ export const useTeamMembersStore = create<TeamMembersState>((set, get) => ({
     try {
       const info = await invoke<{ nodeId: string }>('get_device_info')
       set({ currentNodeId: info.nodeId })
-      syncCurrentShortcutRoles(get().members, info.nodeId)
     } catch {
-      useShortcutsStore.getState().setCurrentShortcutRoles([])
       // P2P node not running yet — will retry next call
     }
   },
@@ -86,9 +69,7 @@ export const useTeamMembersStore = create<TeamMembersState>((set, get) => ({
     try {
       const members = await invoke<TeamMember[]>('unified_team_get_members', getWorkspaceArgs())
       set({ members, loading: false })
-      syncCurrentShortcutRoles(members, get().currentNodeId)
     } catch (e) {
-      useShortcutsStore.getState().setCurrentShortcutRoles([])
       set({ error: String(e), loading: false })
     }
   },
@@ -165,7 +146,6 @@ export const useTeamMembersStore = create<TeamMembersState>((set, get) => ({
     if (_unlistenApplications) {
       _unlistenApplications()
     }
-    useShortcutsStore.getState().setCurrentShortcutRoles([])
     set({
       members: [],
       myRole: null,

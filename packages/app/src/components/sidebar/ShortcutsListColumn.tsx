@@ -15,11 +15,10 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { loadTeamShortcutsFile } from '@/lib/team-shortcuts'
-import { useShortcutsStore, type ShortcutNode } from '@/stores/shortcuts'
+import { useShortcutsStore, buildTree, type ShortcutNode } from '@/stores/shortcuts'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { selectActiveTab, useTabsStore } from '@/stores/tabs'
 import { useUIStore } from '@/stores/ui'
-import { useWorkspaceStore } from '@/stores/workspace'
 
 function resolveIcon(node: ShortcutNode): LucideIcon {
   if (node.icon && node.icon in icons) return icons[node.icon as keyof typeof icons]
@@ -126,14 +125,13 @@ function SectionDivider({ label, count }: { label: string; count: number }) {
 
 export function ShortcutsListColumn() {
   const { t } = useTranslation()
-  const getPersonalTree = useShortcutsStore((s) => s.getPersonalTree)
-  const getTeamTree = useShortcutsStore((s) => s.getTeamTree)
-  const setTeamNodes = useShortcutsStore((s) => s.setTeamNodes)
-  const personalTree = getPersonalTree()
-  const teamTree = getTeamTree()
+  const personalNodes = useShortcutsStore((s) => s.personalNodes)
+  const teamNodes = useShortcutsStore((s) => s.teamNodes)
+  const loadTeamForCurrentTeam = useShortcutsStore((s) => s.loadTeamForCurrentTeam)
+  const personalTree = React.useMemo(() => buildTree(personalNodes, null), [personalNodes])
+  const teamTree = React.useMemo(() => buildTree(teamNodes, null), [teamNodes])
   const activeTab = useTabsStore(selectActiveTab)
   const tabs = useTabsStore((s) => s.tabs)
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const openSettings = useUIStore((s) => s.openSettings)
   const folderIds = React.useMemo(
     () => Array.from(collectFolderIds([...personalTree, ...teamTree])).sort(),
@@ -171,9 +169,8 @@ export function ShortcutsListColumn() {
   }
 
   const handleRefreshTeam = async () => {
-    if (!workspacePath) return
-    const nodes = await loadTeamShortcutsFile(workspacePath)
-    if (nodes) setTeamNodes(nodes)
+    const teamId = useCurrentTeamStore.getState().team?.id ?? null
+    if (teamId) await loadTeamForCurrentTeam(teamId)
   }
 
   const renderTree = (nodes: ShortcutNode[]) => (
