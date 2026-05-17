@@ -1455,6 +1455,16 @@ impl WeComGateway {
             }
         }
 
+        // Show an immediate placeholder so the sender doesn't see "no reply"
+        // while the agent thinks. WeCom's stream msgtype lets us replace the
+        // bubble's content by re-sending the same `id` — first chunk goes
+        // out with finish=false, the final reply re-uses the same id with
+        // finish=true so the placeholder is overwritten in place.
+        let stream_id = uuid::Uuid::new_v4().to_string();
+        let _ = self
+            .send_stream_chunk(&req_id, &stream_id, "💭 正在思考…", false, &ws_sink)
+            .await;
+
         // Drive a single ACP turn through amuxd — runs in parallel with the
         // attachment uploads spawned above.
         let reply = match self
@@ -1465,7 +1475,13 @@ impl WeComGateway {
             Ok(r) => r,
             Err(e) => {
                 let _ = self
-                    .send_reply(&req_id, &format!("Error: {}", e), &ws_sink)
+                    .send_stream_chunk(
+                        &req_id,
+                        &stream_id,
+                        &format!("Error: {}", e),
+                        true,
+                        &ws_sink,
+                    )
                     .await;
                 return;
             }
@@ -1542,8 +1558,19 @@ impl WeComGateway {
             eprintln!("[WeCom] record_message (reply) failed: {}", e);
         }
 
+        // Group chats prepend a plain `@userid` so the final stream chunk
+        // visually marks who the reply is for. WeCom's stream msgtype has no
+        // documented mention markup (`<@id>` rendered as literal text), so
+        // this is presentational only — no push notification, no clickable
+        // mention. Single/external-single chats stay prefix-free.
+        let final_text = if chat_type_str == "group" {
+            format!("@{} {}", userid, reply.reply_text)
+        } else {
+            reply.reply_text.clone()
+        };
+
         let _ = self
-            .send_reply(&req_id, &reply.reply_text, &ws_sink)
+            .send_stream_chunk(&req_id, &stream_id, &final_text, true, &ws_sink)
             .await;
     }
 
