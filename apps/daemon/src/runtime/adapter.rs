@@ -38,6 +38,13 @@ struct AmuxClient {
     event_tx: mpsc::Sender<amux::AcpEvent>,
     /// Pending permission requests: request_id -> oneshot sender
     pending_permissions: Rc<RefCell<HashMap<String, oneshot::Sender<bool>>>>,
+    /// Gateway runtimes have no interactive client on the other end of MQTT
+    /// to approve `requestPermission` callbacks the claude-agent-acp wrapper
+    /// fires for every tool use. Without auto-allow here the oneshot never
+    /// resolves and every tool — including the `send` MCP tool we mounted
+    /// for the gateway specifically — gets denied. Detected at construction
+    /// time from whether an MCP config path was attached (gateway-only).
+    is_gateway: bool,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -55,6 +62,35 @@ impl acp::Client for AmuxClient {
             .kind
             .map(|k| format!("{:?}", k))
             .unwrap_or_default();
+
+        // Gateway runtimes have no human/MQTT subscriber to approve, so we
+        // auto-allow here. Picks the first AllowAlways/AllowOnce option the
+        // wrapper offered; falls back to a synthetic "allow" optionId.
+        if self.is_gateway {
+            let option_id = args
+                .options
+                .iter()
+                .find(|o| {
+                    matches!(
+                        o.kind,
+                        acp::PermissionOptionKind::AllowAlways
+                            | acp::PermissionOptionKind::AllowOnce
+                    )
+                })
+                .or_else(|| args.options.first())
+                .map(|o| o.option_id.clone())
+                .unwrap_or_else(|| acp::PermissionOptionId::new("allow"));
+            info!(
+                tool_id = %tool_id,
+                tool_name = %tool_name,
+                "auto-allow gateway tool"
+            );
+            return Ok(acp::RequestPermissionResponse::new(
+                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
+                    option_id,
+                )),
+            ));
+        }
 
         // Generate a request_id for MQTT routing
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -201,6 +237,46 @@ impl acp::Client for AmuxClient {
 // ---------------------------------------------------------------------------
 // SessionUpdate -> amux::AcpEvent translation
 // ---------------------------------------------------------------------------
+
+/// Read the gateway MCP config JSON we wrote earlier and translate its
+/// `mcpServers` map into ACP-native `McpServer::Stdio` entries that can ride
+/// on `NewSessionRequest.mcp_servers`. Returns `None` when the file has no
+/// entries; bubbles up read/parse errors so callers can degrade gracefully.
+fn parse_mcp_config_to_acp(path: &std::path::Path) -> anyhow::Result<Option<Vec<acp::McpServer>>> {
+    let body = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+    let root: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
+    let Some(servers) = root.get("mcpServers").and_then(|v| v.as_object()) else {
+        return Ok(None);
+    };
+    let mut out = Vec::with_capacity(servers.len());
+    for (name, def) in servers.iter() {
+        let command = def
+            .get("command")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("mcp server '{name}' missing 'command'"))?;
+        let args: Vec<String> = def
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut stdio = acp::McpServerStdio::new(name.clone(), std::path::PathBuf::from(command));
+        if !args.is_empty() {
+            stdio = stdio.args(args);
+        }
+        out.push(acp::McpServer::Stdio(stdio));
+    }
+    if out.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(out))
+    }
+}
 
 fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
     match update {
@@ -534,13 +610,7 @@ async fn run_acp_session(
     // through to claude.
     if let Some(ref cfg_path) = mcp_config_path {
         cmd.arg("--mcp-config").arg(cfg_path);
-        // Headless gateway agents need: (a) auto-accept for built-in edits so
-        // Write/Bash don't stall on permission prompts no one can answer, and
-        // (b) explicit allowlist for the `send` MCP tool so claude doesn't
-        // silently hide it behind a default-deny gate.
-        cmd.arg("--permission-mode").arg("acceptEdits");
-        cmd.arg("--allowedTools").arg("mcp__amuxd-send__send");
-        info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config + acceptEdits + send allowlist");
+        info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config");
     }
     let mut child = cmd
         .current_dir(&worktree)
@@ -583,6 +653,7 @@ async fn run_acp_session(
     let client = AmuxClient {
         event_tx: event_tx.clone(),
         pending_permissions: pending_permissions.clone(),
+        is_gateway: mcp_config_path.is_some(),
     };
 
     // Create the ACP connection
@@ -610,6 +681,32 @@ async fn run_acp_session(
 
     // Create or resume session
     let worktree_path = std::path::PathBuf::from(&worktree);
+
+    // claude-agent-acp 0.x silently drops the claude-code `--mcp-config` CLI
+    // flag — it expects MCP servers to be declared on the ACP `session/new`
+    // payload's `mcpServers` array instead. Parse the gateway MCP config
+    // file we wrote earlier back into ACP-native `McpServerStdio` entries so
+    // the `send` tool actually lands in the spawned agent's tool list.
+    let acp_mcp_servers: Vec<acp::McpServer> = match mcp_config_path.as_ref() {
+        Some(p) => match parse_mcp_config_to_acp(p) {
+            Ok(Some(v)) => v,
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                warn!(error = %e, "MCP config parse failed; agent will spawn without send tool");
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+
+    let build_new_req = |cwd: std::path::PathBuf| -> acp::NewSessionRequest {
+        let mut req = acp::NewSessionRequest::new(cwd);
+        if !acp_mcp_servers.is_empty() {
+            req = req.mcp_servers(acp_mcp_servers.clone());
+        }
+        req
+    };
+
     let session_id = if let Some(ref resume_id) = resume_acp_session_id {
         let resume_req = acp::ResumeSessionRequest::new(
             acp::SessionId::new(resume_id.clone()),
@@ -627,7 +724,7 @@ async fn run_acp_session(
                     "ACP resume_session failed ({}), falling back to new_session", e
                 );
                 let resp = conn
-                    .new_session(acp::NewSessionRequest::new(worktree_path))
+                    .new_session(build_new_req(worktree_path.clone()))
                     .await
                     .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
                 let sid = resp.session_id.clone();
@@ -637,7 +734,7 @@ async fn run_acp_session(
         }
     } else {
         let resp = conn
-            .new_session(acp::NewSessionRequest::new(worktree_path))
+            .new_session(build_new_req(worktree_path))
             .await
             .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
         let sid = resp.session_id.clone();
