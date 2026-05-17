@@ -234,6 +234,7 @@ public final class AppOnboardingCoordinator {
             try modelContext.delete(model: Session.self)
             try modelContext.delete(model: SessionMessage.self)
             try modelContext.delete(model: SessionIdea.self)
+            try modelContext.delete(model: CachedShortcut.self)
             try modelContext.save()
         } catch {
             // Sign-out path; surface only via errorMessage on the
