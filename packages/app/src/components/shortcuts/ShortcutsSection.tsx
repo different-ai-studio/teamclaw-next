@@ -236,7 +236,11 @@ function EditDialog({ open, onOpenChange, node, onSave }: EditDialogProps) {
             <label className="text-sm font-medium">
               {t("settings.shortcuts.type", "Type")}
             </label>
-            <Select value={type} onValueChange={(v) => setType(v as NodeType)}>
+            <Select
+              value={type}
+              onValueChange={(v) => setType(v as NodeType)}
+              disabled={node !== null}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -252,6 +256,14 @@ function EditDialog({ open, onOpenChange, node, onSave }: EditDialogProps) {
                 </SelectItem>
               </SelectContent>
             </Select>
+            {node !== null && (
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "settings.shortcuts.typeImmutable",
+                  "Type can't be changed after creation. Delete and re-add to switch.",
+                )}
+              </p>
+            )}
           </div>
           {!isFolder && (
             <div className="space-y-2">
@@ -491,13 +503,8 @@ export function ShortcutsSection() {
 
   const handleSave = (data: Partial<ShortcutNode>) => {
     if (editingNode) {
-      // `type` is fixed at create time in the new API — log a warning if
-      // the dialog tried to change it (treat as a no-op for now).
-      if (data.type !== undefined && data.type !== editingNode.type) {
-        console.warn(
-          "[shortcuts] changing shortcut type is not supported; ignoring type change",
-        )
-      }
+      // `type` is fixed at create time; the edit dialog disables the Select
+      // in edit mode so `data.type` always equals editingNode.type here.
       const patch: Partial<
         Pick<ShortcutNode, "label" | "icon" | "target" | "order" | "parentId">
       > = {}
