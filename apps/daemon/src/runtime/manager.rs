@@ -773,6 +773,7 @@ impl RuntimeManager {
             title,
             None,
             None,
+            None,
         )
         .await
     }
@@ -793,20 +794,33 @@ impl RuntimeManager {
         _title: &str,
         model_override: Option<(String, String)>,
         supabase_session_id: Option<&str>,
+        working_directory: Option<&str>,
     ) -> crate::error::Result<String> {
         // Gateway sessions don't yet have a "real" workspace concept — they
         // run against a freshly-created scratch dir so the ACP process has a
         // valid cwd. Future work can wire this through `default_workspace_id`
         // on the agent's `agents` row.
-        let worktree = format!(
-            "/tmp/amuxd-gateway-{}",
-            Uuid::new_v4().to_string()[..8].to_string()
-        );
-        std::fs::create_dir_all(&worktree).map_err(|e| {
-            crate::error::AmuxError::Agent(format!(
-                "create_gateway_session: mkdir {worktree}: {e}"
-            ))
-        })?;
+        //
+        // `working_directory: Some(wd)` lets callers (e.g. cron's worktree mode)
+        // spawn the agent in a directory they already prepared — amuxd does NOT
+        // mkdir caller-supplied paths; the caller's lifecycle code owns that.
+        // `None` keeps the legacy throwaway behavior so other gateway callers
+        // (channels/acp_handle.rs etc.) are unaffected.
+        let worktree = match working_directory {
+            Some(wd) => wd.to_string(),
+            None => {
+                let scratch = format!(
+                    "/tmp/amuxd-gateway-{}",
+                    Uuid::new_v4().to_string()[..8].to_string()
+                );
+                std::fs::create_dir_all(&scratch).map_err(|e| {
+                    crate::error::AmuxError::Agent(format!(
+                        "create_gateway_session: mkdir {scratch}: {e}"
+                    ))
+                })?;
+                scratch
+            }
+        };
 
         let initial_model: Option<String> = model_override
             .as_ref()
