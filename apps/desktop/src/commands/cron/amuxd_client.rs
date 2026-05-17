@@ -13,6 +13,12 @@ pub struct PromptAwaitRequest<'a> {
     pub cmd: &'static str,
     pub session_key: &'a str,
     pub message: &'a str,
+    /// Human-readable name of the cron job. amuxd uses this to build the
+    /// Supabase session title ("Cron: <job_name>") so the desktop UI's "view
+    /// session" button on cron records resolves to a labeled chat thread.
+    /// Optional — if absent amuxd falls back to "Cron job".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_name: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29,7 +35,10 @@ pub struct ModelOverride<'a> {
 #[derive(Debug)]
 pub struct PromptAwaitResponse {
     pub text: String,
-    pub acp_session_id: String,
+    /// Supabase `sessions.id` (UUID) that the agent's AgentReply was persisted
+    /// under. The cron scheduler stamps this into `CronRunRecord.session_id`
+    /// so the UI's "view session" button can navigate to it.
+    pub session_id: String,
 }
 
 /// Convenience entry point: connect to amuxd's default sock path (resolved
@@ -90,7 +99,7 @@ pub async fn prompt_await_at(
     #[derive(serde::Deserialize)]
     struct WireResult {
         text: String,
-        acp_session_id: String,
+        session_id: String,
     }
 
     let parsed: Wire = serde_json::from_str(body.trim())
@@ -108,7 +117,7 @@ pub async fn prompt_await_at(
     }
     Ok(PromptAwaitResponse {
         text: r.text,
-        acp_session_id: r.acp_session_id,
+        session_id: r.session_id,
     })
 }
 
@@ -157,11 +166,12 @@ mod tests {
             assert_eq!(req["session_key"].as_str(), Some("cron/j1/r1"));
             assert_eq!(req["message"].as_str(), Some("hi"));
             assert_eq!(req["timeout_secs"].as_u64(), Some(300));
+            assert!(req.get("job_name").is_none());
             assert!(req.get("working_directory").is_none());
             assert!(req.get("model_override").is_none());
             serde_json::json!({
                 "ok": true,
-                "result": { "text": "hello back", "acp_session_id": "sid-1" }
+                "result": { "text": "hello back", "session_id": "sid-1" }
             })
             .to_string()
         })
@@ -173,6 +183,7 @@ mod tests {
                 cmd: "prompt-await",
                 session_key: "cron/j1/r1",
                 message: "hi",
+                job_name: None,
                 working_directory: None,
                 model_override: None,
                 timeout_secs: 300,
@@ -182,18 +193,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(resp.text, "hello back");
-        assert_eq!(resp.acp_session_id, "sid-1");
+        assert_eq!(resp.session_id, "sid-1");
     }
 
     #[tokio::test]
     async fn includes_optional_fields_when_set() {
         let sock_path = mock_server(|req| {
+            assert_eq!(req["job_name"].as_str(), Some("Nightly digest"));
             assert_eq!(req["working_directory"].as_str(), Some("/tmp/wt"));
             assert_eq!(req["model_override"]["provider"].as_str(), Some("anthropic"));
             assert_eq!(req["model_override"]["model"].as_str(), Some("sonnet"));
             serde_json::json!({
                 "ok": true,
-                "result": { "text": "ok", "acp_session_id": "sid-2" }
+                "result": { "text": "ok", "session_id": "sid-2" }
             })
             .to_string()
         })
@@ -205,6 +217,7 @@ mod tests {
                 cmd: "prompt-await",
                 session_key: "cron/j1/r1",
                 message: "hi",
+                job_name: Some("Nightly digest"),
                 working_directory: Some("/tmp/wt"),
                 model_override: Some(ModelOverride {
                     provider: "anthropic",
@@ -230,6 +243,7 @@ mod tests {
                 cmd: "prompt-await",
                 session_key: "cron/j1/r1",
                 message: "hi",
+                job_name: None,
                 working_directory: None,
                 model_override: None,
                 timeout_secs: 300,
@@ -245,7 +259,7 @@ mod tests {
         let sock_path = mock_server(|_req| {
             serde_json::json!({
                 "ok": true,
-                "result": { "text": "", "acp_session_id": "sid-3" }
+                "result": { "text": "", "session_id": "sid-3" }
             })
             .to_string()
         })
@@ -257,6 +271,7 @@ mod tests {
                 cmd: "prompt-await",
                 session_key: "cron/j1/r1",
                 message: "hi",
+                job_name: None,
                 working_directory: None,
                 model_override: None,
                 timeout_secs: 300,
@@ -276,6 +291,7 @@ mod tests {
                 cmd: "prompt-await",
                 session_key: "cron/j1/r1",
                 message: "hi",
+                job_name: None,
                 working_directory: None,
                 model_override: None,
                 timeout_secs: 300,
@@ -300,6 +316,7 @@ mod tests {
                 cmd: "prompt-await",
                 session_key: "cron/j1/r1",
                 message: "hi",
+                job_name: None,
                 working_directory: None,
                 model_override: None,
                 timeout_secs: 300,
