@@ -1,222 +1,248 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import { loadFromStorage, saveToStorage } from '@/lib/storage'
-import { appShortName } from '@/lib/build-config'
+import {
+  selectShortcuts,
+  rpcShortcutCreate,
+  rpcShortcutUpdate,
+  rpcShortcutDelete,
+  rpcShortcutBatchMove,
+  rpcShortcutSetVisibleRoles,
+  selectTeamRoles,
+  selectShortcutRoleBindings,
+  type ShortcutNode,
+  type ShortcutScope,
+  type ShortcutNodeType,
+  type TeamRole,
+} from '@/lib/shortcuts-rpc'
 import { useWorkspaceStore } from './workspace'
 
-function getWorkspaceArgs() {
-  const workspacePath = useWorkspaceStore.getState().workspacePath
-  return workspacePath ? { workspacePath } : {}
-}
+export type { ShortcutNode, TeamRole } from '@/lib/shortcuts-rpc'
 
-export interface ShortcutNode {
-  id: string
+export interface NewShortcutInput {
   label: string
-  icon?: string
-  order: number
-  parentId: string | null
-  type: 'native' | 'link' | 'folder'
+  type: ShortcutNodeType
   target: string
-  role?: string[]
-  children?: ShortcutNode[]
+  parentId: string | null
+  icon: string | null
+  order: number
 }
 
 interface ShortcutsState {
-  nodes: ShortcutNode[]
+  personalNodes: ShortcutNode[]
   teamNodes: ShortcutNode[]
-  teamLoaded: boolean
-  currentShortcutRoles: string[]
+  loading: boolean
+  loadedAt: number | null
 
-  addNode: (node: Omit<ShortcutNode, 'id'>) => string
-  updateNode: (id: string, updates: Partial<ShortcutNode>) => void
-  deleteNode: (id: string) => void
-  moveNode: (id: string, parentId: string | null, order: number) => void
-  batchMove: (moves: { id: string; parentId: string | null; order: number }[]) => void
+  teamRoles: TeamRole[] | null
+  shortcutVisibility: Map<string, string[]> | null
+
+  loadPersonal: () => Promise<void>
+  loadTeamForCurrentTeam: (teamId: string | null) => Promise<void>
+  hydrateFromCache: () => Promise<void>
+
+  addNode:    (scope: ShortcutScope, input: NewShortcutInput, teamId?: string) => Promise<string>
+  updateNode: (id: string, patch: Partial<Pick<ShortcutNode,'label'|'icon'|'target'|'order'|'parentId'>>) => Promise<void>
+  deleteNode: (id: string) => Promise<void>
+  batchMove:  (moves: Array<{ id: string; parentId: string | null; order: number }>) => Promise<void>
+
+  loadTeamRoles:    (teamId: string) => Promise<void>
+  setVisibleRoles:  (shortcutId: string, roleIds: string[]) => Promise<void>
+
   getTree: () => ShortcutNode[]
-  getPersonalTree: () => ShortcutNode[]
-  getTeamTree: () => ShortcutNode[]
   getChildren: (parentId: string | null) => ShortcutNode[]
-  setTeamNodes: (nodes: ShortcutNode[]) => void
-  setCurrentShortcutRoles: (roles: string[] | null | undefined) => void
 }
 
-const STORAGE_KEY = `${appShortName}-shortcuts`
+// ── Cache helpers (Tauri-backed JSON file, version 2) ──────────────────
 
-function loadPersistedNodes(): ShortcutNode[] {
-  const stored = loadFromStorage<{ nodes: ShortcutNode[]; version: number }>(STORAGE_KEY, { nodes: [], version: 1 })
-  return stored.nodes || []
+const CACHE_VERSION = 2
+
+function getWorkspaceArgs(): { workspacePath?: string } {
+  const wp = useWorkspaceStore.getState().workspacePath
+  return wp ? { workspacePath: wp } : {}
 }
 
-async function loadPersistedNodesAsync(): Promise<ShortcutNode[]> {
-  try {
-    const nodes = await invoke<ShortcutNode[]>('load_shortcuts', getWorkspaceArgs())
-    if (nodes && nodes.length > 0) {
-      return nodes
-    }
-  } catch {
-    // File not available or no workspace set — fall back to localStorage
+interface CacheRow {
+  id: string
+  scope: ShortcutScope
+  owner_member_id: string | null
+  team_id: string | null
+  parent_id: string | null
+  label: string
+  icon: string | null
+  order: number
+  node_type: ShortcutNodeType
+  target: string
+  created_at: string
+  updated_at: string
+  __version?: number
+}
+
+function nodeToCache(n: ShortcutNode): CacheRow {
+  return {
+    id: n.id,
+    scope: n.scope,
+    owner_member_id: n.ownerMemberId,
+    team_id: n.teamId,
+    parent_id: n.parentId,
+    label: n.label,
+    icon: n.icon,
+    order: n.order,
+    node_type: n.type,
+    target: n.target,
+    created_at: n.createdAt,
+    updated_at: n.updatedAt,
+    __version: CACHE_VERSION,
   }
-  return loadPersistedNodes()
 }
 
-function persistNodes(nodes: ShortcutNode[]): void {
-  // Write to localStorage for backwards compatibility
-  saveToStorage(STORAGE_KEY, { nodes, version: 1 })
-  // Also persist to file so the MCP server can read/write shortcuts
-  invoke('save_shortcuts', { nodes, ...getWorkspaceArgs() }).catch(() => {
-    // Ignore errors — file write is best-effort (no workspace may be set yet)
-  })
+function cacheToNode(r: CacheRow): ShortcutNode {
+  return {
+    id: r.id,
+    scope: r.scope,
+    ownerMemberId: r.owner_member_id,
+    teamId: r.team_id,
+    parentId: r.parent_id,
+    label: r.label,
+    icon: r.icon,
+    order: r.order,
+    type: r.node_type,
+    target: r.target,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
 }
 
-function generateId(): string {
-  return `shortcut-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+async function persistCache(nodes: ShortcutNode[]): Promise<void> {
+  try {
+    await invoke('save_shortcuts', {
+      ...getWorkspaceArgs(),
+      nodes: nodes.map(nodeToCache),
+    })
+  } catch { /* best-effort */ }
 }
+
+async function readCache(): Promise<ShortcutNode[]> {
+  try {
+    const raw = await invoke<CacheRow[]>('load_shortcuts', getWorkspaceArgs())
+    if (!Array.isArray(raw)) return []
+    // Drop rows that look like legacy v1 (no `scope` field) — clean break.
+    return raw.filter(r => r && (r as { scope?: unknown }).scope).map(cacheToNode)
+  } catch {
+    return []
+  }
+}
+
+// ── Tree helpers ───────────────────────────────────────────────────────
 
 function buildTree(nodes: ShortcutNode[], parentId: string | null): ShortcutNode[] {
   return nodes
-    .filter((n) => n.parentId === parentId)
+    .filter(n => n.parentId === parentId)
     .sort((a, b) => a.order - b.order)
-    .map((node) => ({
-      ...node,
-      children: buildTree(nodes, node.id),
-    }))
+    .map(n => ({ ...n, children: buildTree(nodes, n.id) }))
 }
 
-function normalizeRoles(roles: string[] | null | undefined): string[] {
-  if (!Array.isArray(roles)) return []
-  return roles.filter((role): role is string => typeof role === 'string' && role.trim().length > 0)
-}
+// ── Store ──────────────────────────────────────────────────────────────
 
-function canSeeTeamShortcut(node: ShortcutNode, currentRoles: string[]): boolean {
-  const shortcutRoles = normalizeRoles(node.role)
-  if (shortcutRoles.length === 0) return true
-  if (currentRoles.length === 0) return false
-  const currentRoleSet = new Set(currentRoles)
-  return shortcutRoles.some((role) => currentRoleSet.has(role))
-}
-
-function filterTeamTreeForRoles(tree: ShortcutNode[], currentRoles: string[]): ShortcutNode[] {
-  return tree.flatMap((node) => {
-    const filteredChildren = filterTeamTreeForRoles(node.children ?? [], currentRoles)
-    if (!canSeeTeamShortcut(node, currentRoles) && (node.type !== 'folder' || filteredChildren.length === 0)) {
-      return []
-    }
-    return [{ ...node, children: filteredChildren }]
-  })
-}
-
-export const useShortcutsStore = create<ShortcutsState>((set, get) => {
-  // Kick off async load from file; update store when result arrives
-  loadPersistedNodesAsync().then((nodes) => {
-    // Only update if the store still has the initial localStorage snapshot
-    // (i.e. no mutations have happened yet that would override the file data)
-    const current = get().nodes
-    const initial = loadPersistedNodes()
-    if (JSON.stringify(current) === JSON.stringify(initial)) {
-      set({ nodes })
-    }
-  }).catch(() => {/* ignore */})
-
-  return {
-  nodes: loadPersistedNodes(),
+export const useShortcutsStore = create<ShortcutsState>((set, get) => ({
+  personalNodes: [],
   teamNodes: [],
-  teamLoaded: false,
-  currentShortcutRoles: [],
+  loading: false,
+  loadedAt: null,
+  teamRoles: null,
+  shortcutVisibility: null,
 
-  addNode: (node) => {
-    const id = generateId()
-    const newNode: ShortcutNode = { ...node, id }
-    set((state) => {
-      const newNodes = [...state.nodes, newNode]
-      persistNodes(newNodes)
-      return { nodes: newNodes }
+  hydrateFromCache: async () => {
+    const cached = await readCache()
+    if (cached.length === 0) return
+    set({
+      personalNodes: cached.filter(n => n.scope === 'personal'),
+      teamNodes:     cached.filter(n => n.scope === 'team'),
     })
+  },
+
+  loadPersonal: async () => {
+    set({ loading: true })
+    try {
+      const rows = await selectShortcuts({ scope: 'personal' })
+      set({ personalNodes: rows, loadedAt: Date.now() })
+      await persistCache([...rows, ...get().teamNodes])
+    } finally {
+      set({ loading: false })
+    }
+  },
+
+  loadTeamForCurrentTeam: async (teamId) => {
+    if (!teamId) { set({ teamNodes: [] }); return }
+    set({ loading: true })
+    try {
+      const rows = await selectShortcuts({ scope: 'team', teamId })
+      set({ teamNodes: rows, loadedAt: Date.now() })
+      await persistCache([...get().personalNodes, ...rows])
+    } finally {
+      set({ loading: false })
+    }
+  },
+
+  addNode: async (scope, input, teamId) => {
+    const id = await rpcShortcutCreate({
+      scope,
+      teamId: scope === 'team' ? teamId : undefined,
+      label: input.label,
+      nodeType: input.type,
+      parentId: input.parentId,
+      icon: input.icon,
+      order: input.order,
+      target: input.target,
+    })
+    if (scope === 'personal') await get().loadPersonal()
+    else                       await get().loadTeamForCurrentTeam(teamId ?? null)
     return id
   },
 
-  updateNode: (id, updates) => {
-    set((state) => {
-      const newNodes = state.nodes.map((node) =>
-        node.id === id ? { ...node, ...updates } : node
-      )
-      persistNodes(newNodes)
-      return { nodes: newNodes }
-    })
+  updateNode: async (id, patch) => {
+    await rpcShortcutUpdate(id, patch)
+    const node = [...get().personalNodes, ...get().teamNodes].find(n => n.id === id)
+    if (node?.scope === 'personal') await get().loadPersonal()
+    else if (node?.scope === 'team') await get().loadTeamForCurrentTeam(node.teamId)
   },
 
-  deleteNode: (id) => {
-    set((state) => {
-      const idsToDelete = new Set<string>()
-      const collectChildren = (parentId: string) => {
-        state.nodes.forEach((node) => {
-          if (node.parentId === parentId) {
-            idsToDelete.add(node.id)
-            collectChildren(node.id)
-          }
-        })
-      }
-      idsToDelete.add(id)
-      collectChildren(id)
-
-      const newNodes = state.nodes.filter((n) => !idsToDelete.has(n.id))
-      persistNodes(newNodes)
-
-      return { nodes: newNodes }
-    })
+  deleteNode: async (id) => {
+    const node = [...get().personalNodes, ...get().teamNodes].find(n => n.id === id)
+    await rpcShortcutDelete(id)
+    if (node?.scope === 'personal') await get().loadPersonal()
+    else if (node?.scope === 'team') await get().loadTeamForCurrentTeam(node.teamId)
   },
 
-  moveNode: (id, parentId, order) => {
-    set((state) => {
-      const newNodes = state.nodes.map((node) =>
-        node.id === id ? { ...node, parentId, order } : node
-      )
-      persistNodes(newNodes)
-      return { nodes: newNodes }
-    })
+  batchMove: async (moves) => {
+    await rpcShortcutBatchMove(moves)
+    // After a batch move we don't know which scope was touched; refresh both.
+    await get().loadPersonal()
+    const teamId = get().teamNodes[0]?.teamId ?? null
+    if (teamId) await get().loadTeamForCurrentTeam(teamId)
   },
 
-  batchMove: (moves) => {
-    set((state) => {
-      const moveMap = new Map(moves.map((m) => [m.id, m]))
-      const newNodes = state.nodes.map((node) => {
-        const m = moveMap.get(node.id)
-        return m ? { ...node, parentId: m.parentId, order: m.order } : node
-      })
-      persistNodes(newNodes)
-      return { nodes: newNodes }
-    })
+  loadTeamRoles: async (teamId) => {
+    const [roles, bindings] = await Promise.all([
+      selectTeamRoles(teamId),
+      selectShortcutRoleBindings(teamId),
+    ])
+    set({ teamRoles: roles, shortcutVisibility: bindings })
+  },
+
+  setVisibleRoles: async (shortcutId, roleIds) => {
+    await rpcShortcutSetVisibleRoles(shortcutId, roleIds)
+    const teamId = get().teamNodes.find(n => n.id === shortcutId)?.teamId ?? null
+    if (teamId) await get().loadTeamRoles(teamId)
   },
 
   getTree: () => {
-    const { nodes, teamNodes, currentShortcutRoles } = get()
-    const personalTree = buildTree(nodes, null)
-    const teamTree = filterTeamTreeForRoles(buildTree(teamNodes, null), currentShortcutRoles)
-    return [...personalTree, ...teamTree]
-  },
-
-  getPersonalTree: () => {
-    const { nodes } = get()
-    return buildTree(nodes, null)
-  },
-
-  getTeamTree: () => {
-    const { teamNodes, currentShortcutRoles } = get()
-    return filterTeamTreeForRoles(buildTree(teamNodes, null), currentShortcutRoles)
+    const personal = buildTree(get().personalNodes, null)
+    const team     = buildTree(get().teamNodes, null)
+    return [...personal, ...team]
   },
 
   getChildren: (parentId) => {
-    const { nodes } = get()
-    return nodes
-      .filter((n) => n.parentId === parentId)
-      .sort((a, b) => a.order - b.order)
+    const all = [...get().personalNodes, ...get().teamNodes]
+    return all.filter(n => n.parentId === parentId).sort((a, b) => a.order - b.order)
   },
-
-  setTeamNodes: (nodes) => {
-    set({ teamNodes: nodes, teamLoaded: true })
-  },
-
-  setCurrentShortcutRoles: (roles) => {
-    set({ currentShortcutRoles: normalizeRoles(roles) })
-  },
-  }
-})
+}))

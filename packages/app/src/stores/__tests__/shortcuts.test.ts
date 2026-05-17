@@ -1,227 +1,120 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('@/lib/storage', () => ({
-  loadFromStorage: vi.fn(() => ({ nodes: [], version: 1 })),
-  saveToStorage: vi.fn(),
+const mockInvoke = vi.fn()
+vi.mock('@tauri-apps/api/core', () => ({ invoke: (...a: unknown[]) => mockInvoke(...a) }))
+
+const mockSelectShortcuts = vi.fn()
+const mockRpcCreate       = vi.fn()
+const mockRpcUpdate       = vi.fn()
+const mockRpcDelete       = vi.fn()
+const mockRpcBatchMove    = vi.fn()
+vi.mock('@/lib/shortcuts-rpc', () => ({
+  selectShortcuts:     (...a: unknown[]) => mockSelectShortcuts(...a),
+  rpcShortcutCreate:   (...a: unknown[]) => mockRpcCreate(...a),
+  rpcShortcutUpdate:   (...a: unknown[]) => mockRpcUpdate(...a),
+  rpcShortcutDelete:   (...a: unknown[]) => mockRpcDelete(...a),
+  rpcShortcutBatchMove:(...a: unknown[]) => mockRpcBatchMove(...a),
+  ShortcutsRpcError: class extends Error {},
+}))
+
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: { getState: () => ({ workspacePath: '/ws' }) },
 }))
 
 import { useShortcutsStore } from '@/stores/shortcuts'
 
-describe('shortcuts store', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useShortcutsStore.setState({ nodes: [], teamNodes: [], teamLoaded: false, currentShortcutRoles: [] })
+beforeEach(() => {
+  vi.clearAllMocks()
+  useShortcutsStore.setState({
+    personalNodes: [],
+    teamNodes: [],
+    loading: false,
+    loadedAt: null,
+    teamRoles: null,
+    shortcutVisibility: null,
   })
+})
 
-  it('starts with empty nodes', () => {
-    expect(useShortcutsStore.getState().nodes).toEqual([])
-  })
-
-  it('addNode adds a node and returns an id', () => {
-    const id = useShortcutsStore.getState().addNode({
-      label: 'Test Shortcut',
-      order: 0,
-      parentId: null,
-      type: 'link',
-      target: 'https://example.com',
-    })
-    expect(typeof id).toBe('string')
-    expect(id.startsWith('shortcut-')).toBe(true)
-    const nodes = useShortcutsStore.getState().nodes
-    expect(nodes).toHaveLength(1)
-    expect(nodes[0].label).toBe('Test Shortcut')
-  })
-
-  it('updateNode modifies existing node', () => {
-    const id = useShortcutsStore.getState().addNode({
-      label: 'Original',
-      order: 0,
-      parentId: null,
-      type: 'link',
-      target: 'https://example.com',
-    })
-    useShortcutsStore.getState().updateNode(id, { label: 'Updated' })
-    expect(useShortcutsStore.getState().nodes[0].label).toBe('Updated')
-  })
-
-  it('deleteNode removes node and its children', () => {
-    const parentId = useShortcutsStore.getState().addNode({
-      label: 'Parent',
-      order: 0,
-      parentId: null,
-      type: 'folder',
-      target: '',
-    })
-    useShortcutsStore.getState().addNode({
-      label: 'Child',
-      order: 0,
-      parentId,
-      type: 'link',
-      target: 'https://child.com',
-    })
-    expect(useShortcutsStore.getState().nodes).toHaveLength(2)
-    useShortcutsStore.getState().deleteNode(parentId)
-    expect(useShortcutsStore.getState().nodes).toHaveLength(0)
-  })
-
-  it('getTree builds nested structure', () => {
-    const parentId = useShortcutsStore.getState().addNode({
-      label: 'Folder',
-      order: 0,
-      parentId: null,
-      type: 'folder',
-      target: '',
-    })
-    useShortcutsStore.getState().addNode({
-      label: 'Link',
-      order: 0,
-      parentId,
-      type: 'link',
-      target: 'https://test.com',
-    })
-    const tree = useShortcutsStore.getState().getTree()
-    expect(tree).toHaveLength(1)
-    expect(tree[0].children).toHaveLength(1)
-    expect(tree[0].children![0].label).toBe('Link')
-  })
-
-  it('getPersonalTree returns only personal shortcuts', () => {
-    useShortcutsStore.setState({
-      nodes: [{ id: 'personal-1', label: 'P', order: 0, parentId: null, type: 'link', target: 'https://p.com' }],
-      teamNodes: [{ id: 'team-1', label: 'T', order: 0, parentId: null, type: 'link', target: 'https://t.com' }],
-    })
-    const tree = useShortcutsStore.getState().getPersonalTree()
-    expect(tree).toHaveLength(1)
-    expect(tree[0].id).toBe('personal-1')
-  })
-
-  it('getTeamTree returns only team shortcuts', () => {
-    useShortcutsStore.setState({
-      nodes: [{ id: 'personal-1', label: 'P', order: 0, parentId: null, type: 'link', target: 'https://p.com' }],
-      teamNodes: [{ id: 'team-1', label: 'T', order: 0, parentId: null, type: 'link', target: 'https://t.com' }],
-    })
-    const tree = useShortcutsStore.getState().getTeamTree()
-    expect(tree).toHaveLength(1)
-    expect(tree[0].id).toBe('team-1')
-  })
-
-  it('getTree returns merged tree with personal first', () => {
-    useShortcutsStore.setState({
-      nodes: [{ id: 'personal-1', label: 'P', order: 0, parentId: null, type: 'link', target: 'https://p.com' }],
-      teamNodes: [{ id: 'team-1', label: 'T', order: 0, parentId: null, type: 'link', target: 'https://t.com' }],
-    })
-    const tree = useShortcutsStore.getState().getTree()
-    expect(tree).toHaveLength(2)
-    expect(tree[0].id).toBe('personal-1')
-    expect(tree[1].id).toBe('team-1')
-  })
-
-  it('getTree keeps personal shortcuts while filtering team shortcuts by role', () => {
-    useShortcutsStore.setState({
-      nodes: [{ id: 'personal-1', label: 'P', order: 0, parentId: null, type: 'link', target: 'https://p.com' }],
-      teamNodes: [
-        { id: 'sales', label: 'Sales CRM', order: 0, parentId: null, type: 'link', target: 'https://sales.example.com', role: ['sales'] },
-        { id: 'support', label: 'Support Queue', order: 1, parentId: null, type: 'link', target: 'https://support.example.com', role: ['support'] },
-        { id: 'public', label: 'Handbook', order: 2, parentId: null, type: 'link', target: 'https://handbook.example.com' },
-      ],
-      teamLoaded: true,
-    })
-    useShortcutsStore.getState().setCurrentShortcutRoles(['sales'])
-
-    const tree = useShortcutsStore.getState().getTree()
-
-    expect(tree.map((node) => node.id)).toEqual(['personal-1', 'sales', 'public'])
-  })
-
-  it('setTeamNodes updates team shortcuts', () => {
-    useShortcutsStore.getState().setTeamNodes([
-      { id: 'team-1', label: 'Team', order: 0, parentId: null, type: 'link', target: 'https://team.com' }
+describe('useShortcutsStore', () => {
+  it('loadPersonal fetches via selectShortcuts and persists cache', async () => {
+    mockSelectShortcuts.mockResolvedValue([
+      { id: 'a', scope: 'personal', label: 'A', type: 'link', target: 't', parentId: null,
+        order: 0, ownerMemberId: 'm', teamId: null, icon: null, createdAt: '', updatedAt: '' },
     ])
-    expect(useShortcutsStore.getState().teamNodes).toHaveLength(1)
-    expect(useShortcutsStore.getState().teamLoaded).toBe(true)
+    mockInvoke.mockResolvedValue(undefined)
+    await useShortcutsStore.getState().loadPersonal()
+    expect(useShortcutsStore.getState().personalNodes).toHaveLength(1)
+    expect(mockInvoke).toHaveBeenCalledWith('save_shortcuts', expect.objectContaining({
+      workspacePath: '/ws',
+      nodes: expect.any(Array),
+    }))
   })
 
-  it('keeps unrestricted team shortcuts visible when current shortcut roles are empty', () => {
-    useShortcutsStore.setState({
-      nodes: [],
-      teamNodes: [
-        { id: 'missing-role', label: 'Docs', order: 0, parentId: null, type: 'link', target: 'https://docs.example.com' },
-        { id: 'empty-role', label: 'Wiki', order: 1, parentId: null, type: 'link', target: 'https://wiki.example.com', role: [] },
-      ],
-      teamLoaded: true,
+  it('addNode calls rpcShortcutCreate then re-fetches the affected scope', async () => {
+    mockRpcCreate.mockResolvedValue('new-id')
+    mockSelectShortcuts.mockResolvedValue([])
+    mockInvoke.mockResolvedValue(undefined)
+    const id = await useShortcutsStore.getState().addNode('personal', {
+      label: 'L', type: 'link', target: 't', parentId: null, icon: null, order: 0,
     })
-    useShortcutsStore.getState().setCurrentShortcutRoles([])
-
-    const tree = useShortcutsStore.getState().getTeamTree()
-
-    expect(tree.map((node) => node.id)).toEqual(['missing-role', 'empty-role'])
+    expect(id).toBe('new-id')
+    expect(mockRpcCreate).toHaveBeenCalledOnce()
+    expect(mockSelectShortcuts).toHaveBeenCalledWith({ scope: 'personal' })
   })
 
-  it('filters restricted team shortcuts by current member shortcut roles', () => {
-    useShortcutsStore.setState({
-      nodes: [],
-      teamNodes: [
-        { id: 'sales', label: 'Sales CRM', order: 0, parentId: null, type: 'link', target: 'https://sales.example.com', role: ['sales'] },
-        { id: 'support', label: 'Support Queue', order: 1, parentId: null, type: 'link', target: 'https://support.example.com', role: ['support'] },
-        { id: 'public', label: 'Handbook', order: 2, parentId: null, type: 'link', target: 'https://handbook.example.com' },
-      ],
-      teamLoaded: true,
-    })
-    useShortcutsStore.getState().setCurrentShortcutRoles(['sales'])
-
-    const tree = useShortcutsStore.getState().getTeamTree()
-
-    expect(tree.map((node) => node.id)).toEqual(['sales', 'public'])
+  it('addNode does not update state on RPC failure', async () => {
+    mockRpcCreate.mockRejectedValue(new Error('forbidden'))
+    await expect(useShortcutsStore.getState().addNode('team', {
+      label: 'L', type: 'link', target: 't', parentId: null, icon: null, order: 0,
+    })).rejects.toThrow('forbidden')
+    expect(useShortcutsStore.getState().teamNodes).toHaveLength(0)
   })
 
-  it('hides restricted team shortcuts when no current member shortcut role matches', () => {
+  it('deleteNode calls rpcShortcutDelete then re-fetches', async () => {
+    mockRpcDelete.mockResolvedValue(undefined)
+    mockSelectShortcuts.mockResolvedValue([])
     useShortcutsStore.setState({
-      nodes: [],
-      teamNodes: [
-        { id: 'sales', label: 'Sales CRM', order: 0, parentId: null, type: 'link', target: 'https://sales.example.com', role: ['sales'] },
-        { id: 'support', label: 'Support Queue', order: 1, parentId: null, type: 'link', target: 'https://support.example.com', role: ['support'] },
-      ],
-      teamLoaded: true,
+      personalNodes: [{ id: 'a', scope: 'personal', label: 'A', type: 'link', target: 't',
+        parentId: null, order: 0, ownerMemberId: 'm', teamId: null, icon: null,
+        createdAt: '', updatedAt: '' }],
     })
-    useShortcutsStore.getState().setCurrentShortcutRoles(['ops'])
-
-    const tree = useShortcutsStore.getState().getTeamTree()
-
-    expect(tree).toEqual([])
+    await useShortcutsStore.getState().deleteNode('a')
+    expect(mockRpcDelete).toHaveBeenCalledWith('a')
+    expect(mockSelectShortcuts).toHaveBeenCalled()
   })
 
-  it('keeps a restricted folder when a visible child remains', () => {
-    useShortcutsStore.setState({
-      nodes: [],
-      teamNodes: [
-        { id: 'folder', label: 'Team Tools', order: 0, parentId: null, type: 'folder', target: '', role: ['admin'] },
-        { id: 'sales-child', label: 'Sales CRM', order: 0, parentId: 'folder', type: 'link', target: 'https://sales.example.com', role: ['sales'] },
-        { id: 'support-child', label: 'Support Queue', order: 1, parentId: 'folder', type: 'link', target: 'https://support.example.com', role: ['support'] },
-      ],
-      teamLoaded: true,
-    })
-    useShortcutsStore.getState().setCurrentShortcutRoles(['sales'])
-
-    const tree = useShortcutsStore.getState().getTeamTree()
-
-    expect(tree).toHaveLength(1)
-    expect(tree[0].id).toBe('folder')
-    expect(tree[0].children?.map((node) => node.id)).toEqual(['sales-child'])
+  it('batchMove calls rpcShortcutBatchMove and re-fetches', async () => {
+    mockRpcBatchMove.mockResolvedValue(2)
+    mockSelectShortcuts.mockResolvedValue([])
+    await useShortcutsStore.getState().batchMove([
+      { id: 'a', parentId: null, order: 0 },
+      { id: 'b', parentId: 'a',  order: 1 },
+    ])
+    expect(mockRpcBatchMove).toHaveBeenCalledOnce()
   })
 
-  it('hides a restricted non-folder parent even when a visible child remains', () => {
+  it('getTree returns personal + team trees combined', () => {
     useShortcutsStore.setState({
-      nodes: [],
-      teamNodes: [
-        { id: 'admin-link', label: 'Admin Console', order: 0, parentId: null, type: 'link', target: 'https://admin.example.com', role: ['admin'] },
-        { id: 'sales-child', label: 'Sales CRM', order: 0, parentId: 'admin-link', type: 'link', target: 'https://sales.example.com', role: ['sales'] },
+      personalNodes: [
+        { id: 'p1', scope: 'personal', label: 'P1', type: 'link', target: 't', parentId: null,
+          order: 0, ownerMemberId: 'm', teamId: null, icon: null, createdAt: '', updatedAt: '' },
       ],
-      teamLoaded: true,
+      teamNodes: [
+        { id: 't1', scope: 'team', label: 'T1', type: 'link', target: 't', parentId: null,
+          order: 0, ownerMemberId: null, teamId: 'team-1', icon: null, createdAt: '', updatedAt: '' },
+      ],
     })
-    useShortcutsStore.getState().setCurrentShortcutRoles(['sales'])
+    expect(useShortcutsStore.getState().getTree()).toHaveLength(2)
+  })
 
-    const tree = useShortcutsStore.getState().getTeamTree()
-
-    expect(tree).toEqual([])
+  it('on launch cache hydration: loads cache via load_shortcuts before network', async () => {
+    mockInvoke.mockResolvedValueOnce([
+      { id: 'cache-id', scope: 'personal', label: 'Cached', node_type: 'link', target: 't',
+        parent_id: null, order: 0, owner_member_id: 'm', team_id: null, icon: null,
+        created_at: '', updated_at: '' },
+    ])
+    await useShortcutsStore.getState().hydrateFromCache()
+    expect(useShortcutsStore.getState().personalNodes).toHaveLength(1)
+    expect(useShortcutsStore.getState().personalNodes[0].label).toBe('Cached')
   })
 })
