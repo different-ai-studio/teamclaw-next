@@ -59,6 +59,12 @@ pub struct DaemonServer {
     /// `None` until `start_channels()` runs; held as `Option` so `shutdown(self)`
     /// can be `.take()`n on graceful exit.
     channel_mgr: Option<ChannelManager>,
+    /// Maps cron's logical `session_key` (e.g. `"cron/<job_id>/<run_id>"`) to
+    /// the acp_session_id of a live agent spawned for that key. With the
+    /// current "per-run new session" cron semantics, every prompt-await call
+    /// hits the "absent → create" branch, but the lookup-first shape stays
+    /// so future code can adopt session reuse without changing the handler.
+    cron_sessions: std::collections::HashMap<String, String>,
 }
 
 /// Single control command parsed off `amuxd.sock`. Variants correspond to the
@@ -88,6 +94,15 @@ enum SockCommand {
     /// JSON (`{ "ok": true, "result": ... }` or
     /// `{ "ok": false, "error": ... }`) the listener writes back.
     McpSend {
+        payload: serde_json::Value,
+        reply_tx: oneshot::Sender<String>,
+    },
+    /// Drive one ACP turn to completion for a cron-style logical session.
+    /// `payload` is the raw JSON envelope; `handle_prompt_await` parses it
+    /// and runs the turn against the local primary agent. `reply_tx`
+    /// receives a single line of JSON (`{ "ok": true, "result": { "text": ..., "acp_session_id": ... }}` or
+    /// `{ "ok": false, "error": ... }`).
+    PromptAwait {
         payload: serde_json::Value,
         reply_tx: oneshot::Sender<String>,
     },
@@ -203,6 +218,7 @@ impl DaemonServer {
             supabase,
             actor_id,
             channel_mgr: None,
+            cron_sessions: std::collections::HashMap::new(),
         })
     }
 
@@ -407,6 +423,71 @@ impl DaemonServer {
             "target": target,
             "message_sent": message.map(|s| !s.is_empty()).unwrap_or(false),
             "file_sent": file_path.is_some(),
+        }))
+    }
+
+    /// Drive one ACP turn to completion for a cron-style session_key. Looks up
+    /// (or creates) an ACP session in `cron_sessions`, calls
+    /// `RuntimeManager::send_prompt_and_await_reply`, and returns
+    /// `{text, acp_session_id}` for the listener to wrap in the
+    /// `{ok, result|error}` envelope.
+    async fn handle_prompt_await(
+        &mut self,
+        payload: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let parsed = parse_prompt_await_payload(payload)?;
+
+        // The daemon must have been onboarded (team_id present) before any
+        // cron prompt can be honored — the gateway-session model expects a
+        // team. Surface a clean error rather than panicking inside the
+        // RuntimeManager call.
+        let team_id = self
+            .config
+            .team_id
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("daemon has no team_id; run `amuxd init` first"))?;
+
+        // Look up or create the ACP session for this cron session_key.
+        let acp_sid: String = if let Some(existing) = self.cron_sessions.get(parsed.session_key) {
+            existing.clone()
+        } else {
+            // Confirm we have a local primary agent runtime.
+            let runtime_count = self.agents.lock().await.agent_count();
+            if runtime_count == 0 {
+                anyhow::bail!("no local agent runtime");
+            }
+
+            let mut mgr = self.agents.lock().await;
+            let sid = mgr
+                .create_gateway_session_with_model(
+                    &team_id,
+                    parsed.session_key,                              // logical id
+                    &format!("cron://{}", parsed.session_key),       // binding
+                    "cron",                                          // title (display only)
+                    parsed.model_override.clone(),
+                    None,                                            // supabase_session_id — cron does not bind to a chat session
+                    parsed.working_directory,                        // spawn in caller-supplied worktree if Some(_)
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
+            drop(mgr);
+
+            self.cron_sessions
+                .insert(parsed.session_key.to_string(), sid.clone());
+            sid
+        };
+
+        // Drive the turn.
+        let text = {
+            let mut mgr = self.agents.lock().await;
+            mgr.send_prompt_and_await_reply(&acp_sid, parsed.message)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+        };
+
+        Ok(serde_json::json!({
+            "text": text,
+            "acp_session_id": acp_sid,
         }))
     }
 
@@ -695,6 +776,13 @@ impl DaemonServer {
                             }
                             Some(SockCommand::McpSend { payload, reply_tx }) => {
                                 let resp = match self.handle_mcp_send(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::PromptAwait { payload, reply_tx }) => {
+                                let resp = match self.handle_prompt_await(&payload).await {
                                     Ok(v) => serde_json::json!({ "ok": true, "result": v }),
                                     Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
                                 };
@@ -3010,6 +3098,59 @@ pub fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
 /// Only WeCom defaults are wired in this commit (M1 scope); other channels
 /// return `Ok((channel, None))` so the agent can still send by providing an
 /// explicit `target` override even before per-channel dispatch lands.
+#[derive(Debug)]
+pub(crate) struct PromptAwaitPayload<'a> {
+    pub session_key: &'a str,
+    pub message: &'a str,
+    pub working_directory: Option<&'a str>,
+    pub model_override: Option<(String, String)>,
+    pub timeout_secs: u64,
+}
+
+pub(crate) fn parse_prompt_await_payload(
+    payload: &serde_json::Value,
+) -> anyhow::Result<PromptAwaitPayload<'_>> {
+    let session_key = payload
+        .get("session_key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("prompt-await: missing 'session_key'"))?;
+    if !session_key.starts_with("cron/") {
+        anyhow::bail!("prompt-await: session_key must start with 'cron/' (got {session_key:?})");
+    }
+    let message = payload
+        .get("message")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("prompt-await: missing 'message'"))?;
+    if message.is_empty() {
+        anyhow::bail!("prompt-await: 'message' must not be empty");
+    }
+    let working_directory = payload
+        .get("working_directory")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let model_override = payload
+        .get("model_override")
+        .and_then(|v| v.as_object())
+        .and_then(|m| {
+            let p = m.get("provider").and_then(|v| v.as_str())?;
+            let mo = m.get("model").and_then(|v| v.as_str())?;
+            Some((p.to_string(), mo.to_string()))
+        });
+    let timeout_secs = payload
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(300)
+        .clamp(1, 600);
+
+    Ok(PromptAwaitPayload {
+        session_key,
+        message,
+        working_directory,
+        model_override,
+        timeout_secs,
+    })
+}
+
 fn parse_binding_to_target(binding: &str) -> anyhow::Result<(&'static str, Option<String>)> {
     let (scheme, rest) = binding
         .split_once("://")
@@ -3125,6 +3266,38 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                                     Err(_) => {
                                                         warn!(
                                                             "amuxd.sock: mcp-send reply dropped"
+                                                        );
+                                                    }
+                                                }
+                                            } else if cmd == "prompt-await" {
+                                                let (reply_tx, reply_rx) = oneshot::channel();
+                                                if tx
+                                                    .send(SockCommand::PromptAwait {
+                                                        payload: v,
+                                                        reply_tx,
+                                                    })
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                                match reply_rx.await {
+                                                    Ok(body) => {
+                                                        let mut stream = reader.into_inner();
+                                                        if let Err(e) =
+                                                            stream.write_all(body.as_bytes()).await
+                                                        {
+                                                            warn!(
+                                                                "amuxd.sock: prompt-await write failed: {e}"
+                                                            );
+                                                            return;
+                                                        }
+                                                        let _ = stream.write_all(b"\n").await;
+                                                        let _ = stream.shutdown().await;
+                                                    }
+                                                    Err(_) => {
+                                                        warn!(
+                                                            "amuxd.sock: prompt-await reply dropped"
                                                         );
                                                     }
                                                 }
@@ -3266,5 +3439,59 @@ mod tests {
     #[test]
     fn parse_mention_actor_ids_handles_empty_array() {
         assert!(parse_mention_actor_ids(r#"{"mention_actor_ids":[]}"#).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod prompt_await_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_rejects_missing_session_key() {
+        let p = json!({ "message": "hi" });
+        let err = parse_prompt_await_payload(&p).unwrap_err();
+        assert!(err.to_string().contains("session_key"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_rejects_non_cron_session_key() {
+        let p = json!({ "session_key": "wecom/x/y", "message": "hi" });
+        let err = parse_prompt_await_payload(&p).unwrap_err();
+        assert!(err.to_string().contains("must start with 'cron/'"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_rejects_empty_message() {
+        let p = json!({ "session_key": "cron/j1/r1", "message": "" });
+        let err = parse_prompt_await_payload(&p).unwrap_err();
+        assert!(err.to_string().contains("message"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_accepts_minimal_valid_payload() {
+        let p = json!({ "session_key": "cron/j1/r1", "message": "hello" });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert_eq!(parsed.session_key, "cron/j1/r1");
+        assert_eq!(parsed.message, "hello");
+        assert!(parsed.working_directory.is_none());
+        assert!(parsed.model_override.is_none());
+        assert_eq!(parsed.timeout_secs, 300);
+    }
+
+    #[test]
+    fn parse_accepts_full_payload() {
+        let p = json!({
+            "session_key": "cron/j1/r1",
+            "message": "hello",
+            "working_directory": "/tmp/wt",
+            "model_override": { "provider": "anthropic", "model": "sonnet" },
+            "timeout_secs": 120
+        });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert_eq!(parsed.working_directory.as_deref(), Some("/tmp/wt"));
+        assert_eq!(parsed.model_override.as_ref().map(|m| m.0.as_str()), Some("anthropic"));
+        assert_eq!(parsed.model_override.as_ref().map(|m| m.1.as_str()), Some("sonnet"));
+        assert_eq!(parsed.timeout_secs, 120);
     }
 }

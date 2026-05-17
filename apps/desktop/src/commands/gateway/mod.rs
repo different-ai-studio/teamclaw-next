@@ -45,7 +45,7 @@ pub struct ChannelStatus {
     pub last_error: Option<String>,
 }
 
-fn sock_path() -> PathBuf {
+pub(crate) fn sock_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("amux")

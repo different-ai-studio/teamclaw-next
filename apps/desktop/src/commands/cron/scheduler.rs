@@ -13,7 +13,6 @@ use crate::commands::gateway::SessionMapping;
 use crate::process_util::CommandNoWindow;
 
 const CRON_RUN_HEARTBEAT_INTERVAL_SECS: u64 = 30;
-const OPENCODE_CONNECT_TIMEOUT_SECS: u64 = 30;
 const STALE_RUN_ERROR: &str =
     "Cron run was interrupted before completion; open the session to inspect the latest state.";
 
@@ -21,7 +20,6 @@ const STALE_RUN_ERROR: &str =
 #[derive(Debug)]
 pub struct CronScheduler {
     storage: CronStorage,
-    opencode_port: Arc<RwLock<u16>>,
     delivery: Arc<RwLock<Option<DeliveryManager>>>,
     /// Shared session mapping with gateways — used to look up existing sessions
     session_mapping: Arc<RwLock<Option<SessionMapping>>>,
@@ -36,7 +34,6 @@ impl Clone for CronScheduler {
     fn clone(&self) -> Self {
         Self {
             storage: self.storage.clone(),
-            opencode_port: Arc::clone(&self.opencode_port),
             delivery: Arc::clone(&self.delivery),
             session_mapping: Arc::clone(&self.session_mapping),
             generation: Arc::clone(&self.generation),
@@ -77,7 +74,6 @@ impl CronScheduler {
     pub fn new(storage: CronStorage) -> Self {
         Self {
             storage,
-            opencode_port: Arc::new(RwLock::new(13141)),
             delivery: Arc::new(RwLock::new(None)),
             session_mapping: Arc::new(RwLock::new(None)),
             generation: Arc::new(RwLock::new(0)),
@@ -137,55 +133,27 @@ impl CronScheduler {
     }
 
     /// Reconcile runs left in `running` by a previous app/executor process.
+    ///
+    /// After the amuxd migration we no longer probe a remote session for a
+    /// possible AgentReply text — recovery would need a new amuxd
+    /// `get-session-result` cmd, which is deferred per spec §4. So every
+    /// interrupted run is marked Stale (or Timeout if the legacy
+    /// "response was cut short" marker is present).
     pub async fn reconcile_interrupted_runs(&self) {
         let running = self.storage.get_latest_running_runs().await;
         if running.is_empty() {
             return;
         }
 
-        let port = *self.opencode_port.read().await;
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(
-                OPENCODE_CONNECT_TIMEOUT_SECS,
-            ))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
         println!(
-            "[Cron] Reconciling {} interrupted run(s) from previous executor",
+            "[Cron] Reconciling {} interrupted run(s) from previous executor (marking Stale)",
             running.len()
         );
 
         for record in running {
-            let assistant_text = if record.has_legacy_timeout_cut_short_text() {
-                None
-            } else if let Some(session_id) = record.session_id.as_deref() {
-                let expected_prompt = self
-                    .storage
-                    .get_job(&record.job_id)
-                    .await
-                    .map(|job| job.payload.message);
-                Self::fetch_last_completed_assistant_text_since(
-                    &client,
-                    port,
-                    session_id,
-                    record.started_at,
-                    expected_prompt.as_deref(),
-                )
-                .await
-            } else {
-                None
-            };
-
-            let reconciled = Self::reconcile_interrupted_run(record, assistant_text, Utc::now());
+            let reconciled = Self::reconcile_interrupted_run(record, None, Utc::now());
             self.persist_run_and_notify_ui(&reconciled).await;
         }
-    }
-
-    /// Set the OpenCode server port
-    pub async fn set_port(&self, port: u16) {
-        let mut p = self.opencode_port.write().await;
-        *p = port;
     }
 
     /// Set the delivery manager
@@ -198,114 +166,6 @@ impl CronScheduler {
     pub async fn set_session_mapping(&self, mapping: SessionMapping) {
         let mut sm = self.session_mapping.write().await;
         *sm = Some(mapping);
-    }
-
-    /// Build the standard gateway session key from a delivery config.
-    /// This is the same key format that Discord/Feishu gateways use,
-    /// so we can look up (and reuse) the user's existing chat session.
-    ///
-    /// - Discord DM target "dm:<user_id>"        -> key "discord:dm:<user_id>"
-    /// - Discord Channel target "channel:<ch_id>" -> key "discord:channel:<ch_id>"
-    /// - Feishu target "<chat_id>"                -> key "feishu:<chat_id>"
-    /// - Email                                    -> None (email uses per-execution keys)
-    fn delivery_to_session_key(delivery: &CronDelivery) -> Option<String> {
-        let target = &delivery.to;
-        match delivery.channel {
-            DeliveryChannel::Discord => {
-                if target.starts_with("dm:") {
-                    let user_id = target.strip_prefix("dm:").unwrap_or(target);
-                    Some(format!("discord:dm:{}", user_id))
-                } else if target.starts_with("channel:") {
-                    let channel_id = target.strip_prefix("channel:").unwrap_or(target);
-                    Some(format!("discord:channel:{}", channel_id))
-                } else {
-                    // Raw ID, assume DM
-                    Some(format!("discord:dm:{}", target))
-                }
-            }
-            DeliveryChannel::Feishu => Some(format!("feishu:{}", target)),
-            // Email sessions are created per-execution with unique thread keys,
-            // not per-target-address. See execute_job for details.
-            DeliveryChannel::Email => None,
-            DeliveryChannel::Kook => {
-                if target.starts_with("dm:") {
-                    let user_id = target.strip_prefix("dm:").unwrap_or(target);
-                    Some(format!("kook:dm:{}", user_id))
-                } else if target.starts_with("channel:") {
-                    let parts: Vec<&str> = target
-                        .strip_prefix("channel:")
-                        .unwrap_or(target)
-                        .splitn(2, ':')
-                        .collect();
-                    if parts.len() == 2 {
-                        Some(format!("kook:channel:{}:{}", parts[0], parts[1]))
-                    } else {
-                        Some(format!(
-                            "kook:channel:{}",
-                            target.strip_prefix("channel:").unwrap_or(target)
-                        ))
-                    }
-                } else {
-                    Some(format!("kook:dm:{}", target))
-                }
-            }
-            DeliveryChannel::Wechat => Some(format!("wechat:dm:{}", target)),
-            DeliveryChannel::Wecom => {
-                if target.starts_with("single:") {
-                    let userid = target.strip_prefix("single:").unwrap_or(target);
-                    Some(format!("wecom:dm:{}", userid))
-                } else if target.starts_with("group:") {
-                    let chatid = target.strip_prefix("group:").unwrap_or(target);
-                    Some(format!("wecom:{}", chatid))
-                } else {
-                    Some(format!("wecom:dm:{}", target))
-                }
-            }
-        }
-    }
-
-    /// Try to find an existing session for the delivery target.
-    /// Returns Some(session_id) if found, None otherwise.
-    async fn find_existing_session(&self, delivery: &CronDelivery) -> Option<String> {
-        let key = Self::delivery_to_session_key(delivery)?;
-        let sm_guard = self.session_mapping.read().await;
-        let mapping = sm_guard.as_ref()?;
-
-        let session_id = mapping.get_session(&key).await?;
-        println!(
-            "[Cron] Found existing session for key '{}': {}",
-            key, session_id
-        );
-
-        // Verify the session is not archived by querying OpenCode
-        let port = *self.opencode_port.read().await;
-        if self.is_session_archived(port, &session_id).await {
-            println!(
-                "[Cron] Session '{}' is archived, will create a new one",
-                session_id
-            );
-            return None;
-        }
-
-        println!("[Cron] Session '{}' is active, reusing it", session_id);
-        Some(session_id)
-    }
-
-    /// Store a new session back to the gateway session mapping,
-    /// so subsequent user messages in the same channel reuse it.
-    async fn store_session(&self, delivery: &CronDelivery, session_id: &str) {
-        if let Some(key) = Self::delivery_to_session_key(delivery) {
-            let sm_guard = self.session_mapping.read().await;
-            if let Some(mapping) = sm_guard.as_ref() {
-                mapping
-                    .set_session(key.clone(), session_id.to_string())
-                    .await;
-                println!(
-                    "[Cron] Stored new session '{}' under key '{}'",
-                    session_id, key
-                );
-            }
-        }
     }
 
     /// Start the scheduler background loop
@@ -543,10 +403,6 @@ impl CronScheduler {
             }
         }
 
-        let opencode_directory = wt_guard.path.as_deref();
-
-        let port = *self.opencode_port.read().await;
-
         // Helper macro: abort if scheduler was restarted (workspace switched)
         macro_rules! check_generation {
             () => {
@@ -568,172 +424,64 @@ impl CronScheduler {
         // Check before starting work
         check_generation!();
 
-        // Step 1: Determine session strategy based on delivery channel.
-        //
-        // - Discord/Feishu: Reuse the user's existing session for that channel target,
-        //   so cron tasks share the same conversation context as user messages.
-        // - Email: Always create a NEW session per execution. Email sessions are
-        //   identified by `email:thread:cron:<job_id>:<run_id>`, unique per run.
-        //   After delivery, the outgoing Message-ID is registered in SessionMapping
-        //   so user replies (via In-Reply-To) resolve to this same session.
-        // - No delivery: Always create a fresh session.
+        // Email delivery still needs a unique per-run session_key so that
+        // outgoing Message-ID/subject can be registered for inbound reply
+        // routing (see Step 3 below). The amuxd path itself uses a separate
+        // `cron/<job_id>/<run_id>` key for the ACP session.
         let is_email_delivery = matches!(
             &job.delivery,
             Some(d) if d.channel == DeliveryChannel::Email
         );
-        // For email delivery, build the unique session key upfront
         let email_session_key = if is_email_delivery {
             Some(format!("email:thread:cron:{}:{}", job.id, run_id))
         } else {
             None
         };
 
-        let (session_id, _is_new_session) = if use_worktree {
-            // Worktree mode: always create a new session bound to the worktree directory
-            match self.create_opencode_session(port, opencode_directory).await {
-                Ok(id) => {
-                    println!(
-                        "[Cron] Created worktree session '{}' for job '{}' (dir: {:?})",
-                        id, job.name, opencode_directory
-                    );
-                    (id, true)
-                }
-                Err(e) => {
-                    record.status = RunStatus::Failed;
-                    record.finished_at = Some(Utc::now());
-                    record.error = Some(format!("Failed to create session: {}", e));
-                    self.persist_run_and_notify_ui(&record).await;
-                    self.update_job_after_run(&job, started_at, &my_workspace)
-                        .await;
-                    return;
-                }
-            }
-        } else if is_email_delivery {
-            // Email: always create a new OpenCode session per execution
-            match self.create_opencode_session(port, None).await {
-                Ok(id) => {
-                    let session_key = email_session_key.as_ref().unwrap();
-                    println!(
-                        "[Cron] Created new email session '{}' for job '{}' (key: {})",
-                        id, job.name, session_key
-                    );
-                    // Store the session under the unique email thread key
-                    let sm_guard = self.session_mapping.read().await;
-                    if let Some(mapping) = sm_guard.as_ref() {
-                        mapping.set_session(session_key.clone(), id.clone()).await;
-                    }
-                    (id, true)
-                }
-                Err(e) => {
-                    record.status = RunStatus::Failed;
-                    record.finished_at = Some(Utc::now());
-                    record.error = Some(format!("Failed to create session: {}", e));
-                    self.persist_run_and_notify_ui(&record).await;
-                    self.update_job_after_run(&job, started_at, &my_workspace)
-                        .await;
-                    return;
-                }
-            }
-        } else if let Some(delivery) = &job.delivery {
-            // Discord/Feishu: Try to reuse the user's existing session
-            if let Some(existing_id) = self.find_existing_session(delivery).await {
-                println!(
-                    "[Cron] Reusing existing session '{}' for job '{}'",
-                    existing_id, job.name
-                );
-                (existing_id, false)
-            } else {
-                // No existing session — create a new one and store it
-                match self.create_opencode_session(port, None).await {
-                    Ok(id) => {
-                        println!(
-                            "[Cron] Created new session '{}' for job '{}' (no existing session found)",
-                            id, job.name
-                        );
-                        self.store_session(delivery, &id).await;
-                        (id, true)
-                    }
-                    Err(e) => {
-                        record.status = RunStatus::Failed;
-                        record.finished_at = Some(Utc::now());
-                        record.error = Some(format!("Failed to create session: {}", e));
-                        self.persist_run_and_notify_ui(&record).await;
-                        self.update_job_after_run(&job, started_at, &my_workspace)
-                            .await;
-                        return;
-                    }
-                }
-            }
-        } else {
-            // No delivery configured — always create a fresh session
-            match self.create_opencode_session(port, None).await {
-                Ok(id) => (id, true),
-                Err(e) => {
-                    record.status = RunStatus::Failed;
-                    record.finished_at = Some(Utc::now());
-                    record.error = Some(format!("Failed to create session: {}", e));
-                    self.persist_run_and_notify_ui(&record).await;
-                    self.update_job_after_run(&job, started_at, &my_workspace)
-                        .await;
-                    return;
-                }
-            }
-        };
-        record.session_id = Some(session_id.clone());
-        // Persist session_id and notify UI before long-running OpenCode work so
-        // "scheduled sessions" filtering sees this run without waiting for completion.
-        self.persist_run_and_notify_ui(&record).await;
+        // ── New cron-to-amuxd execution flow ─────────────────────────────
+        // (Replaces the OpenCode HTTP path. See spec
+        //  docs/superpowers/specs/2026-05-17-cron-to-amuxd-design.md §3.)
 
-        // Parse model override
+        let session_key = format!("cron/{}/{}", job.id, run_id);
+        let working_directory = wt_guard.path.clone(); // Option<String>
+
+        // Preserved from the OpenCode path: parse `job.payload.model` (a short
+        // name like "sonnet") into `(provider, model)`. Kept identical so any
+        // job-config docs/tests still apply.
         let model_param = job
             .payload
             .model
             .as_ref()
             .and_then(|m| crate::commands::gateway::parse_model_preference(m));
 
-        // Store model preference in SessionMapping for UI consistency
-        // This ensures the chat panel displays the correct model for cron-initiated sessions
-        if let Some(model_str) = &job.payload.model {
-            let sm_guard = self.session_mapping.read().await;
-            if let Some(mapping) = sm_guard.as_ref() {
-                // Determine which session key to use for storing model preference
-                let key_for_model: Option<String> = if let Some(key) = &email_session_key {
-                    // Email delivery: use the unique email thread key
-                    Some(key.clone())
-                } else if let Some(delivery) = &job.delivery {
-                    // Discord/Feishu: use the delivery target key
-                    Self::delivery_to_session_key(delivery)
-                } else {
-                    // No delivery: no persistent key to store preference
-                    None
-                };
+        let prompt_future = crate::commands::cron::amuxd_client::prompt_await(
+            crate::commands::cron::amuxd_client::PromptAwaitRequest {
+                cmd: "prompt-await",
+                session_key: &session_key,
+                message: &job.payload.message,
+                working_directory: working_directory.as_deref(),
+                model_override: model_param.as_ref().map(|(p, m)| {
+                    crate::commands::cron::amuxd_client::ModelOverride {
+                        provider: p,
+                        model: m,
+                    }
+                }),
+                timeout_secs: 300,
+            },
+        );
 
-                if let Some(key) = key_for_model {
-                    mapping.set_model(key.clone(), model_str.clone()).await;
-                    println!(
-                        "[Cron] Stored model preference '{}' for session key '{}'",
-                        model_str, key
-                    );
-                }
-            }
-        }
-
-        // Check before sending to OpenCode (workspace may have changed)
-        check_generation!();
-
-        // Step 2: Send message to OpenCode
-        let response_future =
-            self.send_to_opencode(port, &session_id, &job.payload.message, model_param.clone());
-        tokio::pin!(response_future);
-        let heartbeat_every = std::time::Duration::from_secs(CRON_RUN_HEARTBEAT_INTERVAL_SECS);
+        // Heartbeat continues while we await the amuxd response.
+        tokio::pin!(prompt_future);
+        let heartbeat_every =
+            std::time::Duration::from_secs(CRON_RUN_HEARTBEAT_INTERVAL_SECS);
         let mut heartbeat_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + heartbeat_every,
             heartbeat_every,
         );
 
-        let response_result = loop {
+        let inner_result = loop {
             tokio::select! {
-                result = &mut response_future => break result,
+                result = &mut prompt_future => break result,
                 _ = heartbeat_interval.tick() => {
                     record.last_heartbeat_at = Some(Utc::now());
                     self.persist_run_and_notify_ui(&record).await;
@@ -741,25 +489,37 @@ impl CronScheduler {
             }
         };
 
-        let response = match response_result {
-            Ok(text) => text,
-            Err(e) => {
-                // Fail immediately without retry. Previous retry logic was too aggressive:
-                // it created a new session on ANY error (including API key errors,
-                // model config issues, etc.), which just creates unusable sessions.
-                // If OpenCode restarts and sessions are lost, user should manually
-                // trigger the job or restart the app to reinitialize.
+        // Outer client-side timeout (330s = amuxd cap 300 + 30s slack)
+        let response_text = match tokio::time::timeout(
+            std::time::Duration::from_secs(330),
+            async { inner_result },
+        )
+        .await
+        {
+            Ok(Ok(r)) => {
+                record.session_id = Some(r.acp_session_id.clone());
+                self.persist_run_and_notify_ui(&record).await;
+                r.text
+            }
+            Ok(Err(e)) => {
                 record.status = RunStatus::Failed;
                 record.finished_at = Some(Utc::now());
-                record.error = Some(format!("Failed to send message: {}", e));
+                record.error = Some(e);
                 self.persist_run_and_notify_ui(&record).await;
-                self.update_job_after_run(&job, started_at, &my_workspace)
-                    .await;
+                self.update_job_after_run(&job, started_at, &my_workspace).await;
+                return;
+            }
+            Err(_) => {
+                record.status = RunStatus::Failed;
+                record.finished_at = Some(Utc::now());
+                record.error = Some("amuxd response exceeded 330s".into());
+                self.persist_run_and_notify_ui(&record).await;
+                self.update_job_after_run(&job, started_at, &my_workspace).await;
                 return;
             }
         };
 
-        record.response_summary = Some(Self::truncate_response_summary(&response));
+        record.response_summary = Some(Self::truncate_response_summary(&response_text));
 
         // Check before delivery (workspace may have changed)
         check_generation!();
@@ -771,7 +531,7 @@ impl CronScheduler {
                 let delivery_mgr = self.delivery.read().await;
                 if let Some(mgr) = delivery_mgr.as_ref() {
                     // Format the delivery message with job context
-                    let delivery_message = format!("[Cron: {}]\n\n{}", job.name, response);
+                    let delivery_message = format!("[Cron: {}]\n\n{}", job.name, response_text);
 
                     match mgr
                         .send_notification(&delivery.channel, &delivery.to, &delivery_message)
@@ -993,251 +753,6 @@ impl CronScheduler {
         }
     }
 
-    // ==================== OpenCode API Helpers ====================
-
-    /// Check if an OpenCode session is archived.
-    /// Returns true if archived, false if active, false on error (fail-open).
-    async fn is_session_archived(&self, port: u16, session_id: &str) -> bool {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        let url = format!("http://127.0.0.1:{}/session/{}", port, session_id);
-
-        match client.get(&url).send().await {
-            Ok(response) if response.status().is_success() => {
-                if let Ok(body) = response.json::<serde_json::Value>().await {
-                    // Session is archived if time.archived field exists
-                    body["time"]["archived"].as_i64().is_some()
-                } else {
-                    false
-                }
-            }
-            _ => false, // On error, assume session is active (fail-open)
-        }
-    }
-
-    /// Create a new OpenCode session
-    async fn create_opencode_session(
-        &self,
-        port: u16,
-        directory: Option<&str>,
-    ) -> Result<String, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        let mut url = format!("http://127.0.0.1:{}/session", port);
-        if let Some(dir) = directory {
-            url = format!("{}?directory={}", url, urlencoding::encode(dir));
-        }
-        println!("[Cron] Creating OpenCode session at: {}", url);
-
-        let response = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .body("{}")
-            .send()
-            .await
-            .map_err(|e| format!("Failed to create session: {}", e))?;
-
-        if !response.status().is_success() {
-            return Err(format!(
-                "Failed to create session: HTTP {}",
-                response.status()
-            ));
-        }
-
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        body["id"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "No session ID in response".to_string())
-    }
-
-    /// Send a message to OpenCode and wait for the response.
-    ///
-    /// Response extraction strategy:
-    /// parse the POST response (a single Message JSON) and extract
-    ///   all `type: "text"` parts. This is the complete response for this request.
-    async fn send_to_opencode(
-        &self,
-        port: u16,
-        session_id: &str,
-        content: &str,
-        model: Option<(String, String)>,
-    ) -> Result<String, String> {
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(
-                OPENCODE_CONNECT_TIMEOUT_SECS,
-            ))
-            .build()
-            .map_err(|e| format!("Failed to create client: {}", e))?;
-
-        let url = format!("http://127.0.0.1:{}/session/{}/message", port, session_id);
-        println!(
-            "[Cron] Sending to OpenCode: {} content length: {}",
-            url,
-            content.len()
-        );
-
-        let mut body = serde_json::json!({
-            "parts": [{
-                "type": "text",
-                "text": content
-            }]
-        });
-
-        if let Some((provider_id, model_id)) = &model {
-            body["model"] = serde_json::json!({
-                "providerID": provider_id,
-                "modelID": model_id
-            });
-            println!("[Cron] Using model override: {}/{}", provider_id, model_id);
-        }
-
-        let response = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send message: {}", e))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
-            return Err(format!("HTTP {} - {}", status, error_body));
-        }
-
-        let response_text = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
-
-        if response_text.is_empty() {
-            return Err("Empty response from OpenCode".to_string());
-        }
-
-        let response_json: serde_json::Value = serde_json::from_str(&response_text)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        // Check for error in the response
-        if let Some(error) = response_json["info"]["error"].as_object() {
-            let error_name = error
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("UnknownError");
-            let error_message = error
-                .get("data")
-                .and_then(|d| d.get("message"))
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error occurred");
-            return Err(format!("{}: {}", error_name, error_message));
-        }
-
-        // Extract all text parts from the response Message
-        let text = Self::extract_text_parts(&response_json);
-        println!(
-            "[Cron] POST completed, extracted {} chars from response",
-            text.len()
-        );
-
-        if text.is_empty() {
-            return Err("No text content in AI response".to_string());
-        }
-        Ok(text)
-    }
-
-    /// Extract all `type: "text"` parts from a Message JSON object.
-    fn extract_text_parts(message: &serde_json::Value) -> String {
-        let mut texts: Vec<&str> = Vec::new();
-        if let Some(parts) = message["parts"].as_array() {
-            for part in parts {
-                if part["type"].as_str() == Some("text") {
-                    if let Some(t) = part["text"].as_str() {
-                        let trimmed = t.trim();
-                        if !trimmed.is_empty() {
-                            texts.push(trimmed);
-                        }
-                    }
-                }
-            }
-        }
-        texts.join("\n\n")
-    }
-
-    /// Fetch the last completed assistant message created after the run started.
-    async fn fetch_last_completed_assistant_text_since(
-        client: &reqwest::Client,
-        port: u16,
-        session_id: &str,
-        started_at: DateTime<Utc>,
-        expected_prompt: Option<&str>,
-    ) -> Option<String> {
-        let url = format!("http://127.0.0.1:{}/session/{}/message", port, session_id);
-        let response = client.get(&url).send().await.ok()?;
-        if !response.status().is_success() {
-            return None;
-        }
-        let body = response.text().await.ok()?;
-        let messages: Vec<serde_json::Value> = serde_json::from_str(&body).ok()?;
-
-        Self::extract_completed_assistant_text_for_cron_run(&messages, started_at, expected_prompt?)
-    }
-
-    fn message_created_at_or_after(message: &serde_json::Value, started_at: DateTime<Utc>) -> bool {
-        let Some(created) = message["info"]["time"]["created"].as_i64() else {
-            return false;
-        };
-
-        if created > 10_000_000_000 {
-            created >= started_at.timestamp_millis()
-        } else {
-            created >= started_at.timestamp()
-        }
-    }
-
-    fn extract_completed_assistant_text_for_cron_run(
-        messages: &[serde_json::Value],
-        started_at: DateTime<Utc>,
-        expected_prompt: &str,
-    ) -> Option<String> {
-        let expected_prompt = expected_prompt.trim();
-        if expected_prompt.is_empty() {
-            return None;
-        }
-
-        let matching_user_ids: Vec<&str> = messages
-            .iter()
-            .filter(|m| {
-                m["info"]["role"].as_str() == Some("user")
-                    && Self::message_created_at_or_after(m, started_at)
-                    && Self::extract_text_parts(m).trim() == expected_prompt
-            })
-            .filter_map(|m| m["info"]["id"].as_str())
-            .collect();
-
-        let [user_id] = matching_user_ids.as_slice() else {
-            return None;
-        };
-
-        messages
-            .iter()
-            .rev()
-            .find(|m| {
-                m["info"]["role"].as_str() == Some("assistant")
-                    && m["info"]["parentID"].as_str() == Some(*user_id)
-                    && m["info"]["time"]["completed"].as_i64().is_some()
-                    && Self::message_created_at_or_after(m, started_at)
-            })
-            .map(Self::extract_text_parts)
-            .filter(|t| !t.is_empty())
-    }
 }
 
 // ==================== Unit Tests ====================
@@ -1274,15 +789,6 @@ mod tests {
             updated_at: now,
             last_run_at: None,
             next_run_at: None,
-        }
-    }
-
-    fn make_delivery(channel: DeliveryChannel, to: &str) -> CronDelivery {
-        CronDelivery {
-            mode: DeliveryMode::Announce,
-            channel,
-            to: to.to_string(),
-            best_effort: false,
         }
     }
 
@@ -1373,81 +879,25 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_ignores_unrelated_assistant_message_in_reused_session() {
-        let started_at = Utc.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let messages = vec![
-            serde_json::json!({
-                "info": {
-                    "id": "cron-user",
-                    "role": "user",
-                    "time": { "created": started_at.timestamp() + 1 }
-                },
-                "parts": [{ "type": "text", "text": "cron prompt" }]
-            }),
-            serde_json::json!({
-                "info": {
-                    "id": "other-user",
-                    "role": "user",
-                    "time": { "created": started_at.timestamp() + 2 }
-                },
-                "parts": [{ "type": "text", "text": "other prompt" }]
-            }),
-            serde_json::json!({
-                "info": {
-                    "id": "other-assistant",
-                    "role": "assistant",
-                    "parentID": "other-user",
-                    "time": {
-                        "created": started_at.timestamp() + 3,
-                        "completed": started_at.timestamp() + 4
-                    }
-                },
-                "parts": [{ "type": "text", "text": "other result" }]
-            }),
-        ];
-
-        let result = CronScheduler::extract_completed_assistant_text_for_cron_run(
-            &messages,
-            started_at,
-            "cron prompt",
-        );
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn reconcile_accepts_assistant_message_parented_to_matching_cron_prompt() {
-        let started_at = Utc.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let messages = vec![
-            serde_json::json!({
-                "info": {
-                    "id": "cron-user",
-                    "role": "user",
-                    "time": { "created": started_at.timestamp() + 1 }
-                },
-                "parts": [{ "type": "text", "text": "cron prompt" }]
-            }),
-            serde_json::json!({
-                "info": {
-                    "id": "cron-assistant",
-                    "role": "assistant",
-                    "parentID": "cron-user",
-                    "time": {
-                        "created": started_at.timestamp() + 2,
-                        "completed": started_at.timestamp() + 3
-                    }
-                },
-                "parts": [{ "type": "text", "text": "cron result" }]
-            }),
-        ];
-
-        let result = CronScheduler::extract_completed_assistant_text_for_cron_run(
-            &messages,
-            started_at,
-            "cron prompt",
-        );
-
-        assert_eq!(result.as_deref(), Some("cron result"));
+    fn reconcile_without_assistant_text_marks_stale() {
+        let record = CronRunRecord {
+            run_id: "r1".into(),
+            job_id: "j1".into(),
+            started_at: Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap(),
+            finished_at: None,
+            status: RunStatus::Running,
+            last_heartbeat_at: Some(Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 30).unwrap()),
+            session_id: Some("sid-1".into()),
+            response_summary: None,
+            delivery_status: None,
+            error: None,
+            worktree_path: None,
+        };
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 0, 5, 0).unwrap();
+        let out = CronScheduler::reconcile_interrupted_run(record, None, now);
+        assert_eq!(out.status, RunStatus::Stale);
+        assert_eq!(out.finished_at, Some(now));
+        assert!(out.error.is_some(), "stale runs should carry an error message");
     }
 
     // ── compute_next_run: At ─────────────────────────────────────────────────
@@ -1670,110 +1120,4 @@ mod tests {
         );
     }
 
-    // ── delivery_to_session_key ───────────────────────────────────────────────
-
-    #[test]
-    fn discord_dm_prefix_produces_correct_key() {
-        let d = make_delivery(DeliveryChannel::Discord, "dm:123456");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("discord:dm:123456".to_string())
-        );
-    }
-
-    #[test]
-    fn discord_channel_prefix_produces_correct_key() {
-        let d = make_delivery(DeliveryChannel::Discord, "channel:789");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("discord:channel:789".to_string())
-        );
-    }
-
-    #[test]
-    fn discord_raw_id_defaults_to_dm() {
-        let d = make_delivery(DeliveryChannel::Discord, "999");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("discord:dm:999".to_string())
-        );
-    }
-
-    #[test]
-    fn feishu_produces_correct_key() {
-        let d = make_delivery(DeliveryChannel::Feishu, "oc_abc123");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("feishu:oc_abc123".to_string())
-        );
-    }
-
-    #[test]
-    fn email_produces_none() {
-        let d = make_delivery(DeliveryChannel::Email, "user@example.com");
-        assert!(CronScheduler::delivery_to_session_key(&d).is_none());
-    }
-
-    #[test]
-    fn kook_dm_prefix_produces_correct_key() {
-        let d = make_delivery(DeliveryChannel::Kook, "dm:user1");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("kook:dm:user1".to_string())
-        );
-    }
-
-    #[test]
-    fn kook_channel_prefix_produces_correct_key() {
-        let d = make_delivery(DeliveryChannel::Kook, "channel:guild1:ch1");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("kook:channel:guild1:ch1".to_string())
-        );
-    }
-
-    #[test]
-    fn kook_raw_id_defaults_to_dm() {
-        let d = make_delivery(DeliveryChannel::Kook, "user42");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("kook:dm:user42".to_string())
-        );
-    }
-
-    #[test]
-    fn wechat_produces_correct_key() {
-        let d = make_delivery(DeliveryChannel::Wechat, "openid_xyz");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("wechat:dm:openid_xyz".to_string())
-        );
-    }
-
-    #[test]
-    fn wecom_single_produces_dm_key() {
-        let d = make_delivery(DeliveryChannel::Wecom, "single:uid1");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("wecom:dm:uid1".to_string())
-        );
-    }
-
-    #[test]
-    fn wecom_group_produces_group_key() {
-        let d = make_delivery(DeliveryChannel::Wecom, "group:chatid42");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("wecom:chatid42".to_string())
-        );
-    }
-
-    #[test]
-    fn wecom_raw_id_defaults_to_dm() {
-        let d = make_delivery(DeliveryChannel::Wecom, "userid99");
-        assert_eq!(
-            CronScheduler::delivery_to_session_key(&d),
-            Some("wecom:dm:userid99".to_string())
-        );
-    }
 }

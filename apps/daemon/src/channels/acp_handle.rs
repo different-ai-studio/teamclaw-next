@@ -127,6 +127,7 @@ impl AmuxdAcpHandle {
                 "Gateway session",
                 model_arg,
                 supabase_session_id.as_deref(),
+                None,
             )
             .await
             .map_err(|e| AcpError::Create(e.to_string()))?
