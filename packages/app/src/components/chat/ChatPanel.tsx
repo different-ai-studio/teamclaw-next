@@ -13,6 +13,7 @@ import { useProviderStore, type ModelOption } from "@/stores/provider";
 import { useTeamModeStore } from "@/stores/team-mode";
 import { useSuggestionsStore } from "@/stores/suggestions";
 import { useShortcutsStore } from "@/stores/shortcuts";
+import { useCurrentTeamStore } from "@/stores/current-team";
 import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-config";
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
 import { useAuthStore } from "@/stores/auth-store";
@@ -533,9 +534,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(async () => {
           console.log('[TeamShortcuts] _meta/shortcuts.json changed, reloading');
-          const { loadTeamShortcutsFile } = await import('@/lib/team-shortcuts');
-          const nodes = await loadTeamShortcutsFile(workspacePath);
-          useShortcutsStore.getState().setTeamNodes(nodes || []);
+          const teamId = useCurrentTeamStore.getState().team?.id ?? null;
+          if (teamId) await useShortcutsStore.getState().loadTeamForCurrentTeam(teamId);
         }, 500);
       });
     })();
