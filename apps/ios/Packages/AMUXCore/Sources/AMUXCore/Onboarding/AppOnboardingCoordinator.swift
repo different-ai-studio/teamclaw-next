@@ -184,11 +184,24 @@ public final class AppOnboardingCoordinator {
         await actorStore.reload()
         await connectedAgentsStore.reload()
 
+        let shortcutsStore: ShortcutsStore? = {
+            guard let repo = try? SupabaseShortcutsRepository() else { return nil }
+            let store = ShortcutsStore(
+                teamID: ctx.team.id,
+                repository: repo,
+                modelContext: modelContext
+            )
+            store.hydrateFromCache()
+            return store
+        }()
+        if let shortcutsStore { Task { await shortcutsStore.reload() } }
+
         teamRuntimeContext = TeamRuntimeContext(
             team: ctx.team,
             memberActorID: ctx.memberActorID,
             actorStore: actorStore,
             connectedAgentsStore: connectedAgentsStore,
+            shortcutsStore: shortcutsStore,
             sessionIDsRepo: try? SupabaseSessionIDsRepository(),
             sessionsRepo: try? SupabaseSessionsRepository(),
             agentRuntimesRepo: try? SupabaseAgentRuntimesRepository(),
@@ -221,6 +234,7 @@ public final class AppOnboardingCoordinator {
             try modelContext.delete(model: Session.self)
             try modelContext.delete(model: SessionMessage.self)
             try modelContext.delete(model: SessionIdea.self)
+            try modelContext.delete(model: CachedShortcut.self)
             try modelContext.save()
         } catch {
             // Sign-out path; surface only via errorMessage on the

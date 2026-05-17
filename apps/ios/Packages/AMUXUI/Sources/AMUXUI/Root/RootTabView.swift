@@ -62,7 +62,7 @@ public struct RootTabView: View {
                             navigationPath: $sessionsPath,
                             connectedAgentsStore: teamRuntime?.connectedAgentsStore,
                             actorStore: teamRuntime?.actorStore,
-                            onSignOut: onSignOut)
+                            shortcutsStore: teamRuntime?.shortcutsStore)
             }
             Tab(IdeaUIPresentation.pluralTitle, systemImage: IdeaUIPresentation.systemImage, value: AppTab.ideas) {
                 IdeasTab(mqtt: mqtt,
@@ -83,6 +83,7 @@ public struct RootTabView: View {
                                currentActorID: currentActorID,
                                store: actorStore,
                                connectedAgentsStore: teamRuntime?.connectedAgentsStore,
+                               onSignOut: onSignOut,
                                showInvite: $showInviteAfterReminder)
                 } else {
                     ContentUnavailableView("No Team Selected",

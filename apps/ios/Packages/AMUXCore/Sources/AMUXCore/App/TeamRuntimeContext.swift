@@ -20,6 +20,7 @@ public struct TeamRuntimeContext {
 
     public let actorStore: ActorStore
     public let connectedAgentsStore: ConnectedAgentsStore
+    public let shortcutsStore: ShortcutsStore?
 
     public let sessionIDsRepo: SupabaseSessionIDsRepository?
     public let sessionsRepo: SupabaseSessionsRepository?
@@ -32,6 +33,7 @@ public struct TeamRuntimeContext {
         memberActorID: String,
         actorStore: ActorStore,
         connectedAgentsStore: ConnectedAgentsStore,
+        shortcutsStore: ShortcutsStore?,
         sessionIDsRepo: SupabaseSessionIDsRepository?,
         sessionsRepo: SupabaseSessionsRepository?,
         agentRuntimesRepo: SupabaseAgentRuntimesRepository?,
@@ -42,6 +44,7 @@ public struct TeamRuntimeContext {
         self.memberActorID = memberActorID
         self.actorStore = actorStore
         self.connectedAgentsStore = connectedAgentsStore
+        self.shortcutsStore = shortcutsStore
         self.sessionIDsRepo = sessionIDsRepo
         self.sessionsRepo = sessionsRepo
         self.agentRuntimesRepo = agentRuntimesRepo

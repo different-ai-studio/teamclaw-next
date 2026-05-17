@@ -10,12 +10,14 @@ public struct MembersTab: View {
     let currentActorID: String?
     let store: ActorStore
     let connectedAgentsStore: ConnectedAgentsStore?
+    let onSignOut: (() -> Void)?
     /// One-shot trigger from the parent (e.g. the zero-agent reminder) to
     /// open the invite sheet without a toolbar tap. Toggled back to false
     /// after firing so subsequent triggers re-fire cleanly.
     @Binding var externalInviteTrigger: Bool
 
     @State private var showInvite   = false
+    @State private var showSettings = false
 
     public init(pairing: PairingManager,
                 mqtt: MQTTService,
@@ -25,6 +27,7 @@ public struct MembersTab: View {
                 currentActorID: String? = nil,
                 store: ActorStore,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
+                onSignOut: (() -> Void)? = nil,
                 showInvite: Binding<Bool> = .constant(false)) {
         self.pairing = pairing
         self.mqtt = mqtt
@@ -34,6 +37,7 @@ public struct MembersTab: View {
         self.currentActorID = currentActorID
         self.store = store
         self.connectedAgentsStore = connectedAgentsStore
+        self.onSignOut = onSignOut
         self._externalInviteTrigger = showInvite
     }
 
@@ -52,6 +56,16 @@ public struct MembersTab: View {
                 .navigationTitle("Actors")
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape")
+                                .font(.title3)
+                                .accessibilityHidden(true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Settings")
+                        .accessibilityIdentifier("members.settingsButton")
+                    }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button { showInvite = true } label: {
                             Image(systemName: "person.badge.plus")
@@ -67,6 +81,11 @@ public struct MembersTab: View {
                 }
                 .sheet(isPresented: $showInvite) {
                     MemberInviteSheet(store: store)
+                }
+                .sheet(isPresented: $showSettings) {
+                    SettingsView(connectedAgentsStore: connectedAgentsStore,
+                                 activeTeam: activeTeam,
+                                 onSignOut: onSignOut)
                 }
                 .onChange(of: externalInviteTrigger) { _, newValue in
                     guard newValue else { return }
