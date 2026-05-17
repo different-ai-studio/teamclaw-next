@@ -1,0 +1,45 @@
+edition: 3.0.0
+name: teamclaw-fc
+access: default
+
+resources:
+  teamclaw-sync:
+    component: fc3
+    props:
+      region: cn-shenzhen
+      functionName: teamclaw-sync
+      runtime: nodejs20
+      handler: index.handler
+      timeout: 30
+      memorySize: 256
+      logConfig: auto
+      code: ./
+      environmentVariables:
+        ACCESS_KEY_ID: ${env('ACCESS_KEY_ID')}
+        ACCESS_KEY_SECRET: ${env('ACCESS_KEY_SECRET')}
+        ROLE_ARN: ${env('ROLE_ARN')}
+        BUCKET: teamclaw-team
+        REGION: cn-shenzhen
+        ENDPOINT: https://oss-cn-shenzhen.aliyuncs.com
+        LITELLM_URL: ${env('LITELLM_URL')}
+        LITELLM_MASTER_KEY: ${env('LITELLM_MASTER_KEY')}
+        LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD: ${env('LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD')}
+        CODEUP_ORG_ID: ${env('CODEUP_ORG_ID')}
+        CODEUP_PAT: ${env('CODEUP_PAT')}
+        CODEUP_BOT_USERNAME: ${env('CODEUP_BOT_USERNAME')}
+        PUSH_WEBHOOK_SECRET: ${env('PUSH_WEBHOOK_SECRET')}
+        SUPABASE_URL: ${env('SUPABASE_URL')}
+        SUPABASE_SERVICE_ROLE_KEY: ${env('SUPABASE_SERVICE_ROLE_KEY')}
+        APNS_PRIVATE_KEY_P8: ${env('APNS_PRIVATE_KEY_P8')}
+        APNS_KEY_ID: ${env('APNS_KEY_ID')}
+        APNS_TEAM_ID: ${env('APNS_TEAM_ID')}
+        APNS_TOPIC: ${env('APNS_TOPIC')}
+        APNS_ENV: ${env('APNS_ENV')}
+      triggers:
+        - triggerName: http-trigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - POST
+              - OPTIONS
