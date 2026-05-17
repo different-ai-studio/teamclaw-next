@@ -97,6 +97,7 @@ impl EmailDb {
                 message_id TEXT NOT NULL,
                 subject TEXT,
                 session_id TEXT,
+                binding TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(account_key, message_id)
             )",
@@ -104,6 +105,26 @@ impl EmailDb {
         )
         .await
         .map_err(|e| format!("Failed to create message_threads table: {}", e))?;
+
+        // Idempotent column add for databases created before the binding
+        // column existed (CREATE TABLE IF NOT EXISTS leaves old schemas
+        // untouched). ALTER ... ADD COLUMN errors out on existing column,
+        // so we swallow that specific error and treat other failures fatal.
+        match conn
+            .execute("ALTER TABLE message_threads ADD COLUMN binding TEXT", ())
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column name") {
+                    return Err(format!(
+                        "Failed to add binding column to message_threads: {}",
+                        msg
+                    ));
+                }
+            }
+        }
 
         // Indexes for performance
         conn.execute(
@@ -267,16 +288,18 @@ impl EmailDb {
     // Message Threads (Message-ID Index)
     // ──────────────────────────────────────────────────────────────────────
 
-    /// Get session ID for a Message-ID (email threading)
+    /// Look up the `(session_id, binding)` pair previously stored for a
+    /// Message-ID. Returns `None` if the message is unknown, or
+    /// `Some((sid, None))` when the row pre-dates the `binding` column.
     pub async fn get_session_by_message_id(
         &self,
         account_key: &str,
         message_id: &str,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<(String, Option<String>)>, String> {
         let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
-                "SELECT session_id FROM message_threads 
+                "SELECT session_id, binding FROM message_threads
                  WHERE account_key = ?1 AND message_id = ?2",
                 params![account_key.to_string(), message_id.to_string()],
             )
@@ -288,32 +311,41 @@ impl EmailDb {
             .await
             .map_err(|e| format!("Failed to read message thread row: {}", e))?
         {
-            return Ok(row.get::<String>(0).ok());
+            let sid: Option<String> = row.get::<String>(0).ok();
+            let binding: Option<String> = row.get::<String>(1).ok().filter(|b| !b.is_empty());
+            return Ok(sid.map(|s| (s, binding)));
         }
 
         Ok(None)
     }
 
-    /// Store Message-ID to session mapping
+    /// Store / upsert a Message-ID → (session_id, binding) mapping. Called
+    /// once for each inbound email we persist and once for each outbound
+    /// reply we send; storing both lets future inbound emails in the same
+    /// thread find the right supabase session by either side of the
+    /// `In-Reply-To` / `References` chain.
     pub async fn store_message_thread(
         &self,
         account_key: &str,
         message_id: &str,
         subject: Option<&str>,
         session_id: Option<&str>,
+        binding: Option<&str>,
     ) -> Result<(), String> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT INTO message_threads (account_key, message_id, subject, session_id)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO message_threads (account_key, message_id, subject, session_id, binding)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(account_key, message_id) DO UPDATE SET
                 subject = ?3,
-                session_id = COALESCE(?4, session_id)",
+                session_id = COALESCE(?4, session_id),
+                binding = COALESCE(?5, binding)",
             params![
                 account_key.to_string(),
                 message_id.to_string(),
                 subject.map(|s| s.to_string()).unwrap_or_default(),
                 session_id.map(|s| s.to_string()).unwrap_or_default(),
+                binding.map(|s| s.to_string()).unwrap_or_default(),
             ],
         )
         .await
@@ -344,17 +376,20 @@ impl EmailDb {
         Ok(())
     }
 
-    /// Search for session by subject (for email threading when Message-ID is missing)
+    /// Subject-based fallback when In-Reply-To / References are missing.
+    /// Returns `(session_id, binding)` for the most recent thread that
+    /// matches the normalised subject. `binding` is `None` for rows
+    /// pre-dating the column.
     pub async fn find_session_by_subject(
         &self,
         account_key: &str,
         subject: &str,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<(String, Option<String>)>, String> {
         let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
-                "SELECT session_id FROM message_threads 
-                 WHERE account_key = ?1 AND subject = ?2 
+                "SELECT session_id, binding FROM message_threads
+                 WHERE account_key = ?1 AND subject = ?2
                  AND session_id IS NOT NULL
                  ORDER BY created_at DESC LIMIT 1",
                 params![account_key.to_string(), subject.to_string()],
@@ -367,7 +402,9 @@ impl EmailDb {
             .await
             .map_err(|e| format!("Failed to read message thread row: {}", e))?
         {
-            return Ok(row.get::<String>(0).ok());
+            let sid: Option<String> = row.get::<String>(0).ok();
+            let binding: Option<String> = row.get::<String>(1).ok().filter(|b| !b.is_empty());
+            return Ok(sid.map(|s| (s, binding)));
         }
 
         Ok(None)

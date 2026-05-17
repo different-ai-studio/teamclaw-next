@@ -1506,11 +1506,13 @@ fn build_thread_session_key(email: &EmailMessage) -> String {
     format!("email:thread:uid:{}", email.uid)
 }
 
-/// Resolve the email "thread key" — used to look up an existing
-/// session via the local `email_db` thread index. Returns the thread key
-/// (e.g. "email:thread:<message-id>") on a hit so that callers can avoid
-/// inventing a brand new key for an ongoing conversation.
-fn resolve_email_session_key_sync(
+/// Resolve a prior thread → session binding for an inbound email so the
+/// follow-up reply lands in the *same* supabase session instead of a new
+/// one per message. Returns `Some(binding)` if any previously persisted
+/// Message-ID in this email's `In-Reply-To` / `References` chain (or a
+/// subject-based fallback) was tagged with a binding; falls back to
+/// `None` so the caller derives a fresh binding from the current message.
+fn resolve_email_session_binding_sync(
     _gateway: &EmailGateway,
     email: &EmailMessage,
     rt_handle: &tokio::runtime::Handle,
@@ -1526,49 +1528,42 @@ fn resolve_email_session_key_sync(
     lookup_ids.sort();
     lookup_ids.dedup();
 
-    let session_key = rt.block_on(async move {
-        // Look up local email database for thread → session associations.
-        // (SessionMapping's per-process email indexes have been removed; we
-        // now rely solely on the persistent email_db.)
+    let resolved = rt.block_on(async move {
         if let Some(db) = email_db {
-            // Try to find session by Message-ID (from In-Reply-To and References headers)
+            // Try to find a stored binding via In-Reply-To / References chain.
             for message_id in &lookup_ids {
-                if let Ok(Some(session_id)) =
+                if let Ok(Some((session_id, binding))) =
                     db.get_session_by_message_id(account_key, message_id).await
                 {
-                    let key = format!("email:thread:{}", message_id);
                     println!(
-                        "[Email] Session resolved by message-id index (database): {} -> session {}",
-                        message_id, session_id
+                        "[Email] Session resolved by message-id index: {} -> session {} (binding={:?})",
+                        message_id, session_id, binding
                     );
-                    return Some(key);
+                    if binding.is_some() {
+                        return binding;
+                    }
                 }
             }
 
-            // Fallback: try to find by subject (for emails without proper threading headers)
+            // Subject-based fallback for clients that strip threading headers.
             if reply_like_subject && !normalized_subject.is_empty() {
-                if let Ok(Some(session_id)) = db
+                if let Ok(Some((session_id, binding))) = db
                     .find_session_by_subject(account_key, &normalized_subject)
                     .await
                 {
-                    // Build a thread key from the current message's ID
-                    let msg_id = normalize_message_id(&email.message_id);
-                    let key = if !msg_id.is_empty() {
-                        format!("email:thread:{}", msg_id)
-                    } else {
-                        format!("email:thread:uid:{}", email.uid)
-                    };
                     println!(
-                        "[Email] Session resolved by subject index (database): {} -> session {}",
-                        normalized_subject, session_id
+                        "[Email] Session resolved by subject index: {} -> session {} (binding={:?})",
+                        normalized_subject, session_id, binding
                     );
-                    return Some(key);
+                    if binding.is_some() {
+                        return binding;
+                    }
                 }
             }
         }
         None
     });
-    Ok(session_key)
+    Ok(resolved)
 }
 
 fn process_and_reply_sync(
@@ -1581,9 +1576,8 @@ fn process_and_reply_sync(
     account_key: &str,
     pending_questions: &Arc<super::PendingQuestionStore>,
 ) -> Result<(), String> {
-    let _session_key =
-        resolve_email_session_key_sync(gateway, email, rt_handle, email_db, account_key)?
-            .unwrap_or_else(|| build_thread_session_key(email));
+    let resolved_binding =
+        resolve_email_session_binding_sync(gateway, email, rt_handle, email_db, account_key)?;
 
     // Build message content — send only the email body text to amuxd ACP.
     let message_content = if email.body_text.is_empty() {
@@ -1664,11 +1658,22 @@ fn process_and_reply_sync(
     }
 
     // ============ amuxd ACP + ChannelStore path ============
-    let thread_key = build_thread_session_key(email)
-        .strip_prefix("email:thread:")
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| email.uid.to_string());
-    let binding = crate::binding::email_thread(account_key, &thread_key);
+    //
+    // If the inbound email is part of an existing thread we've seen before
+    // (`In-Reply-To` / `References` matched a Message-ID we persisted, or
+    // the subject matches a recent thread), reuse the original thread's
+    // binding so `ensure_session` joins the same supabase session row.
+    // First-time threads fall back to a binding derived from the current
+    // message's id.
+    let binding = if let Some(b) = resolved_binding.clone() {
+        b
+    } else {
+        let thread_key = build_thread_session_key(email)
+            .strip_prefix("email:thread:")
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| email.uid.to_string());
+        crate::binding::email_thread(account_key, &thread_key)
+    };
     let urn = crate::binding::urn_email_user(&email.from);
     let sender_display = if email.from.is_empty() {
         "Email user".to_string()
@@ -1773,6 +1778,7 @@ fn process_and_reply_sync(
     let outgoing_message_id_clone = outgoing_message_id.clone();
     let incoming_message_id_for_db = incoming_message_id.clone();
     let subject_for_db = email.subject.clone();
+    let binding_for_db = binding.clone();
 
     // Store email indexes in email_db so subsequent replies in the same thread
     // can be resolved back to this session_id without a Supabase round-trip.
@@ -1785,6 +1791,7 @@ fn process_and_reply_sync(
                         &incoming_message_id_for_db,
                         Some(&subject_for_db),
                         Some(&session_id_clone),
+                        Some(&binding_for_db),
                     )
                     .await
                 {
@@ -1802,6 +1809,7 @@ fn process_and_reply_sync(
                         &outgoing_message_id_clone,
                         Some(&subject_for_db),
                         Some(&session_id_clone),
+                        Some(&binding_for_db),
                     )
                     .await
                 {
