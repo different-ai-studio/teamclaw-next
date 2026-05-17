@@ -15,7 +15,7 @@ create table public.device_push_tokens (
   revoked_at   timestamptz,
   unique (user_id, device_id, provider)
 );
-create index device_push_tokens_user_active_idx
+create index if not exists device_push_tokens_user_active_idx
   on public.device_push_tokens (user_id) where revoked_at is null;
 
 create table public.notification_prefs (
@@ -23,7 +23,7 @@ create table public.notification_prefs (
   enabled       boolean not null default true,
   dnd_start_min smallint check (dnd_start_min between 0 and 1439),
   dnd_end_min   smallint check (dnd_end_min between 0 and 1439),
-  dnd_tz        text default 'Asia/Shanghai',
+  dnd_tz        text not null default 'Asia/Shanghai',
   updated_at    timestamptz not null default now()
 );
 
@@ -45,7 +45,7 @@ create table public.push_idempotency (
   message_id uuid primary key references public.messages(id) on delete cascade,
   claimed_at timestamptz not null default now()
 );
-create index push_idempotency_claimed_at_idx
+create index if not exists push_idempotency_claimed_at_idx
   on public.push_idempotency(claimed_at);
 
 -- RLS: every table is owner-only for authenticated reads/writes.
