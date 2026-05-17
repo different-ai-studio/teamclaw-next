@@ -52,6 +52,22 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
+  AMUX:
+    build:
+      targets:
+        AMUX: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AMUXUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
   AMUXUITests:
     build:
       targets:
