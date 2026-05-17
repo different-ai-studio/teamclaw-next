@@ -184,11 +184,24 @@ public final class AppOnboardingCoordinator {
         await actorStore.reload()
         await connectedAgentsStore.reload()
 
+        let shortcutsStore: ShortcutsStore? = {
+            guard let repo = try? SupabaseShortcutsRepository() else { return nil }
+            let store = ShortcutsStore(
+                teamID: ctx.team.id,
+                repository: repo,
+                modelContext: modelContext
+            )
+            store.hydrateFromCache()
+            return store
+        }()
+        if let shortcutsStore { Task { await shortcutsStore.reload() } }
+
         teamRuntimeContext = TeamRuntimeContext(
             team: ctx.team,
             memberActorID: ctx.memberActorID,
             actorStore: actorStore,
             connectedAgentsStore: connectedAgentsStore,
+            shortcutsStore: shortcutsStore,
             sessionIDsRepo: try? SupabaseSessionIDsRepository(),
             sessionsRepo: try? SupabaseSessionsRepository(),
             agentRuntimesRepo: try? SupabaseAgentRuntimesRepository(),
