@@ -110,8 +110,7 @@ Thumbs.db
 docs/superpowers/
 
 # Internal planning documents
-docs/plans/
-docs/*
+docs/superpowers/*
 
 # Scripts
 scripts/ship-pr.sh

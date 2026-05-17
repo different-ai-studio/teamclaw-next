@@ -30,6 +30,7 @@ import { createWecomActions } from './channels/wecom'
 import { createWechatActions } from './channels/wechat'
 import {
   listChannels,
+  loadChannelConfig,
   AmuxdUnreachableError,
   type ChannelStatus as AmuxdChannelStatus,
 } from '@/lib/amuxd-channels'
@@ -173,23 +174,37 @@ export const useChannelsStore = create<ChannelsState>((set) => ({
   loadConfig: async () => {
     set({ isLoading: true, error: null })
     try {
-      const list = await listChannels()
-      // amuxd does not expose persisted config payloads, only status. Seed
-      // the per-platform config slots with defaults so the UI can still
-      // render forms; users overwrite them with `save*Config`.
+      const [
+        list,
+        discordConfig,
+        feishuConfig,
+        emailConfig,
+        kookConfig,
+        wecomConfig,
+        wechatConfig,
+      ] = await Promise.all([
+        listChannels(),
+        loadChannelConfig<DiscordConfig>('discord'),
+        loadChannelConfig<FeishuConfig>('feishu'),
+        loadChannelConfig<EmailConfig>('email'),
+        loadChannelConfig<KookConfig>('kook'),
+        loadChannelConfig<WeComConfig>('wecom'),
+        loadChannelConfig<WeChatConfig>('wechat'),
+      ])
       set({
-        discord: defaultDiscordConfig,
+        discord: { ...defaultDiscordConfig, ...discordConfig },
         gatewayStatus: discordStatus(list),
-        feishu: defaultFeishuConfig,
+        feishu: { ...defaultFeishuConfig, ...feishuConfig },
         feishuGatewayStatus: feishuStatus(list),
-        email: defaultEmailConfig,
+        email: { ...defaultEmailConfig, ...emailConfig },
         emailGatewayStatus: emailStatus(list),
-        kook: defaultKookConfig,
+        kook: { ...defaultKookConfig, ...kookConfig },
         kookGatewayStatus: kookStatus(list),
-        wecom: defaultWeComConfig,
+        wecom: { ...defaultWeComConfig, ...wecomConfig },
         wecomGatewayStatus: wecomStatus(list),
-        wechat: defaultWeChatConfig,
+        wechat: { ...defaultWeChatConfig, ...wechatConfig },
         wechatGatewayStatus: wechatStatus(list),
+        error: null,
         isLoading: false,
         hasChanges: false,
         feishuHasChanges: false,
@@ -270,6 +285,7 @@ export const useChannelsStore = create<ChannelsState>((set) => ({
         kookGatewayStatus: kookStatus(list),
         wecomGatewayStatus: wecomStatus(list),
         wechatGatewayStatus: wechatStatus(list),
+        error: null,
       })
     } catch (error) {
       console.error('[AutoStart] Failed to fetch channel statuses from amuxd:', error)
@@ -291,6 +307,7 @@ export const useChannelsStore = create<ChannelsState>((set) => ({
         kookGatewayStatus: kookStatus(list),
         wecomGatewayStatus: wecomStatus(list),
         wechatGatewayStatus: wechatStatus(list),
+        error: null,
       })
     } catch {
       // Ignore — keep-alive failures shouldn't surface UI errors on every tick.

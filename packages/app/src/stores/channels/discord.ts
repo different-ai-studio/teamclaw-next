@@ -6,6 +6,7 @@ import type {
 import { defaultDiscordConfig } from '../channels-types'
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -45,9 +46,12 @@ export function createDiscordActions(set: ChannelsSet) {
     loadConfig: async () => {
       set({ isLoading: true, error: null })
       try {
-        const list = await listChannels()
+        const [list, storedConfig] = await Promise.all([
+          listChannels(),
+          loadChannelConfig<DiscordConfig>('discord'),
+        ])
         set({
-          discord: defaultDiscordConfig,
+          discord: { ...defaultDiscordConfig, ...storedConfig },
           gatewayStatus: statusFor(list),
           isLoading: false,
           hasChanges: false,

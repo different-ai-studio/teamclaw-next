@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { listChannels, AmuxdUnreachableError } from "../amuxd-channels";
+import {
+  listChannels,
+  loadChannelConfig,
+  saveChannelConfig,
+  AmuxdUnreachableError,
+} from "../amuxd-channels";
 import * as tauri from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -25,5 +30,42 @@ describe("amuxd-channels", () => {
     ]);
     const result = await listChannels();
     expect(result[0].platform).toBe("discord");
+  });
+
+  it("maps WeCom config to daemon field names on save", async () => {
+    vi.mocked(tauri.invoke).mockResolvedValue(undefined);
+
+    await saveChannelConfig("wecom", {
+      enabled: true,
+      botId: "bot",
+      secret: "sec",
+      encodingAesKey: "aes",
+    });
+
+    expect(tauri.invoke).toHaveBeenCalledWith("save_channel_config", {
+      platform: "wecom",
+      configJson: JSON.stringify({
+        enabled: true,
+        bot_id: "bot",
+        secret: "sec",
+        encoding_aes_key: "aes",
+      }),
+    });
+  });
+
+  it("maps daemon WeCom config back to app field names on load", async () => {
+    vi.mocked(tauri.invoke).mockResolvedValue({
+      enabled: true,
+      bot_id: "bot",
+      secret: "sec",
+      encoding_aes_key: "aes",
+    });
+
+    await expect(loadChannelConfig("wecom")).resolves.toEqual({
+      enabled: true,
+      botId: "bot",
+      secret: "sec",
+      encodingAesKey: "aes",
+    });
   });
 });

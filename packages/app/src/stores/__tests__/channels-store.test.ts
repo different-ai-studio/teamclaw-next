@@ -9,6 +9,7 @@ vi.mock('@/lib/amuxd-channels', () => {
   }
   return {
     listChannels: vi.fn().mockResolvedValue([]),
+    loadChannelConfig: vi.fn().mockResolvedValue(null),
     saveChannelConfig: vi.fn().mockResolvedValue(undefined),
     reloadChannels: vi.fn().mockResolvedValue(undefined),
     AmuxdUnreachableError,

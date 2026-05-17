@@ -6,6 +6,7 @@ import type {
 import { defaultKookConfig } from '../channels-types'
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -32,9 +33,12 @@ export function createKookActions(set: ChannelsSet) {
     loadKookConfig: async () => {
       set({ kookIsLoading: true, error: null })
       try {
-        const list = await listChannels()
+        const [list, storedConfig] = await Promise.all([
+          listChannels(),
+          loadChannelConfig<KookConfig>('kook'),
+        ])
         set({
-          kook: defaultKookConfig,
+          kook: { ...defaultKookConfig, ...storedConfig },
           kookGatewayStatus: statusFor(list),
           kookIsLoading: false,
           kookHasChanges: false,

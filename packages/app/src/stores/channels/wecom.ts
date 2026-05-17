@@ -8,6 +8,7 @@ import type {
 import { defaultWeComConfig } from '../channels-types'
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -34,13 +35,15 @@ export function createWecomActions(set: ChannelsSet) {
     loadWecomConfig: async () => {
       set({ wecomIsLoading: true })
       try {
-        const list = await listChannels()
+        const [list, storedConfig] = await Promise.all([
+          listChannels(),
+          loadChannelConfig<WeComConfig>('wecom'),
+        ])
         set({
-          // amuxd does not expose the persisted config — keep defaults locally
-          // until the user saves an explicit config.
-          wecom: defaultWeComConfig,
+          wecom: { ...defaultWeComConfig, ...storedConfig },
           wecomGatewayStatus: statusFor('wecom', list),
           wecomIsLoading: false,
+          error: null,
         })
       } catch (e) {
         console.error('[WeCom] Failed to load config:', e)
@@ -52,7 +55,7 @@ export function createWecomActions(set: ChannelsSet) {
       try {
         await saveChannelConfig('wecom', config)
         await reloadChannels()
-        set({ wecom: config, wecomHasChanges: false })
+        set({ wecom: config, wecomHasChanges: false, error: null })
       } catch (e) {
         console.error('[WeCom] Failed to save config:', e)
         set({ error: describe(e) })
@@ -73,7 +76,7 @@ export function createWecomActions(set: ChannelsSet) {
         await saveChannelConfig('wecom', enabled)
         await reloadChannels()
         const list = await listChannels()
-        set({ wecom: enabled, wecomGatewayStatus: statusFor('wecom', list) })
+        set({ wecom: enabled, wecomGatewayStatus: statusFor('wecom', list), error: null })
       } catch (e) {
         console.error('[WeCom] Failed to start gateway:', e)
         set({ wecomGatewayStatus: { status: 'error', errorMessage: describe(e) }, error: describe(e) })
@@ -90,7 +93,7 @@ export function createWecomActions(set: ChannelsSet) {
         const disabled = { ...cfg, enabled: false }
         await saveChannelConfig('wecom', disabled)
         await reloadChannels()
-        set({ wecom: disabled, wecomGatewayStatus: { status: 'disconnected' } })
+        set({ wecom: disabled, wecomGatewayStatus: { status: 'disconnected' }, error: null })
       } catch (e) {
         console.error('[WeCom] Failed to stop gateway:', e)
         set({ error: describe(e) })
@@ -100,7 +103,7 @@ export function createWecomActions(set: ChannelsSet) {
     refreshWecomStatus: async () => {
       try {
         const list = await listChannels()
-        set({ wecomGatewayStatus: statusFor('wecom', list) })
+        set({ wecomGatewayStatus: statusFor('wecom', list), error: null })
       } catch (e) {
         console.error('[WeCom] Failed to refresh status:', e)
       }
@@ -136,20 +139,20 @@ export function createWecomActions(set: ChannelsSet) {
       try {
         await saveChannelConfig('wecom', updatedConfig)
         await reloadChannels()
-        set({ wecom: updatedConfig, wecomHasChanges: false })
+        set({ wecom: updatedConfig, wecomHasChanges: false, error: null })
         if (enabled) {
           set({ wecomIsLoading: true })
           // give amuxd a moment to reconcile, then fetch status
           await new Promise((resolve) => setTimeout(resolve, 1000))
           try {
             const list = await listChannels()
-            set({ wecomGatewayStatus: statusFor('wecom', list), wecomIsLoading: false })
+            set({ wecomGatewayStatus: statusFor('wecom', list), wecomIsLoading: false, error: null })
           } catch (error) {
             console.error('[WeCom] Status check after toggle failed:', error)
             set({ wecomIsLoading: false, error: describe(error) })
           }
         } else {
-          set({ wecomGatewayStatus: { status: 'disconnected' } })
+          set({ wecomGatewayStatus: { status: 'disconnected' }, error: null })
         }
       } catch (error) {
         console.error('[WeCom] Toggle enabled failed:', error)

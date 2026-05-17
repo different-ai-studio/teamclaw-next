@@ -6,6 +6,7 @@ import type {
 import { defaultEmailConfig } from '../channels-types'
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -32,9 +33,12 @@ export function createEmailActions(set: ChannelsSet) {
     loadEmailConfig: async () => {
       set({ emailIsLoading: true, error: null })
       try {
-        const list = await listChannels()
+        const [list, storedConfig] = await Promise.all([
+          listChannels(),
+          loadChannelConfig<EmailConfig>('email'),
+        ])
         set({
-          email: defaultEmailConfig,
+          email: { ...defaultEmailConfig, ...storedConfig },
           emailGatewayStatus: statusFor(list),
           emailIsLoading: false,
           emailHasChanges: false,

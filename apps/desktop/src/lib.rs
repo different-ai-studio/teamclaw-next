@@ -373,6 +373,7 @@ pub fn run() {
             commands::filewatcher::unwatch_all,
             commands::filewatcher::get_watched_directories,
             commands::gateway::list_channels,
+            commands::gateway::load_channel_config,
             commands::gateway::save_channel_config,
             commands::gateway::reload_channels,
             commands::gateway::load_shortcuts,

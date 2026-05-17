@@ -96,17 +96,23 @@ export function GatewayStatusCard({
     if (amuxdUnreachableProp !== undefined) return
 
     let cancelled = false
-    listChannels()
-      .then(() => {
-        if (!cancelled) setAmuxdUnreachableLocal(false)
-      })
-      .catch((err) => {
-        if (!cancelled && err instanceof AmuxdUnreachableError) {
-          setAmuxdUnreachableLocal(true)
-        }
-      })
+    const probe = () => {
+      listChannels()
+        .then(() => {
+          if (!cancelled) setAmuxdUnreachableLocal(false)
+        })
+        .catch((err) => {
+          if (!cancelled && err instanceof AmuxdUnreachableError) {
+            setAmuxdUnreachableLocal(true)
+          }
+        })
+    }
+
+    probe()
+    const interval = window.setInterval(probe, 3000)
     return () => {
       cancelled = true
+      window.clearInterval(interval)
     }
   }, [amuxdUnreachableProp])
 

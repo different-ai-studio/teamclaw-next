@@ -42,7 +42,7 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
     let cancelled = false
     setLoading(true); setError(false); setPicked(new Set())
 
-    function applyRows(rows: { id: string; actorType: string; displayName: string }[]) {
+    function applyRows(rows: { id: string; actorType: string; displayName: string }[]): number {
       const filtered = rows
         .filter(r => r.id !== selfActorId)
         .filter(r => r.actorType === 'member' || r.actorType === 'agent')
@@ -52,6 +52,7 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
           display_name: r.displayName,
         }))
       setCandidates(filtered)
+      return filtered.length
     }
 
     void (async () => {
@@ -59,11 +60,14 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
         // ── Phase 1: instant render from local libsql cache ──────────────
         const local = await loadActorsForTeam(teamId)
         if (cancelled) return
-        applyRows(local)
+        const localVisible = applyRows(local)
         setLoading(false)
 
-        // ── Phase 2: background delta sync, re-hydrate if anything new ──
-        const synced = await syncActorsForTeam(teamId)
+        // ── Phase 2: background sync, re-hydrate if anything new ────────
+        // If the cache has no selectable actors, force a full pull. A stale
+        // actor_directory watermark can otherwise leave this picker empty even
+        // while the sidebar's team-member source has rows.
+        const synced = await syncActorsForTeam(teamId, localVisible === 0 ? { full: true } : undefined)
         if (cancelled || synced === 0) return
         const fresh = await loadActorsForTeam(teamId)
         if (cancelled) return

@@ -5,8 +5,6 @@ import { isTauri } from "@/lib/utils";
 import {
   loadSessionsForTeam,
   upsertSessionsBatch,
-  getWatermark,
-  setWatermark,
   type SessionRow,
 } from "@/lib/local-cache";
 
@@ -18,6 +16,7 @@ export interface SessionListEntry {
   last_message_preview: string | null;
   mode: "solo" | "collab" | "control";
   idea_id: string | null;
+  has_unread: boolean;
 }
 
 function mapCacheToEntry(r: SessionRow): SessionListEntry {
@@ -29,6 +28,29 @@ function mapCacheToEntry(r: SessionRow): SessionListEntry {
     last_message_preview: r.lastMessagePreview ?? null,
     mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
     idea_id: r.ideaId ?? null,
+    has_unread: false,
+  };
+}
+
+function mapFreshToEntry(r: {
+  id: string;
+  title: string;
+  team_id: string;
+  mode: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  idea_id: string | null;
+  has_unread: boolean | null;
+}): SessionListEntry {
+  return {
+    id: r.id,
+    title: r.title ?? "",
+    team_id: r.team_id,
+    last_message_at: r.last_message_at,
+    last_message_preview: r.last_message_preview,
+    mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
+    idea_id: r.idea_id ?? null,
+    has_unread: r.has_unread === true,
   };
 }
 
@@ -46,13 +68,18 @@ interface State {
   rows: SessionListEntry[];
   loading: boolean;
   error: string | null;
+  hasMore: boolean;
+  nextCursor: string | null;
   load: () => Promise<void>;
+  markSessionViewed: (sessionId: string, lastReadMessageId?: string | null) => Promise<void>;
 }
 
 export const useSessionListStore = create<State>((set) => ({
   rows: [],
   loading: false,
   error: null,
+  hasMore: false,
+  nextCursor: null,
   load: async () => {
     const session = useAuthStore.getState().session;
     if (!session) {
@@ -75,33 +102,12 @@ export const useSessionListStore = create<State>((set) => ({
       }
     }
 
-    // ── Phase 2: pull delta from Supabase, upsert local, re-hydrate ───────
-    const TABLE = "sessions";
-
-    // Build query — apply watermark if we have a teamId and are in Tauri
-    const watermark =
-      isTauri() && teamId
-        ? await getWatermark(TABLE, teamId)
-        : null;
-
-    let q = supabase
-      .from("sessions")
-      .select("id, title, team_id, mode, last_message_at, last_message_preview, created_at, updated_at, idea_id")
-      // Brand-new sessions have last_message_at = null. Put them first so
-      // they're immediately visible AND so per-session subscribers /
-      // rows.find consumers (e.g., ChatPanel.sendIntoSession) can resolve
-      // the row right after creation. Older sessions still ranked by
-      // recency via the secondary created_at sort.
-      .order("last_message_at", { ascending: false, nullsFirst: true })
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    // Only apply watermark filter when doing a delta pull inside Tauri
-    if (isTauri() && teamId && watermark) {
-      q = q.gt("updated_at", watermark);
-    }
-
-    const { data, error } = await q;
+    // ── Phase 2: pull the canonical current page from Supabase, including
+    // actor-scoped read state, then mirror cacheable session fields locally.
+    const { data, error } = await supabase.rpc("list_current_actor_sessions", {
+      p_limit: 50,
+      p_before_last_message_at: null,
+    });
     if (error) {
       set({ loading: false, error: error.message });
       return;
@@ -117,19 +123,14 @@ export const useSessionListStore = create<State>((set) => ({
       created_at: string;
       updated_at: string;
       idea_id: string | null;
+      has_unread: boolean | null;
     }>;
+    const nextCursor = fresh.length > 0 ? fresh[fresh.length - 1].last_message_at : null;
+    const freshRows = sortEntries(fresh.map(mapFreshToEntry));
 
     // In non-Tauri builds (or first boot without teamId) just set rows directly
     if (!isTauri() || !teamId) {
-      set({ rows: fresh.map((r) => ({
-        id: r.id,
-        title: r.title ?? "",
-        team_id: r.team_id,
-        last_message_at: r.last_message_at,
-        last_message_preview: r.last_message_preview,
-        mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
-        idea_id: r.idea_id ?? null,
-      })), loading: false });
+      set({ rows: freshRows, loading: false, hasMore: fresh.length === 50, nextCursor });
       return;
     }
 
@@ -154,24 +155,28 @@ export const useSessionListStore = create<State>((set) => ({
         syncedAt: new Date().toISOString(),
       }));
       await upsertSessionsBatch(cacheRows);
-
-      // Bump watermark
-      const resolvedTeamId = fresh[0].team_id;
-      const maxUpdated = fresh.reduce(
-        (acc, r) => (r.updated_at > acc ? r.updated_at : acc),
-        watermark ?? "",
-      );
-      if (maxUpdated) {
-        await setWatermark(TABLE, resolvedTeamId, maxUpdated);
-      }
     }
 
-    // Re-hydrate from local cache (merges cached + freshly-synced rows)
-    const resolvedTeamId = fresh[0]?.team_id ?? teamId;
-    const allLocal = await loadSessionsForTeam(resolvedTeamId);
     set({
-      rows: sortEntries(allLocal.map(mapCacheToEntry)),
+      rows: freshRows,
       loading: false,
+      hasMore: fresh.length === 50,
+      nextCursor,
     });
+  },
+  markSessionViewed: async (sessionId, lastReadMessageId = null) => {
+    const { error } = await supabase.rpc("mark_current_actor_session_viewed", {
+      p_session_id: sessionId,
+      p_last_read_message_id: lastReadMessageId,
+    });
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    set((state) => ({
+      rows: state.rows.map((row) =>
+        row.id === sessionId ? { ...row, has_unread: false } : row,
+      ),
+    }));
   },
 }));

@@ -45,6 +45,7 @@ type ListRow = {
   lastMessagePreview: string | null
   ideaId: string | null
   isPinned: boolean
+  hasUnread: boolean
 }
 
 type ParticipantInfo = {
@@ -63,6 +64,7 @@ function entryToRow(entry: SessionListEntry, isPinned: boolean): ListRow {
     lastMessagePreview: entry.last_message_preview,
     ideaId: entry.idea_id,
     isPinned,
+    hasUnread: entry.has_unread,
   }
 }
 
@@ -413,6 +415,12 @@ export function SessionListColumn() {
                     <span className="shrink-0 font-mono text-[10.5px] text-faint">
                       {formatRelativeTime(row.lastMessageAt)}
                     </span>
+                  )}
+                  {!isActive && row.hasUnread && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-coral"
+                      aria-label={t('sidebar.unread', 'Unread')}
+                    />
                   )}
                   {!isActive && isHighlighted && (
                     <span className="shrink-0 rounded-full bg-coral px-1.5 py-px text-[10px] font-semibold leading-4 text-white">

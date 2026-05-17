@@ -52,6 +52,13 @@ fn sock_path() -> PathBuf {
         .join("amuxd.sock")
 }
 
+fn daemon_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("amux")
+        .join("daemon.toml")
+}
+
 /// List the six known channel platforms with their `enabled` / `connected`
 /// state as reported by amuxd over `amuxd.sock`. Errors out clearly when the
 /// daemon is not running so the UI can surface an "amuxd unreachable" state.
@@ -68,6 +75,40 @@ pub async fn list_channels() -> Result<Vec<ChannelStatus>, String> {
         .map_err(|e| format!("read failed: {e}"))?;
     serde_json::from_str(buf.trim())
         .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
+}
+
+/// Load a persisted channel config from daemon.toml. This is local-only data:
+/// secrets already live on this machine, and the settings UI needs to
+/// rehydrate forms after the panel is closed and reopened.
+#[tauri::command]
+pub fn load_channel_config(platform: String) -> Result<Option<serde_json::Value>, String> {
+    if !matches!(
+        platform.as_str(),
+        "discord" | "wecom" | "feishu" | "kook" | "wechat" | "email"
+    ) {
+        return Err(format!("unknown platform: {platform}"));
+    }
+
+    let path = daemon_config_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let parsed: toml::Value =
+        toml::from_str(&content).map_err(|e| format!("parse {}: {e}", path.display()))?;
+
+    let Some(config) = parsed
+        .get("channels")
+        .and_then(|channels| channels.get(&platform))
+    else {
+        return Ok(None);
+    };
+
+    serde_json::to_value(config)
+        .map(Some)
+        .map_err(|e| format!("serialize channel config: {e}"))
 }
 
 /// Replace `daemon.toml`'s `[channels.<platform>]` section with the JSON in

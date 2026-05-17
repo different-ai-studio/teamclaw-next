@@ -102,6 +102,7 @@ ignore = "0.4"
 zip = "8"
 urlencoding = "2"
 dirs = "5"
+toml = "0.8"
 
 # HTML parsing for skills.sh scraping
 scraper = "0.20"

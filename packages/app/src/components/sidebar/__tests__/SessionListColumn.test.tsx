@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import { SessionListColumn } from '../SessionListColumn'
 import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
+import { useSessionListStore } from '@/stores/session-list-store'
 
 vi.mock('@/components/sidebar/session-search-dialog', () => ({
   SessionSearchDialog: () => null,
@@ -29,28 +30,42 @@ vi.mock('@/components/ui/traffic-lights', () => ({
   TrafficLights: () => null,
 }))
 
-const mkSession = (over: Partial<{ id: string; title: string; ideaId: string | null; updatedAt: Date }>) => ({
+const mkSessionRow = (over: Partial<{
+  id: string
+  title: string
+  idea_id: string | null
+  has_unread: boolean
+}>) => ({
   id: 's1',
   title: 't',
-  messages: [],
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  ideaId: null as string | null,
+  team_id: 'team-1',
+  last_message_at: '2026-05-16T08:00:00.000Z',
+  last_message_preview: null,
+  mode: 'collab' as const,
+  idea_id: null as string | null,
+  has_unread: false,
   ...over,
-}) as any
+})
 
 describe('SessionListColumn', () => {
   beforeEach(() => {
     useUIStore.setState({ sidebarFilter: { kind: 'all' } })
     useSessionStore.setState({
-      sessions: [
-        mkSession({ id: 's1', title: 'Alpha', ideaId: null }),
-        mkSession({ id: 's2', title: 'Beta', ideaId: 'idea-1' }),
-        mkSession({ id: 's3', title: 'Gamma', ideaId: 'idea-1' }),
-      ],
+      sessions: [],
       pinnedSessionIds: ['s1'],
       activeSessionId: null,
     } as any)
+    useSessionListStore.setState({
+      rows: [
+        mkSessionRow({ id: 's1', title: 'Alpha', idea_id: null, has_unread: true }),
+        mkSessionRow({ id: 's2', title: 'Beta', idea_id: 'idea-1' }),
+        mkSessionRow({ id: 's3', title: 'Gamma', idea_id: 'idea-1' }),
+      ],
+      loading: false,
+      error: null,
+      hasMore: false,
+      nextCursor: null,
+    })
   })
 
   it('shows all non-cron sessions in "all" mode', () => {
@@ -58,6 +73,11 @@ describe('SessionListColumn', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument()
     expect(screen.getByText('Beta')).toBeInTheDocument()
     expect(screen.getByText('Gamma')).toBeInTheDocument()
+  })
+
+  it('shows a quiet unread indicator for unread inactive sessions', () => {
+    render(<SessionListColumn />)
+    expect(screen.getByLabelText('Unread')).toBeInTheDocument()
   })
 
   it('filters to pinned sessions in "pinned" mode', () => {

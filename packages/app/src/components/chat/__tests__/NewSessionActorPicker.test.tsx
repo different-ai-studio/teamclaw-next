@@ -3,25 +3,32 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NewSessionActorPicker } from '../NewSessionActorPicker'
 
-const supabaseFrom = vi.fn()
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: { from: (...args: unknown[]) => supabaseFrom(...args) },
+const loadActorsForTeam = vi.fn()
+const syncActorsForTeam = vi.fn()
+
+vi.mock('@/lib/local-cache', () => ({
+  loadActorsForTeam: (...args: unknown[]) => loadActorsForTeam(...args),
+}))
+vi.mock('@/lib/sync/actor-sync', () => ({
+  syncActorsForTeam: (...args: unknown[]) => syncActorsForTeam(...args),
 }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback: string) => fallback }),
 }))
 
 function mockActors(rows: { id: string; actor_type: string; display_name: string }[]) {
-  supabaseFrom.mockImplementation(() => ({
-    select: () => ({
-      eq: () => ({
-        in: () => Promise.resolve({ data: rows, error: null }),
-      }),
-    }),
-  }))
+  loadActorsForTeam.mockResolvedValue(rows.map((r) => ({
+    id: r.id,
+    actorType: r.actor_type,
+    displayName: r.display_name,
+  })))
+  syncActorsForTeam.mockResolvedValue(0)
 }
 
-beforeEach(() => { supabaseFrom.mockReset() })
+beforeEach(() => {
+  loadActorsForTeam.mockReset()
+  syncActorsForTeam.mockReset()
+})
 
 describe('NewSessionActorPicker', () => {
   it('renders members and agents, calls onConfirm with selected ids when Send clicked', async () => {
@@ -83,5 +90,27 @@ describe('NewSessionActorPicker', () => {
     )
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
     expect(screen.queryByText('Me')).toBeNull()
+  })
+
+  it('forces a full actor sync when local cache has no selectable actors', async () => {
+    loadActorsForTeam
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'm-1', actorType: 'member', displayName: 'Alice' },
+      ])
+    syncActorsForTeam.mockResolvedValue(1)
+
+    render(
+      <NewSessionActorPicker
+        open={true}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        teamId="t-1"
+        selfActorId={null}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
+    expect(syncActorsForTeam).toHaveBeenCalledWith('t-1', { full: true })
   })
 })

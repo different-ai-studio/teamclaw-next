@@ -6,6 +6,7 @@ import type {
 import { defaultFeishuConfig } from '../channels-types'
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -32,9 +33,12 @@ export function createFeishuActions(set: ChannelsSet) {
     loadFeishuConfig: async () => {
       set({ feishuIsLoading: true, error: null })
       try {
-        const list = await listChannels()
+        const [list, storedConfig] = await Promise.all([
+          listChannels(),
+          loadChannelConfig<FeishuConfig>('feishu'),
+        ])
         set({
-          feishu: defaultFeishuConfig,
+          feishu: { ...defaultFeishuConfig, ...storedConfig },
           feishuGatewayStatus: statusFor(list),
           feishuIsLoading: false,
           feishuHasChanges: false,

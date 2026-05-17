@@ -9,6 +9,7 @@ vi.mock('@/lib/amuxd-channels', () => {
   }
   return {
     listChannels: vi.fn(),
+    loadChannelConfig: vi.fn(),
     saveChannelConfig: vi.fn(),
     reloadChannels: vi.fn(),
     AmuxdUnreachableError,
@@ -17,6 +18,7 @@ vi.mock('@/lib/amuxd-channels', () => {
 
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -25,6 +27,7 @@ import {
 describe('createWecomActions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(loadChannelConfig).mockResolvedValue(null)
   })
 
   it('maps amuxd channel status into the WeCom gateway slot on load', async () => {
@@ -43,6 +46,32 @@ describe('createWecomActions', () => {
     const final = set.mock.calls[set.mock.calls.length - 1][0]
     expect(final.wecomGatewayStatus).toEqual({ status: 'connected' })
     expect(final.wecomIsLoading).toBe(false)
+  })
+
+  it('rehydrates saved WeCom config on load', async () => {
+    vi.mocked(listChannels).mockResolvedValueOnce([
+      { platform: 'wecom', enabled: false, connected: false, lastError: null },
+    ])
+    vi.mocked(loadChannelConfig).mockResolvedValueOnce({
+      enabled: true,
+      botId: 'saved-bot',
+      secret: 'saved-secret',
+      encodingAesKey: 'saved-key',
+    })
+
+    const { createWecomActions } = await import('../wecom')
+    const set = vi.fn()
+    const actions = createWecomActions(set)
+
+    await actions.loadWecomConfig()
+
+    const final = set.mock.calls[set.mock.calls.length - 1][0]
+    expect(final.wecom).toMatchObject({
+      enabled: true,
+      botId: 'saved-bot',
+      secret: 'saved-secret',
+      encodingAesKey: 'saved-key',
+    })
   })
 
   it('saveWecomConfig flips through wrapper + reload', async () => {

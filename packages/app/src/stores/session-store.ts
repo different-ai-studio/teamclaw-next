@@ -128,6 +128,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   setActiveSession: async (sid: string | null) => {
     set({ currentSessionId: sid, activeSessionId: sid });
+    if (sid) {
+      await useSessionListStore.getState().markSessionViewed(sid);
+    }
   },
   loadSessions: async () => {
     await useSessionListStore.getState().load();

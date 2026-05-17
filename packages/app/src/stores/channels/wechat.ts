@@ -6,6 +6,7 @@ import type {
 import { defaultWeChatConfig } from '../channels-types'
 import {
   listChannels,
+  loadChannelConfig,
   saveChannelConfig,
   reloadChannels,
   AmuxdUnreachableError,
@@ -32,11 +33,15 @@ export function createWechatActions(set: ChannelsSet) {
     loadWechatConfig: async () => {
       set({ wechatIsLoading: true })
       try {
-        const list = await listChannels()
+        const [list, storedConfig] = await Promise.all([
+          listChannels(),
+          loadChannelConfig<WeChatConfig>('wechat'),
+        ])
         set({
-          wechat: defaultWeChatConfig,
+          wechat: { ...defaultWeChatConfig, ...storedConfig },
           wechatGatewayStatus: statusFor(list),
           wechatIsLoading: false,
+          error: null,
         })
       } catch (e) {
         console.error('[WeChat] Failed to load config:', e)
@@ -48,7 +53,7 @@ export function createWechatActions(set: ChannelsSet) {
       try {
         await saveChannelConfig('wechat', config)
         await reloadChannels()
-        set({ wechat: config, wechatHasChanges: false })
+        set({ wechat: config, wechatHasChanges: false, error: null })
       } catch (e) {
         console.error('[WeChat] Failed to save config:', e)
         set({ error: describe(e) })
@@ -66,7 +71,7 @@ export function createWechatActions(set: ChannelsSet) {
         await saveChannelConfig('wechat', enabled)
         await reloadChannels()
         const list = await listChannels()
-        set({ wechat: enabled, wechatGatewayStatus: statusFor(list) })
+        set({ wechat: enabled, wechatGatewayStatus: statusFor(list), error: null })
       } catch (e) {
         console.error('[WeChat] Failed to start gateway:', e)
         set({ wechatGatewayStatus: { status: 'error', errorMessage: describe(e) }, error: describe(e) })
@@ -83,7 +88,7 @@ export function createWechatActions(set: ChannelsSet) {
         const disabled = { ...cfg, enabled: false }
         await saveChannelConfig('wechat', disabled)
         await reloadChannels()
-        set({ wechat: disabled, wechatGatewayStatus: { status: 'disconnected' } })
+        set({ wechat: disabled, wechatGatewayStatus: { status: 'disconnected' }, error: null })
       } catch (e) {
         console.error('[WeChat] Failed to stop gateway:', e)
         set({ error: describe(e) })
@@ -93,7 +98,7 @@ export function createWechatActions(set: ChannelsSet) {
     refreshWechatStatus: async () => {
       try {
         const list = await listChannels()
-        set({ wechatGatewayStatus: statusFor(list) })
+        set({ wechatGatewayStatus: statusFor(list), error: null })
       } catch (e) {
         console.error('[WeChat] Failed to refresh status:', e)
       }
@@ -119,19 +124,19 @@ export function createWechatActions(set: ChannelsSet) {
       try {
         await saveChannelConfig('wechat', updatedConfig)
         await reloadChannels()
-        set({ wechat: updatedConfig, wechatHasChanges: false })
+        set({ wechat: updatedConfig, wechatHasChanges: false, error: null })
         if (enabled) {
           set({ wechatIsLoading: true })
           await new Promise((resolve) => setTimeout(resolve, 1000))
           try {
             const list = await listChannels()
-            set({ wechatGatewayStatus: statusFor(list), wechatIsLoading: false })
+            set({ wechatGatewayStatus: statusFor(list), wechatIsLoading: false, error: null })
           } catch (error) {
             console.error('[WeChat] Status check after toggle failed:', error)
             set({ wechatIsLoading: false, error: describe(error) })
           }
         } else {
-          set({ wechatGatewayStatus: { status: 'disconnected' } })
+          set({ wechatGatewayStatus: { status: 'disconnected' }, error: null })
         }
       } catch (error) {
         console.error('[WeChat] Toggle enabled failed:', error)

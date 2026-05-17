@@ -36,7 +36,6 @@ import {
 } from '@/stores/channels'
 import { WeComIcon } from './shared'
 import { GatewayStatusCard } from './GatewayStatusCard'
-import { TestCredentialsButton } from './TestCredentialsButton'
 import { useChannelConfig } from '@/hooks/useChannelConfig'
 
 // WeCom Setup Wizard
@@ -548,15 +547,11 @@ export function WeComChannel() {
     wecomIsLoading,
     wecomGatewayStatus,
     wecomHasChanges,
-    wecomIsTesting,
-    wecomTestResult,
     loadWecomConfig,
     saveWecomConfig,
     startWecomGateway,
     stopWecomGateway,
     refreshWecomStatus,
-    testWecomCredentials,
-    clearWecomTestResult,
     setWecomHasChanges,
     toggleWecomEnabled,
   } = useChannelsStore()
@@ -589,11 +584,6 @@ export function WeComChannel() {
     stopGateway: stopWecomGateway,
     refreshStatus: refreshWecomStatus,
   })
-
-  const handleTestCredentials = async () => {
-    if (!localConfig.botId || !localConfig.secret) return
-    await testWecomCredentials(localConfig.botId, localConfig.secret)
-  }
 
   const handleWizardSave = (botId: string, secret: string) => {
     updateLocalConfig({ botId, secret, enabled: true })
@@ -679,24 +669,15 @@ export function WeComChannel() {
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.secret', 'Secret')}</label>
-              <div className="flex flex-wrap gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    type="password"
-                    value={localConfig.secret}
-                    onChange={(e) => updateLocalConfig({ secret: e.target.value })}
-                    placeholder={t('settings.channels.wecom.secretPlaceholder', 'Enter your WeCom bot secret')}
-                    className="pr-10"
-                  />
-                  <Shield className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                </div>
-                <TestCredentialsButton
-                  onTest={handleTestCredentials}
-                  isTesting={wecomIsTesting}
-                  testResult={wecomTestResult}
-                  onClearResult={clearWecomTestResult}
-                  disabled={!localConfig.botId || !localConfig.secret}
+              <div className="relative">
+                <Input
+                  type="password"
+                  value={localConfig.secret}
+                  onChange={(e) => updateLocalConfig({ secret: e.target.value })}
+                  placeholder={t('settings.channels.wecom.secretPlaceholder', 'Enter your WeCom bot secret')}
+                  className="pr-10"
                 />
+                <Shield className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               </div>
             </div>
           </div>
