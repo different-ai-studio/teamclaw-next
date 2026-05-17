@@ -102,7 +102,7 @@ pub async fn cron_init(
         Some(p) => p,
         None => crate::commands::window::current_workspace_for_window(&window, &registry)?,
     };
-    let (workspace_path, port) =
+    let (workspace_path, _port) =
         crate::commands::opencode::resolve_workspace(&opencode_state, Some(&workspace_path))?;
 
     // Get-or-create per-workspace instance, then stop its old scheduler
@@ -113,7 +113,6 @@ pub async fn cron_init(
 
     instance.storage.init(&workspace_path).await;
     instance.scheduler.set_app_handle(app);
-    instance.scheduler.set_port(port).await;
 
     let session_mapping = gateway_state.shared_session_mapping.clone();
     instance

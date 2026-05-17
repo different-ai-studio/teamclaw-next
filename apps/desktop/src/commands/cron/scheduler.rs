@@ -20,7 +20,6 @@ const STALE_RUN_ERROR: &str =
 #[derive(Debug)]
 pub struct CronScheduler {
     storage: CronStorage,
-    opencode_port: Arc<RwLock<u16>>,
     delivery: Arc<RwLock<Option<DeliveryManager>>>,
     /// Shared session mapping with gateways — used to look up existing sessions
     session_mapping: Arc<RwLock<Option<SessionMapping>>>,
@@ -35,7 +34,6 @@ impl Clone for CronScheduler {
     fn clone(&self) -> Self {
         Self {
             storage: self.storage.clone(),
-            opencode_port: Arc::clone(&self.opencode_port),
             delivery: Arc::clone(&self.delivery),
             session_mapping: Arc::clone(&self.session_mapping),
             generation: Arc::clone(&self.generation),
@@ -76,7 +74,6 @@ impl CronScheduler {
     pub fn new(storage: CronStorage) -> Self {
         Self {
             storage,
-            opencode_port: Arc::new(RwLock::new(13141)),
             delivery: Arc::new(RwLock::new(None)),
             session_mapping: Arc::new(RwLock::new(None)),
             generation: Arc::new(RwLock::new(0)),
@@ -157,12 +154,6 @@ impl CronScheduler {
             let reconciled = Self::reconcile_interrupted_run(record, None, Utc::now());
             self.persist_run_and_notify_ui(&reconciled).await;
         }
-    }
-
-    /// Set the OpenCode server port
-    pub async fn set_port(&self, port: u16) {
-        let mut p = self.opencode_port.write().await;
-        *p = port;
     }
 
     /// Set the delivery manager
