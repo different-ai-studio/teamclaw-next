@@ -546,7 +546,12 @@ impl CronScheduler {
 
                             // For email delivery: register the outgoing Message-ID
                             // and subject in SessionMapping so user replies resolve
-                            // to the same OpenCode session (conversation continuity).
+                            // to the same ACP session (conversation continuity).
+                            // NOTE: SessionMapping::get_email_session_by_* are
+                            // currently uncalled from anywhere outside this file —
+                            // EmailDb is the active store. Pre-existing dead path
+                            // preserved here so the registration is in place if
+                            // the lookup is re-wired. See spec §3 / Open items.
                             if let (Some(msg_id), Some(session_key)) =
                                 (outgoing_message_id, &email_session_key)
                             {
@@ -628,7 +633,9 @@ impl CronScheduler {
             );
         }
 
-        // Wait briefly for OpenCode to flush any pending file writes before worktree cleanup
+        // Wait briefly for the agent process to release file handles before
+        // worktree cleanup. (Original purpose was OpenCode flush; amuxd-spawned
+        // claude-code adapter may have similar pending writes.)
         if wt_guard.path.is_some() {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
