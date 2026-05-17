@@ -91,6 +91,15 @@ enum SockCommand {
         payload: serde_json::Value,
         reply_tx: oneshot::Sender<String>,
     },
+    /// Drive one ACP turn to completion for a cron-style logical session.
+    /// `payload` is the raw JSON envelope; `handle_prompt_await` parses it
+    /// and runs the turn against the local primary agent. `reply_tx`
+    /// receives a single line of JSON (`{ "ok": true, "result": { "text": ..., "acp_session_id": ... }}` or
+    /// `{ "ok": false, "error": ... }`).
+    PromptAwait {
+        payload: serde_json::Value,
+        reply_tx: oneshot::Sender<String>,
+    },
     Unknown(String),
 }
 
@@ -3178,6 +3187,38 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                                     Err(_) => {
                                                         warn!(
                                                             "amuxd.sock: mcp-send reply dropped"
+                                                        );
+                                                    }
+                                                }
+                                            } else if cmd == "prompt-await" {
+                                                let (reply_tx, reply_rx) = oneshot::channel();
+                                                if tx
+                                                    .send(SockCommand::PromptAwait {
+                                                        payload: v,
+                                                        reply_tx,
+                                                    })
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                                match reply_rx.await {
+                                                    Ok(body) => {
+                                                        let mut stream = reader.into_inner();
+                                                        if let Err(e) =
+                                                            stream.write_all(body.as_bytes()).await
+                                                        {
+                                                            warn!(
+                                                                "amuxd.sock: prompt-await write failed: {e}"
+                                                            );
+                                                            return;
+                                                        }
+                                                        let _ = stream.write_all(b"\n").await;
+                                                        let _ = stream.shutdown().await;
+                                                    }
+                                                    Err(_) => {
+                                                        warn!(
+                                                            "amuxd.sock: prompt-await reply dropped"
                                                         );
                                                     }
                                                 }
