@@ -77,3 +77,82 @@ create policy client_presence_owner on public.client_presence
 
 alter table public.push_idempotency enable row level security;
 -- No authenticated policy: only service-role FC may touch this table.
+
+-- Returns a single jsonb object:
+--   { sender_display_name: text,
+--     recipients: [{ user_id, tokens, prefs, presence, muted }, ...] }
+create or replace function public.list_session_push_targets(
+  p_session_id uuid,
+  p_exclude_actor_id uuid
+) returns jsonb
+  language sql security definer
+  set search_path = public
+as $$
+  with sender as (
+    select coalesce(display_name, 'Someone') as display_name
+      from public.actors where id = p_exclude_actor_id
+  ),
+  recipients as (
+    select
+      a.user_id,
+      coalesce(
+        (select jsonb_agg(jsonb_build_object(
+            'provider', dpt.provider,
+            'token',    dpt.token,
+            'device_id', dpt.device_id))
+           from public.device_push_tokens dpt
+          where dpt.user_id = a.user_id
+            and dpt.revoked_at is null),
+        '[]'::jsonb
+      ) as tokens,
+      coalesce(
+        (select to_jsonb(np)
+           from public.notification_prefs np
+          where np.user_id = a.user_id),
+        jsonb_build_object('enabled', true)
+      ) as prefs,
+      coalesce(
+        (select jsonb_agg(jsonb_build_object(
+            'device_id',        cp.device_id,
+            'foreground_until', cp.foreground_until))
+           from public.client_presence cp
+          where cp.user_id = a.user_id
+            and cp.foreground_until > now()),
+        '[]'::jsonb
+      ) as presence,
+      exists(
+        select 1 from public.session_mutes sm
+         where sm.user_id = a.user_id
+           and sm.session_id = p_session_id
+      ) as muted
+    from public.session_participants sp
+    join public.actors a on a.id = sp.actor_id
+    where sp.session_id = p_session_id
+      and sp.actor_id <> p_exclude_actor_id
+      and a.user_id is not null
+      and a.actor_type = 'member'
+  )
+  select jsonb_build_object(
+    'sender_display_name', (select display_name from sender),
+    'recipients', coalesce(
+       (select jsonb_agg(to_jsonb(r)) from recipients r),
+       '[]'::jsonb)
+  );
+$$;
+
+revoke all on function public.list_session_push_targets(uuid, uuid) from public, anon, authenticated;
+-- Only service-role may call (FC uses service-role).
+
+create or replace function public.push_idempotency_claim(p_message_id uuid)
+returns table(claimed boolean)
+  language plpgsql security definer
+  set search_path = public
+as $$
+begin
+  insert into public.push_idempotency(message_id) values (p_message_id)
+  on conflict do nothing;
+  return query select found;
+end;
+$$;
+
+revoke all on function public.push_idempotency_claim(uuid) from public, anon, authenticated;
