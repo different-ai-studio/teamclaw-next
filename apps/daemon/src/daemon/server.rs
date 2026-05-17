@@ -426,6 +426,83 @@ impl DaemonServer {
         }))
     }
 
+    /// Drive one ACP turn to completion for a cron-style session_key. Looks up
+    /// (or creates) an ACP session in `cron_sessions`, calls
+    /// `RuntimeManager::send_prompt_and_await_reply`, and returns
+    /// `{text, acp_session_id}` for the listener to wrap in the
+    /// `{ok, result|error}` envelope.
+    async fn handle_prompt_await(
+        &mut self,
+        payload: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let parsed = parse_prompt_await_payload(payload)?;
+
+        // The daemon must have been onboarded (team_id present) before any
+        // cron prompt can be honored — the gateway-session model expects a
+        // team. Surface a clean error rather than panicking inside the
+        // RuntimeManager call.
+        let team_id = self
+            .config
+            .team_id
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("daemon has no team_id; run `amuxd init` first"))?;
+
+        // Look up or create the ACP session for this cron session_key.
+        let acp_sid: String = if let Some(existing) = self.cron_sessions.get(parsed.session_key) {
+            existing.clone()
+        } else {
+            // Confirm we have a local primary agent runtime.
+            let runtime_count = self.agents.lock().await.agent_count();
+            if runtime_count == 0 {
+                anyhow::bail!("no local agent runtime");
+            }
+
+            let mut mgr = self.agents.lock().await;
+            let sid = mgr
+                .create_gateway_session_with_model(
+                    &team_id,
+                    parsed.session_key,                              // logical id
+                    &format!("cron://{}", parsed.session_key),       // binding
+                    "cron",                                          // title (display only)
+                    parsed.model_override.clone(),
+                    None,                                            // supabase_session_id — cron does not bind to a chat session
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
+            drop(mgr);
+
+            // If a working_directory was provided, the cron spec is to spawn the
+            // agent there. `create_gateway_session_with_model` currently writes a
+            // throwaway `/tmp/amuxd-gateway-<uuid>` and ignores any caller-supplied
+            // path. Honoring `working_directory` requires extending that fn's
+            // signature; Task 4a does so and removes this warn.
+            if let Some(wd) = parsed.working_directory {
+                tracing::warn!(
+                    session_key = parsed.session_key,
+                    working_directory = wd,
+                    "prompt-await: working_directory ignored — create_gateway_session_with_model does not yet accept it; Task 4a extends the signature"
+                );
+            }
+
+            self.cron_sessions
+                .insert(parsed.session_key.to_string(), sid.clone());
+            sid
+        };
+
+        // Drive the turn.
+        let text = {
+            let mut mgr = self.agents.lock().await;
+            mgr.send_prompt_and_await_reply(&acp_sid, parsed.message)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+        };
+
+        Ok(serde_json::json!({
+            "text": text,
+            "acp_session_id": acp_sid,
+        }))
+    }
+
     /// Persist a new per-platform channel config (parsed from the second line
     /// of a `channel-save` sock message) into `daemon.toml`, update the
     /// in-memory `self.config`, and reload the channel manager so the change
@@ -711,6 +788,13 @@ impl DaemonServer {
                             }
                             Some(SockCommand::McpSend { payload, reply_tx }) => {
                                 let resp = match self.handle_mcp_send(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::PromptAwait { payload, reply_tx }) => {
+                                let resp = match self.handle_prompt_await(&payload).await {
                                     Ok(v) => serde_json::json!({ "ok": true, "result": v }),
                                     Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
                                 };

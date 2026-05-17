@@ -67,7 +67,7 @@ Add a new JSON envelope command on `amuxd.sock` (siblings to existing `mcp-send`
    - Maintain an internal `HashMap<session_key, acp_session_id>` (call it `cron_sessions`). Look up the key; if absent, call `RuntimeManager::create_gateway_session_with_model` (or a sibling `create_logical_session`) passing `working_directory` as the worktree and `model_override` as `(provider, model)`. Capture the returned `acp_session_id` into the map.
    - Call `RuntimeManager::send_prompt_and_await_reply(acp_session_id, message)`. This already blocks up to the manager's 5-minute cap and returns the aggregated `AgentReply` text.
    - Return `{ok: true, result: { text, acp_session_id }}`.
-3. Panics inside `handle_prompt_await` must be caught (e.g. `tokio::task::spawn` + `JoinHandle`, or explicit `AssertUnwindSafe + catch_unwind`) and converted to `{ok: false, error: "internal amuxd panic: <msg>"}`. A bare panic that drops the socket gives the cron client only an IO error with no diagnostic.
+3. Panics inside `handle_prompt_await` propagate to the daemon process, matching the existing `mcp-send` pattern. Catching them would require refactoring `DaemonServer` so cron-relevant state is cloneable into a `tokio::spawn`'d task — deferred to Open items (downgraded after implementation tradeoff: introducing a new pattern just for cron was rejected in favor of matching existing conventions).
 4. If the daemon has no primary agent runtime registered (`self.agents` is empty for `self.actor_id`), `handle_prompt_await` returns `{ok: false, error: "no local agent runtime"}` immediately rather than spawning.
 
 **Reuse vs new-session**: with cron's "per-run new session" decision, every `prompt-await` call lands on the "absent → create" branch of `cron_sessions`. The map and the lookup-or-create structure stay (cheap insurance) so that future code paths can adopt session reuse without touching this handler.
@@ -309,7 +309,6 @@ All failure paths land in `CronRunRecord.error: Option<String>` and set `RunStat
 - `"spawn failed: <details>"` — agent spawn errored
 - `"ACP turn timed out"` — amuxd's 5-min cap fired
 - `"ACP event channel closed before reply"` — adapter died mid-turn
-- `"internal amuxd panic: <msg>"` — catch_unwind wrapper around handler
 
 **Guard rails preserved:**
 
@@ -350,3 +349,4 @@ All failure paths land in `CronRunRecord.error: Option<String>` and set `RunStat
 2. **`SessionMapping::set_model` retention** — UI side decision; spec leaves it in place pending review.
 3. **Multi-agent / per-job agent selection** — explicit non-goal here; adding it later means a new `agent_id` field on `CronJob` and resolving the binding against an agent registry.
 4. **OpenCode binary in repo** — still used by other consumers (chat, gateway/email, opencode SDK). This spec does not propose removing it globally.
+5. **Panic-to-error wrapper in `handle_prompt_await`** — downgraded from a must in §1 during implementation. Catching panics requires refactoring `DaemonServer` so cron-relevant state (`cron_sessions`, `team_id`, the `RuntimeManager` Arc) is cloneable into a `tokio::spawn`'d task. Current handler matches the existing `mcp-send` convention of letting panics propagate to the daemon process; cron clients see an IO error rather than a structured `{ok: false, error: "internal amuxd panic: …"}` envelope when this happens. Acceptable given that ACP-runtime panics are already rare and the existing pattern is uniform.
