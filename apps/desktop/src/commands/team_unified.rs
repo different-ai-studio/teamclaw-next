@@ -692,7 +692,6 @@ mod tests {
                 node_id: self.node_id(),
                 name: self.name.clone(),
                 role,
-                shortcuts_role: Vec::new(),
                 label: self.name.clone(),
                 platform: std::env::consts::OS.to_string(),
                 arch: std::env::consts::ARCH.to_string(),

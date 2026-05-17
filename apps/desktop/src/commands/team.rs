@@ -969,7 +969,6 @@ async fn team_git_join_impl(
             node_id: node_id.clone(),
             name: member_name.clone(),
             role: MemberRole::Editor,
-            shortcuts_role: Vec::new(),
             label: String::new(),
             platform: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),

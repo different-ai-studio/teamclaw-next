@@ -254,7 +254,7 @@ describe('useTelemetryConsent', () => {
 })
 
 describe('useGitReposInit', () => {
-  it('hydrates current member roles when loading team shortcuts on startup', async () => {
+  it('loads current member identity and members on startup', async () => {
     mockIsTauri.mockReturnValue(true)
     workspaceState.workspacePath = '/workspace-team'
     workspaceState.workspaceReady = true
@@ -268,7 +268,7 @@ describe('useGitReposInit', () => {
     })
   })
 
-  it('refreshes current member shortcut roles when member manifest files change', async () => {
+  it('reloads members when _meta/members.json changes', async () => {
     mockIsTauri.mockReturnValue(true)
     workspaceState.workspacePath = '/workspace-team'
     workspaceState.workspaceReady = true
@@ -302,7 +302,7 @@ describe('useGitReposInit', () => {
     expect(mockLoadMembers).toHaveBeenCalled()
   })
 
-  it('refreshes current member shortcut roles when team members change', async () => {
+  it('reloads members when team members change', async () => {
     mockIsTauri.mockReturnValue(true)
     workspaceState.workspacePath = '/workspace-team'
     workspaceState.workspaceReady = true
