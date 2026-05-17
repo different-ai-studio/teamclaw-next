@@ -10,9 +10,11 @@ const {
   mockExists,
   mockInvoke,
   mockListen,
-  mockLoadTeamShortcutsFile,
   mockLoadCurrentNodeId,
   mockLoadMembers,
+  mockHydrateFromCache,
+  mockLoadPersonal,
+  mockLoadTeamForCurrentTeam,
 } = vi.hoisted(() => ({
   mockSetWorkspace: vi.fn(),
   mockSetWorkspaceBootstrapped: vi.fn(),
@@ -21,9 +23,11 @@ const {
   mockExists: vi.fn(),
   mockInvoke: vi.fn(),
   mockListen: vi.fn(),
-  mockLoadTeamShortcutsFile: vi.fn(),
   mockLoadCurrentNodeId: vi.fn(),
   mockLoadMembers: vi.fn(),
+  mockHydrateFromCache: vi.fn(),
+  mockLoadPersonal: vi.fn(),
+  mockLoadTeamForCurrentTeam: vi.fn(),
 }))
 
 vi.mock('@/lib/utils', () => ({
@@ -116,8 +120,20 @@ vi.mock('@/stores/team-members', () => ({
   },
 }))
 
-vi.mock('@/lib/team-shortcuts', () => ({
-  loadTeamShortcutsFile: mockLoadTeamShortcutsFile,
+vi.mock('@/stores/shortcuts', () => ({
+  useShortcutsStore: {
+    getState: () => ({
+      hydrateFromCache: mockHydrateFromCache,
+      loadPersonal: mockLoadPersonal,
+      loadTeamForCurrentTeam: mockLoadTeamForCurrentTeam,
+    }),
+  },
+}))
+
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: {
+    getState: () => ({ team: null }),
+  },
 }))
 
 vi.mock('@/stores/ui', () => ({
@@ -156,9 +172,11 @@ beforeEach(() => {
   mockExists.mockResolvedValue(true)
   mockInvoke.mockResolvedValue(null)
   mockListen.mockResolvedValue(vi.fn())
-  mockLoadTeamShortcutsFile.mockResolvedValue([])
   mockLoadCurrentNodeId.mockResolvedValue(undefined)
   mockLoadMembers.mockResolvedValue(undefined)
+  mockHydrateFromCache.mockResolvedValue(undefined)
+  mockLoadPersonal.mockResolvedValue(undefined)
+  mockLoadTeamForCurrentTeam.mockResolvedValue(undefined)
   workspaceState.workspacePath = null
   workspaceState.workspaceBootstrapped = false
   workspaceState.workspaceReady = false
