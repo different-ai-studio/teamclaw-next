@@ -20,11 +20,11 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { useShortcutsStore, ShortcutNode } from "@/stores/shortcuts"
+import { useShortcutsStore, buildTree, ShortcutNode } from "@/stores/shortcuts"
 import { useTabsStore, selectActiveTab } from "@/stores/tabs"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
-import { loadTeamShortcutsFile } from "@/lib/team-shortcuts"
+import { useCurrentTeamStore } from "@/stores/current-team"
 import { useSidebar } from "@/components/ui/sidebar"
 import { isWorkspaceUIVariant } from "@/lib/ui-variant"
 
@@ -164,7 +164,9 @@ function SectionHeader({ label, onConfigure, onRefresh }: SectionHeaderProps) {
 
 export function ShortcutsPanel() {
   const { t } = useTranslation()
-  const { getPersonalTree, getTeamTree, setTeamNodes } = useShortcutsStore()
+  const loadTeamForCurrentTeam = useShortcutsStore((s) => s.loadTeamForCurrentTeam)
+  const personalNodes = useShortcutsStore((s) => s.personalNodes)
+  const teamNodes = useShortcutsStore((s) => s.teamNodes)
   const openSettings = useUIStore((s) => s.openSettings)
   const { setOpen: setSidebarOpen } = useSidebar()
   const isPanelOpen = useWorkspaceStore((s) => s.isPanelOpen)
@@ -172,10 +174,9 @@ export function ShortcutsPanel() {
   const closePanel = useWorkspaceStore((s) => s.closePanel)
   const activeTab = useTabsStore(selectActiveTab)
   const tabs = useTabsStore((s) => s.tabs)
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const openTargets = useMemo(() => new Set(tabs.map((t) => t.target)), [tabs])
-  const personalTree = getPersonalTree()
-  const teamTree = getTeamTree()
+  const personalTree = useMemo(() => buildTree(personalNodes, null), [personalNodes])
+  const teamTree = useMemo(() => buildTree(teamNodes, null), [teamNodes])
 
   const activeTarget = activeTab?.target ?? null
 
@@ -215,11 +216,8 @@ export function ShortcutsPanel() {
   }
 
   const handleRefreshTeam = async () => {
-    if (!workspacePath) return
-    const nodes = await loadTeamShortcutsFile(workspacePath)
-    if (nodes) {
-      setTeamNodes(nodes)
-    }
+    const teamId = useCurrentTeamStore.getState().team?.id ?? null
+    if (teamId) await loadTeamForCurrentTeam(teamId)
   }
 
   return (

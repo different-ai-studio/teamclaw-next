@@ -134,7 +134,7 @@ async function readCache(): Promise<ShortcutNode[]> {
 
 // ── Tree helpers ───────────────────────────────────────────────────────
 
-function buildTree(nodes: ShortcutNode[], parentId: string | null): ShortcutNode[] {
+export function buildTree(nodes: ShortcutNode[], parentId: string | null): ShortcutNode[] {
   return nodes
     .filter(n => n.parentId === parentId)
     .sort((a, b) => a.order - b.order)
