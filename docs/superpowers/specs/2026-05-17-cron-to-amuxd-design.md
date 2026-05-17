@@ -41,6 +41,7 @@ Add a new JSON envelope command on `amuxd.sock` (siblings to existing `mcp-send`
   "cmd": "prompt-await",
   "session_key": "cron/<job_id>/<run_id>",
   "message": "<prompt body>",
+  "job_name": "Nightly digest",               // optional; used as the Supabase session title prefix ("Cron: <job_name>")
   "working_directory": "/path/to/worktree",   // optional; cron worktree mode passes it; null otherwise
   "model_override": {                         // optional; cron job.payload.model passthrough
     "provider": "anthropic",
@@ -53,10 +54,12 @@ Add a new JSON envelope command on `amuxd.sock` (siblings to existing `mcp-send`
 **Response:**
 
 ```jsonc
-{ "ok": true,  "result": { "text": "<final AgentReply text>", "acp_session_id": "<uuid>" } }
+{ "ok": true,  "result": { "text": "<final AgentReply text>", "session_id": "<uuid>" } }
 // or
 { "ok": false, "error": "ACP turn timed out" }
 ```
+
+`session_id` is the Supabase `sessions.id` (UUID) under which the agent's AgentReply was persisted — *not* the ACP transport's session id. amuxd creates a real `public.sessions` row before spawning the runtime and adds the daemon's primary agent + admin members as `session_participants` so the desktop UI's "view session" button (which reads `CronRunRecord.session_id` and calls `switchToSession`) resolves to a labeled, RLS-visible chat thread.
 
 **amuxd-side wiring:**
 
@@ -64,9 +67,11 @@ Add a new JSON envelope command on `amuxd.sock` (siblings to existing `mcp-send`
 2. `handle_prompt_await(payload)`:
    - Validate `session_key` starts with `cron/` (reject otherwise — this command is reserved for cron-style callers; misuse should be loud).
    - Validate `message` is non-empty.
-   - Maintain an internal `HashMap<session_key, acp_session_id>` (call it `cron_sessions`). Look up the key; if absent, call `RuntimeManager::create_gateway_session_with_model` (or a sibling `create_logical_session`) passing `working_directory` as the worktree and `model_override` as `(provider, model)`. Capture the returned `acp_session_id` into the map.
-   - Call `RuntimeManager::send_prompt_and_await_reply(acp_session_id, message)`. This already blocks up to the manager's 5-minute cap and returns the aggregated `AgentReply` text.
-   - Return `{ok: true, result: { text, acp_session_id }}`.
+   - Maintain an internal `HashMap<session_key, "<supabase_id>|<acp_id>">` (call it `cron_sessions`). Look up the key; if absent:
+     - Call `SupabaseClient::create_cron_session(team_id, primary_agent_actor_id, title)` to insert a real `public.sessions` row and register participants (primary agent + admin members of the agent).
+     - Call `RuntimeManager::create_gateway_session_with_model` passing the new Supabase session id as `supabase_session_id`, `working_directory` as the worktree, and `model_override` as `(provider, model)`. Capture the returned `acp_session_id` and cache the pair in the map.
+   - Call `RuntimeManager::send_prompt_and_await_reply(acp_session_id, message)`. This already blocks up to the manager's 5-minute cap and returns the aggregated `AgentReply` text. The reply is persisted under the Supabase session id thanks to the binding above.
+   - Return `{ok: true, result: { text, session_id }}` where `session_id` is the Supabase UUID (the ACP id stays internal).
 3. Panics inside `handle_prompt_await` propagate to the daemon process, matching the existing `mcp-send` pattern. Catching them would require refactoring `DaemonServer` so cron-relevant state is cloneable into a `tokio::spawn`'d task — deferred to Open items (downgraded after implementation tradeoff: introducing a new pattern just for cron was rejected in favor of matching existing conventions).
 4. If the daemon has no primary agent runtime registered (`self.agents` is empty for `self.actor_id`), `handle_prompt_await` returns `{ok: false, error: "no local agent runtime"}` immediately rather than spawning.
 
@@ -96,6 +101,8 @@ pub struct PromptAwaitRequest<'a> {
     pub session_key: &'a str,
     pub message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_override: Option<ModelOverride<'a>>,
@@ -111,7 +118,7 @@ pub struct ModelOverride<'a> {
 #[derive(Debug)]
 pub struct PromptAwaitResponse {
     pub text: String,
-    pub acp_session_id: String,
+    pub session_id: String,
 }
 
 pub async fn prompt_await(req: PromptAwaitRequest<'_>) -> Result<PromptAwaitResponse, String> {
@@ -154,7 +161,7 @@ pub async fn prompt_await(req: PromptAwaitRequest<'_>) -> Result<PromptAwaitResp
         result: Option<WireResult>,
     }
     #[derive(serde::Deserialize)]
-    struct WireResult { text: String, acp_session_id: String }
+    struct WireResult { text: String, session_id: String }
 
     let parsed: Wire = serde_json::from_str(body.trim())
         .map_err(|e| format!("amuxd bad response: {e} (body={body:?})"))?;
@@ -166,7 +173,7 @@ pub async fn prompt_await(req: PromptAwaitRequest<'_>) -> Result<PromptAwaitResp
     if r.text.is_empty() {
         return Err("amuxd returned empty text".into());
     }
-    Ok(PromptAwaitResponse { text: r.text, acp_session_id: r.acp_session_id })
+    Ok(PromptAwaitResponse { text: r.text, session_id: r.session_id })
 }
 ```
 
@@ -193,6 +200,7 @@ let prompt_future = crate::commands::cron::amuxd_client::prompt_await(PromptAwai
     cmd: "prompt-await",
     session_key: &session_key,
     message: &job.payload.message,
+    job_name: Some(&job.name),
     working_directory: working_directory.as_deref(),
     model_override: model_param.as_ref().map(|(p, m)| ModelOverride { provider: p, model: m }),
     timeout_secs: 300,
@@ -220,7 +228,7 @@ let inner = loop {
 // inner future can return its own error rather than us erroring with a misleading
 // "exceeded" message at the boundary.
 let response = match tokio::time::timeout(std::time::Duration::from_secs(330), async { inner }).await {
-    Ok(Ok(r)) => { record.session_id = Some(r.acp_session_id.clone()); r.text }
+    Ok(Ok(r)) => { record.session_id = Some(r.session_id.clone()); r.text }
     Ok(Err(e)) => return fail_run(self, record, e, &job, started_at, &my_workspace).await,
     Err(_) => return fail_run(self, record, "amuxd response exceeded 330s".into(), &job, started_at, &my_workspace).await,
 };
@@ -230,7 +238,7 @@ let response = match tokio::time::timeout(std::time::Duration::from_secs(330), a
 
 | Field | Old source | New source |
 |---|---|---|
-| `session_id` | OpenCode session id from `POST /session` | `acp_session_id` returned by amuxd |
+| `session_id` | OpenCode session id from `POST /session` | Supabase `sessions.id` returned by amuxd (real chat session row with participants) |
 | `response_summary` | text from `extract_text_parts(message_json)` truncated | `response.text` truncated (amuxd already aggregated) |
 | `last_heartbeat_at` | tokio heartbeat tick | unchanged |
 | `worktree_path` | worktree mode path | unchanged (cron still owns the worktree lifecycle) |
@@ -328,7 +336,7 @@ All failure paths land in `CronRunRecord.error: Option<String>` and set `RunStat
 | cron client `prompt_await` | request encoding (each optional field exercised); response parsing for ok/error/missing-result/empty-text branches; IO error paths; 16 MB cap | `#[tokio::test]` spawns a `tokio::net::UnixListener` that accepts one connection, reads a line, writes a canned response, closes. Helper at `apps/desktop/src/commands/cron/amuxd_client.rs` `#[cfg(test)] mod tests` |
 | cron scheduler reconcile | existing reconcile tests (lines ~1309-1456) keep passing; new test: `reconcile_interrupted_runs` with running record → status becomes `Stale`, no IO attempted | scheduler.rs `mod tests` |
 | cron scheduler other | existing tests for `compute_next_run`, worktree cleanup, generation check stay passing | same |
-| Manual smoke | start amuxd with primary agent → add cron job "echo hello world" → trigger → confirm `response_summary` non-empty and `acp_session_id` filled | documented in PR test plan |
+| Manual smoke | start amuxd with primary agent → add cron job "echo hello world" → trigger → confirm `response_summary` non-empty, `session_id` filled with a real UUID, and the desktop UI's "view session" button opens the agent reply thread | documented in PR test plan |
 
 **Not tested:**
 
@@ -345,7 +353,7 @@ All failure paths land in `CronRunRecord.error: Option<String>` and set `RunStat
 
 ## Open items (out of scope here)
 
-1. **Reconcile-after-restart** — currently simplified to Stale. A follow-up could add an amuxd cmd `get-session-result(acp_session_id)` to recover responses produced by amuxd after a desktop crash.
+1. **Reconcile-after-restart** — currently simplified to Stale. A follow-up could add an amuxd cmd `get-session-result(session_id)` to recover responses produced by amuxd after a desktop crash.
 2. **`SessionMapping::set_model` retention** — UI side decision; spec leaves it in place pending review.
 3. **Multi-agent / per-job agent selection** — explicit non-goal here; adding it later means a new `agent_id` field on `CronJob` and resolving the binding against an agent registry.
 4. **OpenCode binary in repo** — still used by other consumers (chat, gateway/email, opencode SDK). This spec does not propose removing it globally.
