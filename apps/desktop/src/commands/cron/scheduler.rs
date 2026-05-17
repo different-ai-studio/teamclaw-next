@@ -459,6 +459,7 @@ impl CronScheduler {
                 cmd: "prompt-await",
                 session_key: &session_key,
                 message: &job.payload.message,
+                job_name: Some(&job.name),
                 working_directory: working_directory.as_deref(),
                 model_override: model_param.as_ref().map(|(p, m)| {
                     crate::commands::cron::amuxd_client::ModelOverride {
@@ -497,7 +498,7 @@ impl CronScheduler {
         .await
         {
             Ok(Ok(r)) => {
-                record.session_id = Some(r.acp_session_id.clone());
+                record.session_id = Some(r.session_id.clone());
                 self.persist_run_and_notify_ui(&record).await;
                 r.text
             }
