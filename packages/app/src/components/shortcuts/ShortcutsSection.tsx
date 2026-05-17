@@ -28,7 +28,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { useShortcutsStore, ShortcutNode } from "@/stores/shortcuts"
+import { useShortcutsStore, buildTree, ShortcutNode } from "@/stores/shortcuts"
 
 // ── Pointer-based drag context (replaces HTML5 DnD for Tauri/WebKit compat) ──
 
@@ -287,15 +287,19 @@ function EditDialog({ open, onOpenChange, node, onSave }: EditDialogProps) {
 
 export function ShortcutsSection() {
   const { t } = useTranslation()
-  const { nodes, addNode, updateNode, deleteNode, batchMove, getTree, getChildren } =
-    useShortcutsStore()
+  const personalNodes = useShortcutsStore((s) => s.personalNodes)
+  const addNode       = useShortcutsStore((s) => s.addNode)
+  const updateNode    = useShortcutsStore((s) => s.updateNode)
+  const deleteNode    = useShortcutsStore((s) => s.deleteNode)
+  const batchMove     = useShortcutsStore((s) => s.batchMove)
+  const getChildren   = useShortcutsStore((s) => s.getChildren)
 
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingNode, setEditingNode] = useState<ShortcutNode | null>(null)
   const [addingParentId, setAddingParentId] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
     const folderIds = new Set<string>()
-    for (const n of nodes) {
+    for (const n of personalNodes) {
       if (n.type === "folder") folderIds.add(n.id)
     }
     return folderIds
@@ -310,7 +314,7 @@ export function ShortcutsSection() {
   const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ sourceId: string; startY: number } | null>(null)
 
-  const tree = getTree()
+  const tree = buildTree(personalNodes, null)
 
   // ── Pointer drag handlers (container-level) ──
 
@@ -327,7 +331,7 @@ export function ShortcutsSection() {
     (sourceId: string, targetId: string) => {
       if (sourceId === targetId) return
 
-      const { nodes: currentNodes, getChildren: storeGetChildren } =
+      const { personalNodes: currentNodes, getChildren: storeGetChildren } =
         useShortcutsStore.getState()
       const sourceNode = currentNodes.find((n) => n.id === sourceId)
       const targetNode = currentNodes.find((n) => n.id === targetId)
@@ -350,7 +354,11 @@ export function ShortcutsSection() {
           (max, n) => Math.max(max, n.order),
           -1,
         )
-        batchMove([{ id: sourceId, parentId: targetId, order: maxOrder + 1 }])
+        batchMove([
+          { id: sourceId, parentId: targetId, order: maxOrder + 1 },
+        ]).catch((err) =>
+          console.warn("[shortcuts] batchMove failed:", err),
+        )
         setExpandedIds((prev) => new Set(prev).add(targetId))
       } else {
         const parentId = targetNode.parentId
@@ -364,7 +372,9 @@ export function ShortcutsSection() {
           parentId,
           order: i,
         }))
-        batchMove(moves)
+        batchMove(moves).catch((err) =>
+          console.warn("[shortcuts] batchMove failed:", err),
+        )
       }
     },
     [batchMove],
@@ -464,7 +474,9 @@ export function ShortcutsSection() {
 
   const handleDelete = (id: string) => {
     if (confirm(t("settings.shortcuts.confirmDelete", "Are you sure you want to delete this shortcut?"))) {
-      deleteNode(id)
+      deleteNode(id).catch((err) =>
+        console.warn("[shortcuts] deleteNode failed:", err),
+      )
     }
   }
 
@@ -479,19 +491,37 @@ export function ShortcutsSection() {
 
   const handleSave = (data: Partial<ShortcutNode>) => {
     if (editingNode) {
-      updateNode(editingNode.id, data)
+      // `type` is fixed at create time in the new API — log a warning if
+      // the dialog tried to change it (treat as a no-op for now).
+      if (data.type !== undefined && data.type !== editingNode.type) {
+        console.warn(
+          "[shortcuts] changing shortcut type is not supported; ignoring type change",
+        )
+      }
+      const patch: Partial<
+        Pick<ShortcutNode, "label" | "icon" | "target" | "order" | "parentId">
+      > = {}
+      if (data.label !== undefined) patch.label = data.label
+      if (data.icon !== undefined) patch.icon = data.icon
+      if (data.target !== undefined) patch.target = data.target
+      if (data.order !== undefined) patch.order = data.order
+      if (data.parentId !== undefined) patch.parentId = data.parentId
+      updateNode(editingNode.id, patch).catch((err) =>
+        console.warn("[shortcuts] updateNode failed:", err),
+      )
     } else {
       const maxOrder = getChildren(addingParentId).reduce(
         (max, n) => Math.max(max, n.order),
         -1,
       )
-      addNode({
+      addNode("personal", {
         label: data.label || "",
         type: data.type || "link",
         target: data.target || "",
         parentId: addingParentId,
+        icon: null,
         order: maxOrder + 1,
-      })
+      }).catch((err) => console.warn("[shortcuts] addNode failed:", err))
     }
   }
 
