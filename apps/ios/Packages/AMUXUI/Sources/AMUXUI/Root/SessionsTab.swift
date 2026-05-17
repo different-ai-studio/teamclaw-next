@@ -16,11 +16,11 @@ public struct SessionsTab: View {
     let refreshSessionsFromBackend: () async -> Void
     let connectedAgentsStore: ConnectedAgentsStore?
     let actorStore: ActorStore?
-    var onSignOut: (() -> Void)?
+    let shortcutsStore: ShortcutsStore?
 
     @Environment(\.modelContext) private var modelContext
 
-    @State private var showSettings = false
+    @State private var showShortcuts = false
     @State private var showNewSession = false
     @State private var showInvite = false
     @Binding var navigationPath: [String]
@@ -41,7 +41,7 @@ public struct SessionsTab: View {
                 navigationPath: Binding<[String]>,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 actorStore: ActorStore? = nil,
-                onSignOut: (() -> Void)? = nil) {
+                shortcutsStore: ShortcutsStore? = nil) {
         self.mqtt = mqtt
         self.hub = hub
         self.pairing = pairing
@@ -53,7 +53,7 @@ public struct SessionsTab: View {
         self._navigationPath = navigationPath
         self.connectedAgentsStore = connectedAgentsStore
         self.actorStore = actorStore
-        self.onSignOut = onSignOut
+        self.shortcutsStore = shortcutsStore
     }
 
     public var body: some View {
@@ -73,10 +73,13 @@ public struct SessionsTab: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gearshape").font(.title3).foregroundStyle(.primary)
+                    Button { showShortcuts = true } label: {
+                        Image(systemName: "star").font(.title3).foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Shortcuts")
+                    .accessibilityIdentifier("sessions.shortcutsButton")
+                    .disabled(shortcutsStore == nil)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showNewSession = true } label: {
@@ -106,10 +109,10 @@ public struct SessionsTab: View {
                     connectedAgentsStore: connectedAgentsStore
                 )
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView(connectedAgentsStore: connectedAgentsStore,
-                             activeTeam: activeTeam,
-                             onSignOut: onSignOut)
+            .sheet(isPresented: $showShortcuts) {
+                if let shortcutsStore {
+                    ShortcutsSheet(store: shortcutsStore)
+                }
             }
             .sheet(isPresented: $showNewSession) {
                 NewSessionSheet(mqtt: mqtt,
