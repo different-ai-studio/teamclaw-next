@@ -494,6 +494,14 @@ impl RuntimeManager {
     /// session's `primary_agent_id` would point to a dead slot.
     /// Used to populate the `primary_agent_id` of newly created collab sessions
     /// in v1 (multi-agent sessions are out of scope).
+    /// Number of registered agent runtimes (any status). Used by
+    /// `handle_prompt_await` to short-circuit when the daemon has never
+    /// spawned a runtime — that path returns `"no local agent runtime"`
+    /// to the caller rather than attempting to spawn one ad-hoc.
+    pub fn agent_count(&self) -> usize {
+        self.agents.len()
+    }
+
     pub fn first_running_agent_id(&self) -> Option<String> {
         self.agents
             .iter()
