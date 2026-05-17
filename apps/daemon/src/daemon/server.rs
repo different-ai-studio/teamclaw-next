@@ -466,23 +466,11 @@ impl DaemonServer {
                     "cron",                                          // title (display only)
                     parsed.model_override.clone(),
                     None,                                            // supabase_session_id — cron does not bind to a chat session
+                    parsed.working_directory,                        // spawn in caller-supplied worktree if Some(_)
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
             drop(mgr);
-
-            // If a working_directory was provided, the cron spec is to spawn the
-            // agent there. `create_gateway_session_with_model` currently writes a
-            // throwaway `/tmp/amuxd-gateway-<uuid>` and ignores any caller-supplied
-            // path. Honoring `working_directory` requires extending that fn's
-            // signature; Task 4a does so and removes this warn.
-            if let Some(wd) = parsed.working_directory {
-                tracing::warn!(
-                    session_key = parsed.session_key,
-                    working_directory = wd,
-                    "prompt-await: working_directory ignored — create_gateway_session_with_model does not yet accept it; Task 4a extends the signature"
-                );
-            }
 
             self.cron_sessions
                 .insert(parsed.session_key.to_string(), sid.clone());
