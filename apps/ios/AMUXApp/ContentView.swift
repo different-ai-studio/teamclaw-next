@@ -57,7 +57,8 @@ struct ContentView: View {
                     },
                     onSignOut: {
                         signOut()
-                    }
+                    },
+                    preferencesAPI: PushBootstrap.shared.preferencesAPI
                 )
                 .environment(onboarding)
                 .task {

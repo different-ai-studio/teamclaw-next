@@ -18,10 +18,13 @@ public struct SessionsTab: View {
     let actorStore: ActorStore?
     let shortcutsStore: ShortcutsStore?
     var onReconnect: (() -> Void)?
+    var onSignOut: (() -> Void)?
+    let preferencesAPI: (any PushPreferencesAPI)?
 
     @Environment(\.modelContext) private var modelContext
 
     @State private var showShortcuts = false
+    @State private var showSettings = false
     @State private var showNewSession = false
     @State private var showInvite = false
     @Binding var navigationPath: [String]
@@ -43,7 +46,9 @@ public struct SessionsTab: View {
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 actorStore: ActorStore? = nil,
                 shortcutsStore: ShortcutsStore? = nil,
-                onReconnect: (() -> Void)? = nil) {
+                onReconnect: (() -> Void)? = nil,
+                onSignOut: (() -> Void)? = nil,
+                preferencesAPI: (any PushPreferencesAPI)? = nil) {
         self.mqtt = mqtt
         self.hub = hub
         self.pairing = pairing
@@ -57,6 +62,8 @@ public struct SessionsTab: View {
         self.actorStore = actorStore
         self.shortcutsStore = shortcutsStore
         self.onReconnect = onReconnect
+        self.onSignOut = onSignOut
+        self.preferencesAPI = preferencesAPI
     }
 
     public var body: some View {
@@ -89,6 +96,13 @@ public struct SessionsTab: View {
                         .disabled(shortcutsStore == nil)
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape").font(.title3).foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("sessions.settingsButton")
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         Button { showNewSession = true } label: {
                             Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.primary)
                         }
@@ -113,8 +127,15 @@ public struct SessionsTab: View {
                         currentActorID: currentActorID,
                         refreshSessionsFromBackend: refreshSessionsFromBackend,
                         navigationPath: $navigationPath,
-                        connectedAgentsStore: connectedAgentsStore
+                        connectedAgentsStore: connectedAgentsStore,
+                        preferencesAPI: preferencesAPI
                     )
+                }
+                .sheet(isPresented: $showSettings) {
+                    SettingsView(connectedAgentsStore: connectedAgentsStore,
+                                 activeTeam: activeTeam,
+                                 onSignOut: onSignOut,
+                                 preferencesAPI: preferencesAPI)
                 }
                 .sheet(isPresented: $showNewSession) {
                     NewSessionSheet(mqtt: mqtt,
@@ -193,6 +214,7 @@ private struct SessionDestinationView: View {
     let refreshSessionsFromBackend: () async -> Void
     @Binding var navigationPath: [String]
     let connectedAgentsStore: ConnectedAgentsStore?
+    let preferencesAPI: (any PushPreferencesAPI)?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -215,7 +237,8 @@ private struct SessionDestinationView: View {
                     hub: hub,
                     peerId: "ios-\(pairing.authToken.prefix(6))",
                     teamclawService: teamclawService,
-                    connectedAgentsStore: connectedAgentsStore
+                    connectedAgentsStore: connectedAgentsStore,
+                    pushPrefs: preferencesAPI
                 )
                 .id("session:\(session.sessionId)")
             } else {

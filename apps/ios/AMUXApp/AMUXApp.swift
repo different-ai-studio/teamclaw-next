@@ -3,6 +3,7 @@ import SwiftData
 import AMUXCore
 import AMUXSharedUI
 import Sentry
+import Supabase
 
 @main
 struct AMUXApp: App {
@@ -44,6 +45,25 @@ struct AMUXApp: App {
             forName: .amuxApnsTokenReady, object: nil, queue: .main) { note in
             guard let hex = note.userInfo?["token"] as? String else { return }
             Task { await PushBootstrap.shared.handleApnsToken(hex) }
+        }
+
+        // Wire Supabase-backed push adapters. A dedicated client is built
+        // from the same bundle config used by SupabaseAppOnboardingStore so
+        // the token uploader, presence writer, and prefs API share the
+        // authenticated session. The userIDProvider closure reads the
+        // current session lazily — it resolves correctly both before and
+        // after sign-in without a strong capture of the @State onboarding.
+        if let config = try? SupabaseProjectConfiguration.fromMainBundle() {
+            let pushClient = SupabaseClient(
+                supabaseURL: config.url,
+                supabaseKey: config.publishableKey
+            )
+            PushBootstrap.shared.registerWithSupabase(
+                client: pushClient,
+                userIDProvider: { [pushClient] in
+                    pushClient.auth.currentSession?.user.id.uuidString.lowercased()
+                }
+            )
         }
     }
 

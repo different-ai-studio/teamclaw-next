@@ -17,6 +17,7 @@ public struct SettingsView: View {
     let connectedAgentsStore: ConnectedAgentsStore?
     let activeTeam: TeamSummary?
     let onSignOut: (() -> Void)?
+    let preferencesAPI: (any PushPreferencesAPI)?
 
     @State private var teamDetails: TeamDetails?
     @State private var teamLoadError: String?
@@ -31,10 +32,12 @@ public struct SettingsView: View {
 
     public init(connectedAgentsStore: ConnectedAgentsStore?,
                 activeTeam: TeamSummary? = nil,
-                onSignOut: (() -> Void)? = nil) {
+                onSignOut: (() -> Void)? = nil,
+                preferencesAPI: (any PushPreferencesAPI)? = nil) {
         self.connectedAgentsStore = connectedAgentsStore
         self.activeTeam = activeTeam
         self.onSignOut = onSignOut
+        self.preferencesAPI = preferencesAPI
     }
 
     private var appVersion: String {
@@ -78,6 +81,9 @@ public struct SettingsView: View {
                         if onboarding?.isAnonymous == true { upgradeBanner }
                         connectedAgentsSection
                         teamSection
+                        if let api = preferencesAPI {
+                            notificationsSection(api: api)
+                        }
                         aboutSection
                         if let id = currentActorID, !id.isEmpty {
                             footerCaption(actorID: id)
@@ -346,6 +352,35 @@ public struct SettingsView: View {
                 .background(SettingsCardBackground())
                 .padding(.horizontal, 16)
             }
+        }
+    }
+
+    // MARK: - Notifications
+
+    private func notificationsSection(api: any PushPreferencesAPI) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionLabel("Preferences")
+            VStack(spacing: 0) {
+                NavigationLink {
+                    NotificationsSettingsView(api: api)
+                } label: {
+                    HStack {
+                        Text("Notifications")
+                            .font(.system(size: 14.5))
+                            .foregroundStyle(Color.amux.onyx)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.amux.slate)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .background(SettingsCardBackground())
+            .padding(.horizontal, 16)
         }
     }
 

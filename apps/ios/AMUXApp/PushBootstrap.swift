@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import AMUXCore
+import Supabase
 
 @MainActor
 final class PushBootstrap {
@@ -29,5 +30,15 @@ final class PushBootstrap {
     func handleApnsToken(_ hex: String) async {
         guard let svc = service else { return }
         try? await svc.uploadToken(hex)
+    }
+
+    /// Convenience: build all three Supabase-backed adapters and register them.
+    func registerWithSupabase(client: SupabaseClient,
+                              userIDProvider: @escaping @Sendable () -> String?) {
+        let uploader = SupabaseTokenUploader(client: client)
+        let presence = SupabasePresenceWriter(client: client, userID: userIDProvider)
+        let prefs = SupabasePushPreferences(client: client, userID: userIDProvider)
+        register(uploader: uploader, presenceWriter: presence,
+                 preferencesAPI: prefs, userIDProvider: userIDProvider)
     }
 }
