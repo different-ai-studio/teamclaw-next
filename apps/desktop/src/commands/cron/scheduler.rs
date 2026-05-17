@@ -543,10 +543,6 @@ impl CronScheduler {
             }
         }
 
-        let opencode_directory = wt_guard.path.as_deref();
-
-        let port = *self.opencode_port.read().await;
-
         // Helper macro: abort if scheduler was restarted (workspace switched)
         macro_rules! check_generation {
             () => {
@@ -568,172 +564,64 @@ impl CronScheduler {
         // Check before starting work
         check_generation!();
 
-        // Step 1: Determine session strategy based on delivery channel.
-        //
-        // - Discord/Feishu: Reuse the user's existing session for that channel target,
-        //   so cron tasks share the same conversation context as user messages.
-        // - Email: Always create a NEW session per execution. Email sessions are
-        //   identified by `email:thread:cron:<job_id>:<run_id>`, unique per run.
-        //   After delivery, the outgoing Message-ID is registered in SessionMapping
-        //   so user replies (via In-Reply-To) resolve to this same session.
-        // - No delivery: Always create a fresh session.
+        // Email delivery still needs a unique per-run session_key so that
+        // outgoing Message-ID/subject can be registered for inbound reply
+        // routing (see Step 3 below). The amuxd path itself uses a separate
+        // `cron/<job_id>/<run_id>` key for the ACP session.
         let is_email_delivery = matches!(
             &job.delivery,
             Some(d) if d.channel == DeliveryChannel::Email
         );
-        // For email delivery, build the unique session key upfront
         let email_session_key = if is_email_delivery {
             Some(format!("email:thread:cron:{}:{}", job.id, run_id))
         } else {
             None
         };
 
-        let (session_id, _is_new_session) = if use_worktree {
-            // Worktree mode: always create a new session bound to the worktree directory
-            match self.create_opencode_session(port, opencode_directory).await {
-                Ok(id) => {
-                    println!(
-                        "[Cron] Created worktree session '{}' for job '{}' (dir: {:?})",
-                        id, job.name, opencode_directory
-                    );
-                    (id, true)
-                }
-                Err(e) => {
-                    record.status = RunStatus::Failed;
-                    record.finished_at = Some(Utc::now());
-                    record.error = Some(format!("Failed to create session: {}", e));
-                    self.persist_run_and_notify_ui(&record).await;
-                    self.update_job_after_run(&job, started_at, &my_workspace)
-                        .await;
-                    return;
-                }
-            }
-        } else if is_email_delivery {
-            // Email: always create a new OpenCode session per execution
-            match self.create_opencode_session(port, None).await {
-                Ok(id) => {
-                    let session_key = email_session_key.as_ref().unwrap();
-                    println!(
-                        "[Cron] Created new email session '{}' for job '{}' (key: {})",
-                        id, job.name, session_key
-                    );
-                    // Store the session under the unique email thread key
-                    let sm_guard = self.session_mapping.read().await;
-                    if let Some(mapping) = sm_guard.as_ref() {
-                        mapping.set_session(session_key.clone(), id.clone()).await;
-                    }
-                    (id, true)
-                }
-                Err(e) => {
-                    record.status = RunStatus::Failed;
-                    record.finished_at = Some(Utc::now());
-                    record.error = Some(format!("Failed to create session: {}", e));
-                    self.persist_run_and_notify_ui(&record).await;
-                    self.update_job_after_run(&job, started_at, &my_workspace)
-                        .await;
-                    return;
-                }
-            }
-        } else if let Some(delivery) = &job.delivery {
-            // Discord/Feishu: Try to reuse the user's existing session
-            if let Some(existing_id) = self.find_existing_session(delivery).await {
-                println!(
-                    "[Cron] Reusing existing session '{}' for job '{}'",
-                    existing_id, job.name
-                );
-                (existing_id, false)
-            } else {
-                // No existing session — create a new one and store it
-                match self.create_opencode_session(port, None).await {
-                    Ok(id) => {
-                        println!(
-                            "[Cron] Created new session '{}' for job '{}' (no existing session found)",
-                            id, job.name
-                        );
-                        self.store_session(delivery, &id).await;
-                        (id, true)
-                    }
-                    Err(e) => {
-                        record.status = RunStatus::Failed;
-                        record.finished_at = Some(Utc::now());
-                        record.error = Some(format!("Failed to create session: {}", e));
-                        self.persist_run_and_notify_ui(&record).await;
-                        self.update_job_after_run(&job, started_at, &my_workspace)
-                            .await;
-                        return;
-                    }
-                }
-            }
-        } else {
-            // No delivery configured — always create a fresh session
-            match self.create_opencode_session(port, None).await {
-                Ok(id) => (id, true),
-                Err(e) => {
-                    record.status = RunStatus::Failed;
-                    record.finished_at = Some(Utc::now());
-                    record.error = Some(format!("Failed to create session: {}", e));
-                    self.persist_run_and_notify_ui(&record).await;
-                    self.update_job_after_run(&job, started_at, &my_workspace)
-                        .await;
-                    return;
-                }
-            }
-        };
-        record.session_id = Some(session_id.clone());
-        // Persist session_id and notify UI before long-running OpenCode work so
-        // "scheduled sessions" filtering sees this run without waiting for completion.
-        self.persist_run_and_notify_ui(&record).await;
+        // ── New cron-to-amuxd execution flow ─────────────────────────────
+        // (Replaces the OpenCode HTTP path. See spec
+        //  docs/superpowers/specs/2026-05-17-cron-to-amuxd-design.md §3.)
 
-        // Parse model override
+        let session_key = format!("cron/{}/{}", job.id, run_id);
+        let working_directory = wt_guard.path.clone(); // Option<String>
+
+        // Preserved from the OpenCode path: parse `job.payload.model` (a short
+        // name like "sonnet") into `(provider, model)`. Kept identical so any
+        // job-config docs/tests still apply.
         let model_param = job
             .payload
             .model
             .as_ref()
             .and_then(|m| crate::commands::gateway::parse_model_preference(m));
 
-        // Store model preference in SessionMapping for UI consistency
-        // This ensures the chat panel displays the correct model for cron-initiated sessions
-        if let Some(model_str) = &job.payload.model {
-            let sm_guard = self.session_mapping.read().await;
-            if let Some(mapping) = sm_guard.as_ref() {
-                // Determine which session key to use for storing model preference
-                let key_for_model: Option<String> = if let Some(key) = &email_session_key {
-                    // Email delivery: use the unique email thread key
-                    Some(key.clone())
-                } else if let Some(delivery) = &job.delivery {
-                    // Discord/Feishu: use the delivery target key
-                    Self::delivery_to_session_key(delivery)
-                } else {
-                    // No delivery: no persistent key to store preference
-                    None
-                };
+        let prompt_future = crate::commands::cron::amuxd_client::prompt_await(
+            crate::commands::cron::amuxd_client::PromptAwaitRequest {
+                cmd: "prompt-await",
+                session_key: &session_key,
+                message: &job.payload.message,
+                working_directory: working_directory.as_deref(),
+                model_override: model_param.as_ref().map(|(p, m)| {
+                    crate::commands::cron::amuxd_client::ModelOverride {
+                        provider: p,
+                        model: m,
+                    }
+                }),
+                timeout_secs: 300,
+            },
+        );
 
-                if let Some(key) = key_for_model {
-                    mapping.set_model(key.clone(), model_str.clone()).await;
-                    println!(
-                        "[Cron] Stored model preference '{}' for session key '{}'",
-                        model_str, key
-                    );
-                }
-            }
-        }
-
-        // Check before sending to OpenCode (workspace may have changed)
-        check_generation!();
-
-        // Step 2: Send message to OpenCode
-        let response_future =
-            self.send_to_opencode(port, &session_id, &job.payload.message, model_param.clone());
-        tokio::pin!(response_future);
-        let heartbeat_every = std::time::Duration::from_secs(CRON_RUN_HEARTBEAT_INTERVAL_SECS);
+        // Heartbeat continues while we await the amuxd response.
+        tokio::pin!(prompt_future);
+        let heartbeat_every =
+            std::time::Duration::from_secs(CRON_RUN_HEARTBEAT_INTERVAL_SECS);
         let mut heartbeat_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + heartbeat_every,
             heartbeat_every,
         );
 
-        let response_result = loop {
+        let inner_result = loop {
             tokio::select! {
-                result = &mut response_future => break result,
+                result = &mut prompt_future => break result,
                 _ = heartbeat_interval.tick() => {
                     record.last_heartbeat_at = Some(Utc::now());
                     self.persist_run_and_notify_ui(&record).await;
@@ -741,25 +629,37 @@ impl CronScheduler {
             }
         };
 
-        let response = match response_result {
-            Ok(text) => text,
-            Err(e) => {
-                // Fail immediately without retry. Previous retry logic was too aggressive:
-                // it created a new session on ANY error (including API key errors,
-                // model config issues, etc.), which just creates unusable sessions.
-                // If OpenCode restarts and sessions are lost, user should manually
-                // trigger the job or restart the app to reinitialize.
+        // Outer client-side timeout (330s = amuxd cap 300 + 30s slack)
+        let response_text = match tokio::time::timeout(
+            std::time::Duration::from_secs(330),
+            async { inner_result },
+        )
+        .await
+        {
+            Ok(Ok(r)) => {
+                record.session_id = Some(r.acp_session_id.clone());
+                self.persist_run_and_notify_ui(&record).await;
+                r.text
+            }
+            Ok(Err(e)) => {
                 record.status = RunStatus::Failed;
                 record.finished_at = Some(Utc::now());
-                record.error = Some(format!("Failed to send message: {}", e));
+                record.error = Some(e);
                 self.persist_run_and_notify_ui(&record).await;
-                self.update_job_after_run(&job, started_at, &my_workspace)
-                    .await;
+                self.update_job_after_run(&job, started_at, &my_workspace).await;
+                return;
+            }
+            Err(_) => {
+                record.status = RunStatus::Failed;
+                record.finished_at = Some(Utc::now());
+                record.error = Some("amuxd response exceeded 330s".into());
+                self.persist_run_and_notify_ui(&record).await;
+                self.update_job_after_run(&job, started_at, &my_workspace).await;
                 return;
             }
         };
 
-        record.response_summary = Some(Self::truncate_response_summary(&response));
+        record.response_summary = Some(Self::truncate_response_summary(&response_text));
 
         // Check before delivery (workspace may have changed)
         check_generation!();
@@ -771,7 +671,7 @@ impl CronScheduler {
                 let delivery_mgr = self.delivery.read().await;
                 if let Some(mgr) = delivery_mgr.as_ref() {
                     // Format the delivery message with job context
-                    let delivery_message = format!("[Cron: {}]\n\n{}", job.name, response);
+                    let delivery_message = format!("[Cron: {}]\n\n{}", job.name, response_text);
 
                     match mgr
                         .send_notification(&delivery.channel, &delivery.to, &delivery_message)
