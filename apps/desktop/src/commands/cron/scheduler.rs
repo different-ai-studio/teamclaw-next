@@ -878,6 +878,28 @@ mod tests {
         assert_eq!(payload.timeout_seconds, Some(30));
     }
 
+    #[test]
+    fn reconcile_without_assistant_text_marks_stale() {
+        let record = CronRunRecord {
+            run_id: "r1".into(),
+            job_id: "j1".into(),
+            started_at: Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap(),
+            finished_at: None,
+            status: RunStatus::Running,
+            last_heartbeat_at: Some(Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 30).unwrap()),
+            session_id: Some("sid-1".into()),
+            response_summary: None,
+            delivery_status: None,
+            error: None,
+            worktree_path: None,
+        };
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 0, 5, 0).unwrap();
+        let out = CronScheduler::reconcile_interrupted_run(record, None, now);
+        assert_eq!(out.status, RunStatus::Stale);
+        assert_eq!(out.finished_at, Some(now));
+        assert!(out.error.is_some(), "stale runs should carry an error message");
+    }
+
     // ── compute_next_run: At ─────────────────────────────────────────────────
 
     #[test]
