@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -10,6 +11,15 @@ use crate::proto::amux;
 use crate::runtime::turn_aggregator::TurnAggregator;
 use crate::supabase::{AgentRuntimeUpsert, SupabaseClient};
 use chrono::Utc;
+
+/// Per-agent runtime state checked out of `RuntimeManager` for the duration
+/// of a single gateway turn. Owning the receiver here lets the turn-await
+/// loop sit on `event_rx.recv().await` without holding the global manager
+/// mutex, so concurrent turns on *different* agents stay parallel.
+pub struct CheckedOutTurn {
+    pub agent_id: String,
+    pub event_rx: mpsc::Receiver<amux::AcpEvent>,
+}
 
 /// Sanitise an arbitrary logical-session-id string into a filename-safe
 /// component. The gateway-minted acp_session_id values that drive the
@@ -423,7 +433,7 @@ impl RuntimeManager {
     }
 
     /// Inner helper: send the given body to ACP without any prefix logic.
-    async fn send_prompt_raw(&mut self, agent_id: &str, text: &str) -> crate::error::Result<()> {
+    pub async fn send_prompt_raw(&mut self, agent_id: &str, text: &str) -> crate::error::Result<()> {
         #[cfg(test)]
         {
             self.last_sent
@@ -586,15 +596,64 @@ impl RuntimeManager {
         self.agents.get_mut(agent_id)
     }
 
-    /// Drain events from all agents, returns (agent_id, event) pairs
+    /// Drain events from all agents, returns (agent_id, event) pairs.
+    ///
+    /// Agents whose `event_rx` has been checked out by a gateway turn are
+    /// skipped — that owner is responsible for forwarding/aggregating its
+    /// own events for the duration of the turn and will hand the receiver
+    /// back afterwards.
     pub fn poll_events(&mut self) -> Vec<(String, amux::AcpEvent)> {
         let mut events = vec![];
         for (agent_id, handle) in &mut self.agents {
-            while let Ok(event) = handle.event_rx.try_recv() {
-                events.push((agent_id.clone(), event));
+            if let Some(rx) = handle.event_rx.as_mut() {
+                while let Ok(event) = rx.try_recv() {
+                    events.push((agent_id.clone(), event));
+                }
             }
         }
         events
+    }
+
+    /// Look up the agent for `acp_session_id`, take its `event_rx` out of
+    /// the manager-owned handle, and return the bits needed to drive a
+    /// turn without holding the global mutex. Caller MUST eventually call
+    /// `checkin_turn` (or the channel stays parked and `poll_events`
+    /// silently drops the agent's events).
+    pub fn checkout_turn_for_acp(
+        &mut self,
+        acp_session_id: &str,
+    ) -> crate::error::Result<(CheckedOutTurn, std::sync::Arc<tokio::sync::Mutex<()>>)> {
+        let agent_id = self
+            .agent_id_by_acp_session(acp_session_id)
+            .ok_or_else(|| {
+                crate::error::AmuxError::Agent(format!(
+                    "no agent for acp_session_id {acp_session_id}"
+                ))
+            })?;
+        let handle = self.agents.get_mut(&agent_id).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!(
+                "agent {agent_id} disappeared during checkout"
+            ))
+        })?;
+        let event_rx = handle.event_rx.take().ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!(
+                "agent {agent_id} event_rx already checked out (concurrent turn?)"
+            ))
+        })?;
+        let turn_lock = handle.turn_lock.clone();
+        Ok((
+            CheckedOutTurn { agent_id, event_rx },
+            turn_lock,
+        ))
+    }
+
+    /// Hand the per-agent `event_rx` back so daemon `poll_events` resumes
+    /// draining and follow-up turns can take it out again. Idempotent: if
+    /// the agent has been removed in the meantime, the receiver is dropped.
+    pub fn checkin_turn(&mut self, turn: CheckedOutTurn) {
+        if let Some(handle) = self.agents.get_mut(&turn.agent_id) {
+            handle.event_rx = Some(turn.event_rx);
+        }
     }
 
     pub fn to_proto_agent_list(&self) -> amux::AgentList {
@@ -827,14 +886,24 @@ impl RuntimeManager {
             }
 
             // Wait for at least one event before draining.
+            // NOTE: holds &mut RuntimeManager for the entire loop, so the
+            // global manager mutex is locked until the turn finishes. Kept
+            // for any legacy non-gateway caller; gateway agents now route
+            // through `checkout_turn_for_acp` + `AmuxdAcpHandle::send_prompt`
+            // which release the manager lock during `recv().await`.
             let next = {
                 let handle = self.agents.get_mut(&agent_id).ok_or_else(|| {
                     crate::error::AmuxError::Agent(format!(
                         "agent {agent_id} disappeared while awaiting reply"
                     ))
                 })?;
+                let event_rx = handle.event_rx.as_mut().ok_or_else(|| {
+                    crate::error::AmuxError::Agent(format!(
+                        "agent {agent_id} event_rx checked out (a concurrent gateway turn is in progress)"
+                    ))
+                })?;
                 let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                tokio::time::timeout(remaining, handle.event_rx.recv()).await
+                tokio::time::timeout(remaining, event_rx.recv()).await
             };
 
             let event = match next {

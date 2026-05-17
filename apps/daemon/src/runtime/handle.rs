@@ -1,4 +1,6 @@
-use tokio::sync::mpsc;
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tracing::warn;
 
 use super::adapter::AcpCommand;
@@ -27,10 +29,21 @@ pub struct RuntimeHandle {
     pub tool_use_count: i32,
     pub started_at: i64,
     pub sequence: u64,
-    pub event_rx: mpsc::Receiver<amux::AcpEvent>,
+    /// Receiver half of the per-agent event channel. Wrapped in `Option` so
+    /// the gateway turn-await loop can `.take()` it for the duration of a
+    /// single turn — letting the loop sit on `recv().await` without holding
+    /// the global `RuntimeManager` mutex. While the receiver is checked out
+    /// (i.e. `None` here), `poll_events` skips this agent and events queue
+    /// in the channel buffer for the checkout owner to drain.
+    pub event_rx: Option<mpsc::Receiver<amux::AcpEvent>>,
     pub event_tx: mpsc::Sender<amux::AcpEvent>,
     /// Channel to send commands (prompt, cancel, permission) to the ACP thread.
     pub cmd_tx: Option<mpsc::Sender<AcpCommand>>,
+    /// Serialises concurrent gateway turns for the *same* agent (e.g. two
+    /// rapid-fire inbound DMs in the same wecom chat). Cloneable Arc, held
+    /// across the entire turn-await loop. Different agents have different
+    /// locks so cross-session traffic stays fully parallel.
+    pub turn_lock: Arc<AsyncMutex<()>>,
     /// Messages that arrived on session/live while this runtime was not in
     /// the mention set. Drained into a `[Context: …]` prefix on the next
     /// real send_prompt so the runtime catches up without firing N turns.
@@ -70,9 +83,10 @@ impl RuntimeHandle {
             tool_use_count: 0,
             started_at: chrono::Utc::now().timestamp(),
             sequence: 0,
-            event_rx,
+            event_rx: Some(event_rx),
             event_tx,
             cmd_tx: None,
+            turn_lock: Arc::new(AsyncMutex::new(())),
             pending_silent: Vec::new(),
             supabase_runtime_row_id: None,
             last_processed_message_id: None,
@@ -217,9 +231,10 @@ impl RuntimeHandle {
             tool_use_count: 0,
             started_at: 0,
             sequence: 0,
-            event_rx,
+            event_rx: Some(event_rx),
             event_tx,
             cmd_tx: None,
+            turn_lock: Arc::new(AsyncMutex::new(())),
             pending_silent: Vec::new(),
             supabase_runtime_row_id: None,
             last_processed_message_id: None,

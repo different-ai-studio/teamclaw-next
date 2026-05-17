@@ -230,13 +230,92 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             self.mark_primed(session).await;
         }
 
-        let mut mgr = self.manager.lock().await;
-        let reply = mgr
-            .send_prompt_and_await_reply(&outcome.real_acp_sid, &prompt)
-            .await
-            .map_err(|e| AcpError::Send(e.to_string()))?;
+        // Per-session concurrency model:
+        //
+        //   1. Grab the per-agent `turn_lock` Arc under a brief manager
+        //      lock and immediately release the manager mutex.
+        //   2. Acquire `turn_lock` — serialises only *this* agent's turns.
+        //      Different agents have different locks, so two concurrent
+        //      wecom sessions never block each other here.
+        //   3. Re-acquire the manager mutex *briefly* to send the prompt
+        //      and check the agent's `event_rx` out of the handle. With
+        //      `turn_lock` held the checkout cannot race.
+        //   4. Drive the aggregator off the local `event_rx.recv().await`
+        //      *without* holding the manager mutex. Re-lock only for the
+        //      sub-millisecond `aggregator.ingest(&event)` call after each
+        //      event. While we're waiting on the model, the manager mutex
+        //      stays free so other sessions can poll events / spawn / etc.
+        //   5. Always check the receiver back in (success or error) before
+        //      dropping the turn_lock guard so `poll_events` resumes
+        //      draining the next round.
+
+        let turn_lock = {
+            let mgr = self.manager.lock().await;
+            let agent_id = mgr.agent_id_by_acp_session(&outcome.real_acp_sid).ok_or_else(|| {
+                AcpError::Send(format!(
+                    "no agent for acp_session_id {}",
+                    outcome.real_acp_sid
+                ))
+            })?;
+            let handle = mgr.get_handle(&agent_id).ok_or_else(|| {
+                AcpError::Send(format!("agent {agent_id} disappeared before turn"))
+            })?;
+            handle.turn_lock.clone()
+        };
+        let _turn_guard = turn_lock.lock().await;
+
+        let (agent_id, mut event_rx) = {
+            let mut mgr = self.manager.lock().await;
+            let (turn, _again) = mgr
+                .checkout_turn_for_acp(&outcome.real_acp_sid)
+                .map_err(|e| AcpError::Send(e.to_string()))?;
+            mgr.send_prompt_raw(&turn.agent_id, &prompt)
+                .await
+                .map_err(|e| AcpError::Send(e.to_string()))?;
+            (turn.agent_id, turn.event_rx)
+        };
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        let result: Result<String, AcpError> = loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break Err(AcpError::Timeout);
+            }
+            let next = tokio::time::timeout(remaining, event_rx.recv()).await;
+            let event = match next {
+                Ok(Some(ev)) => ev,
+                Ok(None) => break Err(AcpError::Send("ACP event channel closed before reply".into())),
+                Err(_) => break Err(AcpError::Timeout),
+            };
+            let emitted = {
+                let mut mgr = self.manager.lock().await;
+                mgr.aggregator_mut(&agent_id)
+                    .map(|agg| agg.ingest(&event))
+                    .unwrap_or_default()
+            };
+            let mut reply: Option<String> = None;
+            for m in emitted {
+                if matches!(m.kind, crate::proto::teamclaw::MessageKind::AgentReply) {
+                    reply = Some(m.content);
+                    break;
+                }
+            }
+            if let Some(text) = reply {
+                break Ok(text);
+            }
+        };
+
+        {
+            let mut mgr = self.manager.lock().await;
+            mgr.checkin_turn(crate::runtime::CheckedOutTurn {
+                agent_id,
+                event_rx,
+            });
+        }
+
+        let reply_text = result?;
         Ok(AcpTurnOutcome {
-            reply_text: reply,
+            reply_text,
             completed: true,
         })
     }
