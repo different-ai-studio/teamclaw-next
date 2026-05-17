@@ -59,6 +59,12 @@ pub struct DaemonServer {
     /// `None` until `start_channels()` runs; held as `Option` so `shutdown(self)`
     /// can be `.take()`n on graceful exit.
     channel_mgr: Option<ChannelManager>,
+    /// Maps cron's logical `session_key` (e.g. `"cron/<job_id>/<run_id>"`) to
+    /// the acp_session_id of a live agent spawned for that key. With the
+    /// current "per-run new session" cron semantics, every prompt-await call
+    /// hits the "absent → create" branch, but the lookup-first shape stays
+    /// so future code can adopt session reuse without changing the handler.
+    cron_sessions: std::collections::HashMap<String, String>,
 }
 
 /// Single control command parsed off `amuxd.sock`. Variants correspond to the
@@ -212,6 +218,7 @@ impl DaemonServer {
             supabase,
             actor_id,
             channel_mgr: None,
+            cron_sessions: std::collections::HashMap::new(),
         })
     }
 
