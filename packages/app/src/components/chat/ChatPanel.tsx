@@ -521,34 +521,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     return () => window.removeEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
   }, []);
 
-  // ── Team shortcuts hot reload via file watcher ─────────────────────────
-  React.useEffect(() => {
-    if (!workspaceBootstrapped || !workspacePath) return;
-    const isTauriEnv = isTauri();
-    if (!isTauriEnv) return;
-
-    let unlisten: (() => void) | null = null;
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    (async () => {
-      const { listen } = await import('@tauri-apps/api/event');
-      unlisten = await listen<{ path: string; kind: string }>('file-change', (event) => {
-        if (!event.payload.path.includes(`${TEAM_REPO_DIR}/_meta/shortcuts.json`)) return;
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
-          console.log('[TeamShortcuts] _meta/shortcuts.json changed, reloading');
-          const teamId = useCurrentTeamStore.getState().team?.id ?? null;
-          if (teamId) await useShortcutsStore.getState().loadTeamForCurrentTeam(teamId);
-        }, 500);
-      });
-    })();
-
-    return () => {
-      if (unlisten) unlisten();
-      if (debounceTimer) clearTimeout(debounceTimer);
-    };
-  }, [workspaceReady, workspacePath]);
-
   // Sync selected model to session store
   React.useEffect(() => {
     if (selectedModelOption) {
