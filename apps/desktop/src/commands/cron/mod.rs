@@ -1,3 +1,4 @@
+pub mod amuxd_client;
 pub mod delivery;
 pub mod scheduler;
 pub mod storage;

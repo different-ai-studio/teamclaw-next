@@ -127,9 +127,12 @@ mod tests {
     where
         F: FnOnce(Value) -> String + Send + 'static,
     {
-        let dir = std::env::temp_dir().join(format!("amuxd-mock-{}", uuid::Uuid::new_v4()));
+        // macOS sun_path is ~104 bytes; std::env::temp_dir() on macOS is
+        // already ~50 chars, so keep the rest minimal.
+        let short = &uuid::Uuid::new_v4().simple().to_string()[..12];
+        let dir = PathBuf::from("/tmp").join(format!("amx-{short}"));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("amuxd.sock");
+        let path = dir.join("a.sock");
         let listener = UnixListener::bind(&path).unwrap();
         let path_clone = path.clone();
         tokio::spawn(async move {
