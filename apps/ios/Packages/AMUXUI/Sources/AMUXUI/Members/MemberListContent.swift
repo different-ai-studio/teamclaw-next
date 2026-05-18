@@ -451,6 +451,8 @@ private struct ActorDetailView: View {
     @State private var isDeleting = false
     @State private var deleteErrorMessage: String?
     @State private var autoApprovedOverrides: [String: Bool] = [:]
+    @State private var isSavingDefaults = false
+    @State private var defaultsErrorMessage: String?
 
     /// Daemon `device_id` for the agent being viewed — only meaningful when
     /// `actor` is itself an agent. Empty for humans (where workspace
@@ -563,6 +565,7 @@ private struct ActorDetailView: View {
                 }
             }
             if actor.isAgent {
+                defaultsSection
                 Section("Workspaces") {
                     Group {
                     if let workspaceStore, workspaceStore.isLoading && workspaceStore.workspaces.isEmpty {
@@ -1128,6 +1131,111 @@ private struct ActorDetailView: View {
             get: { autoApprovedOverrides[row.name] ?? row.defaultOn },
             set: { autoApprovedOverrides[row.name] = $0 }
         )
+    }
+
+    // MARK: - Defaults section
+    //
+    // Per-agent defaults that New Session and Add Agent flows read so the user
+    // doesn't have to repeat workspace + agent-type picks. Backed by
+    // `agents.default_workspace_id` and `agents.agent_kind`.
+
+    private static let agentKindOptions: [(String, String)] = [
+        ("claude",   "Claude"),
+        ("opencode", "OpenCode"),
+        ("codex",    "Codex"),
+    ]
+
+    @ViewBuilder
+    private var defaultsSection: some View {
+        Section {
+            Group {
+                Picker("Default workspace", selection: defaultWorkspaceBinding) {
+                    Text("None").tag(String?.none)
+                    if let workspaceStore {
+                        ForEach(workspaceStore.workspaces) { ws in
+                            Text(ws.displayName.isEmpty ? ws.path : ws.displayName)
+                                .tag(Optional(ws.id))
+                        }
+                    }
+                }
+                .disabled(isSavingDefaults || (workspaceStore?.workspaces.isEmpty ?? true))
+
+                Picker("Agent type", selection: agentKindBinding) {
+                    ForEach(Self.agentKindOptions, id: \.0) { kind, label in
+                        Text(label).tag(kind)
+                    }
+                }
+                .disabled(isSavingDefaults)
+
+                if isSavingDefaults {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Saving…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let defaultsErrorMessage {
+                    Text(defaultsErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(Color.amux.cinnabarDeep)
+                }
+            }
+            .listRowBackground(Color.amux.paper)
+        } header: {
+            Text("Defaults")
+        } footer: {
+            Text("Used when this agent is added to a new session — picks are pre-filled, no extra taps needed.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var defaultWorkspaceBinding: Binding<String?> {
+        Binding(
+            get: { actor.defaultWorkspaceId },
+            set: { newValue in saveDefaults(workspaceID: newValue, agentKind: nil) }
+        )
+    }
+
+    private var agentKindBinding: Binding<String> {
+        Binding(
+            get: {
+                let raw = actor.agentKind ?? "claude"
+                return Self.agentKindOptions.contains(where: { $0.0 == raw }) ? raw : "claude"
+            },
+            set: { newValue in saveDefaults(workspaceID: nil, agentKind: newValue) }
+        )
+    }
+
+    private func saveDefaults(workspaceID: String?, agentKind: String?) {
+        guard !isSavingDefaults else { return }
+        // Apply the local change immediately so the picker reflects the new
+        // value before the round-trip completes. ActorStore.reload() will
+        // overwrite if the RPC succeeds.
+        if let workspaceID {
+            actor.defaultWorkspaceId = workspaceID
+        }
+        if let agentKind {
+            actor.agentKind = agentKind
+        }
+        isSavingDefaults = true
+        defaultsErrorMessage = nil
+        let actorID = actor.actorId
+        Task {
+            let result = await store.updateAgentDefaults(
+                actorID: actorID,
+                defaultWorkspaceID: workspaceID,
+                agentKind: agentKind
+            )
+            await MainActor.run {
+                isSavingDefaults = false
+                if result == nil {
+                    defaultsErrorMessage = store.errorMessage ?? "Failed to save defaults."
+                }
+            }
+        }
     }
 }
 

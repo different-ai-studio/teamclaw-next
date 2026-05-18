@@ -1,22 +1,21 @@
 import SwiftUI
+import SwiftData
 import AMUXCore
 
 // MARK: - AddAgentSheet
 
-/// Two-step picker presented from `SessionDetailView` when the user taps
-/// "Add agent" in the session member sheet:
+/// Picker presented from `SessionDetailView` when the user taps "Add agent"
+/// in the session member sheet. Each row is a `ConnectedAgent` candidate
+/// (already filtered to exclude agents currently in the session); tapping
+/// one resolves the agent's stored defaults (default_workspace_id +
+/// agent_kind, mirrored on `CachedActor`) and immediately calls `onConfirm`
+/// with `(actorID, workspaceID, workspacePath, agentType)`.
 ///
-///   1. List of `ConnectedAgent` candidates (already filtered to exclude
-///      agents currently in the session).
-///   2. Tap a row → `AgentConfigSheet` to choose workspace + agent type.
-///   3. On confirm, hand the chosen `(actorID, workspaceID, workspacePath,
-///      agentType)` back to the parent which calls `addAgent` on the VM.
-///
-/// Workspace loading mirrors `NewSessionSheet`: a `WorkspaceStore` is spun
-/// up on `task`, then we filter to workspaces owned by the chosen agent
-/// (falling back to all workspaces if none match).
+/// Workspace fallback chain matches `NewSessionSheet.resolveAgentDefaults`:
+/// stored default → any workspace owned by the agent → any team workspace.
 public struct AddAgentSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Query private var cachedActors: [CachedActor]
 
     let candidates: [ConnectedAgent]
     let teamID: String
@@ -26,7 +25,7 @@ public struct AddAgentSheet: View {
                     _ agentType: AgentConfigSheet.AgentType) -> Void
 
     @State private var workspaceStore: WorkspaceStore?
-    @State private var pendingAgent: ConnectedAgent?
+    @State private var errorMessage: String?
 
     public init(candidates: [ConnectedAgent],
                 teamID: String,
@@ -53,7 +52,7 @@ public struct AddAgentSheet: View {
                 } else {
                     ForEach(candidates) { agent in
                         Button {
-                            pendingAgent = agent
+                            handleTap(agent)
                         } label: {
                             HStack(spacing: 8) {
                                 Circle()
@@ -77,6 +76,11 @@ public struct AddAgentSheet: View {
                         .tint(.primary)
                     }
                 }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
             .navigationTitle("Add Agent")
             .navigationBarTitleDisplayMode(.inline)
@@ -91,33 +95,6 @@ public struct AddAgentSheet: View {
                 }
             }
         }
-        .sheet(item: $pendingAgent) { agent in
-            // Match NewSessionSheet pattern: prefer workspaces owned by the
-            // chosen agent; fall back to all workspaces if none match.
-            let agentWorkspaces = workspaces
-                .filter { $0.agentID == agent.id }
-                .map { WorkspaceRef(id: $0.id, path: $0.displayName.isEmpty ? $0.path : $0.displayName) }
-            let allWorkspaceRefs = agentWorkspaces.isEmpty
-                ? workspaces.map { WorkspaceRef(id: $0.id, path: $0.displayName.isEmpty ? $0.path : $0.displayName) }
-                : agentWorkspaces
-
-            AgentConfigSheet(
-                actorDisplayName: agent.displayName,
-                workspaces: allWorkspaceRefs,
-                onConfirm: { sel in
-                    // Resolve the chosen workspace's real filesystem path
-                    // (NewSessionSheet uses .path here, not displayName, so
-                    // the daemon spawns in the right cwd).
-                    let wsPath = workspaces.first(where: { $0.id == sel.workspaceID })?.path ?? ""
-                    onConfirm(agent.id, sel.workspaceID, wsPath, sel.agentType)
-                    pendingAgent = nil
-                    dismiss()
-                },
-                onCancel: {
-                    pendingAgent = nil
-                }
-            )
-        }
         .task {
             guard workspaceStore == nil, !teamID.isEmpty else { return }
             if let repository = try? SupabaseWorkspaceRepository() {
@@ -125,5 +102,31 @@ public struct AddAgentSheet: View {
                 await workspaceStore?.reload(agentID: nil)
             }
         }
+    }
+
+    private func handleTap(_ agent: ConnectedAgent) {
+        let cached = cachedActors.first(where: { $0.actorId == agent.id })
+        let defaultWorkspaceID = cached?.defaultWorkspaceId
+        let kindString = cached?.agentKind ?? agent.agentKind
+
+        let workspaceID: String? = {
+            if let id = defaultWorkspaceID,
+               workspaces.contains(where: { $0.id == id }) {
+                return id
+            }
+            if let owned = workspaces.first(where: { $0.agentID == agent.id }) {
+                return owned.id
+            }
+            return workspaces.first?.id
+        }()
+
+        guard let workspaceID,
+              let workspace = workspaces.first(where: { $0.id == workspaceID }) else {
+            errorMessage = "No workspaces available — add one to this agent first."
+            return
+        }
+        let agentType = AgentConfigSheet.AgentType(rawValue: kindString) ?? .claude
+        onConfirm(agent.id, workspace.id, workspace.path, agentType)
+        dismiss()
     }
 }

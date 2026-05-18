@@ -26,6 +26,7 @@ public enum ActorCacheSynchronizer {
             existing.teamRole         = record.teamRole
             existing.agentKind        = record.agentKind
             existing.agentStatus      = record.agentStatus
+            existing.defaultWorkspaceId = record.defaultWorkspaceID
         } else {
             modelContext.insert(CachedActor(
                 actorId: record.id, teamId: record.teamID,
@@ -36,7 +37,8 @@ public enum ActorCacheSynchronizer {
                 lastActiveAt: record.lastActiveAt,
                 createdAt: record.createdAt, updatedAt: record.updatedAt,
                 memberStatus: record.memberStatus, teamRole: record.teamRole,
-                agentKind: record.agentKind, agentStatus: record.agentStatus
+                agentKind: record.agentKind, agentStatus: record.agentStatus,
+                defaultWorkspaceId: record.defaultWorkspaceID
             ))
         }
     }
