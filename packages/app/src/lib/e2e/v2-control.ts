@@ -189,6 +189,7 @@ declare global {
 const seededSessionIds = new Set<string>();
 const seededActorIds = new Set<string>();
 const seededRunIds = new Set<string>();
+let seededSessionRows: SessionListEntry[] | null = null;
 let controlInstalled = false;
 let controlActive = false;
 
@@ -288,6 +289,35 @@ function sortRows(rows: SessionListEntry[]): SessionListEntry[] {
     return b.last_message_at.localeCompare(a.last_message_at);
   });
 }
+
+function sameSessionRows(a: SessionListEntry[], b: SessionListEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((row, index) => {
+    const other = b[index];
+    return (
+      row.id === other.id &&
+      row.title === other.title &&
+      row.team_id === other.team_id &&
+      row.last_message_at === other.last_message_at &&
+      row.last_message_preview === other.last_message_preview &&
+      row.mode === other.mode &&
+      row.idea_id === other.idea_id &&
+      row.has_unread === other.has_unread
+    );
+  });
+}
+
+useSessionListStore.subscribe((state) => {
+  if (!isV2E2EControlActive() || !seededSessionRows) return;
+  if (sameSessionRows(state.rows, seededSessionRows)) return;
+  useSessionListStore.setState({
+    rows: seededSessionRows,
+    loading: false,
+    error: null,
+    hasMore: false,
+    nextCursor: null,
+  });
+});
 
 function messageKindFrom(input: MessageKind | string | undefined): MessageKind {
   if (typeof input === "number") return input;
@@ -514,6 +544,7 @@ const control: V2E2EControl = {
     const sessionEntries = sortRows(
       baseSessionEntries.map((entry) => backfillSessionPreview(entry, nextMessages[entry.id] ?? [])),
     );
+    seededSessionRows = sessionEntries;
     const warnings: string[] = [];
     if (!isTauri() && sessionEntries.length > 0) {
       warnings.push("participant cache is populated only in Tauri; non-Tauri E2E runs should not assert sidebar participant clusters");
@@ -758,6 +789,7 @@ const control: V2E2EControl = {
     seededSessionIds.clear();
     seededActorIds.clear();
     seededRunIds.clear();
+    seededSessionRows = null;
     // local-cache exposes upsert/soft-delete helpers, but no hard-delete-by-run
     // primitive. Keep cleanup scoped to frontend state and require E2E callers
     // to use unique run/session/message ids for repeatable Tauri runs.

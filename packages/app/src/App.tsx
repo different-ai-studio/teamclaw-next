@@ -777,6 +777,7 @@ function AppContent() {
   // v2 Phase 1: load session list from Supabase once AppContent mounts
   // (i.e. after auth is verified). Phase 2 will replace with realtime sub.
   useEffect(() => {
+    if (isV2E2EControlActive()) return;
     void useSessionListStore.getState().load();
   }, []);
 
@@ -1003,13 +1004,17 @@ function AppContent() {
           console.warn('[cache-sync] actor sync failed:', e),
         );
 
-        // Background: sync sessions into local cache.
-        void syncSessionsForTeam(firstTeamId).then(() => {
-          // Reload session list from merged local cache after sync finishes.
-          void useSessionListStore.getState().load();
-        }).catch((e) =>
-          console.warn('[cache-sync] session sync failed:', e),
-        );
+        // Background: sync sessions into local cache. E2E control owns the
+        // session-list rows while active, so skip normal hydration/reloads.
+        if (!isV2E2EControlActive()) {
+          void syncSessionsForTeam(firstTeamId).then(() => {
+            if (isV2E2EControlActive()) return;
+            // Reload session list from merged local cache after sync finishes.
+            void useSessionListStore.getState().load();
+          }).catch((e) =>
+            console.warn('[cache-sync] session sync failed:', e),
+          );
+        }
       } catch (err) {
         console.error("[MQTT] receiver wiring failed:", err);
       }
