@@ -1713,6 +1713,18 @@ impl DaemonServer {
                                 warn!(session_id = %session_id, "SessionMessageEnvelope without inner message; dropping");
                                 return;
                             };
+                            if !msg.message_id.is_empty() {
+                                if let Some(tc) = self.teamclaw.as_mut() {
+                                    if !tc.should_process_message(&session_id, &msg.message_id) {
+                                        info!(
+                                            session_id = %session_id,
+                                            message_id = %msg.message_id,
+                                            "duplicate session/live message.created dropped"
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
                             self.route_session_message(&session_id, msg, &env.mention_actor_ids)
                                 .await;
                         }
@@ -3458,7 +3470,125 @@ fn not_yet_implemented(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_mention_actor_ids;
+    use super::*;
+    use rumqttc::{AsyncClient, MqttOptions};
+    use tempfile::TempDir;
+
+    struct TestServer {
+        server: DaemonServer,
+        _tmp: TempDir,
+    }
+
+    fn test_config() -> DaemonConfig {
+        DaemonConfig {
+            device: crate::config::DeviceConfig {
+                id: "device-test".to_string(),
+                name: "test-device".to_string(),
+            },
+            mqtt: crate::config::MqttConfig {
+                broker_url: "mqtt://localhost:1883".to_string(),
+            },
+            agents: crate::config::AgentsConfig::default(),
+            team_id: Some("team-test".to_string()),
+            channels: crate::config::ChannelsConfig::default(),
+        }
+    }
+
+    fn test_supabase() -> SupabaseClient {
+        SupabaseClient::new_without_persistence(SupabaseConfig {
+            url: "http://localhost".to_string(),
+            anon_key: "anon".to_string(),
+            refresh_token: "refresh".to_string(),
+            team_id: "team-test".to_string(),
+            actor_id: "agent-actor".to_string(),
+        })
+        .unwrap()
+    }
+
+    fn test_mqtt(device_id: &str) -> MqttClient {
+        let mut opts = MqttOptions::new("daemon-server-test", "localhost", 1883);
+        opts.set_clean_session(true);
+        let (client, eventloop) = AsyncClient::new(opts, 10);
+        MqttClient {
+            client,
+            eventloop,
+            topics: crate::mqtt::Topics::new("team-test", device_id),
+        }
+    }
+
+    fn test_server() -> TestServer {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config();
+        let supabase = test_supabase();
+        let mqtt = test_mqtt(&config.device.id);
+        let teamclaw = crate::teamclaw::SessionManager::new(
+            mqtt.client.clone(),
+            "team-test",
+            &config.device.id,
+            Some("agent-actor".to_string()),
+            tmp.path().to_path_buf(),
+        )
+        .unwrap();
+
+        let mut agents = RuntimeManager::new("claude".to_string(), vec![], None);
+        agents.add_test_runtime("rt1", "runtime-agent", "session-1");
+
+        TestServer {
+            server: DaemonServer {
+                config,
+                config_path: tmp.path().join("daemon.toml"),
+                mqtt,
+                agents: Arc::new(AsyncMutex::new(agents)),
+                auth: AuthManager::new(tmp.path().join("members.toml")).unwrap(),
+                peers: PeerTracker::new(),
+                permissions: PermissionManager::new(),
+                workspaces: WorkspaceStore::load(&tmp.path().join("workspaces.toml")).unwrap(),
+                workspaces_path: tmp.path().join("workspaces.toml"),
+                sessions: SessionStore::default(),
+                sessions_path: tmp.path().join("sessions.toml"),
+                history: EventHistory::new(&tmp.path().join("history")),
+                teamclaw: Some(teamclaw),
+                supabase,
+                actor_id: "agent-actor".to_string(),
+                channel_mgr: None,
+                cron_sessions: HashMap::new(),
+            },
+            _tmp: tmp,
+        }
+    }
+
+    fn live_message(
+        session_id: &str,
+        message_id: &str,
+        content: &str,
+    ) -> subscriber::IncomingMessage {
+        let msg = crate::proto::teamclaw::Message {
+            message_id: message_id.to_string(),
+            session_id: session_id.to_string(),
+            sender_actor_id: "human-actor".to_string(),
+            kind: 0,
+            content: content.to_string(),
+            created_at: 1,
+            ..Default::default()
+        };
+        let msg_env = crate::proto::teamclaw::SessionMessageEnvelope {
+            message: Some(msg),
+            mention_actor_ids: vec!["agent-actor".to_string()],
+            ..Default::default()
+        };
+        let live = crate::proto::teamclaw::LiveEventEnvelope {
+            event_id: format!("event-{message_id}-{content}"),
+            event_type: "message.created".to_string(),
+            session_id: session_id.to_string(),
+            actor_id: "human-actor".to_string(),
+            sent_at: 1,
+            body: msg_env.encode_to_vec(),
+        };
+        subscriber::IncomingMessage::TeamclawSessionLive {
+            session_id: session_id.to_string(),
+            payload: live.encode_to_vec(),
+        }
+    }
 
     #[test]
     fn parse_mention_actor_ids_returns_empty_for_empty_object() {
@@ -3487,6 +3617,23 @@ mod tests {
     #[test]
     fn parse_mention_actor_ids_handles_empty_array() {
         assert!(parse_mention_actor_ids(r#"{"mention_actor_ids":[]}"#).is_empty());
+    }
+
+    #[tokio::test]
+    async fn duplicate_live_message_id_is_not_sent_to_runtime_twice() {
+        let mut fixture = test_server();
+
+        fixture
+            .server
+            .handle_incoming(live_message("session-1", "msg-1", "first"))
+            .await;
+        fixture
+            .server
+            .handle_incoming(live_message("session-1", "msg-1", "second"))
+            .await;
+
+        let agents = fixture.server.agents.lock().await;
+        assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("first"));
     }
 }
 
