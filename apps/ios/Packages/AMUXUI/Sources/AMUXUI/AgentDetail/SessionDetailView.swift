@@ -182,13 +182,13 @@ public struct SessionDetailView: View {
                     availableMentions: mentionTargets(),
                     sessionID: viewModel.session?.sessionId ?? "",
                     teamID: viewModel.teamIDRef,
-                    onSend: {
+                    onSend: { attachmentURLs in
                         let text = promptText
                         let modelId = resolvedModelId
                         promptText = ""
                         attachments = []
                         Task {
-                            try? await viewModel.sendPrompt(text, modelId: modelId, modelContext: modelContext)
+                            try? await viewModel.sendPrompt(text, modelId: modelId, attachmentURLs: attachmentURLs, modelContext: modelContext)
                         }
                     },
                     onAgentMention: { target in

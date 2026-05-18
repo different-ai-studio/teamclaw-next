@@ -18,7 +18,7 @@ struct SessionComposer: View {
     let sessionID: String
     let teamID: String
 
-    let onSend: () -> Void
+    let onSend: ([URL]) -> Void
     let onAgentMention: (MentionTarget) -> Void
 
     @State private var showDrawer = false
@@ -225,7 +225,10 @@ struct SessionComposer: View {
 
             Button {
                 if !hasUploadingAttachments {
-                    onSend()
+                    let storageURLs = uploadingAttachments.values
+                        .compactMap { $0.storageURL }
+                        .compactMap { URL(string: $0) }
+                    onSend(storageURLs)
                     hasPendingSlashCommand = false
                 }
             } label: {
