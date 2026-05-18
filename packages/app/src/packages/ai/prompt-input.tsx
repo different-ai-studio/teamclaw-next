@@ -747,6 +747,7 @@ export function PromptInputTextarea({
       onCompositionEnd={handleCompositionEnd}
       onPaste={handlePaste}
       placeholder={placeholder}
+      {...{ "data-testid": "v2-composer-editor" }}
       className={cn(
         "min-h-[36px] max-h-[200px] resize-none border-0 bg-transparent px-0 py-0.5 text-sm leading-normal shadow-none focus-visible:ring-0 focus-visible:ring-offset-0",
         className

@@ -567,6 +567,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
         <div
           ref={scrollRef}
           data-chat-messages
+          data-testid="v2-message-list"
           className="flex-1 overflow-y-auto overflow-x-hidden"
         >
           <div

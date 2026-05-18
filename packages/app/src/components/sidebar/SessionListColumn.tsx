@@ -382,6 +382,9 @@ export function SessionListColumn() {
       <SidebarMenuItem key={row.id}>
         <SidebarMenuButton
           isActive={isActive}
+          data-testid="v2-session-row"
+          data-session-id={row.id}
+          data-active={isActive ? "true" : "false"}
           className={cn(
             // Direction B: paper-on-paper active state, 2px coral left bar.
             // See AGENTS.md §2 "Session list".
@@ -408,7 +411,9 @@ export function SessionListColumn() {
                   <span className={cn(
                     'min-w-0 flex-1 truncate text-left text-[13px]',
                     isActive ? 'font-semibold text-foreground' : 'font-medium text-foreground',
-                  )}>
+                  )}
+                  data-testid="v2-session-row-title"
+                  >
                     {row.title || t('chat.newChat', 'New Chat')}
                   </span>
                   {row.lastMessageAt && (
@@ -432,13 +437,16 @@ export function SessionListColumn() {
             </div>
             {/* Preview line: 2 lines max from last_message_preview. AGENTS.md §2. */}
             {!isRenaming && row.lastMessagePreview && (
-              <div className="w-full text-[12px] leading-[1.45] text-muted-foreground overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]">
+              <div
+                className="w-full text-[12px] leading-[1.45] text-muted-foreground overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]"
+                data-testid="v2-session-row-preview"
+              >
                 {row.lastMessagePreview}
               </div>
             )}
             {/* Participants cluster + activity badge */}
             {!isRenaming && (parts.length > 0 || activity) && (
-              <div className="flex w-full items-center gap-1.5">
+              <div className="flex w-full items-center gap-1.5" data-testid="v2-session-row-participants">
                 {parts.length > 0 && (
                   <>
                     <div className="flex -space-x-1.5">
@@ -516,7 +524,7 @@ export function SessionListColumn() {
   }
 
   return (
-    <div className="flex h-full flex-col min-w-0 border-r border-border bg-background">
+    <div className="flex h-full flex-col min-w-0 border-r border-border bg-background" data-testid="v2-session-list-column">
       <SessionSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
 
       <div
