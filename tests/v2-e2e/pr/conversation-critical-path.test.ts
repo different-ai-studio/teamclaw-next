@@ -399,6 +399,24 @@ describe("V2 PR conversation critical path", () => {
     });
     await waitForSelector(`[data-testid="v2-streaming-tool"][data-tool-id="${successToolId}"][data-tool-status="calling"]`);
 
+    await v2Call("emitAgentDelta", {
+      sessionId,
+      actorId: agentId,
+      channel: "thinking",
+      delta: "hidden deterministic thinking",
+    });
+    await v2Call("setPermissionRequest", {
+      sessionId,
+      actorId: agentId,
+      requestId: id(runId, "permission"),
+      toolName: "write_file",
+      description: "hidden permission request",
+      params: { path: "secret.md" },
+    });
+    expect(await domText('[data-testid="v2-message-list"]')).not.toContain("hidden deterministic thinking");
+    expect(await domText('[data-testid="v2-message-list"]')).not.toContain("hidden permission request");
+    expect(await domText('[data-testid="v2-message-list"]')).not.toContain("Awaiting permission");
+
     await v2Call("completeTool", {
       sessionId,
       actorId: agentId,

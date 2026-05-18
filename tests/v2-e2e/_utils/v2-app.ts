@@ -1,6 +1,7 @@
 import {
   executeJs,
   focusWindow,
+  isReusingExistingApp,
   launchTeamClawApp,
   sleep,
   stopApp,
@@ -48,6 +49,14 @@ async function waitFor<T>(
 
 export async function launchV2E2EApp(): Promise<string> {
   const processId = await launchTeamClawApp();
+  if (isReusingExistingApp() && !(await hasV2ControlSurface())) {
+    throw new Error(
+      [
+        "Refusing to run V2 E2E against an existing non-E2E TeamClaw app.",
+        "Stop the running app, then rerun with a binary built using VITE_TEAMCLAW_E2E=true.",
+      ].join(" "),
+    );
+  }
   await focusWindow();
   await waitForSelectorReady();
   return processId;
@@ -265,14 +274,26 @@ export async function submitComposer(): Promise<void> {
 }
 
 async function waitForSelectorReady(): Promise<void> {
-  await waitFor(
-    "window.__TEAMCLAW_V2_E2E__",
-    () => jsJson<boolean>(`
-      (() => JSON.stringify(Boolean(window.__TEAMCLAW_V2_E2E__)))()
-    `),
-    Boolean,
-    DEFAULT_TIMEOUT_MS,
-  );
+  try {
+    await waitFor(
+      "window.__TEAMCLAW_V2_E2E__",
+      () => jsJson<boolean>(`
+        (() => JSON.stringify(Boolean(window.__TEAMCLAW_V2_E2E__)))()
+      `),
+      Boolean,
+      DEFAULT_TIMEOUT_MS,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      [
+        "V2 E2E control surface is not installed.",
+        "The app connected through the Tauri MCP socket must be built with VITE_TEAMCLAW_E2E=true.",
+        "If a normal TeamClaw app is already running, stop it before running the V2 E2E suite so the launcher does not reuse that non-E2E socket.",
+        `Original wait failure: ${detail}`,
+      ].join(" "),
+    );
+  }
 }
 
 async function readV2CallSlot(callId: string): Promise<V2CallSlot | null> {

@@ -1,8 +1,7 @@
-import { AlertCircle, CheckCircle2, Circle, Clock3, ShieldQuestion } from "lucide-react";
+import { AlertCircle, CheckCircle2, Circle, Clock3 } from "lucide-react";
 import type { AgentStreamEntry, StreamingTodoItem } from "@/stores/v2-streaming-store";
 import { cn } from "@/lib/utils";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
-import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
 
@@ -35,22 +34,6 @@ function InlineTodos({ todos }: { todos: StreamingTodoItem[] }) {
   );
 }
 
-function PermissionRequestCard({ entry }: { entry: AgentStreamEntry }) {
-  const pr = entry.pendingPermission;
-  if (!pr) return null;
-  return (
-    <div className="my-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
-      <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-medium mb-1">
-        <ShieldQuestion className="h-3.5 w-3.5" />
-        Awaiting permission for {pr.toolName || "tool call"}
-      </div>
-      {pr.description && (
-        <div className="text-muted-foreground">{pr.description}</div>
-      )}
-    </div>
-  );
-}
-
 function ErrorCard({ message, details }: { message: string; details: string }) {
   return (
     <div
@@ -72,12 +55,13 @@ function ErrorCard({ message, details }: { message: string; details: string }) {
 
 export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   const hasOutput = entry.outputText.length > 0;
-  const hasThinking = entry.thinkingText.length > 0;
   const hasToolCalls = entry.toolCalls.length > 0;
   const hasTodos = entry.todos.length > 0;
-  const hasPermission = !!entry.pendingPermission;
   const hasError = !!entry.errorMessage;
-  const isStreaming = entry.active;
+
+  if (!hasOutput && !hasToolCalls && !hasTodos && !hasError) {
+    return null;
+  }
 
   return (
     <div
@@ -90,10 +74,6 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
-          {hasThinking && (
-            <ThinkingBlock content={entry.thinkingText} isStreaming={isStreaming} />
-          )}
-
           {hasToolCalls && (
             <div className="space-y-1">
               {entry.toolCalls.map((tc) => (
@@ -111,8 +91,6 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
 
           {hasTodos && <InlineTodos todos={entry.todos} />}
 
-          {hasPermission && <PermissionRequestCard entry={entry} />}
-
           {hasOutput && (
             <MessageContent>
               <MessageResponse>{entry.outputText}</MessageResponse>
@@ -121,10 +99,6 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
 
           {hasError && (
             <ErrorCard message={entry.errorMessage!} details={entry.errorDetails ?? ""} />
-          )}
-
-          {!hasOutput && !hasThinking && !hasToolCalls && !hasTodos && !hasPermission && !hasError && (
-            <div className="text-sm text-muted-foreground italic">Working...</div>
           )}
         </div>
       </Message>
