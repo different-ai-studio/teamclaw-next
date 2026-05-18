@@ -357,6 +357,32 @@ struct ReducerHistoryCrossDedupeTests {
         #expect(state.entries[0].supabaseMessageID == "sb-1")
     }
 
+    @Test("repeated history seed with a new row id does not duplicate same output")
+    func repeatedHistorySeedWithNewRowIDDoesNotDuplicateSameOutput() {
+        var state = TimelineState(entries: [
+            TimelineEntry(
+                eventType: "output",
+                text: "same reply",
+                isComplete: true,
+                senderActorID: "agent",
+                timestamp: Date(timeIntervalSince1970: 1),
+                supabaseMessageID: "sb-existing"
+            )
+        ])
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(supabaseMessageID: "sb-new",
+                                         kind: .output,
+                                         senderActorID: "agent",
+                                         content: "same reply",
+                                         createdAt: Date(timeIntervalSince1970: 2))),
+            to: &state
+        )
+
+        #expect(state.entries.count == 1,
+                "same agent output content must stay one bubble even if Supabase returns another row id")
+    }
+
     @Test("history seed merges local prompt by outbox id before content")
     func historyMergesLocalPromptByOutboxId() {
         var state = TimelineState(entries: [

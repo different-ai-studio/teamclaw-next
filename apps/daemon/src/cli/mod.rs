@@ -31,7 +31,7 @@ pub enum Commands {
     /// and prompts you to paste the deeplink. Pass the URL to skip the
     /// interactive prompt (useful for scripts).
     Init {
-        /// `amux://invite?token=...` URL from the iOS Actors tab.
+        /// `teamclaw://invite?token=...` URL from the iOS Actors tab.
         join_url: Option<String>,
     },
     /// Delete local daemon state (daemon.toml, members.toml, sessions.toml,

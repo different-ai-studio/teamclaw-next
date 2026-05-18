@@ -197,14 +197,8 @@ impl ChannelManager {
                 };
                 let text = message.unwrap_or("");
                 let result = match kind {
-                    "user" => {
-                        g.send_to_user_with_optional_media(id, text, media)
-                            .await
-                    }
-                    "chat" => {
-                        g.send_to_chat_with_optional_media(id, text, media)
-                            .await
-                    }
+                    "user" => g.send_to_user_with_optional_media(id, text, media).await,
+                    "chat" => g.send_to_chat_with_optional_media(id, text, media).await,
                     other => anyhow::bail!("unknown target kind: {other}"),
                 };
                 result.map_err(|e| anyhow::anyhow!("wecom send: {e}"))

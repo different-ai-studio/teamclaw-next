@@ -7,6 +7,7 @@ import AMUXSharedUI
 
 public struct SessionDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: SessionDetailViewModel
     @State private var promptText = ""
     @State private var selectedModelId: String?
@@ -55,10 +56,13 @@ public struct SessionDetailView: View {
                     Image(systemName: "wifi.slash").font(.caption)
                     Text("Daemon offline").font(.caption).fontWeight(.medium)
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.amux.basalt)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .liquidGlass(in: Capsule(), tint: .orange, interactive: false)
+                // Hai banners stay quiet — Pebble fill instead of system
+                // orange. Vermillion is rationed for active session sends.
+                .background(Capsule().fill(Color.amux.pebble.opacity(0.7)))
+                .overlay(Capsule().stroke(Color.amux.hairline, lineWidth: 0.5))
                 .padding(.vertical, 4)
             }
             if let sendError = viewModel.sendErrorMessage {
@@ -66,10 +70,13 @@ public struct SessionDetailView: View {
                     Image(systemName: "exclamationmark.triangle.fill").font(.caption)
                     Text(sendError).font(.caption).fontWeight(.medium)
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.amux.cinnabarDeep)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .liquidGlass(in: Capsule(), tint: .red, interactive: false)
+                // Send-error uses CinnabarDeep tint on a soft fill; matches
+                // the destructive accent everywhere else (cf. Remove buttons).
+                .background(Capsule().fill(Color.amux.cinnabarDeep.opacity(0.10)))
+                .overlay(Capsule().stroke(Color.amux.cinnabarDeep.opacity(0.20), lineWidth: 0.5))
                 .padding(.vertical, 4)
             }
 
@@ -121,8 +128,15 @@ public struct SessionDetailView: View {
                 }
             }
         }
+        // Mist canvas — matches `agent-session.jsx`. Without an explicit
+        // background, plain ScrollView falls back to systemBackground (stark
+        // white), which breaks the seamless paper feel against the composer
+        // and message bubbles.
+        .background(Color.amux.mist)
         .navigationTitle(viewModel.sessionTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.amux.mist.opacity(0.85), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -285,6 +299,28 @@ public struct SessionDetailView: View {
         .onChange(of: viewModel.isAgentWorking) { _, newValue in
             if newValue {
                 Task { await viewModel.refreshMemberSheet() }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // The streaming buffer lives in `streamingTextByAgent`,
+            // which is in-memory only. If iOS reclaims the suspended
+            // process, that partial text vanishes — and on cold relaunch
+            // the resume path has nothing to hydrate from. Snapshot it
+            // to SwiftData on background so the cold-launch hydrate
+            // picks it up; on the common case where the process
+            // survives, the foreground hook deletes the snapshot so it
+            // doesn't double-render alongside the still-live buffer.
+            // MQTT reconnect is owned by `ContentView`'s own scenePhase
+            // observer.
+            switch phase {
+            case .background:
+                viewModel.flushStreamingForBackground()
+            case .active:
+                viewModel.discardBackgroundSnapshot()
+            case .inactive:
+                break
+            @unknown default:
+                break
             }
         }
         .onDisappear {

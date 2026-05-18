@@ -32,13 +32,32 @@ pub fn run(args: ChannelArgs, config_path: &Path) -> anyhow::Result<()> {
 }
 
 fn list(cfg: &DaemonConfig) {
-    let line = |k: &str, on: bool| println!("  {:<8} {}", k, if on { "enabled" } else { "disabled" });
-    line("discord", cfg.channels.discord.as_ref().is_some_and(|c| c.enabled));
-    line("wecom",   cfg.channels.wecom.as_ref().is_some_and(|c| c.enabled));
-    line("feishu",  cfg.channels.feishu.as_ref().is_some_and(|c| c.enabled));
-    line("kook",    cfg.channels.kook.as_ref().is_some_and(|c| c.enabled));
-    line("wechat",  cfg.channels.wechat.as_ref().is_some_and(|c| c.enabled));
-    line("email",   cfg.channels.email.as_ref().is_some_and(|c| c.enabled));
+    let line =
+        |k: &str, on: bool| println!("  {:<8} {}", k, if on { "enabled" } else { "disabled" });
+    line(
+        "discord",
+        cfg.channels.discord.as_ref().is_some_and(|c| c.enabled),
+    );
+    line(
+        "wecom",
+        cfg.channels.wecom.as_ref().is_some_and(|c| c.enabled),
+    );
+    line(
+        "feishu",
+        cfg.channels.feishu.as_ref().is_some_and(|c| c.enabled),
+    );
+    line(
+        "kook",
+        cfg.channels.kook.as_ref().is_some_and(|c| c.enabled),
+    );
+    line(
+        "wechat",
+        cfg.channels.wechat.as_ref().is_some_and(|c| c.enabled),
+    );
+    line(
+        "email",
+        cfg.channels.email.as_ref().is_some_and(|c| c.enabled),
+    );
 }
 
 fn bind(cfg: &mut DaemonConfig, b: ChannelBindArgs) -> anyhow::Result<()> {

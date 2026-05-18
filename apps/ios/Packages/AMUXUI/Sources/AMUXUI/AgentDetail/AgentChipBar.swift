@@ -124,7 +124,14 @@ public struct AgentChipBar: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .padding(.vertical, 4)
-        .background(Capsule().fill(Color.amux.cinnabar.opacity(0.12)))
+        // Opaque Paper base + Cinnabar tint on top — without the Paper
+        // layer the 12%-alpha tint let the chat bubble below bleed
+        // straight through the chip.
+        .background(
+            Capsule()
+                .fill(Color.amux.paper)
+                .overlay(Capsule().fill(Color.amux.cinnabar.opacity(0.12)))
+        )
         .overlay(Capsule().stroke(Color.amux.cinnabar.opacity(0.6), lineWidth: 0.5))
     }
 }

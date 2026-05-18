@@ -232,7 +232,7 @@ fn prompt_for_invite_url() -> anyhow::Result<String> {
     println!("  2. Create a team (if you haven't already).");
     println!("  3. Open the Actors tab → tap the + icon in the top right.");
     println!("  4. Pick kind = Agent, set a display name, tap Confirm.");
-    println!("  5. Copy the generated `amux://invite?...` deeplink.");
+    println!("  5. Copy the generated `teamclaw://invite?...` deeplink.");
     println!();
     print!("Paste the deeplink here (or Ctrl-C to abort): ");
     std::io::stdout().flush()?;

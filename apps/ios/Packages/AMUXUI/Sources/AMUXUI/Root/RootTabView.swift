@@ -71,7 +71,8 @@ public struct RootTabView: View {
                          teamclawService: teamclawService,
                          activeTeam: activeTeam,
                          sessionViewModel: viewModel,
-                         connectedAgentsStore: teamRuntime?.connectedAgentsStore)
+                         connectedAgentsStore: teamRuntime?.connectedAgentsStore,
+                         currentActorID: currentActorID)
             }
             Tab("Actors", systemImage: "person.2", value: AppTab.members) {
                 if let actorStore = teamRuntime?.actorStore {
@@ -151,10 +152,19 @@ public struct RootTabView: View {
     private func maybeShowFirstAgentReminder(team: TeamSummary) async {
         guard !remindedTeams.contains(team.id),
               let repo = teamRuntime?.agentAccessRepo else { return }
+        // `actor_directory` filters out `visibility != 'team'` agents
+        // (see `202605160004_actor_profile_avatar.sql:22`), so
+        // teamAgentCount alone reports 0 for users who only have private
+        // agents and would nag them every launch. Cross-check against
+        // ConnectedAgentsStore, which sources from `agent_member_access`
+        // and surfaces every agent the current user has access to —
+        // public OR private. The reminder only fires when *both*
+        // signals say zero.
         do {
-            let count = try await repo.teamAgentCount(teamID: team.id)
+            let publicCount = try await repo.teamAgentCount(teamID: team.id)
+            let accessibleCount = teamRuntime?.connectedAgentsStore.agents.count ?? 0
             remindedTeams.insert(team.id)
-            if count == 0 {
+            if publicCount == 0 && accessibleCount == 0 {
                 showFirstAgentReminder = true
             }
         } catch {

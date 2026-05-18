@@ -268,10 +268,29 @@ public enum ChatTimelineReducer {
             return
         }
 
-        // Cross-source dedupe: if the same content already exists
-        // (live stream finalised before the history seed ran), backfill
-        // the supabaseMessageID onto the existing entry rather than
-        // append a duplicate.
+        // Cross-source dedupe: if the same output content already exists
+        // for the same agent (live stream / daemon history finalised before
+        // the Supabase history seed ran, or Supabase returned another row id
+        // for the same persisted reply), keep one bubble. User prompts stay
+        // on the stricter nil-id path below so sending the same text twice
+        // does not collapse separate human messages.
+        if eventType == "output",
+           let idx = state.entries.firstIndex(where: {
+               $0.eventType == eventType
+                   && ($0.senderActorID ?? "") == (input.senderActorID ?? "")
+                   && $0.text == input.content
+           }) {
+            if state.entries[idx].supabaseMessageID == nil {
+                state.entries[idx].supabaseMessageID = input.supabaseMessageID
+            }
+            if state.entries[idx].model == nil { state.entries[idx].model = input.model }
+            if state.entries[idx].turnID == nil { state.entries[idx].turnID = input.turnID }
+            return
+        }
+
+        // Conservative prompt dedupe: if the same content already exists
+        // without a Supabase id (live stream finalised before the history
+        // seed ran), backfill the id rather than append a duplicate.
         if let idx = state.entries.firstIndex(where: {
             $0.supabaseMessageID == nil
                 && $0.eventType == eventType
