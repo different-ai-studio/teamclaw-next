@@ -683,12 +683,30 @@ struct AgentAvatar: View {
             } else {
                 Circle().fill(style.bg)
             }
-            Text(initials)
-                .font(.system(size: size * 0.36, weight: .bold))
-                .tracking(-0.3)
-                .foregroundStyle(style.fg)
+            if let urlString = actor.avatarURL, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        initialsLabel
+                    }
+                }
+            } else {
+                initialsLabel
+            }
         }
         .frame(width: size, height: size)
+        .clipShape(actor.isAgent
+            ? AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            : AnyShape(Circle()))
+    }
+
+    private var initialsLabel: some View {
+        Text(initials)
+            .font(.system(size: size * 0.36, weight: .bold))
+            .tracking(-0.3)
+            .foregroundStyle(style.fg)
     }
 }
 
