@@ -2,11 +2,17 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { buildConfig } from "@/lib/build-config";
+import { hasSupabaseConfig } from "@/lib/supabase-client";
 import { useAppVersion } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export function LoginScreen() {
+interface LoginScreenProps {
+  embedded?: boolean;
+  onBack?: () => void;
+}
+
+export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -23,35 +29,55 @@ export function LoginScreen() {
     await verifyOtp(code);
   };
 
-  const onBack = () => {
+  const onUseDifferentEmail = () => {
     setCode("");
     resetOtp();
   };
+  const cardClassName = embedded
+    ? "w-full space-y-5 rounded-[16px] border border-border bg-paper p-5"
+    : "w-full max-w-sm space-y-5 rounded-2xl border border-border bg-paper p-7";
+  const serverConfigRequired = !hasSupabaseConfig;
+  const serverConfigMessage = t(
+    "auth.serverConfigRequired",
+    "Supabase is not configured. Go back and choose self-hosted server before signing in.",
+  );
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6">
-      <div className="mb-8 flex flex-col items-center gap-3">
-        <img
-          src="/logo.png"
-          alt={`${buildConfig.app.name} logo`}
-          width={128}
-          height={128}
-          className="h-20 w-20 object-contain"
-        />
-        <div className="text-center">
-          <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
-            {buildConfig.app.name}
-          </h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            {t("auth.tagline", "AI Ally · AI Teammate")}
-          </p>
+    <div className={embedded ? "w-full" : "flex min-h-screen flex-col items-center justify-center bg-background p-6"}>
+      {!embedded && (
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <img
+            src="/logo.png"
+            alt={`${buildConfig.app.name} logo`}
+            width={128}
+            height={128}
+            className="h-20 w-20 object-contain"
+          />
+          <div className="text-center">
+            <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
+              {buildConfig.app.name}
+            </h1>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {t("auth.tagline", "AI Ally · AI Teammate")}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
+
+      {embedded && onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="mb-5 w-full max-w-sm text-left text-[12px] text-muted-foreground hover:text-foreground"
+        >
+          {t("onboarding.common.back", "Back")}
+        </button>
+      )}
 
       {otpEmail ? (
         <form
           onSubmit={onVerify}
-          className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-paper p-7"
+          className={cardClassName}
         >
           <div className="space-y-1.5">
             <h2 className="text-[17px] font-semibold text-foreground">
@@ -61,10 +87,10 @@ export function LoginScreen() {
               {t("auth.codeSent", "We sent an 8-digit code to {{email}}.", { email: otpEmail })}
             </p>
           </div>
-          <div className="space-y-2">
-            <label className="block text-[12px] font-medium text-ink-2">
+          <label className="block space-y-2">
+            <span className="block text-[12px] font-medium text-ink-2">
               {t("auth.code", "Code")}
-            </label>
+            </span>
             <Input
               type="text"
               inputMode="numeric"
@@ -76,18 +102,22 @@ export function LoginScreen() {
               maxLength={8}
               className="h-11 text-center text-lg tracking-[0.35em] font-mono"
             />
-          </div>
-          {errorMessage && <p className="text-[12px] text-destructive">{errorMessage}</p>}
+          </label>
+          {(serverConfigRequired || errorMessage) && (
+            <p className="text-[12px] text-destructive">
+              {serverConfigRequired ? serverConfigMessage : errorMessage}
+            </p>
+          )}
           <Button
             type="submit"
-            disabled={loading || code.length !== 8}
+            disabled={serverConfigRequired || loading || code.length !== 8}
             className="h-10 w-full bg-coral text-paper hover:bg-coral/90 disabled:bg-coral/40 disabled:text-paper"
           >
             {loading ? t("auth.verifying", "Verifying…") : t("auth.verify", "Verify")}
           </Button>
           <button
             type="button"
-            onClick={onBack}
+            onClick={onUseDifferentEmail}
             className="block w-full text-center text-[12px] text-muted-foreground hover:text-foreground transition-colors"
           >
             {t("auth.useDifferentEmail", "Use a different email")}
@@ -96,7 +126,7 @@ export function LoginScreen() {
       ) : (
         <form
           onSubmit={onSendEmail}
-          className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-paper p-7"
+          className={cardClassName}
         >
           <div className="space-y-1.5">
             <h2 className="text-[17px] font-semibold text-foreground">
@@ -106,10 +136,10 @@ export function LoginScreen() {
               {t("auth.willEmailCode", "We'll email you an 8-digit code.")}
             </p>
           </div>
-          <div className="space-y-2">
-            <label className="block text-[12px] font-medium text-ink-2">
+          <label className="block space-y-2">
+            <span className="block text-[12px] font-medium text-ink-2">
               {t("auth.email", "Email")}
-            </label>
+            </span>
             <Input
               type="email"
               value={email}
@@ -119,11 +149,15 @@ export function LoginScreen() {
               placeholder={t("auth.emailPlaceholder", "you@example.com")}
               className="h-10"
             />
-          </div>
-          {errorMessage && <p className="text-[12px] text-destructive">{errorMessage}</p>}
+          </label>
+          {(serverConfigRequired || errorMessage) && (
+            <p className="text-[12px] text-destructive">
+              {serverConfigRequired ? serverConfigMessage : errorMessage}
+            </p>
+          )}
           <Button
             type="submit"
-            disabled={loading || !email}
+            disabled={serverConfigRequired || loading || !email}
             className="h-10 w-full bg-coral text-paper hover:bg-coral/90 disabled:bg-coral/40 disabled:text-paper"
           >
             {loading ? t("auth.sending", "Sending…") : t("auth.sendCode", "Send code")}
@@ -131,7 +165,7 @@ export function LoginScreen() {
         </form>
       )}
 
-      <p className="mt-6 font-mono text-[11px] text-faint">v{appVersion}</p>
+      {!embedded && <p className="mt-6 font-mono text-[11px] text-faint">v{appVersion}</p>}
     </div>
   );
 }

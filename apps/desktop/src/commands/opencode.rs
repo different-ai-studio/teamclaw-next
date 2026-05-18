@@ -1706,12 +1706,10 @@ fn inherent_desktop_control_skill() -> Option<InherentSkill> {
 }
 
 fn inherent_skills_common() -> Vec<InherentSkill> {
-    vec![
-        InherentSkill {
-            dirname: "create-role",
-            content: include_str!("../../../../packages/app/src/lib/skills/create-role/SKILL.md"),
-        },
-    ]
+    vec![InherentSkill {
+        dirname: "create-role",
+        content: include_str!("../../../../packages/app/src/lib/skills/create-role/SKILL.md"),
+    }]
 }
 
 /// All skills that TeamClaw treats as inherent (auto-provisioned, shown as built-in in UI).

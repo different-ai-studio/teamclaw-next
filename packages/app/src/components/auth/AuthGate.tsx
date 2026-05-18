@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
+import { useCurrentTeamStore } from "@/stores/current-team";
 import { supabase } from "@/lib/supabase-client";
 import { isTauri } from "@/lib/utils";
 import { generateRandomTeamName } from "@/lib/random-team-name";
+import { DesktopOnboarding } from "./DesktopOnboarding";
 import { LoginScreen } from "./LoginScreen";
 import { LobsterLoader } from "./LobsterLoader";
 
@@ -15,12 +17,19 @@ type BootstrapState = "idle" | "checking" | "ready";
 
 export function AuthGate({ children }: AuthGateProps) {
   const { t } = useTranslation();
-  const { session, loading, hydrate } = useAuthStore();
+  const { session, loading, authFlow, hydrate } = useAuthStore();
   const [bootstrap, setBootstrap] = useState<BootstrapState>("idle");
+  const [authHydrated, setAuthHydrated] = useState(false);
   const bootstrappedUserId = useRef<string | null>(null);
 
   useEffect(() => {
-    hydrate();
+    let cancelled = false;
+    void Promise.resolve(hydrate()).finally(() => {
+      if (!cancelled) setAuthHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [hydrate]);
 
   useEffect(() => {
@@ -36,6 +45,7 @@ export function AuthGate({ children }: AuthGateProps) {
   // cancelled-flag pattern would mark the in-flight request as discarded
   // and leave bootstrap pinned at "checking" forever.
   useEffect(() => {
+    if (loading) return;
     if (!session) {
       bootstrappedUserId.current = null;
       setBootstrap("idle");
@@ -61,17 +71,24 @@ export function AuthGate({ children }: AuthGateProps) {
           console.warn("[AuthGate] team lookup failed", error);
           return;
         }
-        if (teams && teams.length > 0) {
+        const existingTeamId = teams?.[0]?.id as string | undefined;
+        if (existingTeamId) {
+          await useCurrentTeamStore.getState().reloadAndSwitchTo(existingTeamId);
           return;
         }
 
         const name = generateRandomTeamName();
-        const { error: createErr } = await supabase.rpc("create_team", {
+        const { data: created, error: createErr } = await supabase.rpc("create_team", {
           p_name: name,
         });
         if (createErr) {
           console.warn("[AuthGate] auto create_team failed", createErr);
         } else {
+          const row = Array.isArray(created) ? created[0] : created;
+          const teamId = row?.team_id as string | undefined;
+          if (teamId) {
+            await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId);
+          }
           console.log("[AuthGate] auto-created team", name);
         }
       } catch (err) {
@@ -80,9 +97,13 @@ export function AuthGate({ children }: AuthGateProps) {
         setBootstrap("ready");
       }
     })();
-  }, [session]);
+  }, [loading, session]);
 
-  if (loading && !session) {
+  if (isTauri() && loading && authFlow === "invite") {
+    return <DesktopOnboarding />;
+  }
+
+  if (!authHydrated && loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-background">
         <LobsterLoader size={120} />
@@ -92,7 +113,16 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (!session) {
-    return <LoginScreen />;
+    return isTauri() ? <DesktopOnboarding /> : <LoginScreen />;
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-background">
+        <LobsterLoader size={120} />
+        <p className="text-[13px] text-muted-foreground">{t("auth.loading", "Loading…")}</p>
+      </div>
+    );
   }
 
   if (isTauri() && bootstrap !== "ready") {

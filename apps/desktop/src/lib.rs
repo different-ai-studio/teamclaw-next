@@ -231,6 +231,9 @@ pub fn run() {
     let rag_state = commands::knowledge::RagState::default();
 
     tauri::Builder::default()
+        .append_invoke_initialization_script(
+            commands::server_config::server_config_initialization_script(),
+        )
         .plugin(tauri_plugin_log::Builder::new()
             .level(log::LevelFilter::Info)
             .filter(|metadata| {
