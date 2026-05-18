@@ -14,11 +14,8 @@ vi.mock('react-i18next', () => ({
 }))
 
 const mockInvoke = vi.fn(async (cmd: string) => {
-  if (cmd === 'p2p_sync_status') return null
   if (cmd === 'webdav_get_status') return null
   if (cmd === 'get_device_info') return { nodeId: 'test-node', platform: 'macos', arch: 'aarch64', hostname: 'test-mac' }
-  if (cmd === 'get_p2p_config') return null
-  if (cmd === 'p2p_reconnect') return null
   if (cmd === 'unified_team_get_members') return []
   if (cmd === 'unified_team_get_my_role') return null
   return null
@@ -59,7 +56,6 @@ describe('TeamSection tab switcher', () => {
 
     const tabs = screen.queryAllByRole('tab')
     expect(tabs.length).toBe(0)
-    expect(screen.queryByText('P2P')).toBeNull()
     expect(screen.queryByText('S3')).toBeNull()
   })
 
@@ -74,13 +70,13 @@ describe('TeamSection tab switcher', () => {
     expect(headings.length).toBeGreaterThan(0)
   })
 
-  it('does not render P2P as the default surface', async () => {
+  it('does not render sync-method tabs as the default surface', async () => {
     const { TeamSection } = await import('../components/settings/TeamSection')
 
     await act(async () => {
       render(React.createElement(TeamSection))
     })
 
-    expect(screen.queryByRole('tab', { name: 'P2P' })).toBeNull()
+    expect(screen.queryAllByRole('tab').length).toBe(0)
   })
 })

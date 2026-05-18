@@ -157,7 +157,7 @@ export const useLocalStatsStore = create<LocalStatsStore>((set, get) => ({
       const { triggerTeamLeaderboardExport } = await import('./telemetry')
       triggerTeamLeaderboardExport()
     } catch (err) {
-      // Silently fail if telemetry is not available (e.g., web mode or no P2P)
+      // Silently fail if telemetry is not available.
       console.debug('[LocalStats] Could not trigger team leaderboard export:', err)
     }
   },

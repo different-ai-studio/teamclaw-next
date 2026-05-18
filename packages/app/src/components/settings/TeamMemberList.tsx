@@ -1,13 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { UserMinus, Shield, Pencil, Eye, UserPlus, Clock, UserCheck, Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
+import { UserMinus, Shield, Pencil, Eye, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTeamMembersStore } from '../../stores/team-members'
 import { AddMemberInput } from './AddMemberInput'
-import { useP2pEngineStore, type PeerConnection } from '@/stores/p2p-engine'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { cn } from '@/lib/utils'
 import {
   Select,
   SelectContent,
@@ -54,29 +51,6 @@ function RoleBadge({ role }: { role?: string }) {
   )
 }
 
-function ConnectionDot({ connection }: { connection: PeerConnection }) {
-  const colors: Record<PeerConnection, string> = {
-    active: 'bg-green-500',
-    stale: 'bg-amber-500',
-    lost: 'bg-red-500',
-    unknown: 'bg-gray-400',
-  }
-  const labels: Record<PeerConnection, string> = {
-    active: 'Online',
-    stale: 'Unstable',
-    lost: 'Offline',
-    unknown: 'Unknown',
-  }
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span className={cn('h-2 w-2 rounded-full inline-block', colors[connection])} />
-      {labels[connection] && (
-        <span className="text-[10px] text-muted-foreground">{labels[connection]}</span>
-      )}
-    </span>
-  )
-}
-
 function LocalDeviceBadge() {
   return (
     <span className="inline-flex items-center gap-1">
@@ -99,27 +73,17 @@ export function TeamMemberList() {
     removeMember,
     updateMemberRole,
     canManageMembers,
-    applications,
-    approveApplication,
-    listenForApplications,
-    cleanupApplicationsListener,
     currentNodeId,
     loadCurrentNodeId,
   } = useTeamMembersStore()
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
-
-  const enginePeers = useP2pEngineStore((s) => s.snapshot.peers)
 
   useEffect(() => {
     if (!workspacePath) return
     loadMembers()
     loadMyRole()
     loadCurrentNodeId()
-    listenForApplications()
-    return () => cleanupApplicationsListener()
   }, [
-    cleanupApplicationsListener,
-    listenForApplications,
     loadCurrentNodeId,
     loadMembers,
     loadMyRole,
@@ -127,19 +91,6 @@ export function TeamMemberList() {
   ])
 
   const isManager = canManageMembers()
-  const [approvingId, setApprovingId] = useState<string | null>(null)
-
-  const handleApprove = async (app: typeof applications[number]) => {
-    setApprovingId(app.nodeId)
-    try {
-      await approveApplication(app)
-      toast.success(t('settings.team.approvedNotice', { name: app.name }))
-    } catch (e) {
-      toast.error(t('settings.team.approveFailed', { error: e }))
-    } finally {
-      setApprovingId(null)
-    }
-  }
 
   const handleAdd = async (nodeId: string, name: string, role: string, label: string) => {
     await addMember({
@@ -162,48 +113,6 @@ export function TeamMemberList() {
       {error && (
         <p className="text-xs text-destructive">{error}</p>
       )}
-      {/* Pending Applications */}
-      {isManager && applications.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5">
-            <Clock className="h-3.5 w-3.5 text-amber-500" />
-            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-              {t('settings.team.pendingReview')} ({applications.length})
-            </span>
-          </div>
-          {applications.map((app) => (
-            <div
-              key={app.nodeId}
-              className="flex items-center justify-between bg-amber-500/5 border border-amber-500/20 rounded-md p-3"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{app.name}</p>
-                <p className="text-xs text-muted-foreground">{app.email}</p>
-                {app.note && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{t('settings.team.noteLabel')}: {app.note}</p>
-                )}
-                <p className="text-[10px] text-muted-foreground">
-                  {app.platform} · {app.arch} · {new Date(app.appliedAt).toLocaleDateString()}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="shrink-0 text-green-600 border-green-500/30 hover:bg-green-500/10"
-                disabled={approvingId === app.nodeId}
-                onClick={() => handleApprove(app)}
-              >
-                {approvingId === app.nodeId ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <UserCheck className="mr-1 h-3.5 w-3.5" />
-                )}
-                {t('settings.team.approveApplication')}
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
       <div className="space-y-2">
         {members.map((member) => {
           const isMemberOwner = member.role === 'owner'
@@ -225,8 +134,7 @@ export function TeamMemberList() {
                 <div className="flex items-center gap-2">
                   {(() => {
                     if (member.nodeId === currentNodeId) return <LocalDeviceBadge />
-                    const peer = enginePeers.find((p) => p.nodeId === member.nodeId)
-                    return <ConnectionDot connection={peer?.connection ?? 'unknown'} />
+                    return null
                   })()}
                   <p className="text-sm font-medium truncate">
                     {member.name || member.hostname}

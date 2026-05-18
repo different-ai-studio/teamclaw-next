@@ -27,23 +27,7 @@ const workspaceStoreMocks = vi.hoisted(() => ({
 const teamModeStoreMocks = vi.hoisted(() => ({
   teamMode: false,
   teamModeType: null as string | null,
-  p2pConnected: false,
   loadTeamGitFileSyncStatus: vi.fn(),
-}))
-
-const teamOssStoreMocks = vi.hoisted(() => ({
-  configured: false,
-  connected: false,
-}))
-
-const p2pEngineStoreMocks = vi.hoisted(() => ({
-  initialized: true,
-  snapshot: {
-    status: 'disconnected',
-    streamHealth: 'dead',
-  },
-  init: vi.fn(async () => () => {}),
-  fetch: vi.fn(async () => {}),
 }))
 
 const sessionStoreMocks = vi.hoisted(() => ({
@@ -122,16 +106,6 @@ vi.mock('@/stores/tabs', () => ({
 vi.mock('@/stores/team-mode', () => ({
   useTeamModeStore: (sel: (s: Record<string, unknown>) => unknown) =>
     sel(teamModeStoreMocks as unknown as Record<string, unknown>),
-}))
-
-vi.mock('@/stores/team-oss', () => ({
-  useTeamOssStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel(teamOssStoreMocks as unknown as Record<string, unknown>),
-}))
-
-vi.mock('@/stores/p2p-engine', () => ({
-  useP2pEngineStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel(p2pEngineStoreMocks as unknown as Record<string, unknown>),
 }))
 
 // Mock sidebar UI components
@@ -249,16 +223,6 @@ describe('AppSidebar', () => {
     workspaceStoreMocks.openPanel = vi.fn()
     workspaceStoreMocks.closePanel = vi.fn()
     teamModeStoreMocks.teamMode = false
-    teamModeStoreMocks.p2pConnected = false
-    teamOssStoreMocks.configured = false
-    teamOssStoreMocks.connected = false
-    p2pEngineStoreMocks.initialized = true
-    p2pEngineStoreMocks.snapshot = {
-      status: 'disconnected',
-      streamHealth: 'dead',
-    }
-    p2pEngineStoreMocks.init = vi.fn(async () => () => {})
-    p2pEngineStoreMocks.fetch = vi.fn(async () => {})
   })
 
   it('renders session titles in sidebar', () => {

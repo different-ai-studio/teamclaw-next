@@ -9,7 +9,6 @@ import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useCronStore } from "@/stores/cron"
 import { useTeamModeStore } from "@/stores/team-mode"
-import { useP2pEngineStore } from "@/stores/p2p-engine"
 import {
   Sidebar,
   SidebarContent,
@@ -339,20 +338,7 @@ function WorkspaceSelectorButton() {
   const workspaceName = useWorkspaceStore(s => s.workspaceName)
   const isLoadingWorkspace = useWorkspaceStore(s => s.isLoadingWorkspace)
   const setWorkspace = useWorkspaceStore(s => s.setWorkspace)
-  const teamMode = useTeamModeStore(s => s.teamMode)
-  const engineInit = useP2pEngineStore(s => s.init)
-  const engineFetch = useP2pEngineStore(s => s.fetch)
   const [isSelecting, setIsSelecting] = React.useState(false)
-
-  // Initialize P2P engine store when in team mode. The UI no longer renders
-  // connection status here, but the engine still needs to come up so sync works.
-  React.useEffect(() => {
-    if (!teamMode || !isTauri()) return
-    let cleanup: (() => void) | undefined
-    engineInit().then((c) => { cleanup = c })
-    void engineFetch()
-    return () => { cleanup?.() }
-  }, [teamMode, engineFetch, engineInit])
 
   const handleOpenFolder = async () => {
     if (!isTauri()) {

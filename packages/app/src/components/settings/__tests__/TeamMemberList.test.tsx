@@ -15,27 +15,12 @@ const teamMembersStoreMock = vi.hoisted(() => ({
   removeMember: vi.fn(),
   updateMemberRole: vi.fn(),
   canManageMembers: vi.fn(() => true),
-  applications: [],
-  approveApplication: vi.fn(),
-  listenForApplications: vi.fn(),
-  cleanupApplicationsListener: vi.fn(),
   currentNodeId: null,
   loadCurrentNodeId: vi.fn(),
 }))
 
-const p2pEngineStoreMock = vi.hoisted(() => ({
-  snapshot: {
-    peers: [],
-  },
-}))
-
 vi.mock('@/stores/team-members', () => ({
   useTeamMembersStore: () => teamMembersStoreMock,
-}))
-
-vi.mock('@/stores/p2p-engine', () => ({
-  useP2pEngineStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel(p2pEngineStoreMock as unknown as Record<string, unknown>),
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -89,23 +74,10 @@ describe('TeamMemberList', () => {
         addedAt: new Date().toISOString(),
       },
     ]
-    p2pEngineStoreMock.snapshot = {
-      peers: [
-        {
-          nodeId: 'node-3',
-          name: 'Carol',
-          role: 'owner',
-          connection: 'active',
-          lastSeenSecsAgo: 3,
-          entriesSent: 0,
-          entriesReceived: 0,
-        },
-      ],
-    }
     mockInvoke.mockResolvedValue({ nodeId: 'node-1' })
   })
 
-  it('shows This device for the local member, real state for remote owner, and Unknown for unmatched remote members', async () => {
+  it('shows This device for the local member and renders remote members without peer state', async () => {
     render(<TeamMemberList />)
 
     expect(screen.getByText('Alice')).toBeTruthy()
@@ -113,7 +85,5 @@ describe('TeamMemberList', () => {
       expect(screen.getByText('This device')).toBeTruthy()
     })
     expect(screen.getByText('Carol')).toBeTruthy()
-    expect(screen.getByText('Online')).toBeTruthy()
-    expect(screen.getByText('Unknown')).toBeTruthy()
   })
 })

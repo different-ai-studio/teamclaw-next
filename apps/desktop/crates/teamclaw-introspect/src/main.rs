@@ -139,7 +139,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "sync_team_dir",
-            "description": "Sync the shared team directory. Auto-detects the configured sync mode. For git/oss modes: pulls remote changes then pushes local changes. For p2p mode: reports the iroh sync engine status (p2p sync is continuous and automatic). Returns a summary.",
+            "description": "Sync the shared team directory. Pulls remote Git changes, pushes local changes, and returns a summary.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}

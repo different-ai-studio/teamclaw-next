@@ -4,12 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# S3/OSS
-aws-sdk-s3 = "1"
-
-# CRDT
-loro = "1"
-
 # WebDAV XML parsing
 quick-xml = "0.36"
 
@@ -37,9 +31,6 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
-# Compression
-zstd = "0.13"
-
 # Logging
 tracing = "0.1"
 log = "0.4"
@@ -53,12 +44,3 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 # URL handling
 url = "2"
 urlencoding = "2"
-
-# Gitignore support
-ignore = "0.4"
-
-# UUID for generation IDs
-uuid = { version = "1", features = ["v4"] }
-
-# Collections
-indexmap = { version = "2", features = ["serde"] }

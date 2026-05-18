@@ -336,7 +336,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
       <SectionHeader
         icon={Shield}
         title={t('settings.sharedSecrets.title', 'Shared Secrets')}
-        description={t('settings.sharedSecrets.sectionDescription', 'Encrypted secrets shared across your team — synced via P2P and stored on disk')}
+        description={t('settings.sharedSecrets.sectionDescription', 'Encrypted secrets shared across your team and stored on disk')}
         iconColor="text-blue-500"
       />
 
@@ -369,7 +369,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
               {t('settings.sharedSecrets.emptyTitle', 'No shared secrets yet')}
             </h4>
             <p className="text-sm text-muted-foreground max-w-sm">
-              {t('settings.sharedSecrets.emptyDescription', 'Share encrypted secrets with your team. Values are encrypted using the team key and synced via P2P.')}
+              {t('settings.sharedSecrets.emptyDescription', 'Share encrypted secrets with your team. Values are encrypted using the team key.')}
             </p>
             <Button size="sm" className="mt-4" onClick={() => setAddDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-1" />
@@ -401,7 +401,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
               {t('settings.sharedSecrets.hintTitle', 'How it works')}
             </p>
             <p>
-              {t('settings.sharedSecrets.hintBody', 'Secrets are encrypted using your team\'s shared key and stored as .enc.json files. They are synced to all team members via P2P and OSS. Values are write-only — they cannot be viewed after saving.')}
+              {t('settings.sharedSecrets.hintBody', 'Secrets are encrypted using your team\'s shared key and stored as .enc.json files. Values are write-only — they cannot be viewed after saving.')}
             </p>
           </div>
         </div>

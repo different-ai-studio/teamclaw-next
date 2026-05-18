@@ -166,7 +166,7 @@ export interface FileTreeItemProps {
   teamSyncing?: boolean;
   /** ISO timestamp of last successful team repo sync (for relative-time label) */
   teamLastSyncAt?: string | null;
-  /** OSS sync status for team files */
+  /** Sync status for team files */
   syncStatus?: 'synced' | 'modified' | 'new' | null;
   compactName?: string;
   compactedPaths?: string[];
