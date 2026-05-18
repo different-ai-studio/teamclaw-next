@@ -89,13 +89,10 @@ public struct SessionMemberSheet: View {
     private func topAddButton(systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.body.weight(.semibold))
+                .font(.title3)
                 .foregroundStyle(Color.amux.cinnabar)
-                .frame(width: 36, height: 32)
-                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .liquidGlass(in: Capsule())
     }
 }
 

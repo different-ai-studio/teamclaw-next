@@ -624,7 +624,6 @@ mod tests {
         write_team_mode(workspace, None).unwrap();
         assert!(!check_team_status(workspace).active);
     }
-
 }
 
 #[cfg(test)]

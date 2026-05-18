@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getEditorType, getLanguageFromFilename, supportsPreview, isSkillFile } from '../utils';
+import { getEditorType, getLanguageFromFilename, supportsPreview } from '../utils';
 
 describe('getEditorType', () => {
   it('returns "markdown" for .md files', () => {
@@ -58,51 +58,10 @@ describe('getEditorType', () => {
     expect(getEditorType('APP.TS')).toBe('code');
   });
 
-  it('returns "code" for skill SKILL.md files when filePath is provided', () => {
-    expect(getEditorType('SKILL.md', '/home/user/.teamclaw/skills/my-skill/SKILL.md')).toBe('code');
-    expect(getEditorType('SKILL.md', '/home/user/.config/teamclaw/skills/test/SKILL.md')).toBe('code');
-    expect(getEditorType('SKILL.md', '/home/user/.claude/skills/debug/SKILL.md')).toBe('code');
-    expect(getEditorType('SKILL.md', '/home/user/.agents/skills/build/SKILL.md')).toBe('code');
-  });
-
-  it('returns "markdown" for non-skill .md files', () => {
-    expect(getEditorType('README.md', '/project/README.md')).toBe('markdown');
-    expect(getEditorType('guide.md', '/project/docs/guide.md')).toBe('markdown');
-  });
-
-  it('returns "markdown" when no filePath is provided for .md', () => {
+  it('keeps skill SKILL.md files in the markdown editor (CodeMirror-based)', () => {
+    // After the Tiptap removal, all markdown files go through MarkdownEditor,
+    // which is CodeMirror-based and handles frontmatter fine.
     expect(getEditorType('SKILL.md')).toBe('markdown');
-  });
-
-  it('routes large markdown files to the code editor to avoid WYSIWYG parse freezes', () => {
-    const largeMarkdown = '# Issue Review\n\n' + 'A'.repeat(512 * 1024 + 1);
-
-    expect(getEditorType('SPAYS-17321.md', '/workspace/knowledge/SPAYS-17321.md', largeMarkdown)).toBe('code');
-  });
-
-  it('keeps smaller markdown files in the WYSIWYG editor', () => {
-    const markdown = '# Notes\n\nSmall enough for rich editing.';
-
-    expect(getEditorType('README.md', '/workspace/README.md', markdown)).toBe('markdown');
-  });
-});
-
-describe('isSkillFile', () => {
-  it('matches skill files in skills directories', () => {
-    expect(isSkillFile('/home/user/.teamclaw/skills/my-skill/SKILL.md')).toBe(true);
-    expect(isSkillFile('/home/user/.config/teamclaw/skills/test/SKILL.md')).toBe(true);
-    expect(isSkillFile('/project/.claude/skills/debug/SKILL.md')).toBe(true);
-  });
-
-  it('does not match regular markdown files', () => {
-    expect(isSkillFile('/project/README.md')).toBe(false);
-    expect(isSkillFile('/project/docs/guide.md')).toBe(false);
-    expect(isSkillFile('/project/skills.md')).toBe(false);
-  });
-
-  it('does not match SKILL.md outside skills directories', () => {
-    expect(isSkillFile('/project/SKILL.md')).toBe(false);
-    expect(isSkillFile('/project/docs/SKILL.md')).toBe(false);
   });
 });
 

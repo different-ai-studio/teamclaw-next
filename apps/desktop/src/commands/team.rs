@@ -1634,8 +1634,9 @@ pub async fn init_git_team_secrets(
         return Ok(()); // No team metadata yet, skip
     }
 
-    let team_secret = crate::commands::team_secret_store::load_team_secret(&workspace_path, &team_id)
-        .map_err(|e| format!("Failed to load team secret: {e}"))?;
+    let team_secret =
+        crate::commands::team_secret_store::load_team_secret(&workspace_path, &team_id)
+            .map_err(|e| format!("Failed to load team secret: {e}"))?;
 
     crate::commands::shared_secrets::init_shared_secrets(&secrets_state, &team_secret, team_path)?;
 

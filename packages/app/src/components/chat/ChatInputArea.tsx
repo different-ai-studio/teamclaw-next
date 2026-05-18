@@ -324,7 +324,6 @@ export function ChatInputArea({
           ) : null}
 
           <PromptInput
-            data-onboarding-id="chat-input-root"
             value={inputValue}
             onValueChange={onInputChange}
             onSubmit={handleSubmit}
@@ -488,9 +487,7 @@ export function ChatInputArea({
 
           <PromptInputFooter>
             <PromptInputTools>
-              <div data-onboarding-id="chat-input-files">
-                <FileInputButton onFilesSelected={onFilesChange} />
-              </div>
+              <FileInputButton onFilesSelected={onFilesChange} />
 
               {teamMode ? (
                 /* v2 team-mode: replace legacy team ModelSelector with AgentSelectorDock */
@@ -569,7 +566,7 @@ export function ChatInputArea({
               )}
             </PromptInputTools>
 
-            <div className="flex items-center gap-2" data-onboarding-id="chat-input-submit">
+            <div className="flex items-center gap-2">
               <ContextUsageBadge />
               <span
                 aria-hidden="true"

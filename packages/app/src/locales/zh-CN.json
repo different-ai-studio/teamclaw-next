@@ -70,7 +70,37 @@
     "verifying": "验证中…",
     "useDifferentEmail": "换一个邮箱",
     "settingUpWorkspace": "正在为你准备工作区…",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "serverConfigRequired": "Supabase 尚未配置。请返回并选择「使用自建 server」后再登录。",
+    "onboarding": {
+      "tagline": "先选择进入 TeamClaw 的方式。",
+      "getStarted": "开始使用",
+      "setupTitle": "选择启动方式",
+      "setupDesc": "可以先试用，也可以登录、加入团队，或连接自建服务。",
+      "quickTrial": "快速试用",
+      "quickTrialDesc": "匿名进入，稍后再加入团队或绑定账号。",
+      "startingTrial": "准备中…",
+      "signInOrRegister": "登录或者注册",
+      "signInOrRegisterDesc": "使用邮箱验证码继续，和 iOS 流程保持一致。",
+      "joinTeam": "Join the team",
+      "joinTeamDesc": "粘贴邀请链接或邀请码，加入已有团队。",
+      "selfHosted": "使用自建 server",
+      "selfHostedDesc": "配置 Supabase 与 MQTT，重启后使用自建服务。",
+      "inviteParseError": "请输入有效的邀请码或邀请链接。",
+      "inviteTitle": "加入团队",
+      "inviteDesc": "粘贴邀请链接或邀请码。我们会先创建匿名会话，再领取团队邀请。",
+      "inviteLabel": "邀请链接或邀请码",
+      "joining": "加入中…",
+      "continue": "继续",
+      "serverTitle": "自建 server",
+      "serverDesc": "保存后会写入本机 TeamClaw 配置，并重启前端以重新初始化 Supabase。",
+      "supabaseUrl": "Supabase URL",
+      "supabaseAnonKey": "Anon key",
+      "mqttHost": "MQTT host",
+      "mqttPort": "MQTT port",
+      "savingServer": "保存中…",
+      "saveServer": "保存并重启"
+    }
   },
   "navigation": {
     "home": "首页",
@@ -341,22 +371,6 @@
       "back": "上一步",
       "next": "下一步",
       "done": "完成"
-    },
-    "main": {
-      "sidebarTitle": "会话侧栏",
-      "sidebarBody": "左侧可以新建会话、切换任务，并快速找到之前的对话。",
-      "chatTitle": "从中间聊天区开始",
-      "chatBody": "大多数任务直接用自然语言描述就可以开始，不需要先写复杂命令。",
-      "panelTitle": "打开辅助面板",
-      "panelBody": "这里可以展开任务和辅助面板；开启高级模式后，还会看到文件和变更视图。"
-    },
-    "chatInput": {
-      "inputTitle": "先在这里描述任务",
-      "inputBody": "直接写自然语言即可，比如让它分析项目、修改代码，或总结当前问题。",
-      "filesTitle": "需要时附带文件",
-      "filesBody": "可以从这里附加文件或截图，让助手基于更具体的上下文工作。",
-      "submitTitle": "从这里发送或中断",
-      "submitBody": "这里负责发送请求；当助手正在处理中时，也可以在同一区域停止并重试。"
     }
   },
   "workspace": {
@@ -729,6 +743,8 @@
       "title": "通用",
       "description": "自定义应用偏好设置",
       "appearance": "外观",
+      "language": "语言",
+      "languageDesc": "选择应用界面语言",
       "autoSave": "自动保存",
       "autoSaveDesc": "自动保存您的工作",
       "notifications": "通知",

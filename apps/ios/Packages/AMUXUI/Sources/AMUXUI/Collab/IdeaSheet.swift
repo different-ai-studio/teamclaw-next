@@ -96,17 +96,18 @@ struct CreateIdeaSheet: View {
                 .padding(.bottom, 24)
             }
             .scrollContentBackground(.hidden)
-            .background(Color.amux.pebble)
+            .background(Color.amux.mist)
             .navigationTitle("New Idea")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: CreateIdeaSheetToolbarPresentation.cancelSystemImage)
-                            .fontWeight(.semibold)
+                            .font(.title3)
+                            .foregroundStyle(.primary)
                     }
                     .accessibilityLabel(CreateIdeaSheetToolbarPresentation.cancelAccessibilityLabel)
-                    .glassButtonStyle()
+                    .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -116,12 +117,13 @@ struct CreateIdeaSheet: View {
                             ProgressView()
                         } else {
                             Image(systemName: CreateIdeaSheetToolbarPresentation.submitSystemImage)
-                                .fontWeight(.semibold)
+                                .font(.title3)
+                                .foregroundStyle(canSave ? Color.amux.cinnabar : Color.amux.slate.opacity(0.5))
                         }
                     }
                     .accessibilityLabel(CreateIdeaSheetToolbarPresentation.submitAccessibilityLabel)
+                    .buttonStyle(.plain)
                     .disabled(!canSave)
-                    .glassProminentButtonStyle()
                 }
             }
         }
@@ -157,8 +159,8 @@ struct CreateIdeaSheet: View {
 
     private var workspaceSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            IdeaSectionLabel("Workspace")
-            VStack(spacing: 0) {
+            HaiSectionLabel("Workspace")
+            HaiPaperCard {
                 Menu {
                     Button("None") { workspaceID = "" }
                     if !workspaces.isEmpty {
@@ -168,7 +170,7 @@ struct CreateIdeaSheet: View {
                         }
                     }
                 } label: {
-                    IdeaSheetRowLabel(
+                    HaiSheetRow(
                         label: "Repository",
                         value: workspaceLabel,
                         valueIsMonospaced: !workspaceID.isEmpty,
@@ -177,10 +179,6 @@ struct CreateIdeaSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.amux.paper)
-            )
-            .padding(.horizontal, 16)
         }
     }
 
@@ -210,63 +208,6 @@ struct CreateIdeaSheet: View {
                 dismiss()
             }
         }
-    }
-}
-
-/// Tiny header label used between Hai sheet cards. Matches the design's
-/// `SectionLabel` (uppercased Basalt).
-private struct IdeaSectionLabel: View {
-    let title: String
-    init(_ title: String) { self.title = title }
-    var body: some View {
-        Text(title.uppercased())
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(0.6)
-            .foregroundStyle(Color.amux.basalt.opacity(0.7))
-            .padding(.horizontal, 24)
-    }
-}
-
-/// Reusable Hai sheet row body — left label, right value, optional
-/// chevron. Plain layout (no surrounding card) so callers can stack
-/// multiple in one Paper card with hairline dividers.
-private struct IdeaSheetRowLabel: View {
-    let label: String
-    let value: String?
-    let valueIsMonospaced: Bool
-    let showsChevron: Bool
-
-    init(label: String,
-         value: String? = nil,
-         valueIsMonospaced: Bool = false,
-         showsChevron: Bool = false) {
-        self.label = label
-        self.value = value
-        self.valueIsMonospaced = valueIsMonospaced
-        self.showsChevron = showsChevron
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.system(size: 14.5))
-                .foregroundStyle(Color.amux.onyx)
-            Spacer(minLength: 8)
-            if let value {
-                Text(value)
-                    .font(.system(size: 14, design: valueIsMonospaced ? .monospaced : .default))
-                    .foregroundStyle(Color.amux.basalt)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.amux.slate)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
     }
 }
 
@@ -395,17 +336,21 @@ struct IdeaRow: View {
         self.workspaceName = workspaceName
     }
 
-    /// Hai keeps the status pill quiet: only `Done` earns Sage; the other
-    /// two states sit in Basalt on Pebble (no orange / blue from earlier
-    /// rounds — that would have violated "spare the vermillion").
+    /// Status pill tones per `ideas-board.jsx`:
+    /// - OPEN earns Cinnabar (call-to-action / unclaimed work — the one
+    ///   place Hai loosens "spare the vermillion" on this screen).
+    /// - IN PROGRESS sits in Basalt on Pebble (quiet in-flight state).
+    /// - DONE finishes in Sage (muted active green).
     private var pillForeground: Color {
         if item.isDone       { return Color.amux.sage }
-        return Color.amux.basalt
+        if item.isInProgress { return Color.amux.basalt }
+        return Color.amux.cinnabar
     }
 
     private var pillBackground: Color {
         if item.isDone       { return Color.amux.sage.opacity(0.12) }
-        return Color.amux.pebble
+        if item.isInProgress { return Color.amux.pebble }
+        return Color.amux.cinnabar.opacity(0.10)
     }
 
     private var creatorInitial: String {
