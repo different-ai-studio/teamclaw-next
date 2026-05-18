@@ -5,7 +5,7 @@
   "identifier": "com.teamclaw.app",
   "build": {
     "beforeDevCommand": "pnpm --filter @teamclaw/app dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "pnpm --filter @teamclaw/app build",
     "frontendDist": "../../packages/app/dist"
   },

@@ -18,6 +18,15 @@ export function parseInviteDeeplink(raw: string): string | null {
   }
 }
 
+export function parseInviteTokenInput(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const fromDeeplink = parseInviteDeeplink(trimmed)
+  if (fromDeeplink) return fromDeeplink
+  if (trimmed.includes('://')) return null
+  return trimmed
+}
+
 export function rewriteAsTeamclawDeeplink(raw: string): string {
   return raw.replace(/^amux:/, 'teamclaw:')
 }

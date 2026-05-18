@@ -669,7 +669,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar variant="sidebar" {...props}>
-      <div className="flex h-full flex-col" data-onboarding-id="main-sidebar">
+      <div className="flex h-full flex-col">
         {/* Header: custom traffic lights (Tauri) or spacer + icon group */}
         <SidebarHeader
           className="flex-row items-center h-12 shrink-0 px-2 pt-0 pb-0"

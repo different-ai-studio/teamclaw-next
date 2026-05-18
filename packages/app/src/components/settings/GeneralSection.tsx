@@ -118,6 +118,16 @@ export const GeneralSection = React.memo(function GeneralSection() {
     applyTheme(t)
   }, [])
 
+  const handleLanguageChange = React.useCallback((value: string) => {
+    const normalizedValue = normalizeSupportedLanguage(value)
+    setLanguage(normalizedValue)
+    i18next.changeLanguage(normalizedValue)
+    persistLanguage(normalizedValue)
+    void invoke('set_config_locale', { locale: normalizedValue }).catch(() => {
+      // Settings should still update locally if the native config is unavailable.
+    })
+  }, [])
+
   const themeIcons: Record<string, React.ElementType> = {
     light: Sun,
     dark: Moon,
@@ -163,37 +173,30 @@ export const GeneralSection = React.memo(function GeneralSection() {
       </SettingCard>
 
       {!import.meta.env.VITE_LOCALE || import.meta.env.VITE_LOCALE === 'all' ? (
-      <SettingCard>
-<div className="space-y-2">
-  <label className="text-sm font-medium flex items-center gap-2">
-    <Languages className="h-4 w-4 text-muted-foreground" />
-    {t('common.language')}
-  </label>
-  <Select
-    value={language}
-    onValueChange={(value) => {
-      const normalizedValue = normalizeSupportedLanguage(value);
-      setLanguage(normalizedValue);
-      i18next.changeLanguage(normalizedValue);
-      persistLanguage(normalizedValue);
-      // Sync locale to config file for gateway i18n
-      invoke('set_config_locale', { locale: normalizedValue }).catch(console.error);
-    }}
-  >
-    <SelectTrigger className="h-11">
-      <SelectValue />
-    </SelectTrigger>
-    <SelectContent>
-      {LANGUAGE_OPTIONS.map((option) => (
-        <SelectItem key={option.value} value={option.value}>
-          {option.value === 'en' ? '🇺🇸 ' : '🇨🇳 '}
-          {t(option.labelKey, option.fallback)}
-        </SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-</div>
-      </SettingCard>
+        <SettingCard>
+          <div className="space-y-2">
+            <label className="text-sm font-medium flex items-center gap-2">
+              <Languages className="h-4 w-4 text-muted-foreground" />
+              {t('settings.general.language', 'Language')}
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.general.languageDesc', 'Choose the app display language')}
+            </p>
+            <Select value={language} onValueChange={handleLanguageChange}>
+              <SelectTrigger className="h-11" data-testid="language-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.value === 'en' ? '🇺🇸 ' : '🇨🇳 '}
+                    {t(option.labelKey, option.fallback)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </SettingCard>
       ) : null}
 
       <SettingCard>
