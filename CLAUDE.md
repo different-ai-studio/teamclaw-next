@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-For **UI / visual design** work (colors, typography, layout, message styles,
-chat input), the source-of-truth is `AGENTS.md` at the repo root. Read it
-before touching anything user-facing.
+For **UI / visual design** work, source-of-truth depends on the platform:
+
+- **iOS** (`apps/ios/`): `apps/ios/DESIGN.md` — the Hai 灰 palette, wabi-sabi
+  language, and SwiftUI implementation conventions (tokens, Hai sheets, iOS 26
+  toolbar rules). Read this before touching anything in `apps/ios/`.
+- **Web / desktop** (`packages/app/`): `AGENTS.md` at the repo root — the
+  Editorial Calm direction (paper neutrals, coral accent, Chinese-first type).
 
 ## Project Overview
 

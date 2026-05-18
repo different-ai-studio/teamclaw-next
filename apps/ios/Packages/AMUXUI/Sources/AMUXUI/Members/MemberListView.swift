@@ -72,10 +72,12 @@ public struct MemberListView: View {
     private var visibleActors: [CachedActor] {
         // When the caller declares which agents we have access to, agents
         // outside that set are hidden from the picker (instead of shown
-        // locked). Humans are always visible; browse mode (empty set) shows
-        // everything too. `excludeActorID` / `excludeActorIDs` hide the
-        // calling user (and any pre-known participants) from the picker.
-        var rows = actors
+        // locked). Humans are always visible. Gateway-only external actors
+        // are intentionally hidden here; they are message/session
+        // participants, not selectable TeamClaw collaborators.
+        // `excludeActorID` / `excludeActorIDs` hide the calling user (and
+        // any pre-known participants) from the picker.
+        var rows = actors.filter { $0.isMember || $0.isAgent }
         if let exclude = excludeActorID, !exclude.isEmpty {
             rows = rows.filter { $0.actorId != exclude }
         }
@@ -102,41 +104,62 @@ public struct MemberListView: View {
         NavigationStack {
             List {
                 ForEach(filtered, id: \.actorId) { actor in
-                    if selectionMode {
-                        selectionRow(actor)
-                    } else {
-                        NavigationLink {
-                            MemberDetailView(member: actor)
-                        } label: {
-                            ActorRow(actor: actor, isPrimary: false, isLocked: false)
+                    Group {
+                        if selectionMode {
+                            selectionRow(actor)
+                        } else {
+                            NavigationLink {
+                                MemberDetailView(member: actor)
+                            } label: {
+                                ActorRow(actor: actor, isPrimary: false, isLocked: false)
+                            }
                         }
                     }
+                    .listRowBackground(Color.amux.paper)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.amux.mist)
             .searchable(text: $searchText, prompt: "Search actors")
             .navigationTitle("Actors").navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if selectionMode {
+                if selectionMode {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .font(.title3)
+                                .foregroundStyle(.primary)
+                        }
+                        .accessibilityLabel("Cancel")
+                        .buttonStyle(.plain)
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        let canConfirm = !(selectedIDs.isEmpty && externallySelectedIDs.isEmpty)
                         Button {
                             let union = selectedIDs.union(externallySelectedIDs)
                             let selected = actors.filter { union.contains($0.actorId) }
                             onConfirm?(selected)
                             dismiss()
                         } label: {
-                            Image(systemName: "checkmark").font(.title3)
+                            Image(systemName: "checkmark")
+                                .font(.title3)
+                                .foregroundStyle(canConfirm ? Color.amux.cinnabar : Color.amux.slate.opacity(0.5))
                         }
+                        .accessibilityLabel("Confirm")
                         .buttonStyle(.plain)
-                        .disabled(selectedIDs.isEmpty && externallySelectedIDs.isEmpty)
+                        .disabled(!canConfirm)
                     }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
+                } else {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .font(.title3)
+                                .foregroundStyle(.primary)
+                        }
+                        .accessibilityLabel("Close")
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -269,17 +292,28 @@ private struct ActorRow: View {
     let isLocked: Bool
 
     private var subtitle: String {
-        if actor.isMember { return actor.roleLabel }
-        let kind = actor.agentKind?.capitalized ?? "Agent"
-        let status = actor.agentStatus ?? ""
-        return status.isEmpty ? kind : "\(kind) · \(status)"
+        if actor.isMember {
+            return actor.roleLabel
+        }
+        if actor.isAgent {
+            let kind = actor.agentKind?.capitalized ?? "Agent"
+            let status = actor.agentStatus ?? ""
+            return status.isEmpty ? kind : "\(kind) · \(status)"
+        }
+        return actor.actorType.capitalized
     }
 
     private var kindBadge: (String, Color) {
         // Both human and agent badges read in Basalt — the kind distinction
         // is communicated through copy ("Human"/"Agent") and the avatar
         // shape elsewhere; per "spare the vermillion", no extra color here.
-        actor.isMember ? ("Human", Color.amux.basalt) : ("Agent", Color.amux.basalt)
+        if actor.isMember {
+            return ("Human", Color.amux.basalt)
+        }
+        if actor.isAgent {
+            return ("Agent", Color.amux.basalt)
+        }
+        return ("External", Color.amux.basalt)
     }
 
     var body: some View {

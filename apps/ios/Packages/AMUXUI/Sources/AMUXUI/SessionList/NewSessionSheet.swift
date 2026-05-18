@@ -84,12 +84,16 @@ public struct NewSessionSheet: View {
     public var body: some View {
         NavigationStack {
             ZStack {
+                Color.amux.mist.ignoresSafeArea()
                 VStack(spacing: 0) {
-                    collaboratorsRow
-                    Divider()
-                    ideaRow
-                    Divider()
-                    Spacer()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            collaboratorsSection
+                            ideaSection
+                        }
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                    }
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.subheadline)
@@ -132,7 +136,10 @@ public struct NewSessionSheet: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
                     }
+                    .accessibilityLabel("Close")
                     .buttonStyle(.plain)
                     .disabled(isSending)
                 }
@@ -209,82 +216,81 @@ public struct NewSessionSheet: View {
         }
     }
 
-    // MARK: - Collaborators row
+    // MARK: - Collaborators section
 
-    private var collaboratorsRow: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text("Collaborators")
-                .foregroundStyle(.secondary)
+    private var collaboratorsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HaiSectionLabel("Collaborators")
+            HaiPaperCard {
+                Button {
+                    showMemberPicker = true
+                    isInputFocused = false
+                } label: {
+                    HStack(spacing: 10) {
+                        if collaborators.isEmpty {
+                            Text("Just you")
+                                .font(.system(size: 14.5))
+                                .foregroundStyle(Color.amux.basalt.opacity(0.6))
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(collaborators, id: \.actorId) { member in
+                                        CollaboratorChip(name: member.displayName) {
+                                            removeCollaborator(member)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 1)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.amux.slate)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    if collaborators.isEmpty {
-                        Text("Just you")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(collaborators, id: \.actorId) { member in
-                            CollaboratorChip(name: member.displayName) {
-                                removeCollaborator(member)
+    // MARK: - Idea section
+
+    private var ideaSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HaiSectionLabel(IdeaUIPresentation.singularTitle)
+            HaiPaperCard {
+                Menu {
+                    Button {
+                        selectedIdeaId = nil
+                    } label: {
+                        Label("None", systemImage: selectedIdeaId == nil ? "checkmark" : "circle")
+                    }
+                    if !availableIdeas.isEmpty {
+                        Divider()
+                        ForEach(availableIdeas, id: \.ideaId) { item in
+                            Button {
+                                selectedIdeaId = item.ideaId
+                            } label: {
+                                Label(item.displayTitle,
+                                      systemImage: selectedIdeaId == item.ideaId ? "checkmark" : "circle")
                             }
                         }
                     }
-                }
-                .padding(.vertical, 1)
-            }
-
-            Spacer(minLength: 0)
-
-            Button {
-                showMemberPicker = true
-                isInputFocused = false
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title3)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    // MARK: - Idea row
-
-    private var ideaRow: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(IdeaUIPresentation.singularTitle)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Menu {
-                Button {
-                    selectedIdeaId = nil
                 } label: {
-                    Label("None", systemImage: selectedIdeaId == nil ? "checkmark" : "circle")
+                    HaiSheetRow(
+                        label: IdeaUIPresentation.singularTitle,
+                        value: selectedIdeaLabel,
+                        valueIsMuted: selectedIdeaId == nil,
+                        showsChevron: true
+                    )
                 }
-                if !availableIdeas.isEmpty {
-                    Divider()
-                    ForEach(availableIdeas, id: \.ideaId) { item in
-                        Button {
-                            selectedIdeaId = item.ideaId
-                        } label: {
-                            Label(item.displayTitle,
-                                  systemImage: selectedIdeaId == item.ideaId ? "checkmark" : "circle")
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(selectedIdeaLabel)
-                        .font(.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption)
-                }
-                .foregroundStyle(selectedIdeaId == nil ? .secondary : .primary)
+                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
     private var selectedIdeaLabel: String {
@@ -313,7 +319,7 @@ public struct NewSessionSheet: View {
                     Button(action: sendAndCreate) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 28))
-                            .foregroundStyle(canSend ? .blue : .gray.opacity(0.4))
+                            .foregroundStyle(canSend ? Color.amux.onyx : Color.amux.mist)
                     }
                     .accessibilityIdentifier("newSession.sendButton")
                     .buttonStyle(.plain)

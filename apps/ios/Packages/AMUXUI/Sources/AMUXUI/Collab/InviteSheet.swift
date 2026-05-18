@@ -45,21 +45,19 @@ public struct InviteSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.title3)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    let canInvite = !selectedIds.isEmpty && !isSending
                     Button { sendInvites() } label: {
                         Text("Invite")
-                            .font(.subheadline).fontWeight(.medium)
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .liquidGlass(in: Capsule())
+                            .font(.subheadline).fontWeight(.semibold)
+                            .foregroundStyle(canInvite ? Color.amux.cinnabar : Color.amux.slate.opacity(0.5))
                     }
                     .buttonStyle(.plain)
-                    .disabled(selectedIds.isEmpty || isSending)
-                    .opacity(selectedIds.isEmpty || isSending ? 0.4 : 1)
+                    .disabled(!canInvite)
                 }
             }
             .task { loadMembers() }

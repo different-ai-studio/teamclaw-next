@@ -1,13 +1,15 @@
-# AGENTS.md — UI / Visual Design Spec
+# AGENTS.md — UI / Visual Design Spec (Web / Desktop)
 
-This file is the source-of-truth for TeamClaw's visual language. When you
-build or change anything user-facing, follow this. For repo conventions
-(architecture, commands, release process) see `CLAUDE.md`.
+This file is the source-of-truth for the **web / desktop** visual language
+(`packages/app/`). For the **iOS client** (`apps/ios/`) the source-of-truth is
+`apps/ios/DESIGN.md` (the Hai 灰 / wabi-sabi system) — don't apply the rules
+below to iOS work. For repo conventions (architecture, commands, release
+process) see `CLAUDE.md`.
 
-The design direction is **"Editorial Calm"** — paper-feel neutrals, brand
-coral used only as small accents, Chinese-first typography, higher
-information density than a typical chat app but with breathing room inside
-each card.
+The web/desktop design direction is **"Editorial Calm"** — paper-feel
+neutrals, brand coral used only as small accents, Chinese-first typography,
+higher information density than a typical chat app but with breathing room
+inside each card.
 
 It came from the Claude Design handoff at
 `https://api.anthropic.com/v1/design/h/OLWqffBkDMYRHp_p7cFRNg` (Direction B).
