@@ -80,21 +80,6 @@ vi.mock('@/stores/team-mode', () => ({
   ),
 }))
 
-const p2pEngineState = {
-  init: vi.fn(async () => () => {}),
-  fetch: vi.fn(async () => {}),
-}
-
-vi.mock('@/stores/p2p-engine', () => ({
-  useP2pEngineStore: Object.assign(
-    (selector: (s: Record<string, unknown>) => unknown) =>
-      selector(p2pEngineState as unknown as Record<string, unknown>),
-    {
-      getState: () => p2pEngineState,
-    },
-  ),
-}))
-
 vi.mock('@/stores/channels', () => ({
   useChannelsStore: () => ({
     autoStartEnabledGateways: vi.fn(),
@@ -182,8 +167,6 @@ beforeEach(() => {
   workspaceState.workspaceReady = false
   teamModeState.teamMode = false
   teamModeState.setState.mockClear()
-  p2pEngineState.init = vi.fn(async () => () => {})
-  p2pEngineState.fetch = vi.fn(async () => {})
   localStorage.clear()
 })
 
@@ -328,40 +311,5 @@ describe('useGitReposInit', () => {
       expect(mockLoadCurrentNodeId).toHaveBeenCalled()
       expect(mockLoadMembers).toHaveBeenCalled()
     })
-  })
-})
-
-describe('useP2pAutoReconnect', () => {
-  it('retries reconnect when team mode becomes active after workspace switch', async () => {
-    vi.useFakeTimers()
-    mockIsTauri.mockReturnValue(true)
-    workspaceState.workspacePath = '/workspace-team'
-    workspaceState.workspaceReady = true
-
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'p2p_sync_status') {
-        return { connected: true, role: 'owner' }
-      }
-      return null
-    })
-
-    const { useP2pAutoReconnect } = await import('@/hooks/useAppInit')
-    const { rerender } = renderHook(() => useP2pAutoReconnect())
-
-    await vi.advanceTimersByTimeAsync(3100)
-    expect(mockInvoke).not.toHaveBeenCalledWith('p2p_reconnect')
-
-    teamModeState.teamMode = true
-    rerender()
-
-    await vi.advanceTimersByTimeAsync(3100)
-
-    expect(mockInvoke).toHaveBeenCalledWith('p2p_reconnect')
-    expect(teamModeState.setState).toHaveBeenCalledWith({
-      p2pConnected: true,
-      myRole: 'owner',
-    })
-    expect(p2pEngineState.init).toHaveBeenCalled()
-    expect(p2pEngineState.fetch).toHaveBeenCalled()
   })
 })

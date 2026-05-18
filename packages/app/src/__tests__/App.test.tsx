@@ -16,7 +16,6 @@ const uiStoreState = vi.hoisted(() => ({
   }),
   fileModeRightTab: 'agent',
   setFileModeRightTab: vi.fn(),
-  spotlightMode: false,
   toggleLayoutMode: vi.fn(),
   advancedMode: false,
   openSettings: vi.fn(),
@@ -87,8 +86,6 @@ vi.mock('@/hooks/useAppInit', () => ({
   useChannelGatewayInit: vi.fn(),
   useGitReposInit: vi.fn(),
   useCronInit: vi.fn(),
-  useP2pAutoReconnect: vi.fn(),
-  useOssSyncInit: vi.fn(),
   useExternalLinkHandler: vi.fn(),
   useTauriBodyClass: vi.fn(),
   useSetupGuide: () => ({ showSetupGuide: false, dependencies: [], handleRecheck: vi.fn(), handleSetupContinue: vi.fn() }),
@@ -149,7 +146,7 @@ vi.mock('@/stores/ui', () => ({
     vi.fn((sel: (s: any) => any) => {
       return sel(uiStoreState)
     }),
-    { getState: () => ({ spotlightMode: uiStoreState.spotlightMode }) }
+    { getState: () => uiStoreState }
   ),
 }))
 vi.mock('@/stores/workspace', () => ({
@@ -213,7 +210,6 @@ describe('App', () => {
     uiStoreState.layoutMode = 'task'
     uiStoreState.mainContentLayout = 'stacked'
     uiStoreState.fileModeRightTab = 'agent'
-    uiStoreState.spotlightMode = false
     workspaceStoreState.workspacePath = null
     workspaceStoreState.isPanelOpen = false
     workspaceStoreState.activeTab = 'shortcuts'

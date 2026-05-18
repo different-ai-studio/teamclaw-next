@@ -9,7 +9,6 @@ import { GitStatus } from "@/lib/git/service";
 import { useWorkspaceStore, type FileNode } from "@/stores/workspace";
 import { useGitStatus } from "@/hooks/use-git-status";
 import { useGitSettingsStore } from "@/stores/git-settings";
-import { useTeamOssStore } from "@/stores/team-oss";
 import { useTeamModeStore } from "@/stores/team-mode";
 import {
   AlertDialog,
@@ -349,24 +348,18 @@ export function FileTree({
     return { fileGitStatusMap: fileMap, dirtyDirectories: dirtyDirs };
   }, [effectiveShowGitStatus, gitStatuses, workspacePath]);
 
-  // Pre-compute sync status data for team files (merge OSS, P2P, and Git sources)
-  const ossFileSyncStatusMap = useTeamOssStore(s => s.fileSyncStatusMap);
-  const p2pFileSyncStatusMap = useTeamModeStore(s => s.p2pFileSyncStatusMap);
+  // Pre-compute sync status data for team files.
   const teamGitFileSyncStatusMap = useTeamModeStore(s => s.teamGitFileSyncStatusMap);
-  const p2pConnected = useTeamModeStore(s => s.p2pConnected);
   const teamModeType = useTeamModeStore(s => s.teamModeType);
   const teamGitSyncing = useTeamModeStore(s => s.teamGitSyncing);
   const teamGitLastSyncAt = useTeamModeStore(s => s.teamGitLastSyncAt);
   const fileSyncStatusMap =
-    teamModeType === 'git' ? teamGitFileSyncStatusMap :
-    p2pConnected           ? p2pFileSyncStatusMap     :
-                             ossFileSyncStatusMap;
+    teamModeType === 'git' ? teamGitFileSyncStatusMap : {};
   const syncDirtyDirectories = useMemo(() => {
-    const dirtyDirs = new Map<string, 'synced' | 'modified' | 'new'>();
+    const dirtyDirs = new Map<string, 'modified' | 'new'>();
     if (!workspacePath) return dirtyDirs;
 
     for (const [relPath, status] of Object.entries(fileSyncStatusMap)) {
-      if (status === 'synced') continue;
       // Build absolute path and propagate to parent directories
       const absPath = `${workspacePath}/${TEAM_REPO_DIR}/${relPath}`;
       let dir = absPath.substring(0, absPath.lastIndexOf("/"));

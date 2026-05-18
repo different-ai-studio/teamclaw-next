@@ -249,7 +249,7 @@ pub fn get_secret_value(state: &SharedSecretsState, key_id: &str) -> Option<Stri
 }
 
 /// Try to initialize shared_secrets from the workspace's team config.
-/// Supports both `oss.teamId` (OSS teams) and `team.teamId` (managed-Git teams).
+/// Supports configured Git teams.
 /// Fast-path returns Ok() immediately when already initialized.
 ///
 /// Called by `shared_secret_set` / `shared_secret_delete` so a user who joined
@@ -281,20 +281,15 @@ pub fn try_lazy_init_from_workspace(
     let json: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse teamclaw.json: {e}"))?;
 
-    // Pick the first enabled team section that carries a `teamId`.
-    // Both OSS and Git team configs use camelCase `teamId` in JSON.
-    let team_id = ["oss", "team"]
-        .iter()
-        .find_map(|section| {
-            let obj = json.get(*section)?.as_object()?;
-            if obj.get("enabled").and_then(|v| v.as_bool()) != Some(true) {
-                return None;
-            }
-            obj.get("teamId").and_then(|v| v.as_str()).map(String::from)
-        })
+    let team_id = json
+        .get("team")
+        .and_then(|section| section.as_object())
+        .filter(|obj| obj.get("enabled").and_then(|v| v.as_bool()) == Some(true))
+        .and_then(|obj| obj.get("teamId").and_then(|v| v.as_str()))
+        .map(String::from)
         .ok_or_else(|| "No team configured for this workspace".to_string())?;
 
-    let team_secret = super::oss_sync::load_team_secret(workspace_path, &team_id)?;
+    let team_secret = super::team_secret_store::load_team_secret(workspace_path, &team_id)?;
     let team_dir = std::path::Path::new(workspace_path).join(super::TEAM_REPO_DIR);
     init_shared_secrets(state, &team_secret, &team_dir)
 }

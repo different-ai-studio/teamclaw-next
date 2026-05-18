@@ -2,8 +2,6 @@ import {
   useEffect,
   useState,
   useRef,
-  lazy,
-  Suspense,
   MouseEvent as ReactMouseEvent,
   type ComponentType,
 } from "react";
@@ -30,21 +28,12 @@ import {
   Mail,
   CalendarDays,
 } from "lucide-react";
-// Spotlight window - lazy loaded for spotlight window label
-const SpotlightWindow = lazy(() =>
-  import("@/components/spotlight/SpotlightWindow").then((m) => ({
-    default: m.SpotlightWindow,
-  }))
-)
-
 import { FileContentViewer } from "@/components/FileEditor";
 import {
   useWorkspaceInit,
   useChannelGatewayInit,
   useGitReposInit,
   useCronInit,
-  useOssSyncInit,
-  useP2pAutoReconnect,
   useOpenCodePreload,
 
   useExternalLinkHandler,
@@ -703,8 +692,6 @@ function AppContent() {
   useChannelGatewayInit();
   useGitReposInit();
   useCronInit();
-  useOssSyncInit();
-  useP2pAutoReconnect();
   useMCPFileWatcher(workspacePath);
   useExternalLinkHandler();
   usePanelAutoOpen();
@@ -1525,9 +1512,6 @@ function App() {
   useWebviewShortcuts()
   useTerminalShortcuts()
 
-  // ── Spotlight mode from UI store ──────────────────────────────────────
-  const spotlightMode = useUIStore((s) => s.spotlightMode)
-
   // ── Initialize tauri-plugin-mcp event listeners (dev only) ──
   useEffect(() => {
     if (!isTauri() || import.meta.env.PROD) return;
@@ -1576,14 +1560,6 @@ function App() {
   const { showSetupGuide, dependencies, handleRecheck, handleSetupContinue } = useSetupGuide(setupReady);
   const { showConsentDialog, setShowConsentDialog } = useTelemetryConsent(showSetupGuide);
 
-  const spotlightContent = (
-    <Suspense fallback={<div className="h-screen w-screen rounded-2xl overflow-hidden" />}>
-      <div className="h-screen w-screen rounded-2xl overflow-hidden">
-        <SpotlightWindow />
-      </div>
-    </Suspense>
-  )
-
   const mainContent = (
     <>
       {showSetupGuide && (
@@ -1625,22 +1601,10 @@ function App() {
 
   return isTauri() ? (
     <div className="h-screen w-screen rounded-2xl overflow-hidden bg-background">
-      <div style={{ display: spotlightMode ? 'contents' : 'none' }}>
-        {spotlightContent}
-      </div>
-      <div style={{ display: spotlightMode ? 'none' : 'contents' }}>
-        {mainContent}
-      </div>
+      {mainContent}
     </div>
   ) : (
-    <>
-      <div style={{ display: spotlightMode ? 'contents' : 'none' }}>
-        {spotlightContent}
-      </div>
-      <div style={{ display: spotlightMode ? 'none' : 'contents' }}>
-        {mainContent}
-      </div>
-    </>
+    <>{mainContent}</>
   )
 }
 

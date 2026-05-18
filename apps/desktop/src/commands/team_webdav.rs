@@ -625,21 +625,6 @@ mod tests {
         assert!(!check_team_status(workspace).active);
     }
 
-    #[test]
-    fn test_team_mode_migration() {
-        use crate::commands::team::check_team_status;
-        let tmp = TempDir::new().unwrap();
-        let workspace = tmp.path().to_str().unwrap();
-        let teamclaw_dir = tmp.path().join(super::TEAMCLAW_DIR);
-        fs::create_dir_all(&teamclaw_dir).unwrap();
-
-        let config = r#"{"p2p": {"enabled": true}, "team": {"enabled": false}}"#;
-        fs::write(teamclaw_dir.join(crate::commands::CONFIG_FILE_NAME), config).unwrap();
-
-        let status = check_team_status(workspace);
-        assert!(status.active);
-        assert_eq!(status.mode.as_deref(), Some("p2p"));
-    }
 }
 
 #[cfg(test)]

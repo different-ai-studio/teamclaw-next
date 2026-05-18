@@ -1,8 +1,8 @@
-pub mod app_settings;
 pub mod clawhub;
 pub mod cron;
 pub mod daemon_installer;
 pub mod deps;
+pub mod device_identity;
 pub mod device_token;
 pub mod env_vars;
 pub mod filewatcher;
@@ -15,23 +15,18 @@ pub mod local_stats;
 pub mod mcp;
 pub mod mqtt_bus;
 pub mod opencode;
-pub mod oss_commands;
-pub mod oss_sync;
-pub mod oss_types;
-pub mod p2p_state;
 pub mod rag_http_server;
 pub mod shared_secrets;
 pub mod shared_secrets_crypto;
 pub mod server_config;
 pub mod skillssh;
-pub mod spotlight;
 pub mod stt;
 pub mod supabase_auth_bridge;
 pub mod system_appearance;
 pub mod team;
-#[cfg(feature = "p2p")]
-pub mod team_p2p;
+pub mod team_secret_store;
 pub mod team_sync_all;
+pub mod team_types;
 pub mod team_unified;
 pub mod team_webdav;
 pub mod terminal;
@@ -42,6 +37,7 @@ pub mod version_store;
 pub mod version_types;
 pub mod webview;
 pub mod window;
+pub mod window_chrome;
 pub mod workspace_files;
 
 #[cfg(target_os = "windows")]

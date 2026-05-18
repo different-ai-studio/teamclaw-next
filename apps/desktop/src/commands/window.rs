@@ -123,7 +123,7 @@ pub async fn create_workspace_window(
 
     // Reposition the macOS traffic lights to match the main window's offset.
     #[cfg(target_os = "macos")]
-    super::spotlight::reposition_traffic_lights(&win);
+    super::window_chrome::reposition_traffic_lights(&win);
 
     // Cleanup on close: unregister this window's workspace mapping.
     let app_handle = app.clone();

@@ -97,14 +97,15 @@ vi.mock('@/stores/git-settings', () => ({
   }),
 }));
 
-vi.mock('@/stores/team-oss', () => ({
-  useTeamOssStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel({ fileSyncStatusMap: {} }),
-}));
-
 vi.mock('@/stores/team-mode', () => ({
   useTeamModeStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel({ p2pFileSyncStatusMap: {}, p2pConnected: false, myRole: 'admin' }),
+    sel({
+      myRole: 'admin',
+      teamGitFileSyncStatusMap: {},
+      teamModeType: null,
+      teamGitSyncing: false,
+      teamGitLastSyncAt: null,
+    }),
 }));
 
 vi.mock('sonner', () => ({

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 
 const mockInvoke = vi.fn()
 const mockRefreshFileTree = vi.fn()
@@ -89,19 +89,11 @@ vi.mock('../shared', () => ({
   ),
 }))
 
-describe('GeneralSection spotlight shortcut setting', () => {
+describe('GeneralSection small-window setting', () => {
   beforeEach(() => {
     vi.resetModules()
     mockInvoke.mockReset()
-    mockInvoke.mockImplementation((command: string, args?: unknown) => {
-      if (command === 'get_spotlight_shortcut') {
-        return Promise.resolve('alt+space')
-      }
-      if (command === 'set_spotlight_shortcut') {
-        return Promise.resolve((args as { shortcut: string }).shortcut)
-      }
-      return Promise.resolve(null)
-    })
+    mockInvoke.mockResolvedValue(null)
 
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -113,39 +105,12 @@ describe('GeneralSection spotlight shortcut setting', () => {
     })
   })
 
-  it('loads the current shortcut from Tauri', async () => {
+  it('does not render the small-window shortcut setting', async () => {
     const { GeneralSection } = await import('../GeneralSection')
 
     render(<GeneralSection />)
 
-    expect(await screen.findByText('Spotlight Shortcut')).toBeTruthy()
-    const shortcutButton = await screen.findByRole('button', { name: /alt\+space/ })
-    await waitFor(() => expect((shortcutButton as HTMLButtonElement).disabled).toBe(false))
-    expect(mockInvoke).toHaveBeenCalledWith('get_spotlight_shortcut')
-  })
-
-  it('captures and saves a changed shortcut through Tauri', async () => {
-    const { GeneralSection } = await import('../GeneralSection')
-
-    render(<GeneralSection />)
-
-    const shortcutButton = await screen.findByRole('button', { name: /alt\+space/ })
-    await waitFor(() => expect((shortcutButton as HTMLButtonElement).disabled).toBe(false))
-    fireEvent.click(shortcutButton)
-    expect(await screen.findByRole('button', { name: /Press shortcut/ })).toBeTruthy()
-
-    fireEvent.keyDown(window, {
-      key: 'P',
-      code: 'KeyP',
-      metaKey: true,
-      shiftKey: true,
-    })
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('set_spotlight_shortcut', {
-        shortcut: 'cmd+shift+p',
-      })
-    })
-    expect(await screen.findByRole('button', { name: /cmd\+shift\+p/ })).toBeTruthy()
+    expect(screen.queryByText('Small Window Shortcut')).toBeNull()
+    expect(mockInvoke).not.toHaveBeenCalled()
   })
 })

@@ -21,7 +21,6 @@ import { useUIStore } from "@/stores/ui";
 import { useDepsStore, getSetupDecision, markSetupCompleted } from "@/stores/deps";
 import { useTelemetryStore } from "@/stores/telemetry";
 import { useTeamModeStore } from "@/stores/team-mode";
-import { useTeamOssStore } from "@/stores/team-oss";
 import { useTeamMembersStore } from "@/stores/team-members";
 import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
@@ -610,68 +609,6 @@ export function useGitReposInit() {
 // Cron session IDs (for sidebar filtering)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// P2P auto-reconnect (team mode)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function useP2pAutoReconnect() {
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = !!workspacePath;
-  const teamMode = useTeamModeStore((s) => s.teamMode);
-  const teamModeType = useTeamModeStore((s) => s.teamModeType);
-
-  useEffect(() => {
-    // Only auto-reconnect for P2P teams, not S3/OSS/Git
-    if (!workspacePath || !workspaceReady || !teamMode || !isTauri()) return;
-    if (teamModeType && teamModeType !== 'p2p') return;
-
-    let cancelled = false;
-    const MAX_RETRIES = 5;
-    const INITIAL_DELAY = 3000;
-
-    const attemptReconnect = async (attempt: number) => {
-      if (cancelled) return;
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("p2p_reconnect");
-
-        // Update connection status
-        const status = await invoke<{ connected?: boolean; role?: string }>("p2p_sync_status").catch(() => null);
-        if (status) {
-          useTeamModeStore.setState({
-            p2pConnected: status.connected ?? false,
-            myRole: (status.role as 'owner' | 'editor' | 'viewer') ?? null,
-          });
-        }
-
-        // Initialize engine store so sidebar icon and popover reflect connection state
-        const { useP2pEngineStore } = await import("@/stores/p2p-engine");
-        await useP2pEngineStore.getState().init();
-        await useP2pEngineStore.getState().fetch();
-
-        console.log("[P2P] Auto-reconnect completed");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (attempt < MAX_RETRIES && msg.includes("not running")) {
-          const delay = INITIAL_DELAY * Math.pow(2, attempt);
-          console.warn(`[P2P] Auto-reconnect attempt ${attempt + 1}/${MAX_RETRIES} failed (iroh not ready), retrying in ${delay}ms`);
-          timer = setTimeout(() => attemptReconnect(attempt + 1), delay);
-        } else {
-          console.warn("[P2P] Auto-reconnect failed:", msg);
-        }
-      }
-    };
-
-    // Delay first attempt so it doesn't compete with app startup
-    let timer: ReturnType<typeof setTimeout> = setTimeout(() => attemptReconnect(0), INITIAL_DELAY);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [workspacePath, workspaceReady, teamMode, teamModeType]);
-}
-
 export function useCronInit() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const workspaceReady = useWorkspaceStore((s) => s.openCodeReady);
@@ -703,31 +640,6 @@ export function useCronInit() {
       unlisten?.();
     };
   }, [workspacePath, workspaceReady]);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OSS sync auto-restore
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function useOssSyncInit() {
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = !!workspacePath;
-  const initialize = useTeamOssStore((s) => s.initialize);
-  const cleanup = useTeamOssStore((s) => s.cleanup);
-
-  useEffect(() => {
-    if (!workspacePath || !workspaceReady || !isTauri()) return;
-
-    // Clean up previous workspace listener, reset state, then re-initialize
-    cleanup();
-    initialize(workspacePath).catch((err: unknown) => {
-      console.warn("[App] OSS sync init failed (non-critical):", err);
-    });
-
-    return () => {
-      cleanup();
-    };
-  }, [workspacePath, workspaceReady, initialize, cleanup]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

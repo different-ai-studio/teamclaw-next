@@ -132,9 +132,7 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
             // Create new native webview
             setIsLoading(true)
 
-            // Device ID is the persistent iroh node_id (derived from a local key
-            // file) — it does not depend on the P2P node being up, so racing P2P
-            // here is wasted latency. Always read it directly.
+            // Device ID is derived from a local persistent key file.
             let deviceNo: string | undefined
             try {
               deviceNo = await invoke<string>("get_persistent_device_id")

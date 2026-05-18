@@ -85,24 +85,6 @@ export interface TeamGitConfig {
   documentsUrl?: string
 }
 
-// ─── P2P Team Sync Types ──────────────────────────────────────────────────
-
-/** Sync status of a P2P connection */
-export type P2pSyncStatus = 'idle' | 'syncing' | 'synced' | 'error'
-
-/** Runtime array of all P2P sync statuses */
-export const P2P_SYNC_STATUSES: P2pSyncStatus[] = ['idle', 'syncing', 'synced', 'error']
-
-/** A single P2P ticket entry (a source to sync from) */
-export interface P2pTicketEntry {
-  /** iroh blob ticket string */
-  ticket: string
-  /** Human-readable label for this source */
-  label: string
-  /** ISO timestamp when the ticket was added */
-  addedAt: string
-}
-
 /** A team member in the allowlist */
 export interface TeamMember {
   /** Iroh NodeId (Ed25519 public key) */
@@ -145,34 +127,6 @@ export interface DeviceInfo {
   platform: string
   arch: string
   hostname: string
-}
-
-/** P2P configuration stored in teamclaw.json */
-export interface P2pConfig {
-  /** Whether P2P sync is enabled */
-  enabled: boolean
-  /** List of P2P ticket sources */
-  tickets: P2pTicketEntry[]
-  /** Whether this workspace publishes its team drive */
-  publishEnabled: boolean
-  /** ISO timestamp of last successful sync, or null */
-  lastSyncAt: string | null
-  /** NodeId of the team owner */
-  ownerNodeId?: string
-  /** List of authorized team members */
-  allowedMembers?: TeamMember[]
-}
-
-/** Type guard for P2pConfig */
-export function isP2pConfig(obj: unknown): obj is P2pConfig {
-  if (obj == null || typeof obj !== 'object') return false
-  const o = obj as Record<string, unknown>
-  return (
-    typeof o.enabled === 'boolean' &&
-    Array.isArray(o.tickets) &&
-    typeof o.publishEnabled === 'boolean' &&
-    (o.lastSyncAt === null || typeof o.lastSyncAt === 'string')
-  )
 }
 
 // ─── Skill Source Types ────────────────────────────────────────────────────
@@ -260,22 +214,4 @@ export interface WebDavSyncResult {
   filesDeleted: number
 }
 
-export type TeamSyncMode = 'git' | 'p2p' | 'webdav' | 'oss' | null
-
-// Unified team management types
-export interface TeamCreateResult {
-  teamId: string | null
-  ticket: string
-}
-
-export interface TeamJoinResult {
-  success: boolean
-  role: 'owner' | 'manager' | 'editor' | 'viewer'
-  members: TeamMember[]
-}
-
-export type TeamJoinErrorType =
-  | 'InvalidTicket'
-  | 'DeviceNotRegistered'
-  | 'AlreadyInTeam'
-  | 'SyncError'
+export type TeamSyncMode = 'git' | 'webdav' | null

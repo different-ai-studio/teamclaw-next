@@ -42,7 +42,6 @@ interface UIState {
    * so the header trigger (App.tsx) and the sheet mount (ChatPanel) can
    * share state. */
   actorSheetOpen: boolean
-  spotlightMode: boolean
   settingsInitialSection: SettingsSection | null
   draftPreselectedActor: DraftActor | null
   sidebarFilter: SidebarFilter
@@ -66,7 +65,6 @@ interface UIState {
   toggleLayoutMode: () => void
   toggleMainContentLayout: () => void
   setFileModeRightTab: (tab: FileModeRightTab) => void
-  setSpotlightMode: (mode: boolean) => void
   advancedMode: boolean
   setAdvancedMode: (value: boolean, workspacePath: string | null) => Promise<void>
   loadAdvancedMode: (workspacePath: string) => Promise<void>
@@ -108,7 +106,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   defaultNavTab: 'session',
   defaultMoreOpen: false,
   actorSheetOpen: false,
-  spotlightMode: false,
   settingsInitialSection: null,
   draftPreselectedActor: null,
   sidebarFilter: { kind: 'all' },
@@ -290,7 +287,6 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   setFileModeRightTab: (tab) => set({ fileModeRightTab: tab }),
 
-  setSpotlightMode: (mode) => set({ spotlightMode: mode }),
 
   advancedMode: false,
 
@@ -340,23 +336,3 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
   },
 }))
-
-// Listen for Tauri spotlight-mode-changed event at module level
-if (typeof window !== 'undefined') {
-  const isTauriEnv = isTauri()
-  const tauriInternals = (window as unknown as {
-    __TAURI_INTERNALS__?: { transformCallback?: unknown }
-  }).__TAURI_INTERNALS__
-  const canListenForTauriEvents =
-    isTauriEnv && typeof tauriInternals?.transformCallback === 'function'
-
-  if (canListenForTauriEvents) {
-    void import('@tauri-apps/api/event').then(({ listen }) => {
-      return listen<boolean>('spotlight-mode-changed', (event) => {
-        useUIStore.setState({ spotlightMode: event.payload })
-      })
-    }).catch((error) => {
-      console.warn('[UI] Failed to listen for spotlight mode changes:', error)
-    })
-  }
-}

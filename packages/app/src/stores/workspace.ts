@@ -377,13 +377,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     // Reset team mode state — each workspace has its own team config
     try {
-      const { useP2pEngineStore } = await import("./p2p-engine");
       const { useTeamMembersStore } = await import("./team-members");
-      const { useTeamOssStore } = await import("./team-oss");
-      useP2pEngineStore.getState().reset();
       useTeamMembersStore.getState().reset();
-      // Reset OSS store first so loadTeamConfig reads clean state
-      useTeamOssStore.getState().cleanup();
       // Reset git repos store so it re-initializes for the new workspace
       try {
         const { useGitReposStore } = await import("./git-repos");
@@ -395,10 +390,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         teamModelConfig: null,
         _appliedConfigKey: null,
         myRole: null,
-        p2pConnected: false,
-        p2pConfigured: false,
         teamGitSyncing: false,
-        p2pFileSyncStatusMap: {},
       });
       // Load team config immediately so sidebar shows team tag on startup
       useTeamModeStore.getState().loadTeamConfig(expandedPath).catch(() => {});
@@ -500,23 +492,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     // Reset team mode state
     try {
-      const { useP2pEngineStore } = await import("./p2p-engine");
       const { useTeamMembersStore } = await import("./team-members");
       const { useTeamModeStore } = await import("./team-mode");
-      const { useTeamOssStore } = await import("./team-oss");
-      useP2pEngineStore.getState().reset();
       useTeamMembersStore.getState().reset();
-      useTeamOssStore.getState().cleanup();
       useTeamModeStore.setState({
         teamMode: false,
         teamModeType: null,
         teamModelConfig: null,
         _appliedConfigKey: null,
         myRole: null,
-        p2pConnected: false,
-        p2pConfigured: false,
         teamGitSyncing: false,
-        p2pFileSyncStatusMap: {},
       });
     } catch { /* ignore */ }
 

@@ -15,8 +15,6 @@ pub async fn sync_all(app: &AppHandle, workspace: &str) -> SyncAllResult {
     let status = check_team_status(workspace);
     match status.mode.as_deref() {
         Some("git") => sync_git(app, workspace).await,
-        Some("oss") | Some("webdav") => sync_oss(app).await,
-        Some("p2p") => sync_p2p(app).await,
         _ => SyncAllResult {
             mode: "none".to_string(),
             success: false,
@@ -55,119 +53,6 @@ async fn sync_git(app: &AppHandle, workspace: &str) -> SyncAllResult {
             message: e,
             changed_files: 0,
         },
-    }
-}
-
-async fn sync_oss(app: &AppHandle) -> SyncAllResult {
-    use crate::commands::oss_sync::OssSyncState;
-    use teamclaw_sync::oss_types::DocType;
-
-    let oss_state = app.state::<OssSyncState>();
-    // Hold the mutex for the entire sync operation to serialize with the background poll loop.
-    // OssSyncManager cannot be accessed without holding this lock.
-    let mut manager_guard = oss_state.manager.lock().await;
-
-    let manager = match manager_guard.as_mut() {
-        Some(m) => m,
-        None => {
-            return SyncAllResult {
-                mode: "oss".to_string(),
-                success: false,
-                message: "OSS sync not initialized. Please connect to a team first.".to_string(),
-                changed_files: 0,
-            }
-        }
-    };
-
-    if let Err(e) = manager.initial_sync().await {
-        return SyncAllResult {
-            mode: "oss".to_string(),
-            success: false,
-            message: format!("OSS pull failed: {e}"),
-            changed_files: 0,
-        };
-    }
-
-    // Secrets are intentionally excluded from MCP-triggered sync to prevent
-    // credential exposure through the AI agent tool interface.
-    let doc_types = [
-        DocType::Skills,
-        DocType::Mcp,
-        DocType::Knowledge,
-        DocType::Meta,
-    ];
-    let mut changed = 0u32;
-    let mut changed_names: Vec<String> = Vec::new();
-
-    for dt in doc_types {
-        match manager.upload_local_changes_incremental(dt).await {
-            Ok(true) => {
-                changed += 1;
-                changed_names.push(dt.path().to_string());
-            }
-            Ok(false) => {}
-            Err(e) => {
-                return SyncAllResult {
-                    mode: "oss".to_string(),
-                    success: false,
-                    message: format!("OSS push failed for {}: {e}", dt.path()),
-                    changed_files: changed,
-                };
-            }
-        }
-    }
-
-    let message = if changed == 0 {
-        "Synced via oss: no changes.".to_string()
-    } else {
-        format!(
-            "Synced via oss: {} doc type(s) changed ({}).",
-            changed,
-            changed_names.join(", ")
-        )
-    };
-
-    SyncAllResult {
-        mode: "oss".to_string(),
-        success: true,
-        message,
-        changed_files: changed,
-    }
-}
-
-#[cfg(feature = "p2p")]
-async fn sync_p2p(app: &AppHandle) -> SyncAllResult {
-    use crate::commands::p2p_state::SyncEngineState;
-
-    let engine_state = app.state::<SyncEngineState>();
-    let engine = engine_state.lock().await;
-    let snapshot = engine.snapshot();
-
-    let is_running = !matches!(snapshot.status, teamclaw_p2p::EngineStatus::Disconnected);
-
-    let message = format!(
-        "P2P sync {}: {} synced, {} pending, {} peer(s) connected.",
-        if is_running { "active" } else { "inactive" },
-        snapshot.synced_files,
-        snapshot.pending_files,
-        snapshot.peers.len(),
-    );
-
-    SyncAllResult {
-        mode: "p2p".to_string(),
-        success: is_running,
-        message,
-        changed_files: snapshot.synced_files,
-    }
-}
-
-#[cfg(not(feature = "p2p"))]
-async fn sync_p2p(_app: &AppHandle) -> SyncAllResult {
-    SyncAllResult {
-        mode: "p2p".to_string(),
-        success: false,
-        message: "P2P sync is not available on this platform.".to_string(),
-        changed_files: 0,
     }
 }
 

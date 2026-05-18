@@ -39,7 +39,6 @@
 
 use tauri::Manager;
 use tauri_plugin_aptabase::EventTracker;
-use tauri_plugin_global_shortcut::ShortcutState;
 
 mod commands;
 mod local_cache;
@@ -264,21 +263,6 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // NOTE: aptabase is registered in the setup() closure below so that
         // the Tokio runtime is available when its internal `tokio::spawn` runs.
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state != ShortcutState::Pressed {
-                        return;
-                    }
-
-                    let app_clone = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        let state = app_clone.state::<commands::spotlight::SpotlightState>();
-                        commands::spotlight::toggle_spotlight(app_clone.clone(), state);
-                    });
-                })
-                .build()
-        )
         .plugin({
             #[cfg(debug_assertions)]
             {
@@ -308,14 +292,8 @@ pub fn run() {
             commands::webview::init_shared_config(&mut wvm);
             wvm
         })
-        .manage(<commands::p2p_state::IrohState>::default())
-        .manage(<commands::p2p_state::SyncEngineState>::default())
-        .manage(commands::spotlight::SpotlightState::default())
-        .manage(commands::app_settings::SpotlightShortcutState::new(
-            commands::app_settings::read_spotlight_shortcut(),
-        ))
+        .manage(commands::window_chrome::MainWindowState::default())
         .manage(tokio::sync::Mutex::new(commands::team_webdav::WebDavManagedState::default()))
-        .manage(commands::oss_sync::OssSyncState::default())
         .manage(commands::version_commands::VersionStoreState::default())
         .manage(commands::shared_secrets::SharedSecretsState::default())
         .manage::<crate::mqtt::MqttBus>(std::sync::Arc::new(crate::mqtt::MqttBusInner::new()))
@@ -448,74 +426,8 @@ pub fn run() {
             commands::team::team_generate_gitignore,
             commands::team::team_sync_repo,
             commands::team::team_disconnect_repo,
-            commands::oss_commands::get_persistent_device_id,
+            commands::device_identity::get_persistent_device_id,
             commands::device_token::generate_device_token,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::get_device_node_id,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::get_device_info,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::get_device_hostname,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::team_add_member,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::team_remove_member,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::team_update_member_role,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_check_team_dir,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_create_team,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_publish_drive,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_join_drive,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_disconnect_source,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_leave_team,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_dissolve_team,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_reconnect,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_rotate_ticket,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_node_status,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_sync_status,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_get_files_sync_status,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::get_p2p_config,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::save_p2p_config,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_skills_leaderboard,
-            #[cfg(feature = "p2p")]
-            commands::team_p2p::p2p_save_seed_config,
-            commands::oss_commands::oss_create_team,
-            commands::oss_commands::oss_restore_sync,
-            commands::oss_commands::oss_leave_team,
-            commands::oss_commands::oss_sync_now,
-            commands::oss_commands::oss_reset_sync,
-            commands::oss_commands::oss_get_sync_status,
-            commands::oss_commands::oss_get_files_sync_status,
-            commands::oss_commands::oss_create_snapshot,
-            commands::oss_commands::oss_cleanup_updates,
-            commands::oss_commands::oss_delete_s3_key,
-            commands::oss_commands::oss_update_members,
-            commands::oss_commands::oss_reset_team_secret,
-            commands::oss_commands::oss_get_team_config,
-            commands::oss_commands::oss_update_service_config,
-            commands::oss_commands::oss_apply_team,
-            commands::oss_commands::oss_get_pending_application,
-            commands::oss_commands::oss_cancel_application,
-            commands::oss_commands::oss_approve_application,
-            commands::oss_commands::oss_mark_file_deleted,
-            commands::oss_commands::oss_list_remote_keys,
-            commands::oss_commands::oss_dump_crdt,
-            commands::oss_commands::oss_restore_deleted,
             commands::version_commands::team_list_file_versions,
             commands::version_commands::team_list_all_versioned_files,
             commands::version_commands::team_restore_file_version,
@@ -583,14 +495,7 @@ pub fn run() {
             commands::workspace_files::read_workspace_directory,
             commands::workspace_files::read_workspace_text_file,
             commands::workspace_files::read_workspace_binary_file,
-            commands::app_settings::get_spotlight_shortcut,
-            commands::app_settings::set_spotlight_shortcut,
-            commands::spotlight::toggle_spotlight,
-            commands::spotlight::set_spotlight_pin,
-            commands::spotlight::show_main_window,
-            commands::spotlight::force_toggle_spotlight,
-            commands::spotlight::get_spotlight_state,
-            commands::spotlight::expand_to_main,
+            commands::window_chrome::show_main_window,
             commands::team_webdav::webdav_connect,
             commands::team_webdav::webdav_sync,
             commands::team_webdav::webdav_disconnect,
@@ -611,18 +516,6 @@ pub fn run() {
             // for its internal `tokio::spawn` polling loop.
             app.handle().plugin(tauri_plugin_aptabase::Builder::new("A-US-9094113207").build())?;
 
-            let spotlight_shortcut = app
-                .handle()
-                .state::<commands::app_settings::SpotlightShortcutState>()
-                .current();
-            if let Err(err) =
-                commands::app_settings::register_spotlight_shortcut(app.handle(), &spotlight_shortcut)
-            {
-                sentry_utils::capture_err("[global-shortcut] Failed to register Spotlight shortcut", &err);
-                #[cfg(debug_assertions)]
-                eprintln!("[global-shortcut] Failed to register Spotlight shortcut: {err}");
-            }
-
             // Start RAG HTTP API server for MCP bridge
             let rag_state_handle = app.handle().state::<commands::knowledge::RagState>();
             let rag_state_for_http = std::sync::Arc::new(rag_state_handle.inner().clone());
@@ -642,34 +535,6 @@ pub fn run() {
                         eprintln!("[IntrospectAPI] Failed to start: {}", e);
                     }
                 });
-            }
-
-            // Initialize iroh P2P node only when P2P team is configured.
-            // The workspace path is not available at setup time; P2P init is
-            // triggered from the frontend after workspace selection.
-            #[cfg(feature = "p2p")]
-            {
-                let p2p_enabled = false;
-
-                if p2p_enabled {
-                    let iroh_state = app.handle().state::<commands::p2p_state::IrohState>().inner().clone();
-                    tauri::async_runtime::spawn(async move {
-                        match commands::team_p2p::IrohNode::new_default().await {
-                            Ok(node) => {
-                                *iroh_state.lock().await = Some(node);
-                                #[cfg(debug_assertions)]
-                                eprintln!("[P2P] iroh node started");
-                            }
-                            Err(e) => {
-                                sentry_utils::capture_err("[P2P] Failed to start iroh node", &e);
-                                eprintln!("[P2P] Failed to start iroh node (P2P disabled): {}", e);
-                            }
-                        }
-                    });
-                } else {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[P2P] Skipped: p2p not enabled in config");
-                }
             }
 
             // Team sync will be triggered from the frontend after workspace is set,
@@ -702,15 +567,15 @@ pub fn run() {
                     } = event
                     {
                         let app = tray.app_handle();
-                        let state = app.state::<commands::spotlight::SpotlightState>();
-                        commands::spotlight::toggle_spotlight_from_tray(app.clone(), state);
+                        let state = app.state::<commands::window_chrome::MainWindowState>();
+                        commands::window_chrome::show_main_window(app.clone(), state);
                     }
                 })
                 .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
                     match event.id().as_ref() {
                         "show_main" => {
-                            let state = app.state::<commands::spotlight::SpotlightState>();
-                            commands::spotlight::show_main_window(app.clone(), state);
+                            let state = app.state::<commands::window_chrome::MainWindowState>();
+                            commands::window_chrome::show_main_window(app.clone(), state);
                         }
                         "quit" => {
                             app.exit(0);
@@ -720,79 +585,10 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // --- Global Shortcut: Double-tap Ctrl for Spotlight ---
-            //
-            // NOTE: Disabled on macOS due to a crash in rdev's macOS keyboard
-            // integration (`TSMGetInputSourceProperty` must run on a specific
-            // dispatch queue; macOS 15+ asserts when called from our CGEvent tap
-            // thread). Until rdev is patched upstream, we only enable this
-            // listener on non-macOS platforms to avoid SIGTRAP crashes when
-            // pressing Ctrl.
-            #[cfg(not(target_os = "macos"))]
-            {
-                let app_handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    use std::sync::Mutex;
-                    use std::time::Instant;
-
-                    struct DoubleTapState {
-                        last_ctrl_release: Instant,
-                        ctrl_held: bool,
-                        other_key_during_ctrl: bool,
-                    }
-
-                    let state = Mutex::new(DoubleTapState {
-                        last_ctrl_release: Instant::now() - std::time::Duration::from_secs(10),
-                        ctrl_held: false,
-                        other_key_during_ctrl: false,
-                    });
-
-                    let _ = rdev::listen(move |event| {
-                        let is_ctrl = matches!(
-                            event.event_type,
-                            rdev::EventType::KeyPress(rdev::Key::ControlLeft | rdev::Key::ControlRight)
-                                | rdev::EventType::KeyRelease(rdev::Key::ControlLeft | rdev::Key::ControlRight)
-                        );
-
-                        let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-
-                        match event.event_type {
-                            rdev::EventType::KeyPress(rdev::Key::ControlLeft | rdev::Key::ControlRight) => {
-                                s.ctrl_held = true;
-                                s.other_key_during_ctrl = false;
-                            }
-                            rdev::EventType::KeyRelease(rdev::Key::ControlLeft | rdev::Key::ControlRight) => {
-                                let now = Instant::now();
-                                if !s.other_key_during_ctrl {
-                                    let elapsed = now.duration_since(s.last_ctrl_release);
-                                    if elapsed < std::time::Duration::from_millis(400) {
-                                        // Double-tap detected — reset to prevent triple-tap trigger
-                                        s.last_ctrl_release = now - std::time::Duration::from_secs(10);
-                                        let app = app_handle.clone();
-                                        let app_inner = app.clone();
-                                        let _ = app.run_on_main_thread(move || {
-                                            let st = app_inner.state::<commands::spotlight::SpotlightState>();
-                                            commands::spotlight::toggle_spotlight(app_inner.clone(), st);
-                                        });
-                                    } else {
-                                        s.last_ctrl_release = now;
-                                    }
-                                }
-                                s.ctrl_held = false;
-                            }
-                            _ if s.ctrl_held && !is_ctrl => {
-                                s.other_key_during_ctrl = true;
-                            }
-                            _ => {}
-                        }
-                    });
-                });
-            }
-
             // --- Reposition macOS traffic lights on startup ---
             #[cfg(target_os = "macos")]
             if let Some(main_win) = app.get_webview_window("main") {
-                commands::spotlight::reposition_traffic_lights(&main_win);
+                commands::window_chrome::reposition_traffic_lights(&main_win);
             }
 
             // --- Window event handlers ---
@@ -803,14 +599,8 @@ pub fn run() {
                     match event {
                         tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
-                            // Save main geometry if in Main mode before hiding
-                            let state = close_app_handle.state::<commands::spotlight::SpotlightState>();
-                            {
-                                let mode = state.mode.lock().unwrap_or_else(|e| e.into_inner());
-                                if *mode == commands::spotlight::WindowMode::Main {
-                                    commands::spotlight::save_main_geometry(&main_win_clone, &state);
-                                }
-                            }
+                            let state = close_app_handle.state::<commands::window_chrome::MainWindowState>();
+                            commands::window_chrome::save_main_geometry(&main_win_clone, &state);
                             let is_fullscreen = main_win_clone.is_fullscreen().unwrap_or(false);
                             if is_fullscreen {
                                 // macOS doesn't allow hide() on fullscreen windows.
@@ -848,11 +638,7 @@ pub fn run() {
                         // because macOS resets button positions during resize/animations.
                         #[cfg(target_os = "macos")]
                         tauri::WindowEvent::Resized { .. } => {
-                            let state = close_app_handle.state::<commands::spotlight::SpotlightState>();
-                            let mode = *state.mode.lock().unwrap_or_else(|e| e.into_inner());
-                            if mode == commands::spotlight::WindowMode::Main {
-                                commands::spotlight::reposition_traffic_lights(&main_win_clone);
-                            }
+                            commands::window_chrome::reposition_traffic_lights(&main_win_clone);
                         }
                         // DAU heartbeat: fires `app_active` once the app
                         // returns to focus after >=4h idle.
@@ -878,43 +664,18 @@ pub fn run() {
                             let app = app_handle.clone();
                             async move {
                                 let cmd = body["command"].as_str().unwrap_or("");
-                                // All spotlight commands touch AppKit/Cocoa window APIs
+                                // Window-mutating commands touch AppKit/Cocoa window APIs
                                 // and MUST run on the main thread (macOS requirement).
                                 // The test control server runs on a tokio thread, so we
                                 // dispatch all window-mutating commands via run_on_main_thread.
                                 match cmd {
-                                    "force_toggle_spotlight" => {
-                                        let app_main = app.clone();
-                                        let _ = app.run_on_main_thread(move || {
-                                            let state = app_main.state::<commands::spotlight::SpotlightState>();
-                                            commands::spotlight::force_toggle_spotlight(app_main.clone(), state);
-                                        });
-                                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                                        Json(serde_json::json!({"ok": true}))
-                                    }
-                                    "get_spotlight_state" => {
-                                        // Read-only: no AppKit calls, safe from any thread
-                                        let state = app.state::<commands::spotlight::SpotlightState>();
-                                        let result = commands::spotlight::get_spotlight_state(app.clone(), state);
-                                        Json(result)
-                                    }
                                     "show_main_window" => {
                                         let app_main = app.clone();
                                         let _ = app.run_on_main_thread(move || {
-                                            let state = app_main.state::<commands::spotlight::SpotlightState>();
-                                            commands::spotlight::show_main_window(app_main.clone(), state);
+                                            let state = app_main.state::<commands::window_chrome::MainWindowState>();
+                                            commands::window_chrome::show_main_window(app_main.clone(), state);
                                         });
                                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                                        Json(serde_json::json!({"ok": true}))
-                                    }
-                                    "expand_to_main" => {
-                                        let app_main = app.clone();
-                                        let _ = app.run_on_main_thread(move || {
-                                            let state = app_main.state::<commands::spotlight::SpotlightState>();
-                                            let _ = commands::spotlight::expand_to_main(app_main.clone(), state);
-                                        });
-                                        // Wait for the animation (~300ms) to complete on the main thread
-                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                                         Json(serde_json::json!({"ok": true}))
                                     }
                                     "toggle_fullscreen" => {
@@ -938,16 +699,6 @@ pub fn run() {
                                             }
                                         });
                                         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-                                        Json(serde_json::json!({"ok": true}))
-                                    }
-                                    "set_spotlight_pin" => {
-                                        let pinned = body["args"]["pinned"].as_bool().unwrap_or(false);
-                                        let app_main = app.clone();
-                                        let _ = app.run_on_main_thread(move || {
-                                            let state = app_main.state::<commands::spotlight::SpotlightState>();
-                                            commands::spotlight::set_spotlight_pin(app_main.clone(), state, pinned);
-                                        });
-                                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                         Json(serde_json::json!({"ok": true}))
                                     }
                                     "is_visible" => {
@@ -995,8 +746,8 @@ pub fn run() {
                     // Tauri's `has_visible_windows` can report `true` even when
                     // the window was hidden via `win.hide()`, so we ignore it and
                     // unconditionally bring the window back.
-                    let state = app.state::<commands::spotlight::SpotlightState>();
-                    commands::spotlight::show_main_window(app.clone(), state);
+                    let state = app.state::<commands::window_chrome::MainWindowState>();
+                    commands::window_chrome::show_main_window(app.clone(), state);
                     maybe_emit_app_active(app);
                 }
                 tauri::RunEvent::Resumed => {

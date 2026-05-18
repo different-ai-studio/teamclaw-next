@@ -4,6 +4,7 @@ import {
   ChevronRight,
   ChevronDown,
   GripVertical,
+  AlertCircle,
   Plus,
   Trash2,
   Edit2,
@@ -297,6 +298,20 @@ function EditDialog({ open, onOpenChange, node, onSave }: EditDialogProps) {
 
 // ── Main section ────────────────────────────────────────────────────
 
+function shortcutErrorMessage(
+  err: unknown,
+  t: (key: string, fallback: string) => string,
+): string {
+  const message = err instanceof Error ? err.message : String(err || "")
+  if (message.includes("public.shortcut_create") && message.includes("schema cache")) {
+    return t(
+      "settings.shortcuts.rpcMissing",
+      "Shortcut database functions are missing. Apply the latest Supabase migrations, then refresh the app.",
+    )
+  }
+  return message || t("settings.shortcuts.operationFailed", "Shortcut operation failed")
+}
+
 export function ShortcutsSection() {
   const { t } = useTranslation()
   const personalNodes = useShortcutsStore((s) => s.personalNodes)
@@ -309,6 +324,7 @@ export function ShortcutsSection() {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingNode, setEditingNode] = useState<ShortcutNode | null>(null)
   const [addingParentId, setAddingParentId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
     const folderIds = new Set<string>()
     for (const n of personalNodes) {
@@ -479,6 +495,7 @@ export function ShortcutsSection() {
   }
 
   const handleAdd = () => {
+    setError(null)
     setEditingNode(null)
     setAddingParentId(null)
     setEditDialogOpen(true)
@@ -486,9 +503,11 @@ export function ShortcutsSection() {
 
   const handleDelete = (id: string) => {
     if (confirm(t("settings.shortcuts.confirmDelete", "Are you sure you want to delete this shortcut?"))) {
-      deleteNode(id).catch((err) =>
-        console.warn("[shortcuts] deleteNode failed:", err),
-      )
+      setError(null)
+      deleteNode(id).catch((err) => {
+        console.warn("[shortcuts] deleteNode failed:", err)
+        setError(shortcutErrorMessage(err, t))
+      })
     }
   }
 
@@ -502,6 +521,7 @@ export function ShortcutsSection() {
   }, [])
 
   const handleSave = (data: Partial<ShortcutNode>) => {
+    setError(null)
     if (editingNode) {
       // `type` is fixed at create time; the edit dialog disables the Select
       // in edit mode so `data.type` always equals editingNode.type here.
@@ -513,9 +533,10 @@ export function ShortcutsSection() {
       if (data.target !== undefined) patch.target = data.target
       if (data.order !== undefined) patch.order = data.order
       if (data.parentId !== undefined) patch.parentId = data.parentId
-      updateNode(editingNode.id, patch).catch((err) =>
-        console.warn("[shortcuts] updateNode failed:", err),
-      )
+      updateNode(editingNode.id, patch).catch((err) => {
+        console.warn("[shortcuts] updateNode failed:", err)
+        setError(shortcutErrorMessage(err, t))
+      })
     } else {
       const maxOrder = getChildren(addingParentId).reduce(
         (max, n) => Math.max(max, n.order),
@@ -528,7 +549,10 @@ export function ShortcutsSection() {
         parentId: addingParentId,
         icon: null,
         order: maxOrder + 1,
-      }).catch((err) => console.warn("[shortcuts] addNode failed:", err))
+      }).catch((err) => {
+        console.warn("[shortcuts] addNode failed:", err)
+        setError(shortcutErrorMessage(err, t))
+      })
     }
   }
 
@@ -552,6 +576,16 @@ export function ShortcutsSection() {
           {t("settings.shortcuts.addShortcut", "Add Shortcut")}
         </Button>
       </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-border bg-paper px-3 py-2 text-[12.5px] text-foreground"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <span>{error}</span>
+        </div>
+      )}
 
       <div className="border rounded-lg">
         {tree.length === 0 ? (
