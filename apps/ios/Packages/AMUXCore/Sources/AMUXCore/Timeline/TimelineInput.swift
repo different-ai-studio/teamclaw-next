@@ -24,7 +24,7 @@ import Foundation
 //
 // 1. ACP events — daemon-side stream (streaming text deltas, complete
 //    output, thinking, tool_use/tool_result, permission_request,
-//    todo_update, status_change, raw tool_title_update, error,
+//    plan_update, status_change, raw tool_title_update, error,
 //    available_commands). Carried by `Amux_AcpEvent`.
 // 2. Live chat messages — cross-actor `Teamclaw_Message` (kind=text)
 //    arriving over `session/{id}/live`.
@@ -275,8 +275,8 @@ public struct PermissionResolutionInput: Sendable {
 //      `isComplete` on it. If no prior `tool_use` exists, append a new
 //      tool_result entry (out-of-order arrival).
 //
-//   3. Todo update: `acp` with `todoUpdate` replaces the single
-//      `todo_update` entry's text. If none exists, append.
+//   3. Plan update: `acp` with `planUpdate` replaces the single
+//      `plan_update` entry's text. If none exists, append.
 //
 //   4. Permission resolve: `.permissionResolution(requestID)` finds the
 //      prior `permissionRequest(requestID)` entry and marks it

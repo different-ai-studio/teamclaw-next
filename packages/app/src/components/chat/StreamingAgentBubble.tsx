@@ -1,35 +1,43 @@
-import { AlertCircle, CheckCircle2, Circle, Clock3 } from "lucide-react";
-import type { AgentStreamEntry, StreamingTodoItem } from "@/stores/v2-streaming-store";
+import { AlertCircle, CheckCircle2, Circle, Clock3, ListTodo } from "lucide-react";
+import type { AgentStreamEntry, StreamingPlanEntry } from "@/stores/v2-streaming-store";
 import { cn } from "@/lib/utils";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
 
-function TodoStatusIcon({ status }: { status: StreamingTodoItem["status"] }) {
+function PlanStatusIcon({ status }: { status: StreamingPlanEntry["status"] }) {
   const cls = "h-3.5 w-3.5 shrink-0";
   if (status === "completed") return <CheckCircle2 className={cn(cls, "text-emerald-500")} />;
   if (status === "in_progress") return <Clock3 className={cn(cls, "text-blue-500")} />;
   return <Circle className={cn(cls, "text-muted-foreground")} />;
 }
 
-function InlineTodos({ todos }: { todos: StreamingTodoItem[] }) {
-  if (todos.length === 0) return null;
+function InlinePlan({ entries }: { entries: StreamingPlanEntry[] }) {
+  if (entries.length === 0) return null;
+  const completedCount = entries.filter((e) => e.status === "completed").length;
   return (
-    <div className="my-1.5 rounded-md border border-border/50 bg-muted/20 p-2.5">
-      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 mb-1.5">
-        Todos
+    <div className="my-1.5 rounded-xl border border-border/70 bg-card/70 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 border-b border-border/50 pb-1.5 text-xs text-muted-foreground">
+        <ListTodo className="h-3.5 w-3.5 shrink-0" />
+        <span>{completedCount}/{entries.length} done</span>
       </div>
-      <ul className="space-y-1">
-        {todos.map((t, i) => (
-          <li key={i} className="flex items-start gap-2 text-xs">
-            <TodoStatusIcon status={t.status} />
-            <span className={cn(
-              "min-w-0 flex-1",
-              t.status === "completed" && "line-through text-muted-foreground",
-            )}>{t.content}</span>
-          </li>
+      <div className="space-y-1">
+        {entries.map((e, i) => (
+          <div
+            key={i}
+            className={cn("grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2.5", e.status === "completed" && "opacity-65")}
+          >
+            <div><PlanStatusIcon status={e.status} /></div>
+            <div className={cn(
+              "text-[13px] leading-6 text-foreground",
+              e.status === "completed" && "text-muted-foreground line-through",
+            )}>
+              <span className="mr-1.5 text-muted-foreground">{i + 1}.</span>
+              {e.content}
+            </div>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
@@ -56,10 +64,10 @@ function ErrorCard({ message, details }: { message: string; details: string }) {
 export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   const hasOutput = entry.outputText.length > 0;
   const hasToolCalls = entry.toolCalls.length > 0;
-  const hasTodos = entry.todos.length > 0;
+  const hasPlan = entry.planEntries.length > 0;
   const hasError = !!entry.errorMessage;
 
-  if (!hasOutput && !hasToolCalls && !hasTodos && !hasError) {
+  if (!hasOutput && !hasToolCalls && !hasPlan && !hasError) {
     return null;
   }
 
@@ -74,6 +82,8 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
+          {hasPlan && <InlinePlan entries={entry.planEntries} />}
+
           {hasToolCalls && (
             <div className="space-y-1">
               {entry.toolCalls.map((tc) => (
@@ -88,8 +98,6 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
               ))}
             </div>
           )}
-
-          {hasTodos && <InlineTodos todos={entry.todos} />}
 
           {hasOutput && (
             <MessageContent>

@@ -91,7 +91,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
           entry.outputText.length +
           entry.thinkingText.length +
           entry.toolCalls.length +
-          entry.todos.length;
+          entry.planEntries.length;
       }
       return total;
     });

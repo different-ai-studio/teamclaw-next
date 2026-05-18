@@ -14,7 +14,7 @@ public enum GroupedEvent: Identifiable {
 
 /// Groups completed tool_use events into tool runs, skipping over
 /// thinking and tool_result events that naturally occur between tools.
-/// A tool run breaks at user_prompt, output, error, permission_request, or todo_update.
+/// A tool run breaks at user_prompt, output, error, permission_request, or plan_update.
 /// Running/incomplete tools also break the run.
 public func groupEvents(_ events: [AgentEvent]) -> [GroupedEvent] {
     let skippableTypes: Set<String> = ["thinking", "tool_result"]

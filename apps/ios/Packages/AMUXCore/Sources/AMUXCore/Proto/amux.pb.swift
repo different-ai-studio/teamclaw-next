@@ -357,20 +357,21 @@ public struct Amux_AcpEvent: Sendable {
     set {event = .statusChange(newValue)}
   }
 
-  public var todoUpdate: Amux_AcpTodoUpdate {
-    get {
-      if case .todoUpdate(let v)? = event {return v}
-      return Amux_AcpTodoUpdate()
-    }
-    set {event = .todoUpdate(newValue)}
-  }
-
   public var availableCommands: Amux_AcpAvailableCommands {
     get {
       if case .availableCommands(let v)? = event {return v}
       return Amux_AcpAvailableCommands()
     }
     set {event = .availableCommands(newValue)}
+  }
+
+  /// ACP Plan notification
+  public var planUpdate: Amux_AcpPlanUpdate {
+    get {
+      if case .planUpdate(let v)? = event {return v}
+      return Amux_AcpPlanUpdate()
+    }
+    set {event = .planUpdate(newValue)}
   }
 
   /// Catch-all for new ACP events not yet mapped
@@ -398,8 +399,9 @@ public struct Amux_AcpEvent: Sendable {
     case error(Amux_AcpError)
     case permissionRequest(Amux_AcpPermissionRequest)
     case statusChange(Amux_AcpStatusChange)
-    case todoUpdate(Amux_AcpTodoUpdate)
     case availableCommands(Amux_AcpAvailableCommands)
+    /// ACP Plan notification
+    case planUpdate(Amux_AcpPlanUpdate)
     /// Catch-all for new ACP events not yet mapped
     case raw(Amux_AcpRawJson)
 
@@ -521,18 +523,6 @@ public struct Amux_AcpStatusChange: Sendable {
   public init() {}
 }
 
-public struct Amux_AcpTodoUpdate: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var items: [Amux_TodoItem] = []
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
 public struct Amux_AcpAvailableCommand: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -574,6 +564,37 @@ public struct Amux_AcpRawJson: Sendable {
 
   /// Raw JSON for forward compat
   public var jsonPayload: Data = Data()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// ACP Plan notification — full replacement on every update (ACP spec).
+/// priority: "high" | "medium" | "low"
+/// status:   "pending" | "in_progress" | "completed"
+public struct Amux_AcpPlanUpdate: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var entries: [Amux_AcpPlanEntry] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Amux_AcpPlanEntry: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var content: String = String()
+
+  public var priority: String = String()
+
+  public var status: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1134,58 +1155,6 @@ public struct Amux_AgentList: Sendable {
   public init() {}
 }
 
-public struct Amux_TodoItem: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var content: String = String()
-
-  public var status: Amux_TodoItem.Status = .pending
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public enum Status: SwiftProtobuf.Enum, Swift.CaseIterable {
-    public typealias RawValue = Int
-    case pending // = 0
-    case inProgress // = 1
-    case completed // = 2
-    case UNRECOGNIZED(Int)
-
-    public init() {
-      self = .pending
-    }
-
-    public init?(rawValue: Int) {
-      switch rawValue {
-      case 0: self = .pending
-      case 1: self = .inProgress
-      case 2: self = .completed
-      default: self = .UNRECOGNIZED(rawValue)
-      }
-    }
-
-    public var rawValue: Int {
-      switch self {
-      case .pending: return 0
-      case .inProgress: return 1
-      case .completed: return 2
-      case .UNRECOGNIZED(let i): return i
-      }
-    }
-
-    // The compiler won't synthesize support with the UNRECOGNIZED case.
-    public static let allCases: [Amux_TodoItem.Status] = [
-      .pending,
-      .inProgress,
-      .completed,
-    ]
-
-  }
-
-  public init() {}
-}
-
 public struct Amux_MemberInfo: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1435,7 +1404,7 @@ extension Amux_RuntimeCommandEnvelope: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 extension Amux_AcpEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AcpEvent"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}thinking\0\u{1}output\0\u{3}tool_use\0\u{3}tool_result\0\u{1}error\0\u{3}permission_request\0\u{3}status_change\0\u{3}todo_update\0\u{3}available_commands\0\u{2}\u{6}raw\0\u{1}model\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}thinking\0\u{1}output\0\u{3}tool_use\0\u{3}tool_result\0\u{1}error\0\u{3}permission_request\0\u{3}status_change\0\u{4}\u{2}available_commands\0\u{3}plan_update\0\u{2}\u{5}raw\0\u{1}model\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1534,19 +1503,6 @@ extension Amux_AcpEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
           self.event = .statusChange(v)
         }
       }()
-      case 8: try {
-        var v: Amux_AcpTodoUpdate?
-        var hadOneofValue = false
-        if let current = self.event {
-          hadOneofValue = true
-          if case .todoUpdate(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.event = .todoUpdate(v)
-        }
-      }()
       case 9: try {
         var v: Amux_AcpAvailableCommands?
         var hadOneofValue = false
@@ -1558,6 +1514,19 @@ extension Amux_AcpEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
           self.event = .availableCommands(v)
+        }
+      }()
+      case 10: try {
+        var v: Amux_AcpPlanUpdate?
+        var hadOneofValue = false
+        if let current = self.event {
+          hadOneofValue = true
+          if case .planUpdate(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.event = .planUpdate(v)
         }
       }()
       case 15: try {
@@ -1613,13 +1582,13 @@ extension Amux_AcpEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       guard case .statusChange(let v)? = self.event else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     }()
-    case .todoUpdate?: try {
-      guard case .todoUpdate(let v)? = self.event else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
     case .availableCommands?: try {
       guard case .availableCommands(let v)? = self.event else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .planUpdate?: try {
+      guard case .planUpdate(let v)? = self.event else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case .raw?: try {
       guard case .raw(let v)? = self.event else { preconditionFailure() }
@@ -1911,36 +1880,6 @@ extension Amux_AcpStatusChange: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension Amux_AcpTodoUpdate: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".AcpTodoUpdate"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}items\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.items.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 1)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Amux_AcpTodoUpdate, rhs: Amux_AcpTodoUpdate) -> Bool {
-    if lhs.items != rhs.items {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 extension Amux_AcpAvailableCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AcpAvailableCommand"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}description\0\u{3}input_hint\0")
@@ -2041,6 +1980,76 @@ extension Amux_AcpRawJson: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   public static func ==(lhs: Amux_AcpRawJson, rhs: Amux_AcpRawJson) -> Bool {
     if lhs.method != rhs.method {return false}
     if lhs.jsonPayload != rhs.jsonPayload {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Amux_AcpPlanUpdate: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AcpPlanUpdate"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}entries\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.entries) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.entries.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.entries, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Amux_AcpPlanUpdate, rhs: Amux_AcpPlanUpdate) -> Bool {
+    if lhs.entries != rhs.entries {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Amux_AcpPlanEntry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AcpPlanEntry"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}content\0\u{1}priority\0\u{1}status\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.content) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.priority) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.status) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.content.isEmpty {
+      try visitor.visitSingularStringField(value: self.content, fieldNumber: 1)
+    }
+    if !self.priority.isEmpty {
+      try visitor.visitSingularStringField(value: self.priority, fieldNumber: 2)
+    }
+    if !self.status.isEmpty {
+      try visitor.visitSingularStringField(value: self.status, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Amux_AcpPlanEntry, rhs: Amux_AcpPlanEntry) -> Bool {
+    if lhs.content != rhs.content {return false}
+    if lhs.priority != rhs.priority {return false}
+    if lhs.status != rhs.status {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -3166,45 +3175,6 @@ extension Amux_AgentList: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
-}
-
-extension Amux_TodoItem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".TodoItem"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}content\0\u{1}status\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.content) }()
-      case 2: try { try decoder.decodeSingularEnumField(value: &self.status) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.content.isEmpty {
-      try visitor.visitSingularStringField(value: self.content, fieldNumber: 1)
-    }
-    if self.status != .pending {
-      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Amux_TodoItem, rhs: Amux_TodoItem) -> Bool {
-    if lhs.content != rhs.content {return false}
-    if lhs.status != rhs.status {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-extension Amux_TodoItem.Status: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PENDING\0\u{1}IN_PROGRESS\0\u{1}COMPLETED\0")
 }
 
 extension Amux_MemberInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

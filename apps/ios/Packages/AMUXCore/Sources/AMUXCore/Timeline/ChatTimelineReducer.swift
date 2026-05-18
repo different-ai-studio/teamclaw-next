@@ -148,19 +148,19 @@ public enum ChatTimelineReducer {
                 timestamp: input.timestamp
             ))
 
-        case .todoUpdate(let tu):
-            let text = tu.items.map { item -> String in
-                let icon = item.status == .completed ? "done"
-                         : item.status == .inProgress ? "wip"
+        case .planUpdate(let pu):
+            let text = pu.entries.map { entry -> String in
+                let icon = entry.status == "completed" ? "done"
+                         : entry.status == "in_progress" ? "wip"
                          : "todo"
-                return "[\(icon)] \(item.content)"
+                return "[\(icon)] \(entry.content)"
             }.joined(separator: "\n")
-            if let idx = state.entries.lastIndex(where: { $0.eventType == "todo_update" }) {
+            if let idx = state.entries.lastIndex(where: { $0.eventType == "plan_update" }) {
                 state.entries[idx].text = text
             } else {
                 state.entries.append(makeEntry(
                     sequence: input.envelopeSequence,
-                    eventType: "todo_update",
+                    eventType: "plan_update",
                     text: text,
                     senderActorID: bucket,
                     timestamp: input.timestamp

@@ -24,6 +24,7 @@ import { RoleLoadToolCard } from "./tool-calls/RoleLoadToolCard";
 import { RoleSkillToolCard, SkillToolCard, TaskToolCard } from "./tool-calls/TaskToolCard";
 import {
   getStatusConfig,
+  getToolIconByKind,
   isQuestionTool,
   isWriteTool,
   isEditTool,
@@ -377,14 +378,18 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
           <CollapsibleTrigger asChild>
             <button className="group w-full flex items-center gap-[10px] px-[12px] py-[10px] text-left transition-colors hover:bg-[#f4f7fa] dark:hover:bg-muted/30">
               {renderExpandableHeaderSlot(
-                <span
-                  className="relative h-[22px] w-[22px] shrink-0 rounded-[8px] border border-[#e2e8f0] bg-[#f8fafc] dark:border-border dark:bg-muted/20"
-                  aria-hidden="true"
-                >
-                  <span className="absolute left-[4px] top-[5px] h-[5px] w-[5px] rounded-full bg-[#475569] dark:bg-slate-300" />
-                  <span className="absolute left-[12px] top-[5px] h-[4px] w-[4px] rounded-full bg-[#94a3b8] dark:bg-slate-500" />
-                  <span className="absolute left-[8px] top-[12px] h-[6px] w-[6px] rounded-full bg-[#cbd5e1] dark:bg-slate-600" />
-                </span>,
+                (() => {
+                  const KindIcon = getToolIconByKind(toolCall.toolKind);
+                  return (
+                    <span
+                      data-testid="tool-fallback-icon"
+                      className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[8px] border border-[#e2e8f0] bg-[#f8fafc] dark:border-border dark:bg-muted/20"
+                      aria-hidden="true"
+                    >
+                      <KindIcon size={12} className="text-[#475569] dark:text-slate-400" />
+                    </span>
+                  );
+                })(),
                 "tool-fallback-icon",
               )}
               <span className="min-w-0 flex-1 text-[13px] font-medium text-[#1f2933] dark:text-foreground">
