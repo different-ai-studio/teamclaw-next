@@ -9,7 +9,8 @@ import {
 import { mqttPublish } from "@/lib/mqtt-bridge";
 import { supabase } from "@/lib/supabase-client";
 import { useAuthStore } from "@/stores/auth-store";
-import { useSessionStore } from "@/stores/session-store";
+import { useSessionMessageStore } from "@/stores/session-message-store";
+import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useSessionListStore } from "@/stores/session-list-store";
 
 export function ActorChatInput() {
@@ -17,7 +18,7 @@ export function ActorChatInput() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sid = useSessionStore((s) => s.currentSessionId);
+  const sid = useSessionSelectionStore((s) => s.currentSessionId);
   const session = useAuthStore((s) => s.session);
   const sessionRow = useSessionListStore((s) => s.rows.find((r) => r.id === sid));
 
@@ -82,7 +83,7 @@ export function ActorChatInput() {
 
       // Optimistic local append — broker doesn't echo back to publisher and
       // single-window scope means we won't get a remote echo either.
-      useSessionStore.getState().appendMessage(sid, message);
+      useSessionMessageStore.getState().appendMessage(sid, message);
 
       setText("");
     } catch (e) {

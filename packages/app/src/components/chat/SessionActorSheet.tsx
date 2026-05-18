@@ -18,6 +18,7 @@ import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncParticipantsForSession } from '@/lib/sync/session-participant-sync'
 import { cn } from '@/lib/utils'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
+import { useSessionParticipantStore } from '@/stores/session-participant-store'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ type Row = {
   agent_kind: string | null
   last_active_at: string | null
 }
+
+type CandidateAgent = { id: string; display_name: string }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -76,6 +79,70 @@ function computeDotStateAndAnimation(
     default:
       return { color: 'bg-muted-foreground/40', breathing: false }
   }
+}
+
+function mapCachedActor(a: {
+  id: string
+  actorType: string
+  displayName: string
+  memberStatus?: string | null
+  agentStatus?: string | null
+}): Row {
+  return {
+    id: a.id,
+    actor_type: (a.actorType as 'member' | 'agent'),
+    display_name: a.displayName,
+    member_status: a.memberStatus ?? null,
+    agent_status: a.agentStatus ?? null,
+    agent_kind: null,
+    last_active_at: null,
+  }
+}
+
+async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: string[]; rows: Row[] }> {
+  const { data: parts, error: partsError } = await supabase
+    .from('session_participants')
+    .select('actor_id')
+    .eq('session_id', sessionId)
+  if (partsError) throw partsError
+
+  const ids = ((parts ?? []) as Array<{ actor_id: string }>).map((p) => p.actor_id).filter(Boolean)
+  if (ids.length === 0) return { ids, rows: [] }
+
+  const { data: actors, error: actorsError } = await supabase
+    .from('actor_directory')
+    .select('id, actor_type, display_name, member_status, agent_status')
+    .in('id', ids)
+  if (actorsError) throw actorsError
+
+  const byId = new Map(((actors ?? []) as Row[]).map((a) => [a.id, a] as const))
+  return {
+    ids,
+    rows: ids
+      .map((id) => byId.get(id))
+      .filter((a): a is Row => !!a)
+      .map((a) => ({
+        id: a.id,
+        actor_type: a.actor_type,
+        display_name: a.display_name,
+        member_status: a.member_status ?? null,
+        agent_status: a.agent_status ?? null,
+        agent_kind: a.agent_kind ?? null,
+        last_active_at: a.last_active_at ?? null,
+      })),
+  }
+}
+
+async function fetchCandidateAgentsFromSupabase(teamId: string, presentIds: Set<string>): Promise<CandidateAgent[]> {
+  const { data, error } = await supabase
+    .from('actors')
+    .select('id, display_name, actor_type')
+    .eq('team_id', teamId)
+    .eq('actor_type', 'agent')
+  if (error) throw error
+  return ((data ?? []) as Array<{ id: string; display_name: string; actor_type: string }>)
+    .filter((a) => a.actor_type === 'agent' && !presentIds.has(a.id))
+    .map((a) => ({ id: a.id, display_name: a.display_name }))
 }
 
 // ── ActorRowView ───────────────────────────────────────────────────────────
@@ -160,7 +227,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
   const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
   const [myActorId, setMyActorId] = React.useState<string | null>(null)
   const [pendingRemove, setPendingRemove] = React.useState<Row | null>(null)
-  const [candidateAgents, setCandidateAgents] = React.useState<Array<{ id: string; display_name: string }>>([])
+  const [candidateAgents, setCandidateAgents] = React.useState<CandidateAgent[]>([])
   const [addingAgent, setAddingAgent] = React.useState(false)
 
   const runtimeStates = useRuntimeStateStore(s => s.byRuntimeId)
@@ -211,7 +278,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
     function applySnapshot(
       actorIds: string[],
       actorRows: Row[],
-      candidates: Array<{ id: string; display_name: string }>,
+      candidates: CandidateAgent[],
     ) {
       setRows(actorRows)
       setCandidateAgents(candidates)
@@ -240,24 +307,31 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         for (const a of extra) cachedById.set(a.id, a)
       }
 
-      const cachedRows: Row[] = cachedActorIds
+      let cachedRows: Row[] = cachedActorIds
         .map(id => cachedById.get(id))
         .filter((a): a is NonNullable<typeof a> => !!a)
-        .map(a => ({
-          id: a.id,
-          actor_type: (a.actorType as 'member' | 'agent'),
-          display_name: a.displayName,
-          member_status: a.memberStatus ?? null,
-          agent_status: a.agentStatus ?? null,
-          agent_kind: null,
-          last_active_at: null,
-        }))
+        .map(mapCachedActor)
 
-      const cachedCandidates = cachedTeamActors
+      let cachedCandidates = cachedTeamActors
         .filter(a => a.actorType === 'agent' && !cachedPresentSet.has(a.id))
         .map(a => ({ id: a.id, display_name: a.displayName }))
 
-      applySnapshot(cachedActorIds, cachedRows, cachedCandidates)
+      let effectiveActorIds = cachedActorIds
+      if (cachedRows.length === 0) {
+        const live = await fetchParticipantsFromSupabase(sessionId)
+        if (cancelled) return
+        cachedRows = live.rows
+        effectiveActorIds = live.ids
+      }
+      if (teamId && cachedCandidates.length === 0) {
+        cachedCandidates = await fetchCandidateAgentsFromSupabase(
+          teamId,
+          new Set(effectiveActorIds),
+        )
+        if (cancelled) return
+      }
+
+      applySnapshot(effectiveActorIds, cachedRows, cachedCandidates)
       setLoading(false)
 
       // ────────────────────────────────────────────────────────────────
@@ -286,24 +360,31 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           for (const a of extra) freshById.set(a.id, a)
         }
 
-        const freshRows: Row[] = freshIds
+        let freshRows: Row[] = freshIds
           .map(id => freshById.get(id))
           .filter((a): a is NonNullable<typeof a> => !!a)
-          .map(a => ({
-            id: a.id,
-            actor_type: (a.actorType as 'member' | 'agent'),
-            display_name: a.displayName,
-            member_status: a.memberStatus ?? null,
-            agent_status: a.agentStatus ?? null,
-            agent_kind: null,
-            last_active_at: null,
-          }))
+          .map(mapCachedActor)
 
-        const freshCandidates = freshTeamActors
+        let freshCandidates = freshTeamActors
           .filter(a => a.actorType === 'agent' && !freshPresent.has(a.id))
           .map(a => ({ id: a.id, display_name: a.displayName }))
 
-        applySnapshot(freshIds, freshRows, freshCandidates)
+        let effectiveFreshIds = freshIds
+        if (freshRows.length === 0) {
+          const live = await fetchParticipantsFromSupabase(sessionId)
+          if (cancelled) return
+          freshRows = live.rows
+          effectiveFreshIds = live.ids
+        }
+        if (freshCandidates.length === 0) {
+          freshCandidates = await fetchCandidateAgentsFromSupabase(
+            teamId,
+            new Set(effectiveFreshIds),
+          )
+          if (cancelled) return
+        }
+
+        applySnapshot(effectiveFreshIds, freshRows, freshCandidates)
       }
 
       // ────────────────────────────────────────────────────────────────
@@ -311,7 +392,10 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       // Small queries, kept on supabase. Fire in parallel; failures are
       // non-fatal (we already rendered from cache).
       // ────────────────────────────────────────────────────────────────
-      const finalActorIds = (await loadSessionParticipants(sessionId)).map(p => p.actorId)
+      let finalActorIds = (await loadSessionParticipants(sessionId)).map(p => p.actorId)
+      if (finalActorIds.length === 0) {
+        finalActorIds = (await fetchParticipantsFromSupabase(sessionId)).ids
+      }
       if (cancelled) return
 
       const [runtimeRes, userRes] = await Promise.all([
@@ -371,6 +455,8 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       // Toast
       const { toast } = await import('sonner')
       toast.error(t('chat.actorSheet.removeError', 'Failed to remove from session'))
+    } else {
+      useSessionParticipantStore.getState().invalidateSessions([sessionId])
     }
   }
 
@@ -444,6 +530,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         console.warn('[SessionActorSheet] runtimeStart threw (non-fatal):', rpcErr)
       }
       // RuntimeInfo retain will arrive via store subscription and update the dot/model automatically
+      useSessionParticipantStore.getState().invalidateSessions([sessionId])
     } catch (e) {
       console.error('[SessionActorSheet] add agent failed:', e)
       // Rollback

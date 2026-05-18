@@ -175,10 +175,11 @@ export const useUIStore = create<UIState>((set, get) => ({
     const isStacked = get().mainContentLayout === 'stacked'
 
     // Import session and other stores lazily to avoid circular dependencies
-    import('@/stores/session').then(({ useSessionStore }) => {
+    import('@/stores/session-selection-store').then(({ useSessionSelectionStore }) => {
       import('@/stores/workspace').then(({ useWorkspaceStore }) => {
         import('@/stores/tabs').then(({ useTabsStore }) => {
           import('@/stores/streaming').then(({ useStreamingStore }) => {
+            import('@/stores/session').then(({ useSessionStore }) => {
             useWorkspaceStore.getState().clearSelection()
             useWorkspaceStore.getState().closePanel()
             // Only deactivate the editor multi-tab pane in stacked layout —
@@ -190,15 +191,11 @@ export const useUIStore = create<UIState>((set, get) => ({
               useTabsStore.getState().hideAll()
             }
             useStreamingStore.getState().clearStreaming()
+            useSessionSelectionStore.getState().clearActiveSession()
 
             // Clear session state to show "Start a New Chat" UI
             // Actual session will be created when user sends first message
             useSessionStore.setState({
-              activeSessionId: null,
-              // Also clear currentSessionId — getActiveSession() falls back
-              // to it, so leaving it stale makes the header keep showing
-              // the previous session's title after pressing "new chat".
-              currentSessionId: null,
               isLoading: false,
               messageQueue: [],
               todos: [],
@@ -208,6 +205,7 @@ export const useUIStore = create<UIState>((set, get) => ({
               pendingQuestions: [],
               pendingPermissions: [],
             })
+            })
           })
         })
       })
@@ -216,12 +214,12 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   switchToSession: async (sessionId: string) => {
     // Import stores lazily to avoid circular dependencies
-    const { useSessionStore } = await import('@/stores/session')
+    const { useSessionSelectionStore } = await import('@/stores/session-selection-store')
     const { useWorkspaceStore } = await import('@/stores/workspace')
     const { useTabsStore } = await import('@/stores/tabs')
     
     // Skip if already on this session (avoid unnecessary reloads)
-    const currentActiveId = useSessionStore.getState().activeSessionId
+    const currentActiveId = useSessionSelectionStore.getState().activeSessionId
     if (sessionId === currentActiveId) {
       return
     }
@@ -234,8 +232,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     useWorkspaceStore.getState().clearSelection()
     useTabsStore.getState().hideAll()
     
-    // Switch to the session (setActiveSession handles its own internal state)
-    await useSessionStore.getState().setActiveSession(sessionId)
+    // Switch to the session (selection store also updates the read marker).
+    await useSessionSelectionStore.getState().setActiveSession(sessionId)
     // If the user was in actor-draft mode, drop that since they jumped into
     // an existing session.
     set({ draftPreselectedActor: null, sidebarFilter: { kind: 'all' }, draftIdeaId: null })
@@ -254,13 +252,13 @@ export const useUIStore = create<UIState>((set, get) => ({
     // canvas with the preselected actor as the implicit recipient. We
     // dynamic-import to avoid a top-level cycle with session/workspace stores.
     void (async () => {
+      const { useSessionSelectionStore } = await import('@/stores/session-selection-store')
       const { useSessionStore } = await import('@/stores/session')
       const { useWorkspaceStore } = await import('@/stores/workspace')
       useWorkspaceStore.getState().clearSelection()
       useWorkspaceStore.getState().closePanel()
+      useSessionSelectionStore.getState().clearActiveSession()
       useSessionStore.setState({
-        activeSessionId: null,
-        currentSessionId: null,
         isLoading: false,
         messageQueue: [],
         todos: [],
