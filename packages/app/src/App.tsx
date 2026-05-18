@@ -7,6 +7,7 @@ import {
   MouseEvent as ReactMouseEvent,
   type ComponentType,
 } from "react";
+import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
@@ -117,6 +118,7 @@ import { Button } from "@/components/ui/button";
 import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
 import { parseInviteDeeplink, claimInviteToken } from "@/lib/invite-deeplink";
 import { useCurrentTeamStore } from "@/stores/current-team";
+import { installV2E2EControl } from "@/lib/e2e/v2-control";
 
 // Module-level set of session/live topics we've already MQTT-subscribed to.
 // Lives outside the React tree so that the App.tsx mount effect + the
@@ -1682,6 +1684,10 @@ function AppContent() {
 }
 
 function App() {
+  React.useEffect(() => {
+    installV2E2EControl();
+  }, []);
+
   // ── Global webview shortcuts (find, zoom, context menu) ──
   useWebviewShortcuts()
   useTerminalShortcuts()
