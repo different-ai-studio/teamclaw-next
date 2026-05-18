@@ -31,7 +31,7 @@ jobs:
       FASTLANE_XCODEBUILD_SETTINGS_RETRIES: 6
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.ref }}
 
