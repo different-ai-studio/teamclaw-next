@@ -52,8 +52,8 @@ message AcpEvent {
     AcpError error = 5;
     AcpPermissionRequest permission_request = 6;
     AcpStatusChange status_change = 7;
-    AcpTodoUpdate todo_update = 8;
     AcpAvailableCommands available_commands = 9;
+    AcpPlanUpdate plan_update = 10; // ACP Plan notification
     AcpRawJson raw = 15;           // Catch-all for new ACP events not yet mapped
   }
   // Model id that produced this event. Set by the daemon for agent-reply
@@ -107,10 +107,6 @@ message AcpStatusChange {
   AgentStatus new_status = 2;
 }
 
-message AcpTodoUpdate {
-  repeated TodoItem items = 1;
-}
-
 message AcpAvailableCommand {
   string name = 1;              // e.g. "clear", "compact"
   string description = 2;       // human-readable
@@ -124,6 +120,19 @@ message AcpAvailableCommands {
 message AcpRawJson {
   string method = 1;              // ACP method name
   bytes json_payload = 2;         // Raw JSON for forward compat
+}
+
+// ACP Plan notification — full replacement on every update (ACP spec).
+// priority: "high" | "medium" | "low"
+// status:   "pending" | "in_progress" | "completed"
+message AcpPlanUpdate {
+  repeated AcpPlanEntry entries = 1;
+}
+
+message AcpPlanEntry {
+  string content = 1;
+  string priority = 2;
+  string status = 3;
 }
 
 // ACP commands from client
@@ -325,16 +334,6 @@ message ModelInfo {
 
 message AgentList {
   repeated RuntimeInfo runtimes = 1;
-}
-
-message TodoItem {
-  string content = 1;
-  enum Status {
-    PENDING = 0;
-    IN_PROGRESS = 1;
-    COMPLETED = 2;
-  }
-  Status status = 2;
 }
 
 enum MemberRole {

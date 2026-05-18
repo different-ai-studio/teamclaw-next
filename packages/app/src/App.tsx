@@ -824,12 +824,14 @@ function AppContent() {
                 toolName?: string;
                 description?: string;
                 params?: Record<string, string>;
+                toolKind?: string;
               };
               useV2StreamingStore.getState().pushToolUse(sid, actorId, {
                 toolId: tu.toolId ?? "",
                 toolName: tu.toolName ?? "",
                 description: tu.description ?? "",
                 params: tu.params ?? {},
+                toolKind: tu.toolKind,
               });
             } else if (event?.case === "toolResult") {
               const tr = event.value as { toolId?: string; success?: boolean; summary?: string };
@@ -859,17 +861,20 @@ function AppContent() {
                 description: pr.description ?? "",
                 params: pr.params ?? {},
               });
-            } else if (event?.case === "todoUpdate") {
-              const tu = event.value as { items?: Array<{ content?: string; status?: number }> };
-              const items = (tu.items ?? []).map((it) => ({
-                content: it.content ?? "",
-                status: (it.status === 1
+            } else if (event?.case === "planUpdate") {
+              const pu = event.value as { entries?: Array<{ content?: string; priority?: string; status?: string }> };
+              const entries = (pu.entries ?? []).map((e) => ({
+                content: e.content ?? "",
+                priority: (e.priority === "high" || e.priority === "medium" || e.priority === "low"
+                  ? e.priority
+                  : ("medium" as const)),
+                status: (e.status === "in_progress"
                   ? ("in_progress" as const)
-                  : it.status === 2
+                  : e.status === "completed"
                   ? ("completed" as const)
                   : ("pending" as const)),
               }));
-              useV2StreamingStore.getState().setTodos(sid, actorId, items);
+              useV2StreamingStore.getState().setPlan(sid, actorId, entries);
             }
             // statusChange / availableCommands / raw: MVP no-op (RuntimeInfo retain
             // already surfaces agent status; commands TBD; raw is catch-all).

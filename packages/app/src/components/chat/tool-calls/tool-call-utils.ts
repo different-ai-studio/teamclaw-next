@@ -3,6 +3,7 @@ import {
   Search,
   Circle,
   FileText,
+  FilePen,
   Terminal,
   Globe,
   Zap,
@@ -11,6 +12,9 @@ import {
   Check,
   X,
   Sparkles,
+  Brain,
+  Trash2,
+  MoveRight,
 } from "lucide-react";
 import type { ToolCall } from "@/stores/session";
 
@@ -94,6 +98,22 @@ export function getToolIcon(toolName: string) {
     return Search;
   }
   return Zap;
+}
+
+// Get icon from ACP ToolKind (snake_case string from daemon).
+// Falls back to Zap when kind is absent or unrecognized.
+export function getToolIconByKind(kind: string | undefined) {
+  switch (kind) {
+    case "read":   return FileText;
+    case "edit":   return FilePen;
+    case "delete": return Trash2;
+    case "move":   return MoveRight;
+    case "search": return Search;
+    case "execute": return Terminal;
+    case "think":  return Brain;
+    case "fetch":  return Globe;
+    default:       return Zap;
+  }
 }
 
 // Check if this is a question tool

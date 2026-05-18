@@ -130,6 +130,8 @@ type ToolStartInput = StreamInput & {
   tool_id?: string;
   toolName?: string;
   tool_name?: string;
+  toolKind?: string;
+  tool_kind?: string;
   description?: string;
   params?: Record<string, string>;
 };
@@ -732,6 +734,7 @@ const control: V2E2EControl = {
       toolName: input.toolName ?? input.tool_name ?? "tool",
       description: input.description ?? "",
       params: input.params ?? {},
+      toolKind: input.toolKind ?? input.tool_kind,
     });
   },
 

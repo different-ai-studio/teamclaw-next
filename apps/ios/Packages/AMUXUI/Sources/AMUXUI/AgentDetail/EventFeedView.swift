@@ -118,7 +118,7 @@ public struct EventBubbleView: View {
             )
             .padding(.horizontal, 16)
             .padding(.vertical, 4)
-        case "todo_update":
+        case "plan_update":
             TodoListView(text: event.text ?? "")
                 .padding(.horizontal, 16)
                 .padding(.vertical, 4)
