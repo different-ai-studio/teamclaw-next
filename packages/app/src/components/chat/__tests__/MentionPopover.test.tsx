@@ -8,8 +8,8 @@ const supabaseFrom = vi.fn()
 vi.mock('@/lib/supabase-client', () => ({
   supabase: { from: (...args: unknown[]) => supabaseFrom(...args) },
 }))
-vi.mock('@/stores/session-store', () => ({
-  useSessionStore: (sel: any) => sel({ currentSessionId: 'sess-1' }),
+vi.mock('@/stores/session-selection-store', () => ({
+  useSessionSelectionStore: (sel: any) => sel({ currentSessionId: 'sess-1' }),
 }))
 vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (sel: any) => sel({ session: { user: { id: 'user-1' } } }),

@@ -114,6 +114,7 @@ function mockSheetData(
           }),
         }),
         insert: () => Promise.resolve({ error: null }),
+        upsert: () => Promise.resolve({ error: null }),
       }
     }
     if (table === 'actor_directory') {

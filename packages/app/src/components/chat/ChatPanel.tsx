@@ -6,6 +6,8 @@ import { cn, isTauri } from "@/lib/utils";
 
 import { SKILLS_CHANGED_EVENT } from "@/hooks/useAppInit";
 import { useSessionStore } from "@/stores/session";
+import { useSessionMessageStore } from "@/stores/session-message-store";
+import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useStreamingStore } from "@/stores/streaming";
 import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -131,7 +133,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const draftPreselectedActor = useUIStore(s => s.draftPreselectedActor);
 
   // ── Session store selectors (reactive state only) ────────────────────
-  const activeSessionId = useSessionStore(s => s.activeSessionId);
+  const activeSessionId = useSessionSelectionStore(s => s.activeSessionId);
   const error = useSessionStore(s => s.error);
   const errorSessionId = useSessionStore(s => s.errorSessionId);
   const isConnected = useSessionStore(s => s.isConnected);
@@ -294,7 +296,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   );
   const setEngagedAgentForSession = React.useCallback(
     (agent: AttachedAgent | null) => {
-      const sid = useSessionStore.getState().activeSessionId;
+      const sid = useSessionSelectionStore.getState().activeSessionId;
       if (!sid) return;
       useEngagedAgentStore.getState().setEngagedAgent(sid, agent);
     },
@@ -395,11 +397,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const messageListRef = React.useRef<MessageListHandle>(null);
 
   // ── Derived values ────────────────────────────────────────────────────
-  // v2: messages live in useSessionStore.messages keyed by sessionId.
+  // v2: messages live in useSessionMessageStore.messages keyed by sessionId.
   // Adapt each Teamclaw_Message → SDK Message shape so legacy MessageList
   // renders unchanged. Phase 2 will replace MessageList with native render.
-  const activeMessagesRaw = useSessionStore(s =>
-    s.activeSessionId ? s.messages?.[s.activeSessionId] : undefined
+  const activeMessagesRaw = useSessionMessageStore(s =>
+    activeSessionId ? s.messages?.[activeSessionId] : undefined
   );
   const activeMessages = React.useMemo(
     () => adaptTeamclawMessages(activeMessagesRaw),
@@ -409,7 +411,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const [displaySessionId, setDisplaySessionId] = React.useState<string | null>(activeSessionId);
   const [sessionFadeOpacity, setSessionFadeOpacity] = React.useState(1);
 
-  const displayMessagesRaw = useSessionStore((s) =>
+  const displayMessagesRaw = useSessionMessageStore((s) =>
     displaySessionId ? s.messages?.[displaySessionId] : undefined,
   );
   const displayMessages = React.useMemo(
@@ -925,7 +927,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           ).catch((publishErr) => {
             console.warn("[MQTT] publish failed", publishErr);
           });
-          useSessionStore.getState().appendMessage(sid, msg);
+          useSessionMessageStore.getState().appendMessage(sid, msg);
         } catch (e) {
           console.error("[ChatPanel] send failed:", e);
         }

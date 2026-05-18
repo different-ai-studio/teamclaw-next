@@ -9,7 +9,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { supabase } from '@/lib/supabase-client'
-import { useSessionStore } from '@/stores/session-store'
+import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { type MentionedPerson } from '@/packages/ai/prompt-input'
 import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
 
@@ -67,7 +67,7 @@ export function MentionPopover({
   onSelectAgent,
 }: MentionPopoverProps) {
   const { t } = useTranslation()
-  const sessionId = useSessionStore(s => s.currentSessionId)
+  const sessionId = useSessionSelectionStore(s => s.currentSessionId)
   const [rows, setRows] = React.useState<ParticipantRow[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(false)

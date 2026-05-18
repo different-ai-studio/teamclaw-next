@@ -1,8 +1,8 @@
-import { useSessionStore } from "@/stores/session-store";
+import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useActorsStore } from "@/stores/actors-store";
 
 export function ActorMessageList() {
-  const messages = useSessionStore((s) => s.currentMessages());
+  const messages = useSessionMessageStore((s) => s.currentMessages());
   const actors = useActorsStore((s) => s.byId);
 
   if (messages.length === 0) {
