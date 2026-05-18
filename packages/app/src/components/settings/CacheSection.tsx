@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { isTauri } from '@/lib/utils'
 import { clearTeam } from '@/lib/local-cache'
 import { useSessionListStore } from '@/stores/session-list-store'
-import { useSessionStore } from '@/stores/session'
+import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncSessionsForTeam } from '@/lib/sync/session-sync'
 import { syncIdeasForTeam } from '@/lib/sync/idea-sync'
@@ -45,7 +45,7 @@ export function CacheSection() {
       await useSessionListStore.getState().load()
 
       // 4. If a session is currently open, re-pull its messages + participants
-      const activeSessionId = useSessionStore.getState().currentSessionId
+      const activeSessionId = useSessionSelectionStore.getState().currentSessionId
       if (activeSessionId) {
         await Promise.all([
           syncMessagesForSession(activeSessionId, teamId, { full: true }),

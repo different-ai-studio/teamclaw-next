@@ -3,11 +3,13 @@ import { useAuthStore } from "./auth-store";
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
+  from: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase-client", () => ({
   supabase: {
     rpc: mocks.rpc,
+    from: mocks.from,
     auth: {
       getSession: vi.fn(),
       onAuthStateChange: vi.fn(),
@@ -50,6 +52,8 @@ describe("session-list-store", () => {
       rows: [],
       loading: false,
       error: null,
+      pinnedSessionIds: [],
+      highlightedSessionIds: [],
       hasMore: false,
       nextCursor: null,
     });
@@ -147,5 +151,35 @@ describe("session-list-store", () => {
       p_last_read_message_id: null,
     });
     expect(useSessionListStore.getState().rows[0].has_unread).toBe(false);
+  });
+
+  it("renames a session through Supabase and patches the row", async () => {
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    mocks.from.mockReturnValue({ update });
+
+    const { useSessionListStore } = await import("./session-list-store");
+    useSessionListStore.setState({ rows: [sessionRow()] });
+
+    await useSessionListStore.getState().updateSessionTitle("session-1", "Renamed");
+
+    expect(mocks.from).toHaveBeenCalledWith("sessions");
+    expect(update).toHaveBeenCalledWith({ title: "Renamed" });
+    expect(eq).toHaveBeenCalledWith("id", "session-1");
+    expect(useSessionListStore.getState().rows[0].title).toBe("Renamed");
+  });
+
+  it("archives a session through Supabase and removes the row", async () => {
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    mocks.from.mockReturnValue({ update });
+
+    const { useSessionListStore } = await import("./session-list-store");
+    useSessionListStore.setState({ rows: [sessionRow()] });
+
+    await useSessionListStore.getState().archiveSession("session-1");
+
+    expect(update).toHaveBeenCalledWith({ archived_at: expect.any(String) });
+    expect(useSessionListStore.getState().rows).toEqual([]);
   });
 });

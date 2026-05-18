@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { SessionListColumn } from '../SessionListColumn'
 import { useUIStore } from '@/stores/ui'
+import { useSessionListStore } from '@/stores/session-list-store'
 import { useSessionStore } from '@/stores/session'
 import { useSessionListStore } from '@/stores/session-list-store'
 
@@ -47,9 +48,34 @@ const mkSessionRow = (over: Partial<{
   ...over,
 })
 
+const mkRow = (over: Partial<{ id: string; title: string; ideaId: string | null; lastMessageAt: string | null }> = {}) => ({
+  id: over.id ?? 's1',
+  title: over.title ?? 't',
+  team_id: 'team-1',
+  mode: 'collab' as const,
+  idea_id: over.ideaId ?? null,
+  last_message_at: over.lastMessageAt ?? '2026-05-17T08:00:00.000Z',
+  last_message_preview: null,
+  has_unread: false,
+  created_at: '2026-05-17T07:59:00.000Z',
+  updated_at: '2026-05-17T08:00:00.000Z',
+})
+
 describe('SessionListColumn', () => {
   beforeEach(() => {
+    localStorage.setItem('teamclaw-pinned-sessions', JSON.stringify({ __legacy__: ['s1'] }))
     useUIStore.setState({ sidebarFilter: { kind: 'all' } })
+    useSessionListStore.setState({
+      rows: [
+        mkRow({ id: 's1', title: 'Alpha', ideaId: null }),
+        mkRow({ id: 's2', title: 'Beta', ideaId: 'idea-1' }),
+        mkRow({ id: 's3', title: 'Gamma', ideaId: 'idea-1' }),
+      ],
+      pinnedSessionIds: ['s1'],
+      highlightedSessionIds: [],
+      hasMore: false,
+      loading: false,
+    })
     useSessionStore.setState({
       sessions: [],
       pinnedSessionIds: ['s1'],
