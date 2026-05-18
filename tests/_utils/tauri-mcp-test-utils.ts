@@ -139,6 +139,9 @@ export function getOsPid(): number {
   if (!_osPid) throw new Error('App not launched yet – call launchTeamClawApp first');
   return _osPid;
 }
+export function isReusingExistingApp(): boolean {
+  return _processId !== null && !_ownedProcess;
+}
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

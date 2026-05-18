@@ -141,6 +141,15 @@ type ToolCompleteInput = StreamInput & {
   summary?: string;
 };
 
+type PermissionRequestInput = StreamInput & {
+  requestId?: string;
+  request_id?: string;
+  toolName?: string;
+  tool_name?: string;
+  description?: string;
+  params?: Record<string, string>;
+};
+
 type AgentErrorInput = StreamInput & {
   message?: string;
   details?: string;
@@ -175,6 +184,7 @@ type V2E2EControl = {
   emitAgentDelta: (input: AgentDeltaInput) => void;
   startTool: (input: ToolStartInput) => void;
   completeTool: (input: ToolCompleteInput) => void;
+  setPermissionRequest: (input: PermissionRequestInput) => void;
   setAgentError: (input: AgentErrorInput) => void;
   completeRun: (input: CompleteRunInput) => Promise<Message>;
   cleanup: () => void;
@@ -614,30 +624,6 @@ const control: V2E2EControl = {
       ),
     );
 
-    withInternalMutation(() => {
-      useSessionListStore.setState({
-        rows: sessionEntries,
-        loading: false,
-        error: null,
-        hasMore: false,
-        nextCursor: null,
-      });
-    });
-
-    useSessionStore.setState({
-      messages: nextMessages,
-      activeSessionId,
-      currentSessionId: activeSessionId,
-      isLoading: false,
-      sessionError: null,
-      errorSessionId: null,
-      messageQueue: [],
-      pendingPermissions: [],
-      pendingQuestions: [],
-      todos: [],
-      sessionDiff: [],
-    });
-
     if (isTauri()) {
       const timestamp = nowIso();
       const actorRows: ActorRow[] = actors.map((actor) => ({
@@ -680,6 +666,30 @@ const control: V2E2EControl = {
       await upsertSessionParticipantsBatch(participantRows);
       await upsertMessagesBatch(messageRows);
     }
+
+    withInternalMutation(() => {
+      useSessionListStore.setState({
+        rows: sessionEntries,
+        loading: false,
+        error: null,
+        hasMore: false,
+        nextCursor: null,
+      });
+    });
+
+    useSessionStore.setState({
+      messages: nextMessages,
+      activeSessionId,
+      currentSessionId: activeSessionId,
+      isLoading: false,
+      sessionError: null,
+      errorSessionId: null,
+      messageQueue: [],
+      pendingPermissions: [],
+      pendingQuestions: [],
+      todos: [],
+      sessionDiff: [],
+    });
 
     return { runId: input.runId, warnings };
   },
@@ -731,6 +741,16 @@ const control: V2E2EControl = {
       toolId: input.toolId ?? input.tool_id ?? "",
       success: input.success ?? true,
       summary: input.summary ?? "",
+    });
+  },
+
+  setPermissionRequest: (input) => {
+    const { sessionId, actorId } = requireStreamIds(input);
+    useV2StreamingStore.getState().setPermissionRequest(sessionId, actorId, {
+      requestId: input.requestId ?? input.request_id ?? `e2e-permission:${sessionId}:${actorId}`,
+      toolName: input.toolName ?? input.tool_name ?? "tool",
+      description: input.description ?? "",
+      params: input.params ?? {},
     });
   },
 
