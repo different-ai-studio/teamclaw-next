@@ -10,20 +10,16 @@ function findRepoRoot(startDir) {
     const gitPath = path.join(current, ".git");
     if (fs.existsSync(gitPath) && fs.existsSync(path.join(current, "package.json"))) {
       // In a git worktree, .git is a file containing "gitdir: <path>".
-      // Resolve to the main repo root so all worktrees share .cargo-target/.
+      // Keep build artifacts scoped to the active checkout: Cargo/Tauri build
+      // metadata can contain absolute source paths, and sharing a target dir
+      // across worktrees can make builds read files from deleted checkouts.
       try {
         const stat = fs.statSync(gitPath);
         if (stat.isFile()) {
           const content = fs.readFileSync(gitPath, "utf8").trim();
           const match = content.match(/^gitdir:\s*(.+)$/);
           if (match) {
-            // gitdir points to <main-repo>/.git/worktrees/<name>
-            const gitdir = path.resolve(current, match[1]);
-            const mainGitDir = path.resolve(gitdir, "..", "..");
-            const mainRoot = path.dirname(mainGitDir);
-            if (fs.existsSync(path.join(mainRoot, "package.json"))) {
-              return mainRoot;
-            }
+            return current;
           }
         }
       } catch (_) {

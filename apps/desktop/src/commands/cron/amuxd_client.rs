@@ -201,7 +201,10 @@ mod tests {
         let sock_path = mock_server(|req| {
             assert_eq!(req["job_name"].as_str(), Some("Nightly digest"));
             assert_eq!(req["working_directory"].as_str(), Some("/tmp/wt"));
-            assert_eq!(req["model_override"]["provider"].as_str(), Some("anthropic"));
+            assert_eq!(
+                req["model_override"]["provider"].as_str(),
+                Some("anthropic")
+            );
             assert_eq!(req["model_override"]["model"].as_str(), Some("sonnet"));
             serde_json::json!({
                 "ok": true,

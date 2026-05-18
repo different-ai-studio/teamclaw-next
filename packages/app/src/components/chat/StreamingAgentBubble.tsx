@@ -53,7 +53,10 @@ function PermissionRequestCard({ entry }: { entry: AgentStreamEntry }) {
 
 function ErrorCard({ message, details }: { message: string; details: string }) {
   return (
-    <div className="my-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs">
+    <div
+      className="my-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs"
+      data-testid="v2-streaming-error"
+    >
       <div className="flex items-center gap-1.5 text-destructive font-medium mb-1">
         <AlertCircle className="h-3.5 w-3.5" />
         {message}
@@ -77,7 +80,13 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   const isStreaming = entry.active;
 
   return (
-    <div className="mb-1.5">
+    <div
+      className="mb-1.5"
+      data-testid="v2-streaming-agent"
+      data-session-id={entry.sessionId}
+      data-actor-id={entry.actorId}
+      data-active={entry.active ? "true" : "false"}
+    >
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
@@ -88,7 +97,14 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
           {hasToolCalls && (
             <div className="space-y-1">
               {entry.toolCalls.map((tc) => (
-                <ToolCallCard key={tc.id} toolCall={tc} />
+                <div
+                  key={tc.id}
+                  data-testid="v2-streaming-tool"
+                  data-tool-id={tc.id}
+                  data-tool-status={tc.status}
+                >
+                  <ToolCallCard toolCall={tc} />
+                </div>
               ))}
             </div>
           )}

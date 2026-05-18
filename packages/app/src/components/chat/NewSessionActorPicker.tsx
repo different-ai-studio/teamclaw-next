@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { loadActorsForTeam } from '@/lib/local-cache'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
+import { supabase } from '@/lib/supabase-client'
 import { cn } from '@/lib/utils'
 
 type Candidate = {
@@ -68,7 +69,31 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
         // actor_directory watermark can otherwise leave this picker empty even
         // while the sidebar's team-member source has rows.
         const synced = await syncActorsForTeam(teamId, localVisible === 0 ? { full: true } : undefined)
-        if (cancelled || synced === 0) return
+        if (cancelled) return
+        if (synced === 0 && localVisible === 0) {
+          const { data, error: fetchError } = await supabase
+            .from('actor_directory')
+            .select('id, actor_type, display_name')
+            .eq('team_id', teamId)
+            .order('display_name', { ascending: true })
+          if (cancelled) return
+          if (fetchError) throw fetchError
+          const remoteRows = ((data ?? []) as Array<{
+            id: string
+            actor_type: string
+            display_name: string | null
+          }>)
+            .filter(r => r.id !== selfActorId)
+            .filter(r => r.actor_type === 'member' || r.actor_type === 'agent')
+            .map<Candidate>(r => ({
+              id: r.id,
+              actor_type: r.actor_type as 'member' | 'agent',
+              display_name: r.display_name || '',
+            }))
+          setCandidates(remoteRows)
+          return
+        }
+        if (synced === 0) return
         const fresh = await loadActorsForTeam(teamId)
         if (cancelled) return
         applyRows(fresh)

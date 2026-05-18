@@ -4,9 +4,11 @@ import { SessionActorPanel } from '@/components/chat/SessionActorSheet'
 import { FileBrowser } from '@/components/workspace/FileBrowser'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { KnowledgeBrowser } from '@/components/knowledge/KnowledgeBrowser'
+import { ActorsView } from '@/components/panel/ActorsView'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import { useSessionListStore } from '@/stores/session-list-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import type { FileDiff } from '@/stores/session-types'
 import type { ComponentProps } from 'react'
 
@@ -25,7 +27,8 @@ export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }:
   const activeSessionId = useSessionStore(s => s.activeSessionId)
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId))
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null)
-  const teamIdForActors = sessionRow?.team_id ?? fallbackTeamId
+  const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null)
+  const teamIdForActors = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId
 
   // Use defaultTab if provided, otherwise use store's activeTab
   const activeTab = defaultTab || storeActiveTab
@@ -49,7 +52,9 @@ export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }:
         <KnowledgeBrowser {...knowledgeBrowserProps} />
       )}
       {activeTab === 'actors' && (
-        <SessionActorPanel sessionId={activeSessionId} teamId={teamIdForActors} />
+        activeSessionId
+          ? <SessionActorPanel sessionId={activeSessionId} teamId={teamIdForActors} />
+          : <ActorsView />
       )}
     </div>
   )

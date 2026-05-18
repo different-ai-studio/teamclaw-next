@@ -59,10 +59,11 @@ interface EditableWithFileChipsProps {
   className?: string
   disabled?: boolean
   autoFocus?: boolean
+  testId?: string
 }
 
 export const EditableWithFileChips = React.forwardRef<HTMLDivElement, EditableWithFileChipsProps>(
-  ({ value, onChange, onKeyDown, onPaste, onCompositionStart, onCompositionEnd, placeholder, className, disabled, autoFocus }, ref) => {
+  ({ value, onChange, onKeyDown, onPaste, onCompositionStart, onCompositionEnd, placeholder, className, disabled, autoFocus, testId }, ref) => {
     const editableRef = React.useRef<HTMLDivElement>(null)
     const isUpdatingRef = React.useRef(false)
     const pendingCursorPositionRef = React.useRef<{ node: Node; offset: number } | null>(null)
@@ -469,6 +470,7 @@ export const EditableWithFileChips = React.forwardRef<HTMLDivElement, EditableWi
         data-gramm="false"
         data-gramm_editor="false"
         data-enable-grammarly="false"
+        data-testid={testId}
         onInput={handleInput}
         onBeforeInput={handleBeforeInput}
         onKeyDown={handleKeyDown}

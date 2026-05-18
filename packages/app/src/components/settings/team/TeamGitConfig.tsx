@@ -25,7 +25,6 @@ import {
 } from 'lucide-react'
 import { cn, isTauri, copyToClipboard } from '@/lib/utils'
 import { ToggleSwitch } from '@/components/settings/shared'
-import { TeamMemberList } from '@/components/settings/TeamMemberList'
 import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
 import { useTeamMembersStore } from '@/stores/team-members'
@@ -171,6 +170,8 @@ export function TeamGitConfig() {
   const [gitBranch, setGitBranch] = React.useState('')
   const [gitToken, setGitToken] = React.useState('')
   const [showToken, setShowToken] = React.useState(false)
+  const [teamSecret, setTeamSecret] = React.useState<string | null>(null)
+  const [showTeamSecret, setShowTeamSecret] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [connectStep, setConnectStep] = React.useState('')
   const [disconnectDialogOpen, setDisconnectDialogOpen] = React.useState(false)
@@ -203,6 +204,7 @@ export function TeamGitConfig() {
 
   // Detect if current URL is HTTPS (needs token auth)
   const isHttpsUrl = gitUrl.trim().startsWith('https://') || gitUrl.trim().startsWith('http://')
+  const gitLocalPath = workspacePath ? `${workspacePath}/${TEAM_REPO_DIR}` : TEAM_REPO_DIR
 
   // ─── Initialize: check git + load config ─────────────────────────────────
 
@@ -244,6 +246,11 @@ export function TeamGitConfig() {
           } catch (err) {
             console.warn('Failed to init shared secrets:', err)
           }
+
+          tauriInvoke<string>('get_git_team_secret', {
+            teamId: config.teamId,
+            ...workspaceArgs,
+          }).then(setTeamSecret).catch(() => setTeamSecret(null))
         }
 
         setState('connected')
@@ -294,10 +301,9 @@ export function TeamGitConfig() {
     }
   }, [state, llmLoaded, workspaceArgs])
 
-  // Load members and device info when connected
+  // Load role and device info when connected
   React.useEffect(() => {
     if ((state === 'connected' || state === 'syncing') && isTauri()) {
-      teamMembersStore.loadMembers()
       teamMembersStore.loadMyRole()
       tauriInvoke<{ nodeId: string }>('get_device_info').then(setDeviceInfo).catch(() => {})
     }
@@ -367,6 +373,10 @@ export function TeamGitConfig() {
       setTeamConfig(newConfig)
       setCreatedTeamId(teamId)
       setCreatedInviteDeeplink(deeplink)
+      tauriInvoke<string>('get_git_team_secret', {
+        teamId,
+        ...workspaceArgs,
+      }).then(setTeamSecret).catch(() => setTeamSecret(null))
       setState('connected')
 
     } catch (err) {
@@ -469,6 +479,7 @@ export function TeamGitConfig() {
       setTeamConfig(null)
       setGitUrl('')
       setGitToken('')
+      setTeamSecret(null)
       setState('unconfigured')
     } catch (err) {
       console.error('Team disconnect error:', err)
@@ -841,18 +852,70 @@ export function TeamGitConfig() {
             </SettingCard>
           )}
 
-          {/* Team Members */}
+          {/* Runtime Details */}
           <SettingCard>
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-green-100 dark:bg-green-900/30">
-                  <Users className="h-5 w-5 text-green-700 dark:text-green-400" />
+                <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-muted">
+                  <KeyRound className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.team.members', 'Team Members')}</p>
+                  <p className="text-sm font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
+                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local Git path, team secret, and this device identity')}</p>
                 </div>
               </div>
-              <TeamMemberList />
+
+              <div className="space-y-2 rounded-lg border border-border-soft bg-background/50 p-3">
+                <div className="grid gap-1.5 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
+                  <span className="text-xs text-muted-foreground">{t('settings.team.gitLocalPath', 'Git Path')}</span>
+                  <code className="min-w-0 break-all font-mono text-xs text-foreground">
+                    {gitLocalPath}
+                  </code>
+                </div>
+
+                {teamConfig.teamId && (
+                  <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
+                    <span className="text-xs text-muted-foreground">{t('settings.team.teamId', 'Team ID')}</span>
+                    <code className="min-w-0 break-all font-mono text-xs text-foreground">
+                      {teamConfig.teamId}
+                    </code>
+                  </div>
+                )}
+
+                <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
+                  <span className="text-xs text-muted-foreground">{t('settings.team.teamSecret', 'Team Secret')}</span>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <code className="min-w-0 flex-1 break-all font-mono text-xs text-foreground">
+                      {teamSecret
+                        ? showTeamSecret
+                          ? teamSecret
+                          : '••••••••••••••••••••••••••••••••'
+                        : t('settings.team.teamSecretUnavailable', 'Not saved on this device')}
+                    </code>
+                    {teamSecret && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 shrink-0 p-0"
+                          onClick={() => setShowTeamSecret((v) => !v)}
+                        >
+                          {showTeamSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 shrink-0 p-0"
+                          onClick={() => copyToClipboard(teamSecret, t('common.copied', 'Copied!'))}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {deviceInfo && (
                 <div className="pt-2 border-t">
                   <p className="text-xs text-muted-foreground mb-1.5">{t('settings.team.myDeviceId', 'My Device ID')}</p>

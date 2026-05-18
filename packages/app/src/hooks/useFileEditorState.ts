@@ -4,8 +4,6 @@
  * Handles:
  *  - Resizable panel widths (right panel)
  *  - Syncing selectedFile <-> TabsStore
- *  - Layout-mode-aware tab sync
- *  - Auto-switch right panel on layout mode change
  *  - Auto-open right panel when todos/diffs first appear
  */
 import { useEffect, useRef, useCallback } from "react";
@@ -37,25 +35,11 @@ export function usePanelAutoOpen() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Auto-switch right panel on layout mode change
+// Legacy no-op retained for callers/tests while file mode is removed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function useLayoutModePanelSync() {
-  const layoutMode = useUIStore((s) => s.layoutMode);
-  const setFileModeRightTab = useUIStore((s) => s.setFileModeRightTab);
-  const closePanel = useWorkspaceStore((s) => s.closePanel);
-  const prevLayoutMode = useRef(layoutMode);
-
-  useEffect(() => {
-    if (prevLayoutMode.current !== layoutMode) {
-      if (layoutMode === "file") {
-        setFileModeRightTab("shortcuts");
-      } else {
-        closePanel();
-      }
-      prevLayoutMode.current = layoutMode;
-    }
-  }, [layoutMode, setFileModeRightTab, closePanel]);
+  return;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,11 +48,10 @@ export function useLayoutModePanelSync() {
 
 export function useFileTabSync() {
   const selectedFile = useWorkspaceStore((s) => s.selectedFile);
-  const layoutMode = useUIStore((s) => s.layoutMode);
 
-  // Open a tab whenever a file is selected (file mode: always; task mode: always)
+  // Open a tab whenever a file is selected in the standard task layout.
   useEffect(() => {
-    if (selectedFile && layoutMode === "file") {
+    if (selectedFile) {
       const filename = selectedFile.split("/").pop() || selectedFile;
       useTabsStore.getState().openTab({
         type: "file",
@@ -76,7 +59,7 @@ export function useFileTabSync() {
         label: filename,
       });
     }
-  }, [selectedFile, layoutMode]);
+  }, [selectedFile]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

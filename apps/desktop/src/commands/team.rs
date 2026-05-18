@@ -44,6 +44,23 @@ pub struct TeamStatus {
     pub llm: Option<LlmConfig>,
 }
 
+/// Git team configuration stored in .teamclaw/teamclaw.json under "team".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamConfig {
+    pub git_url: String,
+    pub enabled: bool,
+    pub last_sync_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fc_endpoint: Option<String>,
+}
+
 /// One untracked file surfaced by the sync precheck.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -524,6 +541,89 @@ pub fn write_team_mode(workspace_path: &str, mode: Option<&str>) -> Result<(), S
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&config_path, content)
         .map_err(|e| format!("Failed to write {}: {}", super::CONFIG_FILE_NAME, e))
+}
+
+fn read_workspace_config(workspace_path: &str) -> Result<serde_json::Value, String> {
+    let config_path = Path::new(workspace_path)
+        .join(crate::commands::TEAMCLAW_DIR)
+        .join(super::CONFIG_FILE_NAME);
+
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read {}: {}", super::CONFIG_FILE_NAME, e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse {}: {}", super::CONFIG_FILE_NAME, e))
+}
+
+fn write_workspace_config(workspace_path: &str, json: &serde_json::Value) -> Result<(), String> {
+    let teamclaw_dir = Path::new(workspace_path).join(crate::commands::TEAMCLAW_DIR);
+    std::fs::create_dir_all(&teamclaw_dir)
+        .map_err(|e| format!("Failed to create {}: {}", super::TEAMCLAW_DIR, e))?;
+
+    let config_path = teamclaw_dir.join(super::CONFIG_FILE_NAME);
+    let content = serde_json::to_string_pretty(json)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write {}: {}", super::CONFIG_FILE_NAME, e))
+}
+
+#[tauri::command]
+pub async fn get_team_config(
+    workspace_path: Option<String>,
+    window: tauri::WebviewWindow,
+    registry: State<'_, crate::commands::window::WindowRegistry>,
+) -> Result<Option<TeamConfig>, String> {
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
+    let json = read_workspace_config(&workspace_path)?;
+    json.get("team")
+        .cloned()
+        .map(serde_json::from_value::<TeamConfig>)
+        .transpose()
+        .map_err(|e| format!("Failed to parse team config: {}", e))
+}
+
+#[tauri::command]
+pub async fn save_team_config(
+    team: TeamConfig,
+    workspace_path: Option<String>,
+    window: tauri::WebviewWindow,
+    registry: State<'_, crate::commands::window::WindowRegistry>,
+) -> Result<(), String> {
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
+    let mut json = read_workspace_config(&workspace_path)?;
+    let obj = json
+        .as_object_mut()
+        .ok_or_else(|| format!("{} is not an object", super::CONFIG_FILE_NAME))?;
+    obj.insert(
+        "team".to_string(),
+        serde_json::to_value(team)
+            .map_err(|e| format!("Failed to serialize team config: {}", e))?,
+    );
+    obj.insert(
+        "team_mode".to_string(),
+        serde_json::Value::String("git".to_string()),
+    );
+    write_workspace_config(&workspace_path, &json)
+}
+
+#[tauri::command]
+pub async fn clear_team_config(
+    workspace_path: Option<String>,
+    window: tauri::WebviewWindow,
+    registry: State<'_, crate::commands::window::WindowRegistry>,
+) -> Result<(), String> {
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
+    let mut json = read_workspace_config(&workspace_path)?;
+    if let Some(obj) = json.as_object_mut() {
+        obj.remove("team");
+        if obj.get("team_mode").and_then(|v| v.as_str()) == Some("git") {
+            obj.remove("team_mode");
+        }
+    }
+    write_workspace_config(&workspace_path, &json)
 }
 
 /// The whitelist .gitignore content

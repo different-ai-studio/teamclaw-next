@@ -54,11 +54,10 @@ beforeEach(() => {
 })
 
 async function renderTeamSection() {
-  const { TeamSection } = await import('../components/settings/TeamSection')
+  const { TeamP2PConfig } = await import('../components/settings/team/TeamP2PConfig')
   await act(async () => {
-    render(React.createElement(TeamSection))
+    render(React.createElement(TeamP2PConfig))
   })
-  // P2P content is directly visible — no tab switching required
 }
 
 describe('TeamP2P Publish Flow', () => {

@@ -14,5 +14,9 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("Cargo must set CARGO_MANIFEST_DIR for build scripts");
+    println!("cargo:rerun-if-changed={}/permissions", manifest_dir);
+
     tauri_plugin::Builder::new(COMMANDS).build();
 }

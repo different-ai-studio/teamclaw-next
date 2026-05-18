@@ -36,6 +36,10 @@ export async function mqttPublish(topic: string, bytes: Uint8Array, retain = fal
   });
 }
 
+export async function mqttStatus(): Promise<{ connected: boolean; subscribedTopics: string[] }> {
+  return invoke("mqtt_status");
+}
+
 export async function listenForEnvelopes(handler: (env: IncomingEnvelope) => void): Promise<UnlistenFn> {
   return listen<IncomingEnvelope>("mqtt:envelope", (msg) => {
     handler(msg.payload);

@@ -360,6 +360,7 @@ describe('cron store actions', () => {
   })
 
   it('loadJobs sets jobs from backend', async () => {
+    useCronStore.setState({ isInitialized: true })
     mockInvoke.mockResolvedValueOnce([mockJob])
     await useCronStore.getState().loadJobs()
     expect(useCronStore.getState().jobs).toEqual([mockJob])

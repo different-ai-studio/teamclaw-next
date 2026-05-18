@@ -50,7 +50,7 @@ beforeEach(() => {
 })
 
 describe('TeamSection tab switcher', () => {
-  it('renders three tabs: P2P, S3, and Git', async () => {
+  it('renders the Git team configuration without sync-method tabs', async () => {
     const { TeamSection } = await import('../components/settings/TeamSection')
 
     await act(async () => {
@@ -58,10 +58,9 @@ describe('TeamSection tab switcher', () => {
     })
 
     const tabs = screen.queryAllByRole('tab')
-    expect(tabs.length).toBe(3)
-    expect(tabs[0].textContent).toBe('P2P')
-    expect(tabs[1].textContent).toBe('S3')
-    expect(tabs[2].textContent).toBe('Git')
+    expect(tabs.length).toBe(0)
+    expect(screen.queryByText('P2P')).toBeNull()
+    expect(screen.queryByText('S3')).toBeNull()
   })
 
   it('renders a heading for the Team section', async () => {
@@ -75,15 +74,13 @@ describe('TeamSection tab switcher', () => {
     expect(headings.length).toBeGreaterThan(0)
   })
 
-  it('P2P tab is selected by default', async () => {
+  it('does not render P2P as the default surface', async () => {
     const { TeamSection } = await import('../components/settings/TeamSection')
 
     await act(async () => {
       render(React.createElement(TeamSection))
     })
 
-    const tabs = screen.queryAllByRole('tab')
-    const p2pTab = tabs.find(t => t.textContent === 'P2P')
-    expect(p2pTab?.getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByRole('tab', { name: 'P2P' })).toBeNull()
   })
 })

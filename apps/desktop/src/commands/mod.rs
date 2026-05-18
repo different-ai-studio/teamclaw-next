@@ -22,6 +22,7 @@ pub mod p2p_state;
 pub mod rag_http_server;
 pub mod shared_secrets;
 pub mod shared_secrets_crypto;
+pub mod server_config;
 pub mod skillssh;
 pub mod spotlight;
 pub mod stt;

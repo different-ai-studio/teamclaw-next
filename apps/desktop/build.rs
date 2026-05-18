@@ -44,7 +44,9 @@ fn resolve_updater_endpoint(config: &serde_json::Value) -> Option<String> {
 
 fn main() {
     // ── Read build config: base → env → local (mirrors vite.config.ts) ──
-    let root_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("Cargo must set CARGO_MANIFEST_DIR for build scripts");
+    let root_dir = std::path::Path::new(&manifest_dir)
         .parent()
         .and_then(|p| p.parent())
         .unwrap();

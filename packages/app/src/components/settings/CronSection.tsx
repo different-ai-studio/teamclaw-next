@@ -207,13 +207,13 @@ export function CronSection() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start gap-4 mb-6">
-        <div className="rounded-xl p-3 bg-muted/50">
-          <Clock className="h-6 w-6 text-amber-500" />
+      <div className="mb-6 flex items-start gap-4">
+        <div className="rounded-[14px] border border-border-soft bg-panel p-3">
+          <Clock className="h-5 w-5 text-amber-500" />
         </div>
         <div className="flex-1">
-          <h3 className="text-xl font-semibold tracking-tight">{t('settings.cron.automation', 'Automation')}</h3>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h3 className="text-[15px] font-semibold tracking-normal">{t('settings.cron.automation', 'Automation')}</h3>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
             {t('settings.cron.automationDesc', 'Schedule recurring tasks for your AI agent. Jobs run automatically and can deliver results through configured channels.')}
           </p>
         </div>
@@ -243,10 +243,10 @@ export function CronSection() {
 
       {/* Empty State */}
       {!isLoading && jobs.length === 0 && (
-        <div className="text-center py-12 rounded-xl border border-dashed">
-          <Clock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-          <h4 className="text-lg font-medium mb-2">{t('settings.cron.noJobs', 'No scheduled jobs yet')}</h4>
-          <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
+        <div className="rounded-xl border border-dashed py-12 text-center">
+          <Clock className="mx-auto mb-4 h-10 w-10 text-muted-foreground/50" />
+          <h4 className="mb-2 text-[15px] font-semibold">{t('settings.cron.noJobs', 'No scheduled jobs yet')}</h4>
+          <p className="mx-auto mb-4 max-w-md text-[12.5px] text-muted-foreground">
             {t('settings.cron.noJobsDesc', 'Create your first automated task to have your AI agent perform actions on a schedule. For example, check your approval platform every 30 minutes.')}
           </p>
           <Button onClick={handleOpenCreate}>

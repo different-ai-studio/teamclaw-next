@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Loader2,
   Database,
+  Server,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -47,28 +48,29 @@ interface Section {
 // Primary sections shown directly in sidebar
 const primarySections: Section[] = [
   { id: 'general', label: 'General', labelKey: 'settings.nav.general', icon: Settings2 },
+  { id: 'server', label: 'Server', labelKey: 'settings.nav.server', icon: Server },
   { id: 'shortcuts', label: 'Shortcuts', labelKey: 'settings.nav.shortcuts', icon: Bookmark },
   { id: 'channels', label: 'Channels', labelKey: 'settings.nav.channels', icon: MessageSquare },
   { id: 'automation', label: 'Automation', labelKey: 'settings.nav.automation', icon: Clock },
   { id: 'team', label: 'Team', labelKey: 'settings.nav.team', icon: Users },
   { id: 'tokenUsage', label: 'Token Usage', labelKey: 'settings.nav.tokenUsage', icon: Coins },
+  { id: 'voice', label: 'Voice', labelKey: 'settings.nav.voice', icon: Mic },
+  { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
+  { id: 'privacy', label: 'Privacy & Telemetry', labelKey: 'settings.nav.privacy', icon: Shield },
+  { id: 'cache', label: 'Local Cache', labelKey: 'settings.nav.cache', icon: Database },
 ]
 
 // Advanced sections shown as tabs inside the Advanced view
 const advancedSections: Section[] = [
-  { id: 'voice', label: 'Voice', labelKey: 'settings.nav.voice', icon: Mic },
   { id: 'llm', label: 'LLM Model', labelKey: 'settings.nav.llm', icon: Brain },
   { id: 'prompt', label: 'Prompt', labelKey: 'settings.nav.prompt', icon: MessageSquareText },
   { id: 'permissions', label: 'Permissions', labelKey: 'settings.nav.permissions', icon: Shield },
   { id: 'mcp', label: 'MCP', labelKey: 'settings.nav.mcp', icon: Plug },
-  { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
   { id: 'roles', label: 'Roles', labelKey: 'settings.nav.roles', icon: UserRound },
   { id: 'rolesSkills', label: 'Role Skills', labelKey: 'settings.nav.rolesSkills', icon: Sparkles },
   { id: 'skills', label: 'Skills', labelKey: 'settings.nav.skills', icon: Sparkles },
   { id: 'knowledge', label: 'Knowledge Base', labelKey: 'settings.nav.knowledge', icon: BookOpen },
   { id: 'deps', label: 'Dependencies', labelKey: 'settings.nav.deps', icon: Package },
-  { id: 'privacy', label: 'Privacy & Telemetry', labelKey: 'settings.nav.privacy', icon: Shield },
-  { id: 'cache', label: 'Local Cache', labelKey: 'settings.nav.cache', icon: Database },
 ]
 
 function UpdateButton() {
@@ -167,9 +169,6 @@ export function Settings(_props?: SettingsProps) {
                       : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
                   )}
                 >
-                  {isActive && (
-                    <div className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-foreground/70" />
-                  )}
                   <Icon className={cn("h-4 w-4 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
                   {t(section.labelKey, section.label)}
                 </button>
@@ -189,14 +188,11 @@ export function Settings(_props?: SettingsProps) {
                   : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
               )}
             >
-              {(advancedExpanded || isAdvancedSection) && (
-                <div className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-foreground/70" />
-              )}
               <SlidersHorizontal className={cn(
                 "h-4 w-4 transition-colors",
                 (advancedExpanded || isAdvancedSection) ? 'text-foreground' : 'text-muted-foreground'
               )} />
-              {t('settings.nav.advanced', 'Advanced')}
+              {t('settings.nav.localAgent', 'Local Agent')}
               <ChevronDown className={cn(
                 "h-4 w-4 ml-auto transition-transform",
                 advancedExpanded ? "rotate-180" : ""
@@ -220,9 +216,6 @@ export function Settings(_props?: SettingsProps) {
                           : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
                       )}
                     >
-                      {isActive && (
-                        <div className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-foreground/70" />
-                      )}
                       <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
                       <span>{t(section.labelKey, section.label)}</span>
                     </button>

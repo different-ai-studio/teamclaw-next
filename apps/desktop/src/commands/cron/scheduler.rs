@@ -473,8 +473,7 @@ impl CronScheduler {
 
         // Heartbeat continues while we await the amuxd response.
         tokio::pin!(prompt_future);
-        let heartbeat_every =
-            std::time::Duration::from_secs(CRON_RUN_HEARTBEAT_INTERVAL_SECS);
+        let heartbeat_every = std::time::Duration::from_secs(CRON_RUN_HEARTBEAT_INTERVAL_SECS);
         let mut heartbeat_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + heartbeat_every,
             heartbeat_every,
@@ -491,34 +490,34 @@ impl CronScheduler {
         };
 
         // Outer client-side timeout (330s = amuxd cap 300 + 30s slack)
-        let response_text = match tokio::time::timeout(
-            std::time::Duration::from_secs(330),
-            async { inner_result },
-        )
-        .await
-        {
-            Ok(Ok(r)) => {
-                record.session_id = Some(r.session_id.clone());
-                self.persist_run_and_notify_ui(&record).await;
-                r.text
-            }
-            Ok(Err(e)) => {
-                record.status = RunStatus::Failed;
-                record.finished_at = Some(Utc::now());
-                record.error = Some(e);
-                self.persist_run_and_notify_ui(&record).await;
-                self.update_job_after_run(&job, started_at, &my_workspace).await;
-                return;
-            }
-            Err(_) => {
-                record.status = RunStatus::Failed;
-                record.finished_at = Some(Utc::now());
-                record.error = Some("amuxd response exceeded 330s".into());
-                self.persist_run_and_notify_ui(&record).await;
-                self.update_job_after_run(&job, started_at, &my_workspace).await;
-                return;
-            }
-        };
+        let response_text =
+            match tokio::time::timeout(std::time::Duration::from_secs(330), async { inner_result })
+                .await
+            {
+                Ok(Ok(r)) => {
+                    record.session_id = Some(r.session_id.clone());
+                    self.persist_run_and_notify_ui(&record).await;
+                    r.text
+                }
+                Ok(Err(e)) => {
+                    record.status = RunStatus::Failed;
+                    record.finished_at = Some(Utc::now());
+                    record.error = Some(e);
+                    self.persist_run_and_notify_ui(&record).await;
+                    self.update_job_after_run(&job, started_at, &my_workspace)
+                        .await;
+                    return;
+                }
+                Err(_) => {
+                    record.status = RunStatus::Failed;
+                    record.finished_at = Some(Utc::now());
+                    record.error = Some("amuxd response exceeded 330s".into());
+                    self.persist_run_and_notify_ui(&record).await;
+                    self.update_job_after_run(&job, started_at, &my_workspace)
+                        .await;
+                    return;
+                }
+            };
 
         record.response_summary = Some(Self::truncate_response_summary(&response_text));
 
@@ -760,7 +759,6 @@ impl CronScheduler {
             }
         }
     }
-
 }
 
 // ==================== Unit Tests ====================
@@ -905,7 +903,10 @@ mod tests {
         let out = CronScheduler::reconcile_interrupted_run(record, None, now);
         assert_eq!(out.status, RunStatus::Stale);
         assert_eq!(out.finished_at, Some(now));
-        assert!(out.error.is_some(), "stale runs should carry an error message");
+        assert!(
+            out.error.is_some(),
+            "stale runs should carry an error message"
+        );
     }
 
     // ── compute_next_run: At ─────────────────────────────────────────────────
@@ -1127,5 +1128,4 @@ mod tests {
             "Expected a fallback next-run time for unknown timezone"
         );
     }
-
 }

@@ -149,7 +149,6 @@ export function SessionList({ compact, onSessionSelected }: SessionListProps) {
   const highlightedSessionIds = useSessionStore(s => s.highlightedSessionIds)
   const setActiveSession = useSessionStore(s => s.setActiveSession)
   const clearSelection = useWorkspaceStore(s => s.clearSelection)
-  const setFileModeRightTab = useUIStore(s => s.setFileModeRightTab)
 
   const parentRef = useRef<HTMLDivElement>(null)
   const useVirtual = parentSessions.length > VIRTUAL_THRESHOLD
@@ -169,11 +168,8 @@ export function SessionList({ compact, onSessionSelected }: SessionListProps) {
     const { viewingChildSessionId: vcid, setViewingChildSession: setVcs } = useSessionStore.getState()
     if (vcid) setVcs(null)
     useUIStore.getState().switchToSession(id)
-    if (useUIStore.getState().layoutMode === 'file') {
-      setFileModeRightTab('agent')
-    }
     onSessionSelected?.()
-  }, [setFileModeRightTab, onSessionSelected])
+  }, [onSessionSelected])
 
   if (isLoading && parentSessions.length === 0) {
     return (

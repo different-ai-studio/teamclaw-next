@@ -7,6 +7,7 @@ import {
   MouseEvent as ReactMouseEvent,
   type ComponentType,
 } from "react";
+import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
@@ -16,20 +17,18 @@ import {
   Terminal,
   BookOpen,
   FolderGit,
-  FolderTree,
   ChevronLeft,
   X,
   Loader2,
-  Bot,
   ChevronDown,
-  Plus,
-  Bookmark,
   RotateCw,
   MessageSquarePlus,
   AppWindow,
   Users,
   TerminalSquare,
   LogOut,
+  Mail,
+  CalendarDays,
 } from "lucide-react";
 // Spotlight window - lazy loaded for spotlight window label
 const SpotlightWindow = lazy(() =>
@@ -39,7 +38,6 @@ const SpotlightWindow = lazy(() =>
 )
 
 import { FileContentViewer } from "@/components/FileEditor";
-import { useNeedsTrafficLightSpacer } from "@/hooks/useTrafficLightSpacer";
 import {
   useWorkspaceInit,
   useChannelGatewayInit,
@@ -53,11 +51,9 @@ import {
   useTauriBodyClass,
   useSetupGuide,
   useTelemetryConsent,
-  useLayoutModeShortcut,
 } from "@/hooks/useAppInit";
 import {
   usePanelAutoOpen,
-  useLayoutModePanelSync,
   useFileTabSync,
   useResizablePanels,
 } from "@/hooks/useFileEditorState";
@@ -86,6 +82,7 @@ import { useSessionStore } from "@/stores/session";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridge";
+import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import { decodeLiveEvent, sessionIdFromTopic } from "@/lib/teamclaw-events";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
@@ -117,6 +114,8 @@ import { Button } from "@/components/ui/button";
 import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
 import { parseInviteDeeplink, claimInviteToken } from "@/lib/invite-deeplink";
 import { useCurrentTeamStore } from "@/stores/current-team";
+import { resolveCurrentMemberActorId } from "@/lib/current-actor";
+import { installV2E2EControl, isV2E2EControlActive } from "@/lib/e2e/v2-control";
 
 // Module-level set of session/live topics we've already MQTT-subscribed to.
 // Lives outside the React tree so that the App.tsx mount effect + the
@@ -140,7 +139,6 @@ export async function ensureSessionLiveSubscribed(teamId: string, sessionId: str
   } catch (e) {
     subscribedSessionTopics.delete(topic);
     console.warn('[MQTT] subscribe failed', topic, e);
-    throw e;
   }
 }
 import { Separator } from "@/components/ui/separator";
@@ -154,6 +152,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -500,79 +500,6 @@ function HeaderPanelTab({
   );
 }
 
-// WebView toolbar for file mode — only renders when active tab is a webview
-function FileModeWebViewToolbar() {
-  const activeTab = useTabsStore(selectActiveTab);
-  const showFind = useWebviewUIStore((s) => s.showFind)
-  const zoomLevels = useWebviewUIStore((s) => s.zoomLevels)
-  if (!activeTab || activeTab.type !== "webview") return null;
-  const webviewLabel = urlToLabel(activeTab.target)
-  return (
-    <>
-      <WebViewToolbar url={activeTab.target} label={webviewLabel} zoomLevel={zoomLevels[webviewLabel]} />
-      {showFind && (
-        <FindInPageBar label={webviewLabel} onClose={() => useWebviewUIStore.getState().setShowFind(false)} />
-      )}
-    </>
-  );
-}
-
-// File mode tab content — renders file viewer for file tabs, delegates to TabContentRenderer for others
-function FileModeTabContent() {
-  const activeTab = useTabsStore(selectActiveTab);
-  const selectedFile = useWorkspaceStore((s) => s.selectedFile);
-  const fileContent = useWorkspaceStore((s) => s.fileContent);
-  const isLoadingFile = useWorkspaceStore((s) => s.isLoadingFile);
-  const clearSelection = useWorkspaceStore((s) => s.clearSelection);
-  const selectFile = useWorkspaceStore((s) => s.selectFile);
-  const { t } = useTranslation();
-
-  // Track previous active tab to detect tab switches
-  const prevActiveTabId = useRef<string | null>(activeTab?.id ?? null);
-
-  // Sync workspace store when user switches tabs (tab click → load file)
-  useEffect(() => {
-    const tabChanged = activeTab?.id !== prevActiveTabId.current;
-    const hadTab = prevActiveTabId.current !== null;
-    prevActiveTabId.current = activeTab?.id ?? null;
-    if (tabChanged && activeTab?.type === "file") {
-      selectFile(activeTab.target);
-    }
-    // When active file tab is closed, clear selectedFile
-    if (tabChanged && hadTab && !activeTab) {
-      clearSelection();
-    }
-  }, [activeTab?.id, activeTab?.type, activeTab?.target, selectFile, clearSelection]);
-
-  if (!activeTab) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-        <Bookmark className="h-16 w-16 mb-4 opacity-30" />
-        <p className="text-sm">
-          {t("app.selectFile", "Select a file from the explorer")}
-        </p>
-      </div>
-    );
-  }
-
-  if (activeTab.type === "file") {
-    return (
-      <FileContentViewer
-        selectedFile={selectedFile}
-        fileContent={fileContent}
-        isLoadingFile={isLoadingFile}
-        onClose={() => {
-          clearSelection();
-          useTabsStore.getState().closeTab(activeTab.id);
-        }}
-      />
-    );
-  }
-
-  // Webview or native tab
-  return <TabContentRenderer />;
-}
-
 // Resize handle component for resizable panels
 function ResizeHandle({
   onResize,
@@ -640,7 +567,7 @@ function ResizeHandle({
 
 // Inner component to access sidebar context
 function AppContent() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   // Session store - individual selectors. Note: we subscribe to the
   // *result* of getActiveSession() so re-renders fire when currentSessionId
@@ -660,16 +587,15 @@ function AppContent() {
   const openPanel = useWorkspaceStore((s) => s.openPanel);
   const closePanel = useWorkspaceStore((s) => s.closePanel);
   const clearWorkspace = useWorkspaceStore((s) => s.clearWorkspace);
-  const selectedFile = useWorkspaceStore((s) => s.selectedFile);
 
   // UI store - individual selectors
   const currentView = useUIStore((s) => s.currentView);
   const closeSettings = useUIStore((s) => s.closeSettings);
   const authSession = useAuthStore((s) => s.session);
   const signOut = useAuthStore((s) => s.signOut);
-  const layoutMode = useUIStore((s) => s.layoutMode);
-  const fileModeRightTab = useUIStore((s) => s.fileModeRightTab);
-  const setFileModeRightTab = useUIStore((s) => s.setFileModeRightTab);
+  const currentTeam = useCurrentTeamStore((s) => s.team);
+  const currentMember = useCurrentTeamStore((s) => s.currentMember);
+  const loadCurrentTeam = useCurrentTeamStore((s) => s.load);
   const mainContentLayout = useUIStore((s) => s.mainContentLayout);
   const openSettings = useUIStore((s) => s.openSettings);
   const isNewWorkspace = useWorkspaceStore((s) => s.isNewWorkspace);
@@ -689,6 +615,22 @@ function AppContent() {
   /** Native traffic lights sit over the left column; spare inset header when left dock owns that strip. */
   const hideInsetChromeForLeftDock =
     leftDockActive && currentView !== "settings";
+
+  useEffect(() => {
+    void loadCurrentTeam();
+  }, [authSession?.user.id, loadCurrentTeam]);
+
+  const formatJoinedAt = (value: string | null | undefined) => {
+    if (!value) return t("common.notAvailable", "Not available");
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return t("common.notAvailable", "Not available");
+    return new Intl.DateTimeFormat(i18n.language || undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(date);
+  };
+
   // In workspace mode, SessionListColumn always sits to the left of SidebarInset
   // and renders its own traffic-light + collapse strip when the sidebar is
   // closed, so the chat header should NOT re-render that strip there.
@@ -704,7 +646,6 @@ function AppContent() {
       </>
     )
   ) : null;
-  const needsTrafficLightSpacer = useNeedsTrafficLightSpacer();
   const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
   const mainWorkspaceOnboardingSteps: OnboardingStep[] = [
     {
@@ -766,15 +707,14 @@ function AppContent() {
   useP2pAutoReconnect();
   useMCPFileWatcher(workspacePath);
   useExternalLinkHandler();
-  useLayoutModeShortcut();
   usePanelAutoOpen();
-  useLayoutModePanelSync();
   useFileTabSync();
   const { rightPanelWidth, handleRightPanelResize } = useResizablePanels();
 
   // v2 Phase 1: load session list from Supabase once AppContent mounts
   // (i.e. after auth is verified). Phase 2 will replace with realtime sub.
   useEffect(() => {
+    if (isV2E2EControlActive()) return;
     void useSessionListStore.getState().load();
   }, []);
 
@@ -799,22 +739,32 @@ function AppContent() {
         // amuxd convention: MQTT username = actor_id, password = JWT
         // (see amux/daemon/src/mqtt/client.rs + daemon/server.rs).
         // EMQX validates the JWT and uses actor_id for topic ACL.
-        const { data: actorRows, error: actorErr } = await supabase
-          .from("actors")
-          .select("id, team_id")
-          .eq("user_id", userId);
-        if (actorErr) throw actorErr;
-        const matching = (actorRows ?? []).find((a) => a.team_id === firstTeamId);
-        if (!matching) {
+        const actorId = await resolveCurrentMemberActorId(firstTeamId, userId, {
+          currentTeamId: useCurrentTeamStore.getState().team?.id ?? null,
+          currentMemberId: useCurrentTeamStore.getState().currentMember?.id ?? null,
+        });
+        if (!actorId) {
           console.warn("[MQTT] no actor for user in team", firstTeamId, "— skipping connect");
           return;
         }
         if (cancelled) return;
-        const actorId = matching.id as string;
+        const serverConfig = await getEffectiveServerConfig();
+        const brokerHost = serverConfig.mqttHost;
+        const brokerPort = serverConfig.mqttPort ?? 1883;
+        if (!brokerHost) {
+          console.warn("[MQTT] missing broker host — configure it in Settings > Server");
+          return;
+        }
+        console.info("[MQTT] connecting", {
+          brokerHost,
+          brokerPort,
+          teamId: firstTeamId,
+          actorId,
+        });
 
         await mqttConnect({
-          brokerHost: import.meta.env.VITE_MQTT_HOST as string,
-          brokerPort: Number(import.meta.env.VITE_MQTT_PORT ?? 1883),
+          brokerHost,
+          brokerPort,
           username: actorId,
           password: accessToken,
           clientId: `teamclaw-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
@@ -1001,13 +951,17 @@ function AppContent() {
           console.warn('[cache-sync] actor sync failed:', e),
         );
 
-        // Background: sync sessions into local cache.
-        void syncSessionsForTeam(firstTeamId).then(() => {
-          // Reload session list from merged local cache after sync finishes.
-          void useSessionListStore.getState().load();
-        }).catch((e) =>
-          console.warn('[cache-sync] session sync failed:', e),
-        );
+        // Background: sync sessions into local cache. E2E control owns the
+        // session-list rows while active, so skip normal hydration/reloads.
+        if (!isV2E2EControlActive()) {
+          void syncSessionsForTeam(firstTeamId).then(() => {
+            if (isV2E2EControlActive()) return;
+            // Reload session list from merged local cache after sync finishes.
+            void useSessionListStore.getState().load();
+          }).catch((e) =>
+            console.warn('[cache-sync] session sync failed:', e),
+          );
+        }
       } catch (err) {
         console.error("[MQTT] receiver wiring failed:", err);
       }
@@ -1085,6 +1039,7 @@ function AppContent() {
   const prevRefreshTriggerRef = useRef(0);
   useEffect(() => {
     if (!currentSessionId) return;
+    if (isV2E2EControlActive()) return;
     // A refresh-trigger bump on the SAME session = user pressed ↻.
     const forceFull =
       messageRefreshTrigger !== prevRefreshTriggerRef.current &&
@@ -1253,11 +1208,13 @@ function AppContent() {
             </Button>
             {authSession && (() => {
               const meta = authSession.user.user_metadata as Record<string, unknown> | undefined;
-              const userName =
+              const email = authSession.user.email || "";
+              const fallbackName =
                 (typeof meta?.full_name === 'string' && meta.full_name) ||
                 (typeof meta?.name === 'string' && meta.name) ||
-                authSession.user.email ||
+                (email ? email.split("@")[0] : "") ||
                 t("common.user", "User");
+              const userName = currentMember?.displayName || fallbackName;
               return (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1270,8 +1227,47 @@ function AppContent() {
                       <ChevronDown className="h-3.5 w-3.5" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => { void signOut(); }}>
+                  <DropdownMenuContent align="end" className="w-72 p-2">
+                    <DropdownMenuLabel className="px-2 py-1">
+                      <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
+                      {currentMember?.role && (
+                        <div className="mt-0.5 font-mono text-[11px] font-normal text-muted-foreground">
+                          {currentMember.role}
+                        </div>
+                      )}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <div className="space-y-1 px-2 py-1.5 text-[12px]">
+                      <div className="flex items-start gap-2">
+                        <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <div className="text-faint">{t("auth.email", "Email")}</div>
+                          <div className="truncate font-mono text-[11px] text-foreground">
+                            {email || t("common.notAvailable", "Not available")}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <div className="text-faint">{t("settings.team.teamName", "Team name")}</div>
+                          <div className="truncate text-foreground">
+                            {currentTeam?.name || t("common.notAvailable", "Not available")}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <div className="text-faint">{t("settings.team.joinedAt", "Joined")}</div>
+                          <div className="font-mono text-[11px] text-foreground">
+                            {formatJoinedAt(currentMember?.joinedAt)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => { void signOut(); }} variant="destructive">
                       <LogOut className="mr-2 h-4 w-4" />
                       {t('common.signOut', 'Sign out')}
                     </DropdownMenuItem>
@@ -1330,167 +1326,6 @@ function AppContent() {
     );
   }
 
-  // File Mode: Completely different layout without sidebar
-  if (layoutMode === "file") {
-    return (
-      <div className="flex h-svh w-full flex-col overflow-hidden bg-background">
-        {/* Global connecting overlay — fixed to viewport, covers everything */}
-        {/* Header for file mode */}
-        <header
-          className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background border-b px-4"
-          data-tauri-drag-region
-        >
-          {needsTrafficLightSpacer && <TrafficLights />}
-
-          <span className="text-sm font-medium">{buildConfig.app.name}</span>
-          <Separator
-            orientation="vertical"
-            className="data-[orientation=vertical]:h-4 mx-2"
-          />
-
-          {/* Current file path */}
-          <span className="text-sm text-muted-foreground truncate flex-1">
-            {selectedFile
-              ? selectedFile.split("/").slice(-2).join("/")
-              : t("app.noFileSelected", "No file selected")}
-          </span>
-
-          {/* Right panel tabs */}
-          <div className="ml-auto flex items-center gap-1">
-            <HeaderPanelTab
-              icon={Bookmark}
-              label={t("navigation.shortcuts", "Shortcuts")}
-              count={0}
-              isActive={fileModeRightTab === "shortcuts"}
-              onClick={() => setFileModeRightTab("shortcuts")}
-            />
-            <HeaderPanelTab
-              icon={FolderGit}
-              label={t("navigation.changes", "Changes")}
-              count={sessionDiff.length}
-              isActive={fileModeRightTab === "changes"}
-              onClick={() => setFileModeRightTab("changes")}
-            />
-            <HeaderPanelTab
-              icon={FolderTree}
-              label={t("navigation.files", "Files")}
-              count={0}
-              isActive={fileModeRightTab === "files"}
-              onClick={() => setFileModeRightTab("files")}
-            />
-            <HeaderPanelTab
-              icon={Bot}
-              label={t("navigation.agent", "Agent")}
-              count={0}
-              isActive={fileModeRightTab === "agent"}
-              onClick={() => setFileModeRightTab("agent")}
-            />
-          </div>
-        </header>
-
-        {/* File Mode: 2-panel layout with resizable panels */}
-        <div className="relative flex flex-1 w-full overflow-hidden">
-          {/* Center - TabBar + Content */}
-          <div className="relative overflow-hidden flex-1 min-w-[200px] flex flex-col">
-            <TabBar />
-            <FileModeWebViewToolbar />
-            <div className="flex-1 relative overflow-hidden">
-              <FileModeTabContent />
-            </div>
-          </div>
-
-          {/* Right resize handle */}
-          <ResizeHandle
-            direction="horizontal"
-            onResize={handleRightPanelResize}
-            className="border-l border-border"
-          />
-
-          {/* Right Panel (resizable) */}
-          <div
-            className="bg-background overflow-hidden flex flex-col shrink-0"
-            style={{ width: rightPanelWidth }}
-          >
-            {/* Panel header — Agent tab has session dropdown + new session button */}
-            <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
-              {fileModeRightTab === "agent" ? (
-                <>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="flex items-center gap-1 text-xs font-medium text-foreground hover:bg-muted px-1.5 py-0.5 rounded transition-colors truncate max-w-[200px]">
-                        <span className="truncate">
-                          {activeSession?.title || t("chat.newChat", "New Chat")}
-                        </span>
-                        <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56 max-h-64 overflow-y-auto">
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                      {(sessions as any[]).slice(0, 20).map((s: any) => (
-                        <DropdownMenuItem
-                          key={s.id}
-                          className={cn(
-                            "text-xs truncate",
-                            s.id === activeSession?.id && "bg-accent"
-                          )}
-                          onClick={() => useUIStore.getState().switchToSession(s.id)}
-                        >
-                          {s.title || t("chat.newChat", "New Chat")}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <button
-                    onClick={() => useUIStore.getState().startNewChat()}
-                    className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                    title={t("app.newSession", "New Session")}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              ) : (
-                <span className="text-xs font-medium text-foreground">
-                  {(() => {
-                    switch (fileModeRightTab) {
-                      case "shortcuts": return t("navigation.shortcuts", "Shortcuts");
-                      case "changes": return t("navigation.changes", "Changes");
-                      default: return t("navigation.files", "Files");
-                    }
-                  })()}
-                </span>
-              )}
-            </div>
-            <div className="flex-1 overflow-hidden relative">
-              {fileModeRightTab === "shortcuts" && (
-                <ShortcutsPanel />
-              )}
-              {fileModeRightTab === "agent" && (
-                <ErrorBoundary scope="Chat" inline>
-                  <ChatPanel compact />
-                </ErrorBoundary>
-              )}
-              {fileModeRightTab === "changes" && (
-                <RightPanel defaultTab="diff" compact />
-              )}
-              {fileModeRightTab === "files" && (
-                <RightPanel defaultTab="files" compact />
-              )}
-            </div>
-          </div>
-        </div>
-        <WorkspaceTypeDialog
-          open={isNewWorkspace}
-          onSelectPersonal={() => setIsNewWorkspace(false)}
-          onSelectTeam={() => {
-            setIsNewWorkspace(false);
-            openSettings('team');
-          }}
-        />
-      </div>
-    );
-  }
-
-  // Task Mode: Standard layout with sidebar
   return (
     <>
       <AppSidebar />
@@ -1682,6 +1517,10 @@ function AppContent() {
 }
 
 function App() {
+  React.useEffect(() => {
+    installV2E2EControl();
+  }, []);
+
   // ── Global webview shortcuts (find, zoom, context menu) ──
   useWebviewShortcuts()
   useTerminalShortcuts()

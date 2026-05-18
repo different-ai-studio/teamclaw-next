@@ -185,6 +185,7 @@ export const ChatMessage = React.memo(function ChatMessage({
       <div
         className="group/msg my-4 flex items-center gap-3 text-muted-foreground"
         data-testid="chat-message"
+        data-message-id={message.id}
         data-message-role={message.role}
         data-message-kind="compaction"
       >
@@ -205,7 +206,12 @@ export const ChatMessage = React.memo(function ChatMessage({
   }
 
   return (
-    <div className={cn("group/msg", isToolCallOnly ? "mb-0.5" : "mb-1.5")} data-testid="chat-message" data-message-role={message.role}>
+    <div
+      className={cn("group/msg", isToolCallOnly ? "mb-0.5" : "mb-1.5")}
+      data-testid="chat-message"
+      data-message-id={message.id}
+      data-message-role={message.role}
+    >
       <ActorLabel
         senderActorId={message.senderActorId}
         modelOverride={message.modelID}
@@ -361,4 +367,3 @@ export const ChatMessage = React.memo(function ChatMessage({
     </div>
   );
 });
-
