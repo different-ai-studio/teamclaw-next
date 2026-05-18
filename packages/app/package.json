@@ -95,7 +95,7 @@
     "@eslint/js": "^10.0.1",
     "@tailwindcss/oxide-darwin-arm64": "^4.1.18",
     "@tailwindcss/oxide-darwin-x64": "^4.3.0",
-    "@tailwindcss/oxide-linux-arm64-gnu": "^4.1.18",
+    "@tailwindcss/oxide-linux-arm64-gnu": "^4.3.0",
     "@tailwindcss/oxide-linux-x64-gnu": "^4.1.18",
     "@tailwindcss/oxide-win32-arm64-msvc": "^4.1.18",
     "@tailwindcss/oxide-win32-x64-msvc": "^4.1.18",
