@@ -192,6 +192,7 @@ const seededRunIds = new Set<string>();
 let seededSessionRows: SessionListEntry[] | null = null;
 let controlInstalled = false;
 let controlActive = false;
+let internalMutationDepth = 0;
 
 function e2eEnabled(): boolean {
   return (
@@ -202,6 +203,15 @@ function e2eEnabled(): boolean {
 
 export function isV2E2EControlActive(): boolean {
   return e2eEnabled() && controlInstalled && controlActive;
+}
+
+function withInternalMutation<T>(fn: () => T): T {
+  internalMutationDepth += 1;
+  try {
+    return fn();
+  } finally {
+    internalMutationDepth -= 1;
+  }
 }
 
 function nowIso(): string {
@@ -308,15 +318,16 @@ function sameSessionRows(a: SessionListEntry[], b: SessionListEntry[]): boolean 
 }
 
 useSessionListStore.subscribe((state) => {
-  if (!isV2E2EControlActive() || !seededSessionRows) return;
+  if (internalMutationDepth > 0 || !isV2E2EControlActive() || !seededSessionRows) return;
   if (sameSessionRows(state.rows, seededSessionRows)) return;
-  useSessionListStore.setState({
-    rows: seededSessionRows,
+  const rows = seededSessionRows;
+  withInternalMutation(() => useSessionListStore.setState({
+    rows,
     loading: false,
     error: null,
     hasMore: false,
     nextCursor: null,
-  });
+  }));
 });
 
 function messageKindFrom(input: MessageKind | string | undefined): MessageKind {
@@ -451,19 +462,35 @@ function sessionToCacheRow(session: SeedSession, entry: SessionListEntry): Sessi
 
 function updateSessionPreview(sessionId: string, message: Message): void {
   const lastMessageAt = protoTimeToIso(message.createdAt);
-  useSessionListStore.setState((state) => ({
-    rows: sortRows(
-      state.rows.map((row) =>
-        row.id === sessionId
-          ? {
-              ...row,
-              last_message_at: lastMessageAt,
-              last_message_preview: message.content,
-            }
-          : row,
-      ),
-    ),
-  }));
+  withInternalMutation(() => {
+    useSessionListStore.setState((state) => {
+      const rows = sortRows(
+        state.rows.map((row) =>
+          row.id === sessionId
+            ? {
+                ...row,
+                last_message_at: lastMessageAt,
+                last_message_preview: message.content,
+              }
+            : row,
+        ),
+      );
+      seededSessionRows = seededSessionRows
+        ? sortRows(
+            seededSessionRows.map((row) =>
+              row.id === sessionId
+                ? {
+                    ...row,
+                    last_message_at: lastMessageAt,
+                    last_message_preview: message.content,
+                  }
+                : row,
+            ),
+          )
+        : null;
+      return { rows };
+    });
+  });
 }
 
 function resolveTeamId(sessionId: string): string {
@@ -545,6 +572,7 @@ const control: V2E2EControl = {
       baseSessionEntries.map((entry) => backfillSessionPreview(entry, nextMessages[entry.id] ?? [])),
     );
     seededSessionRows = sessionEntries;
+    const activeSessionId = input.activeSessionId ?? sessionEntries[0]?.id ?? null;
     const warnings: string[] = [];
     if (!isTauri() && sessionEntries.length > 0) {
       warnings.push("participant cache is populated only in Tauri; non-Tauri E2E runs should not assert sidebar participant clusters");
@@ -586,18 +614,20 @@ const control: V2E2EControl = {
       ),
     );
 
-    useSessionListStore.setState({
-      rows: sessionEntries,
-      loading: false,
-      error: null,
-      hasMore: false,
-      nextCursor: null,
+    withInternalMutation(() => {
+      useSessionListStore.setState({
+        rows: sessionEntries,
+        loading: false,
+        error: null,
+        hasMore: false,
+        nextCursor: null,
+      });
     });
 
     useSessionStore.setState({
       messages: nextMessages,
-      activeSessionId: input.activeSessionId ?? null,
-      currentSessionId: input.activeSessionId ?? null,
+      activeSessionId,
+      currentSessionId: activeSessionId,
       isLoading: false,
       sessionError: null,
       errorSessionId: null,
@@ -750,14 +780,18 @@ const control: V2E2EControl = {
   cleanup: () => {
     const sessionsToClear = new Set(seededSessionIds);
     const actorsToClear = new Set(seededActorIds);
+    controlActive = false;
+    seededSessionRows = null;
 
-    useSessionListStore.setState((state) => ({
-      rows: state.rows.filter((row) => !sessionsToClear.has(row.id)),
-      loading: false,
-      error: null,
-      hasMore: false,
-      nextCursor: null,
-    }));
+    withInternalMutation(() => {
+      useSessionListStore.setState((state) => ({
+        rows: state.rows.filter((row) => !sessionsToClear.has(row.id)),
+        loading: false,
+        error: null,
+        hasMore: false,
+        nextCursor: null,
+      }));
+    });
     useSessionStore.setState((state) => {
       const messages = { ...state.messages };
       for (const sessionId of sessionsToClear) delete messages[sessionId];
@@ -789,11 +823,9 @@ const control: V2E2EControl = {
     seededSessionIds.clear();
     seededActorIds.clear();
     seededRunIds.clear();
-    seededSessionRows = null;
     // local-cache exposes upsert/soft-delete helpers, but no hard-delete-by-run
     // primitive. Keep cleanup scoped to frontend state and require E2E callers
     // to use unique run/session/message ids for repeatable Tauri runs.
-    controlActive = false;
   },
 };
 
