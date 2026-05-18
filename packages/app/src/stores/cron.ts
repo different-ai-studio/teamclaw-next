@@ -167,6 +167,11 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   loadJobs: async () => {
+    if (!get().isInitialized) {
+      await get().init()
+      return
+    }
+
     await withAsync(set, async () => {
       const workspacePath = useWorkspaceStore.getState().workspacePath
       const jobs = await invoke<CronJob[]>('cron_list_jobs', { workspacePath })

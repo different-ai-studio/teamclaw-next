@@ -189,7 +189,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
     if (!isTauri()) return
 
     try {
-      await invoke('telemetry_set_consent', { consent })
+      await invoke('telemetry_set_consent', { state: consent })
       set({ consent })
     } catch (err) {
       console.error('[telemetry] Failed to set consent:', err)

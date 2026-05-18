@@ -5,12 +5,18 @@ import { NewSessionActorPicker } from '../NewSessionActorPicker'
 
 const loadActorsForTeam = vi.fn()
 const syncActorsForTeam = vi.fn()
+const supabaseFrom = vi.fn()
 
 vi.mock('@/lib/local-cache', () => ({
   loadActorsForTeam: (...args: unknown[]) => loadActorsForTeam(...args),
 }))
 vi.mock('@/lib/sync/actor-sync', () => ({
   syncActorsForTeam: (...args: unknown[]) => syncActorsForTeam(...args),
+}))
+vi.mock('@/lib/supabase-client', () => ({
+  supabase: {
+    from: (...args: unknown[]) => supabaseFrom(...args),
+  },
 }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback: string) => fallback }),
@@ -28,6 +34,7 @@ function mockActors(rows: { id: string; actor_type: string; display_name: string
 beforeEach(() => {
   loadActorsForTeam.mockReset()
   syncActorsForTeam.mockReset()
+  supabaseFrom.mockReset()
 })
 
 describe('NewSessionActorPicker', () => {
@@ -112,5 +119,37 @@ describe('NewSessionActorPicker', () => {
 
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
     expect(syncActorsForTeam).toHaveBeenCalledWith('t-1', { full: true })
+  })
+
+  it('falls back to actor_directory when local cache and sync return no rows', async () => {
+    loadActorsForTeam.mockResolvedValue([])
+    syncActorsForTeam.mockResolvedValue(0)
+    supabaseFrom.mockReturnValue({
+      select: () => ({
+        eq: () => ({
+          order: () => Promise.resolve({
+            data: [
+              { id: 'self', actor_type: 'member', display_name: 'Me' },
+              { id: 'm-1', actor_type: 'member', display_name: 'Alice' },
+            ],
+            error: null,
+          }),
+        }),
+      }),
+    })
+
+    render(
+      <NewSessionActorPicker
+        open={true}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        teamId="t-1"
+        selfActorId="self"
+      />
+    )
+
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
+    expect(screen.queryByText('Me')).toBeNull()
+    expect(supabaseFrom).toHaveBeenCalledWith('actor_directory')
   })
 })

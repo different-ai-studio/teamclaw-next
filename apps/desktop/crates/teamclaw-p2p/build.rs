@@ -1,7 +1,9 @@
 fn main() {
     // Read APP_SHORT_NAME from the same build.config.json used by the main crate.
     // This ensures the iroh storage directory matches across crates.
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("Cargo must set CARGO_MANIFEST_DIR for build scripts");
+    let manifest_dir = std::path::Path::new(&manifest_dir);
     // apps/desktop/crates/teamclaw-p2p -> apps/desktop -> project root
     let root_dir = manifest_dir
         .parent()

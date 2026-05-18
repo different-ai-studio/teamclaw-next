@@ -64,8 +64,8 @@ fn daemon_config_path() -> PathBuf {
 /// daemon is not running so the UI can surface an "amuxd unreachable" state.
 #[tauri::command]
 pub async fn list_channels() -> Result<Vec<ChannelStatus>, String> {
-    let mut s = UnixStream::connect(sock_path())
-        .map_err(|e| format!("amuxd not reachable: {e}"))?;
+    let mut s =
+        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
     s.write_all(b"channel-status\n")
         .map_err(|e| format!("write failed: {e}"))?;
     s.shutdown(std::net::Shutdown::Write)
@@ -116,8 +116,8 @@ pub fn load_channel_config(platform: String) -> Result<Option<serde_json::Value>
 /// auto-reloads the channel manager so the change takes effect immediately.
 #[tauri::command]
 pub async fn save_channel_config(platform: String, config_json: String) -> Result<(), String> {
-    let mut s = UnixStream::connect(sock_path())
-        .map_err(|e| format!("amuxd not reachable: {e}"))?;
+    let mut s =
+        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
     // Single-line JSON keeps the framing simple — the daemon reads exactly
     // three newline-terminated tokens off the sock.
     let single_line = config_json.replace('\n', " ");
@@ -131,8 +131,8 @@ pub async fn save_channel_config(platform: String, config_json: String) -> Resul
 /// useful when the daemon-managed config file was edited out-of-band.
 #[tauri::command]
 pub async fn reload_channels() -> Result<(), String> {
-    let mut s = UnixStream::connect(sock_path())
-        .map_err(|e| format!("amuxd not reachable: {e}"))?;
+    let mut s =
+        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
     s.write_all(b"channel-reload\n")
         .map_err(|e| format!("write failed: {e}"))?;
     Ok(())

@@ -30,6 +30,7 @@ import {
   MessageKind,
 } from "@/lib/proto/teamclaw_pb";
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
+import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
 type SendMessageFilePart = Record<string, unknown>;
@@ -306,8 +307,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
   // When activeSessionId is null (brand-new chat), fall back to any row's
   // team_id so SessionActorSheet still has a team context for the add flow.
+  const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null);
+  const currentMemberId = useCurrentTeamStore(s => s.currentMember?.id ?? null);
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
-  const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId;
+  const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
   const [hasSkillRestartPrompt, setHasSkillRestartPrompt] = React.useState(false);
   const [isRestartingSkillsRuntime, setIsRestartingSkillsRuntime] = React.useState(false);
@@ -901,14 +904,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
       if (sid && authSession && teamIdForSend) {
         try {
-          const { data: actorRows, error: actorErr } = await supabase
-            .from("actors")
-            .select("id, team_id")
-            .eq("user_id", authSession.user.id);
-          if (actorErr) throw actorErr;
-          const matching = (actorRows ?? []).find((a) => a.team_id === teamIdForSend);
-          if (!matching) throw new Error(`No actor found for user in team ${teamIdForSend}`);
-          const senderActorId = matching.id as string;
+          const senderActorId = await resolveCurrentMemberActorId(
+            teamIdForSend,
+            authSession.user.id,
+            {
+              currentTeamId: useCurrentTeamStore.getState().team?.id ?? null,
+              currentMemberId: useCurrentTeamStore.getState().currentMember?.id ?? null,
+            },
+          );
+          if (!senderActorId) throw new Error(`No actor found for user in team ${teamIdForSend}`);
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
 
@@ -932,11 +936,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             sentAt: createdAt,
             body: toBinary(SessionMessageEnvelopeSchema, sessionMsg),
           });
-          await mqttPublish(
-            `amux/${teamIdForSend}/session/${sid}/live`,
-            toBinary(LiveEventEnvelopeSchema, live),
-            false,
-          );
           const { error: insErr } = await supabase.from("messages").insert({
             id: messageId,
             team_id: teamIdForSend,
@@ -947,6 +946,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             metadata: { mention_actor_ids: mentionActorIds },
           });
           if (insErr) throw insErr;
+          await mqttPublish(
+            `amux/${teamIdForSend}/session/${sid}/live`,
+            toBinary(LiveEventEnvelopeSchema, live),
+            false,
+          ).catch((publishErr) => {
+            console.warn("[MQTT] publish failed", publishErr);
+          });
           useSessionStore.getState().appendMessage(sid, msg);
         } catch (e) {
           console.error("[ChatPanel] send failed:", e);
@@ -1021,13 +1027,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       console.error('[ChatPanel] no auth session');
       return;
     }
-    const { data: actorRows } = await supabase
-      .from('actors')
-      .select('id, team_id')
-      .eq('user_id', authSession.user.id);
-    const myActor = (actorRows ?? []).find((a: { id: string; team_id: string }) => a.team_id === teamIdForSend);
-    if (!myActor) {
+    const myActorId = await resolveCurrentMemberActorId(
+      teamIdForSend,
+      authSession.user.id,
+      {
+        currentTeamId: useCurrentTeamStore.getState().team?.id ?? null,
+        currentMemberId: useCurrentTeamStore.getState().currentMember?.id ?? null,
+      },
+    );
+    if (!myActorId) {
       console.error('[ChatPanel] no actor record for user in team', teamIdForSend);
+      const { toast } = await import('sonner');
+      toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
       return;
     }
 
@@ -1054,7 +1065,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       const draftIdeaId = useUIStore.getState().draftIdeaId;
       const { sessionId } = await createSessionShell({
         teamId: teamIdForSend,
-        creatorActorId: myActor.id,
+        creatorActorId: myActorId,
         title: titleSource,
         additionalActorIds: allAdditional,
         ideaId: draftIdeaId,
@@ -1324,7 +1335,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         onCancel={handlePickerCancel}
         onConfirm={(picks) => { void handlePickerConfirm(picks); }}
         teamId={sheetTeamId ?? ''}
-        selfActorId={null}
+        selfActorId={currentMemberId}
       />
 
       {/* Inactivity warning - task still running but no events */}

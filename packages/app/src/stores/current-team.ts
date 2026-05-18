@@ -12,8 +12,16 @@ export interface CurrentTeam {
   slug: string;
 }
 
+export interface CurrentTeamMember {
+  id: string;
+  displayName: string;
+  role: string | null;
+  joinedAt: string | null;
+}
+
 interface State {
   team: CurrentTeam | null;
+  currentMember: CurrentTeamMember | null;
   activeWorkspaceConfig: TeamWorkspaceConfig | null;
   loading: boolean;
   saving: boolean;
@@ -25,6 +33,7 @@ interface State {
 
 export const useCurrentTeamStore = create<State>((set, get) => ({
   team: null,
+  currentMember: null,
   activeWorkspaceConfig: null,
   loading: false,
   saving: false,
@@ -33,7 +42,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
   load: async () => {
     const session = useAuthStore.getState().session;
     if (!session) {
-      set({ team: null, activeWorkspaceConfig: null, loading: false, error: null });
+      set({ team: null, currentMember: null, activeWorkspaceConfig: null, loading: false, error: null });
       return;
     }
 
@@ -50,11 +59,15 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     }
     const row = data?.[0];
     const activeTeam = row ? { id: row.id, name: row.name, slug: row.slug } : null;
+    const currentMember = activeTeam
+      ? await loadCurrentMember(activeTeam.id, session.user.id)
+      : null;
     const activeWorkspaceConfig = activeTeam
       ? await getTeamWorkspaceConfig(activeTeam.id)
       : null;
     set({
       team: activeTeam,
+      currentMember,
       activeWorkspaceConfig,
       loading: false,
     });
@@ -63,7 +76,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
   reloadAndSwitchTo: async (teamId: string) => {
     const session = useAuthStore.getState().session;
     if (!session) {
-      set({ team: null, activeWorkspaceConfig: null, loading: false, error: null });
+      set({ team: null, currentMember: null, activeWorkspaceConfig: null, loading: false, error: null });
       return;
     }
 
@@ -79,11 +92,15 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
       return;
     }
     const activeTeam = data ? { id: data.id, name: data.name, slug: data.slug } : null;
+    const currentMember = activeTeam
+      ? await loadCurrentMember(activeTeam.id, session.user.id)
+      : null;
     const activeWorkspaceConfig = activeTeam
       ? await getTeamWorkspaceConfig(activeTeam.id)
       : null;
     set({
       team: activeTeam,
+      currentMember,
       activeWorkspaceConfig,
       loading: false,
     });
@@ -121,3 +138,42 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     return true;
   },
 }));
+
+async function loadCurrentMember(teamId: string, userId: string): Promise<CurrentTeamMember | null> {
+  const { data: actorRows, error: actorError } = await supabase
+    .from("actor_directory")
+    .select("id, display_name, team_role")
+    .eq("team_id", teamId)
+    .eq("user_id", userId)
+    .eq("actor_type", "member")
+    .limit(1);
+
+  if (actorError) {
+    console.warn("[CurrentTeam] failed to load current member", actorError);
+    return null;
+  }
+
+  const actor = actorRows?.[0] as
+    | { id: string; display_name: string | null; team_role: string | null }
+    | undefined;
+  if (!actor) return null;
+
+  const { data: memberRows, error: memberError } = await supabase
+    .from("team_members")
+    .select("joined_at")
+    .eq("team_id", teamId)
+    .eq("member_id", actor.id)
+    .limit(1);
+
+  if (memberError) {
+    console.warn("[CurrentTeam] failed to load current member join time", memberError);
+  }
+
+  const membership = memberRows?.[0] as { joined_at: string | null } | undefined;
+  return {
+    id: actor.id,
+    displayName: actor.display_name || "",
+    role: actor.team_role,
+    joinedAt: membership?.joined_at ?? null,
+  };
+}

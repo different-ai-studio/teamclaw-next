@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 
 // ── hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -64,31 +64,20 @@ describe('GatewayStatusCard', () => {
     vi.clearAllMocks()
   })
 
-  it("shows 'amuxd not running' banner when amuxd is unreachable", async () => {
+  it("does not show the global 'amuxd not running' banner inside a card", () => {
     vi.mocked(api.listChannels).mockRejectedValue(new api.AmuxdUnreachableError())
     render(<GatewayStatusCard {...baseProps} />)
-    await waitFor(() => {
-      expect(screen.getByText(/amuxd not running/i)).toBeTruthy()
-    })
+    expect(screen.queryByText(/amuxd not running/i)).toBeNull()
+    expect(api.listChannels).not.toHaveBeenCalled()
   })
 
-  it('does not show the banner when amuxd returns statuses successfully', async () => {
+  it('renders the gateway title without probing amuxd', () => {
     vi.mocked(api.listChannels).mockResolvedValue([
       { platform: 'discord', enabled: true, connected: false, lastError: null },
     ])
     render(<GatewayStatusCard {...baseProps} title="Discord Gateway" />)
-    // Title should be visible
-    await waitFor(() => {
-      expect(screen.getByText('Discord Gateway')).toBeTruthy()
-    })
-    // Banner must NOT be present
+    expect(screen.getByText('Discord Gateway')).toBeTruthy()
     expect(screen.queryByText(/amuxd not running/i)).toBeNull()
-  })
-
-  it('shows the banner immediately when amuxdUnreachable prop is true (no fetch needed)', () => {
-    // listChannels should NOT be called when prop is provided
-    render(<GatewayStatusCard {...baseProps} amuxdUnreachable={true} />)
-    expect(screen.getByText(/amuxd not running/i)).toBeTruthy()
     expect(api.listChannels).not.toHaveBeenCalled()
   })
 })

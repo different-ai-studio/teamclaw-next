@@ -184,8 +184,8 @@ export function VoiceSection() {
         <SettingCard>
           <div className="flex items-center justify-between">
             <div>
-              <h4 className="font-medium">{t("settings.voice.enableVoice", "Enable Voice Input")}</h4>
-              <p className="text-sm text-muted-foreground">
+              <h4 className="text-[13px] font-semibold">{t("settings.voice.enableVoice", "Enable Voice Input")}</h4>
+              <p className="text-[12.5px] text-muted-foreground">
                 {t("settings.voice.enableVoiceDesc", "Show the voice input button and allow voice shortcuts.")}
               </p>
             </div>
@@ -211,8 +211,8 @@ export function VoiceSection() {
       <SettingCard>
         <div className="flex items-center justify-between">
           <div>
-            <h4 className="font-medium">{t("settings.voice.enableVoice", "Enable Voice Input")}</h4>
-            <p className="text-sm text-muted-foreground">
+            <h4 className="text-[13px] font-semibold">{t("settings.voice.enableVoice", "Enable Voice Input")}</h4>
+            <p className="text-[12.5px] text-muted-foreground">
               {t("settings.voice.enableVoiceDesc", "Show the voice input button and allow voice shortcuts.")}
             </p>
           </div>
@@ -221,11 +221,11 @@ export function VoiceSection() {
       </SettingCard>
 
       <SettingCard>
-        <h4 className="font-medium mb-3">
+        <h4 className="mb-3 text-[13px] font-semibold">
           {t("settings.voice.models", "Speech recognition models")}
         </h4>
         {error && (
-          <p className="text-sm text-destructive mb-3" role="alert">
+          <p className="mb-3 text-[12.5px] text-destructive" role="alert">
             {error}
           </p>
         )}
@@ -240,13 +240,13 @@ export function VoiceSection() {
               <li
                 key={m.id}
                 className={cn(
-                  "flex items-center justify-between gap-4 rounded-lg border p-3",
+                  "flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5",
                   "bg-muted/30 border-border",
                 )}
               >
                 <div>
-                  <span className="font-medium">{m.name}</span>
-                  <span className="text-muted-foreground text-sm ml-2">
+                  <span className="text-[13px] font-semibold">{m.name}</span>
+                  <span className="ml-2 text-[12px] text-muted-foreground">
                     {m.size}
                   </span>
                 </div>
@@ -260,6 +260,7 @@ export function VoiceSection() {
                       <Button
                         size="sm"
                         variant="destructive"
+                        className="h-8 text-[12.5px]"
                         disabled={deletingId !== null || downloadingId !== null}
                         onClick={() => handleDelete(m.id)}
                       >
@@ -295,6 +296,7 @@ export function VoiceSection() {
                     <Button
                       size="sm"
                       variant="secondary"
+                      className="h-8 text-[12.5px]"
                       disabled={downloadingId !== null}
                       onClick={() => handleDownload(m.id)}
                     >

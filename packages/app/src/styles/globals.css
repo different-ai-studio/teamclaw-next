@@ -228,15 +228,15 @@ input,
     user-select: text;
 }
 
-/* Form input focus tracks the user's system accent color where available.
-   macOS / Windows: focused fields glow with the accent the user picked in
-   System Settings. Buttons keep the brand --ring; this rule scopes the
-   override to text-entry surfaces where the convention is clearest. */
+/* Keep text-entry focus treatment inside TeamClaw's neutral design system.
+   Native WebView outlines use the OS accent color (often bright blue), which
+   is too loud for the settings and modal surfaces. */
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-    outline: 2px solid var(--system-accent);
+    outline: 1.5px solid color-mix(in srgb, var(--foreground) 28%, transparent);
     outline-offset: 1px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--foreground) 8%, transparent);
 }
 
 /* Honor system "Reduce motion" preference (macOS System Settings →

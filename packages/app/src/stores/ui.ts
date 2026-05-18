@@ -5,8 +5,7 @@ import { CONFIG_FILE_NAME, TEAMCLAW_DIR } from '@/lib/build-config'
 
 type View = 'chat' | 'settings'
 
-// Layout mode: 'task' for agent-centric, 'file' for file-centric
-export type LayoutMode = 'task' | 'file'
+export type LayoutMode = 'task'
 export type MainContentLayout = 'stacked' | 'split'
 
 // Right panel tab in file mode
@@ -29,7 +28,7 @@ export type SidebarFilter =
   | { kind: 'actor'; actorId: string; displayName: string; actorType: 'member' | 'agent' }
   | { kind: 'idea'; ideaId: string; title: string }
 
-export type SettingsSection = 'llm' | 'general' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts' | 'cache'
+export type SettingsSection = 'llm' | 'general' | 'server' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts' | 'cache'
 
 interface UIState {
   currentView: View
@@ -281,11 +280,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setDraftIdeaId: (ideaId) => set({ draftIdeaId: ideaId }),
   clearDraftIdeaId: () => set({ draftIdeaId: null }),
 
-  setLayoutMode: (mode) => set({ layoutMode: mode }),
+  setLayoutMode: () => set({ layoutMode: 'task' }),
 
-  toggleLayoutMode: () => set((state) => ({
-    layoutMode: state.layoutMode === 'task' ? 'file' : 'task'
-  })),
+  toggleLayoutMode: () => set({ layoutMode: 'task' }),
 
   toggleMainContentLayout: () => set((state) => ({
     mainContentLayout: state.mainContentLayout === 'stacked' ? 'split' : 'stacked'

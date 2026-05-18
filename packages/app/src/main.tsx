@@ -31,6 +31,31 @@ Sentry.init({
   }
 })()
 
+// Text entry defaults to command/config/chat style input. Mobile WebView and
+// some IMEs otherwise auto-capitalize the first Latin character, which is wrong
+// for paths, identifiers, prompts, feedback, and mixed Chinese/English text.
+function applyTextEntryDefaults(root: ParentNode) {
+  root
+    .querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLElement>(
+      'input, textarea, [contenteditable="true"]',
+    )
+    .forEach((el) => {
+      if (!el.hasAttribute('autocapitalize')) el.setAttribute('autocapitalize', 'off')
+      if (!el.hasAttribute('autocorrect')) el.setAttribute('autocorrect', 'off')
+    })
+}
+
+applyTextEntryDefaults(document)
+new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (node instanceof HTMLElement) {
+        applyTextEntryDefaults(node)
+      }
+    }
+  }
+}).observe(document.documentElement, { childList: true, subtree: true })
+
 // Global unhandled error logging
 window.addEventListener('unhandledrejection', (event) => {
   console.error('[Global] Unhandled promise rejection:', event.reason)

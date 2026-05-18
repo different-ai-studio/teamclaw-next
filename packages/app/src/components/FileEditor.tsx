@@ -30,7 +30,6 @@ import { supportsPreview } from "@/components/editors/utils";
 import { useAutoSave } from "@/components/editors/useAutoSave";
 import { ConflictBanner } from "@/components/editors/ConflictBanner";
 import { useSessionStore } from "@/stores/session";
-import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTeamModeStore } from "@/stores/team-mode";
 import { gitManager } from "@/lib/git/manager";
@@ -935,10 +934,8 @@ export function FileEditor({
               filePath={filePath}
               isDark={isDark}
               onSendToAgent={(agentPrompt) => {
-                // Send agent prompt to chat and switch to Agent tab
                 const { sendMessage } = useSessionStore.getState();
                 sendMessage(agentPrompt);
-                useUIStore.getState().setFileModeRightTab("agent");
               }}
             />
           </Suspense>

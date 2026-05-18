@@ -19,22 +19,26 @@ export function PrivacySection() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h3 className="flex items-center gap-2 text-[15px] font-semibold">
+      <div className="mb-6 flex items-start gap-4">
+        <div className="rounded-[14px] border border-border-soft bg-panel p-3">
           <Shield className="h-5 w-5 text-muted-foreground" />
-          {t('settings.privacy.title', 'Privacy & Telemetry')}
-        </h3>
-        <p className="mt-1 text-[12.5px] text-muted-foreground">
-          {t('settings.privacy.description', { defaultValue: 'Control anonymous usage data collection to help improve {{appName}}.', appName: buildConfig.app.name })}
-        </p>
+        </div>
+        <div>
+          <h3 className="text-[15px] font-semibold tracking-normal">
+            {t('settings.privacy.title', 'Privacy & Telemetry')}
+          </h3>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            {t('settings.privacy.description', { defaultValue: 'Control anonymous usage data collection to help improve {{appName}}.', appName: buildConfig.app.name })}
+          </p>
+        </div>
       </div>
 
       {/* Consent Toggle */}
       <div className="rounded-[14px] border border-border bg-paper p-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="font-medium">{t('settings.privacy.analyticsTitle', 'Analytics Data Collection')}</p>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-[13px] font-semibold">{t('settings.privacy.analyticsTitle', 'Analytics Data Collection')}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
               {t('settings.privacy.analyticsDesc', 'Store anonymous usage metrics locally (tokens, tool stats, scores). No code, conversations, or personal data. Data stays on your device.')}
             </p>
           </div>

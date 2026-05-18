@@ -100,12 +100,12 @@ beforeEach(() => {
   }
 })
 
-describe('TeamSection Allowlist Integration', () => {
+describe('TeamP2PConfig Allowlist Integration', () => {
   it('P2P content shows Device ID section', async () => {
-    const { TeamSection } = await import('../components/settings/TeamSection')
+    const { TeamP2PConfig } = await import('../components/settings/team/TeamP2PConfig')
 
     await act(async () => {
-      render(React.createElement(TeamSection))
+      render(React.createElement(TeamP2PConfig))
     })
 
     // P2P content is directly visible — no tab switching required
@@ -117,10 +117,10 @@ describe('TeamSection Allowlist Integration', () => {
   })
 
   it('P2P content shows team member list when owner', async () => {
-    const { TeamSection } = await import('../components/settings/TeamSection')
+    const { TeamP2PConfig } = await import('../components/settings/team/TeamP2PConfig')
 
     await act(async () => {
-      render(React.createElement(TeamSection))
+      render(React.createElement(TeamP2PConfig))
     })
 
     // P2P content is directly visible — no tab switching required
