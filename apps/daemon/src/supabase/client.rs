@@ -1027,6 +1027,97 @@ impl SupabaseClient {
         Ok(())
     }
 
+    /// Create a Supabase `sessions` row for a cron-triggered turn and add the
+    /// daemon's primary agent + all admin members of that agent as
+    /// participants. Returns the new session id (UUID).
+    ///
+    /// `team_id`: the team the cron job belongs to (daemon config).
+    /// `primary_agent_actor_id`: the daemon's primary agent actor id —
+    ///    becomes `created_by_actor_id` AND a participant.
+    /// `title`: short human-readable title (e.g. "Cron: <job_name>").
+    ///
+    /// Mode is `'solo'` — cron is a single-agent automated task.
+    /// `idea_id` is left null. `primary_agent_id` is set so the agent row
+    ///    surfaces in the UI's session badge.
+    pub async fn create_cron_session(
+        &self,
+        team_id: &str,
+        primary_agent_actor_id: &str,
+        title: &str,
+    ) -> SupabaseResult<String> {
+        let token = self.access_token().await?;
+        let url = format!("{}/rest/v1/sessions", self.cfg.url);
+        let body = serde_json::json!({
+            "team_id": team_id,
+            "created_by_actor_id": primary_agent_actor_id,
+            "primary_agent_id": primary_agent_actor_id,
+            "mode": "solo",
+            "title": title,
+        });
+        let resp = self
+            .http
+            .post(&url)
+            .header("apikey", &self.cfg.anon_key)
+            .header("Prefer", "return=representation")
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: format!("create_cron_session: {text}"),
+            });
+        }
+        #[derive(Deserialize)]
+        struct Row {
+            id: String,
+        }
+        let rows: Vec<Row> = resp.json().await?;
+        let row = rows.into_iter().next().ok_or_else(|| SupabaseError::Rpc {
+            code: None,
+            message: "create_cron_session: empty response".into(),
+        })?;
+
+        // Add the primary agent as a participant.
+        self.upsert_session_participant(&row.id, primary_agent_actor_id)
+            .await?;
+
+        // Add admin members so the human user can see the session in their UI.
+        // Best-effort: if the lookup fails, log and continue — the session is
+        // still valid; the user just won't see it (consistent with pre-fix
+        // behavior).
+        match self
+            .list_agent_admin_member_actor_ids(primary_agent_actor_id)
+            .await
+        {
+            Ok(member_actor_ids) => {
+                for actor_id in member_actor_ids {
+                    if let Err(e) = self
+                        .upsert_session_participant(&row.id, &actor_id)
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %row.id,
+                            actor_id = %actor_id,
+                            "create_cron_session: failed to add member participant: {e}"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    primary_agent_actor_id = %primary_agent_actor_id,
+                    "create_cron_session: list_agent_admin_member_actor_ids failed: {e}; session will be agent-only"
+                );
+            }
+        }
+
+        Ok(row.id)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_message(
         &self,

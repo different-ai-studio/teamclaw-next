@@ -426,11 +426,19 @@ impl DaemonServer {
         }))
     }
 
-    /// Drive one ACP turn to completion for a cron-style session_key. Looks up
-    /// (or creates) an ACP session in `cron_sessions`, calls
-    /// `RuntimeManager::send_prompt_and_await_reply`, and returns
-    /// `{text, acp_session_id}` for the listener to wrap in the
-    /// `{ok, result|error}` envelope.
+    /// Drive one ACP turn to completion for a cron-style session_key.
+    ///
+    /// On first hit for a session_key the daemon creates a real Supabase
+    /// `sessions` row (so AgentReply messages land somewhere the desktop UI's
+    /// "view session" button can resolve), adds the daemon's primary agent +
+    /// admin members as `session_participants`, then spawns the ACP runtime
+    /// bound to that Supabase session id. `cron_sessions` caches a
+    /// `(supabase_session_id, acp_session_id)` pair so subsequent turns reuse
+    /// the same chat thread AND reach the same agent process.
+    ///
+    /// Returns `{text, session_id}` where `session_id` is the Supabase UUID —
+    /// the client (cron scheduler) stores it in `CronRunRecord.session_id` so
+    /// the desktop UI's "view session" button resolves to a real chat session.
     async fn handle_prompt_await(
         &mut self,
         payload: &serde_json::Value,
@@ -447,37 +455,68 @@ impl DaemonServer {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("daemon has no team_id; run `amuxd init` first"))?;
 
-        // Look up or create the ACP session for this cron session_key.
-        let acp_sid: String = if let Some(existing) = self.cron_sessions.get(parsed.session_key) {
-            existing.clone()
-        } else {
-            // Confirm we have a local primary agent runtime.
-            let runtime_count = self.agents.lock().await.agent_count();
-            if runtime_count == 0 {
-                anyhow::bail!("no local agent runtime");
-            }
+        // Look up or create the per-session_key binding. We cache the
+        // (supabase_session_id, acp_session_id) pair encoded as a single map
+        // value `"<sb>|<acp>"` so the existing HashMap<String, String> shape
+        // is preserved — sb is what we return to the client and stamp into
+        // cron records; acp is what RuntimeManager needs to drive the turn.
+        let (supabase_session_id, acp_sid): (String, String) =
+            if let Some(existing) = self.cron_sessions.get(parsed.session_key) {
+                let (sb, acp) = existing.split_once('|').ok_or_else(|| {
+                    anyhow::anyhow!("cron_sessions entry malformed for {}", parsed.session_key)
+                })?;
+                (sb.to_string(), acp.to_string())
+            } else {
+                // Confirm we have a local primary agent runtime.
+                let runtime_count = self.agents.lock().await.agent_count();
+                if runtime_count == 0 {
+                    anyhow::bail!("no local agent runtime");
+                }
 
-            let mut mgr = self.agents.lock().await;
-            let sid = mgr
-                .create_gateway_session_with_model(
-                    &team_id,
-                    parsed.session_key,                              // logical id
-                    &format!("cron://{}", parsed.session_key),       // binding
-                    "cron",                                          // title (display only)
-                    parsed.model_override.clone(),
-                    None,                                            // supabase_session_id — cron does not bind to a chat session
-                    parsed.working_directory,                        // spawn in caller-supplied worktree if Some(_)
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
-            drop(mgr);
+                let primary_agent_actor_id = self.actor_id.clone();
+                let title = match parsed.job_name {
+                    Some(n) if !n.is_empty() => {
+                        format!("Cron: {}", n.chars().take(60).collect::<String>())
+                    }
+                    _ => "Cron job".to_string(),
+                };
 
-            self.cron_sessions
-                .insert(parsed.session_key.to_string(), sid.clone());
-            sid
-        };
+                let sb_sid = self
+                    .supabase
+                    .create_cron_session(&team_id, &primary_agent_actor_id, &title)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("create_cron_session: {e}"))?;
 
-        // Drive the turn.
+                let mut mgr = self.agents.lock().await;
+                let acp_sid = mgr
+                    .create_gateway_session_with_model(
+                        &team_id,
+                        parsed.session_key,                              // logical id
+                        &format!("cron://{}", parsed.session_key),       // binding
+                        "cron",                                          // title (display only)
+                        parsed.model_override.clone(),
+                        Some(&sb_sid),                                   // bind AgentReply to the Supabase session
+                        parsed.working_directory,                        // spawn in caller-supplied worktree if Some(_)
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
+                drop(mgr);
+
+                tracing::debug!(
+                    session_key = %parsed.session_key,
+                    supabase_session_id = %sb_sid,
+                    acp_session_id = %acp_sid,
+                    "cron: created Supabase session + spawned ACP runtime"
+                );
+
+                self.cron_sessions.insert(
+                    parsed.session_key.to_string(),
+                    format!("{sb_sid}|{acp_sid}"),
+                );
+                (sb_sid, acp_sid)
+            };
+
+        // Drive the turn through the ACP runtime.
         let text = {
             let mut mgr = self.agents.lock().await;
             mgr.send_prompt_and_await_reply(&acp_sid, parsed.message)
@@ -487,7 +526,7 @@ impl DaemonServer {
 
         Ok(serde_json::json!({
             "text": text,
-            "acp_session_id": acp_sid,
+            "session_id": supabase_session_id,
         }))
     }
 
@@ -3102,6 +3141,10 @@ pub fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
 pub(crate) struct PromptAwaitPayload<'a> {
     pub session_key: &'a str,
     pub message: &'a str,
+    /// Human-readable name of the cron job. Used to construct the Supabase
+    /// session title ("Cron: <job_name>"). Optional — when absent the daemon
+    /// falls back to "Cron job".
+    pub job_name: Option<&'a str>,
     pub working_directory: Option<&'a str>,
     pub model_override: Option<(String, String)>,
     pub timeout_secs: u64,
@@ -3124,6 +3167,10 @@ pub(crate) fn parse_prompt_await_payload(
     if message.is_empty() {
         anyhow::bail!("prompt-await: 'message' must not be empty");
     }
+    let job_name = payload
+        .get("job_name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
     let working_directory = payload
         .get("working_directory")
         .and_then(|v| v.as_str())
@@ -3145,6 +3192,7 @@ pub(crate) fn parse_prompt_await_payload(
     Ok(PromptAwaitPayload {
         session_key,
         message,
+        job_name,
         working_directory,
         model_override,
         timeout_secs,
@@ -3474,6 +3522,7 @@ mod prompt_await_tests {
         let parsed = parse_prompt_await_payload(&p).unwrap();
         assert_eq!(parsed.session_key, "cron/j1/r1");
         assert_eq!(parsed.message, "hello");
+        assert!(parsed.job_name.is_none());
         assert!(parsed.working_directory.is_none());
         assert!(parsed.model_override.is_none());
         assert_eq!(parsed.timeout_secs, 300);
@@ -3484,14 +3533,29 @@ mod prompt_await_tests {
         let p = json!({
             "session_key": "cron/j1/r1",
             "message": "hello",
+            "job_name": "Nightly digest",
             "working_directory": "/tmp/wt",
             "model_override": { "provider": "anthropic", "model": "sonnet" },
             "timeout_secs": 120
         });
         let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert_eq!(parsed.job_name, Some("Nightly digest"));
         assert_eq!(parsed.working_directory.as_deref(), Some("/tmp/wt"));
         assert_eq!(parsed.model_override.as_ref().map(|m| m.0.as_str()), Some("anthropic"));
         assert_eq!(parsed.model_override.as_ref().map(|m| m.1.as_str()), Some("sonnet"));
         assert_eq!(parsed.timeout_secs, 120);
+    }
+
+    #[test]
+    fn parse_accepts_optional_job_name() {
+        // Empty string is treated as absent (consistent with working_directory).
+        let p = json!({ "session_key": "cron/j1/r1", "message": "hi", "job_name": "" });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert!(parsed.job_name.is_none());
+
+        // Non-empty string is preserved.
+        let p = json!({ "session_key": "cron/j1/r1", "message": "hi", "job_name": "My Job" });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert_eq!(parsed.job_name, Some("My Job"));
     }
 }
