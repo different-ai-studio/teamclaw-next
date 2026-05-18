@@ -45,10 +45,12 @@ function classify(file, content) {
   ) {
     return ["downgrade-unit", "Static configuration/source assertion; not an E2E user journey.", "tests/static or unit test"];
   }
+  const hasSyncConcept = /(^|[^a-z])sync([^a-z]|$)/.test(lower);
+
   if (
     lower.includes("p2p") ||
     lower.includes("telemetry") ||
-    lower.includes("sync") ||
+    hasSyncConcept ||
     lower.includes("notification") ||
     lower.includes("gateway") ||
     lower.includes("channel")
