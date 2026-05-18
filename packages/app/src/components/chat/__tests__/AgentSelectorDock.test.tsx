@@ -45,14 +45,14 @@ describe('AgentSelectorDock', () => {
     vi.clearAllMocks()
   })
 
-  it('shows "No agent" placeholder when no agent is engaged', () => {
+  it('hides when no agent is engaged and no session agents exist', () => {
     render(
       <AgentSelectorDock
         engagedAgent={null}
         onEngageAgent={vi.fn()}
       />,
     )
-    expect(screen.getByText('No agent')).toBeInTheDocument()
+    expect(screen.queryByText('No agent')).not.toBeInTheDocument()
   })
 
   it('renders the engaged agent display name', () => {

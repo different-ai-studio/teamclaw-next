@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { supabase } from '@/lib/supabase-client'
 import { loadActorsForTeam } from '@/lib/local-cache'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { cn } from '@/lib/utils'
@@ -14,6 +15,18 @@ type Candidate = {
   id: string
   actor_type: 'member' | 'agent'
   display_name: string
+}
+
+async function fetchCandidatesFromSupabase(teamId: string): Promise<Candidate[]> {
+  const { data, error } = await supabase
+    .from('actor_directory')
+    .select('id, actor_type, display_name')
+    .eq('team_id', teamId)
+    .in('actor_type', ['member', 'agent'])
+  if (error) throw error
+  return ((data ?? []) as Candidate[]).filter(
+    (r) => r.actor_type === 'member' || r.actor_type === 'agent',
+  )
 }
 
 export interface PickedActor {
@@ -42,14 +55,19 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
     let cancelled = false
     setLoading(true); setError(false); setPicked(new Set())
 
-    function applyRows(rows: { id: string; actorType: string; displayName: string }[]) {
+    function applyRows(rows: Array<{ id: string; actorType?: string; actor_type?: string; displayName?: string; display_name?: string }>) {
       const filtered = rows
         .filter(r => r.id !== selfActorId)
-        .filter(r => r.actorType === 'member' || r.actorType === 'agent')
+        .map(r => ({
+          id: r.id,
+          actor_type: (r.actorType ?? r.actor_type) as Candidate['actor_type'],
+          display_name: r.displayName ?? r.display_name ?? '',
+        }))
+        .filter(r => r.actor_type === 'member' || r.actor_type === 'agent')
         .map<Candidate>(r => ({
           id: r.id,
-          actor_type: r.actorType as 'member' | 'agent',
-          display_name: r.displayName,
+          actor_type: r.actor_type,
+          display_name: r.display_name,
         }))
       setCandidates(filtered)
     }
@@ -59,7 +77,11 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
         // ── Phase 1: instant render from local libsql cache ──────────────
         const local = await loadActorsForTeam(teamId)
         if (cancelled) return
-        applyRows(local)
+        if (local.length > 0) {
+          applyRows(local)
+        } else {
+          applyRows(await fetchCandidatesFromSupabase(teamId))
+        }
         setLoading(false)
 
         // ── Phase 2: background delta sync, re-hydrate if anything new ──

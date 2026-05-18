@@ -2,11 +2,10 @@ import { create } from "zustand";
 import { supabase } from "@/lib/supabase-client";
 import { useAuthStore } from "./auth-store";
 import { isTauri } from "@/lib/utils";
+import { loadPinnedSessionIds, savePinnedSessionIds } from "./session-pins";
 import {
   loadSessionsForTeam,
   upsertSessionsBatch,
-  getWatermark,
-  setWatermark,
   type SessionRow,
 } from "@/lib/local-cache";
 
@@ -18,6 +17,9 @@ export interface SessionListEntry {
   last_message_preview: string | null;
   mode: "solo" | "collab" | "control";
   idea_id: string | null;
+  has_unread: boolean;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 function mapCacheToEntry(r: SessionRow): SessionListEntry {
@@ -29,16 +31,52 @@ function mapCacheToEntry(r: SessionRow): SessionListEntry {
     last_message_preview: r.lastMessagePreview ?? null,
     mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
     idea_id: r.ideaId ?? null,
+    has_unread: false,
+    created_at: r.createdAt ?? null,
+    updated_at: r.updatedAt ?? null,
+  };
+}
+
+type FreshSessionRow = {
+  id: string;
+  title: string;
+  team_id: string;
+  mode: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  created_at: string;
+  updated_at: string;
+  idea_id: string | null;
+  has_unread: boolean | null;
+};
+
+function mapFreshToEntry(r: FreshSessionRow): SessionListEntry {
+  return {
+    id: r.id,
+    title: r.title ?? "",
+    team_id: r.team_id,
+    last_message_at: r.last_message_at,
+    last_message_preview: r.last_message_preview,
+    mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
+    idea_id: r.idea_id ?? null,
+    has_unread: r.has_unread === true,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
   };
 }
 
 /** Sort entries: null last_message_at first, then by last_message_at DESC */
 function sortEntries(entries: SessionListEntry[]): SessionListEntry[] {
   return [...entries].sort((a, b) => {
-    if (!a.last_message_at && !b.last_message_at) return 0;
-    if (!a.last_message_at) return -1;
-    if (!b.last_message_at) return 1;
-    return b.last_message_at.localeCompare(a.last_message_at);
+    if (!a.last_message_at && b.last_message_at) return -1;
+    if (a.last_message_at && !b.last_message_at) return 1;
+    if (a.last_message_at && b.last_message_at) {
+      const byLastMessage = b.last_message_at.localeCompare(a.last_message_at);
+      if (byLastMessage !== 0) return byLastMessage;
+    }
+    const byCreated = (b.created_at ?? "").localeCompare(a.created_at ?? "");
+    if (byCreated !== 0) return byCreated;
+    return b.id.localeCompare(a.id);
   });
 }
 
@@ -46,17 +84,73 @@ interface State {
   rows: SessionListEntry[];
   loading: boolean;
   error: string | null;
+  pinnedSessionIds: string[];
+  highlightedSessionIds: string[];
+  hasMore: boolean;
+  nextCursor: {
+    lastMessageAt: string | null;
+    createdAt: string | null;
+    id: string;
+  } | null;
   load: () => Promise<void>;
+  loadFirstPage: (limit?: number) => Promise<void>;
+  loadMore: (limit?: number) => Promise<void>;
+  upsertRows: (rows: SessionListEntry[]) => void;
+  patchRow: (sessionId: string, patch: Partial<SessionListEntry>) => void;
+  removeRow: (sessionId: string) => void;
+  markSessionViewed: (sessionId: string, lastReadMessageId?: string | null) => Promise<void>;
+  initPinnedSessionIds: (workspacePath?: string | null) => void;
+  toggleSessionPinned: (sessionId: string, workspacePath?: string | null) => void;
+  addHighlightedSession: (sessionId: string, ttlMs?: number) => void;
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  archiveSession: (sessionId: string) => Promise<void>;
 }
 
-export const useSessionListStore = create<State>((set) => ({
+function mergeRows(existing: SessionListEntry[], incoming: SessionListEntry[]): SessionListEntry[] {
+  const byId = new Map(existing.map((row) => [row.id, row] as const));
+  for (const row of incoming) byId.set(row.id, row);
+  return sortEntries(Array.from(byId.values()));
+}
+
+function cursorFromRows(rows: SessionListEntry[]): State["nextCursor"] {
+  if (rows.length === 0) return null;
+  const row = rows[rows.length - 1];
+  return {
+    lastMessageAt: row.last_message_at,
+    createdAt: row.created_at,
+    id: row.id,
+  };
+}
+
+async function loadPage(limit: number, cursor: State["nextCursor"]) {
+  const { data, error } = await supabase.rpc("list_current_actor_sessions", {
+    p_limit: limit,
+    p_before_last_message_at: cursor?.lastMessageAt ?? null,
+    p_before_created_at: cursor?.createdAt ?? null,
+    p_before_id: cursor?.id ?? null,
+  });
+
+  return {
+    data: ((data ?? []) as FreshSessionRow[]).map(mapFreshToEntry),
+    error,
+  };
+}
+
+export const useSessionListStore = create<State>((set, get) => ({
   rows: [],
   loading: false,
   error: null,
+  pinnedSessionIds: [],
+  highlightedSessionIds: [],
+  hasMore: false,
+  nextCursor: null,
   load: async () => {
+    await get().loadFirstPage();
+  },
+  loadFirstPage: async (limit = 50) => {
     const session = useAuthStore.getState().session;
     if (!session) {
-      set({ rows: [], loading: false, error: null });
+      set({ rows: [], loading: false, error: null, hasMore: false, nextCursor: null });
       return;
     }
     set({ loading: true, error: null });
@@ -75,68 +169,14 @@ export const useSessionListStore = create<State>((set) => ({
       }
     }
 
-    // ── Phase 2: pull delta from Supabase, upsert local, re-hydrate ───────
-    const TABLE = "sessions";
-
-    // Build query — apply watermark if we have a teamId and are in Tauri
-    const watermark =
-      isTauri() && teamId
-        ? await getWatermark(TABLE, teamId)
-        : null;
-
-    let q = supabase
-      .from("sessions")
-      .select("id, title, team_id, mode, last_message_at, last_message_preview, created_at, updated_at, idea_id")
-      // Brand-new sessions have last_message_at = null. Put them first so
-      // they're immediately visible AND so per-session subscribers /
-      // rows.find consumers (e.g., ChatPanel.sendIntoSession) can resolve
-      // the row right after creation. Older sessions still ranked by
-      // recency via the secondary created_at sort.
-      .order("last_message_at", { ascending: false, nullsFirst: true })
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    // Only apply watermark filter when doing a delta pull inside Tauri
-    if (isTauri() && teamId && watermark) {
-      q = q.gt("updated_at", watermark);
-    }
-
-    const { data, error } = await q;
+    const { data: rows, error } = await loadPage(limit, null);
     if (error) {
       set({ loading: false, error: error.message });
       return;
     }
 
-    const fresh = (data ?? []) as Array<{
-      id: string;
-      title: string;
-      team_id: string;
-      mode: string;
-      last_message_at: string | null;
-      last_message_preview: string | null;
-      created_at: string;
-      updated_at: string;
-      idea_id: string | null;
-    }>;
-
-    // In non-Tauri builds (or first boot without teamId) just set rows directly
-    if (!isTauri() || !teamId) {
-      set({ rows: fresh.map((r) => ({
-        id: r.id,
-        title: r.title ?? "",
-        team_id: r.team_id,
-        last_message_at: r.last_message_at,
-        last_message_preview: r.last_message_preview,
-        mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
-        idea_id: r.idea_id ?? null,
-      })), loading: false });
-      return;
-    }
-
-    // Tauri path: upsert into local cache, then re-hydrate to pick up any
-    // previously-cached rows that weren't returned in the delta query.
-    if (fresh.length > 0) {
-      const cacheRows: SessionRow[] = fresh.map((r) => ({
+    if (isTauri() && teamId && rows.length > 0) {
+      const cacheRows: SessionRow[] = rows.map((r) => ({
         id: r.id,
         teamId: r.team_id,
         title: r.title ?? null,
@@ -148,30 +188,106 @@ export const useSessionListStore = create<State>((set) => ({
         lastMessageAt: r.last_message_at ?? null,
         createdBy: null,
         metadataJson: null,
-        createdAt: r.created_at,
-        updatedAt: r.updated_at,
+        createdAt: r.created_at ?? new Date().toISOString(),
+        updatedAt: r.updated_at ?? new Date().toISOString(),
         deletedAt: null,
         syncedAt: new Date().toISOString(),
       }));
       await upsertSessionsBatch(cacheRows);
-
-      // Bump watermark
-      const resolvedTeamId = fresh[0].team_id;
-      const maxUpdated = fresh.reduce(
-        (acc, r) => (r.updated_at > acc ? r.updated_at : acc),
-        watermark ?? "",
-      );
-      if (maxUpdated) {
-        await setWatermark(TABLE, resolvedTeamId, maxUpdated);
-      }
     }
 
-    // Re-hydrate from local cache (merges cached + freshly-synced rows)
-    const resolvedTeamId = fresh[0]?.team_id ?? teamId;
-    const allLocal = await loadSessionsForTeam(resolvedTeamId);
     set({
-      rows: sortEntries(allLocal.map(mapCacheToEntry)),
+      rows: sortEntries(rows),
       loading: false,
+      hasMore: rows.length === limit,
+      nextCursor: cursorFromRows(rows),
     });
+  },
+  loadMore: async (limit = 50) => {
+    const session = useAuthStore.getState().session;
+    if (!session) return;
+    const cursor = get().nextCursor;
+    if (!cursor) return;
+
+    set({ loading: true, error: null });
+    const { data: rows, error } = await loadPage(limit, cursor);
+    if (error) {
+      set({ loading: false, error: error.message });
+      return;
+    }
+    const nextRows = mergeRows(get().rows, rows);
+    set({
+      rows: nextRows,
+      loading: false,
+      hasMore: rows.length === limit,
+      nextCursor: rows.length > 0 ? cursorFromRows(rows) : null,
+    });
+  },
+  upsertRows: (rows) => set((state) => ({ rows: mergeRows(state.rows, rows) })),
+  patchRow: (sessionId, patch) => set((state) => ({
+    rows: state.rows.map((row) =>
+      row.id === sessionId ? { ...row, ...patch } : row,
+    ),
+  })),
+  removeRow: (sessionId) => set((state) => ({
+    rows: state.rows.filter((row) => row.id !== sessionId),
+  })),
+  markSessionViewed: async (sessionId, lastReadMessageId = null) => {
+    const { error } = await supabase.rpc("mark_current_actor_session_viewed", {
+      p_session_id: sessionId,
+      p_last_read_message_id: lastReadMessageId,
+    });
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    get().patchRow(sessionId, { has_unread: false });
+  },
+  initPinnedSessionIds: (workspacePath = null) => {
+    set({ pinnedSessionIds: loadPinnedSessionIds(workspacePath) });
+  },
+  toggleSessionPinned: (sessionId, workspacePath = null) => {
+    const cur = get().pinnedSessionIds;
+    const next = cur.includes(sessionId)
+      ? cur.filter((id) => id !== sessionId)
+      : [...cur, sessionId];
+    savePinnedSessionIds(workspacePath, next);
+    set({ pinnedSessionIds: next });
+  },
+  addHighlightedSession: (sessionId, ttlMs = 4000) => {
+    const cur = get().highlightedSessionIds;
+    if (cur.includes(sessionId)) return;
+    set({ highlightedSessionIds: [...cur, sessionId] });
+    setTimeout(() => {
+      const latest = useSessionListStore.getState().highlightedSessionIds;
+      useSessionListStore.setState({
+        highlightedSessionIds: latest.filter((id) => id !== sessionId),
+      });
+    }, ttlMs);
+  },
+  updateSessionTitle: async (sessionId, title) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const { error } = await supabase
+      .from("sessions")
+      .update({ title: trimmed })
+      .eq("id", sessionId);
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    get().patchRow(sessionId, { title: trimmed });
+  },
+  archiveSession: async (sessionId) => {
+    const archivedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("sessions")
+      .update({ archived_at: archivedAt })
+      .eq("id", sessionId);
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    get().removeRow(sessionId);
   },
 }));
