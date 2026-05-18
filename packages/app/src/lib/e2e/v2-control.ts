@@ -87,6 +87,11 @@ type SeedConversationInput = {
   activeSessionId?: string | null;
 };
 
+type SeedConversationResult = {
+  runId: string;
+  warnings: string[];
+};
+
 type AppendMessageInput = {
   sessionId?: string;
   session_id?: string;
@@ -164,7 +169,7 @@ type NormalizedActor = {
 };
 
 type V2E2EControl = {
-  seedConversation: (input: SeedConversationInput) => Promise<void>;
+  seedConversation: (input: SeedConversationInput) => Promise<SeedConversationResult>;
   switchSession: (input: string | { sessionId?: string; session_id?: string }) => Promise<void>;
   appendMessage: (input: AppendMessageInput) => Promise<Message>;
   emitAgentDelta: (input: AgentDeltaInput) => void;
@@ -183,12 +188,19 @@ declare global {
 
 const seededSessionIds = new Set<string>();
 const seededActorIds = new Set<string>();
+const seededRunIds = new Set<string>();
+let controlInstalled = false;
+let controlActive = false;
 
 function e2eEnabled(): boolean {
   return (
     typeof window !== "undefined" &&
     ((import.meta.env as unknown as Record<string, string | undefined>).VITE_TEAMCLAW_E2E === "true")
   );
+}
+
+export function isV2E2EControlActive(): boolean {
+  return e2eEnabled() && controlInstalled && controlActive;
 }
 
 function nowIso(): string {
@@ -237,6 +249,17 @@ function normalizeSession(input: SeedSession, teamId: string): SessionListEntry 
     mode: normalizeMode(input.mode),
     idea_id: input.ideaId ?? input.idea_id ?? null,
     has_unread: false,
+  };
+}
+
+function backfillSessionPreview(entry: SessionListEntry, messages: Message[]): SessionListEntry {
+  if (entry.last_message_at && entry.last_message_preview) return entry;
+  const latest = messages[messages.length - 1];
+  if (!latest) return entry;
+  return {
+    ...entry,
+    last_message_at: entry.last_message_at ?? protoTimeToIso(latest.createdAt),
+    last_message_preview: entry.last_message_preview ?? latest.content,
   };
 }
 
@@ -347,6 +370,10 @@ function buildMessage(input: AppendMessageInput): Message {
   });
 }
 
+function deterministicFinalMessageId(sessionId: string, actorId: string, runId: string): string {
+  return `e2e-final:${sessionId}:${actorId}:${runId}`;
+}
+
 function messageToCacheRow(message: Message, teamId: string): MessageRow {
   const timestamp = nowIso();
   return {
@@ -450,9 +477,53 @@ function installCurrentTeam(teamId: string, actors: NormalizedActor[]): void {
 const control: V2E2EControl = {
   seedConversation: async (input) => {
     const actors = (input.actors ?? []).map(normalizeActor);
-    const sessionEntries = sortRows((input.sessions ?? []).map((session) => normalizeSession(session, input.teamId)));
+    const baseSessionEntries = (input.sessions ?? []).map((session) => normalizeSession(session, input.teamId));
     const messagesBySession = input.messagesBySession ?? {};
+    const duplicateSessionIds = baseSessionEntries.filter((entry, index) =>
+      baseSessionEntries.findIndex((candidate) => candidate.id === entry.id) !== index,
+    );
+    if (duplicateSessionIds.length > 0) {
+      throw new Error(`duplicate seeded session id: ${duplicateSessionIds[0].id}`);
+    }
+    if (controlActive) {
+      const reused = baseSessionEntries.find((entry) => seededSessionIds.has(entry.id));
+      if (reused) {
+        throw new Error(
+          `seeded session id ${reused.id} was reused while V2 E2E control is active; use run-scoped session ids or call cleanup first`,
+        );
+      }
+    }
 
+    const nextMessages: Record<string, Message[]> = {};
+    for (const entry of baseSessionEntries) {
+      nextMessages[entry.id] = (messagesBySession[entry.id] ?? [])
+        .map((message) =>
+          buildMessage({
+            ...message,
+            sessionId: message.sessionId ?? message.session_id ?? entry.id,
+            messageId: message.messageId ?? message.message_id ?? message.id,
+            senderActorId: message.senderActorId ?? message.sender_actor_id,
+            replyToMessageId: message.replyToMessageId ?? message.reply_to_message_id,
+            metadataJson: message.metadataJson ?? message.metadata_json,
+            turnId: message.turnId ?? message.turn_id,
+            createdAt: message.createdAt ?? message.created_at,
+          }),
+        )
+        .sort((a, b) => Number(a.createdAt - b.createdAt));
+    }
+    const sessionEntries = sortRows(
+      baseSessionEntries.map((entry) => backfillSessionPreview(entry, nextMessages[entry.id] ?? [])),
+    );
+    const warnings: string[] = [];
+    if (!isTauri() && sessionEntries.length > 0) {
+      warnings.push("participant cache is populated only in Tauri; non-Tauri E2E runs should not assert sidebar participant clusters");
+    }
+    if (isTauri()) {
+      warnings.push("cleanup clears frontend E2E state only; local-cache rows are upserted, so E2E callers should use unique run/session/message ids per run");
+    }
+
+    controlActive = true;
+    seededRunIds.add(input.runId);
     actors.forEach((actor) => seededActorIds.add(actor.id));
     sessionEntries.forEach((session) => seededSessionIds.add(session.id));
 
@@ -492,24 +563,6 @@ const control: V2E2EControl = {
       nextCursor: null,
     });
 
-    const nextMessages: Record<string, Message[]> = {};
-    for (const entry of sessionEntries) {
-      nextMessages[entry.id] = (messagesBySession[entry.id] ?? [])
-        .map((message) =>
-          buildMessage({
-            ...message,
-            sessionId: message.sessionId ?? message.session_id ?? entry.id,
-            messageId: message.messageId ?? message.message_id ?? message.id,
-            senderActorId: message.senderActorId ?? message.sender_actor_id,
-            replyToMessageId: message.replyToMessageId ?? message.reply_to_message_id,
-            metadataJson: message.metadataJson ?? message.metadata_json,
-            turnId: message.turnId ?? message.turn_id,
-            createdAt: message.createdAt ?? message.created_at,
-          }),
-        )
-        .sort((a, b) => Number(a.createdAt - b.createdAt));
-    }
-
     useSessionStore.setState({
       messages: nextMessages,
       activeSessionId: input.activeSessionId ?? null,
@@ -545,7 +598,7 @@ const control: V2E2EControl = {
         const entry = entriesById.get(session.id ?? session.sessionId ?? session.session_id ?? "");
         return entry ? [sessionToCacheRow(session, entry)] : [];
       });
-      const participantRows: SessionParticipantRow[] = (input.sessions ?? []).flatMap((session, index) => {
+      const participantRows: SessionParticipantRow[] = (input.sessions ?? []).flatMap((session) => {
         const entry = sessionEntries.find((row) => row.id === (session.id ?? session.sessionId ?? session.session_id));
         if (!entry) return [];
         return participantActorIds(session, actors).map((actorId) => ({
@@ -566,6 +619,8 @@ const control: V2E2EControl = {
       await upsertSessionParticipantsBatch(participantRows);
       await upsertMessagesBatch(messageRows);
     }
+
+    return { runId: input.runId, warnings };
   },
 
   switchSession: async (input) => {
@@ -634,17 +689,25 @@ const control: V2E2EControl = {
     const streaming = useV2StreamingStore.getState().byKey[streamKey];
     const content = input.content ?? input.finalText ?? input.final_text ?? streaming?.outputText ?? "";
     const runId = input.runId ?? input.run_id ?? streamKey;
+    const messageId = input.messageId ?? input.message_id ?? deterministicFinalMessageId(sessionId, actorId, runId);
     useV2StreamingStore.getState().finalize(sessionId, actorId, content);
 
     const message = buildMessage({
       sessionId,
-      messageId: input.messageId ?? input.message_id,
+      messageId,
       senderActorId: actorId,
       kind: MessageKind.AGENT_REPLY,
       content,
       model: input.model ?? null,
       turnId: runId,
     });
+    const existing = useSessionStore
+      .getState()
+      .messages[sessionId]?.find((candidate) => candidate.messageId === message.messageId);
+    if (existing) {
+      useV2StreamingStore.getState().clearActor(sessionId, actorId);
+      return existing;
+    }
     const teamId = resolveTeamId(sessionId);
     useSessionStore.getState().appendMessage(sessionId, message);
     updateSessionPreview(sessionId, message);
@@ -694,10 +757,16 @@ const control: V2E2EControl = {
 
     seededSessionIds.clear();
     seededActorIds.clear();
+    seededRunIds.clear();
+    // local-cache exposes upsert/soft-delete helpers, but no hard-delete-by-run
+    // primitive. Keep cleanup scoped to frontend state and require E2E callers
+    // to use unique run/session/message ids for repeatable Tauri runs.
+    controlActive = false;
   },
 };
 
 export function installV2E2EControl(): void {
   if (!e2eEnabled()) return;
+  controlInstalled = true;
   window.__TEAMCLAW_V2_E2E__ = control;
 }

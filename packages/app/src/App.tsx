@@ -118,7 +118,7 @@ import { Button } from "@/components/ui/button";
 import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
 import { parseInviteDeeplink, claimInviteToken } from "@/lib/invite-deeplink";
 import { useCurrentTeamStore } from "@/stores/current-team";
-import { installV2E2EControl } from "@/lib/e2e/v2-control";
+import { installV2E2EControl, isV2E2EControlActive } from "@/lib/e2e/v2-control";
 
 // Module-level set of session/live topics we've already MQTT-subscribed to.
 // Lives outside the React tree so that the App.tsx mount effect + the
@@ -1087,6 +1087,7 @@ function AppContent() {
   const prevRefreshTriggerRef = useRef(0);
   useEffect(() => {
     if (!currentSessionId) return;
+    if (isV2E2EControlActive()) return;
     // A refresh-trigger bump on the SAME session = user pressed ↻.
     const forceFull =
       messageRefreshTrigger !== prevRefreshTriggerRef.current &&
