@@ -17,6 +17,7 @@ public final class CachedActor {
     public var teamRole: String?
     public var agentKind: String?
     public var agentStatus: String?
+    public var defaultWorkspaceId: String?
 
     public init(
         actorId: String, teamId: String, actorType: String,
@@ -24,7 +25,8 @@ public final class CachedActor {
         displayName: String, avatarURL: String? = nil, lastActiveAt: Date? = nil,
         createdAt: Date = .now, updatedAt: Date = .now,
         memberStatus: String? = nil, teamRole: String? = nil,
-        agentKind: String? = nil, agentStatus: String? = nil
+        agentKind: String? = nil, agentStatus: String? = nil,
+        defaultWorkspaceId: String? = nil
     ) {
         self.actorId = actorId; self.teamId = teamId; self.actorType = actorType
         self.userId = userId; self.invitedByActorId = invitedByActorId
@@ -32,6 +34,7 @@ public final class CachedActor {
         self.createdAt = createdAt; self.updatedAt = updatedAt
         self.memberStatus = memberStatus; self.teamRole = teamRole
         self.agentKind = agentKind; self.agentStatus = agentStatus
+        self.defaultWorkspaceId = defaultWorkspaceId
     }
 
     public var isMember: Bool { actorType == "member" }
