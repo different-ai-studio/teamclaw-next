@@ -78,7 +78,7 @@ public struct SessionsTab: View {
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
                         Button { showShortcuts = true } label: {
-                            Image(systemName: "star").font(.title3).foregroundStyle(.primary)
+                            Image(systemName: "square.grid.2x2").font(.title3).foregroundStyle(.primary)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Shortcuts")
@@ -150,7 +150,6 @@ public struct SessionsTab: View {
                     viewModel.reloadSessions(modelContext: modelContext)
                 }
             }
-            .simultaneousGesture(shortcutsOpenGesture)
 
             if let shortcutsStore {
                 ShortcutsDrawer(isPresented: $showShortcuts, store: shortcutsStore)
@@ -174,30 +173,6 @@ public struct SessionsTab: View {
         )
     }
 
-    private var shortcutsOpenGesture: some Gesture {
-        DragGesture(minimumDistance: 18)
-            .onEnded { value in
-                guard shortcutsStore != nil, !showShortcuts else { return }
-
-                let startX = value.startLocation.x
-                let dx = value.translation.width
-                let predicted = value.predictedEndTranslation.width
-
-                // Sessions list: drag rightward from the left edge.
-                let edgePullList = navigationPath.isEmpty
-                    && startX <= 44
-                    && (dx > 48 || predicted > 120)
-
-                // Inside a session: iOS owns the left edge for "back", so
-                // shortcuts is reached with a left swipe from anywhere.
-                let inSessionLeftSwipe = !navigationPath.isEmpty
-                    && (dx < -56 || predicted < -140)
-
-                if edgePullList || inSessionLeftSwipe {
-                    showShortcuts = true
-                }
-            }
-    }
 }
 
 private struct SessionDestinationView: View {

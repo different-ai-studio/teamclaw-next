@@ -400,10 +400,27 @@ private struct ActorRow: View {
             }
             .frame(width: 40, height: 40)
             .overlay {
-                Text(avatarInitials)
-                    .font(.system(size: 14, weight: .bold))
-                    .tracking(-0.3)
-                    .foregroundStyle(style.foreground)
+                if let urlString = actor.avatarURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Text(avatarInitials)
+                                .font(.system(size: 14, weight: .bold))
+                                .tracking(-0.3)
+                                .foregroundStyle(style.foreground)
+                        }
+                    }
+                    .clipShape(actor.isAgent
+                        ? AnyShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        : AnyShape(Circle()))
+                } else {
+                    Text(avatarInitials)
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(-0.3)
+                        .foregroundStyle(style.foreground)
+                }
             }
 
             if actor.isOnline {

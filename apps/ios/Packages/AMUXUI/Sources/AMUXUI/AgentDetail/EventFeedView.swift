@@ -143,7 +143,8 @@ public struct EventBubbleView: View {
     }
 
     private var selfUserBubble: some View {
-        VStack(alignment: .trailing, spacing: 2) {
+        let parsed = ParsedMessageContent.parse(event.text ?? "")
+        return VStack(alignment: .trailing, spacing: 2) {
             Text("You")
                 .font(.caption)
                 .foregroundStyle(Color.amux.basalt)
@@ -151,26 +152,40 @@ public struct EventBubbleView: View {
 
             HStack(alignment: .bottom, spacing: 0) {
                 Spacer(minLength: 0)
-                // Wrap dot + bubble in an inner HStack that hugs its
-                // intrinsic width, so the dot stays adjacent to the
-                // bubble's left edge regardless of the bubble's
-                // (variable) frame width.
                 HStack(alignment: .bottom, spacing: 6) {
                     if let outboxID = event.outboxMessageID {
                         OutboxStatusDot(outboxMessageID: outboxID, onRetry: onRetryOutbox)
                     }
-                    Text(event.text ?? "")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.amux.mist)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .liquidGlass(in: RoundedRectangle(cornerRadius: 18),
-                                     tint: Color.amux.cinnabar,
-                                     interactive: false)
-                        .contextMenu {
-                            MessageContextMenu(text: event.text ?? "")
+                    VStack(alignment: .trailing, spacing: 6) {
+                        ForEach(Array(parsed.imageURLs.enumerated()), id: \.offset) { _, url in
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFit()
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                default:
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.amux.pebble)
+                                        .overlay(ProgressView())
+                                        .frame(height: 150)
+                                }
+                            }
                         }
+                        if !parsed.text.isEmpty {
+                            Text(parsed.text)
+                                .font(.subheadline)
+                                .foregroundStyle(Color.amux.mist)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .liquidGlass(in: RoundedRectangle(cornerRadius: 18),
+                                             tint: Color.amux.cinnabar,
+                                             interactive: false)
+                                .contextMenu {
+                                    MessageContextMenu(text: event.text ?? "")
+                                }
+                        }
+                    }
                 }
                 .frame(maxWidth: sizeClass == .regular ? 500 : 260, alignment: .trailing)
             }
@@ -573,6 +588,38 @@ struct OutboxStatusDot: View {
         }
         .padding(.bottom, 6)
     }
+}
+
+// MARK: - MessageContentParser
+
+private struct ParsedMessageContent {
+    let text: String
+    let imageURLs: [URL]
+    static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic", "bmp"]
+
+    static func parse(_ raw: String) -> ParsedMessageContent {
+        let lines = raw.components(separatedBy: "\n")
+        var imageURLs: [URL] = []
+        var textLines: [String] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let url = URL(string: trimmed),
+               url.scheme?.hasPrefix("http") == true,
+               !url.host.isNilOrEmpty,
+               imageExtensions.contains(url.pathExtension.lowercased()) {
+                imageURLs.append(url)
+            } else {
+                textLines.append(line)
+            }
+        }
+        let text = textLines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return ParsedMessageContent(text: text, imageURLs: imageURLs)
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var isNilOrEmpty: Bool { self?.isEmpty != false }
 }
 
 // MARK: - MessageContextMenu

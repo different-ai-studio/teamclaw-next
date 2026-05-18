@@ -1648,7 +1648,7 @@ public final class SessionDetailViewModel {
         }
     }
 
-    public func sendPrompt(_ text: String, modelId: String? = nil, modelContext: ModelContext? = nil) async throws {
+    public func sendPrompt(_ text: String, modelId: String? = nil, attachmentURLs: [URL] = [], modelContext: ModelContext? = nil) async throws {
         if let session, let teamclawService {
             // Session-backed chats use the session live stream as the
             // canonical messaging channel so other collaborators see the
@@ -1661,7 +1661,11 @@ public final class SessionDetailViewModel {
             // any visible mention even though the chip is engaging an
             // agent — confusing in chat history, especially for other
             // collaborators reading along.
-            let body = composeBodyWithMentions(text)
+            var body = composeBodyWithMentions(text)
+            if !attachmentURLs.isEmpty {
+                let urlBlock = attachmentURLs.map(\.absoluteString).joined(separator: "\n")
+                body += "\n\n" + urlBlock
+            }
             let messageID = UUID().uuidString
             let mentionIDs = Array(agentChipSelection)
 
