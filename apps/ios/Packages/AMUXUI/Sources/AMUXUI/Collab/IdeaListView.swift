@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import AMUXCore
+import AMUXSharedUI
 
 public struct IdeaListView: View {
     @Bindable var ideaStore: IdeaStore
@@ -65,11 +66,13 @@ public struct IdeaListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .refreshable {
                     await ideaStore.reload()
                 }
             }
         }
+        .background(Color.amux.mist)
         .navigationTitle(IdeaUIPresentation.pluralTitle)
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .bottom) {

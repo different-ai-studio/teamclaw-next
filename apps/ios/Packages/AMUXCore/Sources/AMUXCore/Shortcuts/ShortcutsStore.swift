@@ -71,6 +71,11 @@ public final class ShortcutsStore {
             personal = remotePersonal.sorted { $0.order < $1.order }
             team     = remoteTeam.sorted     { $0.order < $1.order }
             errorMessage = nil
+        } catch is CancellationError {
+            // SwiftUI .task cancelled (e.g. drawer dismissed mid-load).
+            // Not a real failure — keep the last good state silent.
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // Same story for URLSession-level cancellation.
         } catch {
             errorMessage = error.localizedDescription
         }

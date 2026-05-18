@@ -57,98 +57,103 @@ public struct SessionsTab: View {
     }
 
     public var body: some View {
-        NavigationStack(path: $navigationPath) {
-            SessionListContent(
-                viewModel: viewModel,
-                refreshSessionsFromBackend: refreshSessionsFromBackend,
-                navigationPath: $navigationPath,
-                isEditing: $isEditing,
-                selectedIDs: $selectedIDs,
-                teamclawService: teamclawService,
-                actorId: "ios-\(pairing.authToken.prefix(6))",
-                noAccessibleAgent: connectedAgentsStore?.agents.isEmpty == true,
-                onInviteFirstAgent: actorStore == nil ? nil : { showInvite = true }
-            )
-            .navigationTitle("Sessions")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button { showShortcuts = true } label: {
-                        Image(systemName: "star").font(.title3).foregroundStyle(.primary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Shortcuts")
-                    .accessibilityIdentifier("sessions.shortcutsButton")
-                    .disabled(shortcutsStore == nil)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showNewSession = true } label: {
-                        Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.primary)
-                    }
-                    .accessibilityIdentifier("sessions.newSessionButton")
-                    .buttonStyle(.plain)
-                    .matchedTransitionSource(id: "newSession", in: sheetTransition)
-                }
-            }
-            .navigationDestination(for: String.self) { id in
-                // Every iOS-side push goes through "session:<sid>" now;
-                // the runtime-only fallback path was the legacy entry from
-                // when the session list emitted bare runtime ids.
-                let sessionId = id.hasPrefix("session:")
-                    ? String(id.dropFirst("session:".count))
-                    : id
-                SessionDestinationView(
-                    sessionId: sessionId,
-                    mqtt: mqtt,
-                    hub: hub,
-                    pairing: pairing,
-                    teamclawService: teamclawService,
-                    currentActorID: currentActorID,
+        ZStack(alignment: .leading) {
+            NavigationStack(path: $navigationPath) {
+                SessionListContent(
+                    viewModel: viewModel,
                     refreshSessionsFromBackend: refreshSessionsFromBackend,
                     navigationPath: $navigationPath,
-                    connectedAgentsStore: connectedAgentsStore
-                )
-            }
-            .sheet(isPresented: $showShortcuts) {
-                if let shortcutsStore {
-                    ShortcutsSheet(store: shortcutsStore)
-                }
-            }
-            .sheet(isPresented: $showNewSession) {
-                NewSessionSheet(mqtt: mqtt,
-                               peerId: "ios-\(pairing.authToken.prefix(6))",
-                               teamclawService: teamclawService,
-                               teamID: activeTeam?.id ?? "",
-                               currentActorID: currentActorID,
-                               isAgentAvailable: pairing.isPaired,
-                               connectedAgentsStore: connectedAgentsStore,
-                               viewModel: viewModel) { agentId in
-                    navigationPath = [agentId]
-                    // Pull the freshly-created Supabase rows (sessions +
-                    // agent_runtimes + workspaces) into the local cache so
-                    // the row's agent type / workspace populate without
-                    // waiting for the user to pull-to-refresh.
-                    Task { await refreshSessionsFromBackend() }
-                }
-                .modifier(ZoomTransitionModifier(sourceID: "newSession", namespace: sheetTransition))
-            }
-            .sheet(isPresented: $showInvite) {
-                if let actorStore {
-                    MemberInviteSheet(store: actorStore)
-                }
-            }
-            .task {
-                viewModel.start(
+                    isEditing: $isEditing,
+                    selectedIDs: $selectedIDs,
+                    teamclawService: teamclawService,
+                    pairing: pairing,
                     mqtt: mqtt,
-                    hub: hub,
-                    teamID: activeTeam?.id ?? "",
-                    connectedAgentsStore: connectedAgentsStore,
-                    modelContext: modelContext,
-                    teamclawService: teamclawService
+                    actorId: "ios-\(pairing.authToken.prefix(6))",
+                    currentActorID: currentActorID,
+                    noAccessibleAgent: connectedAgentsStore?.agents.isEmpty == true,
+                    onInviteFirstAgent: actorStore == nil ? nil : { showInvite = true }
                 )
+                .navigationTitle("Sessions")
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button { showShortcuts = true } label: {
+                            Image(systemName: "star").font(.title3).foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Shortcuts")
+                        .accessibilityIdentifier("sessions.shortcutsButton")
+                        .disabled(shortcutsStore == nil)
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button { showNewSession = true } label: {
+                            Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.primary)
+                        }
+                        .accessibilityIdentifier("sessions.newSessionButton")
+                        .buttonStyle(.plain)
+                        .matchedTransitionSource(id: "newSession", in: sheetTransition)
+                    }
+                }
+                .navigationDestination(for: String.self) { id in
+                    // Every iOS-side push goes through "session:<sid>" now;
+                    // the runtime-only fallback path was the legacy entry from
+                    // when the session list emitted bare runtime ids.
+                    let sessionId = id.hasPrefix("session:")
+                        ? String(id.dropFirst("session:".count))
+                        : id
+                    SessionDestinationView(
+                        sessionId: sessionId,
+                        mqtt: mqtt,
+                        hub: hub,
+                        pairing: pairing,
+                        teamclawService: teamclawService,
+                        currentActorID: currentActorID,
+                        refreshSessionsFromBackend: refreshSessionsFromBackend,
+                        navigationPath: $navigationPath,
+                        connectedAgentsStore: connectedAgentsStore
+                    )
+                }
+                .sheet(isPresented: $showNewSession) {
+                    NewSessionSheet(mqtt: mqtt,
+                                   peerId: "ios-\(pairing.authToken.prefix(6))",
+                                   teamclawService: teamclawService,
+                                   teamID: activeTeam?.id ?? "",
+                                   currentActorID: currentActorID,
+                                   isAgentAvailable: pairing.isPaired,
+                                   connectedAgentsStore: connectedAgentsStore,
+                                   viewModel: viewModel) { agentId in
+                        navigationPath = [agentId]
+                        // Pull the freshly-created Supabase rows (sessions +
+                        // agent_runtimes + workspaces) into the local cache so
+                        // the row's agent type / workspace populate without
+                        // waiting for the user to pull-to-refresh.
+                        Task { await refreshSessionsFromBackend() }
+                    }
+                    .modifier(ZoomTransitionModifier(sourceID: "newSession", namespace: sheetTransition))
+                }
+                .sheet(isPresented: $showInvite) {
+                    if let actorStore {
+                        MemberInviteSheet(store: actorStore)
+                    }
+                }
+                .task {
+                    viewModel.start(
+                        mqtt: mqtt,
+                        hub: hub,
+                        teamID: activeTeam?.id ?? "",
+                        connectedAgentsStore: connectedAgentsStore,
+                        modelContext: modelContext,
+                        teamclawService: teamclawService
+                    )
+                }
+                .onChange(of: teamclawService?.sessions.count) {
+                    viewModel.reloadSessions(modelContext: modelContext)
+                }
             }
-            .onChange(of: teamclawService?.sessions.count) {
-                viewModel.reloadSessions(modelContext: modelContext)
+            .simultaneousGesture(shortcutsOpenGesture)
+
+            if let shortcutsStore {
+                ShortcutsDrawer(isPresented: $showShortcuts, store: shortcutsStore)
             }
         }
         // Hoisted from the destination view: when the modifier lives on
@@ -158,7 +163,40 @@ public struct SessionsTab: View {
         // root means visibility flips in the same SwiftUI transaction
         // that mutates `navigationPath`, and the tab bar animates back
         // in alongside the pop instead of waiting it out.
-        .toolbarVisibility(navigationPath.isEmpty ? .visible : .hidden, for: .tabBar)
+        //
+        // Also hide while shortcuts is presented — the drawer occupies
+        // ~86% width + full height; the tab bar peeking out underneath
+        // competes with the drawer's right-side rounded corner and
+        // adds nothing the user can act on in that state.
+        .toolbarVisibility(
+            (navigationPath.isEmpty && !showShortcuts) ? .visible : .hidden,
+            for: .tabBar
+        )
+    }
+
+    private var shortcutsOpenGesture: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onEnded { value in
+                guard shortcutsStore != nil, !showShortcuts else { return }
+
+                let startX = value.startLocation.x
+                let dx = value.translation.width
+                let predicted = value.predictedEndTranslation.width
+
+                // Sessions list: drag rightward from the left edge.
+                let edgePullList = navigationPath.isEmpty
+                    && startX <= 44
+                    && (dx > 48 || predicted > 120)
+
+                // Inside a session: iOS owns the left edge for "back", so
+                // shortcuts is reached with a left swipe from anywhere.
+                let inSessionLeftSwipe = !navigationPath.isEmpty
+                    && (dx < -56 || predicted < -140)
+
+                if edgePullList || inSessionLeftSwipe {
+                    showShortcuts = true
+                }
+            }
     }
 }
 
