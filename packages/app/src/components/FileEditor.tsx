@@ -46,8 +46,8 @@ import {
 } from "@/components/ui/alert-dialog";
 
 // Editors - lazy loaded per file type
-const LazyTiptapMarkdownEditor = lazy(
-  () => import("@/components/editors/TiptapMarkdownEditor"),
+const LazyMarkdownEditor = lazy(
+  () => import("@/components/editors/MarkdownEditor"),
 );
 const LazyCodeEditor = lazy(() => import("@/components/editors/CodeEditor"));
 const LazyDiffRenderer = lazy(() => import("@/components/diff/DiffRenderer"));
@@ -384,7 +384,7 @@ export function FileEditor({
 
   // --- Markdown auto-save & conflict state ---
   const isMarkdown = supportsPreview(filename) === "markdown";
-  const tiptapEditorRef = useRef<import("@/components/editors/TiptapMarkdownEditor").TiptapEditorHandle>(null);
+  const markdownEditorRef = useRef<import("@/components/editors/MarkdownEditor").MarkdownEditorHandle>(null);
 
   // Conflict state for markdown files
   const [conflictAgentContent, setConflictAgentContent] = useState<string | null>(null);
@@ -554,8 +554,8 @@ export function FileEditor({
             setConflictAgentContent(content);
           } else {
             // No local changes — apply with diff-based highlighting
-            if (tiptapEditorRef.current) {
-              tiptapEditorRef.current.applyAgentChange(content);
+            if (markdownEditorRef.current) {
+              markdownEditorRef.current.applyAgentChange(content);
             }
             setCurrentContent(content);
             setExternalUpdateType("updated");
@@ -634,8 +634,8 @@ export function FileEditor({
   // --- Conflict resolution handlers ---
   const handleAcceptAgent = useCallback(() => {
     if (conflictAgentContent !== null) {
-      if (tiptapEditorRef.current) {
-        tiptapEditorRef.current.applyAgentChange(conflictAgentContent);
+      if (markdownEditorRef.current) {
+        markdownEditorRef.current.applyAgentChange(conflictAgentContent);
       }
       setCurrentContent(conflictAgentContent);
       setConflictAgentContent(null);
@@ -942,7 +942,7 @@ export function FileEditor({
         ) : (
           (() => {
             // Route to appropriate editor based on file type
-            const editorType = getEditorType(filename, filePath, content);
+            const editorType = getEditorType(filename);
 
             if (editorType === "markdown") {
               return (
@@ -953,8 +953,8 @@ export function FileEditor({
                     </div>
                   }
                 >
-                  <LazyTiptapMarkdownEditor
-                    ref={tiptapEditorRef}
+                  <LazyMarkdownEditor
+                    ref={markdownEditorRef}
                     content={currentContent}
                     filename={filename}
                     filePath={filePath}
