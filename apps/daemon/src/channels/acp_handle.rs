@@ -75,10 +75,7 @@ impl AmuxdAcpHandle {
     /// `sessions` row) to a real ACP UUID, spawning a runtime on first use.
     /// On a fresh spawn, the matching `sessions.binding` is looked up from
     /// Supabase so it can be baked into the per-session MCP config.
-    async fn resolve_or_spawn(
-        &self,
-        session: &AmuxSessionId,
-    ) -> Result<ResolveOutcome, AcpError> {
+    async fn resolve_or_spawn(&self, session: &AmuxSessionId) -> Result<ResolveOutcome, AcpError> {
         {
             let map = self.logical_to_acp.lock().await;
             if let Some(existing) = map.get(session) {
@@ -252,12 +249,14 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
 
         let turn_lock = {
             let mgr = self.manager.lock().await;
-            let agent_id = mgr.agent_id_by_acp_session(&outcome.real_acp_sid).ok_or_else(|| {
-                AcpError::Send(format!(
-                    "no agent for acp_session_id {}",
-                    outcome.real_acp_sid
-                ))
-            })?;
+            let agent_id = mgr
+                .agent_id_by_acp_session(&outcome.real_acp_sid)
+                .ok_or_else(|| {
+                    AcpError::Send(format!(
+                        "no agent for acp_session_id {}",
+                        outcome.real_acp_sid
+                    ))
+                })?;
             let handle = mgr.get_handle(&agent_id).ok_or_else(|| {
                 AcpError::Send(format!("agent {agent_id} disappeared before turn"))
             })?;
@@ -285,7 +284,11 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             let next = tokio::time::timeout(remaining, event_rx.recv()).await;
             let event = match next {
                 Ok(Some(ev)) => ev,
-                Ok(None) => break Err(AcpError::Send("ACP event channel closed before reply".into())),
+                Ok(None) => {
+                    break Err(AcpError::Send(
+                        "ACP event channel closed before reply".into(),
+                    ))
+                }
                 Err(_) => break Err(AcpError::Timeout),
             };
             let emitted = {
@@ -308,10 +311,7 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
 
         {
             let mut mgr = self.manager.lock().await;
-            mgr.checkin_turn(crate::runtime::CheckedOutTurn {
-                agent_id,
-                event_rx,
-            });
+            mgr.checkin_turn(crate::runtime::CheckedOutTurn { agent_id, event_rx });
         }
 
         let reply_text = result?;

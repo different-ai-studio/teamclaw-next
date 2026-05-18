@@ -144,9 +144,15 @@ public struct IdeaDetailView: View {
                 }
             }
         }
+        // Inset-grouped natively gives rounded sections with side margins
+        // — the paper-card pattern from `idea-detail.jsx`. We hide the
+        // default systemGroupedBackground (gray) so Mist shows in the
+        // gaps, then paint each row with Paper via listRowBackground.
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.amux.mist)
+        .toolbarBackground(Color.amux.mist.opacity(0.85), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composerCapsule
                 .padding(.horizontal, 16)
@@ -221,10 +227,20 @@ public struct IdeaDetailView: View {
     }
 
     private func statusPillMenu(for item: IdeaRecord) -> some View {
-        // Hai keeps the pill quiet: only `Done` earns Sage; the other states
-        // sit in Basalt on Pebble. Cinnabar is reserved for active sessions.
-        let fg: Color = item.isDone ? Color.amux.sage : Color.amux.basalt
-        let bg: Color = item.isDone ? Color.amux.sage.opacity(0.12) : Color.amux.pebble
+        // Status pill colors match the IdeaRow on the list:
+        // OPEN earns Cinnabar (call-to-action / unclaimed work),
+        // IN PROGRESS sits in Basalt on Pebble (quiet in-flight),
+        // DONE finishes in Sage.
+        let fg: Color = {
+            if item.isDone       { return Color.amux.sage }
+            if item.isInProgress { return Color.amux.basalt }
+            return Color.amux.cinnabar
+        }()
+        let bg: Color = {
+            if item.isDone       { return Color.amux.sage.opacity(0.12) }
+            if item.isInProgress { return Color.amux.pebble }
+            return Color.amux.cinnabar.opacity(0.10)
+        }()
         return Menu {
             Picker("Status", selection: statusBinding(for: item)) {
                 Text("Open").tag("open")
@@ -274,22 +290,22 @@ public struct IdeaDetailView: View {
             if let name = workspaceName, !name.isEmpty {
                 Text(name)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.amux.basalt)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Capsule().fill(Color(.systemFill)))
+                    .background(Capsule().fill(Color.amux.pebble))
             }
             if let creator {
                 Text("Created by \(creator.displayName) · \(item.createdAt.relativeShort)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.amux.basalt)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Capsule().fill(Color(.systemFill)))
+                    .background(Capsule().fill(Color.amux.pebble))
             } else {
                 Text(item.createdAt.relativeShort)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.amux.slate)
             }
             Spacer(minLength: 0)
         }
@@ -325,6 +341,7 @@ public struct IdeaDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .listRowBackground(Color.amux.paper)
         } header: {
             sectionHeader("Claimed by")
         }
@@ -349,6 +366,7 @@ public struct IdeaDetailView: View {
             Section {
                 ForEach(subs) { s in
                     SubmissionRow(submission: s)
+                        .listRowBackground(Color.amux.paper)
                 }
             } header: {
                 sectionHeader("Submissions · \(subs.count)")
@@ -365,6 +383,7 @@ public struct IdeaDetailView: View {
                 Text("No sessions linked yet.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .listRowBackground(Color.amux.paper)
             } else {
                 ForEach(relatedSessions, id: \.sessionId) { session in
                     Button {
@@ -373,6 +392,7 @@ public struct IdeaDetailView: View {
                         SessionLinkRow(session: session)
                     }
                     .buttonStyle(.plain)
+                    .listRowBackground(Color.amux.paper)
                 }
             }
         } header: {
@@ -395,11 +415,13 @@ public struct IdeaDetailView: View {
                     } else {
                         Text(item.archived ? "Unarchive" : "Archive")
                             .fontWeight(.medium)
+                            .foregroundStyle(Color.amux.cinnabarDeep)
                     }
                     Spacer()
                 }
             }
             .disabled(isArchiving)
+            .listRowBackground(Color.amux.paper)
             // Attach dialog to the button so iOS 26's popover-style
             // confirmation anchors at the tapped row, not at the top of
             // the screen where the body-level modifier was placed.

@@ -38,9 +38,10 @@ fn sanitize_for_filename(s: &str) -> String {
 /// `acp_session_id` hex) so the same file is reused if the runtime is
 /// re-spawned under the same logical id (e.g. after `/reset`).
 pub fn gateway_mcp_config_path(logical_session_id: &str) -> PathBuf {
-    DaemonConfig::config_dir()
-        .join("mcp-configs")
-        .join(format!("{}.json", sanitize_for_filename(logical_session_id)))
+    DaemonConfig::config_dir().join("mcp-configs").join(format!(
+        "{}.json",
+        sanitize_for_filename(logical_session_id)
+    ))
 }
 
 /// Write the per-session MCP config that points claude-code at
@@ -65,9 +66,8 @@ fn write_gateway_mcp_config(
             ))
         })?;
     }
-    let amuxd_bin = std::env::current_exe().map_err(|e| {
-        crate::error::AmuxError::Agent(format!("current_exe(): {e}"))
-    })?;
+    let amuxd_bin = std::env::current_exe()
+        .map_err(|e| crate::error::AmuxError::Agent(format!("current_exe(): {e}")))?;
     let sock = DaemonConfig::sock_path();
     let cfg = serde_json::json!({
         "mcpServers": {
@@ -433,7 +433,11 @@ impl RuntimeManager {
     }
 
     /// Inner helper: send the given body to ACP without any prefix logic.
-    pub async fn send_prompt_raw(&mut self, agent_id: &str, text: &str) -> crate::error::Result<()> {
+    pub async fn send_prompt_raw(
+        &mut self,
+        agent_id: &str,
+        text: &str,
+    ) -> crate::error::Result<()> {
         #[cfg(test)]
         {
             self.last_sent
@@ -639,9 +643,7 @@ impl RuntimeManager {
                 ))
             })?;
         let handle = self.agents.get_mut(&agent_id).ok_or_else(|| {
-            crate::error::AmuxError::Agent(format!(
-                "agent {agent_id} disappeared during checkout"
-            ))
+            crate::error::AmuxError::Agent(format!("agent {agent_id} disappeared during checkout"))
         })?;
         let event_rx = handle.event_rx.take().ok_or_else(|| {
             crate::error::AmuxError::Agent(format!(
@@ -649,10 +651,7 @@ impl RuntimeManager {
             ))
         })?;
         let turn_lock = handle.turn_lock.clone();
-        Ok((
-            CheckedOutTurn { agent_id, event_rx },
-            turn_lock,
-        ))
+        Ok((CheckedOutTurn { agent_id, event_rx }, turn_lock))
     }
 
     /// Hand the per-agent `event_rx` back so daemon `poll_events` resumes
@@ -897,14 +896,11 @@ impl RuntimeManager {
         // Drive the per-runtime aggregator off the agent's event channel
         // until an `AgentReply` is emitted at Active→Idle. Hard cap so a
         // wedged backend can't pin a gateway worker forever.
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
 
         loop {
             if std::time::Instant::now() >= deadline {
-                return Err(crate::error::AmuxError::Agent(
-                    "ACP turn timed out".into(),
-                ));
+                return Err(crate::error::AmuxError::Agent("ACP turn timed out".into()));
             }
 
             // Wait for at least one event before draining.
@@ -936,9 +932,7 @@ impl RuntimeManager {
                     ));
                 }
                 Err(_) => {
-                    return Err(crate::error::AmuxError::Agent(
-                        "ACP turn timed out".into(),
-                    ));
+                    return Err(crate::error::AmuxError::Agent("ACP turn timed out".into()));
                 }
             };
 
@@ -951,10 +945,7 @@ impl RuntimeManager {
                 .unwrap_or_default();
 
             for m in emitted {
-                if matches!(
-                    m.kind,
-                    crate::proto::teamclaw::MessageKind::AgentReply
-                ) {
+                if matches!(m.kind, crate::proto::teamclaw::MessageKind::AgentReply) {
                     return Ok(m.content);
                 }
             }

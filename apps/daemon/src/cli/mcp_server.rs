@@ -66,7 +66,10 @@ pub fn run(session_id: &str, binding: &str, sock_path: &Path) -> anyhow::Result<
 
         // Notifications carry no id and expect no response.
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
-        if matches!(method, "notifications/initialized" | "notifications/cancelled") {
+        if matches!(
+            method,
+            "notifications/initialized" | "notifications/cancelled"
+        ) {
             continue;
         }
 
@@ -79,15 +82,12 @@ pub fn run(session_id: &str, binding: &str, sock_path: &Path) -> anyhow::Result<
                 "serverInfo": { "name": "amuxd-send", "version": "0.1.0" }
             })),
             "tools/list" => Ok(json!({ "tools": [tool_definition_send()] })),
-            "tools/call" => match handle_tool_call(
-                session_id,
-                binding,
-                sock_path,
-                req.get("params"),
-            ) {
-                Ok(v) => Ok(v),
-                Err(e) => Ok(tool_err(&e)),
-            },
+            "tools/call" => {
+                match handle_tool_call(session_id, binding, sock_path, req.get("params")) {
+                    Ok(v) => Ok(v),
+                    Err(e) => Ok(tool_err(&e)),
+                }
+            }
             other => Err((-32601, format!("method not found: {other}"))),
         };
 
@@ -111,8 +111,8 @@ fn tool_definition_send() -> Value {
     json!({
         "name": "send",
         "description": "Send a text message and/or file to a chat target on a gateway channel (WeCom, Feishu, Discord, Kook, WeChat). \
-By default, sends to the current session's bound chat — provide `target` only to override. \
-Use this when you've generated a file or want to send a follow-up message without waiting for the user to ask.",
+    By default, sends to the current session's bound chat — provide `target` only to override. \
+    Use this when you've generated a file or want to send a follow-up message without waiting for the user to ask.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -229,6 +229,5 @@ fn sock_roundtrip(sock_path: &Path, line: &str) -> std::io::Result<String> {
             Err(e) => return Err(e),
         }
     }
-    String::from_utf8(buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    String::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }

@@ -1154,6 +1154,71 @@ public final class SessionDetailViewModel {
         startModelContext = nil
     }
 
+    /// Persistent ids of the snapshot rows written by the most recent
+    /// `flushStreamingForBackground()`. Per-agent so the foreground
+    /// counterpart can find them without colliding with any other
+    /// incomplete-output rows the daemon or `stop()` may have produced.
+    private var backgroundSnapshotIDByAgent: [String: String] = [:]
+
+    /// Persist a copy of every in-flight per-agent streaming buffer as
+    /// an incomplete `output` row, without cancelling the MQTT task or
+    /// mutating the in-memory streaming state. Wire to
+    /// `scenePhase == .background`: if iOS reclaims the suspended
+    /// process, the next cold launch's `start()` → `incompleteOutputIndex()`
+    /// hydrate path picks the snapshot up and the user sees their
+    /// partial text instead of an empty bubble.
+    /// `discardBackgroundSnapshot()` removes it again on the common
+    /// path where the process survived.
+    public func flushStreamingForBackground() {
+        guard !streamingAgentSet.isEmpty,
+              runtime != nil,
+              let ctx = startModelContext else { return }
+
+        // Drop any prior snapshot first so repeat bg/fg cycles don't
+        // accumulate a chain of stale partials.
+        discardBackgroundSnapshot()
+
+        var seq = (events.last?.sequence ?? 0) + 1
+        for agentID in streamingAgentSet {
+            guard let text = streamingTextByAgent[agentID], !text.isEmpty else { continue }
+            let event = AgentEvent(agentId: eventScopeKey, sequence: seq, eventType: "output")
+            event.senderActorID = agentID
+            event.text = text
+            event.isComplete = false
+            event.model = streamingModelByAgent[agentID]
+            ctx.insert(event)
+            // Deliberately NOT appendEvent — keep this row out of
+            // `events` so the live UI keeps rendering the single
+            // streaming buffer. The row exists only to survive a
+            // suspended-process kill.
+            backgroundSnapshotIDByAgent[agentID] = event.id
+            seq += 1
+        }
+        try? ctx.save()
+    }
+
+    /// Counterpart to `flushStreamingForBackground()`. Deletes the
+    /// snapshot rows we wrote on the way out now that the process
+    /// has survived and the live `streamingTextByAgent` buffer is
+    /// once again the source of truth. Idempotent.
+    public func discardBackgroundSnapshot() {
+        guard !backgroundSnapshotIDByAgent.isEmpty else { return }
+        guard let ctx = startModelContext else {
+            backgroundSnapshotIDByAgent.removeAll()
+            return
+        }
+        for id in backgroundSnapshotIDByAgent.values {
+            let descriptor = FetchDescriptor<AgentEvent>(
+                predicate: #Predicate { $0.id == id }
+            )
+            if let row = (try? ctx.fetch(descriptor))?.first {
+                ctx.delete(row)
+            }
+        }
+        try? ctx.save()
+        backgroundSnapshotIDByAgent.removeAll()
+    }
+
     private func handleEnvelope(_ env: Amux_Envelope, modelContext: ModelContext) {
         switch env.payload {
         case .acpEvent(let acp):

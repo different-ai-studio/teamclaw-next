@@ -1,7 +1,9 @@
 use crate::supabase::error::{SupabaseError, SupabaseResult};
 use url::Url;
 
-/// Parsed representation of an `amux://invite?token=<opaque>` deeplink.
+const INVITE_URL_SCHEMES: &[&str] = &["teamclaw", "amux"];
+
+/// Parsed representation of a `teamclaw://invite?token=<opaque>` deeplink.
 pub struct ParsedInvite {
     pub token: String,
     pub broker_url: Option<String>,
@@ -11,9 +13,9 @@ pub fn parse(raw: &str) -> SupabaseResult<ParsedInvite> {
     let url =
         Url::parse(raw).map_err(|e| SupabaseError::Config(format!("parse invite url: {e}")))?;
 
-    if url.scheme() != "amux" {
+    if !INVITE_URL_SCHEMES.contains(&url.scheme()) {
         return Err(SupabaseError::Config(format!(
-            "invite url scheme must be 'amux', got {}",
+            "invite url scheme must be 'teamclaw', got {}",
             url.scheme()
         )));
     }
@@ -48,6 +50,13 @@ mod tests {
 
     #[test]
     fn parses_valid_invite_url() {
+        let p = parse("teamclaw://invite?token=ABCDEF-12345_xyz").unwrap();
+        assert_eq!(p.token, "ABCDEF-12345_xyz");
+        assert_eq!(p.broker_url, None);
+    }
+
+    #[test]
+    fn parses_legacy_amux_invite_url() {
         let p = parse("amux://invite?token=ABCDEF-12345_xyz").unwrap();
         assert_eq!(p.token, "ABCDEF-12345_xyz");
         assert_eq!(p.broker_url, None);
@@ -55,7 +64,7 @@ mod tests {
 
     #[test]
     fn parses_invite_with_broker_url() {
-        let p = parse("amux://invite?token=tok-123&broker=mqtts://ai.ucar.cc:8883").unwrap();
+        let p = parse("teamclaw://invite?token=tok-123&broker=mqtts://ai.ucar.cc:8883").unwrap();
         assert_eq!(p.token, "tok-123");
         assert_eq!(p.broker_url.as_deref(), Some("mqtts://ai.ucar.cc:8883"));
     }
@@ -63,7 +72,7 @@ mod tests {
     #[test]
     fn ignores_legacy_username_password_params() {
         let p = parse(
-            "amux://invite?token=tok-123&broker=mqtts://ai.ucar.cc:8883&username=teamclaw&password=teamclaw2026",
+            "teamclaw://invite?token=tok-123&broker=mqtts://ai.ucar.cc:8883&username=teamclaw&password=teamclaw2026",
         )
         .unwrap();
         assert_eq!(p.token, "tok-123");
@@ -72,21 +81,24 @@ mod tests {
 
     #[test]
     fn rejects_wrong_scheme() {
-        assert!(parse("http://invite?token=x").is_err());
+        match parse("http://invite?token=x") {
+            Ok(_) => panic!("expected wrong scheme to be rejected"),
+            Err(err) => assert!(err.to_string().contains("must be 'teamclaw'"), "got: {err}"),
+        }
     }
 
     #[test]
     fn rejects_wrong_host() {
-        assert!(parse("amux://join?token=x").is_err());
+        assert!(parse("teamclaw://join?token=x").is_err());
     }
 
     #[test]
     fn rejects_missing_token() {
-        assert!(parse("amux://invite").is_err());
+        assert!(parse("teamclaw://invite").is_err());
     }
 
     #[test]
     fn rejects_empty_token() {
-        assert!(parse("amux://invite?token=").is_err());
+        assert!(parse("teamclaw://invite?token=").is_err());
     }
 }
