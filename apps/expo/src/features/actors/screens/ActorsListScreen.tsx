@@ -33,6 +33,7 @@ export type ActorsListScreenProps = {
   onInvite?: () => void;
   onLoad: () => void;
   onRefresh: () => void;
+  onSelectActor?: (actorId: string) => void;
   state: ActorsListState;
 };
 
@@ -73,10 +74,12 @@ function HeaderBar({
 function Section({
   actors,
   currentActorId,
+  onSelectActor,
   title,
 }: {
   actors: Actor[];
   currentActorId: string | null;
+  onSelectActor?: (actorId: string) => void;
   title: string;
 }) {
   return (
@@ -85,7 +88,11 @@ function Section({
       <View>
         {actors.map((actor, index) => (
           <View key={actor.actorId}>
-            <ActorRow actor={actor} isMe={actor.actorId === currentActorId} />
+            <Pressable
+              onPress={onSelectActor ? () => onSelectActor(actor.actorId) : undefined}
+            >
+              <ActorRow actor={actor} isMe={actor.actorId === currentActorId} />
+            </Pressable>
             {index < actors.length - 1 ? <Hairline style={styles.rowDivider} /> : null}
           </View>
         ))}
@@ -99,6 +106,7 @@ export function ActorsListScreen({
   onInvite,
   onLoad,
   onRefresh,
+  onSelectActor,
   state,
 }: ActorsListScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
@@ -183,6 +191,7 @@ export function ActorsListScreen({
             <Section
               actors={visibleHumans}
               currentActorId={currentActorId}
+              onSelectActor={onSelectActor}
               title={`Humans · ${visibleHumans.length}`}
             />
           ) : null}
@@ -190,6 +199,7 @@ export function ActorsListScreen({
             <Section
               actors={visibleAgents}
               currentActorId={currentActorId}
+              onSelectActor={onSelectActor}
               title={`Agent Actors · ${visibleAgents.length}`}
             />
           ) : null}

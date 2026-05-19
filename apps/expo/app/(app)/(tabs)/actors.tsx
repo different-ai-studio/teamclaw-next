@@ -1,4 +1,4 @@
-import { Redirect } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../_layout";
@@ -8,6 +8,7 @@ import { ActorsListScreen } from "../../../src/features/actors/screens/ActorsLis
 import { supabase } from "../../../src/lib/supabase/client";
 
 export default function ActorsIndexRoute() {
+  const router = useRouter();
   const { state } = useOnboarding();
   const href = routeToHref(state.route);
   const teamId = state.currentTeam?.id ?? "";
@@ -47,6 +48,9 @@ export default function ActorsIndexRoute() {
       }}
       onRefresh={() => {
         void controller.refresh();
+      }}
+      onSelectActor={(actorId) => {
+        router.push(`/(app)/actor-detail?actorId=${actorId}`);
       }}
       state={listState}
     />

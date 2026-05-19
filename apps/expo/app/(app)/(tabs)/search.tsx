@@ -67,6 +67,7 @@ export default function SearchIndexRoute() {
       actors={actors}
       ideas={ideas}
       isLoading={isLoading}
+      onSelectActor={(actorId) => router.push(`/(app)/actor-detail?actorId=${actorId}`)}
       onSelectSession={(sessionId) => router.push(`/(app)/sessions/${sessionId}`)}
       sessions={sessions}
     />
