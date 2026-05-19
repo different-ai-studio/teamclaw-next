@@ -159,6 +159,14 @@ export default function SessionDetailRoute() {
     return map;
   }, [teamActors]);
 
+  const senderAvatars = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const actor of teamActors) {
+      map.set(actor.actorId, actor.avatarUrl);
+    }
+    return map;
+  }, [teamActors]);
+
   const headerAvatars = useMemo(() => {
     if (!detailState.session) return [];
     const participantIds = new Set(detailState.session.participantActorIds);
@@ -277,6 +285,7 @@ export default function SessionDetailRoute() {
           }}
           ownActorId={state.currentMemberActorId ?? undefined}
           replyTarget={detailState.replyTarget}
+          senderAvatars={senderAvatars}
           senderNames={senderNames}
           sendErrorMessage={detailState.sendErrorMessage}
           state={detailState}

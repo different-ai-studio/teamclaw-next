@@ -17,6 +17,8 @@ import {
   type AgentChip,
 } from "../components/AgentChipBar";
 import { ConnectionBannerOverlay } from "../components/ConnectionBannerOverlay";
+import { DaySeparator } from "../components/DaySeparator";
+import { dayLabel, isSameCalendarDay } from "../components/day-separator-labels";
 import { MentionsPopup } from "../components/MentionsPopup";
 import {
   applyMention,
@@ -64,6 +66,7 @@ type SessionDetailScreenProps = {
   onSend: () => void;
   ownActorId?: string;
   replyTarget?: { messageId: string; content: string } | null;
+  senderAvatars?: ReadonlyMap<string, string | null>;
   senderNames?: ReadonlyMap<string, string>;
   sendErrorMessage: string | null;
   state: SessionDetailRenderableState;
@@ -175,6 +178,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onSend,
     ownActorId,
     replyTarget,
+    senderAvatars,
     senderNames,
     sendErrorMessage,
     streamingAgentIds,
@@ -183,7 +187,30 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
   } = props;
   const { session } = state;
   const hasMessages = state.messages.length > 0;
-  const messageListRef = useRef<FlatList<typeof state.messages[number]> | null>(null);
+
+  type FeedItem =
+    | { kind: "separator"; key: string; label: string }
+    | { kind: "message"; key: string; message: typeof state.messages[number] };
+
+  const feedItems: FeedItem[] = [];
+  for (let i = 0; i < state.messages.length; i += 1) {
+    const current = state.messages[i];
+    const prev = i > 0 ? state.messages[i - 1] : null;
+    if (!prev || !isSameCalendarDay(prev.createdAt, current.createdAt)) {
+      feedItems.push({
+        kind: "separator",
+        key: `sep:${current.messageId}`,
+        label: dayLabel(current.createdAt),
+      });
+    }
+    feedItems.push({
+      kind: "message",
+      key: current.messageId,
+      message: current,
+    });
+  }
+
+  const messageListRef = useRef<FlatList<FeedItem> | null>(null);
   const lastMessageCount = useRef(state.messages.length);
 
   useEffect(() => {
@@ -218,31 +245,36 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         {hasMessages ? (
           <FlatList
             contentContainerStyle={styles.feedContent}
-            data={state.messages}
-            keyExtractor={(message) => message.messageId}
+            data={feedItems}
+            keyExtractor={(item) => item.key}
             onContentSizeChange={() => {
               messageListRef.current?.scrollToEnd({ animated: false });
             }}
             ref={messageListRef}
             renderItem={({ item }) => {
-              const isOwn = ownActorId ? item.senderActorId === ownActorId : false;
+              if (item.kind === "separator") {
+                return <DaySeparator label={item.label} />;
+              }
+              const msg = item.message;
+              const isOwn = ownActorId ? msg.senderActorId === ownActorId : false;
               const replyToMessage =
-                item.replyToMessageId && item.replyToMessageId.length > 0
-                  ? state.messages.find((m) => m.messageId === item.replyToMessageId) ?? null
+                msg.replyToMessageId && msg.replyToMessageId.length > 0
+                  ? state.messages.find((m) => m.messageId === msg.replyToMessageId) ??
+                    null
                   : null;
               return (
                 <SessionMessageRow
                   isOwnMessage={isOwn}
-                  message={item}
+                  message={msg}
                   onDelete={onDeleteMessage}
                   onEdit={
                     onEditMessage
-                      ? (msg) => onEditMessage(msg.messageId, msg.content)
+                      ? (m) => onEditMessage(m.messageId, m.content)
                       : undefined
                   }
                   onJumpToReply={(targetId) => {
-                    const index = state.messages.findIndex(
-                      (m) => m.messageId === targetId,
+                    const index = feedItems.findIndex(
+                      (entry) => entry.kind === "message" && entry.message.messageId === targetId,
                     );
                     if (index >= 0) {
                       messageListRef.current?.scrollToIndex({
@@ -254,12 +286,15 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
                   }}
                   onReply={
                     onReplyToMessage
-                      ? (msg) => onReplyToMessage(msg.messageId)
+                      ? (m) => onReplyToMessage(m.messageId)
                       : undefined
                   }
                   replyToMessage={replyToMessage}
+                  senderAvatarUrl={
+                    !isOwn ? senderAvatars?.get(msg.senderActorId) ?? null : null
+                  }
                   senderName={
-                    !isOwn ? senderNames?.get(item.senderActorId) ?? undefined : undefined
+                    !isOwn ? senderNames?.get(msg.senderActorId) ?? undefined : undefined
                   }
                 />
               );

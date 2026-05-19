@@ -24,6 +24,7 @@ export type SessionMessageRowProps = {
   onJumpToReply?: (messageId: string) => void;
   onReply?: (message: SessionMessage) => void;
   replyToMessage?: SessionMessage | null;
+  senderAvatarUrl?: string | null;
   senderName?: string;
 };
 
@@ -79,6 +80,7 @@ export function SessionMessageRow({
   onJumpToReply,
   onReply,
   replyToMessage,
+  senderAvatarUrl,
   senderName,
 }: SessionMessageRowProps) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -136,8 +138,22 @@ export function SessionMessageRow({
 
   const body = normalizeBody(message);
   const attachments = message.attachments ?? [];
+  const senderInitial = (senderName ?? "").charAt(0).toUpperCase() || "?";
   return (
     <View style={[styles.row, isOwnMessage ? styles.rowOwn : styles.rowOther]}>
+      {!isOwnMessage ? (
+        <View style={styles.senderAvatar}>
+          {senderAvatarUrl ? (
+            <Image
+              accessibilityRole="image"
+              source={{ uri: senderAvatarUrl }}
+              style={styles.senderAvatarImage}
+            />
+          ) : (
+            <Text style={styles.senderAvatarText}>{senderInitial}</Text>
+          )}
+        </View>
+      ) : null}
       <Pressable
         accessibilityHint="Long-press to copy or delete"
         delayLongPress={350}
@@ -338,9 +354,31 @@ const styles = StyleSheet.create({
     color: colors.paper,
   },
   row: {
+    flexDirection: "row",
+    gap: spacing.xs,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
     width: "100%",
+  },
+  senderAvatar: {
+    alignItems: "center",
+    alignSelf: "flex-end",
+    backgroundColor: hai.basalt,
+    borderRadius: 999,
+    height: 24,
+    justifyContent: "center",
+    marginBottom: 4,
+    overflow: "hidden",
+    width: 24,
+  },
+  senderAvatarImage: {
+    height: "100%",
+    width: "100%",
+  },
+  senderAvatarText: {
+    color: hai.paper,
+    fontSize: 11,
+    fontWeight: "700",
   },
   rowOther: {
     alignItems: "flex-start",
