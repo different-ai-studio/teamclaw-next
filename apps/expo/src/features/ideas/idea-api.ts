@@ -58,6 +58,22 @@ function toIdea(row: IdeaRow, workspaceName: string | null): Idea {
 
 export function createIdeasApi(client: IdeasClient) {
   return {
+    async updateStatus(ideaId: string, status: IdeaStatus): Promise<void> {
+      const result = (await client
+        .from("ideas")
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq("id", ideaId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
+    async archive(ideaId: string): Promise<void> {
+      const result = (await client
+        .from("ideas")
+        .update({ archived: true, updated_at: new Date().toISOString() })
+        .eq("id", ideaId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async listIdeas(teamId: string): Promise<Idea[]> {
       const ideaResult = (await client
         .from("ideas")

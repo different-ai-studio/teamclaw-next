@@ -14,10 +14,13 @@ import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import type { Idea, IdeaStatus } from "../idea-types";
 
 export type IdeaDetailScreenProps = {
+  busyAction: "toggleStatus" | "archive" | null;
   creatorName: string | null;
   idea: Idea | null;
   isLoading: boolean;
+  onArchive?: () => void;
   onClose: () => void;
+  onToggleStatus?: () => void;
 };
 
 type StatusPill = {
@@ -64,10 +67,13 @@ function formatTimestamp(value: string | undefined): string {
 }
 
 export function IdeaDetailScreen({
+  busyAction,
   creatorName,
   idea,
   isLoading,
+  onArchive,
   onClose,
+  onToggleStatus,
 }: IdeaDetailScreenProps) {
   return (
     <View style={styles.screen}>
@@ -118,6 +124,58 @@ export function IdeaDetailScreen({
                 <DetailRow label="Updated" value={formatTimestamp(idea.updatedAt)} />
               </View>
             </View>
+
+            {(onToggleStatus || onArchive) ? (
+              <View style={styles.actions}>
+                {onToggleStatus ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busyAction !== null}
+                    onPress={onToggleStatus}
+                    style={({ pressed }) => [
+                      styles.actionButton,
+                      idea.status === "done"
+                        ? styles.actionReopen
+                        : styles.actionDone,
+                      busyAction !== null ? styles.actionBusy : null,
+                      pressed && busyAction === null ? styles.actionPressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.actionText,
+                        idea.status === "done"
+                          ? styles.actionReopenText
+                          : styles.actionDoneText,
+                      ]}
+                    >
+                      {busyAction === "toggleStatus"
+                        ? "Saving…"
+                        : idea.status === "done"
+                        ? "Reopen"
+                        : "Mark done"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {onArchive ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busyAction !== null}
+                    onPress={onArchive}
+                    style={({ pressed }) => [
+                      styles.actionButton,
+                      styles.actionArchive,
+                      busyAction !== null ? styles.actionBusy : null,
+                      pressed && busyAction === null ? styles.actionPressed : null,
+                    ]}
+                  >
+                    <Text style={[styles.actionText, styles.actionArchiveText]}>
+                      {busyAction === "archive" ? "Archiving…" : "Archive"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -152,6 +210,41 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  actionArchive: {
+    backgroundColor: "rgba(184,75,54,0.10)",
+  },
+  actionArchiveText: {
+    color: hai.cinnabar,
+  },
+  actionBusy: {
+    opacity: 0.5,
+  },
+  actionButton: {
+    alignItems: "center",
+    borderRadius: radii.button,
+    paddingVertical: 14,
+  },
+  actionDone: {
+    backgroundColor: hai.onyx,
+  },
+  actionDoneText: {
+    color: hai.paper,
+  },
+  actionPressed: {
+    opacity: 0.85,
+  },
+  actionReopen: {
+    backgroundColor: hai.pebble,
+  },
+  actionReopenText: {
+    color: hai.onyx,
+  },
+  actionText: {
+    ...typography.cardTitle,
+  },
+  actions: {
+    gap: spacing.sm,
+  },
   card: {
     backgroundColor: colors.paper,
     borderColor: colors.hairline,
