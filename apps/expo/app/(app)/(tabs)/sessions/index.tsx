@@ -61,7 +61,7 @@ export default function SessionsIndexRoute() {
         router.push(`/(app)/sessions/${sessionId}`);
       }}
       onShortcuts={() => {
-        router.push("/(app)/settings");
+        router.push("/(app)/shortcuts");
       }}
       state={listState}
     />
