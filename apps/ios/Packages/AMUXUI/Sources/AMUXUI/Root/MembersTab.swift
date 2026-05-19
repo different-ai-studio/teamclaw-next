@@ -1,5 +1,6 @@
 import SwiftUI
 import AMUXCore
+import AMUXSharedUI
 
 public struct MembersTab: View {
     let pairing: PairingManager
@@ -55,11 +56,14 @@ public struct MembersTab: View {
             )
                 .navigationTitle("Actors")
                 .navigationBarTitleDisplayMode(.large)
+                .toolbarBackground(Color.amux.mist, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
                         Button { showSettings = true } label: {
                             Image(systemName: "gearshape")
                                 .font(.title3)
+                                .foregroundStyle(Color.amux.onyx)
                                 .accessibilityHidden(true)
                         }
                         .buttonStyle(.plain)
@@ -70,11 +74,11 @@ public struct MembersTab: View {
                         Button { showInvite = true } label: {
                             Image(systemName: "person.badge.plus")
                                 .font(.title3)
+                                .foregroundStyle(activeTeam == nil ? Color.amux.slate.opacity(0.5) : Color.amux.onyx)
                                 .accessibilityHidden(true)
                         }
                         .buttonStyle(.plain)
                         .disabled(activeTeam == nil)
-                        .opacity(activeTeam == nil ? 0.4 : 1)
                         .accessibilityLabel("Invite Member")
                         .accessibilityIdentifier("members.inviteButton")
                     }

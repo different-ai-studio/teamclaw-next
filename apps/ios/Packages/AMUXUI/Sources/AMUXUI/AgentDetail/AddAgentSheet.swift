@@ -43,40 +43,49 @@ public struct AddAgentSheet: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                Color.amux.mist.ignoresSafeArea()
+            List {
                 if candidates.isEmpty {
-                    emptyState
+                    ContentUnavailableView(
+                        "No agents available",
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        description: Text("All connected agents are already in this session, or no agents are reachable.")
+                    )
+                    .listRowBackground(Color.clear)
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            HaiSectionLabel("Available Agents")
-                            HaiPaperCard {
-                                ForEach(Array(candidates.enumerated()), id: \.element.id) { index, agent in
-                                    if index > 0 {
-                                        Rectangle()
-                                            .fill(Color.amux.hairline)
-                                            .frame(height: 0.5)
-                                            .padding(.leading, 32)
+                    ForEach(candidates) { agent in
+                        Button {
+                            handleTap(agent)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(agent.isOnline ? .green : .gray.opacity(0.4))
+                                    .frame(width: 8, height: 8)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(agent.displayName).font(.body)
+                                    if !agent.agentKind.isEmpty {
+                                        Text(agent.agentKind.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
-                                    Button { handleTap(agent) } label: {
-                                        agentRow(agent)
-                                    }
-                                    .buttonStyle(.plain)
                                 }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Color.amux.cinnabarDeep)
-                                    .padding(.horizontal, 24)
-                            }
+                            .contentShape(Rectangle())
                         }
-                        .padding(.top, 16)
-                        .padding(.bottom, 24)
+                        .tint(.primary)
                     }
                 }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.amux.mist)
             .navigationTitle("Add Agent")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -84,7 +93,7 @@ public struct AddAgentSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.title3)
-                            .foregroundStyle(Color.amux.slate)
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -97,46 +106,6 @@ public struct AddAgentSheet: View {
                 await workspaceStore?.reload(agentID: nil)
             }
         }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 6) {
-            Text("No agents available")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.amux.basalt)
-            Text("All connected agents are already in this session,\nor no agents are reachable.")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.amux.slate)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.horizontal, 32)
-    }
-
-    @ViewBuilder
-    private func agentRow(_ agent: ConnectedAgent) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(agent.isOnline ? Color.amux.sage : Color.amux.slate.opacity(0.5))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(agent.displayName)
-                    .font(.system(size: 14.5))
-                    .foregroundStyle(Color.amux.onyx)
-                if !agent.agentKind.isEmpty {
-                    Text(agent.agentKind.uppercased())
-                        .font(.system(size: 10, design: .monospaced))
-                        .tracking(0.28)
-                        .foregroundStyle(Color.amux.slate)
-                }
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.amux.slate)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
-        .contentShape(Rectangle())
     }
 
     private func handleTap(_ agent: ConnectedAgent) {
