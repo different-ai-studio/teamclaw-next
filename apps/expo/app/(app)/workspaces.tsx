@@ -72,6 +72,22 @@ export default function WorkspacesRoute() {
     };
   }, [load]);
 
+  const handleArchive = async (id: string, archived: boolean) => {
+    try {
+      const result = await supabase
+        .from("workspaces")
+        .update({ archived, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (result.error) {
+        setError(result.error.message);
+      } else {
+        await load();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't update workspace.");
+    }
+  };
+
   const handleCreate = async () => {
     if (!teamId || !memberActorId) return;
     const name = createDraft.trim();
@@ -185,6 +201,15 @@ export default function WorkspacesRoute() {
                   <View key={row.id}>
                     <View style={styles.row}>
                       <Text style={styles.rowLabel}>{row.name || row.id}</Text>
+                      <View style={{ flex: 1 }} />
+                      <Pressable
+                        accessibilityLabel={`Archive ${row.name}`}
+                        accessibilityRole="button"
+                        hitSlop={6}
+                        onPress={() => handleArchive(row.id, true)}
+                      >
+                        <Ionicons color={colors.slate} name="archive-outline" size={18} />
+                      </Pressable>
                     </View>
                     {index < active.length - 1 ? <Hairline /> : null}
                   </View>
@@ -202,6 +227,19 @@ export default function WorkspacesRoute() {
                     <View key={row.id}>
                       <View style={styles.row}>
                         <Text style={styles.rowLabelArchived}>{row.name || row.id}</Text>
+                        <View style={{ flex: 1 }} />
+                        <Pressable
+                          accessibilityLabel={`Restore ${row.name}`}
+                          accessibilityRole="button"
+                          hitSlop={6}
+                          onPress={() => handleArchive(row.id, false)}
+                        >
+                          <Ionicons
+                            color={colors.cinnabar}
+                            name="arrow-undo-outline"
+                            size={18}
+                          />
+                        </Pressable>
                       </View>
                       {index < archived.length - 1 ? <Hairline /> : null}
                     </View>

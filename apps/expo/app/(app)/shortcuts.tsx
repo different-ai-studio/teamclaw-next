@@ -29,6 +29,9 @@ export default function ShortcutsRoute() {
   const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [folderStack, setFolderStack] = useState<Array<{ id: string; label: string }>>([]);
+  const currentFolderId = folderStack.length > 0 ? folderStack[folderStack.length - 1].id : null;
+  const currentFolderLabel = folderStack.length > 0 ? folderStack[folderStack.length - 1].label : null;
 
   useEffect(() => {
     if (!teamId) {
@@ -69,14 +72,27 @@ export default function ShortcutsRoute() {
     }
   };
 
-  const folders = shortcuts.filter((row) => row.nodeType === "folder");
-  const leaves = shortcuts.filter(isLeafShortcut);
+  const visible = shortcuts.filter((row) => (row.parentId ?? null) === currentFolderId);
+  const folders = visible.filter((row) => row.nodeType === "folder");
+  const leaves = visible.filter(isLeafShortcut);
 
   return (
     <View style={styles.screen}>
       <View style={styles.headerBar}>
-        <View style={styles.headerSlot} />
-        <Text style={styles.headerTitle}>Shortcuts</Text>
+        <View style={styles.headerSlot}>
+          {folderStack.length > 0 ? (
+            <Pressable
+              accessibilityLabel="Back to parent folder"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => setFolderStack((stack) => stack.slice(0, -1))}
+              style={styles.headerSlotPressable}
+            >
+              <Ionicons color={colors.onyx} name="chevron-back" size={26} />
+            </Pressable>
+          ) : null}
+        </View>
+        <Text style={styles.headerTitle}>{currentFolderLabel ?? "Shortcuts"}</Text>
         <Pressable hitSlop={8} onPress={() => router.back()} style={styles.headerSlot}>
           <Ionicons color={colors.onyx} name="close" size={26} />
         </Pressable>
@@ -112,12 +128,26 @@ export default function ShortcutsRoute() {
                 <View style={styles.card}>
                   {folders.map((folder, index) => (
                     <View key={folder.id}>
-                      <View style={styles.row}>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() =>
+                          setFolderStack((stack) => [
+                            ...stack,
+                            { id: folder.id, label: folder.label },
+                          ])
+                        }
+                        style={({ pressed }) => [
+                          styles.row,
+                          pressed ? styles.rowPressed : null,
+                        ]}
+                      >
                         <View style={styles.iconTile}>
                           <Ionicons color={colors.basalt} name="folder-outline" size={18} />
                         </View>
                         <Text style={styles.rowLabel}>{folder.label}</Text>
-                      </View>
+                        <View style={{ flex: 1 }} />
+                        <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+                      </Pressable>
                       {index < folders.length - 1 ? <Hairline /> : null}
                     </View>
                   ))}
@@ -168,26 +198,28 @@ export default function ShortcutsRoute() {
           </View>
         )}
 
-        <View style={styles.section}>
-          <SectionEyebrow label="SYSTEM" style={styles.sectionEyebrow} />
-          <View style={styles.card}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push("/(app)/settings")}
-              style={({ pressed }) => [
-                styles.row,
-                pressed ? styles.rowPressed : null,
-              ]}
-            >
-              <View style={styles.iconTile}>
-                <Ionicons color={colors.basalt} name="settings-outline" size={18} />
-              </View>
-              <Text style={styles.rowLabel}>Settings</Text>
-              <View style={{ flex: 1 }} />
-              <Ionicons color={colors.slate} name="chevron-forward" size={16} />
-            </Pressable>
+        {folderStack.length === 0 ? (
+          <View style={styles.section}>
+            <SectionEyebrow label="SYSTEM" style={styles.sectionEyebrow} />
+            <View style={styles.card}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.push("/(app)/settings")}
+                style={({ pressed }) => [
+                  styles.row,
+                  pressed ? styles.rowPressed : null,
+                ]}
+              >
+                <View style={styles.iconTile}>
+                  <Ionicons color={colors.basalt} name="settings-outline" size={18} />
+                </View>
+                <Text style={styles.rowLabel}>Settings</Text>
+                <View style={{ flex: 1 }} />
+                <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+              </Pressable>
+            </View>
           </View>
-        </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -240,6 +272,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 40,
     minWidth: 40,
+  },
+  headerSlotPressable: {
+    alignItems: "center",
+    height: 40,
+    justifyContent: "center",
+    width: 40,
   },
   headerTitle: {
     color: colors.onyx,
