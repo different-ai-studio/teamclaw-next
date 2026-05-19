@@ -35,6 +35,7 @@ import {
 type Filter = "all" | "mine" | "open" | "done";
 
 export type IdeasListScreenProps = {
+  actorNames?: ReadonlyMap<string, string>;
   currentActorId: string | null;
   onArchiveBatch?: (ideaIds: string[]) => Promise<void>;
   onCreate?: () => void;
@@ -93,6 +94,7 @@ function HeaderBar({
 }
 
 export function IdeasListScreen({
+  actorNames,
   currentActorId,
   onArchiveBatch,
   onCreate,
@@ -405,7 +407,14 @@ export function IdeasListScreen({
                     </View>
                   ) : null}
                   <View style={styles.ideaRowBody}>
-                    <IdeaRow idea={idea} />
+                    <IdeaRow
+                    creatorName={
+                      idea.createdByActorId
+                        ? actorNames?.get(idea.createdByActorId) ?? null
+                        : null
+                    }
+                    idea={idea}
+                  />
                   </View>
                 </Pressable>
                 {index < filteredIdeas.length - 1 ? (

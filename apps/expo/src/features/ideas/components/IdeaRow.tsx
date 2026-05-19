@@ -34,10 +34,11 @@ function statusPill(status: IdeaStatus): StatusPill {
 }
 
 export type IdeaRowProps = {
+  creatorName?: string | null;
   idea: Idea;
 };
 
-export function IdeaRow({ idea }: IdeaRowProps) {
+export function IdeaRow({ creatorName, idea }: IdeaRowProps) {
   const pill = statusPill(idea.status);
   const isDone = idea.status === "done";
 
@@ -64,6 +65,12 @@ export function IdeaRow({ idea }: IdeaRowProps) {
       {idea.description ? (
         <Text numberOfLines={2} style={styles.body}>
           {idea.description}
+        </Text>
+      ) : null}
+
+      {creatorName ? (
+        <Text numberOfLines={1} style={styles.creatorFooter}>
+          {creatorName}
         </Text>
       ) : null}
     </View>
@@ -110,6 +117,10 @@ const styles = StyleSheet.create({
     color: colors.slate,
     flexShrink: 1,
     ...typography.monoMeta,
+  },
+  creatorFooter: {
+    color: colors.slate,
+    ...typography.caption,
   },
 });
 

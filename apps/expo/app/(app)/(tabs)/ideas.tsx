@@ -1,7 +1,8 @@
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../_layout";
+import { createActorsApi } from "../../../src/features/actors/actor-api";
 import { createIdeasApi } from "../../../src/features/ideas/idea-api";
 import { createIdeasController } from "../../../src/features/ideas/idea-controller";
 import { IdeasListScreen } from "../../../src/features/ideas/screens/IdeasListScreen";
@@ -39,6 +40,26 @@ export default function IdeasIndexRoute() {
     }, [controller, teamId]),
   );
 
+  const [actorNames, setActorNames] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    if (!teamId) return;
+    let cancelled = false;
+    void createActorsApi(supabase)
+      .listActors(teamId)
+      .then((rows) => {
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const row of rows) map.set(row.actorId, row.displayName);
+        setActorNames(map);
+      })
+      .catch(() => {
+        if (!cancelled) setActorNames(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId]);
+
   if (state.route !== "ready") {
     return <Redirect href={href ?? "/"} />;
   }
@@ -49,6 +70,7 @@ export default function IdeasIndexRoute() {
 
   return (
     <IdeasListScreen
+      actorNames={actorNames}
       currentActorId={state.currentMemberActorId}
       onCreate={() => router.push("/(app)/new-idea")}
       onOpenArchived={() => router.push("/(app)/archived-ideas")}
