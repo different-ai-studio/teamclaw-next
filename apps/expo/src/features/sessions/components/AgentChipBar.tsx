@@ -63,6 +63,7 @@ export function AgentChipBar({
     <ScrollView
       contentContainerStyle={styles.row}
       horizontal
+      keyboardShouldPersistTaps="handled"
       showsHorizontalScrollIndicator={false}
       style={styles.container}
     >
@@ -125,6 +126,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   container: {
+    flexGrow: 0,
     paddingVertical: spacing.xs,
   },
   label: {
@@ -133,6 +135,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   row: {
+    alignItems: "center",
     flexDirection: "row",
     gap: spacing.xs,
     paddingHorizontal: spacing.lg,

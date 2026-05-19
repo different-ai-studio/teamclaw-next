@@ -1,8 +1,11 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
+import { createActorsApi } from "../../../../src/features/actors/actor-api";
+import type { Actor } from "../../../../src/features/actors/actor-types";
+import type { AgentChip } from "../../../../src/features/sessions/components/AgentChipBar";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
@@ -98,6 +101,35 @@ export default function SessionDetailRoute() {
     controller?.getState ?? (() => fallbackDetailState),
   );
 
+  const [teamActors, setTeamActors] = useState<Actor[]>([]);
+  useEffect(() => {
+    if (!currentTeam?.id) return;
+    let cancelled = false;
+    void createActorsApi(supabase)
+      .listActors(currentTeam.id)
+      .then((rows) => {
+        if (!cancelled) setTeamActors(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setTeamActors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTeam?.id]);
+
+  const agentChips: AgentChip[] = useMemo(() => {
+    if (!detailState.session) return [];
+    const participantIds = new Set(detailState.session.participantActorIds);
+    return teamActors
+      .filter((actor) => actor.actorType === "agent" && participantIds.has(actor.actorId))
+      .map((actor) => ({
+        agentId: actor.actorId,
+        displayName: actor.displayName,
+        runtimeState: "ready" as const,
+      }));
+  }, [detailState.session, teamActors]);
+
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: "会话详情" }} />
@@ -143,6 +175,7 @@ export default function SessionDetailRoute() {
 
       {canRenderSessionDetail(detailState) ? (
         <SessionDetailScreen
+          agentChips={agentChips}
           composerText={detailState.composerText}
           connectionState={detailState.connectionState}
           isSending={detailState.isSending}
