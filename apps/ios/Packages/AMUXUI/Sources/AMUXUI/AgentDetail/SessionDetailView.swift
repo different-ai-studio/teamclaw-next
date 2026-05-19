@@ -196,24 +196,6 @@ public struct SessionDetailView: View {
         // the pop transition finished — a multi-beat lag.
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
-                AgentChipBar(
-                    chips: viewModel.memberSheetAgents.map { a in
-                        AgentChipBar.AgentChip(
-                            id: a.id,
-                            displayName: a.displayName,
-                            runtimeState: AgentChipBar.RuntimeChipState.fromCore(a.runtimeState)
-                        )
-                    },
-                    selection: Binding(
-                        get: { viewModel.agentChipSelection },
-                        set: { viewModel.setAgentChipSelection($0) }
-                    ),
-                    streamingAgentIDs: viewModel.streamingAgentIDs,
-                    onInterrupt: { agentID in
-                        viewModel.interruptAgent(agentID)
-                    }
-                )
-                Divider().opacity(0.4)
                 SessionComposer(
                     promptText: $promptText,
                     selectedModelId: $selectedModelId,
@@ -224,6 +206,21 @@ public struct SessionDetailView: View {
                     availableMentions: mentionTargets(),
                     sessionID: viewModel.session?.sessionId ?? "",
                     teamID: viewModel.teamIDRef,
+                    agentChips: viewModel.memberSheetAgents.map { a in
+                        AgentChipBar.AgentChip(
+                            id: a.id,
+                            displayName: a.displayName,
+                            runtimeState: AgentChipBar.RuntimeChipState.fromCore(a.runtimeState)
+                        )
+                    },
+                    agentChipSelection: Binding(
+                        get: { viewModel.agentChipSelection },
+                        set: { viewModel.setAgentChipSelection($0) }
+                    ),
+                    streamingAgentIDs: viewModel.streamingAgentIDs,
+                    onAgentInterrupt: { agentID in
+                        viewModel.interruptAgent(agentID)
+                    },
                     onSend: { attachmentURLs in
                         let text = promptText
                         let modelId = resolvedModelId
