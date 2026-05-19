@@ -85,5 +85,20 @@ export async function syncActorsForTeam(
       await cache.setWatermark(TABLE, teamId, maxUpdated);
     }
   }
+
+  // Full-sync reconciliation: soft-delete local rows that are no longer
+  // returned by actor_directory (e.g. removed agents, visibility changed).
+  // This prevents stale actors from appearing in the new-session picker.
+  if (opts?.full) {
+    const freshIds = new Set(rows.map((r) => r.id));
+    const local = await cache.loadActorsForTeam(teamId, false);
+    const now = new Date().toISOString();
+    for (const localRow of local) {
+      if (!freshIds.has(localRow.id)) {
+        await cache.softDeleteActor(localRow.id, now);
+      }
+    }
+  }
+
   return rows.length;
 }

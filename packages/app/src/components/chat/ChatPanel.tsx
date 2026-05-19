@@ -34,10 +34,8 @@ import {
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
-import { uploadAttachmentsToStorage } from "@/lib/attachment-upload";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
-type SendMessageFilePart = Record<string, unknown>;
 import { Suggestions, Suggestion } from "@/packages/ai/suggestion";
 import { Button } from "@/components/ui/button";
 
@@ -54,43 +52,10 @@ import { SessionContinueBanner } from "./SessionContinueBanner";
 import { shouldOpenNewSessionActorPicker } from "./chat-panel-routing";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
+import { uploadAttachment } from "@/lib/attachment-upload";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { useTerminalStore } from "@/stores/terminal-store";
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-async function saveImageToWorkspace(
-  file: File,
-  workspacePath: string,
-): Promise<string | null> {
-  if (!isTauri()) return null;
-  try {
-    const { mkdir, writeFile } = await import("@tauri-apps/plugin-fs");
-    const uploadsDir = `${workspacePath}/.uploads`;
-    try {
-      await mkdir(uploadsDir, { recursive: true });
-    } catch {
-      // already exists
-    }
-    const ext = file.type.split("/")[1] || "png";
-    const timestamp = Date.now();
-    const filename = `paste-${timestamp}.${ext}`;
-    const fullPath = `${uploadsDir}/${filename}`;
-    const buffer = await file.arrayBuffer();
-    await writeFile(fullPath, new Uint8Array(buffer));
-    return fullPath;
-  } catch (err) {
-    console.error("[ChatPanel] Failed to save pasted image:", err);
-    return null;
-  }
-}
 
 const EMPTY_MESSAGES: Message[] = [];
 
@@ -848,6 +813,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     );
     const _isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
 
+
+    // Resolve teamId early — needed for attachment upload path before building content.
+    const authSession = useAuthStore.getState().session;
+    let teamIdForSend: string | null =
+      useSessionListStore.getState().rows.find(r => r.id === sid)?.team_id ?? null;
+    if (!teamIdForSend && sid) {
+      const { data: sessionRow } = await supabase
+        .from("sessions")
+        .select("team_id")
+        .eq("id", sid)
+        .maybeSingle();
+      teamIdForSend = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
+    }
+
+
     let finalContent: string;
     const personMentions: string[] = [];
 
@@ -913,58 +893,35 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     finalContent = parts.join("\n\n");
 
-    // Save pasted images to workspace and build file parts
-    let _imageParts: SendMessageFilePart[] | undefined;
-    if (currentImageFiles.length > 0) {
-      const savedPaths: string[] = [];
-      _imageParts = await Promise.all(
-        currentImageFiles.map(async (file) => {
-          const dataUrl = await fileToDataUrl(file);
-          // Save to workspace so agent tools can access the file
-          if (workspacePath) {
-            const savedPath = await saveImageToWorkspace(file, workspacePath);
-            if (savedPath) {
-              savedPaths.push(savedPath);
-            }
-          }
-          return {
-            type: 'file' as const,
-            url: dataUrl,
-            mime: file.type,
-            filename: file.name,
-          };
-        }),
-      );
-      // Include saved file paths in text so the agent knows where to find them
-      if (savedPaths.length > 0) {
-        for (const p of savedPaths) {
-          const name = p.split("/").pop() || "image";
-          parts.push(`[Attachment: ${name}] (path: ${p})`);
+    // Upload pasted images to Supabase Storage before sending.
+    // Mirrors iOS AttachmentUploadManager: upload first, then include signed
+    // URL in message content so agents and other clients can access the file.
+    const attachmentUrls: string[] = [];
+    if (currentImageFiles.length > 0 && teamIdForSend) {
+      try {
+        const uploaded = await Promise.all(
+          currentImageFiles.map((file) =>
+            uploadAttachment(file, { teamId: teamIdForSend!, sessionId: sid }),
+          ),
+        );
+        for (const att of uploaded) {
+          parts.push(`[Image: ${att.fileName}] (url: ${att.signedUrl})`);
+          attachmentUrls.push(att.signedUrl);
         }
         finalContent = parts.join("\n\n");
+      } catch (e) {
+        console.error("[ChatPanel] attachment upload failed:", e);
+        const { toast } = await import("sonner");
+        toast.error("Failed to upload attachment — message not sent");
+        return;
       }
     }
 
     // v2 send: build LiveEventEnvelope, publish via MQTT, persist to
-    // Supabase, and locally append for immediate render. Drops imageParts
-    // and isPlanMode for now — single-window scope; Phase 2 wires those.
+    // Supabase, and locally append for immediate render.
     const outgoing = finalContent;
     if (outgoing && outgoing.trim()) {
-      const authSession = useAuthStore.getState().session;
-      // Resolve the session's team_id. Prefer the cached row (fast path);
-      // if the session was just created and isn't in `rows` yet (or got
-      // pushed off the top-50 slice), query supabase directly so we
-      // don't silently drop the send.
-      let teamIdForSend: string | null =
-        useSessionListStore.getState().rows.find(r => r.id === sid)?.team_id ?? null;
-      if (!teamIdForSend && sid) {
-        const { data: sessionRow } = await supabase
-          .from("sessions")
-          .select("team_id")
-          .eq("id", sid)
-          .maybeSingle();
-        teamIdForSend = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
-      }
+      // authSession and teamIdForSend were resolved above (before attachment upload).
       if (sid && authSession && teamIdForSend) {
         try {
           const senderActorId = await resolveCurrentMemberActorId(
@@ -978,10 +935,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           if (!senderActorId) throw new Error(`No actor found for user in team ${teamIdForSend}`);
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
-
-          const attachments = currentImageFiles.length > 0
-            ? await uploadAttachmentsToStorage(currentImageFiles, teamIdForSend, sid)
-            : [];
 
           const msg = createMessage(MessageSchema, {
             messageId,
@@ -1010,8 +963,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             sender_actor_id: senderActorId,
             kind: "text",
             content: outgoing,
-            metadata: { mention_actor_ids: mentionActorIds },
-            attachments,
+            metadata: {
+              mention_actor_ids: mentionActorIds,
+              ...(attachmentUrls.length > 0 ? { attachment_urls: attachmentUrls } : {}),
+            },
           });
           if (insErr) throw insErr;
           await mqttPublish(

@@ -64,11 +64,12 @@ export function NewSessionActorPicker({ open, onCancel, onConfirm, teamId, selfA
         const localVisible = applyRows(local)
         setLoading(false)
 
-        // ── Phase 2: background sync, re-hydrate if anything new ────────
-        // If the cache has no selectable actors, force a full pull. A stale
-        // actor_directory watermark can otherwise leave this picker empty even
-        // while the sidebar's team-member source has rows.
-        const synced = await syncActorsForTeam(teamId, localVisible === 0 ? { full: true } : undefined)
+        // ── Phase 2: full sync + reconcile on every open ─────────────────
+        // Always use { full: true } so syncActorsForTeam can tombstone any
+        // actor that was removed from actor_directory since the last pull
+        // (e.g. agent deleted or visibility changed to private). Delta sync
+        // would leave stale rows in the local cache indefinitely.
+        const synced = await syncActorsForTeam(teamId, { full: true })
         if (cancelled) return
         if (synced === 0 && localVisible === 0) {
           const { data, error: fetchError } = await supabase
