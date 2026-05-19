@@ -20,8 +20,35 @@ public final class SessionDetailViewModel {
     public var events: [AgentEvent] = []
     /// Slash commands announced by the attached runtime via
     /// ACP `AvailableCommandsUpdate`. Replaced wholesale on each push.
-    /// In-memory only — not persisted to SwiftData.
-    public var availableCommands: [SlashCommand] = []
+    /// In-memory only — not persisted to SwiftData. Empty until the
+    /// agent's `AvailableCommandsUpdate` lands (or its retained state
+    /// topic is consumed), at which point `availableCommands` switches
+    /// from the built-in fallback set to the agent-provided list.
+    private var dynamicAvailableCommands: [SlashCommand] = []
+
+    /// Slash commands surfaced to the composer popup. Returns the
+    /// agent-provided list when the runtime has announced any; otherwise
+    /// returns a small built-in set so `/` always shows something useful
+    /// (the most common Claude Code built-ins). The composer's
+    /// `recomputeSlashCandidates` re-runs whenever this changes.
+    public var availableCommands: [SlashCommand] {
+        if !dynamicAvailableCommands.isEmpty {
+            return dynamicAvailableCommands
+        }
+        return Self.builtInSlashCommands
+    }
+
+    /// Universal fallback so the popup is usable before (or instead of)
+    /// the agent emitting `AvailableCommandsUpdate`. Names match Claude
+    /// Code's built-ins; sending one forwards the literal `/name` text to
+    /// the agent which interprets it natively.
+    static let builtInSlashCommands: [SlashCommand] = [
+        SlashCommand(name: "clear", description: "Clear conversation history", inputHint: ""),
+        SlashCommand(name: "compact", description: "Compact the conversation", inputHint: ""),
+        SlashCommand(name: "help", description: "Show available commands", inputHint: ""),
+        SlashCommand(name: "model", description: "Switch the active model", inputHint: ""),
+        SlashCommand(name: "cost", description: "Show session token cost", inputHint: ""),
+    ]
     /// Memoised tool-run grouping over `events`. Views should iterate this
     /// instead of calling `groupEvents(vm.events)` in body, which previously
     /// made grouping O(n) on every streaming delta frame. Recomputed by
@@ -499,7 +526,7 @@ public final class SessionDetailViewModel {
         // Covers both: placeholder→real upgrade above and the race where
         // SessionListViewModel writes availableCommandsJSON after start().
         if let cmds = runtime?.availableCommands, !cmds.isEmpty {
-            availableCommands = cmds
+            dynamicAvailableCommands = cmds
         }
         guard let liveRuntime = runtime else { return }
         observeBoundRuntimeChanges()
@@ -579,7 +606,7 @@ public final class SessionDetailViewModel {
             Task { @MainActor [weak self] in
                 self?.isObservingRuntimeChanges = false
                 if let cmds = self?.runtime?.availableCommands, !cmds.isEmpty {
-                    self?.availableCommands = cmds
+                    self?.dynamicAvailableCommands = cmds
                 }
                 await self?.refreshMemberSheet()
             }
@@ -1172,8 +1199,8 @@ public final class SessionDetailViewModel {
             // the composer popup is populated before (or even without) a
             // fresh AvailableCommandsUpdate arriving on the events stream.
             let cachedCommands = runtime.availableCommands
-            if !cachedCommands.isEmpty && availableCommands.isEmpty {
-                availableCommands = cachedCommands
+            if !cachedCommands.isEmpty && dynamicAvailableCommands.isEmpty {
+                dynamicAvailableCommands = cachedCommands
             }
         }
 
@@ -2000,7 +2027,7 @@ public final class SessionDetailViewModel {
         streamingModelByAgent = timelineState.streamingModelByAgent
         streamingAgentSet = timelineState.streamingAgentSet
         if !timelineState.availableCommands.isEmpty {
-            availableCommands = timelineState.availableCommands
+            dynamicAvailableCommands = timelineState.availableCommands
         }
         // Project entries → SwiftData rows.
         return TimelineSwiftDataSync.sync(
