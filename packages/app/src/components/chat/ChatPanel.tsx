@@ -33,6 +33,7 @@ import {
 } from "@/lib/proto/teamclaw_pb";
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
+import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
 type SendMessageFilePart = Record<string, unknown>;
@@ -109,6 +110,41 @@ function buildEnhancedChip(
       ? `role_load({ name: "${name}" })`
       : `skill({ name: "${name}" })`;
   return `[${label}: ${name}|instruction:You must call ${toolCall} before any other action.]`;
+}
+
+async function resolveMentionActorIdsForSession(
+  sessionId: string,
+  memberIds: string[],
+  agentIds: string[],
+): Promise<string[]> {
+  const explicit = Array.from(new Set([...memberIds, ...agentIds]));
+  if (explicit.length > 0) return explicit;
+
+  const { data: participants, error: participantError } = await supabase
+    .from("session_participants")
+    .select("actor_id")
+    .eq("session_id", sessionId);
+  if (participantError) {
+    console.warn("[ChatPanel] failed to load session participants:", participantError);
+    return [];
+  }
+
+  const actorIds = (participants ?? []).map((row: { actor_id: string }) => row.actor_id);
+  if (actorIds.length === 0) return [];
+
+  const { data: agents, error: agentError } = await supabase
+    .from("actor_directory")
+    .select("id")
+    .in("id", actorIds)
+    .in("actor_type", [...AGENT_ACTOR_TYPES]);
+  if (agentError) {
+    console.warn("[ChatPanel] failed to resolve session agents:", agentError);
+    return [];
+  }
+
+  return (agents ?? []).length === 1
+    ? [(agents![0] as { id: string }).id]
+    : [];
 }
 
 // ─── Main component ────────────────────────────────────────────────────────
@@ -302,6 +338,44 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     },
     [],
   );
+
+  // Existing sessions can be reopened after a reload with no in-memory
+  // engaged agent selected. If there is exactly one agent participant, route
+  // messages to it automatically so sends still trigger a reply.
+  React.useEffect(() => {
+    if (!activeSessionId || engagedAgent) return;
+
+    let cancelled = false;
+    void (async () => {
+      const { data: parts, error: partErr } = await supabase
+        .from('session_participants')
+        .select('actor_id')
+        .eq('session_id', activeSessionId);
+      if (cancelled || partErr) return;
+
+      const actorIds = (parts ?? []).map((row: { actor_id: string }) => row.actor_id);
+      if (actorIds.length === 0) return;
+
+      const { data: actors, error: actorErr } = await supabase
+        .from('actors')
+        .select('id, display_name, actor_type')
+        .in('id', actorIds)
+        .in('actor_type', [...AGENT_ACTOR_TYPES]);
+      if (cancelled || actorErr) return;
+
+      if ((actors ?? []).length === 1) {
+        const soleAgent = actors[0] as { id: string; display_name: string };
+        useEngagedAgentStore.getState().setEngagedAgent(activeSessionId, {
+          id: soleAgent.id,
+          displayName: soleAgent.display_name,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, engagedAgent]);
   // Dedupe runtimeStart RPCs across re-engages within the same session.
   const ensuredRuntimesRef = React.useRef<Set<string>>(new Set());
   const [pendingFirstMessage, setPendingFirstMessage] = React.useState<PromptInputMessage | null>(null);
@@ -754,7 +828,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
     const memberIds = mentions.map((m) => m.id);
     const agentIds = allAgents.map((a) => a.id);
-    const mentionActorIds = Array.from(new Set([...memberIds, ...agentIds]));
+    const mentionActorIds = await resolveMentionActorIdsForSession(
+      sid,
+      memberIds,
+      agentIds,
+    );
     const _isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
 
     if (!text && attachedFiles.length === 0 && mentions.length === 0 && imageFiles.length === 0) return;

@@ -1,14 +1,5 @@
-// Permissive proxy so the file typechecks until the amuxd daemon client
-// replaces it; every method throws at runtime (chat is disabled).
-// TODO(amuxd): wire to daemon
-const getAgentClient: () => any = () =>
-  new Proxy({}, {
-    get() {
-      return () => {
-        throw new Error('Agent client not wired to amuxd daemon yet');
-      };
-    },
-  });
+import { getOpenCodeClient, isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
+const getAgentClient: () => any = () => getOpenCodeClient();
 import type { Todo, FileDiff } from "./session-types";
 import { notificationService } from "@/lib/notification-service";
 import { useProviderStore } from "@/stores/provider";
@@ -163,7 +154,7 @@ export function createLoaderActions(set: SessionSet, get: SessionGet) {
         // Also load child sessions from API for the active session
         const { activeSessionId } = get();
         let apiChildSessions: Session[] = [];
-        if (activeSessionId) {
+        if (isOpenCodeSessionId(activeSessionId)) {
           try {
             const children = await client.getSessionChildren(activeSessionId);
             apiChildSessions = children
@@ -453,6 +444,7 @@ export function createLoaderActions(set: SessionSet, get: SessionGet) {
 
       set({
         activeSessionId: id,
+        currentSessionId: id,
         isLoading: true,
         messageQueue: cachedData?.messageQueue || [],
         todos: cachedData?.todos || [],
@@ -466,12 +458,23 @@ export function createLoaderActions(set: SessionSet, get: SessionGet) {
         const client = getAgentClient();
 
         // Fetch messages, session info, todos, diffs, and child sessions in parallel
+        const canLoadOpenCodeSessionMeta = isOpenCodeSessionId(id);
         const [messages, sessionInfo, todosData, diffsData, childSessionsData] = await Promise.all([
-          client.getMessages(id),
-          client.getSession(id).catch(() => null),
-          client.getTodos(id).catch(() => []),
-          client.getSessionDiff(id).catch(() => []),
-          client.getSessionChildren(id).catch(() => []),
+          canLoadOpenCodeSessionMeta
+            ? client.getMessages(id)
+            : Promise.resolve([]),
+          canLoadOpenCodeSessionMeta
+            ? client.getSession(id).catch(() => null)
+            : Promise.resolve(null),
+          canLoadOpenCodeSessionMeta
+            ? client.getTodos(id).catch(() => [])
+            : Promise.resolve([]),
+          canLoadOpenCodeSessionMeta
+            ? client.getSessionDiff(id).catch(() => [])
+            : Promise.resolve([]),
+          canLoadOpenCodeSessionMeta
+            ? client.getSessionChildren(id).catch(() => [])
+            : Promise.resolve([]),
         ]);
 
         console.log("[Session] Session info:", sessionInfo);

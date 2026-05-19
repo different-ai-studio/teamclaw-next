@@ -2,12 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { create } from '@bufbuild/protobuf'
-import {
-  RuntimeInfoSchema,
-  AgentStatus,
-  AgentType,
-  RuntimeLifecycle,
-} from '@/lib/proto/amux_pb'
+import { RuntimeInfoSchema, AgentStatus, AgentType, RuntimeLifecycle } from '@/lib/proto/amux_pb'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { SessionActorPanel } from '../SessionActorSheet'
 
@@ -18,12 +13,31 @@ vi.mock('@/lib/teamclaw-rpc', () => ({
 
 const supabaseFrom = vi.fn()
 const supabaseDelete = vi.fn()
+const loadSessionParticipantsMock = vi.fn()
+const loadActorsForTeamMock = vi.fn()
+const loadActorsByIdsMock = vi.fn()
+const syncActorsForTeamMock = vi.fn().mockResolvedValue(undefined)
+const syncParticipantsForSessionMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/lib/supabase-client', () => ({
   supabase: {
     from: (...args: unknown[]) => supabaseFrom(...args),
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
   },
+}))
+
+vi.mock('@/lib/local-cache', () => ({
+  loadSessionParticipants: (...args: unknown[]) => loadSessionParticipantsMock(...args),
+  loadActorsForTeam: (...args: unknown[]) => loadActorsForTeamMock(...args),
+  loadActorsByIds: (...args: unknown[]) => loadActorsByIdsMock(...args),
+}))
+
+vi.mock('@/lib/sync/actor-sync', () => ({
+  syncActorsForTeam: (...args: unknown[]) => syncActorsForTeamMock(...args),
+}))
+
+vi.mock('@/lib/sync/session-participant-sync', () => ({
+  syncParticipantsForSession: (...args: unknown[]) => syncParticipantsForSessionMock(...args),
 }))
 
 vi.mock('react-i18next', () => ({
@@ -40,6 +54,11 @@ beforeEach(() => {
   supabaseFrom.mockReset()
   supabaseDelete.mockReset()
   mockRuntimeStart.mockReset()
+  loadSessionParticipantsMock.mockReset()
+  loadActorsForTeamMock.mockReset()
+  loadActorsByIdsMock.mockReset()
+  syncActorsForTeamMock.mockClear()
+  syncParticipantsForSessionMock.mockClear()
   mockRuntimeStart.mockResolvedValue({ accepted: true, runtimeId: 'rt-new', sessionId: 'sess-1', rejectedReason: '' })
   useRuntimeStateStore.getState().clear()
 })
@@ -63,6 +82,19 @@ function makeActorsMock(myActorId = 'm-1', teamAgentRows: unknown[] = []) {
 }
 
 function mockJoinedRows(participantActorIds: string[], actorRows: unknown[]) {
+  loadSessionParticipantsMock.mockResolvedValue(
+    participantActorIds.map(id => ({ actorId: id })),
+  )
+  loadActorsForTeamMock.mockResolvedValue([])
+  loadActorsByIdsMock.mockResolvedValue(
+    actorRows.map((row: any) => ({
+      id: row.id,
+      actorType: row.actor_type,
+      displayName: row.display_name,
+      memberStatus: row.member_status ?? null,
+      agentStatus: row.agent_status ?? null,
+    })),
+  )
   supabaseFrom.mockImplementation((table: string) => {
     if (table === 'session_participants') {
       return {
@@ -98,7 +130,34 @@ function mockSheetData(
   actorRows: unknown[],
   runtimeRows: unknown[],
   teamAgentRows: unknown[] = [],
+  agentHistoryRows: unknown[] = [],
 ) {
+  const actorCacheRows = actorRows.map((row: any) => ({
+    id: row.id,
+    actorType: row.actor_type,
+    displayName: row.display_name,
+    memberStatus: row.member_status ?? null,
+    agentStatus: row.agent_status ?? null,
+  }))
+  const teamCacheRows = [...actorCacheRows]
+  for (const row of teamAgentRows as Array<any>) {
+    if (!teamCacheRows.some(existing => existing.id === row.id)) {
+      teamCacheRows.push({
+        id: row.id,
+        actorType: row.actor_type,
+        displayName: row.display_name,
+        memberStatus: row.member_status ?? null,
+        agentStatus: row.agent_status ?? null,
+      })
+    }
+  }
+
+  loadSessionParticipantsMock.mockResolvedValue(
+    participantActorIds.map(id => ({ actorId: id })),
+  )
+  loadActorsForTeamMock.mockResolvedValue(teamCacheRows)
+  loadActorsByIdsMock.mockResolvedValue(actorCacheRows)
+
   supabaseFrom.mockImplementation((table: string) => {
     if (table === 'session_participants') {
       return {
@@ -108,6 +167,7 @@ function mockSheetData(
             error: null,
           }),
         }),
+        upsert: () => Promise.resolve({ error: null }),
         delete: () => ({
           eq: () => ({
             eq: () => supabaseDelete(),
@@ -119,9 +179,12 @@ function mockSheetData(
     }
     if (table === 'actor_directory') {
       return {
-        select: () => ({
-          in: () => Promise.resolve({ data: actorRows, error: null }),
-        }),
+        select: () => {
+          const query = {
+            in: () => Promise.resolve({ data: actorRows, error: null }),
+          }
+          return query
+        },
       }
     }
     if (table === 'agent_runtimes') {
@@ -136,7 +199,7 @@ function mockSheetData(
             return {
               eq: vi.fn().mockReturnValue({
                 order: vi.fn().mockReturnValue({
-                  limit: () => Promise.resolve({ data: [], error: null }),
+                  limit: () => Promise.resolve({ data: agentHistoryRows, error: null }),
                 }),
               }),
             }
@@ -237,6 +300,39 @@ describe('SessionActorSheet', () => {
     // The self row 'Me' (m-1) must NOT have a remove button
     const removeBtns = screen.getAllByRole('button', { name: /remove/i })
     expect(removeBtns).toHaveLength(2)
+  })
+
+  it('starts added agents with opencode runtimeStart requests when runtime history says opencode', async () => {
+    const user = userEvent.setup()
+    mockSheetData(
+      ['m-1'],
+      [
+        { id: 'm-1', actor_type: 'member', display_name: 'Me', member_status: 'active', agent_status: null, agent_kind: null, last_active_at: null },
+      ],
+      [],
+      [
+        { id: 'a-2', actor_type: 'agent', display_name: 'Builder', member_status: null, agent_status: 'idle', agent_kind: 'daemon', last_active_at: null },
+      ],
+      [
+        { workspace_id: 'ws-open', agent_id: 'a-2', current_model: 'openai/gpt-5', status: 'idle', backend_type: 'opencode', updated_at: '2026-05-18T00:00:00.000Z' },
+      ],
+    )
+
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
+    await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
+
+    const addAgentButton = screen.getByRole('button', { name: /add agent/i })
+    await user.click(addAgentButton)
+
+    await waitFor(() => {
+        expect(mockRuntimeStart).toHaveBeenCalledWith(
+          expect.objectContaining({
+            targetDeviceId: 'a-2',
+            workspaceId: 'ws-open',
+            agentType: AgentType.OPENCODE,
+          }),
+        )
+      })
   })
 
   it('opens confirm dialog when X is clicked and dismisses on cancel', async () => {

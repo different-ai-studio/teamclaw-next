@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
-use tokio::sync::{mpsc, oneshot};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
@@ -15,7 +15,7 @@ use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
-use crate::runtime::RuntimeManager;
+use crate::runtime::{AgentLaunchConfig, RuntimeManager};
 use crate::supabase::{SupabaseClient, SupabaseConfig};
 use std::path::PathBuf;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
@@ -34,6 +34,22 @@ struct StartRuntimeError {
     error_code: String,
     error_message: String,
     failed_stage: String,
+}
+
+fn resolve_requested_agent_type(
+    config: &DaemonConfig,
+    requested: amux::AgentType,
+) -> amux::AgentType {
+    match requested {
+        amux::AgentType::Unknown | amux::AgentType::ClaudeCode => {
+            if config.agents.claude_code.is_none() && config.agents.opencode.is_some() {
+                amux::AgentType::Opencode
+            } else {
+                amux::AgentType::ClaudeCode
+            }
+        }
+        _ => requested,
+    }
 }
 
 pub struct DaemonServer {
@@ -144,18 +160,27 @@ impl DaemonServer {
 
         let mqtt = MqttClient::new(&config, &actor_id, &token)?;
 
-        let binary = config
-            .agents
-            .claude_code
-            .as_ref()
-            .map(|c| c.binary.clone())
-            .unwrap_or_else(|| "claude".into());
-        let flags = config
-            .agents
-            .claude_code
-            .as_ref()
-            .map(|c| c.default_flags.clone())
-            .unwrap_or_default();
+        let mut launch_configs = RuntimeManager::default_launch_configs();
+        if let Some(claude) = config.agents.claude_code.as_ref() {
+            launch_configs.insert(
+                amux::AgentType::ClaudeCode,
+                AgentLaunchConfig::new(
+                    claude.binary.clone(),
+                    claude.default_flags.clone(),
+                    "claude",
+                ),
+            );
+        }
+        if let Some(opencode) = config.agents.opencode.as_ref() {
+            launch_configs.insert(
+                amux::AgentType::Opencode,
+                AgentLaunchConfig::new(
+                    opencode.binary.clone(),
+                    opencode.default_flags.clone(),
+                    "opencode",
+                ),
+            );
+        }
 
         let members_path = config_path
             .parent()
@@ -184,8 +209,7 @@ impl DaemonServer {
         let history = EventHistory::new(&history_dir);
 
         let agents = Arc::new(AsyncMutex::new(RuntimeManager::new(
-            binary,
-            flags,
+            launch_configs,
             Some(supabase.clone()),
         )));
 
@@ -416,7 +440,8 @@ impl DaemonServer {
             .channel_mgr
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("channel manager not running"))?;
-        mgr.dispatch_send(channel, target, message, file_path).await?;
+        mgr.dispatch_send(channel, target, message, file_path)
+            .await?;
 
         Ok(serde_json::json!({
             "channel": channel,
@@ -491,12 +516,12 @@ impl DaemonServer {
                 let acp_sid = mgr
                     .create_gateway_session_with_model(
                         &team_id,
-                        parsed.session_key,                              // logical id
-                        &format!("cron://{}", parsed.session_key),       // binding
-                        "cron",                                          // title (display only)
+                        parsed.session_key,                        // logical id
+                        &format!("cron://{}", parsed.session_key), // binding
+                        "cron",                                    // title (display only)
                         parsed.model_override.clone(),
-                        Some(&sb_sid),                                   // bind AgentReply to the Supabase session
-                        parsed.working_directory,                        // spawn in caller-supplied worktree if Some(_)
+                        Some(&sb_sid), // bind AgentReply to the Supabase session
+                        parsed.working_directory, // spawn in caller-supplied worktree if Some(_)
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
@@ -1189,7 +1214,7 @@ impl DaemonServer {
                     amux::AgentStatus::Stopped => "stopped",
                     _ => "unknown",
                 };
-                let (acp_sid, session_id, ws_id, current_model) = {
+                let (acp_sid, session_id, ws_id, current_model, backend_type) = {
                     let agents = self.agents.lock().await;
                     let h = agents.get_handle(agent_id);
                     (
@@ -1197,6 +1222,8 @@ impl DaemonServer {
                         h.map(|h| h.session_id.clone()).unwrap_or_default(),
                         h.map(|h| h.workspace_id.clone()).unwrap_or_default(),
                         agents.current_model(agent_id).cloned(),
+                        h.map(|h| agents.launch_config_for(h.agent_type).backend_type)
+                            .unwrap_or("claude"),
                     )
                 };
                 let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
@@ -1213,7 +1240,7 @@ impl DaemonServer {
                         agent_id: &actor_id,
                         session_id: (!session_id.is_empty()).then_some(session_id.as_str()),
                         workspace_id: supabase_ws_id.as_deref(),
-                        backend_type: "claude",
+                        backend_type,
                         backend_session_id: if acp_sid.is_empty() {
                             None
                         } else {
@@ -2922,7 +2949,12 @@ impl DaemonServer {
     ) -> crate::proto::teamclaw::RpcResponse {
         use crate::proto::teamclaw::{rpc_response, RpcResponse, RuntimeStartResult};
 
-        let at = amux::AgentType::try_from(start.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
+        let requested =
+            amux::AgentType::try_from(start.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
+        let at = resolve_requested_agent_type(&self.config, requested);
+        if at != requested {
+            info!(requested = ?requested, resolved = ?at, "runtimeStart agent_type overridden by daemon config");
+        }
 
         // Note: start.model_id is accepted for wire compatibility but not yet
         // threaded through apply_start_runtime — the legacy AcpStartAgent path
@@ -3293,10 +3325,8 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                         serde_json::from_str(head);
                                     match parsed {
                                         Ok(v) => {
-                                            let cmd = v
-                                                .get("cmd")
-                                                .and_then(|c| c.as_str())
-                                                .unwrap_or("");
+                                            let cmd =
+                                                v.get("cmd").and_then(|c| c.as_str()).unwrap_or("");
                                             if cmd == "mcp-send" {
                                                 let (reply_tx, reply_rx) = oneshot::channel();
                                                 if tx
@@ -3324,9 +3354,7 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                                         let _ = stream.shutdown().await;
                                                     }
                                                     Err(_) => {
-                                                        warn!(
-                                                            "amuxd.sock: mcp-send reply dropped"
-                                                        );
+                                                        warn!("amuxd.sock: mcp-send reply dropped");
                                                     }
                                                 }
                                             } else if cmd == "prompt-await" {
@@ -3362,9 +3390,7 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                                     }
                                                 }
                                             } else {
-                                                warn!(
-                                                    "amuxd.sock: unknown JSON cmd: {cmd:?}"
-                                                );
+                                                warn!("amuxd.sock: unknown JSON cmd: {cmd:?}");
                                             }
                                         }
                                         Err(e) => {
@@ -3432,9 +3458,8 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                             .await;
                                     }
                                     other => {
-                                        let _ = tx
-                                            .send(SockCommand::Unknown(other.to_string()))
-                                            .await;
+                                        let _ =
+                                            tx.send(SockCommand::Unknown(other.to_string())).await;
                                     }
                                 }
                             }
@@ -3530,7 +3555,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut agents = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut agents = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
         agents.add_test_runtime("rt1", "runtime-agent", "session-1");
 
         TestServer {
@@ -3653,7 +3678,10 @@ mod prompt_await_tests {
     fn parse_rejects_non_cron_session_key() {
         let p = json!({ "session_key": "wecom/x/y", "message": "hi" });
         let err = parse_prompt_await_payload(&p).unwrap_err();
-        assert!(err.to_string().contains("must start with 'cron/'"), "got: {err}");
+        assert!(
+            err.to_string().contains("must start with 'cron/'"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -3688,8 +3716,14 @@ mod prompt_await_tests {
         let parsed = parse_prompt_await_payload(&p).unwrap();
         assert_eq!(parsed.job_name, Some("Nightly digest"));
         assert_eq!(parsed.working_directory.as_deref(), Some("/tmp/wt"));
-        assert_eq!(parsed.model_override.as_ref().map(|m| m.0.as_str()), Some("anthropic"));
-        assert_eq!(parsed.model_override.as_ref().map(|m| m.1.as_str()), Some("sonnet"));
+        assert_eq!(
+            parsed.model_override.as_ref().map(|m| m.0.as_str()),
+            Some("anthropic")
+        );
+        assert_eq!(
+            parsed.model_override.as_ref().map(|m| m.1.as_str()),
+            Some("sonnet")
+        );
         assert_eq!(parsed.timeout_secs, 120);
     }
 
@@ -3704,5 +3738,85 @@ mod prompt_await_tests {
         let p = json!({ "session_key": "cron/j1/r1", "message": "hi", "job_name": "My Job" });
         let parsed = parse_prompt_await_payload(&p).unwrap();
         assert_eq!(parsed.job_name, Some("My Job"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_backend_resolution_tests {
+    use super::*;
+
+    fn base_config() -> DaemonConfig {
+        DaemonConfig {
+            device: crate::config::DeviceConfig {
+                id: "dev-1".to_string(),
+                name: "Mac".to_string(),
+            },
+            mqtt: crate::config::MqttConfig {
+                broker_url: "tcp://localhost:1883".to_string(),
+            },
+            agents: crate::config::AgentsConfig::default(),
+            team_id: None,
+            channels: crate::config::ChannelsConfig::default(),
+        }
+    }
+
+    #[test]
+    fn resolves_claude_request_to_opencode_when_only_opencode_is_configured() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_non_claude_request() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn resolves_unknown_request_to_opencode_when_only_opencode_is_configured() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn keeps_unknown_request_on_claude_when_claude_backend_is_available() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::ClaudeCode
+        );
     }
 }

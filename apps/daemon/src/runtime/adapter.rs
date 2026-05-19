@@ -538,6 +538,7 @@ fn extract_text(content: &acp::ContentBlock) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_acp_agent(
     binary: String,
+    args: Vec<String>,
     worktree: String,
     initial_prompt: String,
     agent_type: amux::AgentType,
@@ -578,6 +579,7 @@ pub fn spawn_acp_agent(
             rt.block_on(local_set.run_until(async move {
                 if let Err(e) = run_acp_session(
                     binary,
+                    args,
                     worktree,
                     initial_prompt,
                     agent_type,
@@ -621,6 +623,7 @@ pub fn spawn_acp_agent(
 #[allow(clippy::too_many_arguments)]
 async fn run_acp_session(
     binary: String,
+    args: Vec<String>,
     worktree: String,
     initial_prompt: String,
     agent_type: amux::AgentType,
@@ -639,8 +642,14 @@ async fn run_acp_session(
         let mut c = tokio::process::Command::new("npx");
         c.arg("--yes").arg("@zed-industries/claude-agent-acp");
         c
+    } else if agent_type == amux::AgentType::Opencode && args.is_empty() {
+        let mut c = tokio::process::Command::new(&binary);
+        c.arg("acp");
+        c
     } else {
-        tokio::process::Command::new(&binary)
+        let mut c = tokio::process::Command::new(&binary);
+        c.args(&args);
+        c
     };
     // Forward per-session MCP config to the underlying claude-code so the
     // agent can call amuxd's `send` tool. The wrapper passes unknown args

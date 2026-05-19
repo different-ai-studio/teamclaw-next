@@ -93,6 +93,7 @@ fn main() -> anyhow::Result<()> {
                     tokio::sync::oneshot::channel::<String>();
                 let _cmd_tx = runtime::adapter::spawn_acp_agent(
                     binary,
+                    Vec::new(),
                     worktree.clone(),
                     prompt.clone(),
                     proto::amux::AgentType::ClaudeCode,

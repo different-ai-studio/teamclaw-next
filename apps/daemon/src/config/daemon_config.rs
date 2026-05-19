@@ -27,11 +27,13 @@ pub struct MqttConfig {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     #[serde(default)]
-    pub claude_code: Option<ClaudeCodeConfig>,
+    pub claude_code: Option<AgentBackendConfig>,
+    #[serde(default)]
+    pub opencode: Option<AgentBackendConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClaudeCodeConfig {
+pub struct AgentBackendConfig {
     #[serde(default = "default_claude_binary")]
     pub binary: String,
     #[serde(default)]
@@ -163,6 +165,10 @@ name = "Mac"
 [mqtt]
 broker_url = "tcp://localhost:1883"
 
+[agents.opencode]
+binary = "opencode"
+default_flags = ["acp"]
+
 [channels.wecom]
 enabled = true
 bot_id = "b1"
@@ -172,5 +178,12 @@ encoding_aes_key = "k"
         let cfg: DaemonConfig = toml::from_str(toml_src).unwrap();
         assert!(cfg.channels.wecom.is_some());
         assert_eq!(cfg.channels.wecom.as_ref().unwrap().bot_id, "b1");
+        assert_eq!(
+            cfg.agents
+                .opencode
+                .as_ref()
+                .map(|c| (c.binary.clone(), c.default_flags.clone())),
+            Some(("opencode".to_string(), vec!["acp".to_string()]))
+        );
     }
 }

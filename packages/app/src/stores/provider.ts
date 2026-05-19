@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { workspaceScopedKey } from '@/lib/storage'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { getOpenCodeClient } from '@/lib/opencode/sdk-client'
-import { allAmuxdModels, AMUXD_AGENT_TYPES, availableModelsFor } from '@/lib/amuxd-models'
+import { AMUXD_AGENT_TYPES, availableModelsFor } from '@/lib/amuxd-models'
 import {
   type CustomProviderConfig,
   addCustomProviderToConfig,
@@ -63,6 +63,63 @@ export interface ConfiguredProvider {
   id: string
   name: string
   models: Array<{ id: string; name: string }>
+}
+
+function flattenConfiguredProviders(configuredProviders: ConfiguredProvider[]): ModelOption[] {
+  return configuredProviders.flatMap((provider) =>
+    provider.models.map((model) => ({
+      id: model.id,
+      name: model.name,
+      provider: provider.id,
+    })),
+  )
+}
+
+function mergeConfiguredProviders(...groups: ConfiguredProvider[][]): ConfiguredProvider[] {
+  const merged = new Map<string, { id: string; name: string; models: Map<string, { id: string; name: string }> }>()
+
+  for (const providers of groups) {
+    for (const provider of providers) {
+      const existing =
+        merged.get(provider.id) ??
+        { id: provider.id, name: provider.name, models: new Map<string, { id: string; name: string }>() }
+
+      existing.name = provider.name
+      for (const model of provider.models) {
+        existing.models.set(model.id, { ...model })
+      }
+
+      merged.set(provider.id, existing)
+    }
+  }
+
+  return Array.from(merged.values()).map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    models: Array.from(provider.models.values()),
+  }))
+}
+
+function mergeProviders(...groups: ProviderEntry[][]): ProviderEntry[] {
+  const merged = new Map<string, ProviderEntry>()
+
+  for (const providers of groups) {
+    for (const provider of providers) {
+      const existing = merged.get(provider.id)
+      merged.set(provider.id, existing
+        ? {
+            ...existing,
+            ...provider,
+            configured: existing.configured || provider.configured,
+          }
+        : { ...provider })
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => {
+    if (a.configured !== b.configured) return a.configured ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
 }
 
 export interface ProviderState {
@@ -505,30 +562,65 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     // installer will replace this with live RuntimeInfo per running runtime.
     // We bypass refreshProviders/refreshConfiguredProviders (those still hit
     // legacy SDK stubs) and seed state directly.
-    const flat = allAmuxdModels()
-    const providers: ProviderEntry[] = AMUXD_AGENT_TYPES.map((id) => ({
+    const staticProviders: ProviderEntry[] = AMUXD_AGENT_TYPES.map((id) => ({
       id,
       name: id,
       configured: availableModelsFor(id).length > 0,
     }))
-    const configuredProviders: ConfiguredProvider[] = AMUXD_AGENT_TYPES
+    const staticConfiguredProviders: ConfiguredProvider[] = AMUXD_AGENT_TYPES
       .map((id) => ({
         id,
         name: id,
         models: availableModelsFor(id).map((m) => ({ id: m.id, name: m.displayName })),
       }))
       .filter((p) => p.models.length > 0)
-    const models: ModelOption[] = flat.map((m) => ({
-      id: m.id,
-      name: m.displayName,
-      provider: m.provider,
-    }))
+
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    const { _disconnectedIds } = get()
+    const customProviderIds = workspacePath ? await getCustomProviderIds(workspacePath) : []
+    const customConfiguredProviders = workspacePath
+      ? (await Promise.all(
+          customProviderIds.map(async (providerId) => {
+            if (_disconnectedIds.has(providerId)) return null
+
+            const config = await getCustomProviderConfig(workspacePath, providerId)
+            if (!config || config.models.length === 0) return null
+
+            return {
+              id: providerId,
+              name: config.name || providerId,
+              models: config.models.map((model) => ({
+                id: model.modelId,
+                name: model.modelName || model.modelId,
+              })),
+            } satisfies ConfiguredProvider
+          }),
+        )).filter((provider): provider is ConfiguredProvider => provider !== null)
+      : []
+
+    const configuredProviders = mergeConfiguredProviders(
+      staticConfiguredProviders,
+      get().configuredProviders,
+      customConfiguredProviders,
+    )
+    const models = flattenConfiguredProviders(configuredProviders)
+    const providers = mergeProviders(
+      staticProviders,
+      get().providers,
+      customConfiguredProviders.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        configured: true,
+      })),
+    )
+
     set({
       providers,
       configuredProviders,
       models,
       providersLoading: false,
       configuredProvidersLoading: false,
+      customProviderIds,
     })
 
     // After loading, resolve selected model:
