@@ -12,6 +12,7 @@ import {
 import type { AgentChip } from "../../../../src/features/sessions/components/AgentChipBar";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
+import { createSessionMutesApi } from "../../../../src/features/sessions/session-mutes";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
 import { impactLight, selectionTick, successTone } from "../../../../src/lib/haptics";
 import { showToast } from "../../../../src/ui/Toast";
@@ -138,6 +139,29 @@ export default function SessionDetailRoute() {
   const [runtimeInfo, setRuntimeInfo] = useState<
     { runtimeId: string; status: string; currentModel: string | null } | null
   >(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const userIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      const uid = data.session?.user.id ?? null;
+      if (cancelled) return;
+      userIdRef.current = uid;
+      const mutes = createSessionMutesApi(supabase, () => userIdRef.current);
+      try {
+        const muted = await mutes.isMuted(sessionId);
+        if (!cancelled) setIsMuted(muted);
+      } catch {
+        if (!cancelled) setIsMuted(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -393,6 +417,29 @@ export default function SessionDetailRoute() {
                     await Share.share({ message: `${title}\n${url}`, url });
                   } catch {
                     // user cancelled or platform refused
+                  }
+                }
+              : undefined
+          }
+          isMuted={isMuted}
+          onToggleMute={
+            sessionId
+              ? async () => {
+                  const next = !isMuted;
+                  setIsMuted(next);
+                  selectionTick();
+                  try {
+                    await createSessionMutesApi(
+                      supabase,
+                      () => userIdRef.current,
+                    ).setMuted(sessionId, next);
+                    showToast("success", next ? "已静音" : "已取消静音");
+                  } catch (err) {
+                    setIsMuted(!next);
+                    showToast(
+                      "error",
+                      err instanceof Error ? err.message : "无法切换静音",
+                    );
                   }
                 }
               : undefined

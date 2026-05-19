@@ -57,6 +57,7 @@ type SessionDetailScreenProps = {
   isSending: boolean;
   onChangeRuntimeModel?: () => void;
   runtimeInfo?: { status: string; currentModel: string | null } | null;
+  isMuted?: boolean;
   mentionPool?: ReadonlyArray<MentionTarget>;
   onAgentInterrupt?: (agentId: string) => void;
   onAgentRemove?: (agentId: string) => void;
@@ -72,6 +73,7 @@ type SessionDetailScreenProps = {
   onReplyToMessage?: (messageId: string) => void;
   onSend: () => void;
   onShare?: () => void;
+  onToggleMute?: () => void;
   ownActorId?: string;
   replyTarget?: { messageId: string; content: string } | null;
   senderAvatars?: ReadonlyMap<string, string | null>;
@@ -99,16 +101,20 @@ function connectionDescriptor(
 function SessionHeader({
   connectionState,
   headerAvatars,
+  isMuted,
   onBack,
   onOpenMembers,
   onShare,
+  onToggleMute,
   session,
 }: {
   connectionState: SessionDetailConnectionState;
   headerAvatars?: ReadonlyArray<{ actorId: string; avatarUrl?: string | null; initial: string }>;
+  isMuted?: boolean;
   onBack: () => void;
   onOpenMembers?: () => void;
   onShare?: () => void;
+  onToggleMute?: () => void;
   session: SessionSummary;
 }) {
   const title = session.title.trim() || "Untitled session";
@@ -166,6 +172,21 @@ function SessionHeader({
             color={onOpenMembers ? colors.onyx : colors.slate}
           />
         </Pressable>
+        {onToggleMute ? (
+          <Pressable
+            accessibilityLabel={isMuted ? "Unmute notifications" : "Mute notifications"}
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={onToggleMute}
+            style={styles.headerSlot}
+          >
+            <Ionicons
+              color={isMuted ? colors.cinnabar : colors.onyx}
+              name={isMuted ? "notifications-off-outline" : "notifications-outline"}
+              size={20}
+            />
+          </Pressable>
+        ) : null}
       </View>
       <Hairline />
     </View>
@@ -178,6 +199,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     composerText,
     connectionState,
     headerAvatars,
+    isMuted,
     isSending,
     mentionPool,
     onAgentInterrupt,
@@ -194,6 +216,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onReplyToMessage,
     onSend,
     onShare,
+    onToggleMute,
     ownActorId,
     replyTarget,
     runtimeInfo,
@@ -259,9 +282,11 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       <SessionHeader
         connectionState={connectionState}
         headerAvatars={headerAvatars}
+        isMuted={isMuted}
         onBack={onBack}
         onOpenMembers={onOpenMembers}
         onShare={onShare}
+        onToggleMute={onToggleMute}
         session={session}
       />
       <ConnectionBannerOverlay connectionState={connectionState} />
