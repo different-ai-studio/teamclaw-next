@@ -20,7 +20,7 @@ import {
 } from "../../actors/components/SegmentedFilter";
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { PrimaryButton } from "../../../ui/button";
-import { colors, spacing, typography } from "../../../ui/theme";
+import { colors, radii, spacing, typography } from "../../../ui/theme";
 import { IdeaRow } from "../components/IdeaRow";
 import {
   isDoneIdea,
@@ -33,6 +33,7 @@ type Filter = "all" | "mine" | "open" | "done";
 
 export type IdeasListScreenProps = {
   currentActorId: string | null;
+  onArchiveBatch?: (ideaIds: string[]) => Promise<void>;
   onCreate?: () => void;
   onLoad: () => void;
   onRefresh: () => void;
@@ -76,6 +77,7 @@ function HeaderBar({
 
 export function IdeasListScreen({
   currentActorId,
+  onArchiveBatch,
   onCreate,
   onLoad,
   onRefresh,
@@ -84,6 +86,31 @@ export function IdeasListScreen({
 }: IdeasListScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
+  const [isBatchBusy, setIsBatchBusy] = useState(false);
+  const selectionMode = selection.size > 0;
+
+  const toggleSelection = (id: string) => {
+    setSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelection(new Set());
+
+  const handleArchiveSelected = async () => {
+    if (!onArchiveBatch || selection.size === 0) return;
+    setIsBatchBusy(true);
+    try {
+      await onArchiveBatch(Array.from(selection));
+      clearSelection();
+    } finally {
+      setIsBatchBusy(false);
+    }
+  };
 
   const searched = useMemo(
     () =>
@@ -165,7 +192,8 @@ export function IdeasListScreen({
   }
 
   return (
-    <ScrollView
+    <View style={styles.screen}>
+      <ScrollView
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
@@ -174,7 +202,7 @@ export function IdeasListScreen({
           tintColor={colors.slate}
         />
       }
-      style={styles.screen}
+      style={{ flex: 1 }}
     >
       {headerBar}
 
@@ -232,21 +260,76 @@ export function IdeasListScreen({
         </View>
       ) : (
         <View>
-          {filteredIdeas.map((idea, index) => (
-            <View key={idea.ideaId}>
-              <Pressable
-                onPress={onSelectIdea ? () => onSelectIdea(idea.ideaId) : undefined}
-              >
-                <IdeaRow idea={idea} />
-              </Pressable>
-              {index < filteredIdeas.length - 1 ? (
-                <Hairline style={styles.rowDivider} />
-              ) : null}
-            </View>
-          ))}
+          {filteredIdeas.map((idea, index) => {
+            const checked = selection.has(idea.ideaId);
+            return (
+              <View key={idea.ideaId}>
+                <Pressable
+                  onLongPress={() => toggleSelection(idea.ideaId)}
+                  onPress={() => {
+                    if (selectionMode) {
+                      toggleSelection(idea.ideaId);
+                    } else if (onSelectIdea) {
+                      onSelectIdea(idea.ideaId);
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.ideaRowOuter,
+                    checked ? styles.ideaRowChecked : null,
+                    pressed ? styles.ideaRowPressed : null,
+                  ]}
+                >
+                  {selectionMode ? (
+                    <View style={[styles.checkbox, checked ? styles.checkboxOn : null]}>
+                      {checked ? (
+                        <Ionicons color="#F8F6F1" name="checkmark" size={14} />
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <View style={styles.ideaRowBody}>
+                    <IdeaRow idea={idea} />
+                  </View>
+                </Pressable>
+                {index < filteredIdeas.length - 1 ? (
+                  <Hairline style={styles.rowDivider} />
+                ) : null}
+              </View>
+            );
+          })}
         </View>
       )}
-    </ScrollView>
+      </ScrollView>
+
+      {selectionMode ? (
+        <View style={styles.batchBar}>
+          <Text style={styles.batchCount}>{selection.size} selected</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={clearSelection}
+            style={({ pressed }) => [
+              styles.batchAction,
+              pressed ? styles.batchActionPressed : null,
+            ]}
+          >
+            <Text style={styles.batchActionText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={isBatchBusy || !onArchiveBatch}
+            onPress={handleArchiveSelected}
+            style={({ pressed }) => [
+              styles.batchPrimary,
+              isBatchBusy ? styles.batchPrimaryBusy : null,
+              pressed && !isBatchBusy ? styles.batchActionPressed : null,
+            ]}
+          >
+            <Text style={styles.batchPrimaryText}>
+              {isBatchBusy ? "Archiving…" : "Archive"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -285,6 +368,73 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     marginHorizontal: spacing.lg,
+  },
+  batchAction: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  batchActionPressed: {
+    opacity: 0.7,
+  },
+  batchActionText: {
+    color: colors.basalt,
+    ...typography.body,
+  },
+  batchBar: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderTopColor: colors.hairline,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  batchCount: {
+    color: colors.onyx,
+    flex: 1,
+    ...typography.body,
+    fontWeight: "600",
+  },
+  batchPrimary: {
+    backgroundColor: "rgba(184,75,54,0.12)",
+    borderRadius: radii.button,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  batchPrimaryBusy: {
+    opacity: 0.5,
+  },
+  batchPrimaryText: {
+    color: colors.cinnabar,
+    ...typography.body,
+    fontWeight: "700",
+  },
+  checkbox: {
+    alignItems: "center",
+    borderColor: colors.slate,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    height: 22,
+    justifyContent: "center",
+    width: 22,
+  },
+  checkboxOn: {
+    backgroundColor: colors.cinnabar,
+    borderColor: colors.cinnabar,
+  },
+  ideaRowBody: {
+    flex: 1,
+  },
+  ideaRowChecked: {
+    backgroundColor: "rgba(184,75,54,0.06)",
+  },
+  ideaRowOuter: {
+    alignItems: "center",
+    flexDirection: "row",
+    paddingLeft: spacing.lg,
+  },
+  ideaRowPressed: {
+    opacity: 0.88,
   },
   screen: {
     backgroundColor: colors.mist,

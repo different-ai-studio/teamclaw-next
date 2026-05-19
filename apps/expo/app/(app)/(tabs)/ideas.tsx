@@ -1,5 +1,5 @@
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../_layout";
 import { createIdeasApi } from "../../../src/features/ideas/idea-api";
@@ -50,6 +50,17 @@ export default function IdeasIndexRoute() {
   return (
     <IdeasListScreen
       currentActorId={state.currentMemberActorId}
+      onArchiveBatch={async (ideaIds) => {
+        const api = createIdeasApi(supabase);
+        for (const id of ideaIds) {
+          try {
+            await api.archive(id);
+          } catch {
+            // Continue archiving the rest; controller refresh picks up the partial diff.
+          }
+        }
+        await controller.refresh();
+      }}
       onLoad={() => {
         void controller.load();
       }}
