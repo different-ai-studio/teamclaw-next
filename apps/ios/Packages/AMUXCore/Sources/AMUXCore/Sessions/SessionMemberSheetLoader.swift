@@ -135,6 +135,7 @@ public struct SessionMemberSheetLoader: Sendable {
             .filter { $0.actorType == "agent" }
             .map { p in
                 let runtime = sessionRuntimes.first(where: { $0.agentID == p.actorID })
+                let liveModels = availableModelsForAgent(p.actorID)
                 return MemberSheetAgent(
                     id: p.actorID,
                     displayName: p.displayName,
@@ -142,7 +143,9 @@ public struct SessionMemberSheetLoader: Sendable {
                     agentType: Self.displayName(forBackendType: runtime?.backendType),
                     runtimeState: Self.chipState(forStatus: runtime?.status,
                                                  lastSeenAt: runtime?.lastSeenAt),
-                    availableModels: availableModelsForAgent(p.actorID),
+                    availableModels: liveModels.isEmpty
+                        ? Self.fallbackModelIDs(forBackendType: runtime?.backendType)
+                        : liveModels,
                     currentModel: runtime?.currentModel,
                     runtimeID: runtime?.runtimeID,
                     workspaceID: runtime?.workspaceID,
@@ -198,6 +201,22 @@ public struct SessionMemberSheetLoader: Sendable {
         case "codex": return "Codex"
         case .some(let s) where !s.isEmpty: return s.capitalized
         default: return ""
+        }
+    }
+
+    /// Hardcoded fallback list mirroring daemon's `available_models_for`
+    /// (apps/daemon/src/runtime/models.rs). Used when the live MQTT
+    /// retained state hasn't surfaced an availableModels list — most
+    /// often because the daemon was MQTT-disconnected when ACTIVE was
+    /// published, so iOS only ever saw the STARTING payload (which uses
+    /// `Default::default()` and so ships empty available_models).
+    /// Keep this in sync with the daemon source on any model add/remove.
+    public static func fallbackModelIDs(forBackendType backendType: String?) -> [String] {
+        switch backendType {
+        case "claude":
+            return ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7"]
+        default:
+            return []
         }
     }
 }
