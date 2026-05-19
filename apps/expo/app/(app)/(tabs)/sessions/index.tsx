@@ -1,11 +1,11 @@
 import { Redirect, useRouter } from "expo-router";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import { routeToHref, useOnboarding } from "../../_layout";
-import { createSessionsApi } from "../../../src/features/sessions/session-api";
-import { createSessionsController } from "../../../src/features/sessions/session-controller";
-import { SessionsListScreen } from "../../../src/features/sessions/screens/SessionsListScreen";
-import { supabase } from "../../../src/lib/supabase/client";
+import { routeToHref, useOnboarding } from "../../../_layout";
+import { createSessionsApi } from "../../../../src/features/sessions/session-api";
+import { createSessionsController } from "../../../../src/features/sessions/session-controller";
+import { SessionsListScreen } from "../../../../src/features/sessions/screens/SessionsListScreen";
+import { supabase } from "../../../../src/lib/supabase/client";
 
 export default function SessionsIndexRoute() {
   const router = useRouter();

@@ -52,9 +52,9 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: colors.paper,
-    borderColor: colors.border,
+    borderColor: colors.hairline,
     borderRadius: radii.input,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     color: colors.foreground,
     minHeight: 48,
     paddingHorizontal: 14,

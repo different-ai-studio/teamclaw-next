@@ -32,9 +32,9 @@ export function AppCard({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.paper,
-    borderColor: colors.border,
+    borderColor: colors.hairline,
     borderRadius: radii.card,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   compact: {
     borderRadius: radii.cardCompact,

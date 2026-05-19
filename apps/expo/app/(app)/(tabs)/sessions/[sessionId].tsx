@@ -2,17 +2,17 @@ import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-import { routeToHref, useOnboarding } from "../../_layout";
-import { createSessionsApi } from "../../../src/features/sessions/session-api";
-import { createSessionDetailController } from "../../../src/features/sessions/session-detail-controller";
-import { SessionDetailScreen } from "../../../src/features/sessions/screens/SessionDetailScreen";
-import { supabase } from "../../../src/lib/supabase/client";
-import { getOptionalMqttUrl } from "../../../src/lib/mqtt/config";
-import { createExpoMqttAdapter } from "../../../src/lib/mqtt/expo-mqtt";
-import { PrimaryButton } from "../../../src/ui/button";
-import { AppCard } from "../../../src/ui/card";
-import { colors, spacing, typography } from "../../../src/ui/theme";
-import type { SessionDetailControllerState } from "../../../src/features/sessions/session-detail-controller";
+import { routeToHref, useOnboarding } from "../../../_layout";
+import { createSessionsApi } from "../../../../src/features/sessions/session-api";
+import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
+import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
+import { supabase } from "../../../../src/lib/supabase/client";
+import { getOptionalMqttUrl } from "../../../../src/lib/mqtt/config";
+import { createExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
+import { PrimaryButton } from "../../../../src/ui/button";
+import { AppCard } from "../../../../src/ui/card";
+import { colors, spacing, typography } from "../../../../src/ui/theme";
+import type { SessionDetailControllerState } from "../../../../src/features/sessions/session-detail-controller";
 
 const fallbackDetailState: SessionDetailControllerState = {
   status: "loading",
