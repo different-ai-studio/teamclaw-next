@@ -71,9 +71,9 @@ public struct TodoDockView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(width: 20, alignment: .trailing)
-                        Image(systemName: icon(for: item.status))
+                        Image(systemName: item.status.rowIcon)
                             .font(.caption)
-                            .foregroundStyle(color(for: item.status))
+                            .foregroundStyle(item.status.rowColor)
                             .padding(.top, 3)
                         Text(item.content)
                             .font(.subheadline)
@@ -89,20 +89,4 @@ public struct TodoDockView: View {
         .frame(maxHeight: 175)
     }
 
-    private func icon(for status: TodoItemStatus) -> String {
-        switch status {
-        case .completed: "checkmark.circle.fill"
-        case .inProgress: "circle.lefthalf.filled"
-        case .pending: "circle"
-        case .cancelled: "xmark.circle"
-        }
-    }
-
-    private func color(for status: TodoItemStatus) -> Color {
-        switch status {
-        case .completed: Color.amux.sage
-        case .inProgress: Color.amux.cinnabar
-        case .pending, .cancelled: .secondary
-        }
-    }
 }
