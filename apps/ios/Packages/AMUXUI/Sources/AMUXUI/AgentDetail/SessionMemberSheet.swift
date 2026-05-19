@@ -146,17 +146,24 @@ private struct AgentMemberRow: View {
 
     @ViewBuilder
     private var trailingLabel: some View {
-        // While the runtime is still spawning, the model hasn't been
-        // applied yet — showing "default" reads as a misleading model
-        // pick. Surface a small spinner instead so the row's status
-        // matches the chip dot. Once the runtime's running, fall back
-        // to the model picker menu.
-        switch row.runtimeState {
-        case .spawning:
+        // Daemon writes `current_model` into the initial agent_runtimes
+        // upsert (manager.rs awaits initial_model_rx before the row
+        // write) — so the model is known well before Supabase status
+        // flips off "starting". Show it whenever we have it; the chip
+        // dot color already communicates the spawning state. Only fall
+        // through to spinner / "default" when we genuinely have no
+        // model id yet (very early window, or MQTT-only path that hasn't
+        // surfaced currentModel yet).
+        if let model = row.currentModel, !model.isEmpty {
+            Text(model)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        } else if row.runtimeState == .spawning {
             ProgressView()
                 .controlSize(.small)
-        default:
-            Text(row.currentModel ?? "default")
+        } else {
+            Text("default")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
