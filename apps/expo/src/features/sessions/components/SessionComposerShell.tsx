@@ -80,7 +80,18 @@ export function SessionComposerShell({
           </View>
 
           <View style={styles.footerRight}>
-            <Text style={styles.keyboardHint}>⌘↵</Text>
+            {composerText.trim().length === 0 ? (
+              <Pressable
+                accessibilityLabel="Voice memo"
+                accessibilityRole="button"
+                hitSlop={6}
+                style={styles.micButton}
+              >
+                <Ionicons color={colors.slate} name="mic-outline" size={18} />
+              </Pressable>
+            ) : (
+              <Text style={styles.keyboardHint}>⌘↵</Text>
+            )}
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ disabled: presentation.isDisabled }}
@@ -189,6 +200,12 @@ const styles = StyleSheet.create({
   keyboardHint: {
     color: colors.faint,
     ...typography.monoMeta,
+  },
+  micButton: {
+    alignItems: "center",
+    height: 28,
+    justifyContent: "center",
+    width: 28,
   },
   placeholder: {
     color: colors.mutedForeground,
