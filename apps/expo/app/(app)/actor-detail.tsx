@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
@@ -23,7 +23,19 @@ export default function ActorDetailRoute() {
 
   const [actor, setActor] = useState<Actor | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+
+  const refresh = useCallback(async () => {
+    if (!teamId || !actorId) return;
+    setIsRefreshing(true);
+    try {
+      const rows = await createActorsApi(supabase).listActors(teamId);
+      setActor(rows.find((row) => row.actorId === actorId) ?? null);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [actorId, teamId]);
 
   useEffect(() => {
     if (!teamId || !actorId) {
@@ -91,7 +103,11 @@ export default function ActorDetailRoute() {
       actor={actor}
       isLoading={isLoading}
       isMe={isMe}
+      isRefreshing={isRefreshing}
       onClose={() => router.back()}
+      onRefresh={() => {
+        void refresh();
+      }}
       onSelectSession={(sessionId) => {
         router.replace(`/(app)/sessions/${sessionId}`);
       }}

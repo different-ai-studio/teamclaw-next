@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
@@ -20,10 +20,23 @@ export default function IdeaDetailRoute() {
   const [idea, setIdea] = useState<Idea | null>(null);
   const [creatorName, setCreatorName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [relatedSessions, setRelatedSessions] = useState<
     Array<{ sessionId: string; title: string; lastMessageAt: string }>
   >([]);
+
+  const refresh = useCallback(async () => {
+    if (!teamId || !ideaId) return;
+    setIsRefreshing(true);
+    try {
+      const fresh = await createIdeasApi(supabase).listIdeas(teamId);
+      const found = fresh.find((row) => row.ideaId === ideaId) ?? null;
+      setIdea(found);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [ideaId, teamId]);
 
   useEffect(() => {
     if (!teamId || !ideaId) {
@@ -133,8 +146,12 @@ export default function IdeaDetailRoute() {
       creatorName={creatorName}
       idea={idea}
       isLoading={isLoading}
+      isRefreshing={isRefreshing}
       onArchive={handleArchive}
       onClose={() => router.back()}
+      onRefresh={() => {
+        void refresh();
+      }}
       onSaveContent={handleSaveContent}
       onSelectSession={(sessionId) => router.replace(`/(app)/sessions/${sessionId}`)}
       onToggleStatus={handleToggleStatus}

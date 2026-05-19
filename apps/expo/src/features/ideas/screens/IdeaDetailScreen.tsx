@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,8 +21,10 @@ export type IdeaDetailScreenProps = {
   creatorName: string | null;
   idea: Idea | null;
   isLoading: boolean;
+  isRefreshing?: boolean;
   onArchive?: () => void;
   onClose: () => void;
+  onRefresh?: () => void;
   onSaveContent?: (patch: { title: string; description: string }) => Promise<void>;
   onSelectSession?: (sessionId: string) => void;
   onToggleStatus?: () => void;
@@ -80,8 +83,10 @@ export function IdeaDetailScreen({
   creatorName,
   idea,
   isLoading,
+  isRefreshing,
   onArchive,
   onClose,
+  onRefresh,
   onSaveContent,
   onSelectSession,
   onToggleStatus,
@@ -110,7 +115,18 @@ export function IdeaDetailScreen({
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              onRefresh={onRefresh}
+              refreshing={Boolean(isRefreshing)}
+              tintColor={colors.slate}
+            />
+          ) : undefined
+        }
+      >
         {isLoading && idea === null ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={colors.slate} />

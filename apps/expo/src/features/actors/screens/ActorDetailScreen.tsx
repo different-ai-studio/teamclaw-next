@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,7 +18,9 @@ export type ActorDetailScreenProps = {
   actor: Actor | null;
   isLoading: boolean;
   isMe: boolean;
+  isRefreshing?: boolean;
   onClose: () => void;
+  onRefresh?: () => void;
   onSelectSession?: (sessionId: string) => void;
   recentSessions?: ReadonlyArray<{
     sessionId: string;
@@ -73,7 +76,9 @@ export function ActorDetailScreen({
   actor,
   isLoading,
   isMe,
+  isRefreshing,
   onClose,
+  onRefresh,
   onSelectSession,
   recentSessions,
 }: ActorDetailScreenProps) {
@@ -88,7 +93,18 @@ export function ActorDetailScreen({
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              onRefresh={onRefresh}
+              refreshing={Boolean(isRefreshing)}
+              tintColor={colors.slate}
+            />
+          ) : undefined
+        }
+      >
         {isLoading && actor === null ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={colors.slate} />
