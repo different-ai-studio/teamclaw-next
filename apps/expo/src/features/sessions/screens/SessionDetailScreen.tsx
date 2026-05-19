@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useEffect, useRef } from "react";
 import {
   FlatList,
   Pressable,
@@ -144,6 +145,19 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
   } = props;
   const { session } = state;
   const hasMessages = state.messages.length > 0;
+  const messageListRef = useRef<FlatList<typeof state.messages[number]> | null>(null);
+  const lastMessageCount = useRef(state.messages.length);
+
+  useEffect(() => {
+    if (state.messages.length > lastMessageCount.current) {
+      // New message appended — scroll to the bottom so the user sees
+      // the latest reply without manually paging down.
+      requestAnimationFrame(() => {
+        messageListRef.current?.scrollToEnd({ animated: true });
+      });
+    }
+    lastMessageCount.current = state.messages.length;
+  }, [state.messages.length]);
 
   return (
     <View style={styles.screen}>
@@ -166,6 +180,10 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
             contentContainerStyle={styles.feedContent}
             data={state.messages}
             keyExtractor={(message) => message.messageId}
+            onContentSizeChange={() => {
+              messageListRef.current?.scrollToEnd({ animated: false });
+            }}
+            ref={messageListRef}
             renderItem={({ item }) => (
               <SessionMessageRow
                 isOwnMessage={ownActorId ? item.senderActorId === ownActorId : false}
