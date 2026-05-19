@@ -20,6 +20,8 @@ import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 type WorkspaceRow = {
   id: string;
   name: string;
+  path: string | null;
+  agent_id: string | null;
   archived: boolean;
 };
 
@@ -45,7 +47,7 @@ export default function WorkspacesRoute() {
     try {
       const result = await supabase
         .from("workspaces")
-        .select("id, name, archived")
+        .select("id, name, path, agent_id, archived")
         .eq("team_id", teamId)
         .order("name", { ascending: true });
       if (result.error) {
@@ -85,6 +87,28 @@ export default function WorkspacesRoute() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't update workspace.");
+    }
+  };
+
+  const [editingPathId, setEditingPathId] = useState<string | null>(null);
+  const [editPathDraft, setEditPathDraft] = useState("");
+
+  const commitPath = async (id: string) => {
+    try {
+      const next = editPathDraft.trim();
+      const result = await supabase
+        .from("workspaces")
+        .update({ path: next || null, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      setRows((prev) => prev.map((row) => (row.id === id ? { ...row, path: next || null } : row)));
+      setEditingPathId(null);
+      setEditPathDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't update path.");
     }
   };
 
@@ -197,23 +221,58 @@ export default function WorkspacesRoute() {
                 style={styles.sectionEyebrow}
               />
               <View style={styles.card}>
-                {active.map((row, index) => (
-                  <View key={row.id}>
-                    <View style={styles.row}>
-                      <Text style={styles.rowLabel}>{row.name || row.id}</Text>
-                      <View style={{ flex: 1 }} />
-                      <Pressable
-                        accessibilityLabel={`Archive ${row.name}`}
-                        accessibilityRole="button"
-                        hitSlop={6}
-                        onPress={() => handleArchive(row.id, true)}
-                      >
-                        <Ionicons color={colors.slate} name="archive-outline" size={18} />
-                      </Pressable>
+                {active.map((row, index) => {
+                  const isEditingPath = editingPathId === row.id;
+                  return (
+                    <View key={row.id}>
+                      <View style={styles.row}>
+                        <View style={styles.rowBody}>
+                          <Text style={styles.rowLabel}>{row.name || row.id}</Text>
+                          {isEditingPath ? (
+                            <TextInput
+                              autoCapitalize="none"
+                              autoCorrect={false}
+                              autoFocus
+                              onBlur={() => void commitPath(row.id)}
+                              onChangeText={setEditPathDraft}
+                              onSubmitEditing={() => void commitPath(row.id)}
+                              placeholder="~/code/repo"
+                              placeholderTextColor={colors.slate}
+                              returnKeyType="done"
+                              selectionColor={colors.cinnabar}
+                              style={styles.pathInput}
+                              value={editPathDraft}
+                            />
+                          ) : (
+                            <Pressable
+                              accessibilityLabel="Edit workspace path"
+                              accessibilityRole="button"
+                              onPress={() => {
+                                setEditingPathId(row.id);
+                                setEditPathDraft(row.path ?? "");
+                              }}
+                            >
+                              <Text style={styles.rowPath}>
+                                {row.path && row.path.length > 0
+                                  ? row.path
+                                  : "Set local path…"}
+                              </Text>
+                            </Pressable>
+                          )}
+                        </View>
+                        <Pressable
+                          accessibilityLabel={`Archive ${row.name}`}
+                          accessibilityRole="button"
+                          hitSlop={6}
+                          onPress={() => handleArchive(row.id, true)}
+                        >
+                          <Ionicons color={colors.slate} name="archive-outline" size={18} />
+                        </Pressable>
+                      </View>
+                      {index < active.length - 1 ? <Hairline /> : null}
                     </View>
-                    {index < active.length - 1 ? <Hairline /> : null}
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             </View>
             {archived.length > 0 ? (
@@ -347,9 +406,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },
+  pathInput: {
+    color: colors.basalt,
+    padding: 0,
+    ...typography.monoMeta,
+  },
+  rowBody: {
+    flex: 1,
+    gap: 2,
+  },
   rowLabel: {
     color: colors.onyx,
     ...typography.body,
+  },
+  rowPath: {
+    color: colors.slate,
+    ...typography.monoMeta,
   },
   rowLabelArchived: {
     color: colors.slate,

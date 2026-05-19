@@ -1,4 +1,5 @@
-import { Image, StyleSheet, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import Markdown from "react-native-markdown-display";
 
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
@@ -16,6 +17,7 @@ const AGENT_NOTE_KINDS = new Set([
 export type SessionMessageRowProps = {
   message: SessionMessage;
   isOwnMessage?: boolean;
+  onDelete?: (messageId: string) => void;
 };
 
 export function normalizeBody(message: SessionMessage): string {
@@ -62,11 +64,35 @@ export function formatTimestamp(value: string): string {
   }).format(date);
 }
 
-export function SessionMessageRow({ message, isOwnMessage = false }: SessionMessageRowProps) {
+export function SessionMessageRow({
+  message,
+  isOwnMessage = false,
+  onDelete,
+}: SessionMessageRowProps) {
   const kindKey = message.kind.trim().toLowerCase();
   if (isHiddenMessageKind(kindKey)) return null;
 
   const timestamp = formatTimestamp(message.createdAt);
+
+  const handleLongPress = () => {
+    const options: { text: string; style?: "default" | "cancel" | "destructive"; onPress?: () => void }[] = [
+      {
+        text: "Copy",
+        onPress: () => {
+          void Clipboard.setStringAsync(message.content);
+        },
+      },
+    ];
+    if (isOwnMessage && onDelete) {
+      options.push({
+        text: "Delete",
+        style: "destructive",
+        onPress: () => onDelete(message.messageId),
+      });
+    }
+    options.push({ text: "Cancel", style: "cancel" });
+    Alert.alert("Message", message.content.slice(0, 80), options);
+  };
 
   if (isAgentNoteKind(kindKey)) {
     const note = agentNoteStyle(kindKey);
@@ -87,10 +113,14 @@ export function SessionMessageRow({ message, isOwnMessage = false }: SessionMess
   const attachments = message.attachments ?? [];
   return (
     <View style={[styles.row, isOwnMessage ? styles.rowOwn : styles.rowOther]}>
-      <View
-        style={[
+      <Pressable
+        accessibilityHint="Long-press to copy or delete"
+        delayLongPress={350}
+        onLongPress={handleLongPress}
+        style={({ pressed }) => [
           styles.surface,
           isOwnMessage ? styles.surfaceOwn : styles.surfaceOther,
+          pressed ? styles.surfacePressed : null,
         ]}
       >
         {attachments.length > 0 ? (
@@ -118,7 +148,7 @@ export function SessionMessageRow({ message, isOwnMessage = false }: SessionMess
             {timestamp}
           </Text>
         ) : null}
-      </View>
+      </Pressable>
     </View>
   );
 }
@@ -278,6 +308,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.onyx,
     borderBottomRightRadius: radii.hairline,
     borderRadius: radii.card,
+  },
+  surfacePressed: {
+    opacity: 0.88,
   },
   time: {
     flexShrink: 0,

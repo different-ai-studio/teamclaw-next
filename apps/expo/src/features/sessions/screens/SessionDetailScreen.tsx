@@ -53,6 +53,7 @@ type SessionDetailScreenProps = {
   onAttach?: () => void;
   onBack: () => void;
   onChangeComposerText: (value: string) => void;
+  onDeleteMessage?: (messageId: string) => void;
   onOpenMembers?: () => void;
   onSend: () => void;
   ownActorId?: string;
@@ -135,6 +136,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onAttach,
     onBack,
     onChangeComposerText,
+    onDeleteMessage,
     onOpenMembers,
     onSend,
     ownActorId,
@@ -188,6 +190,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
               <SessionMessageRow
                 isOwnMessage={ownActorId ? item.senderActorId === ownActorId : false}
                 message={item}
+                onDelete={onDeleteMessage}
               />
             )}
           />

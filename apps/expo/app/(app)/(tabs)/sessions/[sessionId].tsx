@@ -196,6 +196,14 @@ export default function SessionDetailRoute() {
           onChangeComposerText={(value) => {
             controller?.setComposerText(value);
           }}
+          onDeleteMessage={async (messageId) => {
+            try {
+              await supabase.from("messages").delete().eq("id", messageId);
+              void controller?.load();
+            } catch {
+              // Surface in toast in a future pass.
+            }
+          }}
           onOpenMembers={() => {
             router.push(`/(app)/session-members?sessionId=${sessionId}`);
           }}
