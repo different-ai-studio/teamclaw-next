@@ -3,12 +3,15 @@ import { useEffect, useState } from "react";
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
+import { createIdeasApi } from "../../src/features/ideas/idea-api";
+import { isOpenIdea } from "../../src/features/ideas/idea-types";
 import { createSessionsApi } from "../../src/features/sessions/session-api";
 import { NewSessionScreen } from "../../src/features/sessions/screens/NewSessionScreen";
 import { supabase } from "../../src/lib/supabase/client";
 import { uuidV4 } from "../../src/lib/uuid";
 
 type AgentChoice = { actorId: string; displayName: string };
+type IdeaChoice = { ideaId: string; displayTitle: string };
 
 function deriveTitle(firstMessage: string): string {
   const trimmed = firstMessage.trim();
@@ -25,23 +28,36 @@ export default function NewSessionRoute() {
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentChoice[]>([]);
+  const [ideas, setIdeas] = useState<IdeaChoice[]>([]);
 
   useEffect(() => {
     const teamId = state.currentTeam?.id;
     if (!teamId) return;
     let cancelled = false;
-    void createActorsApi(supabase)
-      .listActors(teamId)
-      .then((rows) => {
+    void Promise.all([
+      createActorsApi(supabase).listActors(teamId),
+      createIdeasApi(supabase).listIdeas(teamId),
+    ])
+      .then(([actorRows, ideaRows]) => {
         if (cancelled) return;
         setAgents(
-          rows
+          actorRows
             .filter((row) => row.actorType === "agent")
             .map((row) => ({ actorId: row.actorId, displayName: row.displayName })),
         );
+        setIdeas(
+          ideaRows
+            .filter(isOpenIdea)
+            .map((row) => ({
+              ideaId: row.ideaId,
+              displayTitle: row.title.trim() || "Untitled idea",
+            })),
+        );
       })
       .catch(() => {
-        if (!cancelled) setAgents([]);
+        if (cancelled) return;
+        setAgents([]);
+        setIdeas([]);
       });
     return () => {
       cancelled = true;
@@ -52,9 +68,11 @@ export default function NewSessionRoute() {
     <NewSessionScreen
       agents={agents}
       errorMessage={errorMessage}
+      ideas={ideas}
       isBusy={isBusy}
+      selectedIdeaId={ideaId}
       onClose={() => router.back()}
-      onCreate={async ({ firstMessage, agentActorId }) => {
+      onCreate={async ({ firstMessage, agentActorId, ideaId: chosenIdeaId }) => {
         if (!state.currentTeam) {
           setErrorMessage("No active team — bootstrap first.");
           return;
@@ -73,7 +91,7 @@ export default function NewSessionRoute() {
             title: deriveTitle(firstMessage),
             mode: "agent",
             primaryAgentId: agentActorId,
-            ideaId,
+            ideaId: chosenIdeaId,
           });
 
           if (firstMessage.trim().length > 0) {

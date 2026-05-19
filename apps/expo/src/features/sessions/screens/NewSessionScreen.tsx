@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
+  ActionSheetIOS,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,27 +20,33 @@ import { colors, radii, spacing, typography } from "../../../ui/theme";
 export type NewSessionScreenProps = {
   agents?: ReadonlyArray<{ actorId: string; displayName: string }>;
   errorMessage?: string | null;
+  ideas?: ReadonlyArray<{ ideaId: string; displayTitle: string }>;
   isBusy?: boolean;
   onClose: () => void;
   onCreate: (payload: {
     firstMessage: string;
     agentActorId: string | null;
+    ideaId: string | null;
   }) => Promise<void> | void;
   selectedAgentActorId?: string | null;
+  selectedIdeaId?: string | null;
 };
 
 export function NewSessionScreen({
   agents = [],
   errorMessage = null,
+  ideas = [],
   isBusy = false,
   onClose,
   onCreate,
   selectedAgentActorId,
+  selectedIdeaId = null,
 }: NewSessionScreenProps) {
   const [firstMessage, setFirstMessage] = useState("");
   const [pickedAgentId, setPickedAgentId] = useState<string | null>(
     selectedAgentActorId ?? agents[0]?.actorId ?? null,
   );
+  const [pickedIdeaId, setPickedIdeaId] = useState<string | null>(selectedIdeaId);
   const canSubmit = firstMessage.trim().length > 0 && !isBusy;
 
   const handleStart = () => {
@@ -46,7 +54,41 @@ export function NewSessionScreen({
     void onCreate({
       firstMessage: firstMessage.trim(),
       agentActorId: pickedAgentId,
+      ideaId: pickedIdeaId,
     });
+  };
+
+  const ideaLabel =
+    pickedIdeaId === null
+      ? "None"
+      : ideas.find((i) => i.ideaId === pickedIdeaId)?.displayTitle ?? "—";
+
+  const showIdeaPicker = () => {
+    if (ideas.length === 0) return;
+    const labels = ["None", ...ideas.map((i) => i.displayTitle), "Cancel"];
+    const dispatch = (index: number) => {
+      if (index === 0) setPickedIdeaId(null);
+      else if (index > 0 && index <= ideas.length) {
+        setPickedIdeaId(ideas[index - 1].ideaId);
+      }
+    };
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: labels, cancelButtonIndex: labels.length - 1 },
+        dispatch,
+      );
+      return;
+    }
+    Alert.alert(
+      "Link to idea",
+      undefined,
+      labels.map((label, index) => {
+        if (index === labels.length - 1) {
+          return { text: label, style: "cancel" as const };
+        }
+        return { text: label, onPress: () => dispatch(index) };
+      }),
+    );
   };
 
   return (
@@ -108,8 +150,39 @@ export function NewSessionScreen({
             </View>
           </View>
 
+          {ideas.length > 0 ? (
+            <View style={styles.section}>
+              <SectionEyebrow label="02 · IDEA" />
+              <Pressable
+                accessibilityRole="button"
+                onPress={showIdeaPicker}
+                style={({ pressed }) => [
+                  styles.paperCard,
+                  styles.ideaRow,
+                  pressed ? styles.ideaRowPressed : null,
+                ]}
+              >
+                <Text style={styles.cardTitle}>Link to idea</Text>
+                <View style={styles.ideaValue}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.cardBody,
+                      pickedIdeaId === null ? styles.ideaValueMuted : null,
+                    ]}
+                  >
+                    {ideaLabel}
+                  </Text>
+                  <Ionicons color={colors.slate} name="chevron-down" size={14} />
+                </View>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View style={styles.section}>
-            <SectionEyebrow label="02 · FIRST MESSAGE" />
+            <SectionEyebrow
+              label={ideas.length > 0 ? "03 · FIRST MESSAGE" : "02 · FIRST MESSAGE"}
+            />
             <View style={styles.paperCard}>
               <TextInput
                 editable={!isBusy}
@@ -238,6 +311,24 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.xs,
     paddingTop: 4,
+  },
+  ideaRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  ideaRowPressed: {
+    opacity: 0.8,
+  },
+  ideaValue: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+    maxWidth: 200,
+  },
+  ideaValueMuted: {
+    color: colors.slate,
   },
   paperCard: {
     backgroundColor: colors.paper,
