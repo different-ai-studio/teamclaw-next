@@ -11,6 +11,7 @@ export default function SettingsRoute() {
   const { state } = useOnboarding();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,8 +43,11 @@ export default function SettingsRoute() {
       buildNumber={buildNumber}
       displayName={displayName}
       isSigningOut={isSigningOut}
+      notificationsEnabled={notificationsEnabled}
       onClose={() => router.back()}
+      onOpenWorkspaces={() => router.push("/(app)/workspaces")}
       onSignOut={handleSignOut}
+      onToggleNotifications={setNotificationsEnabled}
       team={
         state.currentTeam
           ? { name: state.currentTeam.name, role: state.currentTeam.role ?? null }

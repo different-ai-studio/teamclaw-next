@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
@@ -15,8 +15,12 @@ export type SettingsScreenProps = {
   buildNumber: string;
   displayName: string;
   isSigningOut?: boolean;
+  notificationsEnabled?: boolean;
   onClose: () => void;
+  onEditProfile?: () => void;
+  onOpenWorkspaces?: () => void;
   onSignOut?: () => void;
+  onToggleNotifications?: (enabled: boolean) => void;
   team: SettingsTeam | null;
   userEmail: string | null;
 };
@@ -35,8 +39,12 @@ export function SettingsScreen({
   buildNumber,
   displayName,
   isSigningOut = false,
+  notificationsEnabled = false,
   onClose,
+  onEditProfile,
+  onOpenWorkspaces,
   onSignOut,
+  onToggleNotifications,
   team,
   userEmail,
 }: SettingsScreenProps) {
@@ -55,7 +63,15 @@ export function SettingsScreen({
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.identityCard}>
+        <Pressable
+          accessibilityRole={onEditProfile ? "button" : undefined}
+          disabled={!onEditProfile}
+          onPress={onEditProfile}
+          style={({ pressed }) => [
+            styles.identityCard,
+            pressed && onEditProfile ? styles.identityCardPressed : null,
+          ]}
+        >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{avatarInitials(displayName)}</Text>
           </View>
@@ -69,7 +85,10 @@ export function SettingsScreen({
               </Text>
             ) : null}
           </View>
-        </View>
+          {onEditProfile ? (
+            <Ionicons color={colors.slate} name="chevron-forward" size={18} />
+          ) : null}
+        </Pressable>
 
         {team ? (
           <View style={styles.section}>
@@ -84,9 +103,46 @@ export function SettingsScreen({
                 <Text style={styles.rowLabel}>Role</Text>
                 <Text style={styles.rowValue}>{team.role ?? "member"}</Text>
               </View>
+              {onOpenWorkspaces ? (
+                <>
+                  <Hairline />
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={onOpenWorkspaces}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed ? styles.rowPressed : null,
+                    ]}
+                  >
+                    <Text style={styles.rowLabel}>Workspaces</Text>
+                    <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+                  </Pressable>
+                </>
+              ) : null}
             </View>
           </View>
         ) : null}
+
+        <View style={styles.section}>
+          <SectionEyebrow label="NOTIFICATIONS" style={styles.sectionEyebrow} />
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <View style={styles.rowBody}>
+                <Text style={styles.rowLabel}>Push alerts</Text>
+                <Text style={styles.rowHelper}>
+                  Get a heads-up when an agent finishes a turn.
+                </Text>
+              </View>
+              <Switch
+                disabled={!onToggleNotifications}
+                onValueChange={onToggleNotifications}
+                thumbColor={notificationsEnabled ? colors.paper : colors.paper}
+                trackColor={{ false: colors.pebble, true: colors.cinnabar }}
+                value={notificationsEnabled}
+              />
+            </View>
+          </View>
+        </View>
 
         <View style={styles.section}>
           <SectionEyebrow label="ABOUT" style={styles.sectionEyebrow} />
@@ -183,6 +239,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.lg,
   },
+  identityCardPressed: {
+    opacity: 0.85,
+  },
   identityEmail: {
     color: colors.slate,
     ...typography.monoMeta,
@@ -194,13 +253,25 @@ const styles = StyleSheet.create({
   row: {
     alignItems: "center",
     flexDirection: "row",
+    gap: spacing.md,
     justifyContent: "space-between",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },
+  rowBody: {
+    flex: 1,
+    gap: 2,
+  },
+  rowHelper: {
+    color: colors.slate,
+    ...typography.caption,
+  },
   rowLabel: {
     color: colors.basalt,
     ...typography.body,
+  },
+  rowPressed: {
+    backgroundColor: "rgba(34,32,29,0.04)",
   },
   rowValue: {
     color: colors.onyx,
