@@ -153,6 +153,15 @@ export function createSessionsApi(client: SessionsClient) {
       throwIfError(result.error);
     },
 
+    async removeParticipant(sessionId: string, actorId: string): Promise<void> {
+      const result = (await client
+        .from("session_participants")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("actor_id", actorId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async markSessionRead(
       sessionId: string,
       actorId: string,

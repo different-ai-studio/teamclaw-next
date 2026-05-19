@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useCallback } from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,6 +25,7 @@ export type SessionMemberSheetProps = {
   onAddAgent?: () => void;
   onAddMember?: () => void;
   onClose: () => void;
+  onRemoveActor?: (actorId: string) => void;
 };
 
 function ToolbarButton({
@@ -60,6 +65,32 @@ export function SessionMemberSheet({
 }: SessionMemberSheetProps) {
   const humans = actors.filter(isMemberActor);
   const agents = actors.filter(isAgentActor);
+
+  const showRemoveSheet = useCallback(
+    (actor: Actor) => {
+      if (!onRemoveActor) return;
+      const labels = [`Remove ${actor.displayName}`, "Cancel"];
+      const dispatch = (index: number) => {
+        if (index === 0) onRemoveActor(actor.actorId);
+      };
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: labels,
+            cancelButtonIndex: 1,
+            destructiveButtonIndex: 0,
+          },
+          dispatch,
+        );
+        return;
+      }
+      Alert.alert("Remove from session", actor.displayName, [
+        { text: labels[0], style: "destructive", onPress: () => dispatch(0) },
+        { text: labels[1], style: "cancel" },
+      ]);
+    },
+    [onRemoveActor],
+  );
 
   return (
     <View style={styles.screen}>
@@ -106,12 +137,17 @@ export function SessionMemberSheet({
                 />
                 <View>
                   {humans.map((actor, index) => (
-                    <View key={actor.actorId}>
+                    <Pressable
+                      delayLongPress={350}
+                      disabled={!onRemoveActor || actor.actorId === currentActorId}
+                      key={actor.actorId}
+                      onLongPress={() => showRemoveSheet(actor)}
+                    >
                       <ActorRow actor={actor} isMe={actor.actorId === currentActorId} />
                       {index < humans.length - 1 ? (
                         <Hairline style={styles.rowDivider} />
                       ) : null}
-                    </View>
+                    </Pressable>
                   ))}
                 </View>
               </View>
@@ -124,12 +160,17 @@ export function SessionMemberSheet({
                 />
                 <View>
                   {agents.map((actor, index) => (
-                    <View key={actor.actorId}>
+                    <Pressable
+                      delayLongPress={350}
+                      disabled={!onRemoveActor}
+                      key={actor.actorId}
+                      onLongPress={() => showRemoveSheet(actor)}
+                    >
                       <ActorRow actor={actor} />
                       {index < agents.length - 1 ? (
                         <Hairline style={styles.rowDivider} />
                       ) : null}
-                    </View>
+                    </Pressable>
                   ))}
                 </View>
               </View>

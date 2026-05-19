@@ -7,6 +7,7 @@ import type { Actor } from "../../src/features/actors/actor-types";
 import { createSessionsApi } from "../../src/features/sessions/session-api";
 import { SessionMemberSheet } from "../../src/features/sessions/screens/SessionMemberSheet";
 import { supabase } from "../../src/lib/supabase/client";
+import { showToast } from "../../src/ui/Toast";
 
 export default function SessionMembersRoute() {
   const router = useRouter();
@@ -53,6 +54,20 @@ export default function SessionMembersRoute() {
     return actors.filter((actor) => ids.has(actor.actorId));
   }, [actors, participantIds]);
 
+  const handleRemove = async (actorId: string) => {
+    if (!sessionId) return;
+    try {
+      await createSessionsApi(supabase).removeParticipant(sessionId, actorId);
+      setParticipantIds((prev) => prev.filter((id) => id !== actorId));
+      showToast("success", "Removed from session");
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Couldn't remove participant",
+      );
+    }
+  };
+
   return (
     <SessionMemberSheet
       actors={participants}
@@ -61,6 +76,7 @@ export default function SessionMembersRoute() {
       onAddAgent={() => router.push("/(app)/invite")}
       onAddMember={() => router.push("/(app)/invite")}
       onClose={() => router.back()}
+      onRemoveActor={handleRemove}
     />
   );
 }
