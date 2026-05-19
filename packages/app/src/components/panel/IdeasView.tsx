@@ -4,7 +4,9 @@ import { Loader2, Lightbulb } from 'lucide-react'
 import { supabase } from '@/lib/supabase-client'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { formatRelativeTime } from '@/lib/date-format'
-import { cn } from '@/lib/utils'
+import { cn, isTauri } from '@/lib/utils'
+import * as localCache from '@/lib/local-cache'
+import { syncIdeasForTeam } from '@/lib/sync/idea-sync'
 
 export type IdeaRow = {
   id: string
@@ -58,37 +60,70 @@ export function useIdeasForTeam(): UseIdeasForTeamResult {
     setLoading(true)
     setError(false)
     void (async () => {
-      const { data, error } = await supabase
-        .from('ideas')
-        .select('id, title, status, created_by_actor_id, updated_at')
-        .eq('team_id', teamId)
-        .eq('archived', false)
-        .order('updated_at', { ascending: false })
-      if (cancelled) return
-      if (error) { setError(true); setLoading(false); return }
-      const rows = (data ?? []) as IdeaRow[]
-      setIdeas(rows)
-      const creatorIds = Array.from(new Set(rows.map(r => r.created_by_actor_id).filter(Boolean)))
-      if (creatorIds.length > 0) {
-        const { data: actorRows } = await supabase
-          .from('actors')
-          .select('id, display_name')
-          .in('id', creatorIds)
+      if (isTauri()) {
+        const cached = await localCache.loadIdeasForTeam(teamId)
         if (cancelled) return
-        const map = new Map<string, string>()
-        for (const r of (actorRows ?? []) as { id: string; display_name: string }[]) {
-          map.set(r.id, r.display_name)
+        const rows = cached
+          .filter(r => r.archived === 0 && !r.deletedAt)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .map(r => ({
+            id: r.id,
+            title: r.title,
+            status: r.status as IdeaRow['status'],
+            created_by_actor_id: r.createdBy ?? '',
+            updated_at: r.updatedAt,
+          }))
+        setIdeas(rows)
+        const creatorIds = Array.from(new Set(rows.map(r => r.created_by_actor_id).filter(Boolean)))
+        if (creatorIds.length > 0) {
+          const actors = await localCache.loadActorsByIds(creatorIds)
+          if (cancelled) return
+          const map = new Map<string, string>()
+          for (const a of actors) map.set(a.id, a.displayName)
+          setCreators(map)
+        } else {
+          setCreators(new Map())
         }
-        setCreators(map)
+        setLoading(false)
       } else {
-        setCreators(new Map())
+        const { data, error } = await supabase
+          .from('ideas')
+          .select('id, title, status, created_by_actor_id, updated_at')
+          .eq('team_id', teamId)
+          .eq('archived', false)
+          .order('updated_at', { ascending: false })
+        if (cancelled) return
+        if (error) { setError(true); setLoading(false); return }
+        const rows = (data ?? []) as IdeaRow[]
+        setIdeas(rows)
+        const creatorIds = Array.from(new Set(rows.map(r => r.created_by_actor_id).filter(Boolean)))
+        if (creatorIds.length > 0) {
+          const { data: actorRows } = await supabase
+            .from('actors')
+            .select('id, display_name')
+            .in('id', creatorIds)
+          if (cancelled) return
+          const map = new Map<string, string>()
+          for (const r of (actorRows ?? []) as { id: string; display_name: string }[]) {
+            map.set(r.id, r.display_name)
+          }
+          setCreators(map)
+        } else {
+          setCreators(new Map())
+        }
+        setLoading(false)
       }
-      setLoading(false)
     })()
     return () => { cancelled = true }
   }, [teamId, refreshTick])
 
-  const refetch = React.useCallback(() => setRefreshTick((n) => n + 1), [])
+  const refetch = React.useCallback(() => {
+    if (isTauri() && teamId) {
+      void syncIdeasForTeam(teamId).then(() => setRefreshTick(n => n + 1))
+    } else {
+      setRefreshTick(n => n + 1)
+    }
+  }, [teamId])
 
   return { ideas, creators, loading, error, teamId, refetch }
 }
