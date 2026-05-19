@@ -3654,4 +3654,22 @@ mod runtime_backend_resolution_tests {
             amux::AgentType::Opencode
         );
     }
+
+    #[test]
+    fn keeps_unknown_request_on_claude_when_claude_backend_is_available() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::ClaudeCode
+        );
+    }
 }

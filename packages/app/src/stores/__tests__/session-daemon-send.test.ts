@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => {
     supabaseInsert: vi.fn(),
     sessionParticipantsSelect: vi.fn(),
     actorDirectorySelect: vi.fn(),
+    actorDirectoryActorTypeFilter: [] as string[],
   }
 })
 
@@ -83,7 +84,10 @@ vi.mock('@/lib/supabase-client', () => ({
         return {
           select: () => ({
             in: () => ({
-              in: () => Promise.resolve(mocks.actorDirectorySelect()),
+              in: (_column: string, values: string[]) => {
+                mocks.actorDirectoryActorTypeFilter = values
+                return Promise.resolve(mocks.actorDirectorySelect())
+              },
             }),
           }),
         }
@@ -161,6 +165,7 @@ describe('session store daemon send path', () => {
       data: [],
       error: null,
     })
+    mocks.actorDirectoryActorTypeFilter = []
     mocks.mqttPublish.mockResolvedValue(undefined)
   })
 
@@ -211,6 +216,40 @@ describe('session store daemon send path', () => {
 
     await useSessionStore.getState().sendMessage('hello daemon')
 
+    expect(mocks.supabaseInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { mention_actor_ids: ['agent-1'] },
+      }),
+    )
+  })
+
+  it('treats personal_agent participants as agent mentions for daemon sessions', async () => {
+    const { useSessionStore } = await import('../session-store')
+
+    mocks.sessionParticipantsSelect.mockReturnValue({
+      data: [{ actor_id: 'agent-1' }, { actor_id: 'member-1' }],
+      error: null,
+    })
+    mocks.actorDirectorySelect.mockReturnValue({
+      data: [{ id: 'agent-1', actor_type: 'personal_agent' }],
+      error: null,
+    })
+
+    useSessionStore.setState({
+      activeSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+      currentSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+      sessions: [{
+        id: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+        title: 'Collab Session',
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }],
+    })
+
+    await useSessionStore.getState().sendMessage('hello daemon')
+
+    expect(mocks.actorDirectoryActorTypeFilter).toContain('personal_agent')
     expect(mocks.supabaseInsert).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: { mention_actor_ids: ['agent-1'] },
