@@ -23,9 +23,12 @@ import type { SessionGroup, SessionsListState } from "../session-types";
 type SessionsListScreenProps = {
   onArchiveBatch?: (sessionIds: string[]) => Promise<void>;
   onLoad: () => void;
+  onMarkBatchRead?: (sessionIds: string[]) => Promise<void>;
   onNewSession?: () => void;
   onRefresh: () => void;
   onSelectSession: (sessionId: string) => void;
+  onTogglePin?: (sessionId: string) => Promise<void> | void;
+  pinnedSessionIds?: ReadonlySet<string>;
   onShortcuts?: () => void;
   selectedSessionId?: string | null;
   state: SessionsListState;
@@ -118,10 +121,13 @@ function HeaderBar({
 export function SessionsListScreen({
   onArchiveBatch,
   onLoad,
+  onMarkBatchRead,
   onNewSession,
   onRefresh,
   onSelectSession,
   onShortcuts,
+  onTogglePin,
+  pinnedSessionIds,
   selectedSessionId = null,
   state,
 }: SessionsListScreenProps) {
@@ -150,20 +156,52 @@ export function SessionsListScreen({
     }
   };
 
+  const handleMarkReadSelected = async () => {
+    if (!onMarkBatchRead || selection.size === 0) return;
+    setIsBatchBusy(true);
+    try {
+      await onMarkBatchRead(Array.from(selection));
+      clearSelection();
+    } finally {
+      setIsBatchBusy(false);
+    }
+  };
+
   const filteredGroups = useMemo<SessionGroup[]>(() => {
-    if (query.trim().length === 0) return state.groups;
-    return state.groups
-      .map((group) => ({
-        ...group,
-        sessions: group.sessions.filter((session) =>
-          matchesAnyField(
-            [session.title, session.summary, session.lastMessagePreview],
-            query,
-          ),
-        ),
-      }))
-      .filter((group) => group.sessions.length > 0);
-  }, [state.groups, query]);
+    const filtered =
+      query.trim().length === 0
+        ? state.groups
+        : state.groups
+            .map((group) => ({
+              ...group,
+              sessions: group.sessions.filter((session) =>
+                matchesAnyField(
+                  [session.title, session.summary, session.lastMessagePreview],
+                  query,
+                ),
+              ),
+            }))
+            .filter((group) => group.sessions.length > 0);
+
+    if (!pinnedSessionIds || pinnedSessionIds.size === 0) return filtered;
+    const pinned: SessionGroup["sessions"] = [];
+    const rest: SessionGroup = { label: "今天", sessions: [] };
+    const remainingGroups: SessionGroup[] = [];
+    for (const group of filtered) {
+      const remaining: SessionGroup["sessions"] = [];
+      for (const session of group.sessions) {
+        if (pinnedSessionIds.has(session.sessionId)) pinned.push(session);
+        else remaining.push(session);
+      }
+      if (remaining.length > 0) remainingGroups.push({ ...group, sessions: remaining });
+    }
+    if (pinned.length === 0) return remainingGroups;
+    const pinnedGroup: SessionGroup = { label: "今天", sessions: pinned };
+    // Reuse the existing eyebrow look but force a synthetic group label.
+    (pinnedGroup as unknown as { label: string }).label = `PINNED · ${pinned.length}`;
+    void rest;
+    return [pinnedGroup, ...remainingGroups];
+  }, [state.groups, query, pinnedSessionIds]);
 
   const handleNewSession = () => {
     if (onNewSession) {
@@ -321,6 +359,35 @@ export function SessionsListScreen({
         >
           <Text style={styles.batchActionText}>Cancel</Text>
         </Pressable>
+        {onTogglePin ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={isBatchBusy}
+            onPress={async () => {
+              for (const id of selection) await onTogglePin(id);
+              clearSelection();
+            }}
+            style={({ pressed }) => [
+              styles.batchAction,
+              pressed && !isBatchBusy ? styles.batchActionPressed : null,
+            ]}
+          >
+            <Text style={styles.batchActionText}>Pin</Text>
+          </Pressable>
+        ) : null}
+        {onMarkBatchRead ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={isBatchBusy}
+            onPress={handleMarkReadSelected}
+            style={({ pressed }) => [
+              styles.batchAction,
+              pressed && !isBatchBusy ? styles.batchActionPressed : null,
+            ]}
+          >
+            <Text style={styles.batchActionText}>Mark read</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           disabled={isBatchBusy || !onArchiveBatch}
