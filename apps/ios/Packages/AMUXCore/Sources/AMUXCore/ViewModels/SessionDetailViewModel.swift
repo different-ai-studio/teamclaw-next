@@ -484,6 +484,23 @@ public final class SessionDetailViewModel {
         if runtime == nil, let ctx = startModelContext {
             runtime = RuntimeResolver.resolve(existing: nil, session: session, modelContext: ctx)
         }
+        // Upgrade a transient placeholder to the real SwiftData Runtime row if
+        // one has arrived since start(). A placeholder is never inserted into a
+        // ModelContext, so `modelContext == nil` identifies it.
+        if let ctx = startModelContext,
+           let ph = runtime, ph.modelContext == nil, !ph.runtimeId.isEmpty {
+            let rid = ph.runtimeId
+            let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
+            if let real = (try? ctx.fetch(desc))?.first {
+                runtime = real
+            }
+        }
+        // Seed slash commands from the (possibly newly resolved) runtime.
+        // Covers both: placeholder→real upgrade above and the race where
+        // SessionListViewModel writes availableCommandsJSON after start().
+        if let cmds = runtime?.availableCommands, !cmds.isEmpty {
+            availableCommands = cmds
+        }
         guard let liveRuntime = runtime else { return }
         observeBoundRuntimeChanges()
 
@@ -557,9 +574,13 @@ public final class SessionDetailViewModel {
         withObservationTracking {
             _ = runtime.status
             _ = runtime.currentModel
+            _ = runtime.availableCommandsJSON
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.isObservingRuntimeChanges = false
+                if let cmds = self?.runtime?.availableCommands, !cmds.isEmpty {
+                    self?.availableCommands = cmds
+                }
                 await self?.refreshMemberSheet()
             }
         }
