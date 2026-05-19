@@ -271,6 +271,9 @@ export default function SessionDetailRoute() {
           onOpenMembers={() => {
             router.push(`/(app)/session-members?sessionId=${sessionId}`);
           }}
+          onRefresh={() => {
+            void controller?.load();
+          }}
           onReplyToMessage={(messageId) => {
             const target = detailState.messages.find((m) => m.messageId === messageId);
             if (target) {

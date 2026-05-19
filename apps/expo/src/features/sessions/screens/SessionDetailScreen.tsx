@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   FlatList,
   Image,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -58,9 +59,11 @@ type SessionDetailScreenProps = {
   onAttach?: () => void;
   onBack: () => void;
   onChangeComposerText: (value: string) => void;
+  isRefreshing?: boolean;
   onClearReply?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string, currentContent: string) => void;
+  onRefresh?: () => void;
   onOpenMembers?: () => void;
   onReplyToMessage?: (messageId: string) => void;
   onSend: () => void;
@@ -174,10 +177,12 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onDeleteMessage,
     onEditMessage,
     onOpenMembers,
+    onRefresh,
     onReplyToMessage,
     onSend,
     ownActorId,
     replyTarget,
+    isRefreshing,
     senderAvatars,
     senderNames,
     sendErrorMessage,
@@ -212,6 +217,16 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
 
   const messageListRef = useRef<FlatList<FeedItem> | null>(null);
   const lastMessageCount = useRef(state.messages.length);
+
+  const separatorIndices = useMemo(() => {
+    const out: number[] = [];
+    for (let i = 0; i < feedItems.length; i += 1) {
+      if (feedItems[i].kind === "separator") out.push(i);
+    }
+    return out;
+    // feedItems is derived from state.messages each render; safe to depend on length only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.messages.length]);
 
   useEffect(() => {
     if (state.messages.length > lastMessageCount.current) {
@@ -250,7 +265,17 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
             onContentSizeChange={() => {
               messageListRef.current?.scrollToEnd({ animated: false });
             }}
+            refreshControl={
+              onRefresh ? (
+                <RefreshControl
+                  onRefresh={onRefresh}
+                  refreshing={Boolean(isRefreshing)}
+                  tintColor={colors.slate}
+                />
+              ) : undefined
+            }
             ref={messageListRef}
+            stickyHeaderIndices={separatorIndices}
             renderItem={({ item }) => {
               if (item.kind === "separator") {
                 return <DaySeparator label={item.label} />;

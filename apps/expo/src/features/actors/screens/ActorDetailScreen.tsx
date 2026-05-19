@@ -18,6 +18,12 @@ export type ActorDetailScreenProps = {
   isLoading: boolean;
   isMe: boolean;
   onClose: () => void;
+  onSelectSession?: (sessionId: string) => void;
+  recentSessions?: ReadonlyArray<{
+    sessionId: string;
+    title: string;
+    lastMessageAt: string;
+  }>;
 };
 
 const HUMAN_PALETTE = [hai.basalt, hai.slate, hai.sage, hai.onyx];
@@ -68,6 +74,8 @@ export function ActorDetailScreen({
   isLoading,
   isMe,
   onClose,
+  onSelectSession,
+  recentSessions,
 }: ActorDetailScreenProps) {
   return (
     <View style={styles.screen}>
@@ -96,6 +104,41 @@ export function ActorDetailScreen({
         ) : (
           <>
             <HeroCard actor={actor} isMe={isMe} />
+
+            {recentSessions && recentSessions.length > 0 ? (
+              <View style={styles.section}>
+                <SectionEyebrow
+                  label={`RECENT SESSIONS · ${recentSessions.length}`}
+                  style={styles.sectionEyebrow}
+                />
+                <View style={styles.card}>
+                  {recentSessions.map((row, index) => (
+                    <View key={row.sessionId}>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={
+                          onSelectSession
+                            ? () => onSelectSession(row.sessionId)
+                            : undefined
+                        }
+                        style={({ pressed }) => [
+                          styles.detailRow,
+                          pressed && onSelectSession ? { opacity: 0.7 } : null,
+                        ]}
+                      >
+                        <Text numberOfLines={1} style={styles.detailLabel}>
+                          {row.title || "Untitled session"}
+                        </Text>
+                        <Text style={styles.detailValue}>
+                          {row.lastMessageAt ? new Date(row.lastMessageAt).toLocaleDateString() : "—"}
+                        </Text>
+                      </Pressable>
+                      {index < recentSessions.length - 1 ? <Hairline /> : null}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
             <View style={styles.section}>
               <SectionEyebrow label="INFO" style={styles.sectionEyebrow} />
