@@ -90,7 +90,6 @@ public struct RootTabView: View {
                                currentActorID: currentActorID,
                                store: actorStore,
                                connectedAgentsStore: teamRuntime?.connectedAgentsStore,
-                               onSignOut: onSignOut,
                                showInvite: $showInviteAfterReminder)
                 } else {
                     ContentUnavailableView("No Team Selected",

@@ -96,13 +96,6 @@ public struct SessionsTab: View {
                         .disabled(shortcutsStore == nil)
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button { showSettings = true } label: {
-                            Image(systemName: "gearshape").font(.title3).foregroundStyle(.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("sessions.settingsButton")
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
                         Button { showNewSession = true } label: {
                             Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.primary)
                         }
@@ -176,7 +169,9 @@ public struct SessionsTab: View {
             }
 
             if let shortcutsStore {
-                ShortcutsDrawer(isPresented: $showShortcuts, store: shortcutsStore)
+                ShortcutsDrawer(isPresented: $showShortcuts,
+                                store: shortcutsStore,
+                                onOpenSettings: { showSettings = true })
             }
         }
         // Hoisted from the destination view: when the modifier lives on
