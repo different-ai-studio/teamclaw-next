@@ -23,6 +23,8 @@ public struct SessionDetailView: View {
     @State private var isAddAgentSheetPresented: Bool = false
     @State private var isAddMemberSheetPresented: Bool = false
     @State private var muted = false
+    @State private var isPlansPanelPresented: Bool = false
+    @State private var plansPageIndex: Int = 0
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
@@ -145,6 +147,20 @@ public struct SessionDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                if !viewModel.activePlanSnapshots.isEmpty {
+                    Button {
+                        withAnimation(AMUXAnimation.fast) {
+                            isPlansPanelPresented.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "list.bullet.clipboard")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.amux.cinnabar)
+                    }
+                    .accessibilityLabel("Plans")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
                         isMemberSheetPresented = true
@@ -194,6 +210,17 @@ public struct SessionDetailView: View {
         // Keeping it here meant the modifier was alive until this view
         // fully unmounted on pop, so the bar only animated back after
         // the pop transition finished — a multi-beat lag.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isPlansPanelPresented {
+                let snapshots = viewModel.activePlanSnapshots
+                if !snapshots.isEmpty {
+                    SessionPlansPanelView(
+                        snapshots: snapshots,
+                        pageIndex: $plansPageIndex
+                    )
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 SessionComposer(
