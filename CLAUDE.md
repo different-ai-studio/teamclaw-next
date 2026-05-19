@@ -102,6 +102,19 @@ Single source of truth principle — **never mix content sources**:
 3. `git tag v<desktop-version> && git push origin v<desktop-version>`
 4. Tag push triggers `release.yml` (macOS desktop)
 
+## iOS TestFlight Release
+
+**Version file:** `apps/ios/project.yml` — `MARKETING_VERSION` (e.g. `1.1.5`) + `CURRENT_PROJECT_VERSION` (build number, increment by 1 each release).
+
+**Release process:**
+1. Bump `CURRENT_PROJECT_VERSION` in `apps/ios/project.yml`
+2. Commit and push to main
+3. `git tag ios-v<version>-<build> && git push origin ios-v<version>-<build>`
+   - Example: `git tag ios-v1.1.5-4 && git push origin ios-v1.1.5-4`
+4. Tag push triggers `.github/workflows/testflight.yml` (runs `fastlane beta` on CI)
+
+**Tag format must be `ios-v*`** — other formats (e.g. `ios-1.1.5-4`) do not trigger the workflow.
+
 ## FC (Function Compute) Deployment
 
 FC function `teamclaw-sync` is deployed to Alibaba Cloud cn-shenzhen region.
