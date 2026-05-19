@@ -3,9 +3,12 @@ import SwiftData
 import AMUXCore
 import AMUXSharedUI
 import Sentry
+import Supabase
 
 @main
 struct AMUXApp: App {
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) var pushDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @State private var pairing = PairingManager()
     let modelContainer: ModelContainer
 
@@ -38,6 +41,30 @@ struct AMUXApp: App {
         } catch {
             fatalError("Failed to initialise ModelContainer: \(error)")
         }
+        NotificationCenter.default.addObserver(
+            forName: .amuxApnsTokenReady, object: nil, queue: .main) { note in
+            guard let hex = note.userInfo?["token"] as? String else { return }
+            Task { await PushBootstrap.shared.handleApnsToken(hex) }
+        }
+
+        // Wire Supabase-backed push adapters. A dedicated client is built
+        // from the same bundle config used by SupabaseAppOnboardingStore so
+        // the token uploader, presence writer, and prefs API share the
+        // authenticated session. The userIDProvider closure reads the
+        // current session lazily — it resolves correctly both before and
+        // after sign-in without a strong capture of the @State onboarding.
+        if let config = try? SupabaseProjectConfiguration.fromMainBundle() {
+            let pushClient = SupabaseClient(
+                supabaseURL: config.url,
+                supabaseKey: config.publishableKey
+            )
+            PushBootstrap.shared.registerWithSupabase(
+                client: pushClient,
+                userIDProvider: { [pushClient] in
+                    pushClient.auth.currentSession?.user.id.uuidString.lowercased()
+                }
+            )
+        }
     }
 
     var body: some Scene {
@@ -48,8 +75,16 @@ struct AMUXApp: App {
                 // toggle accents, and other system tinted surfaces to the Hai
                 // Cinnabar accent without disturbing liquid-glass behaviour.
                 .tint(Color.amux.cinnabar)
+                .task { _ = await PushPermissionManager.requestIfUndetermined() }
         }
         .modelContainer(modelContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:     PushBootstrap.shared.heartbeat?.enterForeground()
+            case .background: PushBootstrap.shared.heartbeat?.enterBackground()
+            default: break
+            }
+        }
     }
 
     private func handle(_ url: URL) {
@@ -67,6 +102,13 @@ struct AMUXApp: App {
             NotificationCenter.default.post(
                 name: .amuxAuthCallbackReceived, object: url
             )
+        case "session":
+            // teamclaw://session/<id>
+            let sid = url.pathComponents.last ?? ""
+            if !sid.isEmpty {
+                NotificationCenter.default.post(
+                    name: .amuxOpenSession, object: nil, userInfo: ["session_id": sid])
+            }
         default:
             break
         }

@@ -57,7 +57,8 @@ struct ContentView: View {
                     },
                     onSignOut: {
                         signOut()
-                    }
+                    },
+                    preferencesAPI: PushBootstrap.shared.preferencesAPI
                 )
                 .environment(onboarding)
                 .task {
@@ -119,6 +120,16 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .amuxAuthCallbackReceived)) { notification in
             guard let url = notification.object as? URL else { return }
             Task { await onboarding.handleAuthCallback(url: url) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .amuxOpenSession)) { note in
+            guard let sid = note.userInfo?["session_id"] as? String else { return }
+            // TODO(push): wire deep-link to session detail.
+            // ContentView does not own the session navigation primitive — that
+            // is `sessionsPath: [String]` inside RootTabView (AMUXUI package).
+            // T20 should hoist sessionsPath (or an equivalent Binding/action)
+            // up to ContentView or use an @Environment-injected router so this
+            // receiver can push the session onto the NavigationStack.
+            NSLog("[push] open session deep link received: %@", sid)
         }
         .onChange(of: scenePhase) { _, phase in
             // iOS freezes sockets when backgrounded but rarely delivers a

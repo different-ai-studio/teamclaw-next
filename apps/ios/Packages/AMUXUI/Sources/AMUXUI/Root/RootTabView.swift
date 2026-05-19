@@ -10,6 +10,7 @@ public struct RootTabView: View {
     let currentActorID: String?
     var onReconnect: (() -> Void)?
     var onSignOut: (() -> Void)?
+    let preferencesAPI: (any PushPreferencesAPI)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(AppOnboardingCoordinator.self) private var coordinator: AppOnboardingCoordinator?
@@ -35,7 +36,8 @@ public struct RootTabView: View {
                 activeTeam: TeamSummary? = nil,
                 currentActorID: String? = nil,
                 onReconnect: (() -> Void)? = nil,
-                onSignOut: (() -> Void)? = nil) {
+                onSignOut: (() -> Void)? = nil,
+                preferencesAPI: (any PushPreferencesAPI)? = nil) {
         self.mqtt = mqtt
         self.hub = hub
         self.pairing = pairing
@@ -44,6 +46,7 @@ public struct RootTabView: View {
         self.currentActorID = currentActorID
         self.onReconnect = onReconnect
         self.onSignOut = onSignOut
+        self.preferencesAPI = preferencesAPI
     }
 
     private var teamRuntime: TeamRuntimeContext? { coordinator?.teamRuntimeContext }
@@ -63,7 +66,9 @@ public struct RootTabView: View {
                             connectedAgentsStore: teamRuntime?.connectedAgentsStore,
                             actorStore: teamRuntime?.actorStore,
                             shortcutsStore: teamRuntime?.shortcutsStore,
-                            onReconnect: onReconnect)
+                            onReconnect: onReconnect,
+                            onSignOut: onSignOut,
+                            preferencesAPI: preferencesAPI)
             }
             Tab(IdeaUIPresentation.pluralTitle, systemImage: IdeaUIPresentation.systemImage, value: AppTab.ideas) {
                 IdeasTab(mqtt: mqtt,

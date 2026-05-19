@@ -42,6 +42,10 @@ import {
   useTelemetryConsent,
 } from "@/hooks/useAppInit";
 import {
+  useDesktopNotifications,
+  getDispatcher,
+} from "@/hooks/useDesktopNotifications";
+import {
   usePanelAutoOpen,
   useFileTabSync,
   useResizablePanels,
@@ -638,8 +642,62 @@ function AppContent() {
     )
   ) : null;
   const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
+  // Resolved by the MQTT-connect effect; passed to the notification dispatcher.
+  const [myActorId, setMyActorId] = useState<string | null>(null);
+  const mainWorkspaceOnboardingSteps: OnboardingStep[] = [
+    {
+      target: '[data-onboarding-id="main-sidebar"]',
+      title: t("onboarding.main.sidebarTitle", "Session sidebar"),
+      description: t(
+        "onboarding.main.sidebarBody",
+        "Use the left sidebar to create a new chat, switch tasks, and find earlier conversations.",
+      ),
+    },
+    {
+      target: '[data-onboarding-id="main-chat-area"]',
+      title: t("onboarding.main.chatTitle", "Work from the chat center"),
+      description: t(
+        "onboarding.main.chatBody",
+        "Describe what you want in plain language here. Most tasks can start with a sentence instead of a command.",
+      ),
+    },
+    {
+      target: '[data-onboarding-id="workspace-panel-tabs"]',
+      title: t("onboarding.main.panelTitle", "Open the helper panels"),
+      description: t(
+        "onboarding.main.panelBody",
+        "This area opens tasks and helper panels. If advanced mode is enabled, file and change views will also appear here.",
+      ),
+    },
+    {
+      target: '[data-onboarding-id="chat-input-root"]',
+      title: t("onboarding.chatInput.inputTitle", "Describe the task here"),
+      description: t(
+        "onboarding.chatInput.inputBody",
+        "You can start with a plain sentence like asking for analysis, code changes, or a summary of the current project.",
+      ),
+    },
+    {
+      target: '[data-onboarding-id="chat-input-files"]',
+      title: t("onboarding.chatInput.filesTitle", "Attach files when useful"),
+      description: t(
+        "onboarding.chatInput.filesBody",
+        "Use this button to add files or screenshots so the assistant can work with concrete context.",
+      ),
+    },
+    {
+      target: '[data-onboarding-id="chat-input-submit"]',
+      title: t("onboarding.chatInput.submitTitle", "Send or stop here"),
+      description: t(
+        "onboarding.chatInput.submitBody",
+        "Send your request from here. If the assistant is already working, the same area lets you stop and retry.",
+      ),
+    },
+  ];
+
   // Extracted hooks — initialization, panel state, keyboard shortcuts
   const { initialWorkspaceResolved } = useWorkspaceInit();
+  useDesktopNotifications(myActorId);
   useChannelGatewayInit();
   useGitReposInit();
   useCronInit();
@@ -686,6 +744,7 @@ function AppContent() {
           return;
         }
         if (cancelled) return;
+        setMyActorId(actorId);
         const serverConfig = await getEffectiveServerConfig();
         const brokerHost = serverConfig.mqttHost;
         const brokerPort = serverConfig.mqttPort ?? 1883;
@@ -803,6 +862,27 @@ function AppContent() {
               };
               upsertMessagesBatch([msgRow]).catch((e) => {
                 console.warn("[cache] message upsert failed:", e);
+              });
+            }
+            // Desktop notification: fire-and-forget; dispatcher filters own
+            // messages, DnD, focus, mute — no action needed on error.
+            {
+              const dm = decoded.message;
+              const dmKind =
+                dm.kind === MessageKind.AGENT_TOOL_CALL ? "agent_tool_call"
+                : dm.kind === MessageKind.AGENT_TOOL_RESULT ? "agent_tool_result"
+                : dm.kind === MessageKind.AGENT_THINKING ? "agent_thinking"
+                : dm.kind === MessageKind.AGENT_REPLY ? "agent_reply"
+                : dm.kind === MessageKind.SYSTEM ? "system"
+                : "text";
+              getDispatcher()?.maybeNotify({
+                id: dm.messageId,
+                session_id: dm.sessionId,
+                sender_actor_id: dm.senderActorId,
+                kind: dmKind,
+                content: dm.content,
+              }).catch((e) => {
+                console.warn("[notifications] maybeNotify failed:", e);
               });
             }
             return;

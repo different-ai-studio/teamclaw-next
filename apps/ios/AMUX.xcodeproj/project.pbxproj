@@ -18,6 +18,8 @@
 		3203553BEAE4D5D79B881582 /* SentrySwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5821CF422126708735E13341 /* SentrySwiftUI */; };
 		4553E608B533CD245A887A39 /* AMUXSessionStreamingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7089CE9863C2F15703551691 /* AMUXSessionStreamingUITests.swift */; };
 		48A4F0655EACAE64B0B0232B /* AMUXUI in Frameworks */ = {isa = PBXBuildFile; productRef = 984FDD5CB983CACB65198166 /* AMUXUI */; };
+		5D9C7760A6A171683819C4A0 /* PushAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C23CE506628F56CB70DAB6 /* PushAppDelegate.swift */; };
+		70245B4A62E76BFBC234FE03 /* PushBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933101253D0E0056ED286BFB /* PushBootstrap.swift */; };
 		989AF52819F1BFC91A3315B1 /* AMUXSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5400E9174EF5F9869349C3EF /* AMUXSharedUI */; };
 		A77EC78143196C418FE87C82 /* AMUXAuthUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E16412C0DABEF538623C6257 /* AMUXAuthUITests.swift */; };
 		E162A3FC8793994442C23372 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5C333674232A156EF5A6D1 /* WelcomeView.swift */; };
@@ -35,9 +37,11 @@
 		499D508CBB7FB4FD1F584D9D /* AMUXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AMUXApp.swift; sourceTree = "<group>"; };
 		514F7615E8C226A5F3660A5F /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		5A17336F2708FD5E2A0C62C8 /* AMUXSharedUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = AMUXSharedUI; path = Packages/AMUXSharedUI; sourceTree = SOURCE_ROOT; };
+		67C23CE506628F56CB70DAB6 /* PushAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushAppDelegate.swift; sourceTree = "<group>"; };
 		7089CE9863C2F15703551691 /* AMUXSessionStreamingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AMUXSessionStreamingUITests.swift; sourceTree = "<group>"; };
 		913DCF0E3CEDD1823F52E8D6 /* AMUXUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = AMUXUI; path = Packages/AMUXUI; sourceTree = SOURCE_ROOT; };
 		92EC5FA726FD730FCA929AD0 /* AMUX.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AMUX.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		933101253D0E0056ED286BFB /* PushBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushBootstrap.swift; sourceTree = "<group>"; };
 		9E532B070FBC309D7EB883CE /* AMUXSessionMessageRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AMUXSessionMessageRegressionTests.swift; sourceTree = "<group>"; };
 		A57443CB6DA7A01B751BBA00 /* OnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViews.swift; sourceTree = "<group>"; };
 		AA5C333674232A156EF5A6D1 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
@@ -105,6 +109,8 @@
 				FDEFC0BF7C8A215582AF7257 /* Info.plist */,
 				514F7615E8C226A5F3660A5F /* LoginView.swift */,
 				A57443CB6DA7A01B751BBA00 /* OnboardingViews.swift */,
+				67C23CE506628F56CB70DAB6 /* PushAppDelegate.swift */,
+				933101253D0E0056ED286BFB /* PushBootstrap.swift */,
 				AA5C333674232A156EF5A6D1 /* WelcomeView.swift */,
 			);
 			path = AMUXApp;
@@ -228,6 +234,8 @@
 				2C36DC72B69CF16E00B4ECB5 /* ContentView.swift in Sources */,
 				EC3990515ABE38A90617C32E /* LoginView.swift in Sources */,
 				29C3F045A406DBA4AD7D1F32 /* OnboardingViews.swift in Sources */,
+				5D9C7760A6A171683819C4A0 /* PushAppDelegate.swift in Sources */,
+				70245B4A62E76BFBC234FE03 /* PushBootstrap.swift in Sources */,
 				E162A3FC8793994442C23372 /* WelcomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
