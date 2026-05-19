@@ -9,6 +9,7 @@ export interface SessionSummary {
   lastMessageAt: string;
   createdAt: string;
   createdBy: string;
+  hasUnread?: boolean;
 }
 
 export type MessageAttachment = {

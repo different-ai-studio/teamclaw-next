@@ -64,6 +64,17 @@ export default function SessionDetailRoute() {
       return;
     }
 
+    // Best-effort mark-as-read: surfaces the session as no-longer-unread the
+    // next time the list reloads. Failures are silent — the list re-derives
+    // unread state from the (unchanged) read marker anyway.
+    if (state.currentMemberActorId) {
+      void createSessionsApi(supabase).markSessionRead(
+        sessionId,
+        state.currentMemberActorId,
+        null,
+      );
+    }
+
     const nextController = createSessionDetailController({
       api: createSessionsApi(supabase),
       currentMemberActorId: state.currentMemberActorId,

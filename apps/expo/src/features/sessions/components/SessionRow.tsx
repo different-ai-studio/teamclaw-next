@@ -56,7 +56,7 @@ export function SessionRow({
   const lastMessage = session.lastMessagePreview.trim();
   const timestamp = session.lastMessageAt || session.createdAt;
   const timeLabel = formatRelativeTime(timestamp);
-  const isUnread = unreadCount > 0;
+  const isUnread = unreadCount > 0 || Boolean(session.hasUnread);
 
   return (
     <Pressable

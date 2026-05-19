@@ -19,6 +19,7 @@ export default function SessionsIndexRoute() {
     controllerRef.current = createSessionsController(
       createSessionsApi(supabase),
       activeTeamId,
+      state.currentMemberActorId,
     );
     teamIdRef.current = activeTeamId;
   }

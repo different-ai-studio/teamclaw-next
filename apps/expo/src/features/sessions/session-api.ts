@@ -124,6 +124,46 @@ function toSessionSummary(
 
 export function createSessionsApi(client: SessionsClient) {
   return {
+    async loadReadMarkers(
+      sessionIds: string[],
+      actorId: string,
+    ): Promise<Map<string, string>> {
+      if (sessionIds.length === 0 || !actorId) return new Map();
+      const result = (await client
+        .from("session_read_markers")
+        .select("session_id, last_read_at")
+        .in("session_id", sessionIds)
+        .eq("actor_id", actorId)) as QueryResult<
+        Array<{ session_id: string; last_read_at: string | null }> | null
+      >;
+      throwIfError(result.error);
+      const map = new Map<string, string>();
+      for (const row of result.data ?? []) {
+        if (row.last_read_at) map.set(row.session_id, row.last_read_at);
+      }
+      return map;
+    },
+
+    async markSessionRead(
+      sessionId: string,
+      actorId: string,
+      lastMessageId: string | null,
+    ): Promise<void> {
+      const result = (await client
+        .from("session_read_markers")
+        .upsert(
+          {
+            session_id: sessionId,
+            actor_id: actorId,
+            last_read_at: new Date().toISOString(),
+            last_read_message_id: lastMessageId,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "session_id,actor_id" },
+        )) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async resolveMemberActorId(teamId: string, userId: string): Promise<string | null> {
       const result = (await client
         .from("actors")
@@ -177,7 +217,7 @@ export function createSessionsApi(client: SessionsClient) {
       return [...(result.data ?? [])].sort(compareMessageRecords).map((row) => mapMessageRecord(row));
     },
 
-    async listSessions(teamId: string): Promise<SessionSummary[]> {
+    async listSessions(teamId: string, currentActorId?: string): Promise<SessionSummary[]> {
       const result = await client
         .from("sessions")
         .select(SESSION_COLUMNS)
@@ -187,12 +227,25 @@ export function createSessionsApi(client: SessionsClient) {
       throwIfError(result.error);
 
       const rows = (result.data ?? []) as SessionRecord[];
-      const participantMeta = await loadParticipantMeta(
-        client,
-        nonEmptySessionIds(rows.map((row) => row.session_id)),
-      );
+      const sessionIds = nonEmptySessionIds(rows.map((row) => row.session_id));
+      const [participantMeta, readMarkers] = await Promise.all([
+        loadParticipantMeta(client, sessionIds),
+        currentActorId
+          ? this.loadReadMarkers(sessionIds, currentActorId).catch(() => new Map())
+          : Promise.resolve(new Map<string, string>()),
+      ]);
 
-      return rows.map((row) => toSessionSummary(row, participantMeta[row.session_id ?? ""]));
+      return rows.map((row) => {
+        const summary = toSessionSummary(row, participantMeta[row.session_id ?? ""]);
+        if (!currentActorId) return summary;
+        const lastReadIso = readMarkers.get(summary.sessionId);
+        if (!summary.lastMessageAt) return summary;
+        if (!lastReadIso) return { ...summary, hasUnread: true };
+        const lastMessageMs = Date.parse(summary.lastMessageAt);
+        const lastReadMs = Date.parse(lastReadIso);
+        if (Number.isNaN(lastMessageMs) || Number.isNaN(lastReadMs)) return summary;
+        return { ...summary, hasUnread: lastMessageMs > lastReadMs + 500 };
+      });
     },
 
     async createSession(input: {
