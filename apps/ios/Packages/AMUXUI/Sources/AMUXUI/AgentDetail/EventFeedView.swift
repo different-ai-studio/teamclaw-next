@@ -26,6 +26,8 @@ public struct EventBubbleView: View {
     /// directory hasn't synced yet.
     @Query(sort: \CachedActor.displayName) private var cachedActors: [CachedActor]
 
+    @State private var fullscreenImageContext: FullscreenImageContext?
+
     public init(event: AgentEvent, runtime: Runtime? = nil,
                 onGrant: ((String) -> Void)? = nil,
                 onDeny: ((String) -> Void)? = nil,
@@ -93,37 +95,42 @@ public struct EventBubbleView: View {
     }
 
     public var body: some View {
-        switch event.eventType {
-        case "user_prompt":
-            userBubble
-        case "output":
-            assistantBubble
-        case "thinking":
-            thinkingBlock
-        case "tool_use":
-            toolUseBlock
-        case "tool_result":
-            EmptyView()
-        case "error":
-            errorBlock
-        case "permission_request":
-            PermissionBannerView(
-                toolName: event.toolName ?? "",
-                description: event.text ?? "",
-                requestId: event.toolId ?? "",
-                isResolved: event.isComplete == true,
-                wasGranted: event.success,
-                onGrant: event.isComplete == true ? nil : onGrant,
-                onDeny: event.isComplete == true ? nil : onDeny
-            )
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-        case "plan_update":
-            TodoListView(text: event.text ?? "")
+        Group {
+            switch event.eventType {
+            case "user_prompt":
+                userBubble
+            case "output":
+                assistantBubble
+            case "thinking":
+                thinkingBlock
+            case "tool_use":
+                toolUseBlock
+            case "tool_result":
+                EmptyView()
+            case "error":
+                errorBlock
+            case "permission_request":
+                PermissionBannerView(
+                    toolName: event.toolName ?? "",
+                    description: event.text ?? "",
+                    requestId: event.toolId ?? "",
+                    isResolved: event.isComplete == true,
+                    wasGranted: event.success,
+                    onGrant: event.isComplete == true ? nil : onGrant,
+                    onDeny: event.isComplete == true ? nil : onDeny
+                )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 4)
-        default:
-            EmptyView()
+            case "plan_update":
+                TodoListView(text: event.text ?? "")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+            default:
+                EmptyView()
+            }
+        }
+        .fullScreenCover(item: $fullscreenImageContext) { ctx in
+            FullScreenSessionImageViewer(sessionID: ctx.sessionID, initialURL: ctx.initialURL)
         }
     }
 
@@ -158,7 +165,11 @@ public struct EventBubbleView: View {
                     }
                     VStack(alignment: .trailing, spacing: 6) {
                         if let outboxID = event.outboxMessageID {
-                            SentAttachmentsView(outboxMessageID: outboxID)
+                            SentAttachmentsView(outboxMessageID: outboxID) { url, sid in
+                                fullscreenImageContext = FullscreenImageContext(
+                                    initialURL: url, sessionID: sid
+                                )
+                            }
                         }
                         ForEach(Array(parsed.imageURLs.enumerated()), id: \.offset) { _, url in
                             AsyncImage(url: url) { phase in
@@ -540,6 +551,107 @@ struct TypingIndicatorView: View {
     }
 }
 
+// MARK: - FullscreenImageContext
+
+private struct FullscreenImageContext: Identifiable {
+    let id = UUID()
+    let initialURL: URL
+    let sessionID: String
+}
+
+// MARK: - FullScreenSessionImageViewer
+
+/// Full-screen paging image viewer for all attachment images in a session.
+/// Queries every OutboxMessage for `sessionID`, flattens their attachment URLs
+/// in chronological order, and presents them in a paging TabView so the user
+/// can swipe left/right between images. Opens at the tapped image's index.
+private struct FullScreenSessionImageViewer: View {
+    @Environment(\.dismiss) private var dismiss
+    let sessionID: String
+    let initialURL: URL
+
+    @Query private var messages: [OutboxMessage]
+    @State private var currentIndex: Int = 0
+
+    init(sessionID: String, initialURL: URL) {
+        self.sessionID = sessionID
+        self.initialURL = initialURL
+        let sid = sessionID
+        _messages = Query(
+            filter: #Predicate<OutboxMessage> { $0.sessionID == sid },
+            sort: \.createdAt
+        )
+    }
+
+    private var allURLs: [URL] {
+        messages.flatMap { $0.attachmentURLs }
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            if allURLs.isEmpty {
+                AsyncImage(url: initialURL) { phase in
+                    imagePhaseView(phase)
+                }
+                .padding()
+            } else {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(allURLs.enumerated()), id: \.offset) { idx, url in
+                        AsyncImage(url: url) { phase in
+                            imagePhaseView(phase)
+                        }
+                        .tag(idx)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: allURLs.count > 1 ? .always : .never))
+                .ignoresSafeArea()
+            }
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color.black.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 56)
+            .padding(.trailing, 20)
+        }
+        .onAppear { seekToInitial() }
+        .onChange(of: allURLs) { _, _ in seekToInitial() }
+    }
+
+    @ViewBuilder
+    private func imagePhaseView(_ phase: AsyncImagePhase) -> some View {
+        switch phase {
+        case .success(let image):
+            image.resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failure:
+            VStack(spacing: 12) {
+                Image(systemName: "photo.badge.exclamationmark")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.secondary)
+                Text("Failed to load")
+                    .foregroundStyle(.secondary)
+            }
+        default:
+            ProgressView()
+                .tint(.white)
+        }
+    }
+
+    private func seekToInitial() {
+        guard let idx = allURLs.firstIndex(of: initialURL) else { return }
+        currentIndex = idx
+    }
+}
+
 // MARK: - OutboxStatusDot
 
 /// Tiny accessory rendered to the right of a self-authored user_prompt
@@ -602,13 +714,16 @@ struct OutboxStatusDot: View {
 /// device (outboxMessageID is nil for remote messages).
 private struct SentAttachmentsView: View {
     @Query private var rows: [OutboxMessage]
+    let onTap: ((URL, String) -> Void)?
 
-    init(outboxMessageID: String) {
+    init(outboxMessageID: String, onTap: ((URL, String) -> Void)? = nil) {
         let id = outboxMessageID
         _rows = Query(filter: #Predicate<OutboxMessage> { $0.messageID == id })
+        self.onTap = onTap
     }
 
     private var attachmentURLs: [URL] { rows.first?.attachmentURLs ?? [] }
+    private var sessionID: String { rows.first?.sessionID ?? "" }
 
     var body: some View {
         ForEach(Array(attachmentURLs.enumerated()), id: \.offset) { _, url in
@@ -623,6 +738,7 @@ private struct SentAttachmentsView: View {
                         .frame(height: 150)
                 }
             }
+            .onTapGesture { onTap?(url, sessionID) }
         }
     }
 }
