@@ -1,3 +1,5 @@
+import { Ionicons } from "@expo/vector-icons";
+import type { ComponentProps } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { colors, radii, shadows, spacing, typography } from "../../../ui/theme";
@@ -15,10 +17,12 @@ type SessionComposerShellProps = {
   sendErrorMessage: string | null;
 };
 
-function IconChip({ label }: { label: string }) {
+type IconName = ComponentProps<typeof Ionicons>["name"];
+
+function IconChip({ name }: { name: IconName }) {
   return (
     <View style={styles.iconChip}>
-      <Text style={styles.iconChipText}>{label}</Text>
+      <Ionicons name={name} size={14} color={colors.slate} />
     </View>
   );
 }
@@ -61,9 +65,9 @@ export function SessionComposerShell({
               <Text style={styles.agentPillText}>TeamClaw AI</Text>
               <Text style={styles.agentChevron}>▾</Text>
             </View>
-            <IconChip label="＋" />
-            <IconChip label="@" />
-            <IconChip label="✦" />
+            <IconChip name="add" />
+            <IconChip name="at" />
+            <IconChip name="sparkles-outline" />
           </View>
 
           <View style={styles.footerRight}>
@@ -172,12 +176,6 @@ const styles = StyleSheet.create({
     height: 24,
     justifyContent: "center",
     width: 24,
-  },
-  iconChipText: {
-    color: colors.faint,
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 14,
   },
   keyboardHint: {
     color: colors.faint,
