@@ -486,20 +486,51 @@ public final class SessionDetailViewModel {
         }
         guard let liveRuntime = runtime else { return }
         observeBoundRuntimeChanges()
+
+        // Build a runtimeId → SwiftData Runtime lookup for non-primary agents so
+        // their MQTT-synced currentModel / state is reflected here too. Without
+        // this, only the bound (primary) agent's SwiftData row is read; non-primary
+        // agents rely solely on Supabase, which the daemon writes with a brief delay.
+        var extraByRID: [String: Runtime] = [:]
+        if let ctx = startModelContext {
+            let rids = memberSheetAgents.compactMap(\.runtimeID).filter {
+                $0 != liveRuntime.runtimeId
+            }
+            for rid in rids {
+                let r = rid
+                let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == r })
+                if let found = try? ctx.fetch(desc).first { extraByRID[rid] = found }
+            }
+        }
+
         memberSheetAgents = memberSheetAgents.map { agent in
-            let matches = agent.runtimeID == liveRuntime.runtimeId
-                || session?.primaryAgentId == agent.id
-            guard matches else { return agent }
-            return MemberSheetAgent(
-                id: agent.id, displayName: agent.displayName,
-                workspacePath: agent.workspacePath, agentType: agent.agentType,
-                runtimeState: chipStateFromRuntime(liveRuntime),
-                availableModels: agent.availableModels.isEmpty
-                    ? liveRuntime.availableModels.map(\.id) : agent.availableModels,
-                currentModel: liveRuntime.currentModel ?? agent.currentModel,
-                runtimeID: agent.runtimeID ?? liveRuntime.runtimeId,
-                workspaceID: agent.workspaceID, backendType: agent.backendType
-            )
+            // Primary agent: use bound runtime.
+            if agent.runtimeID == liveRuntime.runtimeId || session?.primaryAgentId == agent.id {
+                return MemberSheetAgent(
+                    id: agent.id, displayName: agent.displayName,
+                    workspacePath: agent.workspacePath, agentType: agent.agentType,
+                    runtimeState: chipStateFromRuntime(liveRuntime),
+                    availableModels: agent.availableModels.isEmpty
+                        ? liveRuntime.availableModels.map(\.id) : agent.availableModels,
+                    currentModel: liveRuntime.currentModel ?? agent.currentModel,
+                    runtimeID: agent.runtimeID ?? liveRuntime.runtimeId,
+                    workspaceID: agent.workspaceID, backendType: agent.backendType
+                )
+            }
+            // Non-primary agent: overlay from their SwiftData Runtime if available.
+            if let rid = agent.runtimeID, let extra = extraByRID[rid] {
+                return MemberSheetAgent(
+                    id: agent.id, displayName: agent.displayName,
+                    workspacePath: agent.workspacePath, agentType: agent.agentType,
+                    runtimeState: chipStateFromRuntime(extra),
+                    availableModels: agent.availableModels.isEmpty
+                        ? extra.availableModels.map(\.id) : agent.availableModels,
+                    currentModel: extra.currentModel ?? agent.currentModel,
+                    runtimeID: agent.runtimeID, workspaceID: agent.workspaceID,
+                    backendType: agent.backendType
+                )
+            }
+            return agent
         }
     }
 
@@ -825,12 +856,30 @@ public final class SessionDetailViewModel {
         Task { [weak self] in
             guard let self,
                   let teamclawService = self.teamclawService,
-                  let routeDevice = self.routeDeviceID(forAgentActorID: actorID),
-                  !routeDevice.isEmpty,
                   let runtimeID = self.runtimeID(forAgentActorID: actorID),
                   !runtimeID.isEmpty
             else {
-                print("[RuntimeDetailVM] setModel: skipping — no resolvable route/runtime for actor=\(actorID)")
+                print("[RuntimeDetailVM] setModel: skipping — no runtimeID for actor=\(actorID)")
+                return
+            }
+            // Resolve daemon device ID. connectedAgentsStore only contains agents
+            // the current user has explicit access to, so non-primary agents added
+            // to a session by someone else may not be in the store. Fall back to
+            // the bound runtime (primary agent) or a SwiftData fetch by runtimeId.
+            let routeDevice: String = {
+                if let id = self.routeDeviceID(forAgentActorID: actorID), !id.isEmpty { return id }
+                if let r = self.runtime, r.runtimeId == runtimeID, !r.daemonDeviceId.isEmpty {
+                    return r.daemonDeviceId
+                }
+                if let ctx = self.startModelContext {
+                    let rid = runtimeID
+                    let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
+                    return (try? ctx.fetch(desc).first?.daemonDeviceId) ?? ""
+                }
+                return ""
+            }()
+            guard !routeDevice.isEmpty else {
+                print("[RuntimeDetailVM] setModel: skipping — no deviceID for actor=\(actorID)")
                 return
             }
             let (ok, err) = await teamclawService.setModelRpc(
@@ -839,8 +888,23 @@ public final class SessionDetailViewModel {
                 modelID: model)
             if !ok {
                 print("[RuntimeDetailVM] setModel RPC failed: \(err)")
+                return
             }
+            // refreshMemberSheet re-reads Supabase, which the daemon writes
+            // concurrently in a tokio::spawn. Apply the selection optimistically
+            // AFTER the refresh so the Supabase race doesn't overwrite the choice.
             await self.refreshMemberSheet()
+            if let idx = self.memberSheetAgents.firstIndex(where: { $0.id == actorID }),
+               self.memberSheetAgents[idx].currentModel != model {
+                let cur = self.memberSheetAgents[idx]
+                self.memberSheetAgents[idx] = MemberSheetAgent(
+                    id: cur.id, displayName: cur.displayName,
+                    workspacePath: cur.workspacePath, agentType: cur.agentType,
+                    runtimeState: cur.runtimeState, availableModels: cur.availableModels,
+                    currentModel: model, runtimeID: cur.runtimeID,
+                    workspaceID: cur.workspaceID, backendType: cur.backendType
+                )
+            }
         }
     }
 
