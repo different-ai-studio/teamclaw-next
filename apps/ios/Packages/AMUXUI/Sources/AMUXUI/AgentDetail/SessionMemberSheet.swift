@@ -103,13 +103,17 @@ private struct AgentMemberRow: View {
     let onRemove: () -> Void
 
     /// Whether tapping the row should open agent settings (model picker
-    /// today, future expansion later). Disabled while spawning since
-    /// nothing is configurable yet — and during stopped/error since the
-    /// runtime can't accept a model change in those states.
+    /// today, future expansion later). Allowed during .spawning as long
+    /// as availableModels has been surfaced — daemon's handle_set_model
+    /// forwards to ACP regardless of runtime status, and the model name
+    /// is already visible to the user via the MQTT-overlay path, so
+    /// blocking the picker just because the chip is still gray confuses
+    /// the affordance. stopped/error stay disabled (no live ACP to talk to).
     private var isInteractive: Bool {
         switch row.runtimeState {
         case .ready, .idle, .active: return true
-        case .spawning, .stopped, .error: return false
+        case .spawning: return !row.availableModels.isEmpty
+        case .stopped, .error: return false
         }
     }
 
