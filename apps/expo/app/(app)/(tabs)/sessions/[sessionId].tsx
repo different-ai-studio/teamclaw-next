@@ -1,10 +1,14 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
 import type { Actor } from "../../../../src/features/actors/actor-types";
+import {
+  loadComposerDraft,
+  saveComposerDraft,
+} from "../../../../src/features/sessions/composer-drafts";
 import type { AgentChip } from "../../../../src/features/sessions/components/AgentChipBar";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
@@ -94,10 +98,25 @@ export default function SessionDetailRoute() {
     setController(nextController);
     void nextController.load();
 
+    // Restore any composer draft saved for this session on a prior visit.
+    void loadComposerDraft(sessionId).then((draft) => {
+      if (draft.length > 0) {
+        nextController.setComposerText(draft);
+      }
+    });
+
     return () => {
       void nextController.dispose();
     };
   }, [currentTeam, sessionId, state.currentMemberActorId, state.route]);
+
+  // Persist composer text per-session as it changes (debounced via ref).
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
+  }, []);
 
   if (state.route !== "ready") {
     return <Redirect href={href ?? "/"} />;
@@ -237,6 +256,12 @@ export default function SessionDetailRoute() {
           onBack={handleBackToList}
           onChangeComposerText={(value) => {
             controller?.setComposerText(value);
+            if (sessionId) {
+              if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+              draftSaveTimer.current = setTimeout(() => {
+                void saveComposerDraft(sessionId, value);
+              }, 250);
+            }
           }}
           onClearReply={() => controller?.setReplyTarget(null)}
           onDeleteMessage={async (messageId) => {
@@ -284,6 +309,9 @@ export default function SessionDetailRoute() {
             }
           }}
           onSend={() => {
+            if (sessionId) {
+              void saveComposerDraft(sessionId, "");
+            }
             void controller?.sendMessage();
           }}
           ownActorId={state.currentMemberActorId ?? undefined}

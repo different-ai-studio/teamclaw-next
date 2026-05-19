@@ -1,4 +1,5 @@
 import { groupSessionsByRecency, type SessionGroup, type SessionSummary } from "./session-types";
+import { setUnreadSessionCount } from "./unread-store";
 
 type SessionsApi = ReturnType<(typeof import("./session-api"))["createSessionsApi"]>;
 
@@ -106,6 +107,7 @@ export function createSessionsController(
         return;
       }
 
+      setUnreadSessionCount(sessions.filter((s) => s.hasUnread).length);
       setState(buildDerivedState(sessions));
     } catch (error) {
       if (!isCurrentRequest(currentRequestId)) {
@@ -125,6 +127,7 @@ export function createSessionsController(
         return;
       }
 
+      setUnreadSessionCount(sessions.filter((s) => s.hasUnread).length);
       setState(buildDerivedState(sessions));
     } catch (error) {
       if (!isCurrentRequest(currentRequestId)) {

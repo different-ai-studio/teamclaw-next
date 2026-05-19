@@ -1,7 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
+import { useEffect, useState } from "react";
 import { StyleSheet } from "react-native";
 
+import {
+  getUnreadSessionCount,
+  subscribeUnreadSessionCount,
+} from "../../../src/features/sessions/unread-store";
 import { colors, typography } from "../../../src/ui/theme";
 
 type TabIconProps = {
@@ -21,6 +26,9 @@ function makeIcon(activeName: IconName, idleName: IconName) {
 }
 
 export default function TabsLayout() {
+  const [unread, setUnread] = useState(getUnreadSessionCount());
+  useEffect(() => subscribeUnreadSessionCount((next) => setUnread(next)), []);
+
   return (
     <Tabs
       screenOptions={{
@@ -36,6 +44,13 @@ export default function TabsLayout() {
         name="sessions"
         options={{
           title: "Sessions",
+          tabBarBadge: unread > 0 ? unread : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: colors.cinnabar,
+            color: colors.paper,
+            fontSize: 10,
+            fontWeight: "700",
+          },
           tabBarIcon: makeIcon("chatbubbles", "chatbubbles-outline"),
         }}
       />
