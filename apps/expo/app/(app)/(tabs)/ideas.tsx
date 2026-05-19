@@ -1,4 +1,4 @@
-import { Redirect } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../_layout";
@@ -8,6 +8,7 @@ import { IdeasListScreen } from "../../../src/features/ideas/screens/IdeasListSc
 import { supabase } from "../../../src/lib/supabase/client";
 
 export default function IdeasIndexRoute() {
+  const router = useRouter();
   const { state } = useOnboarding();
   const href = routeToHref(state.route);
   const teamId = state.currentTeam?.id ?? "";
@@ -47,6 +48,9 @@ export default function IdeasIndexRoute() {
       }}
       onRefresh={() => {
         void controller.refresh();
+      }}
+      onSelectIdea={(ideaId) => {
+        router.push(`/(app)/idea-detail?ideaId=${ideaId}`);
       }}
       state={listState}
     />

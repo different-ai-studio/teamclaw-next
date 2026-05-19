@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 
+
 import {
   SegmentedFilter,
   type SegmentedFilterSegment,
@@ -32,6 +33,7 @@ export type IdeasListScreenProps = {
   onCreate?: () => void;
   onLoad: () => void;
   onRefresh: () => void;
+  onSelectIdea?: (ideaId: string) => void;
   state: IdeasListState;
 };
 
@@ -74,6 +76,7 @@ export function IdeasListScreen({
   onCreate,
   onLoad,
   onRefresh,
+  onSelectIdea,
   state,
 }: IdeasListScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
@@ -192,7 +195,11 @@ export function IdeasListScreen({
         <View>
           {filteredIdeas.map((idea, index) => (
             <View key={idea.ideaId}>
-              <IdeaRow idea={idea} />
+              <Pressable
+                onPress={onSelectIdea ? () => onSelectIdea(idea.ideaId) : undefined}
+              >
+                <IdeaRow idea={idea} />
+              </Pressable>
               {index < filteredIdeas.length - 1 ? (
                 <Hairline style={styles.rowDivider} />
               ) : null}
