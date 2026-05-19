@@ -1,0 +1,34 @@
+{
+  "name": "@teamclaw/expo",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "@supabase/supabase-js": "^2.49.8",
+    "@teamclaw/app": "workspace:*",
+    "expo": "~53.0.22",
+    "expo-constants": "~17.1.8",
+    "expo-linking": "~7.1.7",
+    "expo-router": "~5.1.11",
+    "expo-status-bar": "~2.2.3",
+    "mqtt": "5.14.0",
+    "react": "19.0.0",
+    "react-native": "0.79.6",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.10",
+    "babel-preset-expo": "~13.2.4",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.0"
+  }
+}

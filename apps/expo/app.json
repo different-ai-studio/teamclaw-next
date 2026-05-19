@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "TeamClaw Expo",
+    "slug": "teamclaw-expo",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.bertrand319.teamclawexpo"
+    }
+  }
+}
