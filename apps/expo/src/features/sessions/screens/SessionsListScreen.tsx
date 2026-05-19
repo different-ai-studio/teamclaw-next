@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -15,6 +16,7 @@ import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { PrimaryButton } from "../../../ui/button";
 import { AppCard } from "../../../ui/card";
 import { colors, spacing, typography } from "../../../ui/theme";
+import { matchesAnyField } from "../../search/search-matcher";
 import { SessionRow } from "../components/SessionRow";
 import type { SessionGroup, SessionsListState } from "../session-types";
 
@@ -96,6 +98,22 @@ export function SessionsListScreen({
   state,
 }: SessionsListScreenProps) {
   const [placeholderMessage, setPlaceholderMessage] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const filteredGroups = useMemo<SessionGroup[]>(() => {
+    if (query.trim().length === 0) return state.groups;
+    return state.groups
+      .map((group) => ({
+        ...group,
+        sessions: group.sessions.filter((session) =>
+          matchesAnyField(
+            [session.title, session.summary, session.lastMessagePreview],
+            query,
+          ),
+        ),
+      }))
+      .filter((group) => group.sessions.length > 0);
+  }, [state.groups, query]);
 
   const handleNewSession = () => {
     if (onNewSession) {
@@ -187,9 +205,33 @@ export function SessionsListScreen({
         </AppCard>
       ) : null}
 
-      {state.groups.length > 0 ? (
+      <View style={styles.searchField}>
+        <Ionicons color={colors.slate} name="search" size={16} />
+        <TextInput
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={setQuery}
+          placeholder="Search sessions"
+          placeholderTextColor={colors.slate}
+          selectionColor={colors.cinnabar}
+          style={styles.searchInput}
+          value={query}
+        />
+        {query.length > 0 ? (
+          <Pressable
+            accessibilityLabel="Clear search"
+            accessibilityRole="button"
+            hitSlop={6}
+            onPress={() => setQuery("")}
+          >
+            <Ionicons color={colors.slate} name="close-circle" size={16} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {filteredGroups.length > 0 ? (
         <View style={styles.groups}>
-          {state.groups.map((group) => (
+          {filteredGroups.map((group) => (
             <SessionGroupSection
               group={group}
               key={group.label}
@@ -266,6 +308,24 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.mist,
     flex: 1,
+  },
+  searchField: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  searchInput: {
+    color: colors.onyx,
+    flex: 1,
+    padding: 0,
+    ...typography.body,
   },
   stateBlock: {
     gap: spacing.md,

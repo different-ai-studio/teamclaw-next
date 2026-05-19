@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 
 import { StatusDot } from "../../../ui/atoms/StatusDot";
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
@@ -83,7 +83,15 @@ export function ActorRow({ actor, isMe = false }: ActorRowProps) {
           { backgroundColor: avatar.background, borderRadius: avatar.isSquare ? 10 : 999 },
         ]}
       >
-        <Text style={[styles.avatarText, { color: avatar.foreground }]}>{initials}</Text>
+        {actor.avatarUrl ? (
+          <Image
+            accessibilityRole="image"
+            source={{ uri: actor.avatarUrl }}
+            style={[styles.avatarImage, { borderRadius: avatar.isSquare ? 10 : 999 }]}
+          />
+        ) : (
+          <Text style={[styles.avatarText, { color: avatar.foreground }]}>{initials}</Text>
+        )}
       </View>
 
       <View style={styles.body}>
@@ -114,7 +122,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     height: 40,
     justifyContent: "center",
+    overflow: "hidden",
     width: 40,
+  },
+  avatarImage: {
+    height: "100%",
+    width: "100%",
   },
   avatarText: {
     fontSize: 13,
