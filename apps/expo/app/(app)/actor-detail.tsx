@@ -25,6 +25,7 @@ export default function ActorDetailRoute() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  const [stats, setStats] = useState<{ sessions: number; ideas: number } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!teamId || !actorId) return;
@@ -84,10 +85,28 @@ export default function ActorDetailRoute() {
           })
           .slice(0, 5);
         setRecentSessions(sessions);
+
+        const [sessionsCount, ideasCount] = await Promise.all([
+          supabase
+            .from("session_participants")
+            .select("session_id", { count: "exact", head: true })
+            .eq("actor_id", actorId),
+          supabase
+            .from("ideas")
+            .select("id", { count: "exact", head: true })
+            .eq("created_by_actor_id", actorId)
+            .eq("archived", false),
+        ]);
+        if (cancelled) return;
+        setStats({
+          sessions: sessionsCount.count ?? 0,
+          ideas: ideasCount.count ?? 0,
+        });
       } catch {
         if (!cancelled) {
           setActor(null);
           setRecentSessions([]);
+          setStats(null);
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -112,6 +131,7 @@ export default function ActorDetailRoute() {
         router.replace(`/(app)/sessions/${sessionId}`);
       }}
       recentSessions={recentSessions}
+      stats={stats ?? undefined}
     />
   );
 }

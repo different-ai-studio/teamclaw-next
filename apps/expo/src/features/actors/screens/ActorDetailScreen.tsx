@@ -27,6 +27,10 @@ export type ActorDetailScreenProps = {
     title: string;
     lastMessageAt: string;
   }>;
+  stats?: {
+    sessions: number;
+    ideas: number;
+  };
 };
 
 const HUMAN_PALETTE = [hai.basalt, hai.slate, hai.sage, hai.onyx];
@@ -81,6 +85,7 @@ export function ActorDetailScreen({
   onRefresh,
   onSelectSession,
   recentSessions,
+  stats,
 }: ActorDetailScreenProps) {
   return (
     <View style={styles.screen}>
@@ -120,6 +125,19 @@ export function ActorDetailScreen({
         ) : (
           <>
             <HeroCard actor={actor} isMe={isMe} />
+
+            {stats ? (
+              <View style={styles.statsRow}>
+                <View style={styles.statTile}>
+                  <Text style={styles.statValue}>{stats.sessions}</Text>
+                  <Text style={styles.statLabel}>Sessions</Text>
+                </View>
+                <View style={styles.statTile}>
+                  <Text style={styles.statValue}>{stats.ideas}</Text>
+                  <Text style={styles.statLabel}>Ideas</Text>
+                </View>
+              </View>
+            ) : null}
 
             {recentSessions && recentSessions.length > 0 ? (
               <View style={styles.section}>
@@ -357,6 +375,29 @@ const styles = StyleSheet.create({
   stateTitle: {
     color: colors.onyx,
     ...typography.cardTitle,
+  },
+  statLabel: {
+    color: colors.slate,
+    ...typography.monoMeta,
+  },
+  statTile: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: radii.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+    gap: 4,
+    paddingVertical: spacing.md,
+  },
+  statValue: {
+    color: colors.onyx,
+    fontSize: 22,
+    fontWeight: "700",
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: spacing.md,
   },
 });
 
