@@ -171,6 +171,8 @@ public struct SessionsTab: View {
             if let shortcutsStore {
                 ShortcutsDrawer(isPresented: $showShortcuts,
                                 store: shortcutsStore,
+                                currentActorID: currentActorID,
+                                activeTeam: activeTeam,
                                 onOpenSettings: { showSettings = true })
             }
         }

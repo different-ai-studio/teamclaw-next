@@ -1,20 +1,28 @@
 import SwiftUI
+import SwiftData
 import AMUXCore
 import AMUXSharedUI
 
 public struct ShortcutsDrawer: View {
     @Binding var isPresented: Bool
     @Bindable var store: ShortcutsStore
+    let currentActorID: String?
+    let activeTeam: TeamSummary?
     let onOpenSettings: () -> Void
 
+    @Query private var cachedActors: [CachedActor]
     @State private var expandedIDs: Set<String> = []
     @State private var presentedLink: ShortcutLinkPresentation?
 
     public init(isPresented: Binding<Bool>,
                 store: ShortcutsStore,
+                currentActorID: String? = nil,
+                activeTeam: TeamSummary? = nil,
                 onOpenSettings: @escaping () -> Void) {
         self._isPresented = isPresented
         self.store = store
+        self.currentActorID = currentActorID
+        self.activeTeam = activeTeam
         self.onOpenSettings = onOpenSettings
     }
 
@@ -44,9 +52,12 @@ public struct ShortcutsDrawer: View {
         }
     }
 
+    // MARK: - Drawer layout
+
     private func drawer(width: CGFloat) -> some View {
         VStack(spacing: 0) {
-            content
+            profileHeader
+            shortcutList
             settingsFooter
         }
         .frame(width: width)
@@ -55,9 +66,66 @@ public struct ShortcutsDrawer: View {
         .ignoresSafeArea(edges: [.leading, .bottom])
     }
 
-    private var content: some View {
+    // MARK: - Profile header
+
+    private var currentActor: CachedActor? {
+        guard let id = currentActorID else { return nil }
+        return cachedActors.first(where: { $0.actorId == id })
+    }
+
+    private var profileDisplayName: String {
+        if let name = currentActor?.displayName, !name.isEmpty { return name }
+        return activeTeam?.name ?? "Signed out"
+    }
+
+    private var profileSubtitle: String? {
+        if let role = currentActor?.roleLabel, role != "—" { return role }
+        if let team = activeTeam?.name { return "Team · \(team)" }
+        return nil
+    }
+
+    private var profileHeader: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                ProfileAvatarView(
+                    displayName: profileDisplayName,
+                    avatarURL: currentActor?.avatarURL,
+                    size: 44,
+                    fontSize: 16
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profileDisplayName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.amux.onyx)
+                        .lineLimit(1)
+
+                    if let subtitle = profileSubtitle {
+                        Text(subtitle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.amux.slate)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+
+            Rectangle()
+                .fill(Color.amux.hairline)
+                .frame(height: 0.5)
+                .padding(.horizontal, 20)
+        }
+    }
+
+    // MARK: - List content
+
+    private var shortcutList: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 16) {
                 section(title: "Personal", scope: .personal)
                 section(title: "Team", scope: .team)
 
@@ -65,12 +133,13 @@ public struct ShortcutsDrawer: View {
                     Text(err)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.amux.slate)
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 20)
                         .padding(.top, 4)
                 }
             }
-            .padding(.top, 36)
+            .padding(.top, 16)
             .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color.amux.mist)
         .refreshable {
@@ -89,58 +158,23 @@ public struct ShortcutsDrawer: View {
         }
     }
 
-    private var settingsFooter: some View {
-        HaiPaperCard {
-            Button(action: handleSettingsTap) {
-                HStack(spacing: 12) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(Color.amux.basalt)
-                        .frame(width: 18, alignment: .center)
-
-                    Text("Settings")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.amux.onyx)
-
-                    Spacer(minLength: 6)
-                }
-                .padding(.vertical, 11)
-                .padding(.horizontal, 14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("shortcuts.settingsButton")
-            .accessibilityLabel("Settings")
-        }
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .background(Color.amux.mist)
-    }
-
     private func section(title: String, scope: ShortcutScope) -> some View {
         let roots = store.children(parentID: nil, scope: scope)
         return Group {
             if !roots.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
                     sectionHeader(title: title, count: roots.count)
-                    HaiPaperCard {
-                        VStack(spacing: 0) {
-                            ForEach(Array(roots.enumerated()), id: \.element.id) { idx, node in
-                                if idx > 0 {
-                                    Divider()
-                                        .background(Color.amux.hairline)
-                                        .padding(.leading, 14 + 18 + 12)
+                    VStack(spacing: 0) {
+                        ForEach(roots) { node in
+                            ShortcutMenuRow(
+                                node: node,
+                                store: store,
+                                depth: 0,
+                                expandedIDs: $expandedIDs,
+                                onSelectLink: { url, title in
+                                    presentedLink = ShortcutLinkPresentation(url: url, title: title)
                                 }
-                                ShortcutMenuRow(
-                                    node: node,
-                                    store: store,
-                                    depth: 0,
-                                    expandedIDs: $expandedIDs,
-                                    onSelectLink: { url, title in
-                                        presentedLink = ShortcutLinkPresentation(url: url, title: title)
-                                    }
-                                )
-                            }
+                            )
                         }
                     }
                 }
@@ -153,8 +187,63 @@ public struct ShortcutsDrawer: View {
             .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
             .tracking(0.4)
             .foregroundStyle(Color.amux.slate)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 2)
     }
+
+    // MARK: - Settings footer
+
+    private var appVersion: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        return "v\(short)"
+    }
+
+    private var settingsFooter: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.amux.hairline)
+                .frame(height: 0.5)
+                .padding(.horizontal, 20)
+
+            Button(action: handleSettingsTap) {
+                HStack(spacing: ShortcutRowMetrics.chevronToIconSpacing) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(Color.amux.basalt)
+                        .frame(
+                            width: ShortcutRowMetrics.chevronWidth
+                                + ShortcutRowMetrics.chevronToIconSpacing
+                                + ShortcutRowMetrics.iconWidth,
+                            alignment: .center
+                        )
+
+                    Text("Settings")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.amux.onyx)
+
+                    Spacer(minLength: 6)
+
+                    Text(appVersion)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Color.amux.slate)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.amux.slate)
+                }
+                .padding(.leading, ShortcutRowMetrics.leadingPadding)
+                .padding(.trailing, ShortcutRowMetrics.trailingPadding)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(SettingsRowButtonStyle())
+            .accessibilityIdentifier("shortcuts.settingsButton")
+            .accessibilityLabel("Settings")
+        }
+        .background(Color.amux.mist)
+    }
+
+    // MARK: - Empty / loading state
 
     private var emptyState: some View {
         ContentUnavailableView(
@@ -169,6 +258,8 @@ public struct ShortcutsDrawer: View {
         store.children(parentID: nil, scope: .personal).isEmpty
             && store.children(parentID: nil, scope: .team).isEmpty
     }
+
+    // MARK: - Gestures
 
     private var closeDrag: some Gesture {
         DragGesture(minimumDistance: 16)
@@ -192,6 +283,14 @@ public struct ShortcutsDrawer: View {
         DispatchQueue.main.async {
             onOpenSettings()
         }
+    }
+}
+
+private struct SettingsRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Color.amux.onyx.opacity(0.04) : Color.clear)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

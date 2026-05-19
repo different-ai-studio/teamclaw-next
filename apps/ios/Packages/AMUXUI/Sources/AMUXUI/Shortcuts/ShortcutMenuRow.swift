@@ -2,10 +2,15 @@ import SwiftUI
 import AMUXCore
 import AMUXSharedUI
 
-/// Plain shortcut row used inside a `HaiPaperCard`. The card and the
-/// hairline separators between siblings live in the parent, so each row
-/// renders as a bare HStack — no per-row background, no stroke, no
-/// icon container. Restraint per DESIGN.md "不足の美".
+/// Depth-aware shortcut row.
+///
+/// - Top-level (depth 0): chevron column (folders only) + icon + label.
+///   Link rows reserve the chevron column so labels align vertically with
+///   folder labels.
+/// - Child rows (depth ≥ 1): plain text indented to start at the parent's
+///   label x-coordinate — no icon, no chevron, no trailing glyph.
+///
+/// All rows render bare — no per-row background, stroke, or card chrome.
 struct ShortcutMenuRow: View {
     let node: ShortcutRecord
     let store: ShortcutsStore
@@ -15,7 +20,7 @@ struct ShortcutMenuRow: View {
 
     private var isExpanded: Bool { expandedIDs.contains(node.id) }
     private var destination: ShortcutPresentation { ShortcutPresentation.destination(for: node) }
-    private var indent: CGFloat { CGFloat(depth) * 18 }
+    private var isFolder: Bool { node.type == .folder }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,27 +30,22 @@ struct ShortcutMenuRow: View {
             .buttonStyle(ShortcutRowButtonStyle())
             .accessibilityIdentifier("shortcuts.row.\(node.id)")
 
-            if isExpanded, node.type == .folder {
+            if isExpanded, isFolder {
                 let children = store.children(parentID: node.id, scope: node.scope)
                 if children.isEmpty {
-                    HStack {
+                    HStack(spacing: 0) {
                         Text("Empty")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.amux.slate)
-                        Spacer()
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.amux.slate.opacity(0.7))
+                        Spacer(minLength: 6)
                     }
-                    .padding(.leading, indent + 30)
+                    .padding(.leading, ShortcutRowMetrics.childIndent(depth: depth + 1))
+                    .padding(.trailing, ShortcutRowMetrics.trailingPadding)
                     .padding(.vertical, 8)
-                    .padding(.horizontal, 14)
                     .transition(.opacity)
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
-                            if idx > 0 {
-                                Divider()
-                                    .background(Color.amux.hairline)
-                                    .padding(.leading, 14 + CGFloat(depth + 1) * 18 + 26)
-                            }
+                        ForEach(children) { child in
                             ShortcutMenuRow(
                                 node: child,
                                 store: store,
@@ -61,10 +61,22 @@ struct ShortcutMenuRow: View {
         }
     }
 
+    @ViewBuilder
     private var rowLabel: some View {
-        HStack(spacing: 12) {
+        if depth == 0 {
+            topLevelRow
+        } else {
+            childRow
+        }
+    }
+
+    private var topLevelRow: some View {
+        HStack(spacing: ShortcutRowMetrics.chevronToIconSpacing) {
+            chevronSlot
+                .frame(width: ShortcutRowMetrics.chevronWidth)
+
             iconView
-                .padding(.leading, indent)
+                .frame(width: ShortcutRowMetrics.iconWidth)
 
             Text(node.label)
                 .font(.system(size: 15))
@@ -72,11 +84,37 @@ struct ShortcutMenuRow: View {
                 .lineLimit(1)
 
             Spacer(minLength: 6)
-            trailingGlyph
         }
+        .padding(.leading, ShortcutRowMetrics.leadingPadding)
+        .padding(.trailing, ShortcutRowMetrics.trailingPadding)
         .padding(.vertical, 11)
-        .padding(.horizontal, 14)
         .contentShape(Rectangle())
+    }
+
+    private var childRow: some View {
+        HStack(spacing: 0) {
+            Text(node.label)
+                .font(.system(size: 14.5))
+                .foregroundStyle(rowDisabled ? Color.amux.slate : Color.amux.onyx)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+        }
+        .padding(.leading, ShortcutRowMetrics.childIndent(depth: depth))
+        .padding(.trailing, ShortcutRowMetrics.trailingPadding)
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var chevronSlot: some View {
+        if isFolder {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.amux.slate)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+        } else {
+            Color.clear
+        }
     }
 
     @ViewBuilder
@@ -85,35 +123,15 @@ struct ShortcutMenuRow: View {
         switch kind {
         case .emoji(let s):
             Text(s)
-                .font(.system(size: 16))
-                .frame(width: 18, alignment: .center)
+                .font(.system(size: 17))
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(iconColor)
-                .frame(width: 18, alignment: .center)
         case .none:
             Image(systemName: defaultSymbol)
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(iconColor)
-                .frame(width: 18, alignment: .center)
-        }
-    }
-
-    @ViewBuilder
-    private var trailingGlyph: some View {
-        switch destination {
-        case .folder:
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.amux.slate)
-                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-        case .web:
-            Image(systemName: "arrow.up.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.amux.slate)
-        case .disabled:
-            EmptyView()
         }
     }
 
@@ -153,6 +171,30 @@ struct ShortcutMenuRow: View {
         case .disabled:
             break
         }
+    }
+}
+
+/// Shared layout constants so children can align with their parent's label
+/// across recursive renders.
+enum ShortcutRowMetrics {
+    static let leadingPadding: CGFloat = 20
+    static let trailingPadding: CGFloat = 20
+    static let chevronWidth: CGFloat = 16
+    static let chevronToIconSpacing: CGFloat = 8
+    static let iconWidth: CGFloat = 22
+
+    /// Where labels sit, in points from the row's leading edge. Children
+    /// indent to this so their text starts at their parent's label column.
+    static var labelStartX: CGFloat {
+        leadingPadding + chevronWidth + chevronToIconSpacing + iconWidth + chevronToIconSpacing
+    }
+
+    /// Indent for a child at the given depth. depth=1 aligns with the
+    /// top-level label column; each additional level adds a small extra
+    /// indent so deep nesting is still legible.
+    static func childIndent(depth: Int) -> CGFloat {
+        let extra = max(0, depth - 1) * 14
+        return labelStartX + CGFloat(extra)
     }
 }
 
