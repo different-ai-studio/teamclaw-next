@@ -1,7 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -27,6 +30,7 @@ export type IdeaDetailScreenProps = {
   onRefresh?: () => void;
   onSaveContent?: (patch: { title: string; description: string }) => Promise<void>;
   onSelectSession?: (sessionId: string) => void;
+  onSetStatus?: (next: IdeaStatus) => void;
   onStartSession?: () => void;
   onToggleStatus?: () => void;
   relatedSessions?: ReadonlyArray<{
@@ -90,6 +94,7 @@ export function IdeaDetailScreen({
   onRefresh,
   onSaveContent,
   onSelectSession,
+  onSetStatus,
   onStartSession,
   onToggleStatus,
   relatedSessions,
@@ -144,11 +149,41 @@ export function IdeaDetailScreen({
         ) : (
           <>
             <View style={styles.hero}>
-              <View style={[styles.pill, { backgroundColor: statusPill(idea.status).background }]}>
+              <Pressable
+                accessibilityLabel="Change idea status"
+                accessibilityRole={onSetStatus ? "button" : undefined}
+                disabled={!onSetStatus || busyAction !== null}
+                hitSlop={4}
+                onPress={() => {
+                  if (!onSetStatus) return;
+                  const labels = ["Open", "In Progress", "Done", "Cancel"];
+                  const values: IdeaStatus[] = ["open", "in_progress", "done"];
+                  const dispatch = (index: number) => {
+                    if (index < 0 || index >= values.length) return;
+                    if (values[index] === idea.status) return;
+                    onSetStatus(values[index]);
+                  };
+                  if (Platform.OS === "ios") {
+                    ActionSheetIOS.showActionSheetWithOptions(
+                      { options: labels, cancelButtonIndex: 3 },
+                      dispatch,
+                    );
+                    return;
+                  }
+                  Alert.alert("设置状态", undefined, [
+                    { text: labels[0], onPress: () => dispatch(0) },
+                    { text: labels[1], onPress: () => dispatch(1) },
+                    { text: labels[2], onPress: () => dispatch(2) },
+                    { text: labels[3], style: "cancel" },
+                  ]);
+                }}
+                style={[styles.pill, { backgroundColor: statusPill(idea.status).background }]}
+              >
                 <Text style={[styles.pillText, { color: statusPill(idea.status).foreground }]}>
                   {statusPill(idea.status).label}
+                  {onSetStatus ? " ▾" : ""}
                 </Text>
-              </View>
+              </Pressable>
               <TextInput
                 editable={!busyAction}
                 multiline

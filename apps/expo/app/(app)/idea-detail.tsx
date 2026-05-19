@@ -112,6 +112,25 @@ export default function IdeaDetailRoute() {
       }
     : undefined;
 
+  const handleSetStatus = idea
+    ? async (next: IdeaStatus) => {
+        if (next === idea.status) return;
+        setBusyAction("toggleStatus");
+        try {
+          await createIdeasApi(supabase).updateStatus(idea.ideaId, next);
+          setIdea({ ...idea, status: next, updatedAt: new Date().toISOString() });
+          showToast("success", `Marked ${next.replace("_", " ")}`);
+        } catch (err) {
+          showToast(
+            "error",
+            err instanceof Error ? err.message : "Couldn't update status",
+          );
+        } finally {
+          setBusyAction(null);
+        }
+      }
+    : undefined;
+
   const handleArchive = idea
     ? async () => {
         setBusyAction("archive");
@@ -166,6 +185,7 @@ export default function IdeaDetailRoute() {
       }}
       onSaveContent={handleSaveContent}
       onSelectSession={(sessionId) => router.replace(`/(app)/sessions/${sessionId}`)}
+      onSetStatus={handleSetStatus}
       onStartSession={
         idea
           ? () => {
