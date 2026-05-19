@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import type { ToolCall } from "@/stores/session-types";
 
-export interface StreamingTodoItem {
+export interface StreamingPlanEntry {
   content: string;
+  priority: "high" | "medium" | "low";
   status: "pending" | "in_progress" | "completed";
 }
 
@@ -19,7 +20,7 @@ export interface AgentStreamEntry {
   outputText: string;           // accumulated output deltas, or final content after finalize
   thinkingText: string;         // accumulated thinking deltas
   toolCalls: ToolCall[];        // pushed on AcpToolUse, completed on AcpToolResult
-  todos: StreamingTodoItem[];   // replaced wholesale on AcpTodoUpdate
+  planEntries: StreamingPlanEntry[]; // replaced wholesale on AcpPlanUpdate
   pendingPermission: StreamingPermissionRequest | null; // set on AcpPermissionRequest
   errorMessage: string | null;  // set on AcpError
   errorDetails: string | null;
@@ -34,14 +35,14 @@ interface State {
   pushToolUse: (
     sessionId: string,
     actorId: string,
-    args: { toolId: string; toolName: string; description: string; params: Record<string, string> },
+    args: { toolId: string; toolName: string; description: string; params: Record<string, string>; toolKind?: string },
   ) => void;
   completeToolUse: (
     sessionId: string,
     actorId: string,
     args: { toolId: string; success: boolean; summary: string },
   ) => void;
-  setTodos: (sessionId: string, actorId: string, items: StreamingTodoItem[]) => void;
+  setPlan: (sessionId: string, actorId: string, entries: StreamingPlanEntry[]) => void;
   setError: (sessionId: string, actorId: string, message: string, details: string) => void;
   setPermissionRequest: (
     sessionId: string,
@@ -65,7 +66,7 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
     outputText: "",
     thinkingText: "",
     toolCalls: [],
-    todos: [],
+    planEntries: [],
     pendingPermission: null,
     errorMessage: null,
     errorDetails: null,
@@ -119,13 +120,14 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  pushToolUse: (sessionId, actorId, { toolId, toolName, description, params }) => {
+  pushToolUse: (sessionId, actorId, { toolId, toolName, description, params, toolKind }) => {
     if (!toolId) return;
     const entry = activeEntry(get(), sessionId, actorId);
     if (entry.toolCalls.some((tc) => tc.id === toolId)) return;
     const newToolCall: ToolCall = {
       id: toolId,
       name: toolName || "unknown",
+      toolKind: toolKind || undefined,
       status: "calling",
       arguments: { ...(params ?? {}), ...(description ? { _description: description } : {}) },
       startTime: new Date(),
@@ -170,14 +172,14 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  setTodos: (sessionId, actorId, items) => {
+  setPlan: (sessionId, actorId, entries) => {
     const entry = activeEntry(get(), sessionId, actorId);
     set({
       byKey: {
         ...get().byKey,
         [k(sessionId, actorId)]: {
           ...entry,
-          todos: items,
+          planEntries: entries,
           lastUpdate: Date.now(),
           active: true,
         },
@@ -230,7 +232,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
 
   /** Finalize a streaming turn: replace outputText with the canonical final
    * content from the daemon's published Message and mark inactive. Keep
-   * thinking + tool_calls + todos visible. The next turn's first
+   * thinking + tool_calls + plan visible. The next turn's first
    * acp.event will reset the entry via activeEntry()'s inactive-check. */
   finalize: (sessionId, actorId, finalText) => {
     const key = k(sessionId, actorId);

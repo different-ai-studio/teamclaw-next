@@ -85,7 +85,7 @@ public func buildFeedItems(_ events: [AgentEvent],
             result.append(.userMessage(event))
         case "permission_request":
             result.append(.permission(event))
-        case "todo_update":
+        case "plan_update":
             result.append(.todo(event))
         case "error":
             result.append(.error(event))

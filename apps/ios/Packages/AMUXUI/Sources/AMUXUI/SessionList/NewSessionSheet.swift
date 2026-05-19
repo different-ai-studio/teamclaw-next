@@ -24,10 +24,10 @@ public struct NewSessionSheet: View {
     let preselectedIdeaId: String?
     let preselectedCollaborators: [CachedActor]
 
-    // Per-agent config (workspace + agent type) keyed by actorId
+    // Per-agent config (workspace + agent type) keyed by actorId. Resolved
+    // automatically from each agent's stored defaults when they're tapped in
+    // the picker — no per-session prompt.
     @State private var agentConfigs: [String: AgentConfigSheet.Selection] = [:]
-    // The agent actor currently awaiting AgentConfigSheet presentation
-    @State private var pendingAgentConfig: CachedActor?
     @State private var workspaceStore: WorkspaceStore?
 
     @State private var collaborators: [CachedActor] = []
@@ -84,12 +84,16 @@ public struct NewSessionSheet: View {
     public var body: some View {
         NavigationStack {
             ZStack {
+                Color.amux.mist.ignoresSafeArea()
                 VStack(spacing: 0) {
-                    collaboratorsRow
-                    Divider()
-                    ideaRow
-                    Divider()
-                    Spacer()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            collaboratorsSection
+                            ideaSection
+                        }
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                    }
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.subheadline)
@@ -132,7 +136,10 @@ public struct NewSessionSheet: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
                     }
+                    .accessibilityLabel("Close")
                     .buttonStyle(.plain)
                     .disabled(isSending)
                 }
@@ -150,44 +157,22 @@ public struct NewSessionSheet: View {
                         // Tapping an already-configured agent deselects it.
                         agentConfigs.removeValue(forKey: actor.actorId)
                         collaborators.removeAll { $0.actorId == actor.actorId }
+                    } else if let selection = resolveAgentDefaults(for: actor) {
+                        agentConfigs[actor.actorId] = selection
+                        if !collaborators.contains(where: { $0.actorId == actor.actorId }) {
+                            collaborators.append(actor)
+                        }
                     } else {
-                        pendingAgentConfig = actor
+                        errorMessage = "No workspaces available — add one to this agent before starting a session."
                     }
                 }
             ) { selected in
                 // `selected` includes humans (from internal selectedIDs) +
-                // agents already added via per-tap config (passed in via
+                // agents already added via auto-config (passed in via
                 // externallySelectedIDs). Replace collaborators wholesale.
                 collaborators = selected
             }
             .task { await connectedAgentsStore?.reload() }
-            // AgentConfigSheet stacks on top of the picker so the user
-            // configures one agent and stays in the picker to keep
-            // selecting (multiple agents = multiple sequential
-            // AgentConfigSheet presentations, one per tap).
-            .sheet(item: $pendingAgentConfig) { actor in
-                let agentWorkspaces = workspaces
-                    .filter { $0.agentID == actor.actorId }
-                    .map { WorkspaceRef(id: $0.id, path: $0.displayName.isEmpty ? $0.path : $0.displayName) }
-                let allWorkspaceRefs = agentWorkspaces.isEmpty
-                    ? workspaces.map { WorkspaceRef(id: $0.id, path: $0.displayName.isEmpty ? $0.path : $0.displayName) }
-                    : agentWorkspaces
-                AgentConfigSheet(
-                    actorDisplayName: actor.displayName,
-                    workspaces: allWorkspaceRefs,
-                    onConfirm: { sel in
-                        agentConfigs[actor.actorId] = sel
-                        if !collaborators.contains(where: { $0.actorId == actor.actorId }) {
-                            collaborators.append(actor)
-                        }
-                        pendingAgentConfig = nil
-                    },
-                    onCancel: {
-                        // Don't add the agent — leave selection unchanged.
-                        pendingAgentConfig = nil
-                    }
-                )
-            }
         }
         .onAppear {
             isInputFocused = true
@@ -209,82 +194,81 @@ public struct NewSessionSheet: View {
         }
     }
 
-    // MARK: - Collaborators row
+    // MARK: - Collaborators section
 
-    private var collaboratorsRow: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text("Collaborators")
-                .foregroundStyle(.secondary)
+    private var collaboratorsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HaiSectionLabel("Collaborators")
+            HaiPaperCard {
+                Button {
+                    showMemberPicker = true
+                    isInputFocused = false
+                } label: {
+                    HStack(spacing: 10) {
+                        if collaborators.isEmpty {
+                            Text("Just you")
+                                .font(.system(size: 14.5))
+                                .foregroundStyle(Color.amux.basalt.opacity(0.6))
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(collaborators, id: \.actorId) { member in
+                                        CollaboratorChip(name: member.displayName) {
+                                            removeCollaborator(member)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 1)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.amux.slate)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    if collaborators.isEmpty {
-                        Text("Just you")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(collaborators, id: \.actorId) { member in
-                            CollaboratorChip(name: member.displayName) {
-                                removeCollaborator(member)
+    // MARK: - Idea section
+
+    private var ideaSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HaiSectionLabel(IdeaUIPresentation.singularTitle)
+            HaiPaperCard {
+                Menu {
+                    Button {
+                        selectedIdeaId = nil
+                    } label: {
+                        Label("None", systemImage: selectedIdeaId == nil ? "checkmark" : "circle")
+                    }
+                    if !availableIdeas.isEmpty {
+                        Divider()
+                        ForEach(availableIdeas, id: \.ideaId) { item in
+                            Button {
+                                selectedIdeaId = item.ideaId
+                            } label: {
+                                Label(item.displayTitle,
+                                      systemImage: selectedIdeaId == item.ideaId ? "checkmark" : "circle")
                             }
                         }
                     }
-                }
-                .padding(.vertical, 1)
-            }
-
-            Spacer(minLength: 0)
-
-            Button {
-                showMemberPicker = true
-                isInputFocused = false
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title3)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    // MARK: - Idea row
-
-    private var ideaRow: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(IdeaUIPresentation.singularTitle)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Menu {
-                Button {
-                    selectedIdeaId = nil
                 } label: {
-                    Label("None", systemImage: selectedIdeaId == nil ? "checkmark" : "circle")
+                    HaiSheetRow(
+                        label: IdeaUIPresentation.singularTitle,
+                        value: selectedIdeaLabel,
+                        valueIsMuted: selectedIdeaId == nil,
+                        showsChevron: true
+                    )
                 }
-                if !availableIdeas.isEmpty {
-                    Divider()
-                    ForEach(availableIdeas, id: \.ideaId) { item in
-                        Button {
-                            selectedIdeaId = item.ideaId
-                        } label: {
-                            Label(item.displayTitle,
-                                  systemImage: selectedIdeaId == item.ideaId ? "checkmark" : "circle")
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(selectedIdeaLabel)
-                        .font(.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption)
-                }
-                .foregroundStyle(selectedIdeaId == nil ? .secondary : .primary)
+                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
     private var selectedIdeaLabel: String {
@@ -313,7 +297,7 @@ public struct NewSessionSheet: View {
                     Button(action: sendAndCreate) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 28))
-                            .foregroundStyle(canSend ? .blue : .gray.opacity(0.4))
+                            .foregroundStyle(canSend ? Color.amux.onyx : Color.amux.mist)
                     }
                     .accessibilityIdentifier("newSession.sendButton")
                     .buttonStyle(.plain)
@@ -356,9 +340,27 @@ public struct NewSessionSheet: View {
     private func removeCollaborator(_ member: CachedActor) {
         collaborators.removeAll { $0.actorId == member.actorId }
         agentConfigs.removeValue(forKey: member.actorId)
-        if pendingAgentConfig?.actorId == member.actorId {
-            pendingAgentConfig = nil
-        }
+    }
+
+    /// Builds the (workspace, agent type) pair the daemon needs, using the
+    /// agent's stored defaults. Workspace fallback chain mirrors the previous
+    /// AgentConfigSheet defaults: prefer the agent's `default_workspace_id`,
+    /// then any workspace owned by the agent, then any workspace in the team.
+    /// Returns nil if no workspace exists at all.
+    private func resolveAgentDefaults(for actor: CachedActor) -> AgentConfigSheet.Selection? {
+        let workspaceID: String? = {
+            if let id = actor.defaultWorkspaceId,
+               workspaces.contains(where: { $0.id == id }) {
+                return id
+            }
+            if let owned = workspaces.first(where: { $0.agentID == actor.actorId }) {
+                return owned.id
+            }
+            return workspaces.first?.id
+        }()
+        guard let workspaceID else { return nil }
+        let type = AgentConfigSheet.AgentType(rawValue: actor.agentKind ?? "claude") ?? .claude
+        return AgentConfigSheet.Selection(workspaceID: workspaceID, agentType: type)
     }
 
     private func sendAndCreate() {
@@ -435,12 +437,7 @@ public struct NewSessionSheet: View {
             )
         }
 
-        // Auto-mention rule: when there's exactly one agent, address it
-        // implicitly. Multi-agent sessions leave routing to the daemon's
-        // mention-parser.
-        let mentionIDs: [String] = agentConfigs.count == 1
-            ? Array(agentConfigs.keys)
-            : []
+        let mentionIDs: [String] = []
 
         let input = SessionCreationInput(
             sessionID: sessionID,

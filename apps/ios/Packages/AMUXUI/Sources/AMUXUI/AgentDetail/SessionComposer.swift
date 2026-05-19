@@ -18,7 +18,7 @@ struct SessionComposer: View {
     let sessionID: String
     let teamID: String
 
-    let onSend: () -> Void
+    let onSend: ([URL]) -> Void
     let onAgentMention: (MentionTarget) -> Void
 
     @State private var showDrawer = false
@@ -103,7 +103,7 @@ struct SessionComposer: View {
                     }
                 )
                 .padding(.horizontal, 16)
-                .animation(.easeInOut(duration: 0.15), value: slashCandidates)
+                .animation(AMUXAnimation.fast, value: slashCandidates)
             }
             if !mentionCandidates.isEmpty {
                 MentionsPopup(
@@ -111,83 +111,22 @@ struct SessionComposer: View {
                     onTap: { target in pickMention(target) }
                 )
                 .padding(.horizontal, 16)
-                .animation(.easeInOut(duration: 0.15), value: mentionCandidates)
+                .animation(AMUXAnimation.fast, value: mentionCandidates)
             }
 
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         ForEach(attachments, id: \.self) { url in
-                            if let upload = uploadingAttachments[url.absoluteString] {
-                                // Show upload progress
-                                VStack(spacing: 4) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "doc")
-                                            .font(.caption)
-                                        Text(url.lastPathComponent)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        if upload.uploadState == .failed {
-                                            Button {
-                                                // Retry will be handled by AttachmentUploadManager.retryUpload
-                                                // For now, show retry UI via context menu
-                                            } label: {
-                                                Image(systemName: "exclamationmark.circle.fill")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.red)
-                                            }
-                                        } else {
-                                            Button {
-                                                attachments.removeAll { $0 == url }
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-
-                                    // Progress bar
-                                    if upload.uploadState == .uploading {
-                                        ProgressView(value: upload.progress)
-                                            .frame(height: 3)
-                                            .padding(.horizontal, 10)
-                                    }
-                                }
-                                .liquidGlass(in: Capsule(), interactive: false)
-                            } else {
-                                // Fallback (attachment not yet tracked)
-                                HStack(spacing: 4) {
-                                    Image(systemName: "doc")
-                                        .font(.caption)
-                                    Text(url.lastPathComponent)
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                    Button {
-                                        attachments.removeAll { $0 == url }
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .liquidGlass(in: Capsule(), interactive: false)
-                            }
+                            AttachmentThumbnailTile(
+                                url: url,
+                                upload: uploadingAttachments[url.absoluteString],
+                                onRemove: { attachments.removeAll { $0 == url } }
+                            )
                         }
                     }
                     .padding(.horizontal, 16)
-                }
-                if !uploadingAttachments.isEmpty {
-                    Text("Files uploading...")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 22)
+                    .padding(.vertical, 4)
                 }
             }
 
@@ -286,7 +225,10 @@ struct SessionComposer: View {
 
             Button {
                 if !hasUploadingAttachments {
-                    onSend()
+                    let storageURLs = uploadingAttachments.values
+                        .compactMap { $0.storageURL }
+                        .compactMap { URL(string: $0) }
+                    onSend(storageURLs)
                     hasPendingSlashCommand = false
                 }
             } label: {
@@ -384,6 +326,115 @@ struct SessionComposer: View {
             onAgentMention(target)
         }
         mentionCandidates = []
+    }
+}
+
+private struct AttachmentThumbnailTile: View {
+    let url: URL
+    let upload: AttachmentUpload?
+    let onRemove: () -> Void
+
+    private static let imageExts: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "bmp", "tiff"
+    ]
+
+    @State private var thumbnail: UIImage?
+
+    private var isImage: Bool {
+        Self.imageExts.contains(url.pathExtension.lowercased())
+    }
+
+    private var uploadState: UploadState? { upload?.uploadState }
+    private var progress: Double { upload?.progress ?? 0 }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            tileBody
+                .frame(width: 56, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+                )
+                .overlay(progressOverlay)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color.black.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .offset(x: 6, y: -6)
+            .accessibilityLabel("Remove attachment")
+        }
+        .task(id: url) {
+            guard isImage, thumbnail == nil else { return }
+            thumbnail = await loadThumbnail(from: url)
+        }
+    }
+
+    @ViewBuilder
+    private var tileBody: some View {
+        if isImage, let image = thumbnail {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color.secondary.opacity(0.12)
+                VStack(spacing: 2) {
+                    Image(systemName: isImage ? "photo" : "doc")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(.secondary)
+                    let ext = url.pathExtension.uppercased()
+                    if !ext.isEmpty {
+                        Text(ext)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var progressOverlay: some View {
+        switch uploadState {
+        case .uploading, .pending:
+            ZStack {
+                Color.black.opacity(0.35)
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(.white)
+                    .frame(width: 40)
+            }
+        case .failed:
+            ZStack {
+                Color.black.opacity(0.45)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.red)
+            }
+        case .completed, .none:
+            EmptyView()
+        }
+    }
+
+    private func loadThumbnail(from url: URL) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: url),
+                  let image = UIImage(data: data) else { return nil }
+            let target: CGFloat = 168 // 56pt * ~3x for retina
+            let size = image.size
+            let scale = max(target / size.width, target / size.height)
+            let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+            let renderer = UIGraphicsImageRenderer(size: newSize)
+            return renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        }.value
     }
 }
 

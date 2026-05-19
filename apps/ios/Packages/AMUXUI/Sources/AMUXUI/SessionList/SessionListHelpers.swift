@@ -14,7 +14,13 @@ struct SessionListContent: View {
     @Binding var isEditing: Bool
     @Binding var selectedIDs: Set<String>
     let teamclawService: TeamclawService?
+    let pairing: PairingManager
+    let mqtt: MQTTService
     let actorId: String
+    /// Signed-in user's actor id (Supabase `actors.id`). Drives the "you = Cinnabar"
+    /// chip in the participant cluster. Distinct from `actorId` above, which
+    /// is the daemon peer id derived from the pairing token.
+    let currentActorID: String?
     /// True when the current user has zero accessible agents in this team.
     /// The empty-state copy switches to an invite-first-agent CTA in that case.
     let noAccessibleAgent: Bool
@@ -24,67 +30,167 @@ struct SessionListContent: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    private var hasContent: Bool { !viewModel.groupedSessions.isEmpty }
+    /// Locally-cached team directory keyed by actor id. Drives initials,
+    /// display name, and agent-vs-human shaping for the participant cluster.
+    @Query private var allActors: [CachedActor]
+
+    /// Most-recent cached messages across all sessions. Cap at a reasonable
+    /// number — we only need to discover distinct senders per session, not
+    /// replay the thread.
+    @Query(
+        sort: \SessionMessage.createdAt,
+        order: .reverse
+    ) private var recentMessages: [SessionMessage]
+
+    private var flatSessions: [Session] {
+        viewModel.groupedSessions.flatMap(\.items)
+    }
+
+    private var actorByID: [String: CachedActor] {
+        Dictionary(allActors.map { ($0.actorId, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Distinct senderActorIds per session, ordered by most-recent message
+    /// first. Built once per body evaluation so each row gets a synchronous
+    /// lookup instead of a per-row SwiftData fetch.
+    private var sendersBySession: [String: [String]] {
+        var ordered: [String: [String]] = [:]
+        var seen: [String: Set<String>] = [:]
+        for msg in recentMessages {
+            let sid = msg.sessionId
+            let aid = msg.senderActorId
+            if sid.isEmpty || aid.isEmpty { continue }
+            if seen[sid, default: []].contains(aid) { continue }
+            seen[sid, default: []].insert(aid)
+            ordered[sid, default: []].append(aid)
+        }
+        return ordered
+    }
+
+    private func participantPreviews(for session: Session) -> [ParticipantPreview] {
+        let directory = actorByID
+        let senders = sendersBySession[session.sessionId] ?? []
+
+        var ids: [String] = []
+        var seen = Set<String>()
+        func add(_ id: String?) {
+            guard let id, !id.isEmpty, !seen.contains(id) else { return }
+            ids.append(id); seen.insert(id)
+        }
+
+        // Order: current user first (so the "YT" chip leads the stack),
+        // then the primary agent, then anyone else who has spoken. Falls
+        // through to session.createdBy when the user hasn't sent a message
+        // yet — covers freshly-created sessions before any reply arrives.
+        if let me = currentActorID { add(me) }
+        add(session.primaryAgentId)
+        if !session.createdBy.isEmpty { add(session.createdBy) }
+        for sender in senders { add(sender) }
+
+        return ids.prefix(ParticipantCluster.maxVisible).map { id in
+            let actor = directory[id]
+            return ParticipantPreview(
+                actorID: id,
+                displayName: actor?.displayName ?? "",
+                isAgent: actor?.isAgent ?? false,
+                isCurrentUser: id == currentActorID,
+                agentKind: actor?.agentKind
+            )
+        }
+    }
+    private var hasContent: Bool { !flatSessions.isEmpty }
     private var hasActiveSearch: Bool {
         !viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
-        Group {
+        // Single List for everything so the daemon banner + search field
+        // scroll out of view alongside the session rows, freeing vertical
+        // real estate on long lists. The header lives as a normal, non-
+        // sticky row at the top; loading / empty states sit in their own
+        // borderless row beneath it.
+        List {
+            headerRow
+
             if !hasContent && viewModel.isLoading {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Loading sessions…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                loadingRow
             } else if !hasContent {
-                if hasActiveSearch {
-                    ContentUnavailableView.search(text: viewModel.searchText)
-                } else if noAccessibleAgent {
-                    ContentUnavailableView {
-                        Label("Invite your first agent", systemImage: "cpu")
-                    } description: {
-                        Text("You don't have access to any agent in this team yet. Invite one to start a session.")
-                    } actions: {
-                        Button {
-                            onInviteFirstAgent?()
-                        } label: {
-                            Text("Invite agent")
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                        }
-                        .glassProminentButtonStyle()
-                        .accessibilityIdentifier("sessions.inviteFirstAgentButton")
-                    }
-                } else {
-                    ContentUnavailableView("No Sessions", systemImage: "cpu",
-                        description: Text("Start a new session to begin"))
-                }
+                emptyRow
             } else {
-                List {
-                    ForEach(viewModel.groupedSessions) { group in
-                        Section {
-                            ForEach(group.items) { session in
-                                sessionRow(session)
-                            }
-                        } header: {
-                            Text(group.title)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.secondary)
-                                .textCase(nil)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .refreshable {
-                    await refreshSessionsFromBackend()
+                // Plain flat list — day grouping retired per
+                // sessions-list.jsx, which uses only hairline separators
+                // inset under the title (handled by AgentRowView's
+                // alignmentGuide(.listRowSeparatorLeading)).
+                ForEach(flatSessions, id: \.sessionId) { session in
+                    sessionRow(session)
                 }
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.amux.mist)
+        .refreshable {
+            await refreshSessionsFromBackend()
+        }
+    }
+
+    @ViewBuilder
+    private var headerRow: some View {
+        VStack(spacing: 8) {
+            DaemonStatusBanner(pairing: pairing, mqtt: mqtt)
+            SessionListSearchField(text: $viewModel.searchText)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 12)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+    }
+
+    @ViewBuilder
+    private var loadingRow: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Loading sessions…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 220)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    @ViewBuilder
+    private var emptyRow: some View {
+        Group {
+            if hasActiveSearch {
+                ContentUnavailableView.search(text: viewModel.searchText)
+            } else if noAccessibleAgent {
+                ContentUnavailableView {
+                    Label("Invite your first agent", systemImage: "cpu")
+                } description: {
+                    Text("You don't have access to any agent in this team yet. Invite one to start a session.")
+                } actions: {
+                    Button {
+                        onInviteFirstAgent?()
+                    } label: {
+                        Text("Invite agent")
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                    }
+                    .glassProminentButtonStyle()
+                    .accessibilityIdentifier("sessions.inviteFirstAgentButton")
+                }
+            } else {
+                ContentUnavailableView("No Sessions", systemImage: "cpu",
+                    description: Text("Start a new session to begin"))
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 280)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
@@ -102,7 +208,8 @@ struct SessionListContent: View {
                 session: session,
                 runtime: runtime,
                 cachedRuntime: cached,
-                workspaceName: workspaceName(runtime: runtime, cached: cached)
+                workspaceName: workspaceName(runtime: runtime, cached: cached),
+                participants: participantPreviews(for: session)
             )
         }
         .contentShape(Rectangle())
@@ -114,6 +221,12 @@ struct SessionListContent: View {
             }
         }
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        // Plain-list rows default to systemBackground (stark white) which
+        // breaks the seamless-on-Mist treatment from sessions-list.jsx. Clear
+        // the per-row fill and pin the hairline separator to the Hai token so
+        // the only visible structure is the subtle inset rule under the title.
+        .listRowBackground(Color.clear)
+        .listRowSeparatorTint(Color.amux.hairline)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button {
                 session.isArchived = true
@@ -169,19 +282,20 @@ struct AgentRowView: View {
     let runtime: Runtime?
     let cachedRuntime: CachedAgentRuntime?
     let workspaceName: String
-
-    @State private var breathe = false
+    let participants: [ParticipantPreview]
 
     init(
         session: Session,
         runtime: Runtime? = nil,
         cachedRuntime: CachedAgentRuntime? = nil,
-        workspaceName: String = ""
+        workspaceName: String = "",
+        participants: [ParticipantPreview] = []
     ) {
         self.session = session
         self.runtime = runtime
         self.cachedRuntime = cachedRuntime
         self.workspaceName = workspaceName
+        self.participants = participants
     }
 
     private var displayTitle: String {
@@ -315,14 +429,7 @@ struct AgentRowView: View {
             Circle()
                 .fill(statusDotColor)
                 .frame(width: 5, height: 5)
-                .opacity(isRunning ? (breathe ? 0.35 : 1.0) : 1.0)
-                .animation(
-                    isRunning
-                        ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                        : .default,
-                    value: breathe
-                )
-                .onAppear { if isRunning { breathe = true } }
+                .breathingOpacity(active: isRunning)
             Text(badge.glyph)
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.2)
@@ -362,15 +469,14 @@ struct AgentRowView: View {
 
             Spacer(minLength: 0)
 
-            if session.participantCount > 1 {
-                HStack(spacing: 3) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 10))
-                    Text("\(session.participantCount)")
-                        .font(.caption)
-                        .monospacedDigit()
-                }
-                .foregroundStyle(Color.amux.basalt)
+            // Right-side participant cluster — `sessions-list.jsx →
+            // ParticipantStack`. Source data is stitched together from
+            // local SwiftData caches (current user, primary agent, session
+            // creator, then anyone who has sent a message) by
+            // SessionListContent.participantPreviews; we never round-trip
+            // to Supabase for this read.
+            if !participants.isEmpty {
+                ParticipantCluster(participants: participants)
             }
         }
     }

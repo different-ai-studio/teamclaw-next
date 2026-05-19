@@ -163,4 +163,12 @@ private actor MockActorRepository: ActorRepository {
             agentStatus: nil
         )
     }
+    func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?) async throws -> AgentDefaults {
+        if let e = nextError { nextError = nil; throw e }
+        return AgentDefaults(
+            agentID: actorID,
+            defaultWorkspaceID: defaultWorkspaceID,
+            agentKind: agentKind
+        )
+    }
 }

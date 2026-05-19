@@ -1,6 +1,6 @@
 //! Crypto utilities for shared secrets (KMS).
 //!
-//! Pure functions — no Tauri state or commands. Used by shared_secrets.rs and oss_sync.rs.
+//! Pure functions — no Tauri state or commands.
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -27,7 +27,7 @@ pub struct SecretEntry {
     pub updated_at: String,
 }
 
-/// Encrypted envelope stored on disk / OSS.
+/// Encrypted envelope stored on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedEnvelope {
     /// Format version (currently 1).

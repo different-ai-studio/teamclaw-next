@@ -89,6 +89,7 @@ export default defineConfig({
   },
   // Dev server – MUST stay on 1420 for Tauri devUrl
   server: {
+    host: '127.0.0.1',
     port: 1420,
     // If 1420 is occupied, fail instead of switching ports,
     // otherwise the Tauri window will load the wrong (blank) URL.

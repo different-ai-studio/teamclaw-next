@@ -7,6 +7,8 @@ import { useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCronStore } from '@/stores/cron'
 import { useSessionListStore, type SessionListEntry } from '@/stores/session-list-store'
+import { useSessionParticipantStore } from '@/stores/session-participant-store'
+import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { useSidebar } from '@/components/ui/sidebar'
 import { TrafficLights } from '@/components/ui/traffic-lights'
 import { SidebarCollapseToggle } from '@/components/app-sidebar'
@@ -26,10 +28,6 @@ import { formatRelativeTime } from '@/lib/date-format'
 import { useTypeAhead } from '@/hooks/use-type-ahead'
 import { buildSessionListActivityMap, type SessionListActivity } from '@/lib/session-list-activity'
 import { loadSessionIdsForActor } from '@/lib/session-by-actor'
-import {
-  loadSessionParticipants,
-  loadActorsByIds,
-} from '@/lib/local-cache'
 import { actorAvatarColor } from '@/lib/actor-color'
 
 /**
@@ -46,13 +44,6 @@ type ListRow = {
   ideaId: string | null
   isPinned: boolean
   hasUnread: boolean
-}
-
-type ParticipantInfo = {
-  actorId: string
-  displayName: string
-  avatarUrl: string | null
-  isAgent: boolean
 }
 
 function entryToRow(entry: SessionListEntry, isPinned: boolean): ListRow {
@@ -116,23 +107,25 @@ export function SessionListColumn() {
   // last_message_preview, idea_id — no extra Supabase round-trip needed.
   const listRows = useSessionListStore((s) => s.rows)
   const listLoading = useSessionListStore((s) => s.loading)
+  const listHasMore = useSessionListStore((s) => s.hasMore)
+  const loadMoreSessions = useSessionListStore((s) => s.loadMore)
 
-  // Per-user state (pin, active row, highlight, activity badges) stays on the
-  // legacy useSessionStore. Reads here are read-only; writes (rename / archive
-  // / pin) go through its handlers, which update both stores transitively.
+  // Activity badges still read legacy compat state until the activity store is
+  // extracted. List actions and row state are v2-owned.
   const allSessions = useSessionStore((s) => s.sessions)
-  const pinnedSessionIds = useSessionStore((s) => s.pinnedSessionIds)
-  const activeSessionId = useSessionStore((s) => s.activeSessionId)
-  const highlightedSessionIds = useSessionStore((s) => s.highlightedSessionIds)
+  const activeSessionId = useSessionSelectionStore((s) => s.activeSessionId)
+  const pinnedSessionIds = useSessionListStore((s) => s.pinnedSessionIds)
+  const highlightedSessionIds = useSessionListStore((s) => s.highlightedSessionIds)
   const sessionStatuses = useSessionStore((s) => s.sessionStatuses) || {}
   const pendingQuestionIdsBySession = useSessionStore((s) => s.pendingQuestionIdsBySession) || {}
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions) || []
   const pendingPermissions = useSessionStore((s) => s.pendingPermissions) || []
   const streamingMessageId = useStreamingStore((s) => s.streamingMessageId)
   const childSessionStreaming = useStreamingStore((s) => s.childSessionStreaming)
-  const archiveSession = useSessionStore((s) => s.archiveSession)
-  const updateSessionTitle = useSessionStore((s) => s.updateSessionTitle)
-  const toggleSessionPinned = useSessionStore((s) => s.toggleSessionPinned)
+  const archiveSession = useSessionListStore((s) => s.archiveSession)
+  const updateSessionTitle = useSessionListStore((s) => s.updateSessionTitle)
+  const toggleSessionPinned = useSessionListStore((s) => s.toggleSessionPinned)
+  const initPinnedSessionIds = useSessionListStore((s) => s.initPinnedSessionIds)
   const cronSessionIds = useCronStore((s) => s.cronSessionIds)
   const showCronSessions = useCronStore((s) => s.showCronSessions)
   const toggleShowCronSessions = useCronStore((s) => s.toggleShowCronSessions)
@@ -146,22 +139,15 @@ export function SessionListColumn() {
   const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null)
   const [actorSessionIds, setActorSessionIds] = React.useState<Set<string> | null>(null)
   const [actorLoading, setActorLoading] = React.useState(false)
-  /**
-   * Per-session participant cache. Populated lazily once a row becomes visible
-   * (see the visibleIds effect below). Each entry is the joined result of
-   * session_participant × actor from libsql, so we hit local cache only.
-   *
-   * Not invalidated on participant change today — would need to wire into the
-   * realtime envelope handler in App.tsx if that becomes important. Tracked in
-   * AGENTS.md §7.
-   */
-  const [participantsBySession, setParticipantsBySession] = React.useState<
-    Record<string, ParticipantInfo[]>
-  >({})
+  const participantsBySession = useSessionParticipantStore((s) => s.participantsBySession)
+  const ensureParticipants = useSessionParticipantStore((s) => s.ensureParticipants)
 
   // Load actor-session set when filter switches to actor mode.
   // teamId is only used for cache namespacing; the supabase query is by actor_id.
   const teamIdFromList = useSessionListStore((s) => s.rows[0]?.team_id ?? '')
+  React.useEffect(() => {
+    initPinnedSessionIds(workspacePath)
+  }, [initPinnedSessionIds, workspacePath])
   React.useEffect(() => {
     if (filter.kind !== 'actor') {
       setActorSessionIds(null)
@@ -222,53 +208,12 @@ export function SessionListColumn() {
     })
   }, [listRows, pinnedSessionIds, cronSessionIds, showCronSessions, filter, actorSessionIds])
 
-  /**
-   * Load participants for any visible row we haven't seen yet. Two libsql
-   * round-trips per session: session_participant by sessionId, then actor by
-   * id batch. Both tables are indexed for these queries.
-   */
+  /** Load participants for any visible row we haven't seen yet. */
   const visibleIds = filteredRows.map((r) => r.id).join('|')
   React.useEffect(() => {
     if (filteredRows.length === 0) return
-    const missing = filteredRows
-      .map((r) => r.id)
-      .filter((id) => !participantsBySession[id])
-    if (missing.length === 0) return
-    let cancelled = false
-    void (async () => {
-      const entries = await Promise.all(
-        missing.map(async (sid) => {
-          const parts = await loadSessionParticipants(sid)
-          if (parts.length === 0) return [sid, [] as ParticipantInfo[]] as const
-          const actorIds = parts.map((p) => p.actorId)
-          const actors = await loadActorsByIds(actorIds)
-          const byId = new Map(actors.map((a) => [a.id, a] as const))
-          const info: ParticipantInfo[] = parts
-            .map((p) => {
-              const a = byId.get(p.actorId)
-              if (!a) return null
-              return {
-                actorId: a.id,
-                displayName: a.displayName,
-                avatarUrl: a.avatarUrl ?? null,
-                isAgent: a.actorType === 'agent',
-              }
-            })
-            .filter((x): x is ParticipantInfo => x !== null)
-          return [sid, info] as const
-        }),
-      )
-      if (cancelled) return
-      setParticipantsBySession((prev) => {
-        const next = { ...prev }
-        for (const [sid, info] of entries) next[sid] = info
-        return next
-      })
-    })()
-    return () => { cancelled = true }
-    // visibleIds (string) carries the row id set; including participantsBySession would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIds])
+    void ensureParticipants(filteredRows.map((r) => r.id))
+  }, [ensureParticipants, filteredRows, visibleIds])
 
   /**
    * Date-bucket rows (Today / Yesterday / This week / Earlier). Rows without
@@ -370,7 +315,10 @@ export function SessionListColumn() {
     setRenamingSessionId(null)
   }
   const handleArchive = async (e: React.SyntheticEvent, id: string) => { e.stopPropagation(); await archiveSession(id) }
-  const handleTogglePinned = (e: React.SyntheticEvent, id: string) => { e.stopPropagation(); toggleSessionPinned(id) }
+  const handleTogglePinned = (e: React.SyntheticEvent, id: string) => {
+    e.stopPropagation()
+    toggleSessionPinned(id, workspacePath)
+  }
 
   const renderSessionItem = (row: ListRow) => {
     const isHighlighted = highlightedSessionIds.includes(row.id)
@@ -611,8 +559,22 @@ export function SessionListColumn() {
             ))}
           </SidebarMenu>
         )}
-        {/* Load-more deferred — useSessionListStore caps at 50; pagination
-            lands in a separate pass (see AGENTS.md §7). */}
+        {listHasMore && (
+          <div className="px-4 py-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 w-full justify-center rounded-md text-[12px] text-muted-foreground hover:text-foreground"
+              disabled={listLoading}
+              onClick={() => void loadMoreSessions()}
+            >
+              {listLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : t('sidebar.loadMoreSessions', 'Load more')}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -429,11 +429,48 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                 model: String::new(),
             }]
         }
+        acp::SessionUpdate::Plan(plan) => {
+            let entries = plan
+                .entries
+                .into_iter()
+                .map(|e| amux::AcpPlanEntry {
+                    content: e.content,
+                    priority: plan_priority_to_snake(&e.priority),
+                    status: plan_status_to_snake(&e.status),
+                })
+                .collect();
+            vec![amux::AcpEvent {
+                event: Some(amux::acp_event::Event::PlanUpdate(amux::AcpPlanUpdate {
+                    entries,
+                })),
+                model: String::new(),
+            }]
+        }
         _ => {
             debug!("unhandled SessionUpdate variant");
             vec![]
         }
     }
+}
+
+fn plan_priority_to_snake(p: &acp::PlanEntryPriority) -> String {
+    match p {
+        acp::PlanEntryPriority::High => "high",
+        acp::PlanEntryPriority::Medium => "medium",
+        acp::PlanEntryPriority::Low => "low",
+        _ => "medium",
+    }
+    .to_string()
+}
+
+fn plan_status_to_snake(s: &acp::PlanEntryStatus) -> String {
+    match s {
+        acp::PlanEntryStatus::Pending => "pending",
+        acp::PlanEntryStatus::InProgress => "in_progress",
+        acp::PlanEntryStatus::Completed => "completed",
+        _ => "pending",
+    }
+    .to_string()
 }
 
 fn kind_to_name(kind: &acp::ToolKind) -> String {

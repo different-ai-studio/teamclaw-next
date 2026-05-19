@@ -32,7 +32,7 @@ public struct ChatInputBar: View {
                 floatingCapsules
             }
         }
-        .animation(.spring(duration: 0.25), value: isTextInputMode)
+        .animation(AMUXAnimation.standard, value: isTextInputMode)
     }
 
     // MARK: - Floating Capsules

@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import type { Message } from "@/lib/proto/teamclaw_pb";
+import { useSessionMessageStore } from "./session-message-store";
 import { useSessionListStore } from "./session-list-store";
 import { createLoaderActions } from "./session-loader";
 import { createMessageActions } from "./session-messages";
+import { useSessionSelectionStore } from "./session-selection-store";
 
 // ────────────────────────────────────────────────────────────────────
 // v2 Phase 1 compat shim.
@@ -22,11 +24,6 @@ import { createMessageActions } from "./session-messages";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Compat = any;
-
-// Stable empty references so selectors like `s.currentMessages()` don't
-// return a new `[]` identity each call — React's useSyncExternalStore
-// treats that as a tear and infinite-loops.
-const EMPTY_MESSAGES: Message[] = [];
 
 type V2Native = {
   messages: Record<string, Message[]>;
@@ -78,18 +75,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   messages: {},
   currentSessionId: null,
   messageRefreshTrigger: 0,
-  setCurrent: (sid) => set({ currentSessionId: sid, activeSessionId: sid }),
-  appendMessage: (sid, msg) => {
-    const cur = get().messages[sid] ?? [];
-    if (cur.some((m) => m.messageId === msg.messageId)) return;
-    set({ messages: { ...get().messages, [sid]: [...cur, msg] } });
+  setCurrent: (sid) => {
+    useSessionSelectionStore.getState().setCurrent(sid);
   },
-  setMessages: (sid, msgs) => set({ messages: { ...get().messages, [sid]: msgs } }),
-  currentMessages: () => {
-    const sid = get().currentSessionId;
-    if (!sid) return EMPTY_MESSAGES;
-    return get().messages[sid] ?? EMPTY_MESSAGES;
-  },
+  appendMessage: (sid, msg) => useSessionMessageStore.getState().appendMessage(sid, msg),
+  setMessages: (sid, msgs) => useSessionMessageStore.getState().setMessages(sid, msgs),
+  currentMessages: () => useSessionMessageStore.getState().currentMessages(),
 
   // ── Phase 1E compat: read-field defaults ─────────────────────────
   sessions: [],
@@ -129,49 +120,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     return get().sessions.find((s: Compat) => s.id === sid) ?? null;
   },
   setActiveSession: async (sid: string | null) => {
-    set({ currentSessionId: sid, activeSessionId: sid });
-    if (sid) {
-      await useSessionListStore.getState().markSessionViewed(sid);
-    }
+    await useSessionSelectionStore.getState().setActiveSession(sid);
   },
   loadSessions: async () => {
     await useSessionListStore.getState().load();
   },
   reloadActiveSessionMessages: async () => {
-    // Refresh the session list AND signal the App.tsx history-loader
-    // effect to do a full (non-watermark) pull for the active session.
-    await useSessionListStore.getState().load();
-    set({ messageRefreshTrigger: (get().messageRefreshTrigger ?? 0) + 1 });
+    await useSessionMessageStore.getState().reloadActiveSessionMessages();
   },
-  resetSessions: () =>
-    set({ sessions: [], activeSessionId: null, currentSessionId: null }),
+  resetSessions: () => {
+    useSessionSelectionStore.getState().clearActiveSession();
+    set({ sessions: [] });
+  },
   setDraftInput: (text: string) => set({ draftInput: text }),
   setError: (msg: string | null, sid?: string | null) =>
     set({ sessionError: msg, errorSessionId: sid ?? null }),
   clearSessionError: () => set({ sessionError: null, errorSessionId: null }),
   toggleSessionPinned: (sid: string) => {
-    const cur = get().pinnedSessionIds as string[];
-    set({
-      pinnedSessionIds: cur.includes(sid)
-        ? cur.filter((id) => id !== sid)
-        : [...cur, sid],
-    });
+    useSessionListStore.getState().toggleSessionPinned(sid);
   },
   /** Briefly mark a session as freshly-created in the sidebar.
    * Auto-clears after ttlMs. */
   addHighlightedSession: (sid: string, ttlMs = 4000) => {
-    const cur = (get().highlightedSessionIds as string[]) ?? [];
-    if (cur.includes(sid)) return;
-    set({ highlightedSessionIds: [...cur, sid] });
-    setTimeout(() => {
-      const next = ((get().highlightedSessionIds as string[]) ?? []).filter(
-        (id) => id !== sid,
-      );
-      set({ highlightedSessionIds: next });
-    }, ttlMs);
+    useSessionListStore.getState().addHighlightedSession(sid, ttlMs);
   },
   setSelectedModel: (model: Compat) => set({ selectedModel: model }),
-  setViewingChildSession: (sid: string | null) => set({ viewingChildSessionId: sid }),
+  setViewingChildSession: (sid: string | null) => {
+    useSessionSelectionStore.getState().setViewingChildSession(sid);
+  },
   setConnected: (v: boolean) => set({ isConnected: v }),
   setInactivityWarning: (v: Compat) => set({ inactivityWarning: v }),
 
@@ -180,8 +156,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   ...createMessageActions(set as never, get as never),
 
   // ── Phase 1E compat: pure stubs (no v2 implementation yet) ───────
-  archiveSession: stubAsync("archiveSession"),
-  updateSessionTitle: stubAsync("updateSessionTitle"),
   pollPermissions: stubAsync("pollPermissions"),
   replyPermission: stubAsync("replyPermission"),
   answerQuestion: stubAsync("answerQuestion"),
@@ -231,6 +205,13 @@ useSessionListStore.subscribe((state, prev) => {
   const updates: Partial<SessionState> = {};
   if (state.rows !== prev.rows) updates.sessions = state.rows.map(adaptSessionRow);
   if (state.loading !== prev.loading) updates.isLoading = state.loading;
+  if (state.pinnedSessionIds !== prev.pinnedSessionIds) {
+    updates.pinnedSessionIds = state.pinnedSessionIds;
+  }
+  if (state.highlightedSessionIds !== prev.highlightedSessionIds) {
+    updates.highlightedSessionIds = state.highlightedSessionIds;
+  }
+  if (state.hasMore !== prev.hasMore) updates.hasMoreSessions = state.hasMore;
   if (Object.keys(updates).length > 0) {
     useSessionStore.setState(updates);
   }
@@ -240,5 +221,54 @@ useSessionListStore.subscribe((state, prev) => {
   useSessionStore.setState({
     sessions: initial.rows.map(adaptSessionRow),
     isLoading: initial.loading,
+    pinnedSessionIds: initial.pinnedSessionIds,
+    highlightedSessionIds: initial.highlightedSessionIds,
+    hasMoreSessions: initial.hasMore,
+  });
+}
+
+useSessionSelectionStore.subscribe((state, prev) => {
+  if (
+    state.activeSessionId === prev.activeSessionId &&
+    state.currentSessionId === prev.currentSessionId &&
+    state.viewingArchivedSessionId === prev.viewingArchivedSessionId &&
+    state.viewingChildSessionId === prev.viewingChildSessionId
+  ) {
+    return;
+  }
+  useSessionStore.setState({
+    activeSessionId: state.activeSessionId,
+    currentSessionId: state.currentSessionId,
+    viewingArchivedSessionId: state.viewingArchivedSessionId,
+    viewingChildSessionId: state.viewingChildSessionId,
+  });
+});
+{
+  const initial = useSessionSelectionStore.getState();
+  useSessionStore.setState({
+    activeSessionId: initial.activeSessionId,
+    currentSessionId: initial.currentSessionId,
+    viewingArchivedSessionId: initial.viewingArchivedSessionId,
+    viewingChildSessionId: initial.viewingChildSessionId,
+  });
+}
+
+useSessionMessageStore.subscribe((state, prev) => {
+  if (
+    state.messages === prev.messages &&
+    state.messageRefreshTrigger === prev.messageRefreshTrigger
+  ) {
+    return;
+  }
+  useSessionStore.setState({
+    messages: state.messages,
+    messageRefreshTrigger: state.messageRefreshTrigger,
+  });
+});
+{
+  const initial = useSessionMessageStore.getState();
+  useSessionStore.setState({
+    messages: initial.messages,
+    messageRefreshTrigger: initial.messageRefreshTrigger,
   });
 }

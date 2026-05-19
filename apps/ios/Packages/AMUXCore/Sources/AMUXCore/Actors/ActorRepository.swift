@@ -62,6 +62,17 @@ public struct ClaimResult: Equatable, Sendable {
     }
 }
 
+public struct AgentDefaults: Equatable, Sendable {
+    public let agentID: String
+    public let defaultWorkspaceID: String?
+    public let agentKind: String?
+    public init(agentID: String, defaultWorkspaceID: String?, agentKind: String?) {
+        self.agentID = agentID
+        self.defaultWorkspaceID = defaultWorkspaceID
+        self.agentKind = agentKind
+    }
+}
+
 public protocol ActorRepository: Sendable {
     func listActors(teamID: String) async throws -> [ActorRecord]
     func createInvite(teamID: String, input: InviteCreateInput) async throws -> InviteCreated
@@ -70,4 +81,5 @@ public protocol ActorRepository: Sendable {
     func removeActor(actorID: String) async throws
     func uploadAvatar(actorID: String, imageData: Data, contentType: String) async throws -> String
     func updateCurrentActorProfile(actorID: String, displayName: String, avatarURL: String?) async throws -> ActorRecord
+    func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?) async throws -> AgentDefaults
 }

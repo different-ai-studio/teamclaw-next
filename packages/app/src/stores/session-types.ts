@@ -53,6 +53,8 @@ export interface ToolCallPermission {
 export interface ToolCall {
   id: string;
   name: string;
+  /** ACP ToolKind as snake_case: "read"|"edit"|"delete"|"move"|"search"|"execute"|"think"|"fetch"|"switch_mode"|"other" */
+  toolKind?: string;
   status: "calling" | "completed" | "failed" | "waiting";
   arguments: Record<string, unknown>;
   result?: unknown;
@@ -131,6 +133,8 @@ export interface Message {
   providerID?: string;
   agent?: string; // Agent/skill name
   retrievedChunks?: SearchResult[]; // RAG 检索到的文档片段
+  /** ACP Plan steps captured at turn end. present = show collapsed PlanCard. */
+  planEntries?: PlanEntry[];
   displayKind?: "compaction" | "compaction-summary" | "synthetic";
   hidden?: boolean;
   parentID?: string;
@@ -139,6 +143,12 @@ export interface Message {
     overflow?: boolean;
     completed?: boolean;
   };
+}
+
+export interface PlanEntry {
+  content: string;
+  priority: "high" | "medium" | "low";
+  status: "pending" | "in_progress" | "completed";
 }
 
 export interface Session {

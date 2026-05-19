@@ -154,13 +154,13 @@ struct ReducerToolResultPairingTests {
     }
 }
 
-@Suite("ChatTimelineReducer — todo replace (case 3)")
-struct ReducerTodoReplaceTests {
-    @Test("a second todo_update replaces the first entry's text in place")
+@Suite("ChatTimelineReducer — plan replace (case 3)")
+struct ReducerPlanReplaceTests {
+    @Test("a second plan_update replaces the first entry's text in place")
     func replacesInPlace() {
         var state = TimelineState()
         var first = Amux_AcpEvent()
-        first.event = .todoUpdate(makeTodoUpdate([("plan", .pending)]))
+        first.event = .planUpdate(makePlanUpdate([("plan", "pending")]))
         ChatTimelineReducer.apply(
             .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
                           agentBucketKey: "agent", timestamp: .now,
@@ -168,8 +168,8 @@ struct ReducerTodoReplaceTests {
             to: &state
         )
         var second = Amux_AcpEvent()
-        second.event = .todoUpdate(makeTodoUpdate([("plan", .completed),
-                                                   ("ship", .inProgress)]))
+        second.event = .planUpdate(makePlanUpdate([("plan", "completed"),
+                                                   ("ship", "in_progress")]))
         ChatTimelineReducer.apply(
             .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt",
                           agentBucketKey: "agent", timestamp: .now,
@@ -177,7 +177,7 @@ struct ReducerTodoReplaceTests {
             to: &state
         )
         #expect(state.entries.count == 1,
-                "todo_update is a snapshot replacement, not an append")
+                "plan_update is a snapshot replacement, not an append")
         #expect(state.entries[0].text?.contains("[done] plan") == true)
         #expect(state.entries[0].text?.contains("[wip] ship") == true)
     }
@@ -357,6 +357,32 @@ struct ReducerHistoryCrossDedupeTests {
         #expect(state.entries[0].supabaseMessageID == "sb-1")
     }
 
+    @Test("repeated history seed with a new row id does not duplicate same output")
+    func repeatedHistorySeedWithNewRowIDDoesNotDuplicateSameOutput() {
+        var state = TimelineState(entries: [
+            TimelineEntry(
+                eventType: "output",
+                text: "same reply",
+                isComplete: true,
+                senderActorID: "agent",
+                timestamp: Date(timeIntervalSince1970: 1),
+                supabaseMessageID: "sb-existing"
+            )
+        ])
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(supabaseMessageID: "sb-new",
+                                         kind: .output,
+                                         senderActorID: "agent",
+                                         content: "same reply",
+                                         createdAt: Date(timeIntervalSince1970: 2))),
+            to: &state
+        )
+
+        #expect(state.entries.count == 1,
+                "same agent output content must stay one bubble even if Supabase returns another row id")
+    }
+
     @Test("history seed merges local prompt by outbox id before content")
     func historyMergesLocalPromptByOutboxId() {
         var state = TimelineState(entries: [
@@ -533,13 +559,13 @@ private func makeStatusChange(_ newStatus: Amux_AgentStatus) -> Amux_AcpStatusCh
     return s
 }
 
-private func makeTodoUpdate(_ items: [(String, Amux_TodoItem.Status)]) -> Amux_AcpTodoUpdate {
-    var u = Amux_AcpTodoUpdate()
-    u.items = items.map { content, status in
-        var i = Amux_TodoItem()
-        i.content = content
-        i.status = status
-        return i
+private func makePlanUpdate(_ items: [(String, String)]) -> Amux_AcpPlanUpdate {
+    var u = Amux_AcpPlanUpdate()
+    u.entries = items.map { content, status in
+        var e = Amux_AcpPlanEntry()
+        e.content = content
+        e.status = status
+        return e
     }
     return u
 }

@@ -10,6 +10,9 @@ public struct IdeasTab: View {
     let hub: MQTTMessageHub
     let sessionViewModel: SessionListViewModel
     let connectedAgentsStore: ConnectedAgentsStore?
+    /// Drives the "Mine" filter on the ideas list — compared against
+    /// `IdeaRecord.createdByActorID`. `nil` hides the chip.
+    let currentActorID: String?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -26,7 +29,8 @@ public struct IdeasTab: View {
         teamclawService: TeamclawService?,
         activeTeam: TeamSummary?,
         sessionViewModel: SessionListViewModel,
-        connectedAgentsStore: ConnectedAgentsStore? = nil
+        connectedAgentsStore: ConnectedAgentsStore? = nil,
+        currentActorID: String? = nil
     ) {
         self.mqtt = mqtt
         self.hub = hub
@@ -35,6 +39,7 @@ public struct IdeasTab: View {
         self.activeTeam = activeTeam
         self.sessionViewModel = sessionViewModel
         self.connectedAgentsStore = connectedAgentsStore
+        self.currentActorID = currentActorID
     }
 
     public var body: some View {
@@ -115,7 +120,7 @@ public struct IdeasTab: View {
                 description: Text(ideaSetupError)
             )
         } else if let ideaStore {
-            IdeaListView(ideaStore: ideaStore, showCreate: $showCreate)
+            IdeaListView(ideaStore: ideaStore, showCreate: $showCreate, currentActorID: currentActorID)
         } else {
             ProgressView("Loading ideas…")
         }

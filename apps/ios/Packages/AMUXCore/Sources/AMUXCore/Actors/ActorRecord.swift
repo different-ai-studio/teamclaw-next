@@ -17,6 +17,7 @@ public struct ActorRecord: Codable, Equatable, Hashable, Identifiable, Sendable 
 
     public let agentKind: String?
     public let agentStatus: String?
+    public let defaultWorkspaceID: String?
 
     public init(
         id: String, teamID: String, actorType: String,
@@ -24,7 +25,8 @@ public struct ActorRecord: Codable, Equatable, Hashable, Identifiable, Sendable 
         displayName: String, avatarURL: String? = nil, lastActiveAt: Date?,
         createdAt: Date, updatedAt: Date,
         memberStatus: String?, teamRole: String?,
-        agentKind: String?, agentStatus: String?
+        agentKind: String?, agentStatus: String?,
+        defaultWorkspaceID: String? = nil
     ) {
         self.id = id; self.teamID = teamID; self.actorType = actorType
         self.userID = userID; self.invitedByActorID = invitedByActorID
@@ -32,6 +34,7 @@ public struct ActorRecord: Codable, Equatable, Hashable, Identifiable, Sendable 
         self.createdAt = createdAt; self.updatedAt = updatedAt
         self.memberStatus = memberStatus; self.teamRole = teamRole
         self.agentKind = agentKind; self.agentStatus = agentStatus
+        self.defaultWorkspaceID = defaultWorkspaceID
     }
 
     public var isMember: Bool { actorType == "member" }

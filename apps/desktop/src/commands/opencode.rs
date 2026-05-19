@@ -506,7 +506,7 @@ pub async fn start_opencode_inner(
     // Ensure system env vars exist (e.g. tc_api_key) before reading personal secrets.
     // Runs synchronously before the local encrypted secret blob load.
     {
-        let device_id = super::oss_commands::get_device_id().unwrap_or_default();
+        let device_id = super::device_identity::get_device_id().unwrap_or_default();
         let ws = workspace_path.clone();
         let did = device_id.clone();
         if let Err(e) =
@@ -627,7 +627,7 @@ pub async fn start_opencode_inner(
     // Merge shared secrets (team KMS) into secrets vec.
     // Shared secrets take priority over local personal secrets with the same key.
     //
-    // On every (re)start: (1) lazy-init if needed — supports both OSS and Git
+    // On every (re)start: lazy-init if needed.
     // teams via `try_lazy_init_from_workspace`, and (2) re-read the `_secrets/`
     // directory unconditionally so we pick up envelopes that arrived via sync
     // while the app was running (or while opencode was stopped).
@@ -709,7 +709,7 @@ pub async fn start_opencode_inner(
             xdg_base.join("cache").to_string_lossy().as_ref(),
         );
     // Inject device identity as environment variables
-    let device_id = super::oss_commands::get_device_id().unwrap_or_default();
+    let device_id = super::device_identity::get_device_id().unwrap_or_default();
     if !device_id.is_empty() {
         sidecar_command = sidecar_command.env("device_id", &device_id);
     }
@@ -1706,24 +1706,10 @@ fn inherent_desktop_control_skill() -> Option<InherentSkill> {
 }
 
 fn inherent_skills_common() -> Vec<InherentSkill> {
-    vec![
-        InherentSkill {
-            dirname: "create-role",
-            content: include_str!("../../../../packages/app/src/lib/skills/create-role/SKILL.md"),
-        },
-        InherentSkill {
-            dirname: "ai-keys",
-            content: include_str!("../../../../packages/app/src/lib/skills/ai-keys/SKILL.md"),
-        },
-        InherentSkill {
-            dirname: "ai-usage",
-            content: include_str!("../../../../packages/app/src/lib/skills/ai-usage/SKILL.md"),
-        },
-        InherentSkill {
-            dirname: "ai-manage",
-            content: include_str!("../../../../packages/app/src/lib/skills/ai-manage/SKILL.md"),
-        },
-    ]
+    vec![InherentSkill {
+        dirname: "create-role",
+        content: include_str!("../../../../packages/app/src/lib/skills/create-role/SKILL.md"),
+    }]
 }
 
 /// All skills that TeamClaw treats as inherent (auto-provisioned, shown as built-in in UI).

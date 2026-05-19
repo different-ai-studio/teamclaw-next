@@ -60,4 +60,10 @@ declare let webkitSpeechRecognition: { new (): SpeechRecognitionInstance };
 interface Window {
   SpeechRecognition?: typeof SpeechRecognition;
   webkitSpeechRecognition?: typeof webkitSpeechRecognition;
+  __TEAMCLAW_SERVER_CONFIG__?: {
+    supabaseUrl?: string;
+    supabaseAnonKey?: string;
+    mqttHost?: string;
+    mqttPort?: number;
+  };
 }

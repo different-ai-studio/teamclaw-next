@@ -2,8 +2,6 @@ import {
   useEffect,
   useState,
   useRef,
-  lazy,
-  Suspense,
   MouseEvent as ReactMouseEvent,
   type ComponentType,
 } from "react";
@@ -30,21 +28,12 @@ import {
   Mail,
   CalendarDays,
 } from "lucide-react";
-// Spotlight window - lazy loaded for spotlight window label
-const SpotlightWindow = lazy(() =>
-  import("@/components/spotlight/SpotlightWindow").then((m) => ({
-    default: m.SpotlightWindow,
-  }))
-)
-
 import { FileContentViewer } from "@/components/FileEditor";
 import {
   useWorkspaceInit,
   useChannelGatewayInit,
   useGitReposInit,
   useCronInit,
-  useOssSyncInit,
-  useP2pAutoReconnect,
   useOpenCodePreload,
 
   useExternalLinkHandler,
@@ -77,9 +66,11 @@ import { SetupGuide } from "@/components/SetupGuide";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
 import { WorkspacePrompt } from "@/components/workspace";
 import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
-import { OnboardingTour, type OnboardingStep } from "@/components/onboarding";
 import { useSessionStore } from "@/stores/session";
 import { useSessionListStore } from "@/stores/session-list-store";
+import { useSessionMessageStore } from "@/stores/session-message-store";
+import { useSessionParticipantStore } from "@/stores/session-participant-store";
+import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridge";
 import { getEffectiveServerConfig } from "@/lib/server-config";
@@ -647,64 +638,11 @@ function AppContent() {
     )
   ) : null;
   const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
-  const mainWorkspaceOnboardingSteps: OnboardingStep[] = [
-    {
-      target: '[data-onboarding-id="main-sidebar"]',
-      title: t("onboarding.main.sidebarTitle", "Session sidebar"),
-      description: t(
-        "onboarding.main.sidebarBody",
-        "Use the left sidebar to create a new chat, switch tasks, and find earlier conversations.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="main-chat-area"]',
-      title: t("onboarding.main.chatTitle", "Work from the chat center"),
-      description: t(
-        "onboarding.main.chatBody",
-        "Describe what you want in plain language here. Most tasks can start with a sentence instead of a command.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="workspace-panel-tabs"]',
-      title: t("onboarding.main.panelTitle", "Open the helper panels"),
-      description: t(
-        "onboarding.main.panelBody",
-        "This area opens tasks and helper panels. If advanced mode is enabled, file and change views will also appear here.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="chat-input-root"]',
-      title: t("onboarding.chatInput.inputTitle", "Describe the task here"),
-      description: t(
-        "onboarding.chatInput.inputBody",
-        "You can start with a plain sentence like asking for analysis, code changes, or a summary of the current project.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="chat-input-files"]',
-      title: t("onboarding.chatInput.filesTitle", "Attach files when useful"),
-      description: t(
-        "onboarding.chatInput.filesBody",
-        "Use this button to add files or screenshots so the assistant can work with concrete context.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="chat-input-submit"]',
-      title: t("onboarding.chatInput.submitTitle", "Send or stop here"),
-      description: t(
-        "onboarding.chatInput.submitBody",
-        "Send your request from here. If the assistant is already working, the same area lets you stop and retry.",
-      ),
-    },
-  ];
-
   // Extracted hooks — initialization, panel state, keyboard shortcuts
   const { initialWorkspaceResolved } = useWorkspaceInit();
   useChannelGatewayInit();
   useGitReposInit();
   useCronInit();
-  useOssSyncInit();
-  useP2pAutoReconnect();
   useMCPFileWatcher(workspacePath);
   useExternalLinkHandler();
   usePanelAutoOpen();
@@ -778,6 +716,28 @@ function AppContent() {
           const decoded = decodeLiveEvent(new Uint8Array(env.bytes));
           if (!decoded) return;
 
+          if (
+            decoded.envelope.eventType === "session_participant.created" ||
+            decoded.envelope.eventType === "session_participant.updated" ||
+            decoded.envelope.eventType === "session_participant.deleted" ||
+            decoded.envelope.eventType === "participant.added" ||
+            decoded.envelope.eventType === "participant.removed" ||
+            decoded.envelope.eventType === "session.participant.added" ||
+            decoded.envelope.eventType === "session.participant.removed"
+          ) {
+            const teamId =
+              useSessionListStore.getState().rows.find((r) => r.id === sid)
+                ?.team_id ?? firstTeamId;
+            void useSessionParticipantStore
+              .getState()
+              .refreshSession(sid, teamId)
+              .catch((e) => {
+                console.warn("[participants] refresh failed:", e);
+                useSessionParticipantStore.getState().invalidateSessions([sid]);
+              });
+            return;
+          }
+
           // Case 1: final message.created
           if (decoded.message) {
             const senderActorId = decoded.message.senderActorId;
@@ -792,9 +752,9 @@ function AppContent() {
               // The bubble disappears on inactive (filtered in ChatPanel);
               // the ChatMessage takes its place in chronological order.
               streamingStore.finalize(sid, senderActorId!, decoded.message.content);
-              useSessionStore.getState().appendMessage(sid, decoded.message);
+              useSessionMessageStore.getState().appendMessage(sid, decoded.message);
             } else {
-              useSessionStore.getState().appendMessage(sid, decoded.message);
+              useSessionMessageStore.getState().appendMessage(sid, decoded.message);
             }
             // Write ALL incoming messages into the unified `message` table
             // (origin="mqtt-live"). This replaces the old agent_runtime_event
@@ -864,12 +824,14 @@ function AppContent() {
                 toolName?: string;
                 description?: string;
                 params?: Record<string, string>;
+                toolKind?: string;
               };
               useV2StreamingStore.getState().pushToolUse(sid, actorId, {
                 toolId: tu.toolId ?? "",
                 toolName: tu.toolName ?? "",
                 description: tu.description ?? "",
                 params: tu.params ?? {},
+                toolKind: tu.toolKind,
               });
             } else if (event?.case === "toolResult") {
               const tr = event.value as { toolId?: string; success?: boolean; summary?: string };
@@ -899,17 +861,20 @@ function AppContent() {
                 description: pr.description ?? "",
                 params: pr.params ?? {},
               });
-            } else if (event?.case === "todoUpdate") {
-              const tu = event.value as { items?: Array<{ content?: string; status?: number }> };
-              const items = (tu.items ?? []).map((it) => ({
-                content: it.content ?? "",
-                status: (it.status === 1
+            } else if (event?.case === "planUpdate") {
+              const pu = event.value as { entries?: Array<{ content?: string; priority?: string; status?: string }> };
+              const entries = (pu.entries ?? []).map((e) => ({
+                content: e.content ?? "",
+                priority: (e.priority === "high" || e.priority === "medium" || e.priority === "low"
+                  ? e.priority
+                  : ("medium" as const)),
+                status: (e.status === "in_progress"
                   ? ("in_progress" as const)
-                  : it.status === 2
+                  : e.status === "completed"
                   ? ("completed" as const)
                   : ("pending" as const)),
               }));
-              useV2StreamingStore.getState().setTodos(sid, actorId, items);
+              useV2StreamingStore.getState().setPlan(sid, actorId, entries);
             }
             // statusChange / availableCommands / raw: MVP no-op (RuntimeInfo retain
             // already surfaces agent status; commands TBD; raw is catch-all).
@@ -1009,7 +974,7 @@ function AppContent() {
   // Reactive on the row's team_id (selector) so this also fires once the
   // session list finishes loading — otherwise a freshly-activated session
   // can race against rows hydration and stay un-subscribed.
-  const activeSessionIdForSubscribe = useSessionStore((s) => s.activeSessionId);
+  const activeSessionIdForSubscribe = useSessionSelectionStore((s) => s.activeSessionId);
   const activeSessionTeamId = useSessionListStore((s) =>
     activeSessionIdForSubscribe
       ? s.rows.find((r) => r.id === activeSessionIdForSubscribe)?.team_id ?? null
@@ -1034,8 +999,8 @@ function AppContent() {
   // with origin="mqtt-live" into the message table by new envelope handler code.
   // TODO(cleanup): remove agent_runtime_event table once all clients have
   // upgraded past this version.
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
-  const messageRefreshTrigger = useSessionStore((s) => s.messageRefreshTrigger ?? 0);
+  const currentSessionId = useSessionSelectionStore((s) => s.currentSessionId);
+  const messageRefreshTrigger = useSessionMessageStore((s) => s.messageRefreshTrigger);
   const prevRefreshTriggerRef = useRef(0);
   useEffect(() => {
     if (!currentSessionId) return;
@@ -1082,7 +1047,7 @@ function AppContent() {
         const localMsgs = await loadMessagesForSession(currentSessionId);
         if (cancelled) return;
         if (localMsgs.length > 0) {
-          useSessionStore.getState().setMessages(
+          useSessionMessageStore.getState().setMessages(
             currentSessionId,
             localMsgs.map(cacheRowToProto),
           );
@@ -1112,7 +1077,7 @@ function AppContent() {
           // Re-read from local cache to surface the newly-synced rows
           const fresh = await loadMessagesForSession(currentSessionId);
           if (!cancelled) {
-            useSessionStore.getState().setMessages(
+            useSessionMessageStore.getState().setMessages(
               currentSessionId,
               fresh.map(cacheRowToProto),
             );
@@ -1144,7 +1109,7 @@ function AppContent() {
           createdAt: BigInt(Math.floor(new Date(r.created_at).getTime() / 1000)),
         }),
       );
-      useSessionStore.getState().setMessages(currentSessionId, supabaseMsgs);
+      useSessionMessageStore.getState().setMessages(currentSessionId, supabaseMsgs);
     })();
     return () => {
       cancelled = true;
@@ -1419,7 +1384,7 @@ function AppContent() {
             )}
 
             {/* Panel tabs - right side of header */}
-            <div className="ml-auto flex shrink-0 items-center gap-0.5" data-onboarding-id="workspace-panel-tabs">
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {mainContentLayout === "stacked" && (hasActiveFileTab || hasHiddenTabs) && (
                 <button
                   className={cn(
@@ -1475,10 +1440,7 @@ function AppContent() {
           </header>
 
           {/* Main content - Chat or file preview */}
-          <div
-            className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-            data-onboarding-id="main-chat-area"
-          >
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <MainContent />
           </div>
         </div>
@@ -1499,11 +1461,6 @@ function AppContent() {
           </div>
         </div>
       </SidebarInset>
-      <OnboardingTour
-        id="main-workspace"
-        enabled={!!workspacePath}
-        steps={mainWorkspaceOnboardingSteps}
-      />
       <WorkspaceTypeDialog
         open={isNewWorkspace}
         onSelectPersonal={() => setIsNewWorkspace(false)}
@@ -1524,9 +1481,6 @@ function App() {
   // ── Global webview shortcuts (find, zoom, context menu) ──
   useWebviewShortcuts()
   useTerminalShortcuts()
-
-  // ── Spotlight mode from UI store ──────────────────────────────────────
-  const spotlightMode = useUIStore((s) => s.spotlightMode)
 
   // ── Initialize tauri-plugin-mcp event listeners (dev only) ──
   useEffect(() => {
@@ -1576,14 +1530,6 @@ function App() {
   const { showSetupGuide, dependencies, handleRecheck, handleSetupContinue } = useSetupGuide(setupReady);
   const { showConsentDialog, setShowConsentDialog } = useTelemetryConsent(showSetupGuide);
 
-  const spotlightContent = (
-    <Suspense fallback={<div className="h-screen w-screen rounded-2xl overflow-hidden" />}>
-      <div className="h-screen w-screen rounded-2xl overflow-hidden">
-        <SpotlightWindow />
-      </div>
-    </Suspense>
-  )
-
   const mainContent = (
     <>
       {showSetupGuide && (
@@ -1625,22 +1571,10 @@ function App() {
 
   return isTauri() ? (
     <div className="h-screen w-screen rounded-2xl overflow-hidden bg-background">
-      <div style={{ display: spotlightMode ? 'contents' : 'none' }}>
-        {spotlightContent}
-      </div>
-      <div style={{ display: spotlightMode ? 'none' : 'contents' }}>
-        {mainContent}
-      </div>
+      {mainContent}
     </div>
   ) : (
-    <>
-      <div style={{ display: spotlightMode ? 'contents' : 'none' }}>
-        {spotlightContent}
-      </div>
-      <div style={{ display: spotlightMode ? 'none' : 'contents' }}>
-        {mainContent}
-      </div>
-    </>
+    <>{mainContent}</>
   )
 }
 

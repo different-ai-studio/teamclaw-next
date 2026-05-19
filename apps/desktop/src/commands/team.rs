@@ -38,7 +38,7 @@ pub struct LlmConfig {
 pub struct TeamStatus {
     /// Whether a team mode is currently active
     pub active: bool,
-    /// Which team mode: "p2p", "webdav", or "git"
+    /// Which team mode: "webdav" or "git"
     pub mode: Option<String>,
     /// Team LLM configuration, if present
     pub llm: Option<LlmConfig>,
@@ -480,20 +480,6 @@ pub fn check_team_status(workspace_path: &str) -> TeamStatus {
             {
                 Some("webdav".to_string())
             } else if json
-                .get("p2p")
-                .and_then(|v| v.get("enabled"))
-                .and_then(|v| v.as_bool())
-                == Some(true)
-            {
-                Some("p2p".to_string())
-            } else if json
-                .get("oss")
-                .and_then(|v| v.get("enabled"))
-                .and_then(|v| v.as_bool())
-                == Some(true)
-            {
-                Some("oss".to_string())
-            } else if json
                 .get("team")
                 .and_then(|v| v.get("enabled"))
                 .and_then(|v| v.as_bool())
@@ -849,7 +835,7 @@ pub fn get_team_status(
     Ok(check_team_status(&ws))
 }
 
-/// Update LLM config for an existing team (any mode: P2P, OSS, Git, WebDAV).
+/// Update LLM config for an existing team.
 /// Called from the "服务配置" section in team settings.
 #[tauri::command]
 pub fn update_team_llm_config(
@@ -1050,7 +1036,7 @@ async fn team_git_join_impl(
     };
 
     // 7. Dedup: update existing member or add new
-    let node_id = match crate::commands::oss_commands::get_device_id() {
+    let node_id = match crate::commands::device_identity::get_device_id() {
         Ok(id) => id,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&team_dir);
@@ -1141,7 +1127,7 @@ async fn team_git_join_impl(
     );
 
     // 11. Save team_secret to keychain
-    crate::commands::oss_sync::save_team_secret(&workspace_path, &team_id, &team_secret)?;
+    crate::commands::team_secret_store::save_team_secret(&workspace_path, &team_id, &team_secret)?;
     println!("[Team Join] Saved team_secret to keychain");
 
     // 12. Init shared secrets
@@ -1648,8 +1634,9 @@ pub async fn init_git_team_secrets(
         return Ok(()); // No team metadata yet, skip
     }
 
-    let team_secret = crate::commands::oss_sync::load_team_secret(&workspace_path, &team_id)
-        .map_err(|e| format!("Failed to load team secret: {e}"))?;
+    let team_secret =
+        crate::commands::team_secret_store::load_team_secret(&workspace_path, &team_id)
+            .map_err(|e| format!("Failed to load team secret: {e}"))?;
 
     crate::commands::shared_secrets::init_shared_secrets(&secrets_state, &team_secret, team_path)?;
 
@@ -1665,7 +1652,7 @@ pub async fn get_git_team_secret(
     registry: State<'_, crate::commands::window::WindowRegistry>,
 ) -> Result<String, String> {
     let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
-    crate::commands::oss_sync::load_team_secret(&workspace_path, &team_id)
+    crate::commands::team_secret_store::load_team_secret(&workspace_path, &team_id)
 }
 
 // NOTE: Startup team sync is triggered from the frontend after workspace is set,

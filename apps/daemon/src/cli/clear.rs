@@ -43,7 +43,7 @@ pub fn run(force: bool) -> anyhow::Result<()> {
             Err(e) => eprintln!("✗ {}: {e}", p.display()),
         }
     }
-    println!("Done. Run `amuxd init <amux://invite?token=...>` to re-onboard.");
+    println!("Done. Run `amuxd init <teamclaw://invite?token=...>` to re-onboard.");
     Ok(())
 }
 

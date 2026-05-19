@@ -315,10 +315,7 @@ public final class SessionDetailViewModel {
                 runtimeState: runtimeStates[$0.actorID] ?? .spawning
             )
         }
-        // Q7=c default selection: lit if exactly one agent, else empty.
-        self.agentChipSelection = (agents.count == 1)
-            ? Set(agents.map(\.actorID))
-            : []
+        self.agentChipSelection = []
     }
 
     /// Toggle the selected state of one chip. Called from the chip-bar tap handler.
@@ -439,18 +436,6 @@ public final class SessionDetailViewModel {
 
         memberSheetHumans = snapshot.humans
         memberSheetAgents = snapshot.agents
-
-        // Auto-light rule (Q7=c, lifted to refreshMemberSheet so the
-        // chip bar's single-source-of-truth `memberSheetAgents` drives
-        // chip selection). If the bar is currently empty AND there's
-        // exactly one agent in the session, pre-engage them so the
-        // first message routes without the user manually @-picking.
-        if !userEditedAgentChipSelection,
-           agentChipSelection.isEmpty,
-           snapshot.agents.count == 1,
-           let only = snapshot.agents.first {
-            agentChipSelection = [only.id]
-        }
 
         // memberSheet now provides runtime_id → actor_id mappings. Live
         // events that arrived before this load may have been stamped with
@@ -827,13 +812,13 @@ public final class SessionDetailViewModel {
     // rebuilt after bulk operations (fetch, sort, insert-at-zero).
     private var toolUseIndexByToolId: [String: Int] = [:]
     private var permissionIndexByRequestId: [String: Int] = [:]
-    private var todoUpdateIndex: Int?
+    private var planUpdateIndex: Int?
     private var lastIncompleteOutputIndex: Int?
 
     private func rebuildIndexes() {
         toolUseIndexByToolId.removeAll(keepingCapacity: true)
         permissionIndexByRequestId.removeAll(keepingCapacity: true)
-        todoUpdateIndex = nil
+        planUpdateIndex = nil
         lastIncompleteOutputIndex = nil
         for (i, e) in events.enumerated() { registerIndex(event: e, at: i) }
     }
@@ -844,8 +829,8 @@ public final class SessionDetailViewModel {
             if let id = event.toolId { toolUseIndexByToolId[id] = idx }
         case "permission_request":
             if let id = event.toolId { permissionIndexByRequestId[id] = idx }
-        case "todo_update":
-            todoUpdateIndex = idx
+        case "plan_update":
+            planUpdateIndex = idx
         case "output":
             if !event.isComplete { lastIncompleteOutputIndex = idx }
         default:
@@ -870,8 +855,8 @@ public final class SessionDetailViewModel {
             if let id = removed.toolId, permissionIndexByRequestId[id] == idx {
                 permissionIndexByRequestId.removeValue(forKey: id)
             }
-        case "todo_update":
-            if todoUpdateIndex == idx { todoUpdateIndex = nil }
+        case "plan_update":
+            if planUpdateIndex == idx { planUpdateIndex = nil }
         case "output":
             if lastIncompleteOutputIndex == idx { lastIncompleteOutputIndex = nil }
         default: break
@@ -886,7 +871,7 @@ public final class SessionDetailViewModel {
         for (k, v) in permissionIndexByRequestId where v > idx {
             permissionIndexByRequestId[k] = v - 1
         }
-        if let t = todoUpdateIndex, t > idx { todoUpdateIndex = t - 1 }
+        if let t = planUpdateIndex, t > idx { planUpdateIndex = t - 1 }
         if let l = lastIncompleteOutputIndex, l > idx { lastIncompleteOutputIndex = l - 1 }
     }
 
@@ -1152,6 +1137,71 @@ public final class SessionDetailViewModel {
             recomputeGroups()
         }
         startModelContext = nil
+    }
+
+    /// Persistent ids of the snapshot rows written by the most recent
+    /// `flushStreamingForBackground()`. Per-agent so the foreground
+    /// counterpart can find them without colliding with any other
+    /// incomplete-output rows the daemon or `stop()` may have produced.
+    private var backgroundSnapshotIDByAgent: [String: String] = [:]
+
+    /// Persist a copy of every in-flight per-agent streaming buffer as
+    /// an incomplete `output` row, without cancelling the MQTT task or
+    /// mutating the in-memory streaming state. Wire to
+    /// `scenePhase == .background`: if iOS reclaims the suspended
+    /// process, the next cold launch's `start()` → `incompleteOutputIndex()`
+    /// hydrate path picks the snapshot up and the user sees their
+    /// partial text instead of an empty bubble.
+    /// `discardBackgroundSnapshot()` removes it again on the common
+    /// path where the process survived.
+    public func flushStreamingForBackground() {
+        guard !streamingAgentSet.isEmpty,
+              runtime != nil,
+              let ctx = startModelContext else { return }
+
+        // Drop any prior snapshot first so repeat bg/fg cycles don't
+        // accumulate a chain of stale partials.
+        discardBackgroundSnapshot()
+
+        var seq = (events.last?.sequence ?? 0) + 1
+        for agentID in streamingAgentSet {
+            guard let text = streamingTextByAgent[agentID], !text.isEmpty else { continue }
+            let event = AgentEvent(agentId: eventScopeKey, sequence: seq, eventType: "output")
+            event.senderActorID = agentID
+            event.text = text
+            event.isComplete = false
+            event.model = streamingModelByAgent[agentID]
+            ctx.insert(event)
+            // Deliberately NOT appendEvent — keep this row out of
+            // `events` so the live UI keeps rendering the single
+            // streaming buffer. The row exists only to survive a
+            // suspended-process kill.
+            backgroundSnapshotIDByAgent[agentID] = event.id
+            seq += 1
+        }
+        try? ctx.save()
+    }
+
+    /// Counterpart to `flushStreamingForBackground()`. Deletes the
+    /// snapshot rows we wrote on the way out now that the process
+    /// has survived and the live `streamingTextByAgent` buffer is
+    /// once again the source of truth. Idempotent.
+    public func discardBackgroundSnapshot() {
+        guard !backgroundSnapshotIDByAgent.isEmpty else { return }
+        guard let ctx = startModelContext else {
+            backgroundSnapshotIDByAgent.removeAll()
+            return
+        }
+        for id in backgroundSnapshotIDByAgent.values {
+            let descriptor = FetchDescriptor<AgentEvent>(
+                predicate: #Predicate { $0.id == id }
+            )
+            if let row = (try? ctx.fetch(descriptor))?.first {
+                ctx.delete(row)
+            }
+        }
+        try? ctx.save()
+        backgroundSnapshotIDByAgent.removeAll()
     }
 
     private func handleEnvelope(_ env: Amux_Envelope, modelContext: ModelContext) {
@@ -1583,7 +1633,7 @@ public final class SessionDetailViewModel {
         }
     }
 
-    public func sendPrompt(_ text: String, modelId: String? = nil, modelContext: ModelContext? = nil) async throws {
+    public func sendPrompt(_ text: String, modelId: String? = nil, attachmentURLs: [URL] = [], modelContext: ModelContext? = nil) async throws {
         if let session, let teamclawService {
             // Session-backed chats use the session live stream as the
             // canonical messaging channel so other collaborators see the
@@ -1596,7 +1646,11 @@ public final class SessionDetailViewModel {
             // any visible mention even though the chip is engaging an
             // agent — confusing in chat history, especially for other
             // collaborators reading along.
-            let body = composeBodyWithMentions(text)
+            var body = composeBodyWithMentions(text)
+            if !attachmentURLs.isEmpty {
+                let urlBlock = attachmentURLs.map(\.absoluteString).joined(separator: "\n")
+                body += "\n\n" + urlBlock
+            }
             let messageID = UUID().uuidString
             let mentionIDs = Array(agentChipSelection)
 

@@ -2,9 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-For **UI / visual design** work (colors, typography, layout, message styles,
-chat input), the source-of-truth is `AGENTS.md` at the repo root. Read it
-before touching anything user-facing.
+For **UI / visual design** work, source-of-truth depends on the platform:
+
+- **iOS** (`apps/ios/`): `apps/ios/DESIGN.md` — the Hai 灰 palette, wabi-sabi
+  language, and SwiftUI implementation conventions (tokens, Hai sheets, iOS 26
+  toolbar rules). Read this before touching anything in `apps/ios/`.
+- **Web / desktop** (`packages/app/`): `AGENTS.md` at the repo root — the
+  Editorial Calm direction (paper neutrals, coral accent, Chinese-first type).
+
+## Git Workflow
+
+**Never push directly to `main`.** All changes must go through a Pull Request:
+
+1. Create a feature branch before making any changes
+2. Commit work to the feature branch
+3. Push and open a PR via `gh pr create`
+4. Do not merge or push to `main` directly, even for small fixes
 
 ## Project Overview
 
@@ -97,6 +110,19 @@ Single source of truth principle — **never mix content sources**:
 2. Commit, push to main
 3. `git tag v<desktop-version> && git push origin v<desktop-version>`
 4. Tag push triggers `release.yml` (macOS desktop)
+
+## iOS TestFlight Release
+
+**Version file:** `apps/ios/project.yml` — `MARKETING_VERSION` (e.g. `1.1.5`) + `CURRENT_PROJECT_VERSION` (build number, increment by 1 each release).
+
+**Release process:**
+1. Bump `CURRENT_PROJECT_VERSION` in `apps/ios/project.yml`
+2. Commit and push to main
+3. `git tag ios-v<version>-<build> && git push origin ios-v<version>-<build>`
+   - Example: `git tag ios-v1.1.5-4 && git push origin ios-v1.1.5-4`
+4. Tag push triggers `.github/workflows/testflight.yml` (runs `fastlane beta` on CI)
+
+**Tag format must be `ios-v*`** — other formats (e.g. `ios-1.1.5-4`) do not trigger the workflow.
 
 ## FC (Function Compute) Deployment
 

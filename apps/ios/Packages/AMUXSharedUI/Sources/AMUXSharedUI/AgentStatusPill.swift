@@ -8,8 +8,6 @@ import AMUXCore
 public struct AgentStatusPill: View {
     public let runtime: Runtime
 
-    @State private var breathe = false
-
     public init(runtime: Runtime) {
         self.runtime = runtime
     }
@@ -19,14 +17,7 @@ public struct AgentStatusPill: View {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
-                .opacity(runtime.isActive ? (breathe ? 0.35 : 1.0) : 1.0)
-                .animation(
-                    runtime.isActive
-                        ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
-                        : .default,
-                    value: breathe
-                )
-                .onAppear { breathe = true }
+                .breathingOpacity(active: runtime.isActive)
             Text(runtime.statusLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)

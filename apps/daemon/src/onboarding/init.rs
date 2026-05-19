@@ -2,6 +2,7 @@ use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
 use crate::onboarding::invite_url::{self, ParsedInvite};
 use crate::supabase::error::{SupabaseError, SupabaseResult};
 use crate::supabase::{SupabaseClient, SupabaseConfig};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_MQTT_BROKER_URL: &str = "mqtts://ai.ucar.cc:8883";
@@ -13,7 +14,7 @@ pub struct InitOutcome {
     pub config_path: PathBuf,
 }
 
-/// Execute `amuxd init <amux://invite?token=...>`:
+/// Execute `amuxd init <teamclaw://invite?token=...>`:
 ///  1. parse token
 ///  2. anon-RPC `claim_team_invite` → mint daemon auth.users + refresh_token
 ///  3. verify by trading refresh_token for an access_token
@@ -92,13 +93,26 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
 fn supabase_build_env_config_from_process() -> SupabaseResult<SupabaseConfig> {
     let url = std::env::var("SUPABASE_URL").ok();
     let anon_key = std::env::var("SUPABASE_ANON_KEY").ok();
-    supabase_build_env_config(url.as_deref(), anon_key.as_deref())
+    let dotenv = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".env")).ok();
+    supabase_build_env_config_with_dotenv(url.as_deref(), anon_key.as_deref(), dotenv.as_deref())
 }
 
+#[cfg(test)]
 fn supabase_build_env_config(
     url: Option<&str>,
     anon_key: Option<&str>,
 ) -> SupabaseResult<SupabaseConfig> {
+    supabase_build_env_config_with_dotenv(url, anon_key, None)
+}
+
+fn supabase_build_env_config_with_dotenv(
+    url: Option<&str>,
+    anon_key: Option<&str>,
+    dotenv: Option<&str>,
+) -> SupabaseResult<SupabaseConfig> {
+    let dotenv = dotenv.map(parse_dotenv).unwrap_or_default();
+    let url = url.or_else(|| dotenv.get("SUPABASE_URL").map(String::as_str));
+    let anon_key = anon_key.or_else(|| dotenv.get("SUPABASE_ANON_KEY").map(String::as_str));
     let url = required_supabase_env("SUPABASE_URL", url)?;
     let anon_key = required_supabase_env("SUPABASE_ANON_KEY", anon_key)?;
 
@@ -109,6 +123,36 @@ fn supabase_build_env_config(
         team_id: String::new(),
         actor_id: String::new(),
     })
+}
+
+fn parse_dotenv(contents: &str) -> HashMap<String, String> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (key, value) = line.split_once('=')?;
+            let key = key.trim();
+            if key.is_empty() {
+                return None;
+            }
+            Some((key.to_string(), unquote_dotenv_value(value.trim())))
+        })
+        .collect()
+}
+
+fn unquote_dotenv_value(value: &str) -> String {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
 }
 
 fn required_supabase_env(name: &str, value: Option<&str>) -> SupabaseResult<String> {
@@ -229,5 +273,41 @@ mod tests {
         assert!(cfg.refresh_token.is_empty());
         assert!(cfg.team_id.is_empty());
         assert!(cfg.actor_id.is_empty());
+    }
+
+    #[test]
+    fn supabase_build_env_loads_missing_values_from_dotenv_text() {
+        let cfg = supabase_build_env_config_with_dotenv(
+            None,
+            None,
+            Some(
+                r#"
+SUPABASE_URL=https://example.supabase.co
+SUPABASE_ANON_KEY=anon-key
+"#,
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(cfg.url, "https://example.supabase.co");
+        assert_eq!(cfg.anon_key, "anon-key");
+    }
+
+    #[test]
+    fn supabase_build_env_prefers_process_values_over_dotenv_text() {
+        let cfg = supabase_build_env_config_with_dotenv(
+            Some("https://process.supabase.co"),
+            Some("process-key"),
+            Some(
+                r#"
+SUPABASE_URL=https://dotenv.supabase.co
+SUPABASE_ANON_KEY=dotenv-key
+"#,
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(cfg.url, "https://process.supabase.co");
+        assert_eq!(cfg.anon_key, "process-key");
     }
 }

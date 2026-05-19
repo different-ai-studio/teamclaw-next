@@ -14,7 +14,6 @@ vi.mock('react-i18next', () => ({
 }))
 
 const mockInvoke = vi.fn(async (cmd: string) => {
-  if (cmd === 'p2p_sync_status') return null
   if (cmd === 'webdav_get_status') return null
   if (cmd === 'get_device_info') return {
     nodeId: 'test-node-id-123',
@@ -22,8 +21,6 @@ const mockInvoke = vi.fn(async (cmd: string) => {
     arch: 'aarch64',
     hostname: 'test-mac',
   }
-  if (cmd === 'get_p2p_config') return null
-  if (cmd === 'p2p_reconnect') return null
   if (cmd === 'unified_team_get_members') return []
   if (cmd === 'unified_team_get_my_role') return null
   return null
@@ -54,7 +51,7 @@ beforeEach(() => {
 })
 
 describe('TeamSection Git-only navigation', () => {
-  it('does not show P2P, S3, or Git sync-method tabs', async () => {
+  it('does not show S3 or Git sync-method tabs', async () => {
     const { TeamSection } = await import('../components/settings/TeamSection')
 
     await act(async () => {
@@ -63,7 +60,6 @@ describe('TeamSection Git-only navigation', () => {
 
     const tabs = screen.queryAllByRole('tab')
     expect(tabs.length).toBe(0)
-    expect(screen.queryByText('P2P')).toBeNull()
     expect(screen.queryByText('S3')).toBeNull()
   })
 

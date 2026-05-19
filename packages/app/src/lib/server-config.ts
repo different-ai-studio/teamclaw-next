@@ -12,6 +12,7 @@ const STORAGE_KEY = "teamclaw.serverConfig";
 
 function readLocalConfig(): ServerConfig {
   if (typeof window === "undefined") return {};
+  if (window.__TEAMCLAW_SERVER_CONFIG__) return window.__TEAMCLAW_SERVER_CONFIG__;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};

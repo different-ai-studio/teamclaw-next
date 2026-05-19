@@ -75,15 +75,12 @@ export interface TeamModelConfig {
 
 interface TeamModeState {
   teamMode: boolean
-  teamModeType: string | null // "p2p" | "oss" | "webdav" | "git" — from teamclaw.json
+  teamModeType: string | null // "git" | "webdav" — from teamclaw.json
   teamModelConfig: TeamModelConfig | null
   teamModelOptions: TeamModelOption[] // available model choices from build config
   _appliedConfigKey: string | null // fingerprint of last applied config to avoid redundant apply
   devUnlocked: boolean // hidden dev mode: unlocks model selector & hidden dirs in team mode
   myRole: 'owner' | 'editor' | 'viewer' | null
-  p2pConnected: boolean
-  p2pConfigured: boolean
-  p2pFileSyncStatusMap: Record<string, 'synced' | 'modified' | 'new'>
   teamGitFileSyncStatusMap: Record<string, 'modified' | 'new'>
   /** True while a Git team sync is in progress (for file tree loading indicator) */
   teamGitSyncing: boolean
@@ -95,7 +92,6 @@ interface TeamModeState {
   switchTeamModel: (modelId: string, workspacePath: string) => Promise<void>
   clearTeamMode: (workspacePath?: string) => Promise<void>
   setDevUnlocked: (unlocked: boolean) => void
-  loadP2pFileSyncStatus: () => Promise<void>
   loadTeamGitFileSyncStatus: (workspacePath: string) => Promise<void>
 }
 
@@ -131,25 +127,12 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
   _appliedConfigKey: null,
   devUnlocked: true,
   myRole: null,
-  p2pConnected: false,
-  p2pConfigured: false,
   teamGitSyncing: false,
   teamGitLastSyncAt: null,
-  p2pFileSyncStatusMap: {},
   teamGitFileSyncStatusMap: {},
 
   loadTeamConfig: async (_workspacePath: string) => {
-    // teamMode = p2p.enabled || ossConfigured
     const status = await fetchTeamStatus(_workspacePath)
-    // Check OSS config directly from backend to avoid stale store state on workspace switch
-    let ossConfigured = false
-    if (isTauri()) {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        const ossConfig = await invoke<{ enabled?: boolean } | null>('oss_get_team_config', { workspacePath: _workspacePath })
-        ossConfigured = !!ossConfig?.enabled
-      } catch { /* ignore */ }
-    }
     // Load last sync timestamp from teamclaw.json (git mode persists it via team_sync_repo)
     if (isTauri()) {
       try {
@@ -160,12 +143,11 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
         set({ teamGitLastSyncAt: teamConfig?.lastSyncAt ?? null })
       } catch { /* ignore */ }
     }
-    const p2pActive = !!status?.active
-    const isTeamMode = p2pActive || ossConfigured
+    const isTeamMode = !!status?.active
 
     if (isTeamMode) {
-      set({ teamMode: true, teamModeType: status?.mode ?? (ossConfigured ? 'oss' : null) })
-      if ((status?.mode ?? (ossConfigured ? 'oss' : null)) === 'git' && _workspacePath) {
+      set({ teamMode: true, teamModeType: status?.mode ?? null })
+      if (status?.mode === 'git' && _workspacePath) {
         // Fire-and-forget; errors swallowed inside action
         get().loadTeamGitFileSyncStatus(_workspacePath)
       }
@@ -210,16 +192,11 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     } else {
       set({ teamMode: false, teamModeType: null, teamModelConfig: null })
     }
-    // Load user's role and P2P connection status (non-critical)
+    // Load user's role (non-critical)
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const role = await invoke<string | null>('unified_team_get_my_role')
       set({ myRole: role as any })
-      const syncStatus = await invoke<{ connected?: boolean; namespaceId?: string | null }>('p2p_sync_status').catch(() => null)
-      set({ p2pConnected: syncStatus?.connected ?? false, p2pConfigured: !!syncStatus?.namespaceId })
-      if (syncStatus?.connected) {
-        get().loadP2pFileSyncStatus()
-      }
     } catch {
       // Non-critical, role can be loaded later
     }
@@ -296,21 +273,6 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     set({ devUnlocked: true })
   },
 
-  loadP2pFileSyncStatus: async () => {
-    if (!isTauri()) return
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const statuses = await invoke<Array<{ path: string; docType: string; status: 'synced' | 'modified' | 'new' }>>('p2p_get_files_sync_status')
-      const map: Record<string, 'synced' | 'modified' | 'new'> = {}
-      for (const s of statuses) {
-        map[s.path] = s.status
-      }
-      set({ p2pFileSyncStatusMap: map })
-    } catch (e) {
-      console.debug('[team-mode] loadP2pFileSyncStatus skipped:', e)
-    }
-  },
-
   loadTeamGitFileSyncStatus: async (workspacePath: string) => {
     if (!isTauri() || !workspacePath) return
     try {
@@ -346,7 +308,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     if (buildConfig.team.lockLlmConfig) return
 
     // Set state immediately to trigger UI updates
-    set({ teamMode: false, teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, p2pFileSyncStatusMap: {}, teamGitFileSyncStatusMap: {} })
+    set({ teamMode: false, teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, teamGitFileSyncStatusMap: {} })
 
     // Remove team provider from teamclaw config
     if (workspacePath) {
@@ -395,22 +357,3 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     } catch { /* ignore */ }
   },
 }))
-
-// Subscribe to OSS configured state changes — teamMode = p2p.enabled || ossConfigured
-import('./team-oss').then(({ useTeamOssStore }) => {
-  let prevConfigured = useTeamOssStore.getState().configured
-  useTeamOssStore.subscribe((state) => {
-    if (state.configured !== prevConfigured) {
-      prevConfigured = state.configured
-      if (state.configured) {
-        useTeamModeStore.setState({ teamMode: true })
-      } else {
-        // OSS disconnected — only clear teamMode if P2P is also not active
-        const p2pActive = useTeamModeStore.getState().p2pConnected
-        if (!p2pActive) {
-          useTeamModeStore.setState({ teamMode: false })
-        }
-      }
-    }
-  })
-})

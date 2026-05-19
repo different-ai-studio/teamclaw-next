@@ -22,7 +22,6 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useUIStore } from '@/stores/ui'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { cn, isTauri } from '@/lib/utils'
-import { markTeamFileDeleted } from '@/components/workspace/file-tree-operations'
 import { classifyFileType, filterKnowledgeItems, type KnowledgeItem } from '@/lib/knowledge-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -249,7 +248,6 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
       
       for (const path of itemsToDelete) {
         await remove(path, { recursive: true })
-        markTeamFileDeleted(path, workspacePath ?? undefined)
       }
 
       toast.success(

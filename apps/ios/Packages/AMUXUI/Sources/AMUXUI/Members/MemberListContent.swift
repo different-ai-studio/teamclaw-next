@@ -9,6 +9,11 @@ public struct MemberListContent: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \CachedActor.displayName) private var actors: [CachedActor]
     @State private var searchText = ""
+    @State private var kindFilter: ActorKindFilter = .all
+
+    enum ActorKindFilter: Hashable {
+        case all, humans, agents
+    }
 
     let store: ActorStore
     let pairing: PairingManager
@@ -68,6 +73,28 @@ public struct MemberListContent: View {
     private var humans: [CachedActor] { filtered.filter(\.isMember) }
     private var agents: [CachedActor] { filtered.filter(\.isAgent) }
 
+    private var kindFilteredHumans: [CachedActor] {
+        kindFilter == .agents ? [] : humans
+    }
+
+    private var kindFilteredAgents: [CachedActor] {
+        kindFilter == .humans ? [] : agents
+    }
+
+    private var kindSegments: [SegmentedFilterBar<ActorKindFilter>.Segment] {
+        // "All" deliberately counts only `humans + agents` (what the row
+        // sections actually render). `filtered.count` also picks up
+        // gateway-only `actor_type='external'` rows (e.g. a WeCom bridge
+        // actor) which today land in neither section — using it for the
+        // pill would print "All · 4" alongside "Humans · 3 / Agents · 0",
+        // a phantom row the user can never see.
+        [
+            .init(tag: .all,    title: "All",    count: humans.count + agents.count),
+            .init(tag: .humans, title: "Humans", count: humans.count),
+            .init(tag: .agents, title: "Agents", count: agents.count),
+        ]
+    }
+
     public var body: some View {
         Group {
             if actors.isEmpty {
@@ -77,6 +104,16 @@ public struct MemberListContent: View {
                 ContentUnavailableView.search(text: searchText)
             } else {
                 List {
+                    Section {
+                        SegmentedFilterBar(segments: kindSegments, selection: $kindFilter)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                            .padding(.bottom, 12)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
+                    }
+
                     if showOwnAgentNotice {
                         Section {
                             ownAgentNotice
@@ -85,21 +122,22 @@ public struct MemberListContent: View {
                                 .listRowSeparator(.hidden)
                         }
                     }
-                    if !humans.isEmpty {
+                    if !kindFilteredHumans.isEmpty {
                         Section {
-                            ForEach(humans, id: \.actorId, content: detailLink)
+                            ForEach(kindFilteredHumans, id: \.actorId, content: detailLink)
                         } header: {
-                            sectionHeader(title: "Humans", count: humans.count)
+                            sectionHeader(title: "Humans", count: kindFilteredHumans.count)
                         }
                     }
-                    if !agents.isEmpty {
+                    if !kindFilteredAgents.isEmpty {
                         Section {
-                            ForEach(agents, id: \.actorId, content: detailLink)
+                            ForEach(kindFilteredAgents, id: \.actorId, content: detailLink)
                         } header: {
-                            sectionHeader(title: "Agent actors", count: agents.count)
+                            sectionHeader(title: "Agent actors", count: kindFilteredAgents.count)
                         }
                     }
                 }
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
@@ -124,20 +162,27 @@ public struct MemberListContent: View {
         } label: {
             ActorRow(actor: a, isMe: a.actorId == currentActorID)
         }
+        // Plain-list rows would otherwise pick up systemBackground (white)
+        // and a default-tinted separator. Clear the fill so Mist shows
+        // through and pin the hairline to the Hai token.
+        .listRowBackground(Color.clear)
+        .listRowSeparatorTint(Color.amux.hairline)
     }
 
     private func sectionHeader(title: String, count: Int) -> some View {
         HStack(spacing: 6) {
             Text(title.uppercased())
                 .tracking(0.4)
+                .foregroundStyle(Color.amux.slate)
             Text("·")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.amux.slate.opacity(0.7))
             Text("\(count)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(Color.amux.slate)
                 .monospacedDigit()
         }
         .font(.caption)
         .fontWeight(.semibold)
-        .foregroundStyle(.secondary)
         .textCase(nil)
     }
 
@@ -173,8 +218,6 @@ private struct ActorRow: View {
     let actor: CachedActor
     var isMe: Bool = false
 
-    @State private var breathe = false
-
     private var avatarInitials: String {
         let parts = actor.displayName
             .split(whereSeparator: { $0.isWhitespace || $0 == "·" })
@@ -184,35 +227,64 @@ private struct ActorRow: View {
         return String(actor.displayName.prefix(1)).uppercased()
     }
 
-    /// Hai avatar style — every tile sits on Pebble. Foregrounds are
-    /// rationed: the "you" actor gets Cinnabar (the only call-out worth a
-    /// vermillion seal in the list), every other actor reads in Onyx /
-    /// Basalt / Slate. Agent vs human is signalled by tile shape (rounded
-    /// square vs circle), not by color.
+    /// Hai avatar style — per `actors-list.jsx`:
+    /// - You → solid Cinnabar fill with white glyph (the one place "YT"
+    ///   earns the vermillion seal).
+    /// - Other humans → solid hash-rotated fill from Basalt / Slate / Sage
+    ///   with white glyph.
+    /// - Agents → Pebble bg with agent-color glyph (Claude = Cinnabar,
+    ///   OpenCode = Sage, Codex = Basalt).
+    /// Tile shape (rounded square vs circle) is still the secondary cue
+    /// for agent vs human.
     private struct AvatarStyle {
         let background: Color
         let foreground: Color
     }
 
     private var avatarStyle: AvatarStyle {
+        if actor.isAgent {
+            let fg: Color
+            switch actor.agentKind {
+            case "claude":   fg = Color.amux.cinnabar
+            case "opencode": fg = Color.amux.sage
+            case "codex":    fg = Color.amux.basalt
+            default:         fg = Color.amux.basalt
+            }
+            return AvatarStyle(background: Color.amux.pebble, foreground: fg)
+        }
         if isMe {
-            return AvatarStyle(background: Color.amux.pebble, foreground: Color.amux.cinnabar)
+            return AvatarStyle(background: Color.amux.cinnabar, foreground: .white)
         }
         let palette: [Color] = [
-            Color.amux.onyx,
             Color.amux.basalt,
             Color.amux.slate,
+            Color.amux.sage,
+            Color.amux.onyx,
         ]
         let hash = actor.actorId.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
-        return AvatarStyle(background: Color.amux.pebble,
-                           foreground: palette[abs(hash) % palette.count])
+        return AvatarStyle(background: palette[abs(hash) % palette.count],
+                           foreground: .white)
     }
 
+    /// Subtitle copy targets `actors-list.jsx`: humans get an identifier
+    /// line (mono "you · ios-<short>" for the signed-in user, role label
+    /// for everyone else since CachedActor doesn't carry email yet);
+    /// agents get a mono `kind · status` line.
     private var subtitle: String {
+        if isMe {
+            return "you"
+        }
         if actor.isMember { return actor.roleLabel }
         let kind = actor.agentKind?.capitalized ?? "Agent"
         let status = actor.agentStatus ?? ""
         return status.isEmpty ? kind : "\(kind) · \(status)"
+    }
+
+    /// Render the human subtitle in mono only for the signed-in user, so
+    /// the "you" line reads as an identifier (matches the handoff). Other
+    /// humans keep the proportional caption.
+    private var subtitleIsMonospaced: Bool {
+        actor.isAgent || isMe
     }
 
     /// Deterministic placeholder while a real per-actor session aggregate
@@ -278,10 +350,10 @@ private struct ActorRow: View {
                     }
                 }
                 Text(subtitle)
-                    .font(actor.isAgent
+                    .font(subtitleIsMonospaced
                           ? .system(.caption, design: .monospaced)
                           : .caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.amux.slate)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -297,11 +369,7 @@ private struct ActorRow: View {
             Circle()
                 .fill(actor.isOnline ? Color.amux.sage : Color.amux.slate)
                 .frame(width: 6, height: 6)
-                .opacity(actor.isOnline && breathe ? 0.5 : 1.0)
-                .animation(actor.isOnline
-                           ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                           : .default,
-                           value: breathe)
+                .breathingOpacity(active: actor.isOnline, dim: 0.5)
             Text("\(mockActiveSessions)")
                 .font(.caption)
                 .monospacedDigit()
@@ -326,21 +394,38 @@ private struct ActorRow: View {
             }
             .frame(width: 40, height: 40)
             .overlay {
-                Text(avatarInitials)
-                    .font(.system(size: 14, weight: .bold))
-                    .tracking(-0.3)
-                    .foregroundStyle(style.foreground)
+                if let urlString = actor.avatarURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Text(avatarInitials)
+                                .font(.system(size: 14, weight: .bold))
+                                .tracking(-0.3)
+                                .foregroundStyle(style.foreground)
+                        }
+                    }
+                    .clipShape(actor.isAgent
+                        ? AnyShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        : AnyShape(Circle()))
+                } else {
+                    Text(avatarInitials)
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(-0.3)
+                        .foregroundStyle(style.foreground)
+                }
             }
 
             if actor.isOnline {
                 Circle()
                     .fill(Color.amux.sage)
                     .frame(width: 11, height: 11)
-                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2.5))
-                    .opacity(breathe ? 0.55 : 1.0)
-                    .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true),
-                               value: breathe)
-                    .onAppear { breathe = true }
+                    // Ring matches the row background (Mist), not iOS
+                    // systemBackground, so the online dot reads as a clean
+                    // pip on the Hai paper instead of a white halo.
+                    .overlay(Circle().stroke(Color.amux.mist, lineWidth: 2.5))
+                    .breathingOpacity(active: true, dim: 0.55)
                     .offset(x: 1, y: 1)
             }
         }
@@ -374,6 +459,8 @@ private struct ActorDetailView: View {
     @State private var isDeleting = false
     @State private var deleteErrorMessage: String?
     @State private var autoApprovedOverrides: [String: Bool] = [:]
+    @State private var isSavingDefaults = false
+    @State private var defaultsErrorMessage: String?
 
     /// Daemon `device_id` for the agent being viewed — only meaningful when
     /// `actor` is itself an agent. Empty for humans (where workspace
@@ -424,63 +511,71 @@ private struct ActorDetailView: View {
                 autoApprovedToolsSection
             }
             Section("Info") {
-                LabeledContent("Name", value: actor.displayName)
-                LabeledContent("Kind", value: actor.isMember ? "Human" : "Agent")
-                if actor.isMember {
-                    LabeledContent("Role",   value: actor.roleLabel)
-                    LabeledContent("Status", value: actor.memberStatus?.capitalized ?? "—")
-                } else {
-                    LabeledContent("Agent kind", value: actor.agentKind ?? "—")
-                    LabeledContent("Status",     value: actor.agentStatus?.capitalized ?? "—")
+                Group {
+                    LabeledContent("Name", value: actor.displayName)
+                    LabeledContent("Kind", value: actor.isMember ? "Human" : "Agent")
+                    if actor.isMember {
+                        LabeledContent("Role",   value: actor.roleLabel)
+                        LabeledContent("Status", value: actor.memberStatus?.capitalized ?? "—")
+                    } else {
+                        LabeledContent("Agent kind", value: actor.agentKind ?? "—")
+                        LabeledContent("Status",     value: actor.agentStatus?.capitalized ?? "—")
+                    }
+                    LabeledContent("Joined",
+                                   value: actor.createdAt.formatted(date: .abbreviated, time: .shortened))
                 }
-                LabeledContent("Joined",
-                               value: actor.createdAt.formatted(date: .abbreviated, time: .shortened))
+                .listRowBackground(Color.amux.paper)
             }
             if !actor.isMember, let store = authorizedHumansStore {
                 Section("Authorized Members") {
-                    if store.humans.isEmpty && !store.isLoading {
-                        Text("No members authorized yet.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.humans) { human in
-                            AuthorizedHumanRow(human: human)
-                        }
-                    }
-
-                    if store.canManage {
-                        Button {
-                            showAddAuthorizedMembersSheet = true
-                        } label: {
-                            HStack {
-                                Label("Add Member", systemImage: "person.badge.plus")
-                                Spacer()
-                                if isGrantingAuthorizedMembers {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                }
-                            }
-                        }
-                        .disabled(isGrantingAuthorizedMembers || availableAuthorizedMemberCandidates.isEmpty)
-
-                        if availableAuthorizedMemberCandidates.isEmpty {
-                            Text("All team members are already authorized.")
-                                .font(.footnote)
+                    Group {
+                        if store.humans.isEmpty && !store.isLoading {
+                            Text("No members authorized yet.")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         } else {
-                            Text("Added members get Prompt access.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                            ForEach(store.humans) { human in
+                                AuthorizedHumanRow(human: human)
+                            }
+                        }
+
+                        if store.canManage {
+                            Button {
+                                showAddAuthorizedMembersSheet = true
+                            } label: {
+                                HStack {
+                                    Label("Add Member", systemImage: "person.badge.plus")
+                                    Spacer()
+                                    if isGrantingAuthorizedMembers {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                }
+                            }
+                            .disabled(isGrantingAuthorizedMembers || availableAuthorizedMemberCandidates.isEmpty)
+
+                            if availableAuthorizedMemberCandidates.isEmpty {
+                                Text("All team members are already authorized.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Added members get Prompt access.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if let err = store.errorMessage {
+                            Text(err).font(.footnote).foregroundStyle(Color.amux.cinnabarDeep)
                         }
                     }
-
-                    if let err = store.errorMessage {
-                        Text(err).font(.footnote).foregroundStyle(Color.amux.cinnabarDeep)
-                    }
+                    .listRowBackground(Color.amux.paper)
                 }
             }
             if actor.isAgent {
+                defaultsSection
                 Section("Workspaces") {
+                    Group {
                     if let workspaceStore, workspaceStore.isLoading && workspaceStore.workspaces.isEmpty {
                         ProgressView("Loading workspaces…")
                     } else if let workspaceStore {
@@ -553,25 +648,30 @@ private struct ActorDetailView: View {
                             .font(.footnote)
                             .foregroundStyle(Color.amux.cinnabarDeep)
                     }
+                    }
+                    .listRowBackground(Color.amux.paper)
                 }
             }
             Section {
-                Button {
-                    createInvite()
-                } label: {
-                    HStack {
-                        Label(reinviteButtonTitle, systemImage: "link.badge.plus")
-                        Spacer()
-                        if isCreatingInvite {
-                            ProgressView().controlSize(.small)
+                Group {
+                    Button {
+                        createInvite()
+                    } label: {
+                        HStack {
+                            Label(reinviteButtonTitle, systemImage: "link.badge.plus")
+                            Spacer()
+                            if isCreatingInvite {
+                                ProgressView().controlSize(.small)
+                            }
                         }
                     }
-                }
-                .disabled(isCreatingInvite || isDeleting)
+                    .disabled(isCreatingInvite || isDeleting)
 
-                Text(reinviteFootnote)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    Text(reinviteFootnote)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.amux.paper)
             } header: {
                 Text("Re-invite")
             }
@@ -586,11 +686,13 @@ private struct ActorDetailView: View {
                         } else {
                             Text(actor.isMember ? "Remove Member" : "Remove Agent")
                                 .fontWeight(.medium)
+                                .foregroundStyle(Color.amux.cinnabarDeep)
                         }
                         Spacer()
                     }
                 }
                 .disabled(isDeleting)
+                .listRowBackground(Color.amux.paper)
                 // Attach dialog to the button so iOS 26's popover-style
                 // confirmation anchors at the tapped row, not at the top
                 // of the scroll view where the body-level modifier lived.
@@ -618,10 +720,18 @@ private struct ActorDetailView: View {
                 }
             }
         }
+        // Inset-grouped natively gives rounded sections + side margin —
+        // the paper-card pattern from `actor-detail.jsx`. We hide the
+        // default grouped background (gray gaps) so Mist shows through,
+        // then paint each row Paper via listRowBackground. The hero
+        // stays clear so the avatar floats on Mist.
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.amux.mist)
         .navigationTitle(actor.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.amux.mist.opacity(0.85), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .task {
             guard !actor.isMember, authorizedHumansStore == nil else { return }
             if let repo = try? SupabaseAgentAccessRepository() {
@@ -861,7 +971,7 @@ private struct ActorDetailView: View {
                     Circle()
                         .fill(Color.amux.mist)
                         .frame(width: 6, height: 6)
-                        .modifier(BreathingDot(active: true))
+                        .breathingOpacity(active: true)
                 }
                 .overlay(
                     Circle().stroke(Color(.systemGroupedBackground), lineWidth: 3)
@@ -933,6 +1043,7 @@ private struct ActorDetailView: View {
             }
             .padding(.vertical, 8)
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.amux.paper)
         }
     }
 
@@ -961,6 +1072,7 @@ private struct ActorDetailView: View {
         Section {
             ForEach(Array(mockTools.enumerated()), id: \.offset) { _, t in
                 ToolUsageRow(name: t.name, count: t.count, max: maxToolCount)
+                    .listRowBackground(Color.amux.paper)
             }
         } header: {
             Text("Top 5 skills used".uppercased())
@@ -982,9 +1094,11 @@ private struct ActorDetailView: View {
                 Text("No recent sessions yet.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .listRowBackground(Color.amux.paper)
             } else {
                 ForEach(actorRecentSessions.prefix(5), id: \.sessionId) { s in
                     RecentSessionRow(session: s)
+                        .listRowBackground(Color.amux.paper)
                 }
             }
         } header: {
@@ -1005,6 +1119,7 @@ private struct ActorDetailView: View {
                         .font(.subheadline)
                 }
                 .tint(Color.amux.cinnabar)
+                .listRowBackground(Color.amux.paper)
             }
         } header: {
             Text("Auto-approved tools".uppercased())
@@ -1024,6 +1139,111 @@ private struct ActorDetailView: View {
             get: { autoApprovedOverrides[row.name] ?? row.defaultOn },
             set: { autoApprovedOverrides[row.name] = $0 }
         )
+    }
+
+    // MARK: - Defaults section
+    //
+    // Per-agent defaults that New Session and Add Agent flows read so the user
+    // doesn't have to repeat workspace + agent-type picks. Backed by
+    // `agents.default_workspace_id` and `agents.agent_kind`.
+
+    private static let agentKindOptions: [(String, String)] = [
+        ("claude",   "Claude"),
+        ("opencode", "OpenCode"),
+        ("codex",    "Codex"),
+    ]
+
+    @ViewBuilder
+    private var defaultsSection: some View {
+        Section {
+            Group {
+                Picker("Default workspace", selection: defaultWorkspaceBinding) {
+                    Text("None").tag(String?.none)
+                    if let workspaceStore {
+                        ForEach(workspaceStore.workspaces) { ws in
+                            Text(ws.displayName.isEmpty ? ws.path : ws.displayName)
+                                .tag(Optional(ws.id))
+                        }
+                    }
+                }
+                .disabled(isSavingDefaults || (workspaceStore?.workspaces.isEmpty ?? true))
+
+                Picker("Agent type", selection: agentKindBinding) {
+                    ForEach(Self.agentKindOptions, id: \.0) { kind, label in
+                        Text(label).tag(kind)
+                    }
+                }
+                .disabled(isSavingDefaults)
+
+                if isSavingDefaults {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Saving…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let defaultsErrorMessage {
+                    Text(defaultsErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(Color.amux.cinnabarDeep)
+                }
+            }
+            .listRowBackground(Color.amux.paper)
+        } header: {
+            Text("Defaults")
+        } footer: {
+            Text("Used when this agent is added to a new session — picks are pre-filled, no extra taps needed.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var defaultWorkspaceBinding: Binding<String?> {
+        Binding(
+            get: { actor.defaultWorkspaceId },
+            set: { newValue in saveDefaults(workspaceID: newValue, agentKind: nil) }
+        )
+    }
+
+    private var agentKindBinding: Binding<String> {
+        Binding(
+            get: {
+                let raw = actor.agentKind ?? "claude"
+                return Self.agentKindOptions.contains(where: { $0.0 == raw }) ? raw : "claude"
+            },
+            set: { newValue in saveDefaults(workspaceID: nil, agentKind: newValue) }
+        )
+    }
+
+    private func saveDefaults(workspaceID: String?, agentKind: String?) {
+        guard !isSavingDefaults else { return }
+        // Apply the local change immediately so the picker reflects the new
+        // value before the round-trip completes. ActorStore.reload() will
+        // overwrite if the RPC succeeds.
+        if let workspaceID {
+            actor.defaultWorkspaceId = workspaceID
+        }
+        if let agentKind {
+            actor.agentKind = agentKind
+        }
+        isSavingDefaults = true
+        defaultsErrorMessage = nil
+        let actorID = actor.actorId
+        Task {
+            let result = await store.updateAgentDefaults(
+                actorID: actorID,
+                defaultWorkspaceID: workspaceID,
+                agentKind: agentKind
+            )
+            await MainActor.run {
+                isSavingDefaults = false
+                if result == nil {
+                    defaultsErrorMessage = store.errorMessage ?? "Failed to save defaults."
+                }
+            }
+        }
     }
 }
 

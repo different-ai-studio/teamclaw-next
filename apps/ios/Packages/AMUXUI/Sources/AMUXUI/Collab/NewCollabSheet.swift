@@ -43,21 +43,19 @@ public struct NewCollabSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.title3)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    let canCreate = !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
                     Button { createSession() } label: {
                         Text("Create")
-                            .font(.subheadline).fontWeight(.medium)
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .liquidGlass(in: Capsule())
+                            .font(.subheadline).fontWeight(.semibold)
+                            .foregroundStyle(canCreate ? Color.amux.cinnabar : Color.amux.slate.opacity(0.5))
                     }
                     .buttonStyle(.plain)
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
-                    .opacity(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending ? 0.4 : 1)
+                    .disabled(!canCreate)
                 }
             }
         }
