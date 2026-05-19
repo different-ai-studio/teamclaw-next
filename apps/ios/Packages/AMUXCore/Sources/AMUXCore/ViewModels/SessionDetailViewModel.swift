@@ -150,6 +150,7 @@ public final class SessionDetailViewModel {
     /// clears on `statusChange:.idle` or after 10s of silence.
     public private(set) var isAgentWorking: Bool = false
     private var agentWorkingResetTask: Task<Void, Never>?
+    nonisolated(unsafe) private var spawningPollTask: Task<Void, Never>?
     public var participantCount: Int { session?.participantCount ?? 0 }
     public var hasRuntime: Bool { runtime != nil }
 
@@ -447,6 +448,26 @@ public final class SessionDetailViewModel {
         // trailing card. Reconcile here by retroactively rewriting the
         // raw stamps to the resolved actor_id.
         relabelRawRuntimeIDStampsToActorIDs()
+
+        // While any agent is still spawning, keep polling so the sheet
+        // self-updates once the runtime transitions to active — covering
+        // the case where the SwiftData onChange chain misses the MQTT
+        // ACTIVE transition for session-based (non-bound-runtime) views.
+        scheduleSpawningRefreshIfNeeded()
+    }
+
+    private func scheduleSpawningRefreshIfNeeded() {
+        if memberSheetAgents.contains(where: { $0.runtimeState == .spawning }) {
+            guard spawningPollTask == nil else { return }
+            spawningPollTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                self?.spawningPollTask = nil
+                await self?.refreshMemberSheet()
+            }
+        } else {
+            spawningPollTask?.cancel()
+            spawningPollTask = nil
+        }
     }
 
     /// Best-effort lookup of model ids for the chosen agent actor. Falls back
@@ -525,6 +546,23 @@ public final class SessionDetailViewModel {
             print("[RuntimeDetailVM] addAgent: no device id for agent actor \(actorID)")
             await refreshMemberSheet()
             return
+        }
+
+        // Refresh once so the agent row appears (participant row just
+        // written), then immediately flip it to .spawning so the sheet
+        // shows a spinner for the ~1-3s that the RPC + ACP spawn takes.
+        // The Supabase agent_runtimes row won't exist yet at this point,
+        // so without the optimistic patch the row would show "default".
+        await refreshMemberSheet()
+        if let idx = memberSheetAgents.firstIndex(where: { $0.id == actorID }) {
+            let cur = memberSheetAgents[idx]
+            memberSheetAgents[idx] = MemberSheetAgent(
+                id: cur.id, displayName: cur.displayName,
+                workspacePath: cur.workspacePath, agentType: cur.agentType,
+                runtimeState: .spawning, availableModels: cur.availableModels,
+                currentModel: cur.currentModel, runtimeID: cur.runtimeID,
+                workspaceID: cur.workspaceID, backendType: cur.backendType
+            )
         }
 
         if let teamclawService {
@@ -1108,10 +1146,12 @@ public final class SessionDetailViewModel {
     /// keeps spinning and the MQTT subscription leaks.
     deinit {
         task?.cancel()
+        spawningPollTask?.cancel()
     }
 
     public func stop() {
         task?.cancel(); task = nil
+        spawningPollTask?.cancel(); spawningPollTask = nil
 
         // Flush every in-progress per-agent streaming buffer to a
         // persisted incomplete event so it's visible when the user returns.
