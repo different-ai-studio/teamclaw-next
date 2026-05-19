@@ -4,10 +4,12 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -30,6 +32,9 @@ export default function ShortcutsRoute() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [folderStack, setFolderStack] = useState<Array<{ id: string; label: string }>>([]);
+  const [editMode, setEditMode] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const currentFolderId = folderStack.length > 0 ? folderStack[folderStack.length - 1].id : null;
   const currentFolderLabel = folderStack.length > 0 ? folderStack[folderStack.length - 1].label : null;
 
@@ -76,6 +81,43 @@ export default function ShortcutsRoute() {
   const folders = visible.filter((row) => row.nodeType === "folder");
   const leaves = visible.filter(isLeafShortcut);
 
+  const handleSaveRename = async (id: string) => {
+    const next = editDraft.trim();
+    if (!next) return;
+    try {
+      await createShortcutsApi(supabase).renameShortcut(id, next);
+      setShortcuts((prev) =>
+        prev.map((row) => (row.id === id ? { ...row, label: next } : row)),
+      );
+      setEditingId(null);
+      setEditDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't rename shortcut.");
+    }
+  };
+
+  const handleDelete = (shortcut: Shortcut) => {
+    Alert.alert(
+      "Delete shortcut",
+      `Remove “${shortcut.label}” from your shortcuts?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await createShortcutsApi(supabase).deleteShortcut(shortcut.id);
+              setShortcuts((prev) => prev.filter((row) => row.id !== shortcut.id));
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Couldn't delete.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={styles.screen}>
       <View style={styles.headerBar}>
@@ -93,9 +135,26 @@ export default function ShortcutsRoute() {
           ) : null}
         </View>
         <Text style={styles.headerTitle}>{currentFolderLabel ?? "Shortcuts"}</Text>
-        <Pressable hitSlop={8} onPress={() => router.back()} style={styles.headerSlot}>
-          <Ionicons color={colors.onyx} name="close" size={26} />
-        </Pressable>
+        <View style={styles.headerSlotGroup}>
+          <Pressable
+            accessibilityLabel={editMode ? "Done editing" : "Edit shortcuts"}
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => {
+              setEditMode((value) => !value);
+              setEditingId(null);
+              setEditDraft("");
+            }}
+            style={styles.headerSlotPressable}
+          >
+            <Text style={[styles.headerActionText, editMode ? styles.headerActionTextActive : null]}>
+              {editMode ? "Done" : "Edit"}
+            </Text>
+          </Pressable>
+          <Pressable hitSlop={8} onPress={() => router.back()} style={styles.headerSlot}>
+            <Ionicons color={colors.onyx} name="close" size={26} />
+          </Pressable>
+        </View>
       </View>
       <Hairline />
 
@@ -162,36 +221,79 @@ export default function ShortcutsRoute() {
                   style={styles.sectionEyebrow}
                 />
                 <View style={styles.card}>
-                  {leaves.map((shortcut, index) => (
-                    <View key={shortcut.id}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => handleOpen(shortcut)}
-                        style={({ pressed }) => [
-                          styles.row,
-                          pressed ? styles.rowPressed : null,
-                        ]}
-                      >
-                        <View style={styles.iconTile}>
-                          <Ionicons
-                            color={colors.cinnabar}
-                            name={iconNameForLeaf(shortcut.nodeType)}
-                            size={18}
-                          />
-                        </View>
-                        <View style={styles.rowBody}>
-                          <Text style={styles.rowLabel}>{shortcut.label}</Text>
-                          {shortcut.target ? (
-                            <Text numberOfLines={1} style={styles.rowMeta}>
-                              {shortcut.target}
-                            </Text>
+                  {leaves.map((shortcut, index) => {
+                    const isEditing = editMode && editingId === shortcut.id;
+                    return (
+                      <View key={shortcut.id}>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => {
+                            if (editMode) {
+                              setEditingId(shortcut.id);
+                              setEditDraft(shortcut.label);
+                              return;
+                            }
+                            handleOpen(shortcut);
+                          }}
+                          style={({ pressed }) => [
+                            styles.row,
+                            pressed ? styles.rowPressed : null,
+                          ]}
+                        >
+                          {editMode ? (
+                            <Pressable
+                              accessibilityLabel="Delete"
+                              accessibilityRole="button"
+                              hitSlop={6}
+                              onPress={() => handleDelete(shortcut)}
+                              style={styles.deleteTile}
+                            >
+                              <Ionicons color={hai.paper} name="remove" size={14} />
+                            </Pressable>
+                          ) : (
+                            <View style={styles.iconTile}>
+                              <Ionicons
+                                color={colors.cinnabar}
+                                name={iconNameForLeaf(shortcut.nodeType)}
+                                size={18}
+                              />
+                            </View>
+                          )}
+                          <View style={styles.rowBody}>
+                            {isEditing ? (
+                              <TextInput
+                                autoFocus
+                                onBlur={() => {
+                                  if (editDraft.trim()) {
+                                    void handleSaveRename(shortcut.id);
+                                  } else {
+                                    setEditingId(null);
+                                  }
+                                }}
+                                onChangeText={setEditDraft}
+                                onSubmitEditing={() => void handleSaveRename(shortcut.id)}
+                                returnKeyType="done"
+                                selectionColor={colors.cinnabar}
+                                style={styles.editInput}
+                                value={editDraft}
+                              />
+                            ) : (
+                              <Text style={styles.rowLabel}>{shortcut.label}</Text>
+                            )}
+                            {!isEditing && shortcut.target ? (
+                              <Text numberOfLines={1} style={styles.rowMeta}>
+                                {shortcut.target}
+                              </Text>
+                            ) : null}
+                          </View>
+                          {!editMode ? (
+                            <Ionicons color={colors.slate} name="open-outline" size={16} />
                           ) : null}
-                        </View>
-                        <Ionicons color={colors.slate} name="open-outline" size={16} />
-                      </Pressable>
-                      {index < leaves.length - 1 ? <Hairline /> : null}
-                    </View>
-                  ))}
+                        </Pressable>
+                        {index < leaves.length - 1 ? <Hairline /> : null}
+                      </View>
+                    );
+                  })}
                 </View>
               </View>
             ) : null}
@@ -278,6 +380,31 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     width: 40,
+  },
+  headerSlotGroup: {
+    flexDirection: "row",
+  },
+  headerActionText: {
+    color: colors.onyx,
+    ...typography.body,
+  },
+  headerActionTextActive: {
+    color: colors.cinnabar,
+    fontWeight: "700",
+  },
+  deleteTile: {
+    alignItems: "center",
+    backgroundColor: hai.cinnabar,
+    borderRadius: 999,
+    height: 22,
+    justifyContent: "center",
+    width: 22,
+  },
+  editInput: {
+    color: colors.onyx,
+    padding: 0,
+    ...typography.body,
+    fontWeight: "600",
   },
   headerTitle: {
     color: colors.onyx,

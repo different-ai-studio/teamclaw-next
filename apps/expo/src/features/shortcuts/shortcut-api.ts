@@ -57,5 +57,21 @@ export function createShortcutsApi(client: ShortcutsClient) {
       throwIfError(result.error);
       return (result.data ?? []).map(toShortcut);
     },
+
+    async renameShortcut(id: string, label: string): Promise<void> {
+      const result = (await client
+        .from("shortcuts")
+        .update({ label, updated_at: new Date().toISOString() })
+        .eq("id", id)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
+    async deleteShortcut(id: string): Promise<void> {
+      const result = (await client
+        .from("shortcuts")
+        .delete()
+        .eq("id", id)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
   };
 }
