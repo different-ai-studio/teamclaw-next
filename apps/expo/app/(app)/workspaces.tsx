@@ -1,12 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -14,7 +15,7 @@ import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { supabase } from "../../src/lib/supabase/client";
-import { colors, radii, spacing, typography } from "../../src/ui/theme";
+import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
 type WorkspaceRow = {
   id: string;
@@ -26,43 +27,76 @@ export default function WorkspacesRoute() {
   const router = useRouter();
   const { state } = useOnboarding();
   const teamId = state.currentTeam?.id ?? "";
+  const memberActorId = state.currentMemberActorId;
   const [rows, setRows] = useState<WorkspaceRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createDraft, setCreateDraft] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!teamId) {
       setIsLoading(false);
       return;
     }
-    let cancelled = false;
     setIsLoading(true);
     setError(null);
-    void (async () => {
-      try {
-        const result = await supabase
-          .from("workspaces")
-          .select("id, name, archived")
-          .eq("team_id", teamId)
-          .order("name", { ascending: true });
-        if (cancelled) return;
-        if (result.error) {
-          setError(result.error.message);
-          setRows([]);
-        } else {
-          setRows((result.data ?? []) as WorkspaceRow[]);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Couldn't load workspaces.");
-      } finally {
-        if (!cancelled) setIsLoading(false);
+    try {
+      const result = await supabase
+        .from("workspaces")
+        .select("id, name, archived")
+        .eq("team_id", teamId)
+        .order("name", { ascending: true });
+      if (result.error) {
+        setError(result.error.message);
+        setRows([]);
+      } else {
+        setRows((result.data ?? []) as WorkspaceRow[]);
       }
-    })();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load workspaces.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [teamId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void load().catch(() => {
+      // load already surfaces errors
+    });
     return () => {
       cancelled = true;
+      void cancelled;
     };
-  }, [teamId]);
+  }, [load]);
+
+  const handleCreate = async () => {
+    if (!teamId || !memberActorId) return;
+    const name = createDraft.trim();
+    if (!name) return;
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      const result = await supabase.from("workspaces").insert({
+        team_id: teamId,
+        created_by_member_id: memberActorId,
+        name,
+        archived: false,
+      });
+      if (result.error) {
+        setCreateError(result.error.message);
+      } else {
+        setCreateDraft("");
+        await load();
+      }
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Couldn't create workspace.");
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   const active = rows.filter((row) => !row.archived);
   const archived = rows.filter((row) => row.archived);
@@ -79,6 +113,49 @@ export default function WorkspacesRoute() {
       <Hairline />
 
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.section}>
+          <SectionEyebrow label="NEW WORKSPACE" style={styles.sectionEyebrow} />
+          <View style={styles.card}>
+            <View style={styles.createRow}>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isCreating}
+                onChangeText={setCreateDraft}
+                placeholder="workspace-name"
+                placeholderTextColor={colors.slate}
+                selectionColor={colors.cinnabar}
+                style={styles.createInput}
+                value={createDraft}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={isCreating || createDraft.trim().length === 0 || !memberActorId}
+                onPress={handleCreate}
+                style={({ pressed }) => [
+                  styles.createButton,
+                  createDraft.trim().length > 0 && !isCreating
+                    ? styles.createButtonActive
+                    : styles.createButtonIdle,
+                  pressed && createDraft.trim().length > 0 ? styles.createButtonPressed : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.createButtonText,
+                    createDraft.trim().length > 0 && !isCreating
+                      ? styles.createButtonTextActive
+                      : styles.createButtonTextIdle,
+                  ]}
+                >
+                  {isCreating ? "Creating…" : "Create"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+          {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+        </View>
+
         {isLoading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={colors.slate} />
@@ -143,6 +220,49 @@ const styles = StyleSheet.create({
   body: {
     color: colors.basalt,
     ...typography.secondaryBody,
+  },
+  createButton: {
+    alignItems: "center",
+    borderRadius: radii.button,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  createButtonActive: {
+    backgroundColor: hai.cinnabar,
+  },
+  createButtonIdle: {
+    backgroundColor: hai.pebble,
+  },
+  createButtonPressed: {
+    opacity: 0.88,
+  },
+  createButtonText: {
+    ...typography.caption,
+    fontWeight: "700",
+  },
+  createButtonTextActive: {
+    color: hai.paper,
+  },
+  createButtonTextIdle: {
+    color: hai.slate,
+  },
+  createInput: {
+    color: colors.onyx,
+    flex: 1,
+    padding: 0,
+    ...typography.body,
+  },
+  createRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  errorText: {
+    color: hai.cinnabarDeep,
+    paddingHorizontal: spacing.xs,
+    ...typography.caption,
   },
   card: {
     backgroundColor: colors.paper,
