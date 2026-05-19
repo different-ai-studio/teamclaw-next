@@ -10,7 +10,10 @@ import {
 type SupabaseError = { message?: string } | null;
 
 type SessionsClient = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   from: (table: string) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc: (fn: string, args?: Record<string, unknown>) => any;
 };
 
 type ParticipantRow = {
@@ -185,6 +188,26 @@ export function createSessionsApi(client: SessionsClient) {
       );
 
       return rows.map((row) => toSessionSummary(row, participantMeta[row.session_id ?? ""]));
+    },
+
+    async createSession(input: {
+      title: string;
+      mode?: string;
+      primaryAgentId?: string | null;
+      ideaId?: string | null;
+    }): Promise<string> {
+      const result = (await client.rpc("create_session", {
+        p_primary_agent_id: input.primaryAgentId ?? null,
+        p_idea_id: input.ideaId ?? null,
+        p_mode: input.mode ?? "agent",
+        p_title: input.title,
+      })) as QueryResult<string | null>;
+      throwIfError(result.error);
+      const sessionId = result.data;
+      if (!sessionId || typeof sessionId !== "string") {
+        throw new Error("create_session returned no session id");
+      }
+      return sessionId;
     },
 
     async getSession(teamId: string, sessionId: string): Promise<SessionSummary | null> {
