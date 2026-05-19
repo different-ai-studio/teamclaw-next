@@ -449,15 +449,62 @@ public final class SessionDetailViewModel {
         // raw stamps to the resolved actor_id.
         relabelRawRuntimeIDStampsToActorIDs()
 
-        // While any agent is still spawning, keep polling so the sheet
-        // self-updates once the runtime transitions to active — covering
-        // the case where the SwiftData onChange chain misses the MQTT
-        // ACTIVE transition for session-based (non-bound-runtime) views.
+        // Overlay live MQTT-derived data from the SwiftData Runtime row.
+        // Supabase agent_runtimes.current_model is only written on ACP
+        // StatusChange events (first prompt reply); MQTT state carries
+        // currentModel right after set_session_model() completes (~2-3s
+        // after spawn). For session-based views where runtime was nil at
+        // start() time, re-resolve here so a Runtime row created by
+        // SessionListVM after MQTT arrived isn't missed.
+        overlayMQTTRuntimeState()
+
+        // While any agent is still spawning OR has no Supabase runtime row
+        // yet (just-spawned, row not written), keep polling so the sheet
+        // self-updates once state settles — covers the SwiftData onChange
+        // chain missing the MQTT ACTIVE transition for non-bound-runtime views.
         scheduleSpawningRefreshIfNeeded()
     }
 
+    /// Re-resolves the bound Runtime (if nil) and overlays its MQTT-derived
+    /// chip state + currentModel onto the matching member-sheet agent row.
+    private func overlayMQTTRuntimeState() {
+        if runtime == nil, let ctx = startModelContext {
+            runtime = RuntimeResolver.resolve(existing: nil, session: session, modelContext: ctx)
+        }
+        guard let liveRuntime = runtime else { return }
+        memberSheetAgents = memberSheetAgents.map { agent in
+            let matches = agent.runtimeID == liveRuntime.runtimeId
+                || session?.primaryAgentId == agent.id
+            guard matches else { return agent }
+            return MemberSheetAgent(
+                id: agent.id, displayName: agent.displayName,
+                workspacePath: agent.workspacePath, agentType: agent.agentType,
+                runtimeState: chipStateFromRuntime(liveRuntime),
+                availableModels: agent.availableModels.isEmpty
+                    ? liveRuntime.availableModels.map(\.id) : agent.availableModels,
+                currentModel: liveRuntime.currentModel ?? agent.currentModel,
+                runtimeID: agent.runtimeID ?? liveRuntime.runtimeId,
+                workspaceID: agent.workspaceID, backendType: agent.backendType
+            )
+        }
+    }
+
+    private func chipStateFromRuntime(_ r: Runtime) -> AgentRuntimeChipState {
+        switch r.status {
+        case 1: return .spawning
+        case 2: return .active
+        case 3: return .idle
+        case 4: return .error
+        case 5: return .stopped
+        default: return .spawning
+        }
+    }
+
     private func scheduleSpawningRefreshIfNeeded() {
-        if memberSheetAgents.contains(where: { $0.runtimeState == .spawning }) {
+        let needsPoll = memberSheetAgents.contains {
+            $0.runtimeState == .spawning || $0.runtimeID == nil
+        }
+        if needsPoll {
             guard spawningPollTask == nil else { return }
             spawningPollTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
