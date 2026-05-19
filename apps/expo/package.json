@@ -17,6 +17,7 @@
     "@teamclaw/app": "workspace:*",
     "buffer": "^6.0.3",
     "expo": "~53.0.22",
+    "expo-audio": "^55.0.14",
     "expo-constants": "~17.1.8",
     "expo-document-picker": "^55.0.13",
     "expo-image-picker": "^55.0.20",
