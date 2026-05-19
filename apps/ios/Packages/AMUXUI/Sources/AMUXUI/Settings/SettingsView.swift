@@ -641,7 +641,7 @@ private struct EditProfileSheet: View {
     }
 }
 
-private struct ProfileAvatarView: View {
+struct ProfileAvatarView: View {
     let displayName: String
     let avatarURL: String?
     let size: CGFloat

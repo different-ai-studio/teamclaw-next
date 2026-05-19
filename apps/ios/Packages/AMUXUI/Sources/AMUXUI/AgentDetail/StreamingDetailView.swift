@@ -31,10 +31,20 @@ public struct TurnRoute: Hashable {
 public struct StreamingDetailView: View {
     let route: TurnRoute
     @Bindable var viewModel: SessionDetailViewModel
+    @State private var todoDockCollapsed = true
 
     public init(route: TurnRoute, viewModel: SessionDetailViewModel) {
         self.route = route
         self.viewModel = viewModel
+    }
+
+    private var planUpdateText: String? {
+        for item in viewModel.feedItems.reversed() {
+            if case .todo(let event) = item, let text = event.text, !text.isEmpty {
+                return text
+            }
+        }
+        return nil
     }
 
     /// Resolved turn data. We re-derive on every render from the
@@ -152,6 +162,11 @@ public struct StreamingDetailView: View {
                 if stillStreaming {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("detail-bottom", anchor: .bottom) }
                 }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let text = planUpdateText {
+                TodoDockView(text: text, isCollapsed: $todoDockCollapsed)
             }
         }
         .navigationBarTitleDisplayMode(.inline)

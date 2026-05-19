@@ -100,12 +100,12 @@ public struct TodoDockView: View {
             isCollapsed.toggle()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "checklist")
+                Text("TO-DO")
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
-                Text("\(items.count) tasks · \(completedCount) done")
+                Text("·  \(completedCount) / \(items.count)")
                     .font(.caption)
-                    .fontWeight(.medium)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.down")
@@ -150,7 +150,7 @@ public struct TodoDockView: View {
     private func icon(for status: TodoItemStatus) -> String {
         switch status {
         case .completed: "checkmark.circle.fill"
-        case .inProgress: "clock"
+        case .inProgress: "circle.lefthalf.filled"
         case .pending: "circle"
         case .cancelled: "xmark.circle"
         }
@@ -158,8 +158,8 @@ public struct TodoDockView: View {
 
     private func color(for status: TodoItemStatus) -> Color {
         switch status {
-        case .completed: .green
-        case .inProgress: .blue
+        case .completed: Color.amux.sage
+        case .inProgress: Color.amux.cinnabar
         case .pending, .cancelled: .secondary
         }
     }
