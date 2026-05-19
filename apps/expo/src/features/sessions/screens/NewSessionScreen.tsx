@@ -16,24 +16,37 @@ import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
 
 export type NewSessionScreenProps = {
-  onClose: () => void;
-  onCreate: (payload: { firstMessage: string }) => Promise<void> | void;
-  isBusy?: boolean;
+  agents?: ReadonlyArray<{ actorId: string; displayName: string }>;
   errorMessage?: string | null;
+  isBusy?: boolean;
+  onClose: () => void;
+  onCreate: (payload: {
+    firstMessage: string;
+    agentActorId: string | null;
+  }) => Promise<void> | void;
+  selectedAgentActorId?: string | null;
 };
 
 export function NewSessionScreen({
+  agents = [],
+  errorMessage = null,
+  isBusy = false,
   onClose,
   onCreate,
-  isBusy = false,
-  errorMessage = null,
+  selectedAgentActorId,
 }: NewSessionScreenProps) {
   const [firstMessage, setFirstMessage] = useState("");
+  const [pickedAgentId, setPickedAgentId] = useState<string | null>(
+    selectedAgentActorId ?? agents[0]?.actorId ?? null,
+  );
   const canSubmit = firstMessage.trim().length > 0 && !isBusy;
 
   const handleStart = () => {
     if (!canSubmit) return;
-    void onCreate({ firstMessage: firstMessage.trim() });
+    void onCreate({
+      firstMessage: firstMessage.trim(),
+      agentActorId: pickedAgentId,
+    });
   };
 
   return (
@@ -58,11 +71,40 @@ export function NewSessionScreen({
           <View style={styles.section}>
             <SectionEyebrow label="01 · COLLABORATORS" />
             <View style={styles.paperCard}>
-              <Text style={styles.cardTitle}>Add agents and humans</Text>
-              <Text style={styles.cardBody}>
-                Choose who the session is for. Coming in the next sub-spec — for
-                now, the team's first available agent is auto-selected.
-              </Text>
+              <Text style={styles.cardTitle}>Pick an agent</Text>
+              {agents.length === 0 ? (
+                <Text style={styles.cardBody}>
+                  No agents on this team yet — invite one from the Actors tab
+                  to engage the session.
+                </Text>
+              ) : (
+                <View style={styles.agentRow}>
+                  {agents.map((agent) => {
+                    const selected = agent.actorId === pickedAgentId;
+                    return (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        key={agent.actorId}
+                        onPress={() => setPickedAgentId(agent.actorId)}
+                        style={[
+                          styles.agentChip,
+                          selected ? styles.agentChipSelected : null,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.agentChipText,
+                            selected ? styles.agentChipTextSelected : null,
+                          ]}
+                        >
+                          {agent.displayName}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           </View>
 
@@ -173,6 +215,29 @@ const styles = StyleSheet.create({
     padding: 0,
     textAlignVertical: "top",
     ...typography.body,
+  },
+  agentChip: {
+    backgroundColor: colors.pebble,
+    borderRadius: radii.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  agentChipSelected: {
+    backgroundColor: colors.onyx,
+  },
+  agentChipText: {
+    color: colors.basalt,
+    ...typography.body,
+    fontWeight: "600",
+  },
+  agentChipTextSelected: {
+    color: colors.paper,
+  },
+  agentRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    paddingTop: 4,
   },
   paperCard: {
     backgroundColor: colors.paper,

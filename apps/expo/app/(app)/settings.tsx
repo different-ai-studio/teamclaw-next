@@ -1,6 +1,7 @@
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
+import { Alert } from "react-native";
 
 import { useOnboarding } from "../_layout";
 import { SettingsScreen } from "../../src/features/settings/screens/SettingsScreen";
@@ -30,11 +31,24 @@ export default function SettingsRoute() {
   const buildNumber =
     (Constants.expoConfig?.runtimeVersion as string | undefined) ?? "—";
 
-  const handleSignOut = async () => {
-    setIsSigningOut(true);
-    await supabase.auth.signOut();
-    setIsSigningOut(false);
-    router.replace("/");
+  const handleSignOut = () => {
+    Alert.alert(
+      "Sign out",
+      "You'll need to verify your email again next time.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: async () => {
+            setIsSigningOut(true);
+            await supabase.auth.signOut();
+            setIsSigningOut(false);
+            router.replace("/");
+          },
+        },
+      ],
+    );
   };
 
   return (

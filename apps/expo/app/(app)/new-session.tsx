@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
@@ -7,6 +7,8 @@ import { createSessionsApi } from "../../src/features/sessions/session-api";
 import { NewSessionScreen } from "../../src/features/sessions/screens/NewSessionScreen";
 import { supabase } from "../../src/lib/supabase/client";
 import { uuidV4 } from "../../src/lib/uuid";
+
+type AgentChoice = { actorId: string; displayName: string };
 
 function deriveTitle(firstMessage: string): string {
   const trimmed = firstMessage.trim();
@@ -20,13 +22,37 @@ export default function NewSessionRoute() {
   const { state } = useOnboarding();
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [agents, setAgents] = useState<AgentChoice[]>([]);
+
+  useEffect(() => {
+    const teamId = state.currentTeam?.id;
+    if (!teamId) return;
+    let cancelled = false;
+    void createActorsApi(supabase)
+      .listActors(teamId)
+      .then((rows) => {
+        if (cancelled) return;
+        setAgents(
+          rows
+            .filter((row) => row.actorType === "agent")
+            .map((row) => ({ actorId: row.actorId, displayName: row.displayName })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setAgents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.currentTeam?.id]);
 
   return (
     <NewSessionScreen
+      agents={agents}
       errorMessage={errorMessage}
       isBusy={isBusy}
       onClose={() => router.back()}
-      onCreate={async ({ firstMessage }) => {
+      onCreate={async ({ firstMessage, agentActorId }) => {
         if (!state.currentTeam) {
           setErrorMessage("No active team — bootstrap first.");
           return;
@@ -41,14 +67,10 @@ export default function NewSessionRoute() {
         setErrorMessage(null);
         try {
           const sessionsApi = createSessionsApi(supabase);
-          const actorsApi = createActorsApi(supabase);
-          const actors = await actorsApi.listActors(state.currentTeam.id);
-          const primaryAgent = actors.find((actor) => actor.actorType === "agent");
-
           const sessionId = await sessionsApi.createSession({
             title: deriveTitle(firstMessage),
             mode: "agent",
-            primaryAgentId: primaryAgent?.actorId ?? null,
+            primaryAgentId: agentActorId,
           });
 
           if (firstMessage.trim().length > 0) {
