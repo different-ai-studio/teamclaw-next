@@ -1,5 +1,5 @@
-import { Redirect, useRouter } from "expo-router";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
@@ -37,6 +37,13 @@ export default function SessionsIndexRoute() {
 
     void controller.load();
   }, [activeTeamId, controller]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!activeTeamId) return;
+      void controller.refresh();
+    }, [activeTeamId, controller]),
+  );
 
   if (state.route !== "ready") {
     return <Redirect href={href ?? "/"} />;

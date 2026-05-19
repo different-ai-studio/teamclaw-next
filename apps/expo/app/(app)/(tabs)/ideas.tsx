@@ -1,5 +1,5 @@
-import { Redirect, useRouter } from "expo-router";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../_layout";
 import { createIdeasApi } from "../../../src/features/ideas/idea-api";
@@ -31,6 +31,13 @@ export default function IdeasIndexRoute() {
     if (!teamId) return;
     void controller.load();
   }, [controller, teamId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!teamId) return;
+      void controller.refresh();
+    }, [controller, teamId]),
+  );
 
   if (state.route !== "ready") {
     return <Redirect href={href ?? "/"} />;

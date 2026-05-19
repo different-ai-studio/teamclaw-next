@@ -1,5 +1,5 @@
-import { Redirect, useRouter } from "expo-router";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../_layout";
 import { createActorsApi } from "../../../src/features/actors/actor-api";
@@ -31,6 +31,13 @@ export default function ActorsIndexRoute() {
     if (!teamId) return;
     void controller.load();
   }, [controller, teamId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!teamId) return;
+      void controller.refresh();
+    }, [controller, teamId]),
+  );
 
   if (state.route !== "ready") {
     return <Redirect href={href ?? "/"} />;
