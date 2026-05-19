@@ -139,6 +139,19 @@ export default function SessionDetailRoute() {
     [teamActors],
   );
 
+  const headerAvatars = useMemo(() => {
+    if (!detailState.session) return [];
+    const participantIds = new Set(detailState.session.participantActorIds);
+    return teamActors
+      .filter((actor) => participantIds.has(actor.actorId))
+      .slice(0, 3)
+      .map((actor) => ({
+        actorId: actor.actorId,
+        avatarUrl: actor.avatarUrl,
+        initial: actor.displayName.charAt(0).toUpperCase() || "?",
+      }));
+  }, [detailState.session, teamActors]);
+
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: "会话详情" }} />
@@ -187,6 +200,7 @@ export default function SessionDetailRoute() {
           agentChips={agentChips}
           composerText={detailState.composerText}
           connectionState={detailState.connectionState}
+          headerAvatars={headerAvatars}
           isSending={detailState.isSending}
           mentionPool={mentionPool}
           onAttach={() => {

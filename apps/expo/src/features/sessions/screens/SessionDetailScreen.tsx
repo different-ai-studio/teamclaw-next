@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useRef } from "react";
 import {
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -10,7 +11,7 @@ import {
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { StatusDot } from "../../../ui/atoms/StatusDot";
-import { colors, spacing, typography } from "../../../ui/theme";
+import { colors, hai, spacing, typography } from "../../../ui/theme";
 import {
   AgentChipBar,
   type AgentChip,
@@ -46,6 +47,7 @@ type SessionDetailScreenProps = {
   agentChips?: AgentChip[];
   composerText: string;
   connectionState: SessionDetailConnectionState;
+  headerAvatars?: ReadonlyArray<{ actorId: string; avatarUrl?: string | null; initial: string }>;
   isSending: boolean;
   mentionPool?: ReadonlyArray<MentionTarget>;
   onAgentInterrupt?: (agentId: string) => void;
@@ -79,11 +81,13 @@ function connectionDescriptor(
 
 function SessionHeader({
   connectionState,
+  headerAvatars,
   onBack,
   onOpenMembers,
   session,
 }: {
   connectionState: SessionDetailConnectionState;
+  headerAvatars?: ReadonlyArray<{ actorId: string; avatarUrl?: string | null; initial: string }>;
   onBack: () => void;
   onOpenMembers?: () => void;
   session: SessionSummary;
@@ -97,6 +101,26 @@ function SessionHeader({
         <Pressable hitSlop={8} onPress={onBack} style={styles.headerSlot}>
           <Ionicons name="chevron-back" size={26} color={colors.onyx} />
         </Pressable>
+        {headerAvatars && headerAvatars.length > 0 ? (
+          <View style={styles.headerAvatars}>
+            {headerAvatars.slice(0, 3).map((avatar, index) => (
+              <View
+                key={avatar.actorId}
+                style={[styles.headerAvatarTile, { marginLeft: index === 0 ? 0 : -8 }]}
+              >
+                {avatar.avatarUrl ? (
+                  <Image
+                    accessibilityRole="image"
+                    source={{ uri: avatar.avatarUrl }}
+                    style={styles.headerAvatarImage}
+                  />
+                ) : (
+                  <Text style={styles.headerAvatarInitial}>{avatar.initial}</Text>
+                )}
+              </View>
+            ))}
+          </View>
+        ) : null}
         <View style={styles.headerTitleBlock}>
           <Text numberOfLines={1} style={styles.headerTitle}>
             {title}
@@ -129,6 +153,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     agentChips,
     composerText,
     connectionState,
+    headerAvatars,
     isSending,
     mentionPool,
     onAgentInterrupt,
@@ -165,6 +190,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     <View style={styles.screen}>
       <SessionHeader
         connectionState={connectionState}
+        headerAvatars={headerAvatars}
         onBack={onBack}
         onOpenMembers={onOpenMembers}
         session={session}
@@ -298,6 +324,32 @@ const styles = StyleSheet.create({
     color: colors.slate,
     paddingHorizontal: 2,
     ...typography.caption,
+  },
+  headerAvatarImage: {
+    height: "100%",
+    width: "100%",
+  },
+  headerAvatarInitial: {
+    color: hai.paper,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  headerAvatarTile: {
+    alignItems: "center",
+    backgroundColor: hai.basalt,
+    borderColor: colors.mist,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    height: 22,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: 22,
+  },
+  headerAvatars: {
+    alignItems: "center",
+    flexDirection: "row",
+    marginLeft: 4,
+    marginRight: 8,
   },
   headerSlot: {
     alignItems: "center",

@@ -12,6 +12,7 @@ type SessionRowProps = {
   isActive?: boolean;
   isPinned?: boolean;
   session: SessionSummary;
+  onLongPress?: (session: SessionSummary) => void;
   onPress?: (session: SessionSummary) => void;
   unreadCount?: number;
 };
@@ -47,6 +48,7 @@ export function SessionRow({
   isActive = false,
   isPinned = false,
   session,
+  onLongPress,
   onPress,
   unreadCount = 0,
 }: SessionRowProps) {
@@ -59,7 +61,9 @@ export function SessionRow({
   return (
     <Pressable
       accessibilityRole={onPress ? "button" : undefined}
+      delayLongPress={350}
       disabled={!onPress}
+      onLongPress={onLongPress ? () => onLongPress(session) : undefined}
       onPress={() => onPress?.(session)}
       style={({ pressed }) => [
         styles.row,

@@ -55,6 +55,20 @@ export default function SessionsIndexRoute() {
 
   return (
     <SessionsListScreen
+      onArchiveBatch={async (sessionIds) => {
+        const now = new Date().toISOString();
+        for (const id of sessionIds) {
+          try {
+            await supabase
+              .from("sessions")
+              .update({ archived_at: now })
+              .eq("id", id);
+          } catch {
+            // continue
+          }
+        }
+        await controller.refresh();
+      }}
       onLoad={() => {
         void controller.load();
       }}
