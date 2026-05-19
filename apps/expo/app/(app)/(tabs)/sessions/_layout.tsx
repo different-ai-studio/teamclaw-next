@@ -9,6 +9,16 @@ export default function SessionsStackLayout() {
         headerShown: false,
         contentStyle: { backgroundColor: colors.mist },
       }}
-    />
+    >
+      <Stack.Screen name="index" />
+      <Stack.Screen name="[sessionId]" />
+      <Stack.Screen
+        name="new"
+        options={{
+          presentation: "modal",
+          animation: "slide_from_bottom",
+        }}
+      />
+    </Stack>
   );
 }

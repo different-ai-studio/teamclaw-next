@@ -20,8 +20,10 @@ import type { SessionGroup, SessionsListState } from "../session-types";
 
 type SessionsListScreenProps = {
   onLoad: () => void;
+  onNewSession?: () => void;
   onRefresh: () => void;
   onSelectSession: (sessionId: string) => void;
+  onShortcuts?: () => void;
   selectedSessionId?: string | null;
   state: SessionsListState;
 };
@@ -86,18 +88,28 @@ function HeaderBar({
 
 export function SessionsListScreen({
   onLoad,
+  onNewSession,
   onRefresh,
   onSelectSession,
+  onShortcuts,
   selectedSessionId = null,
   state,
 }: SessionsListScreenProps) {
   const [placeholderMessage, setPlaceholderMessage] = useState<string | null>(null);
 
   const handleNewSession = () => {
+    if (onNewSession) {
+      onNewSession();
+      return;
+    }
     setPlaceholderMessage("New session — coming next.");
   };
 
   const handleShortcuts = () => {
+    if (onShortcuts) {
+      onShortcuts();
+      return;
+    }
     setPlaceholderMessage("Shortcuts drawer — coming with the Shortcuts sub-spec.");
   };
 
