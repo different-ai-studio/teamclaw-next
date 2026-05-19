@@ -1024,13 +1024,13 @@ public final class SessionDetailViewModel {
     // rebuilt after bulk operations (fetch, sort, insert-at-zero).
     private var toolUseIndexByToolId: [String: Int] = [:]
     private var permissionIndexByRequestId: [String: Int] = [:]
-    private var planUpdateIndex: Int?
+    private var planUpdateIndexByAgent: [String: Int] = [:]
     private var lastIncompleteOutputIndex: Int?
 
     private func rebuildIndexes() {
         toolUseIndexByToolId.removeAll(keepingCapacity: true)
         permissionIndexByRequestId.removeAll(keepingCapacity: true)
-        planUpdateIndex = nil
+        planUpdateIndexByAgent.removeAll(keepingCapacity: true)
         lastIncompleteOutputIndex = nil
         for (i, e) in events.enumerated() { registerIndex(event: e, at: i) }
     }
@@ -1042,7 +1042,7 @@ public final class SessionDetailViewModel {
         case "permission_request":
             if let id = event.toolId { permissionIndexByRequestId[id] = idx }
         case "plan_update":
-            planUpdateIndex = idx
+            planUpdateIndexByAgent[event.agentId] = idx
         case "output":
             if !event.isComplete { lastIncompleteOutputIndex = idx }
         default:
@@ -1068,7 +1068,9 @@ public final class SessionDetailViewModel {
                 permissionIndexByRequestId.removeValue(forKey: id)
             }
         case "plan_update":
-            if planUpdateIndex == idx { planUpdateIndex = nil }
+            if planUpdateIndexByAgent[removed.agentId] == idx {
+                planUpdateIndexByAgent.removeValue(forKey: removed.agentId)
+            }
         case "output":
             if lastIncompleteOutputIndex == idx { lastIncompleteOutputIndex = nil }
         default: break
@@ -1083,7 +1085,9 @@ public final class SessionDetailViewModel {
         for (k, v) in permissionIndexByRequestId where v > idx {
             permissionIndexByRequestId[k] = v - 1
         }
-        if let t = planUpdateIndex, t > idx { planUpdateIndex = t - 1 }
+        for (agent, v) in planUpdateIndexByAgent where v > idx {
+            planUpdateIndexByAgent[agent] = v - 1
+        }
         if let l = lastIncompleteOutputIndex, l > idx { lastIncompleteOutputIndex = l - 1 }
     }
 
