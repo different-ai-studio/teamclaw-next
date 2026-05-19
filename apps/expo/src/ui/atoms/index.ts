@@ -10,6 +10,7 @@ export {
   SectionEyebrow,
   type SectionEyebrowProps,
 } from "./SectionEyebrow";
+export { SkeletonRow, type SkeletonRowProps } from "./SkeletonRow";
 export {
   StatusDot,
   type StatusDotKind,

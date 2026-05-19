@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
+import { SkeletonRow } from "../../../ui/atoms/SkeletonRow";
 import { PrimaryButton } from "../../../ui/button";
 import { AppCard } from "../../../ui/card";
 import { colors, spacing, typography } from "../../../ui/theme";
@@ -242,12 +242,11 @@ export function SessionsListScreen({
       >
         {headerBar}
         {placeholderMessage ? <Text style={styles.feedback}>{placeholderMessage}</Text> : null}
-        <View style={styles.stateBlock}>
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={colors.slate} />
-            <Text style={styles.stateTitle}>Loading sessions</Text>
-          </View>
-          <Text style={styles.stateBody}>Catching up with the team.</Text>
+        <View>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
         </View>
       </ScrollView>
     );

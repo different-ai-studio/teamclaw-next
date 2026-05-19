@@ -22,6 +22,11 @@ import type { SessionSummary } from "../../sessions/session-types";
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
+import {
+  clearSearchHistory,
+  loadSearchHistory,
+  recordSearchQuery,
+} from "../search-history";
 import { matchesAnyField, matchesQuery } from "../search-matcher";
 
 export type SearchScreenProps = {
@@ -58,11 +63,31 @@ export function SearchScreen({
 }: SearchScreenProps) {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [history, setHistory] = useState<string[]>([]);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(query), 80);
     return () => clearTimeout(handle);
   }, [query]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadSearchHistory().then((rows) => {
+      if (!cancelled) setHistory(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
+    if (trimmed.length < 2) return;
+    const timeout = setTimeout(() => {
+      void recordSearchQuery(trimmed).then((next) => setHistory(next));
+    }, 800);
+    return () => clearTimeout(timeout);
+  }, [debouncedQuery]);
 
   const trimmed = debouncedQuery.trim();
 
@@ -127,6 +152,39 @@ export function SearchScreen({
               <ActivityIndicator color={colors.slate} />
               <Text style={styles.stateBody}>Loading team data…</Text>
             </View>
+          ) : history.length > 0 ? (
+            <>
+              <View style={styles.historyHeader}>
+                <SectionEyebrow label={`RECENT · ${history.length}`} />
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={6}
+                  onPress={() => {
+                    void clearSearchHistory().then(() => setHistory([]));
+                  }}
+                >
+                  <Text style={styles.historyClear}>Clear</Text>
+                </Pressable>
+              </View>
+              <View style={styles.historyList}>
+                {history.map((entry) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    key={entry}
+                    onPress={() => setQuery(entry)}
+                    style={({ pressed }) => [
+                      styles.historyChip,
+                      pressed ? styles.historyChipPressed : null,
+                    ]}
+                  >
+                    <Ionicons color={colors.slate} name="time-outline" size={12} />
+                    <Text numberOfLines={1} style={styles.historyChipText}>
+                      {entry}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
           ) : (
             <>
               <Text style={styles.stateTitle}>Search</Text>
@@ -272,6 +330,39 @@ const styles = StyleSheet.create({
   sectionLabel: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
+  },
+  historyChip: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  historyChipPressed: {
+    opacity: 0.7,
+  },
+  historyChipText: {
+    color: colors.onyx,
+    ...typography.caption,
+  },
+  historyClear: {
+    color: colors.cinnabar,
+    ...typography.caption,
+    fontWeight: "700",
+  },
+  historyHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  historyList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
   },
   stateBlock: {
     gap: spacing.md,
