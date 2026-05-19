@@ -118,34 +118,42 @@ private struct AgentMemberRow: View {
     }
 
     var body: some View {
-        Group {
-            if isInteractive {
-                Menu {
-                    ForEach(row.availableModels, id: \.self) { m in
-                        Button(m) { onChangeModel(m) }
-                    }
-                } label: { rowContent }
-            } else {
-                rowContent
+        rowContent
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { onRemove() } label: { Label("Remove", systemImage: "xmark") }
+                Button { onRestart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
+                    .tint(.orange)
             }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { onRemove() } label: { Label("Remove", systemImage: "xmark") }
-            Button { onRestart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
-                .tint(.orange)
-        }
     }
 
+    // Putting the Menu on the trailing area (vs wrapping the entire row)
+    // avoids gesture conflicts with the List's row tap/swipe handling —
+    // the previous full-row Menu wrapper just no-op'd on tap.
     private var rowContent: some View {
         HStack(spacing: 8) {
             Circle().fill(row.runtimeState.color).frame(width: 8, height: 8)
             Text(row.displayName).fontWeight(.semibold).foregroundStyle(.primary)
             Text(row.agentType).foregroundStyle(.secondary).font(.caption)
             Spacer(minLength: 8)
-            trailingLabel
+            if isInteractive {
+                Menu {
+                    ForEach(row.availableModels, id: \.self) { m in
+                        Button(m) { onChangeModel(m) }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        trailingLabel
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                trailingLabel
+            }
         }
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
     }
 
     @ViewBuilder
