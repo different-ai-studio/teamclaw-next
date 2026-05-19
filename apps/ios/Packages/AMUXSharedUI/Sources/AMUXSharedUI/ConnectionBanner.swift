@@ -27,22 +27,22 @@ public struct ConnectionBanner: View {
             banner(icon: "arrow.triangle.2.circlepath", text: "Reconnecting\u{2026}", color: .yellow)
         case .disconnected:
             Button { onReconnect?() } label: {
-                banner(icon: "bolt.slash.fill", text: "Not Connected \u{00B7} Click to reconnect", color: .red)
+                banner(icon: "bolt.slash.fill", text: "Not connected \u{00B7} Tap to reconnect", color: .red)
             }
             .buttonStyle(.plain)
         }
     }
 
     private func banner(icon: String, text: String, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-            Text(text).font(.subheadline.weight(.medium))
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.caption)
+            Text(text).font(.caption.weight(.medium))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .foregroundStyle(.white)
         .background(color, in: Capsule())
-        .padding(.top, 10)
+        .padding(.top, 8)
     }
 }
 

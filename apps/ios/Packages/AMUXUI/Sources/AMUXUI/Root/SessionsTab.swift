@@ -17,6 +17,7 @@ public struct SessionsTab: View {
     let connectedAgentsStore: ConnectedAgentsStore?
     let actorStore: ActorStore?
     let shortcutsStore: ShortcutsStore?
+    var onReconnect: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -41,7 +42,8 @@ public struct SessionsTab: View {
                 navigationPath: Binding<[String]>,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 actorStore: ActorStore? = nil,
-                shortcutsStore: ShortcutsStore? = nil) {
+                shortcutsStore: ShortcutsStore? = nil,
+                onReconnect: (() -> Void)? = nil) {
         self.mqtt = mqtt
         self.hub = hub
         self.pairing = pairing
@@ -54,6 +56,7 @@ public struct SessionsTab: View {
         self.connectedAgentsStore = connectedAgentsStore
         self.actorStore = actorStore
         self.shortcutsStore = shortcutsStore
+        self.onReconnect = onReconnect
     }
 
     public var body: some View {
@@ -171,6 +174,11 @@ public struct SessionsTab: View {
             (navigationPath.isEmpty && !showShortcuts) ? .visible : .hidden,
             for: .tabBar
         )
+        .overlay(alignment: .top) {
+            if navigationPath.isEmpty {
+                ConnectionBannerOverlay(mqtt: mqtt, onReconnect: onReconnect)
+            }
+        }
     }
 
 }

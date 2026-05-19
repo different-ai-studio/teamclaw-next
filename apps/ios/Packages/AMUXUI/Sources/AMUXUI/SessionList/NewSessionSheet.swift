@@ -437,12 +437,7 @@ public struct NewSessionSheet: View {
             )
         }
 
-        // Auto-mention rule: when there's exactly one agent, address it
-        // implicitly. Multi-agent sessions leave routing to the daemon's
-        // mention-parser.
-        let mentionIDs: [String] = agentConfigs.count == 1
-            ? Array(agentConfigs.keys)
-            : []
+        let mentionIDs: [String] = []
 
         let input = SessionCreationInput(
             sessionID: sessionID,

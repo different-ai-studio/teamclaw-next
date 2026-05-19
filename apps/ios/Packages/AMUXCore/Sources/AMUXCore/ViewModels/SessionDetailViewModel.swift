@@ -315,10 +315,7 @@ public final class SessionDetailViewModel {
                 runtimeState: runtimeStates[$0.actorID] ?? .spawning
             )
         }
-        // Q7=c default selection: lit if exactly one agent, else empty.
-        self.agentChipSelection = (agents.count == 1)
-            ? Set(agents.map(\.actorID))
-            : []
+        self.agentChipSelection = []
     }
 
     /// Toggle the selected state of one chip. Called from the chip-bar tap handler.
@@ -439,18 +436,6 @@ public final class SessionDetailViewModel {
 
         memberSheetHumans = snapshot.humans
         memberSheetAgents = snapshot.agents
-
-        // Auto-light rule (Q7=c, lifted to refreshMemberSheet so the
-        // chip bar's single-source-of-truth `memberSheetAgents` drives
-        // chip selection). If the bar is currently empty AND there's
-        // exactly one agent in the session, pre-engage them so the
-        // first message routes without the user manually @-picking.
-        if !userEditedAgentChipSelection,
-           agentChipSelection.isEmpty,
-           snapshot.agents.count == 1,
-           let only = snapshot.agents.first {
-            agentChipSelection = [only.id]
-        }
 
         // memberSheet now provides runtime_id → actor_id mappings. Live
         // events that arrived before this load may have been stamped with

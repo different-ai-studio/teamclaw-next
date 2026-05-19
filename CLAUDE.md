@@ -10,6 +10,15 @@ For **UI / visual design** work, source-of-truth depends on the platform:
 - **Web / desktop** (`packages/app/`): `AGENTS.md` at the repo root — the
   Editorial Calm direction (paper neutrals, coral accent, Chinese-first type).
 
+## Git Workflow
+
+**Never push directly to `main`.** All changes must go through a Pull Request:
+
+1. Create a feature branch before making any changes
+2. Commit work to the feature branch
+3. Push and open a PR via `gh pr create`
+4. Do not merge or push to `main` directly, even for small fixes
+
 ## Project Overview
 
 TeamClaw is an AI Agent Desktop Platform built with Tauri 2.0 + React 19. Three-column layout chat/collaboration tool with local AI agents, team P2P/OSS sync, and multi-channel gateways.
