@@ -25,9 +25,19 @@ public struct RootTabView: View {
     /// Set when the user taps "Add agent" in the reminder sheet. Triggers the
     /// existing MemberInviteSheet on the Actors tab after the reminder closes.
     @State private var showInviteAfterReminder: Bool = false
-    /// Tracks teams we've already shown the reminder for in this app launch
-    /// so re-entering the team doesn't keep nagging.
-    @State private var remindedTeams: Set<String> = []
+    /// Tracks teams we've already shown the reminder for, persisted across
+    /// launches so the zero-agent nag only fires once per team.
+    @AppStorage("remindedTeamIDs") private var remindedTeamIDsRaw: String = ""
+
+    private var remindedTeams: Set<String> {
+        get { Set(remindedTeamIDsRaw.split(separator: ",").map(String.init)) }
+    }
+
+    private func markTeamReminded(_ teamID: String) {
+        var ids = remindedTeams
+        ids.insert(teamID)
+        remindedTeamIDsRaw = ids.joined(separator: ",")
+    }
 
     public init(mqtt: MQTTService,
                 hub: MQTTMessageHub,
@@ -165,7 +175,7 @@ public struct RootTabView: View {
         do {
             let publicCount = try await repo.teamAgentCount(teamID: team.id)
             let accessibleCount = teamRuntime?.connectedAgentsStore.agents.count ?? 0
-            remindedTeams.insert(team.id)
+            markTeamReminded(team.id)
             if publicCount == 0 && accessibleCount == 0 {
                 showFirstAgentReminder = true
             }
