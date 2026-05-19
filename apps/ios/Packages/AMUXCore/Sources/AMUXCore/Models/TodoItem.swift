@@ -47,6 +47,8 @@ public func parseTodoText(_ text: String) -> [TodoItem] {
 }
 
 private extension String {
+    /// Returns the substring after `prefix`, trimmed of surrounding
+    /// whitespace, or nil if `self` does not start with `prefix`.
     func stripping(prefix: String) -> String? {
         guard hasPrefix(prefix) else { return nil }
         return String(dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
