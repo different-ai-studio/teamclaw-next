@@ -1,8 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +30,61 @@ export default function NewIdeaRoute() {
   const [description, setDescription] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
+  const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!teamId) return;
+    let cancelled = false;
+    void (async () => {
+      const result = (await supabase
+        .from("workspaces")
+        .select("id, name, archived")
+        .eq("team_id", teamId)
+        .order("name", { ascending: true })) as {
+        data: Array<{ id: string; name: string; archived: boolean }> | null;
+        error: { message?: string } | null;
+      };
+      if (cancelled) return;
+      const rows = (result.data ?? []).filter((row) => !row.archived);
+      setWorkspaces(rows.map((row) => ({ id: row.id, name: row.name })));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId]);
+
+  const workspaceLabel =
+    pickedWorkspaceId === null
+      ? "None"
+      : workspaces.find((w) => w.id === pickedWorkspaceId)?.name ?? "—";
+
+  const showWorkspacePicker = () => {
+    const labels = ["None", ...workspaces.map((w) => w.name), "Cancel"];
+    const dispatch = (index: number) => {
+      if (index === 0) setPickedWorkspaceId(null);
+      else if (index > 0 && index <= workspaces.length) {
+        setPickedWorkspaceId(workspaces[index - 1].id);
+      }
+    };
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: labels, cancelButtonIndex: labels.length - 1 },
+        dispatch,
+      );
+      return;
+    }
+    Alert.alert(
+      "Link workspace",
+      undefined,
+      labels.map((label, index) => {
+        if (index === labels.length - 1) {
+          return { text: label, style: "cancel" as const };
+        }
+        return { text: label, onPress: () => dispatch(index) };
+      }),
+    );
+  };
 
   const canCreate =
     !isBusy && Boolean(teamId) && Boolean(memberActorId) && title.trim().length > 0;
@@ -45,6 +103,7 @@ export default function NewIdeaRoute() {
           description: description.trim(),
           status: "open",
           archived: false,
+          workspace_id: pickedWorkspaceId,
         })
         .select("id")
         .single()) as {
@@ -96,6 +155,32 @@ export default function NewIdeaRoute() {
             />
           </View>
         </View>
+
+        {workspaces.length > 0 ? (
+          <View style={styles.section}>
+            <SectionEyebrow label="WORKSPACE" style={styles.sectionEyebrow} />
+            <Pressable
+              accessibilityRole="button"
+              onPress={showWorkspacePicker}
+              style={({ pressed }) => [
+                styles.card,
+                styles.pickerRow,
+                pressed ? styles.pickerRowPressed : null,
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.pickerValue,
+                  pickedWorkspaceId === null ? styles.pickerValueMuted : null,
+                ]}
+              >
+                {workspaceLabel}
+              </Text>
+              <Ionicons color={colors.slate} name="chevron-down" size={14} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <SectionEyebrow label="DESCRIPTION" style={styles.sectionEyebrow} />
@@ -205,6 +290,23 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: colors.onyx,
     ...typography.sectionTitle,
+  },
+  pickerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  pickerRowPressed: {
+    opacity: 0.8,
+  },
+  pickerValue: {
+    color: colors.onyx,
+    flex: 1,
+    ...typography.body,
+  },
+  pickerValueMuted: {
+    color: colors.slate,
   },
   screen: {
     backgroundColor: colors.mist,
