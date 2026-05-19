@@ -14,6 +14,7 @@ import { createSessionsApi } from "../../../../src/features/sessions/session-api
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
 import { impactLight, selectionTick, successTone } from "../../../../src/lib/haptics";
+import { showToast } from "../../../../src/ui/Toast";
 import { supabase } from "../../../../src/lib/supabase/client";
 import { getOptionalMqttUrl } from "../../../../src/lib/mqtt/config";
 import { createExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
@@ -269,9 +270,13 @@ export default function SessionDetailRoute() {
             try {
               await supabase.from("messages").delete().eq("id", messageId);
               successTone();
+              showToast("success", "Message deleted");
               void controller?.load();
-            } catch {
-              // Surface in toast in a future pass.
+            } catch (err) {
+              showToast(
+                "error",
+                err instanceof Error ? err.message : "Couldn't delete message",
+              );
             }
           }}
           onEditMessage={(messageId, currentContent) => {
