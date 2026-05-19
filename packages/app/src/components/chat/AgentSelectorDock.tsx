@@ -28,6 +28,26 @@ interface AgentSelectorDockProps {
 
 type SessionAgent = { id: string; display_name: string }
 
+type FallbackModel = { id: string; displayName: string }
+
+// Mirrors iOS RuntimeResolver.encodedDefaultModels / SessionMemberSheetLoader.fallbackModelIDs.
+// Called when the live runtime hasn't reported availableModels yet so the model
+// picker is usable immediately rather than stuck on "Loading…".
+function fallbackModels(backendType: string | undefined): FallbackModel[] {
+  switch (backendType) {
+    case 'claude':
+    case 'claude_code':
+    case 'opencode':
+      return [
+        { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5' },
+        { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6' },
+        { id: 'claude-opus-4-7', displayName: 'Claude Opus 4.7' },
+      ]
+    default:
+      return []
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Status dot helper
 // ────────────────────────────────────────────────────────────────────────────
@@ -68,6 +88,7 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
 
   const [sessionAgents, setSessionAgents] = React.useState<SessionAgent[]>([])
   const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
+  const [agentToBackendType, setAgentToBackendType] = React.useState<Map<string, string>>(new Map())
   const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
 
   // Load session participants + agent_runtimes mapping when session changes.
@@ -99,17 +120,20 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
       if (cancelled) return
       setSessionAgents((actors ?? []) as SessionAgent[])
 
-      // Fetch agent_runtimes for live RuntimeInfo lookup
+      // Fetch agent_runtimes for live RuntimeInfo + backend_type lookup
       const { data: rtRows } = await supabase
         .from('agent_runtimes')
-        .select('agent_id, runtime_id')
+        .select('agent_id, runtime_id, backend_type')
         .eq('session_id', activeSessionId)
       if (cancelled) return
       const map = new Map<string, string>()
-      for (const r of (rtRows ?? []) as { agent_id: string; runtime_id: string }[]) {
+      const btMap = new Map<string, string>()
+      for (const r of (rtRows ?? []) as { agent_id: string; runtime_id: string; backend_type: string | null }[]) {
         if (r.agent_id && r.runtime_id) map.set(r.agent_id, r.runtime_id)
+        if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
       }
       setAgentToRuntimeId(map)
+      setAgentToBackendType(btMap)
     })()
     return () => { cancelled = true }
   }, [activeSessionId])
@@ -135,23 +159,56 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
     void (async () => {
       const { data: rtRows } = await supabase
         .from('agent_runtimes')
-        .select('agent_id, runtime_id')
+        .select('agent_id, runtime_id, backend_type')
         .eq('session_id', activeSessionId)
       if (cancelled) return
       const map = new Map<string, string>()
-      for (const r of (rtRows ?? []) as { agent_id: string; runtime_id: string }[]) {
+      const btMap = new Map<string, string>()
+      for (const r of (rtRows ?? []) as { agent_id: string; runtime_id: string; backend_type: string | null }[]) {
         if (r.agent_id && r.runtime_id) map.set(r.agent_id, r.runtime_id)
+        if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
       }
       setAgentToRuntimeId(map)
+      setAgentToBackendType(prev => {
+        const next = new Map(prev)
+        btMap.forEach((bt, id) => next.set(id, bt))
+        return next
+      })
     })()
     return () => { cancelled = true }
   }, [engagedAgent, activeSessionId, agentToRuntimeId, retainSignature])
 
+  // When engagedAgent is set but we have no backend_type yet (brand-new session
+  // with no agent_runtimes row), pull backend_type from the agent's most recent
+  // historical runtime — mirrors iOS CachedAgentRuntime lookup in RuntimeResolver.
+  React.useEffect(() => {
+    if (!engagedAgent) return
+    if (agentToBackendType.has(engagedAgent.id)) return
+    let cancelled = false
+    void (async () => {
+      const { data: rows } = await supabase
+        .from('agent_runtimes')
+        .select('backend_type')
+        .eq('agent_id', engagedAgent.id)
+        .not('backend_type', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      if (cancelled) return
+      const bt = (rows as Array<{ backend_type: string | null }>)?.[0]?.backend_type
+      if (bt) {
+        setAgentToBackendType(prev => new Map(prev).set(engagedAgent.id, bt))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [engagedAgent, agentToBackendType])
+
   const engagedRuntimeId = engagedAgent ? agentToRuntimeId.get(engagedAgent.id) : undefined
   const engagedRuntimeInfo = engagedRuntimeId ? runtimeStates[engagedRuntimeId]?.info : undefined
   const { color: dotColor, pulse } = dotClasses(engagedRuntimeInfo)
+  const engagedBackendType = engagedAgent ? agentToBackendType.get(engagedAgent.id) : undefined
 
-  const availableModels = engagedRuntimeInfo?.availableModels ?? []
+  const liveModels = engagedRuntimeInfo?.availableModels ?? []
+  const availableModels = liveModels.length > 0 ? liveModels : fallbackModels(engagedBackendType)
   const currentModel = engagedRuntimeInfo?.currentModel ?? ''
 
   const handlePickModel = React.useCallback(async (modelId: string) => {
@@ -174,7 +231,9 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
   // joins (via picker / Add agent button / @-mention).
   if (sessionAgents.length === 0 && !engagedAgent) return null
 
-  const runtimeInfoLoading = !!engagedAgent && !engagedRuntimeInfo
+  // Only show spinner when we have neither live runtime info nor a backend_type
+  // to derive fallback models from — i.e., a genuinely unknown agent state.
+  const runtimeInfoLoading = !!engagedAgent && !engagedRuntimeInfo && !engagedBackendType
 
   return (
     <div className="flex items-center gap-1">

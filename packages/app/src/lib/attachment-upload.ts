@@ -1,43 +1,42 @@
+/**
+ * attachment-upload.ts — Upload attachments to Supabase Storage before sending.
+ *
+ * Mirrors iOS AttachmentUploadManager: bucket="attachments",
+ * path="{teamId}/{sessionId}/{attachmentId}/{fileName}", signed URL 1 year.
+ */
+
 import { supabase } from "@/lib/supabase-client";
 
-export interface AttachmentRecord {
-  id: string;
-  name: string;
-  mime: string;
+export interface UploadedAttachment {
+  attachmentId: string;
+  fileName: string;
+  signedUrl: string;
+  mimeType: string;
   size: number;
-  path: string;
 }
 
-/**
- * Uploads files to the `attachments` Supabase Storage bucket and returns
- * structured metadata for each uploaded file.
- *
- * Storage path: `<teamId>/<sessionId>/<uuid>-<filename>`
- * Failures are logged and skipped — partial success is acceptable.
- */
-export async function uploadAttachmentsToStorage(
-  files: File[],
-  teamId: string,
-  sessionId: string,
-): Promise<AttachmentRecord[]> {
-  const results: AttachmentRecord[] = [];
+export async function uploadAttachment(
+  file: File,
+  { teamId, sessionId }: { teamId: string; sessionId: string },
+): Promise<UploadedAttachment> {
+  const attachmentId = crypto.randomUUID();
+  const storagePath = `${teamId}/${sessionId}/${attachmentId}/${file.name}`;
 
-  for (const file of files) {
-    const id = crypto.randomUUID();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const path = `${teamId}/${sessionId}/${id}-${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from("attachments")
+    .upload(storagePath, file, { contentType: file.type, upsert: false });
+  if (uploadError) throw uploadError;
 
-    const { error } = await supabase.storage
-      .from("attachments")
-      .upload(path, file, { contentType: file.type });
+  const { data: signedData, error: signError } = await supabase.storage
+    .from("attachments")
+    .createSignedUrl(storagePath, 31_536_000); // 1 year, mirrors iOS
+  if (signError) throw signError;
 
-    if (error) {
-      console.error("[attachment-upload] failed:", file.name, error);
-      continue;
-    }
-
-    results.push({ id, name: file.name, mime: file.type, size: file.size, path });
-  }
-
-  return results;
+  return {
+    attachmentId,
+    fileName: file.name,
+    signedUrl: signedData.signedUrl,
+    mimeType: file.type,
+    size: file.size,
+  };
 }
