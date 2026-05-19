@@ -62,7 +62,8 @@ public struct RootTabView: View {
                             navigationPath: $sessionsPath,
                             connectedAgentsStore: teamRuntime?.connectedAgentsStore,
                             actorStore: teamRuntime?.actorStore,
-                            shortcutsStore: teamRuntime?.shortcutsStore)
+                            shortcutsStore: teamRuntime?.shortcutsStore,
+                            onReconnect: onReconnect)
             }
             Tab(IdeaUIPresentation.pluralTitle, systemImage: IdeaUIPresentation.systemImage, value: AppTab.ideas) {
                 IdeasTab(mqtt: mqtt,
@@ -102,9 +103,6 @@ public struct RootTabView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
-        .overlay(alignment: .top) {
-            ConnectionBannerOverlay(mqtt: mqtt, onReconnect: onReconnect)
-        }
         .task(id: activeTeam?.id) {
             await coordinator?.prepareTeamRuntime(modelContext: modelContext)
             // SessionListVM observes ConnectedAgentsStore directly and fans
