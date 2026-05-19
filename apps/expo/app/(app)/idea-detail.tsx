@@ -166,6 +166,13 @@ export default function IdeaDetailRoute() {
       }}
       onSaveContent={handleSaveContent}
       onSelectSession={(sessionId) => router.replace(`/(app)/sessions/${sessionId}`)}
+      onStartSession={
+        idea
+          ? () => {
+              router.replace(`/(app)/new-session?ideaId=${idea.ideaId}`);
+            }
+          : undefined
+      }
       onToggleStatus={handleToggleStatus}
       relatedSessions={relatedSessions}
     />

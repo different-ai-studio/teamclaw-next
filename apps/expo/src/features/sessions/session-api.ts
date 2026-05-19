@@ -276,6 +276,14 @@ export function createSessionsApi(client: SessionsClient) {
       return sessionId;
     },
 
+    async updateRuntimeModel(runtimeId: string, model: string): Promise<void> {
+      const result = (await client
+        .from("agent_runtimes")
+        .update({ current_model: model, updated_at: new Date().toISOString() })
+        .eq("id", runtimeId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async loadRuntime(sessionId: string): Promise<
       | {
           runtimeId: string;

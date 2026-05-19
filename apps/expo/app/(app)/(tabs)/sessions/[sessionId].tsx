@@ -136,7 +136,7 @@ export default function SessionDetailRoute() {
 
   const [teamActors, setTeamActors] = useState<Actor[]>([]);
   const [runtimeInfo, setRuntimeInfo] = useState<
-    { status: string; currentModel: string | null } | null
+    { runtimeId: string; status: string; currentModel: string | null } | null
   >(null);
 
   useEffect(() => {
@@ -147,7 +147,13 @@ export default function SessionDetailRoute() {
       .then((row) => {
         if (cancelled) return;
         setRuntimeInfo(
-          row ? { status: row.status, currentModel: row.currentModel } : null,
+          row
+            ? {
+                runtimeId: row.runtimeId,
+                status: row.status,
+                currentModel: row.currentModel,
+              }
+            : null,
         );
       })
       .catch(() => {
@@ -287,6 +293,38 @@ export default function SessionDetailRoute() {
               }, 250);
             }
           }}
+          onChangeRuntimeModel={
+            runtimeInfo
+              ? () => {
+                  Alert.prompt(
+                    "Change model",
+                    "Set the model the runtime uses for the next turn (e.g. claude-sonnet-4-6).",
+                    async (next) => {
+                      const trimmed = next?.trim();
+                      if (!trimmed) return;
+                      try {
+                        await createSessionsApi(supabase).updateRuntimeModel(
+                          runtimeInfo.runtimeId,
+                          trimmed,
+                        );
+                        setRuntimeInfo({
+                          ...runtimeInfo,
+                          currentModel: trimmed,
+                        });
+                        showToast("success", `Model set to ${trimmed}`);
+                      } catch (err) {
+                        showToast(
+                          "error",
+                          err instanceof Error ? err.message : "Couldn't update model",
+                        );
+                      }
+                    },
+                    "plain-text",
+                    runtimeInfo.currentModel ?? "",
+                  );
+                }
+              : undefined
+          }
           onClearReply={() => controller?.setReplyTarget(null)}
           onDeleteMessage={async (messageId) => {
             try {

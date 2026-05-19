@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 
 import { useOnboarding } from "../_layout";
@@ -19,6 +19,8 @@ function deriveTitle(firstMessage: string): string {
 
 export default function NewSessionRoute() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ ideaId?: string }>();
+  const ideaId = typeof params.ideaId === "string" ? params.ideaId : null;
   const { state } = useOnboarding();
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -71,6 +73,7 @@ export default function NewSessionRoute() {
             title: deriveTitle(firstMessage),
             mode: "agent",
             primaryAgentId: agentActorId,
+            ideaId,
           });
 
           if (firstMessage.trim().length > 0) {

@@ -27,6 +27,7 @@ export type IdeaDetailScreenProps = {
   onRefresh?: () => void;
   onSaveContent?: (patch: { title: string; description: string }) => Promise<void>;
   onSelectSession?: (sessionId: string) => void;
+  onStartSession?: () => void;
   onToggleStatus?: () => void;
   relatedSessions?: ReadonlyArray<{
     sessionId: string;
@@ -89,6 +90,7 @@ export function IdeaDetailScreen({
   onRefresh,
   onSaveContent,
   onSelectSession,
+  onStartSession,
   onToggleStatus,
   relatedSessions,
 }: IdeaDetailScreenProps) {
@@ -244,6 +246,22 @@ export function IdeaDetailScreen({
               </View>
             ) : null}
 
+            {onStartSession ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={onStartSession}
+                style={({ pressed }) => [
+                  styles.actionButton,
+                  styles.actionStart,
+                  pressed ? styles.actionPressed : null,
+                ]}
+              >
+                <Text style={[styles.actionText, styles.actionStartText]}>
+                  Start a session
+                </Text>
+              </Pressable>
+            ) : null}
+
             {(onToggleStatus || onArchive) ? (
               <View style={styles.actions}>
                 {onToggleStatus ? (
@@ -339,6 +357,13 @@ const styles = StyleSheet.create({
   },
   actionReopen: {
     backgroundColor: hai.pebble,
+  },
+  actionStart: {
+    backgroundColor: hai.cinnabar,
+    marginBottom: spacing.sm,
+  },
+  actionStartText: {
+    color: hai.paper,
   },
   actionReopenText: {
     color: hai.onyx,

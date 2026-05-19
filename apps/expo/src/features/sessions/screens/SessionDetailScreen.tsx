@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   FlatList,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -53,6 +55,7 @@ type SessionDetailScreenProps = {
   connectionState: SessionDetailConnectionState;
   headerAvatars?: ReadonlyArray<{ actorId: string; avatarUrl?: string | null; initial: string }>;
   isSending: boolean;
+  onChangeRuntimeModel?: () => void;
   runtimeInfo?: { status: string; currentModel: string | null } | null;
   mentionPool?: ReadonlyArray<MentionTarget>;
   onAgentInterrupt?: (agentId: string) => void;
@@ -174,6 +177,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onAttach,
     onBack,
     onChangeComposerText,
+    onChangeRuntimeModel,
     onClearReply,
     onDeleteMessage,
     onEditMessage,
@@ -252,12 +256,23 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       />
       <ConnectionBannerOverlay connectionState={connectionState} />
       {runtimeInfo ? (
-        <View style={styles.runtimeBar}>
+        <Pressable
+          accessibilityRole={onChangeRuntimeModel ? "button" : undefined}
+          disabled={!onChangeRuntimeModel}
+          onPress={onChangeRuntimeModel}
+          style={({ pressed }) => [
+            styles.runtimeBar,
+            pressed && onChangeRuntimeModel ? styles.runtimeBarPressed : null,
+          ]}
+        >
           <Text style={styles.runtimeLabel}>
             Runtime · {runtimeInfo.status}
             {runtimeInfo.currentModel ? ` · ${runtimeInfo.currentModel}` : ""}
           </Text>
-        </View>
+          {onChangeRuntimeModel ? (
+            <Ionicons color={colors.slate} name="chevron-down" size={12} />
+          ) : null}
+        </Pressable>
       ) : null}
 
       {state.status === "error" ? (
@@ -410,15 +425,20 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         />
       ) : null}
 
-      <SessionComposerShell
-        composerText={composerText}
-        connectionState={connectionState}
-        isSending={isSending}
-        onAttach={onAttach}
-        onChangeText={onChangeComposerText}
-        onSend={onSend}
-        sendErrorMessage={sendErrorMessage}
-      />
+      <KeyboardAvoidingView
+        behavior={Platform.select({ ios: "padding", android: undefined })}
+        keyboardVerticalOffset={Platform.select({ ios: 8, default: 0 })}
+      >
+        <SessionComposerShell
+          composerText={composerText}
+          connectionState={connectionState}
+          isSending={isSending}
+          onAttach={onAttach}
+          onChangeText={onChangeComposerText}
+          onSend={onSend}
+          sendErrorMessage={sendErrorMessage}
+        />
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -510,9 +530,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   runtimeBar: {
+    alignItems: "center",
     backgroundColor: hai.pebble,
+    flexDirection: "row",
+    gap: 6,
     paddingHorizontal: spacing.lg,
     paddingVertical: 4,
+  },
+  runtimeBarPressed: {
+    opacity: 0.7,
   },
   runtimeLabel: {
     color: colors.basalt,
