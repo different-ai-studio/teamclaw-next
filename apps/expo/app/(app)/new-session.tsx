@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 
-import { NewSessionScreen } from "../../../../src/features/sessions/screens/NewSessionScreen";
+import { NewSessionScreen } from "../../src/features/sessions/screens/NewSessionScreen";
 
 /**
  * Modal route for "New session". Stub today: collects a first message, then

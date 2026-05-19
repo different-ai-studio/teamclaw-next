@@ -6,7 +6,18 @@ import { colors } from "../../src/ui/theme";
 export default function AppLayout() {
   return (
     <View style={styles.layout}>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="home" />
+        <Stack.Screen
+          name="new-session"
+          options={{
+            presentation: "modal",
+            animation: "slide_from_bottom",
+            contentStyle: { backgroundColor: colors.mist },
+          }}
+        />
+      </Stack>
     </View>
   );
 }

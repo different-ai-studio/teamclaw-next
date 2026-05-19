@@ -52,7 +52,7 @@ export default function SessionsIndexRoute() {
         void controller.load();
       }}
       onNewSession={() => {
-        router.push("/(app)/sessions/new");
+        router.push("/(app)/new-session");
       }}
       onRefresh={() => {
         void controller.refresh();
