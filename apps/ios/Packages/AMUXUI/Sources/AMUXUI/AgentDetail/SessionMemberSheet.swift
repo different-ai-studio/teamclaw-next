@@ -101,62 +101,90 @@ private struct AgentMemberRow: View {
     let onRestart: () -> Void
     let onChangeModel: (String) -> Void
     let onRemove: () -> Void
+    @State private var isModelPickerPresented = false
 
     /// Whether tapping the row should open agent settings (model picker
-    /// today, future expansion later). Disabled while spawning since
-    /// nothing is configurable yet — and during stopped/error since the
-    /// runtime can't accept a model change in those states.
+    /// today, future expansion later). Allowed during .spawning as long
+    /// as availableModels has been surfaced — daemon's handle_set_model
+    /// forwards to ACP regardless of runtime status, and the model name
+    /// is already visible to the user via the MQTT-overlay path, so
+    /// blocking the picker just because the chip is still gray confuses
+    /// the affordance. stopped/error stay disabled (no live ACP to talk to).
     private var isInteractive: Bool {
         switch row.runtimeState {
         case .ready, .idle, .active: return true
-        case .spawning, .stopped, .error: return false
+        case .spawning: return !row.availableModels.isEmpty
+        case .stopped, .error: return false
         }
     }
 
     var body: some View {
-        Group {
-            if isInteractive {
-                Menu {
-                    ForEach(row.availableModels, id: \.self) { m in
-                        Button(m) { onChangeModel(m) }
-                    }
-                } label: { rowContent }
-            } else {
-                rowContent
+        rowContent
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { onRemove() } label: { Label("Remove", systemImage: "xmark") }
+                Button { onRestart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
+                    .tint(.orange)
             }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { onRemove() } label: { Label("Remove", systemImage: "xmark") }
-            Button { onRestart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
-                .tint(.orange)
-        }
     }
 
+    // Putting the Menu on the trailing area (vs wrapping the entire row)
+    // avoids gesture conflicts with the List's row tap/swipe handling —
+    // the previous full-row Menu wrapper just no-op'd on tap.
     private var rowContent: some View {
         HStack(spacing: 8) {
             Circle().fill(row.runtimeState.color).frame(width: 8, height: 8)
             Text(row.displayName).fontWeight(.semibold).foregroundStyle(.primary)
             Text(row.agentType).foregroundStyle(.secondary).font(.caption)
             Spacer(minLength: 8)
-            trailingLabel
+            if isInteractive {
+                Button {
+                    isModelPickerPresented = true
+                } label: {
+                    HStack(spacing: 4) {
+                        trailingLabel
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .confirmationDialog(
+                    "Select model",
+                    isPresented: $isModelPickerPresented,
+                    titleVisibility: .visible
+                ) {
+                    ForEach(row.availableModels, id: \.self) { m in
+                        Button(m) { onChangeModel(m) }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+            } else {
+                trailingLabel
+            }
         }
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private var trailingLabel: some View {
-        // While the runtime is still spawning, the model hasn't been
-        // applied yet — showing "default" reads as a misleading model
-        // pick. Surface a small spinner instead so the row's status
-        // matches the chip dot. Once the runtime's running, fall back
-        // to the model picker menu.
-        switch row.runtimeState {
-        case .spawning:
+        // Daemon writes `current_model` into the initial agent_runtimes
+        // upsert (manager.rs awaits initial_model_rx before the row
+        // write) — so the model is known well before Supabase status
+        // flips off "starting". Show it whenever we have it; the chip
+        // dot color already communicates the spawning state. Only fall
+        // through to spinner / "default" when we genuinely have no
+        // model id yet (very early window, or MQTT-only path that hasn't
+        // surfaced currentModel yet).
+        if let model = row.currentModel, !model.isEmpty {
+            Text(model)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        } else if row.runtimeState == .spawning {
             ProgressView()
                 .controlSize(.small)
-        default:
-            Text(row.currentModel ?? "default")
+        } else {
+            Text("default")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
