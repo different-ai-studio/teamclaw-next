@@ -12,6 +12,23 @@ use crate::runtime::turn_aggregator::TurnAggregator;
 use crate::supabase::{AgentRuntimeUpsert, SupabaseClient};
 use chrono::Utc;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLaunchConfig {
+    pub binary: String,
+    pub args: Vec<String>,
+    pub backend_type: &'static str,
+}
+
+impl AgentLaunchConfig {
+    pub fn new(binary: impl Into<String>, args: Vec<String>, backend_type: &'static str) -> Self {
+        Self {
+            binary: binary.into(),
+            args,
+            backend_type,
+        }
+    }
+}
+
 /// Per-agent runtime state checked out of `RuntimeManager` for the duration
 /// of a single gateway turn. Owning the receiver here lets the turn-await
 /// loop sit on `event_rx.recv().await` without holding the global manager
@@ -38,9 +55,10 @@ fn sanitize_for_filename(s: &str) -> String {
 /// `acp_session_id` hex) so the same file is reused if the runtime is
 /// re-spawned under the same logical id (e.g. after `/reset`).
 pub fn gateway_mcp_config_path(logical_session_id: &str) -> PathBuf {
-    DaemonConfig::config_dir()
-        .join("mcp-configs")
-        .join(format!("{}.json", sanitize_for_filename(logical_session_id)))
+    DaemonConfig::config_dir().join("mcp-configs").join(format!(
+        "{}.json",
+        sanitize_for_filename(logical_session_id)
+    ))
 }
 
 /// Write the per-session MCP config that points claude-code at
@@ -65,9 +83,8 @@ fn write_gateway_mcp_config(
             ))
         })?;
     }
-    let amuxd_bin = std::env::current_exe().map_err(|e| {
-        crate::error::AmuxError::Agent(format!("current_exe(): {e}"))
-    })?;
+    let amuxd_bin = std::env::current_exe()
+        .map_err(|e| crate::error::AmuxError::Agent(format!("current_exe(): {e}")))?;
     let sock = DaemonConfig::sock_path();
     let cfg = serde_json::json!({
         "mcpServers": {
@@ -111,7 +128,7 @@ pub fn model_id_for_short_name(short: &str) -> Option<String> {
 pub struct RuntimeManager {
     agents: HashMap<String, RuntimeHandle>,
     pub aggregators: std::collections::HashMap<String, TurnAggregator>,
-    claude_binary: String,
+    launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
     /// Tracks the model id currently applied to each agent's ACP session.
     /// Populated on spawn (after the adapter sends the initial set_model)
     /// and updated whenever set_current_model is called. The adapter is
@@ -130,17 +147,39 @@ pub struct RuntimeManager {
 }
 
 impl RuntimeManager {
-    pub fn new(binary: String, _flags: Vec<String>, supabase: Option<SupabaseClient>) -> Self {
+    pub fn new(
+        launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
+        supabase: Option<SupabaseClient>,
+    ) -> Self {
         Self {
             agents: HashMap::new(),
             aggregators: std::collections::HashMap::new(),
-            claude_binary: binary,
+            launch_configs,
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
             supabase,
             #[cfg(test)]
             last_sent: HashMap::new(),
         }
+    }
+
+    pub fn default_launch_configs() -> HashMap<amux::AgentType, AgentLaunchConfig> {
+        HashMap::from([(
+            amux::AgentType::ClaudeCode,
+            AgentLaunchConfig::new("claude", Vec::new(), "claude"),
+        )])
+    }
+
+    pub fn launch_config_for(&self, agent_type: amux::AgentType) -> AgentLaunchConfig {
+        self.launch_configs
+            .get(&agent_type)
+            .cloned()
+            .or_else(|| {
+                self.launch_configs
+                    .get(&amux::AgentType::ClaudeCode)
+                    .cloned()
+            })
+            .unwrap_or_else(|| AgentLaunchConfig::new("claude", Vec::new(), "claude"))
     }
 
     /// Records the latest slash-command list for an agent. Callers feed
@@ -229,8 +268,10 @@ impl RuntimeManager {
             tokio::sync::oneshot::channel::<Option<String>>();
         let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel::<String>();
 
+        let launch = self.launch_config_for(agent_type);
         let cmd_tx = adapter::spawn_acp_agent(
-            self.claude_binary.clone(),
+            launch.binary.clone(),
+            launch.args.clone(),
             worktree.to_string(),
             prompt.to_string(),
             agent_type,
@@ -277,7 +318,7 @@ impl RuntimeManager {
                 agent_id: &sb.config().actor_id,
                 session_id: supabase_session_id,
                 workspace_id: supabase_workspace_id,
-                backend_type: "claude",
+                backend_type: launch.backend_type,
                 backend_session_id: if acp_sid.is_empty() {
                     None
                 } else {
@@ -328,8 +369,10 @@ impl RuntimeManager {
             tokio::sync::oneshot::channel::<Option<String>>();
         let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel::<String>();
 
+        let launch = self.launch_config_for(agent_type);
         let cmd_tx = adapter::spawn_acp_agent(
-            self.claude_binary.clone(),
+            launch.binary.clone(),
+            launch.args.clone(),
             worktree.to_string(),
             prompt.to_string(),
             agent_type,
@@ -371,7 +414,7 @@ impl RuntimeManager {
                 agent_id: &sb.config().actor_id,
                 session_id: supabase_session_id,
                 workspace_id: supabase_workspace_id,
-                backend_type: "claude",
+                backend_type: launch.backend_type,
                 backend_session_id: if new_acp_sid.is_empty() {
                     None
                 } else {
@@ -433,7 +476,11 @@ impl RuntimeManager {
     }
 
     /// Inner helper: send the given body to ACP without any prefix logic.
-    pub async fn send_prompt_raw(&mut self, agent_id: &str, text: &str) -> crate::error::Result<()> {
+    pub async fn send_prompt_raw(
+        &mut self,
+        agent_id: &str,
+        text: &str,
+    ) -> crate::error::Result<()> {
         #[cfg(test)]
         {
             self.last_sent
@@ -639,9 +686,7 @@ impl RuntimeManager {
                 ))
             })?;
         let handle = self.agents.get_mut(&agent_id).ok_or_else(|| {
-            crate::error::AmuxError::Agent(format!(
-                "agent {agent_id} disappeared during checkout"
-            ))
+            crate::error::AmuxError::Agent(format!("agent {agent_id} disappeared during checkout"))
         })?;
         let event_rx = handle.event_rx.take().ok_or_else(|| {
             crate::error::AmuxError::Agent(format!(
@@ -649,10 +694,7 @@ impl RuntimeManager {
             ))
         })?;
         let turn_lock = handle.turn_lock.clone();
-        Ok((
-            CheckedOutTurn { agent_id, event_rx },
-            turn_lock,
-        ))
+        Ok((CheckedOutTurn { agent_id, event_rx }, turn_lock))
     }
 
     /// Hand the per-agent `event_rx` back so daemon `poll_events` resumes
@@ -897,14 +939,11 @@ impl RuntimeManager {
         // Drive the per-runtime aggregator off the agent's event channel
         // until an `AgentReply` is emitted at Active→Idle. Hard cap so a
         // wedged backend can't pin a gateway worker forever.
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
 
         loop {
             if std::time::Instant::now() >= deadline {
-                return Err(crate::error::AmuxError::Agent(
-                    "ACP turn timed out".into(),
-                ));
+                return Err(crate::error::AmuxError::Agent("ACP turn timed out".into()));
             }
 
             // Wait for at least one event before draining.
@@ -936,9 +975,7 @@ impl RuntimeManager {
                     ));
                 }
                 Err(_) => {
-                    return Err(crate::error::AmuxError::Agent(
-                        "ACP turn timed out".into(),
-                    ));
+                    return Err(crate::error::AmuxError::Agent("ACP turn timed out".into()));
                 }
             };
 
@@ -951,10 +988,7 @@ impl RuntimeManager {
                 .unwrap_or_default();
 
             for m in emitted {
-                if matches!(
-                    m.kind,
-                    crate::proto::teamclaw::MessageKind::AgentReply
-                ) {
+                if matches!(m.kind, crate::proto::teamclaw::MessageKind::AgentReply) {
                     return Ok(m.content);
                 }
             }
@@ -977,9 +1011,13 @@ impl RuntimeManager {
 
 #[cfg(test)]
 impl RuntimeManager {
+    fn test_launch_configs() -> HashMap<amux::AgentType, AgentLaunchConfig> {
+        Self::default_launch_configs()
+    }
+
     /// Build a manager with a single dummy runtime pre-inserted, for tests.
     pub fn test_dummy_with_runtime(runtime_id: &str) -> Self {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(Self::test_launch_configs(), None);
         let mut h = super::handle::RuntimeHandle::test_dummy();
         h.agent_id = runtime_id.to_string();
         mgr.agents.insert(runtime_id.to_string(), h);
@@ -1007,7 +1045,7 @@ mod tests {
 
     #[test]
     fn set_current_model_records_value() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.set_current_model("agent-1", "claude-sonnet-4-6");
         assert_eq!(
             mgr.current_model("agent-1").map(|s| s.as_str()),
@@ -1017,13 +1055,28 @@ mod tests {
 
     #[test]
     fn current_model_returns_none_for_unknown_agent() {
-        let mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         assert_eq!(mgr.current_model("agent-1"), None);
     }
 
     #[test]
+    fn launch_config_for_opencode_uses_registered_backend() {
+        let mut configs = RuntimeManager::test_launch_configs();
+        configs.insert(
+            amux::AgentType::Opencode,
+            AgentLaunchConfig::new("opencode", vec!["acp".to_string()], "opencode"),
+        );
+        let mgr = RuntimeManager::new(configs, None);
+
+        assert_eq!(
+            mgr.launch_config_for(amux::AgentType::Opencode),
+            AgentLaunchConfig::new("opencode", vec!["acp".to_string()], "opencode")
+        );
+    }
+
+    #[test]
     fn running_agent_id_for_collab_session_ignores_stopped_agents() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         let mut stopped = RuntimeHandle::new(
             "stopped-1".to_string(),
             amux::AgentType::ClaudeCode,
@@ -1055,7 +1108,7 @@ mod tests {
 
     #[test]
     fn find_active_runtime_for_matches_full_tuple() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         let mut h = RuntimeHandle::new(
             "rt-1".to_string(),
             amux::AgentType::ClaudeCode,
@@ -1088,7 +1141,7 @@ mod tests {
         // Empty session_id is the bare-agent / test spawn sentinel. Two
         // such spawns must NOT dedupe into the first one — they're
         // explicit fresh runtimes.
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         let mut h = RuntimeHandle::new(
             "rt-bare".to_string(),
             amux::AgentType::ClaudeCode,
@@ -1133,7 +1186,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_prompt_returns_err_for_missing_runtime() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         let result = mgr.send_prompt("nonexistent", "hello").await;
         assert!(result.is_err());
     }
@@ -1142,7 +1195,7 @@ mod tests {
 
     #[test]
     fn runtime_ids_for_session_filters_by_session() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.add_test_runtime("rt1", "agent_A", "session_S");
         mgr.add_test_runtime("rt2", "agent_B", "session_S");
         mgr.add_test_runtime("rt3", "agent_C", "session_OTHER");
@@ -1156,7 +1209,7 @@ mod tests {
 
     #[test]
     fn agent_id_of_returns_handle_agent_id() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.add_test_runtime("rt1", "agent_X", "session_S");
         assert_eq!(mgr.agent_id_of("rt1").as_deref(), Some("agent_X"));
         assert_eq!(mgr.agent_id_of("missing"), None);
@@ -1164,7 +1217,7 @@ mod tests {
 
     #[test]
     fn supabase_runtime_row_id_returns_none_when_unset() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.add_test_runtime("rt1", "agent_X", "session_S");
         // supabase_runtime_row_id defaults to None until Task 9 wires it.
         assert_eq!(mgr.supabase_runtime_row_id("rt1"), None);
@@ -1173,7 +1226,7 @@ mod tests {
     /// Simulate the "mentioned" branch: send_prompt is called with the message content.
     #[tokio::test]
     async fn route_mentioned_sends_prompt() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.add_test_runtime("rt1", "agent_X", "session_S");
 
         // Simulates the mentioned path: directly call send_prompt (as route_session_message does).
@@ -1194,7 +1247,7 @@ mod tests {
     /// Simulate the "not mentioned" branch: message is queued as pending_silent.
     #[tokio::test]
     async fn route_not_mentioned_queues_silent() {
-        let mut mgr = RuntimeManager::new("claude".to_string(), vec![], None);
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.add_test_runtime("rt1", "agent_X", "session_S");
 
         let mention_actor_ids: Vec<String> = vec!["agent_OTHER".to_string()];

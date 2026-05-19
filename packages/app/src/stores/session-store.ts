@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type { Message } from "@/lib/proto/teamclaw_pb";
 import { useSessionListStore } from "./session-list-store";
+import { createLoaderActions } from "./session-loader";
+import { createMessageActions } from "./session-messages";
 
 // ────────────────────────────────────────────────────────────────────
 // v2 Phase 1 compat shim.
@@ -173,17 +175,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setConnected: (v: boolean) => set({ isConnected: v }),
   setInactivityWarning: (v: Compat) => set({ inactivityWarning: v }),
 
+  // Re-enable the legacy chat/session pipeline on top of the v2 compat shim.
+  ...createLoaderActions(set as never, get as never),
+  ...createMessageActions(set as never, get as never),
+
   // ── Phase 1E compat: pure stubs (no v2 implementation yet) ───────
   archiveSession: stubAsync("archiveSession"),
   updateSessionTitle: stubAsync("updateSessionTitle"),
-  loadMoreSessions: stubAsync("loadMoreSessions"),
-  loadArchivedSessions: stubAsync("loadArchivedSessions"),
-  openArchivedSession: stubAsync("openArchivedSession"),
-  closeArchivedSession: stub("closeArchivedSession"),
-  restoreSession: stubAsync("restoreSession"),
-  abortSession: stubAsync("abortSession"),
-  sendMessage: stubAsync("sendMessage"),
-  removeFromQueue: stub("removeFromQueue"),
   pollPermissions: stubAsync("pollPermissions"),
   replyPermission: stubAsync("replyPermission"),
   answerQuestion: stubAsync("answerQuestion"),

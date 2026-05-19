@@ -1,15 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
-// Permissive proxy until the amuxd daemon client is wired up;
-// chat send/messages are non-functional.
-// TODO(amuxd): wire to daemon
-const getAgentClient: () => any = () =>
-  new Proxy({}, {
-    get() {
-      return () => {
-        throw new Error('Agent client not wired to amuxd daemon yet');
-      };
-    },
-  });
+import { create as createProtoMessage, toBinary } from "@bufbuild/protobuf";
+import { mqttPublish } from "@/lib/mqtt-bridge";
+import {
+  LiveEventEnvelopeSchema,
+  MessageKind,
+  MessageSchema,
+  SessionMessageEnvelopeSchema,
+} from "@/lib/proto/teamclaw_pb";
+import { supabase } from "@/lib/supabase-client";
+import { resolveCurrentMemberActorId } from "@/lib/current-actor";
+import { getOpenCodeClient, isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
+import { useAuthStore } from "@/stores/auth-store";
+import { useCurrentTeamStore } from "@/stores/current-team";
+import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
+import { useSessionListStore } from "@/stores/session-list-store";
+const getAgentClient: () => any = () => getOpenCodeClient();
 import type { SendMessageFilePart, SessionErrorEvent } from "./session-types";
 import type {
   Message,
@@ -36,6 +41,7 @@ import { trackEvent } from "@/stores/telemetry";
 const syncSetSessionId = (_id: string | null) => {};
 import { insertMessageSorted } from "@/lib/insert-message-sorted";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
 import {
   resolvePendingPermissionActivityOwner,
   resolvePendingQuestionActivityOwner,
@@ -74,7 +80,214 @@ function appendSystemPrompt(basePrompt: string | undefined, extraPrompt: string)
   return basePrompt ? `${basePrompt}\n\n---\n\n${extraPrompt}` : extraPrompt;
 }
 
+async function resolveMentionActorIdsForSession(
+  sessionId: string,
+  engagedAgentId: string | null,
+): Promise<string[]> {
+  if (engagedAgentId) return [engagedAgentId];
+
+  const { data: participants, error: participantError } = await supabase
+    .from("session_participants")
+    .select("actor_id")
+    .eq("session_id", sessionId);
+  if (participantError) {
+    console.warn("[SendMessage] failed to load session participants:", participantError);
+    return [];
+  }
+
+  const actorIds = (participants ?? []).map((row: { actor_id: string }) => row.actor_id);
+  if (actorIds.length === 0) return [];
+
+  const { data: agents, error: agentError } = await supabase
+    .from("actor_directory")
+    .select("id")
+    .in("id", actorIds)
+    .in("actor_type", [...AGENT_ACTOR_TYPES]);
+  if (agentError) {
+    console.warn("[SendMessage] failed to resolve session agents:", agentError);
+    return [];
+  }
+
+  return (agents ?? []).length === 1
+    ? [(agents![0] as { id: string }).id]
+    : [];
+}
+
 export function createMessageActions(set: SessionSet, get: SessionGet) {
+  async function ensureDaemonSessionForSend(content: string): Promise<string | null> {
+    const existing = get().activeSessionId;
+    if (existing) return existing;
+
+    const authSession = useAuthStore.getState().session;
+    const currentTeam = useCurrentTeamStore.getState().team;
+    const currentMember = useCurrentTeamStore.getState().currentMember;
+    if (!authSession || !currentTeam?.id) return null;
+
+    const creatorActorId = await resolveCurrentMemberActorId(
+      currentTeam.id,
+      authSession.user.id,
+      {
+        currentTeamId: currentTeam.id,
+        currentMemberId: currentMember?.id ?? null,
+      },
+    );
+    if (!creatorActorId) {
+      throw new Error(`No member actor found for team ${currentTeam.id}`);
+    }
+
+    const { data: agentRows, error: agentError } = await supabase
+      .from("actor_directory")
+      .select("id, display_name")
+      .eq("team_id", currentTeam.id)
+      .eq("actor_type", "agent")
+      .limit(2);
+    if (agentError) {
+      throw new Error(`Failed to load team agents: ${agentError.message}`);
+    }
+
+    const soleAgent =
+      (agentRows ?? []).length === 1
+        ? (agentRows?.[0] as { id: string; display_name: string | null })
+        : null;
+
+    const { createSessionShell, startAgentRuntimesAsync } = await import("@/lib/session-create");
+    const { sessionId } = await createSessionShell({
+      teamId: currentTeam.id,
+      creatorActorId,
+      title: content.trim().slice(0, 80) || "New chat",
+      additionalActorIds: soleAgent ? [soleAgent.id] : [],
+    });
+
+    await useSessionListStore.getState().load();
+    set({
+      activeSessionId: sessionId,
+      currentSessionId: sessionId,
+      isLoading: false,
+    } as Partial<SessionState>);
+
+    if (soleAgent) {
+      useEngagedAgentStore.getState().setEngagedAgent(sessionId, {
+        id: soleAgent.id,
+        displayName: soleAgent.display_name || "AI",
+      });
+      void startAgentRuntimesAsync({
+        sessionId,
+        teamId: currentTeam.id,
+        agentActorIds: [soleAgent.id],
+      });
+    }
+
+    return sessionId;
+  }
+
+  async function sendViaDaemon(
+    sessionId: string,
+    content: string,
+    userMessage: Message,
+  ): Promise<void> {
+    const authSession = useAuthStore.getState().session;
+    if (!authSession) throw new Error("No authenticated user session");
+
+    let teamId =
+      useSessionListStore.getState().rows.find((row) => row.id === sessionId)?.team_id ?? null;
+    if (!teamId) {
+      const { data: sessionRow, error: sessionError } = await supabase
+        .from("sessions")
+        .select("team_id")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (sessionError) {
+        throw new Error(`Failed to resolve session team: ${sessionError.message}`);
+      }
+      teamId = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
+    }
+    if (!teamId) throw new Error(`No team_id found for session ${sessionId}`);
+
+    const currentTeam = useCurrentTeamStore.getState().team;
+    const currentMember = useCurrentTeamStore.getState().currentMember;
+    const senderActorId = await resolveCurrentMemberActorId(
+      teamId,
+      authSession.user.id,
+      {
+        currentTeamId: currentTeam?.id ?? null,
+        currentMemberId: currentMember?.id ?? null,
+      },
+    );
+    if (!senderActorId) {
+      throw new Error(`No actor found for user in team ${teamId}`);
+    }
+
+    const engagedAgent = useEngagedAgentStore.getState().get(sessionId);
+    const mentionActorIds = await resolveMentionActorIdsForSession(
+      sessionId,
+      engagedAgent?.id ?? null,
+    );
+    const messageId = crypto.randomUUID();
+    const createdAt = BigInt(Math.floor(Date.now() / 1000));
+
+    const protoMessage = createProtoMessage(MessageSchema, {
+      messageId,
+      sessionId,
+      senderActorId,
+      kind: MessageKind.TEXT,
+      content,
+      createdAt,
+    });
+    const sessionEnvelope = createProtoMessage(SessionMessageEnvelopeSchema, {
+      message: protoMessage,
+      mentionActorIds,
+    });
+    const liveEnvelope = createProtoMessage(LiveEventEnvelopeSchema, {
+      eventId: crypto.randomUUID(),
+      eventType: "message.created",
+      sessionId,
+      actorId: senderActorId,
+      sentAt: createdAt,
+      body: toBinary(SessionMessageEnvelopeSchema, sessionEnvelope),
+    });
+
+    const { error: insertError } = await supabase.from("messages").insert({
+      id: messageId,
+      team_id: teamId,
+      session_id: sessionId,
+      sender_actor_id: senderActorId,
+      kind: "text",
+      content,
+      metadata: { mention_actor_ids: mentionActorIds },
+    });
+    if (insertError) {
+      throw new Error(`Failed to persist message: ${insertError.message}`);
+    }
+
+    await mqttPublish(
+      `amux/${teamId}/session/${sessionId}/live`,
+      toBinary(LiveEventEnvelopeSchema, liveEnvelope),
+      false,
+    );
+
+    (get() as any).appendMessage(sessionId, protoMessage);
+    set((state) => {
+      const newSessions = state.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              messages: insertMessageSorted(session.messages, userMessage),
+              title:
+                session.messages.length === 0
+                  ? content.slice(0, 50) + (content.length > 50 ? "..." : "")
+                  : session.title,
+              updatedAt: new Date(),
+            }
+          : session,
+      );
+      updateSessionCache(newSessions);
+      return {
+        sessions: newSessions,
+        sessionError: null,
+      };
+    });
+  }
+
   return {
     // RAG V2: Auto-inject knowledge from pre-inference search
     autoInjectKnowledge: async (userMessage: string): Promise<{ context?: string; chunks?: SearchResult[] }> => {
@@ -151,7 +364,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     sendMessage: async (content: string, agent?: string, imageParts?: SendMessageFilePart[]) => {
       if (!content.trim() && (!imageParts || imageParts.length === 0)) return;
 
-      let { activeSessionId } = get();
+      let activeSessionId = await ensureDaemonSessionForSend(content);
       const { streamingMessageId } = useStreamingStore.getState();
 
       // Auto-create a session if there isn't one
@@ -207,6 +420,19 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
         parts: [{ id: `part-${now}`, type: "text", content: content.trim() }],
         timestamp: userMessageTimestamp,
       };
+
+      if (!isOpenCodeSessionId(activeSessionId)) {
+        try {
+          await sendViaDaemon(activeSessionId, content.trim(), userMessage);
+        } catch (error) {
+          set({
+            error:
+              error instanceof Error ? error.message : "Failed to send message",
+            errorSessionId: activeSessionId,
+          });
+        }
+        return;
+      }
 
       // If the session is already in retry, don't create a pending assistant
       if (sessionStatus?.type === 'retry') {

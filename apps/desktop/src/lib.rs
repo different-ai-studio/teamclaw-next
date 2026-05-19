@@ -378,6 +378,7 @@ pub fn run() {
             commands::gateway::load_channel_config,
             commands::gateway::save_channel_config,
             commands::gateway::reload_channels,
+            commands::gateway::sync_gateway_session_model,
             commands::gateway::load_shortcuts,
             commands::gateway::save_shortcuts,
             commands::gateway::load_system_prompt,

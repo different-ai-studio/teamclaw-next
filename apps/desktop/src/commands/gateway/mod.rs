@@ -138,6 +138,36 @@ pub async fn reload_channels() -> Result<(), String> {
     Ok(())
 }
 
+/// Persist a per-session model preference for gateway-backed chats.
+/// The mapping is keyed by the logical session id used by the desktop UI.
+#[tauri::command]
+pub async fn sync_gateway_session_model(
+    session_id: String,
+    model: Option<String>,
+    gateway_state: State<'_, GatewayState>,
+) -> Result<bool, String> {
+    if session_id.trim().is_empty() {
+        return Ok(false);
+    }
+
+    match model {
+        Some(model_key) if !model_key.trim().is_empty() => {
+            gateway_state
+                .shared_session_mapping
+                .set_model(session_id, model_key)
+                .await;
+        }
+        _ => {
+            gateway_state
+                .shared_session_mapping
+                .remove_model(&session_id)
+                .await;
+        }
+    }
+
+    Ok(true)
+}
+
 // ─── Workspace teamclaw.json helpers (not channel-specific) ───────────────────
 //
 // These four commands manage non-channel fields of the workspace-level

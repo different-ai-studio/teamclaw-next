@@ -18,7 +18,8 @@ import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncParticipantsForSession } from '@/lib/sync/session-participant-sync'
 import { cn } from '@/lib/utils'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
+import { RuntimeLifecycle, AgentStatus, AgentType, type RuntimeInfo } from '@/lib/proto/amux_pb'
+import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -414,26 +415,29 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       // 2. Derive workspace from the agent's prior runtime history
       const { data: priorRows } = await supabase
         .from('agent_runtimes')
-        .select('workspace_id, agent_id, current_model, status, updated_at')
+        .select('workspace_id, agent_id, current_model, status, backend_type, updated_at')
         .eq('agent_id', candidate.id)
         .eq('team_id', teamId)
         .order('updated_at', { ascending: false })
         .limit(1)
 
       const workspaceId = priorRows?.[0]?.workspace_id ?? ''
+      const agentType = resolveAmuxAgentType(
+        priorRows?.[0]?.backend_type ?? null,
+        candidate.agent_kind,
+      )
 
       // 3. Call runtimeStart RPC. Daemon may reject if it already has a
       //    runtime for this (session, agent) — treat that as success since
       //    the existing runtime will service the next prompt anyway.
       const { runtimeStart } = await import('@/lib/teamclaw-rpc')
-      const { AgentType } = await import('@/lib/proto/amux_pb')
       try {
         const result = await runtimeStart({
           targetDeviceId: candidate.id,
           workspaceId,
           worktree: '', // daemon falls back to '.' when empty
           sessionId,
-          agentType: AgentType.CLAUDE_CODE,
+          agentType,
           initialPrompt: '',
         })
         if (!result.accepted) {

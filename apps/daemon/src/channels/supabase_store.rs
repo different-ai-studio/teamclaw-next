@@ -115,11 +115,7 @@ impl ChannelStore for AmuxdChannelStore {
             .map_err(|e| StoreError::Supabase(e.to_string()))
     }
 
-    async fn add_participant(
-        &self,
-        session_id: &str,
-        actor_id: &str,
-    ) -> Result<(), StoreError> {
+    async fn add_participant(&self, session_id: &str, actor_id: &str) -> Result<(), StoreError> {
         self.client
             .upsert_session_participant(session_id, actor_id)
             .await

@@ -981,7 +981,9 @@ impl SupabaseClient {
         let rows: Vec<Row> = self
             .rpc(
                 "list_agent_admin_member_actor_ids",
-                &Req { p_agent_actor_id: agent_actor_id },
+                &Req {
+                    p_agent_actor_id: agent_actor_id,
+                },
             )
             .await?;
         Ok(rows.into_iter().map(|r| r.member_actor_id).collect())
@@ -1008,10 +1010,7 @@ impl SupabaseClient {
             .http
             .post(&url)
             .header("apikey", &self.cfg.anon_key)
-            .header(
-                "Prefer",
-                "resolution=ignore-duplicates,return=minimal",
-            )
+            .header("Prefer", "resolution=ignore-duplicates,return=minimal")
             .bearer_auth(&token)
             .json(&body)
             .send()
@@ -1095,10 +1094,7 @@ impl SupabaseClient {
         {
             Ok(member_actor_ids) => {
                 for actor_id in member_actor_ids {
-                    if let Err(e) = self
-                        .upsert_session_participant(&row.id, &actor_id)
-                        .await
-                    {
+                    if let Err(e) = self.upsert_session_participant(&row.id, &actor_id).await {
                         tracing::warn!(
                             session_id = %row.id,
                             actor_id = %actor_id,

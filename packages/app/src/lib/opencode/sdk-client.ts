@@ -218,6 +218,10 @@ export function getRawSdkClient(): OpencodeClient {
   return sdkClient
 }
 
+export function isOpenCodeSessionId(id: string | null | undefined): boolean {
+  return typeof id === 'string' && id.startsWith('ses')
+}
+
 /**
  * Update the workspace / directory path used for all subsequent API calls.
  * Recreates the underlying SDK client so that the `directory` default is baked in.

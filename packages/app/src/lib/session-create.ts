@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase-client'
 import { runtimeStart } from '@/lib/teamclaw-rpc'
-import { AgentType } from '@/lib/proto/amux_pb'
+import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import {
   upsertSessionsBatch,
   upsertSessionParticipantsBatch,
@@ -115,21 +115,25 @@ export interface StartAgentRuntimesArgs {
 export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<void> {
   if (args.agentActorIds.length === 0) return
 
-  const priorByAgent = new Map<string, { workspace_id: string | null }>()
+  const priorByAgent = new Map<string, { workspace_id: string | null; backend_type: string | null }>()
   const { data: priorRows } = await supabase
     .from('agent_runtimes')
-    .select('agent_id, workspace_id, updated_at')
+    .select('agent_id, workspace_id, backend_type, updated_at')
     .in('agent_id', args.agentActorIds)
     .eq('team_id', args.teamId)
     .order('updated_at', { ascending: false })
   for (const r of priorRows ?? []) {
     if (!priorByAgent.has(r.agent_id)) {
-      priorByAgent.set(r.agent_id, { workspace_id: r.workspace_id })
+      priorByAgent.set(r.agent_id, {
+        workspace_id: r.workspace_id,
+        backend_type: r.backend_type ?? null,
+      })
     }
   }
 
   await Promise.all(args.agentActorIds.map(async (agentActorId) => {
     const prior = priorByAgent.get(agentActorId)
+    const agentType = resolveAmuxAgentType(prior?.backend_type)
     try {
       // Current amuxd convention: daemon device_id == its actor_id, so the
       // RPC topic is amux/{team}/device/{agentActorId}/rpc/req. Multi-daemon
@@ -139,7 +143,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         workspaceId: prior?.workspace_id ?? '',
         worktree: '',
         sessionId: args.sessionId,
-        agentType: AgentType.CLAUDE_CODE,
+        agentType,
         initialPrompt: '',
       })
       if (!result.accepted) {
