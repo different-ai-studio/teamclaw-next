@@ -14,6 +14,13 @@ import {
   AgentChipBar,
   type AgentChip,
 } from "../components/AgentChipBar";
+import { MentionsPopup } from "../components/MentionsPopup";
+import {
+  applyMention,
+  filterMentionCandidates,
+  mentionQuery,
+  type MentionTarget,
+} from "../components/mentions";
 import { SessionComposerShell } from "../components/SessionComposerShell";
 import { SessionMessageRow } from "../components/SessionMessageRow";
 import { SlashCommandsPopup } from "../components/SlashCommandsPopup";
@@ -39,6 +46,7 @@ type SessionDetailScreenProps = {
   composerText: string;
   connectionState: SessionDetailConnectionState;
   isSending: boolean;
+  mentionPool?: ReadonlyArray<MentionTarget>;
   onAgentInterrupt?: (agentId: string) => void;
   onAgentRemove?: (agentId: string) => void;
   onAttach?: () => void;
@@ -120,6 +128,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     composerText,
     connectionState,
     isSending,
+    mentionPool,
     onAgentInterrupt,
     onAgentRemove,
     onAttach,
@@ -186,6 +195,19 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
             onSelect={(command) => {
               onChangeComposerText(`/${command.name} `);
             }}
+          />
+        );
+      })()}
+
+      {(() => {
+        if (!mentionPool || mentionPool.length === 0) return null;
+        const query = mentionQuery(composerText);
+        if (query === null) return null;
+        const candidates = filterMentionCandidates(mentionPool, query);
+        return (
+          <MentionsPopup
+            candidates={candidates}
+            onSelect={(target) => onChangeComposerText(applyMention(composerText, target))}
           />
         );
       })()}

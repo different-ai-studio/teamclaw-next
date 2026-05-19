@@ -130,6 +130,15 @@ export default function SessionDetailRoute() {
       }));
   }, [detailState.session, teamActors]);
 
+  const mentionPool = useMemo(
+    () =>
+      teamActors.map((actor) => ({
+        actorId: actor.actorId,
+        displayName: actor.displayName,
+      })),
+    [teamActors],
+  );
+
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: "会话详情" }} />
@@ -179,6 +188,7 @@ export default function SessionDetailRoute() {
           composerText={detailState.composerText}
           connectionState={detailState.connectionState}
           isSending={detailState.isSending}
+          mentionPool={mentionPool}
           onAttach={() => {
             router.push("/(app)/attach");
           }}
