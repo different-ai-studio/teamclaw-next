@@ -39,6 +39,7 @@ function SessionGroupSection({
   group,
   onLongPressSession,
   onSelectSession,
+  pinnedSessionIds,
   selectedSessionId,
   selectionMode,
   selection,
@@ -46,6 +47,7 @@ function SessionGroupSection({
   group: SessionGroup;
   onLongPressSession?: (id: string) => void;
   onSelectSession: (sessionId: string) => void;
+  pinnedSessionIds?: ReadonlySet<string>;
   selectedSessionId: string | null;
   selectionMode: boolean;
   selection: ReadonlySet<string>;
@@ -71,6 +73,7 @@ function SessionGroupSection({
               <View style={{ flex: 1 }}>
                 <SessionRow
                   isActive={selectedSessionId === session.sessionId}
+                  isPinned={pinnedSessionIds?.has(session.sessionId) ?? false}
                   onLongPress={
                     onLongPressSession
                       ? () => onLongPressSession(session.sessionId)
@@ -344,6 +347,7 @@ export function SessionsListScreen({
                   onSelectSession(id);
                 }
               }}
+              pinnedSessionIds={pinnedSessionIds}
               selectedSessionId={selectedSessionId}
               selection={selection}
               selectionMode={selectionMode}
