@@ -10,6 +10,10 @@ import {
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { StatusDot } from "../../../ui/atoms/StatusDot";
 import { colors, spacing, typography } from "../../../ui/theme";
+import {
+  AgentChipBar,
+  type AgentChip,
+} from "../components/AgentChipBar";
 import { SessionComposerShell } from "../components/SessionComposerShell";
 import { SessionMessageRow } from "../components/SessionMessageRow";
 import type {
@@ -24,9 +28,12 @@ type SessionDetailRenderableState = SessionDetailControllerState & {
 };
 
 type SessionDetailScreenProps = {
+  agentChips?: AgentChip[];
   composerText: string;
   connectionState: SessionDetailConnectionState;
   isSending: boolean;
+  onAgentInterrupt?: (agentId: string) => void;
+  onAgentRemove?: (agentId: string) => void;
   onBack: () => void;
   onChangeComposerText: (value: string) => void;
   onOpenMembers?: () => void;
@@ -34,6 +41,7 @@ type SessionDetailScreenProps = {
   ownActorId?: string;
   sendErrorMessage: string | null;
   state: SessionDetailRenderableState;
+  streamingAgentIds?: ReadonlySet<string>;
 };
 
 function connectionDescriptor(
@@ -99,15 +107,19 @@ function SessionHeader({
 
 export function SessionDetailScreen(props: SessionDetailScreenProps) {
   const {
+    agentChips,
     composerText,
     connectionState,
     isSending,
+    onAgentInterrupt,
+    onAgentRemove,
     onBack,
     onChangeComposerText,
     onOpenMembers,
     onSend,
     ownActorId,
     sendErrorMessage,
+    streamingAgentIds,
     state,
   } = props;
   const { session } = state;
@@ -150,6 +162,15 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           </View>
         )}
       </View>
+
+      {agentChips && agentChips.length > 0 ? (
+        <AgentChipBar
+          chips={agentChips}
+          onInterrupt={onAgentInterrupt}
+          onRemove={onAgentRemove}
+          streamingAgentIds={streamingAgentIds}
+        />
+      ) : null}
 
       <SessionComposerShell
         composerText={composerText}
