@@ -1,6 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
+  ActionSheetIOS,
+  Alert,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -124,6 +127,41 @@ export function IdeasListScreen({
   };
 
   const clearSelection = () => setSelection(new Set());
+
+  const showRowContextMenu = useCallback(
+    (ideaId: string) => {
+      const labels = ["归档", "选择更多…", "取消"];
+      const dispatch = (index: number) => {
+        switch (index) {
+          case 0:
+            if (onArchiveBatch) void onArchiveBatch([ideaId]);
+            break;
+          case 1:
+            toggleSelection(ideaId);
+            break;
+          default:
+            break;
+        }
+      };
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: labels,
+            cancelButtonIndex: 2,
+            destructiveButtonIndex: 0,
+          },
+          dispatch,
+        );
+        return;
+      }
+      Alert.alert("想法操作", undefined, [
+        { text: labels[0], style: "destructive", onPress: () => dispatch(0) },
+        { text: labels[1], onPress: () => dispatch(1) },
+        { text: labels[2], style: "cancel" },
+      ]);
+    },
+    [onArchiveBatch],
+  );
 
   const handleArchiveSelected = async () => {
     if (!onArchiveBatch || selection.size === 0) return;
@@ -339,7 +377,13 @@ export function IdeasListScreen({
             return (
               <View key={idea.ideaId}>
                 <Pressable
-                  onLongPress={() => toggleSelection(idea.ideaId)}
+                  onLongPress={() => {
+                    if (selectionMode) {
+                      toggleSelection(idea.ideaId);
+                    } else {
+                      showRowContextMenu(idea.ideaId);
+                    }
+                  }}
                   onPress={() => {
                     if (selectionMode) {
                       toggleSelection(idea.ideaId);
