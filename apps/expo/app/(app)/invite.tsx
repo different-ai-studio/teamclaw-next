@@ -17,6 +17,7 @@ import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { supabase } from "../../src/lib/supabase/client";
+import { showToast } from "../../src/ui/Toast";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
 type Kind = "member" | "agent";
@@ -86,6 +87,7 @@ export default function InviteRoute() {
   const handleCopy = async () => {
     if (!invite) return;
     await Clipboard.setStringAsync(invite.deeplink);
+    showToast("success", "Invite link copied");
   };
 
   const handleShare = async () => {

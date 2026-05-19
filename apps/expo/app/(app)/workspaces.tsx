@@ -13,6 +13,7 @@ import {
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
+import { showToast } from "../../src/ui/Toast";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { supabase } from "../../src/lib/supabase/client";
@@ -176,6 +177,7 @@ export default function WorkspacesRoute() {
         setCreateError(result.error.message);
       } else {
         setCreateDraft("");
+        showToast("success", "Workspace created");
         await load();
       }
     } catch (err) {
