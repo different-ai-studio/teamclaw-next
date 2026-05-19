@@ -110,6 +110,19 @@ export default function SessionsIndexRoute() {
         }
         await controller.refresh();
       }}
+      onMarkBatchUnread={async (sessionIds) => {
+        const actorId = state.currentMemberActorId;
+        if (!actorId) return;
+        const api = createSessionsApi(supabase);
+        for (const id of sessionIds) {
+          try {
+            await api.markSessionUnread(id, actorId);
+          } catch {
+            // continue
+          }
+        }
+        await controller.refresh();
+      }}
       onNewSession={() => {
         router.push("/(app)/new-session");
       }}

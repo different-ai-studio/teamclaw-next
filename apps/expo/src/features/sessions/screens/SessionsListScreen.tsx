@@ -24,6 +24,7 @@ type SessionsListScreenProps = {
   onArchiveBatch?: (sessionIds: string[]) => Promise<void>;
   onLoad: () => void;
   onMarkBatchRead?: (sessionIds: string[]) => Promise<void>;
+  onMarkBatchUnread?: (sessionIds: string[]) => Promise<void>;
   onNewSession?: () => void;
   onRefresh: () => void;
   onSelectSession: (sessionId: string) => void;
@@ -122,6 +123,7 @@ export function SessionsListScreen({
   onArchiveBatch,
   onLoad,
   onMarkBatchRead,
+  onMarkBatchUnread,
   onNewSession,
   onRefresh,
   onSelectSession,
@@ -161,6 +163,17 @@ export function SessionsListScreen({
     setIsBatchBusy(true);
     try {
       await onMarkBatchRead(Array.from(selection));
+      clearSelection();
+    } finally {
+      setIsBatchBusy(false);
+    }
+  };
+
+  const handleMarkUnreadSelected = async () => {
+    if (!onMarkBatchUnread || selection.size === 0) return;
+    setIsBatchBusy(true);
+    try {
+      await onMarkBatchUnread(Array.from(selection));
       clearSelection();
     } finally {
       setIsBatchBusy(false);
@@ -385,6 +398,19 @@ export function SessionsListScreen({
             ]}
           >
             <Text style={styles.batchActionText}>Mark read</Text>
+          </Pressable>
+        ) : null}
+        {onMarkBatchUnread ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={isBatchBusy}
+            onPress={handleMarkUnreadSelected}
+            style={({ pressed }) => [
+              styles.batchAction,
+              pressed && !isBatchBusy ? styles.batchActionPressed : null,
+            ]}
+          >
+            <Text style={styles.batchActionText}>Mark unread</Text>
           </Pressable>
         ) : null}
         <Pressable
