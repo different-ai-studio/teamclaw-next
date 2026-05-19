@@ -190,7 +190,7 @@ export default function SessionDetailRoute() {
           isSending={detailState.isSending}
           mentionPool={mentionPool}
           onAttach={() => {
-            router.push("/(app)/attach");
+            router.push(`/(app)/attach?sessionId=${sessionId}`);
           }}
           onBack={handleBackToList}
           onChangeComposerText={(value) => {

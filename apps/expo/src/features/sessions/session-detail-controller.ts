@@ -10,6 +10,7 @@ import {
 import { decodeLiveEvent, sessionIdFromTopic } from "../../lib/teamclaw/live-events";
 import type { ExpoMqttAdapter } from "../../lib/mqtt/expo-mqtt";
 import { uuidV4 } from "../../lib/uuid";
+import { takePendingAttachments } from "./pending-attachments";
 import {
   buildSessionDetailState,
   type SessionDetailState,
@@ -414,6 +415,16 @@ export function createSessionDetailController(
         const createdAtSeconds = BigInt(Math.floor(Date.parse(createdAt) / 1000));
         const messageId = uuidV4();
 
+        const pendingAttachments = takePendingAttachments(deps.teamId, deps.sessionId);
+        const attachmentsPayload = pendingAttachments.length > 0
+          ? pendingAttachments.map((row) => ({
+              url: row.publicUrl || row.path,
+              path: row.path,
+              mime: row.mime,
+              size: row.size,
+            }))
+          : undefined;
+
         await deps.api.insertOutgoingMessage({
           id: messageId,
           teamId: deps.teamId,
@@ -422,6 +433,7 @@ export function createSessionDetailController(
           content,
           createdAt,
           metadata: { mention_actor_ids: [] },
+          attachments: attachmentsPayload,
         });
 
         const optimisticMessage: SessionMessage = {

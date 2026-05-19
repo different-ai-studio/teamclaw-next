@@ -42,6 +42,7 @@ type OutgoingMessageInput = {
   model?: string | null;
   turnId?: string | null;
   replyToMessageId?: string | null;
+  attachments?: unknown[] | null;
 };
 
 const SESSION_COLUMNS =
@@ -150,6 +151,10 @@ export function createSessionsApi(client: SessionsClient) {
         turn_id: input.turnId ?? null,
         reply_to_message_id: input.replyToMessageId ?? null,
       };
+
+      if (input.attachments && input.attachments.length > 0) {
+        payload.attachments = input.attachments;
+      }
 
       if (input.createdAt) {
         payload.created_at = input.createdAt;
