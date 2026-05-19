@@ -1,6 +1,9 @@
+export type SlashCommandAction = "insert" | "clear" | "compact";
+
 export type SlashCommand = {
   name: string;
   description: string;
+  action: SlashCommandAction;
 };
 
 /**
@@ -9,15 +12,15 @@ export type SlashCommand = {
  * platforms while the real `slash_commands` registry lands later.
  */
 export const SLASH_COMMANDS: ReadonlySet<SlashCommand> = new Set([
-  { name: "ask", description: "Send a one-shot message without engaging an agent loop." },
-  { name: "clear", description: "Clear the composer draft." },
-  { name: "compact", description: "Compact older messages into a single recap." },
-  { name: "explain", description: "Ask the bound agent to explain the prior reply." },
-  { name: "fix", description: "Have the bound agent fix the issue surfaced in the last message." },
-  { name: "model", description: "Switch the bound agent's model for the next turn." },
-  { name: "review", description: "Request a code review from the bound agent." },
-  { name: "test", description: "Run the project's test suite via the bound agent." },
-  { name: "todo", description: "Update the session's todo list." },
+  { action: "insert", name: "ask", description: "Send a one-shot message without engaging an agent loop." },
+  { action: "clear", name: "clear", description: "Clear the composer draft." },
+  { action: "compact", name: "compact", description: "Compact older messages into a single recap." },
+  { action: "insert", name: "explain", description: "Ask the bound agent to explain the prior reply." },
+  { action: "insert", name: "fix", description: "Have the bound agent fix the issue surfaced in the last message." },
+  { action: "insert", name: "model", description: "Switch the bound agent's model for the next turn." },
+  { action: "insert", name: "review", description: "Request a code review from the bound agent." },
+  { action: "insert", name: "test", description: "Run the project's test suite via the bound agent." },
+  { action: "insert", name: "todo", description: "Update the session's todo list." },
 ]);
 
 /**

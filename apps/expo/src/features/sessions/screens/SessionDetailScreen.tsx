@@ -362,6 +362,16 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           <SlashCommandsPopup
             candidates={candidates}
             onSelect={(command) => {
+              if (command.action === "clear") {
+                onChangeComposerText("");
+                return;
+              }
+              if (command.action === "compact") {
+                onChangeComposerText(
+                  "/compact Please summarize the conversation so far and replace earlier messages with a recap.",
+                );
+                return;
+              }
               onChangeComposerText(`/${command.name} `);
             }}
           />
