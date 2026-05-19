@@ -144,6 +144,15 @@ export function createSessionsApi(client: SessionsClient) {
       return map;
     },
 
+    async markSessionUnread(sessionId: string, actorId: string): Promise<void> {
+      const result = (await client
+        .from("session_read_markers")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("actor_id", actorId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async markSessionRead(
       sessionId: string,
       actorId: string,

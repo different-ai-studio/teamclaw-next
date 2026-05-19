@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useState } from "react";
 import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
@@ -84,6 +85,7 @@ export function SessionMessageRow({
   senderName,
 }: SessionMessageRowProps) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [noteExpanded, setNoteExpanded] = useState(false);
   const kindKey = message.kind.trim().toLowerCase();
   if (isHiddenMessageKind(kindKey)) return null;
 
@@ -123,15 +125,35 @@ export function SessionMessageRow({
 
   if (isAgentNoteKind(kindKey)) {
     const note = agentNoteStyle(kindKey);
+    const noteBody = normalizeBody(message);
     return (
       <View style={[styles.row, styles.rowOther]}>
-        <View style={[styles.surface, styles.surfaceNote]}>
-          <Text style={[styles.noteEyebrow, { color: note.tint }]}>{note.eyebrow}</Text>
-          <Text numberOfLines={6} style={styles.noteBody}>
-            {normalizeBody(message)}
+        <Pressable
+          accessibilityHint="Tap to expand"
+          accessibilityRole="button"
+          onPress={() => setNoteExpanded((value) => !value)}
+          style={({ pressed }) => [
+            styles.surface,
+            styles.surfaceNote,
+            pressed ? styles.surfacePressed : null,
+          ]}
+        >
+          <View style={styles.noteHeaderRow}>
+            <Text style={[styles.noteEyebrow, { color: note.tint }]}>{note.eyebrow}</Text>
+            <Ionicons
+              color={note.tint}
+              name={noteExpanded ? "chevron-up" : "chevron-down"}
+              size={12}
+            />
+          </View>
+          <Text
+            numberOfLines={noteExpanded ? undefined : 3}
+            style={styles.noteBody}
+          >
+            {noteBody}
           </Text>
           {timestamp ? <Text style={styles.timeOther}>{timestamp}</Text> : null}
-        </View>
+        </Pressable>
       </View>
     );
   }
@@ -406,6 +428,12 @@ const styles = StyleSheet.create({
   noteEyebrow: {
     ...typography.eyebrow,
     fontWeight: "700",
+  },
+  noteHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "space-between",
   },
   surfaceNote: {
     backgroundColor: hai.pebble,
