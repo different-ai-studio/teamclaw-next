@@ -102,6 +102,7 @@ import {
   type MessageRow,
 } from "@/lib/local-cache";
 import { syncActorsForTeam } from "@/lib/sync/actor-sync";
+import { syncIdeasForTeam } from "@/lib/sync/idea-sync";
 import { syncMessagesForSession } from "@/lib/sync/message-sync";
 import { syncParticipantsForSession } from "@/lib/sync/session-participant-sync";
 import { syncSessionsForTeam } from "@/lib/sync/session-sync";
@@ -994,6 +995,11 @@ function AppContent() {
         // lookups hit libsql instead of Supabase on subsequent renders.
         void syncActorsForTeam(firstTeamId).catch((e) =>
           console.warn('[cache-sync] actor sync failed:', e),
+        );
+
+        // Background: sync ideas into local cache.
+        void syncIdeasForTeam(firstTeamId).catch((e) =>
+          console.warn('[cache-sync] idea sync failed:', e),
         );
 
         // Background: sync sessions into local cache. E2E control owns the
