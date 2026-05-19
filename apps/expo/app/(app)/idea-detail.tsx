@@ -8,7 +8,7 @@ import type { Idea, IdeaStatus } from "../../src/features/ideas/idea-types";
 import { IdeaDetailScreen } from "../../src/features/ideas/screens/IdeaDetailScreen";
 import { supabase } from "../../src/lib/supabase/client";
 
-type BusyAction = "toggleStatus" | "archive" | null;
+type BusyAction = "toggleStatus" | "archive" | "save" | null;
 
 export default function IdeaDetailRoute() {
   const router = useRouter();
@@ -86,6 +86,23 @@ export default function IdeaDetailRoute() {
       }
     : undefined;
 
+  const handleSaveContent = idea
+    ? async (patch: { title: string; description: string }) => {
+        setBusyAction("save");
+        try {
+          await createIdeasApi(supabase).updateContent(idea.ideaId, patch);
+          setIdea({
+            ...idea,
+            title: patch.title,
+            description: patch.description,
+            updatedAt: new Date().toISOString(),
+          });
+        } finally {
+          setBusyAction(null);
+        }
+      }
+    : undefined;
+
   return (
     <IdeaDetailScreen
       busyAction={busyAction}
@@ -94,6 +111,7 @@ export default function IdeaDetailRoute() {
       isLoading={isLoading}
       onArchive={handleArchive}
       onClose={() => router.back()}
+      onSaveContent={handleSaveContent}
       onToggleStatus={handleToggleStatus}
     />
   );

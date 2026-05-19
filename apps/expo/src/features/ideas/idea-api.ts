@@ -66,6 +66,22 @@ export function createIdeasApi(client: IdeasClient) {
       throwIfError(result.error);
     },
 
+    async updateContent(
+      ideaId: string,
+      patch: { title?: string; description?: string },
+    ): Promise<void> {
+      const next: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (patch.title !== undefined) next.title = patch.title;
+      if (patch.description !== undefined) next.description = patch.description;
+      const result = (await client
+        .from("ideas")
+        .update(next)
+        .eq("id", ideaId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async archive(ideaId: string): Promise<void> {
       const result = (await client
         .from("ideas")

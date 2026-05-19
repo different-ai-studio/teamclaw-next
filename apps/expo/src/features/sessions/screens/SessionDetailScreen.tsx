@@ -16,6 +16,7 @@ import {
   AgentChipBar,
   type AgentChip,
 } from "../components/AgentChipBar";
+import { ConnectionBannerOverlay } from "../components/ConnectionBannerOverlay";
 import { MentionsPopup } from "../components/MentionsPopup";
 import {
   applyMention,
@@ -195,6 +196,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         onOpenMembers={onOpenMembers}
         session={session}
       />
+      <ConnectionBannerOverlay connectionState={connectionState} />
 
       {state.status === "error" ? (
         <View style={styles.errorBanner}>

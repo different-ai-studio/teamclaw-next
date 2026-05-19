@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -14,12 +16,13 @@ import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import type { Idea, IdeaStatus } from "../idea-types";
 
 export type IdeaDetailScreenProps = {
-  busyAction: "toggleStatus" | "archive" | null;
+  busyAction: "toggleStatus" | "archive" | "save" | null;
   creatorName: string | null;
   idea: Idea | null;
   isLoading: boolean;
   onArchive?: () => void;
   onClose: () => void;
+  onSaveContent?: (patch: { title: string; description: string }) => Promise<void>;
   onToggleStatus?: () => void;
 };
 
@@ -73,8 +76,21 @@ export function IdeaDetailScreen({
   isLoading,
   onArchive,
   onClose,
+  onSaveContent,
   onToggleStatus,
 }: IdeaDetailScreenProps) {
+  const [titleDraft, setTitleDraft] = useState("");
+  const [descDraft, setDescDraft] = useState("");
+
+  useEffect(() => {
+    setTitleDraft(idea?.title ?? "");
+    setDescDraft(idea?.description ?? "");
+  }, [idea?.ideaId, idea?.title, idea?.description]);
+
+  const dirty =
+    idea !== null &&
+    (titleDraft.trim() !== idea.title.trim() ||
+      descDraft.trim() !== (idea.description ?? "").trim());
   return (
     <View style={styles.screen}>
       <View style={styles.headerBar}>
@@ -101,15 +117,57 @@ export function IdeaDetailScreen({
           </View>
         ) : (
           <>
-            <Hero idea={idea} />
-
-            {idea.description ? (
-              <View style={styles.section}>
-                <SectionEyebrow label="DESCRIPTION" style={styles.sectionEyebrow} />
-                <View style={styles.card}>
-                  <Text style={styles.descriptionText}>{idea.description}</Text>
-                </View>
+            <View style={styles.hero}>
+              <View style={[styles.pill, { backgroundColor: statusPill(idea.status).background }]}>
+                <Text style={[styles.pillText, { color: statusPill(idea.status).foreground }]}>
+                  {statusPill(idea.status).label}
+                </Text>
               </View>
+              <TextInput
+                editable={!busyAction}
+                multiline
+                onChangeText={setTitleDraft}
+                placeholder="Title"
+                placeholderTextColor={hai.slate}
+                selectionColor={hai.cinnabar}
+                style={[styles.heroTitle, idea.status === "done" ? styles.heroTitleDone : null]}
+                value={titleDraft}
+              />
+            </View>
+
+            <View style={styles.section}>
+              <SectionEyebrow label="DESCRIPTION" style={styles.sectionEyebrow} />
+              <View style={styles.card}>
+                <TextInput
+                  editable={!busyAction}
+                  multiline
+                  onChangeText={setDescDraft}
+                  placeholder="Add a description"
+                  placeholderTextColor={hai.slate}
+                  selectionColor={hai.cinnabar}
+                  style={styles.descriptionText}
+                  value={descDraft}
+                />
+              </View>
+            </View>
+
+            {dirty && onSaveContent ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={busyAction !== null || titleDraft.trim().length === 0}
+                onPress={() =>
+                  onSaveContent({ title: titleDraft.trim(), description: descDraft })
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
+                  busyAction === "save" ? styles.actionBusy : null,
+                  pressed ? styles.actionPressed : null,
+                ]}
+              >
+                <Text style={styles.saveButtonText}>
+                  {busyAction === "save" ? "Saving…" : "Save changes"}
+                </Text>
+              </Pressable>
             ) : null}
 
             <View style={styles.section}>
@@ -183,21 +241,6 @@ export function IdeaDetailScreen({
   );
 }
 
-function Hero({ idea }: { idea: Idea }) {
-  const pill = statusPill(idea.status);
-  const isDone = idea.status === "done";
-  return (
-    <View style={styles.hero}>
-      <View style={[styles.pill, { backgroundColor: pill.background }]}>
-        <Text style={[styles.pillText, { color: pill.foreground }]}>{pill.label}</Text>
-      </View>
-      <Text style={[styles.heroTitle, isDone ? styles.heroTitleDone : null]}>
-        {idea.title}
-      </Text>
-    </View>
-  );
-}
-
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.detailRow}>
@@ -244,6 +287,16 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.sm,
+  },
+  saveButton: {
+    alignItems: "center",
+    backgroundColor: hai.cinnabar,
+    borderRadius: radii.button,
+    paddingVertical: 12,
+  },
+  saveButtonText: {
+    color: hai.paper,
+    ...typography.cardTitle,
   },
   card: {
     backgroundColor: colors.paper,

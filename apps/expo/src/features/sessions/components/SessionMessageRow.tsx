@@ -1,10 +1,12 @@
 import * as Clipboard from "expo-clipboard";
+import { useState } from "react";
 import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import Markdown from "react-native-markdown-display";
 
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import type { MessageAttachment, SessionMessage } from "../session-types";
 import { AudioPlayerChip } from "./AudioPlayerChip";
+import { ImageLightbox } from "./ImageLightbox";
 
 const HIDDEN_MESSAGE_KINDS = new Set(["permission_request"]);
 
@@ -69,6 +71,7 @@ export function SessionMessageRow({
   isOwnMessage = false,
   onDelete,
 }: SessionMessageRowProps) {
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const kindKey = message.kind.trim().toLowerCase();
   if (isHiddenMessageKind(kindKey)) return null;
 
@@ -130,10 +133,12 @@ export function SessionMessageRow({
                 attachment={attachment}
                 isOwn={isOwnMessage}
                 key={`${attachment.url}:${index}`}
+                onOpenImage={(url) => setLightboxUrl(url)}
               />
             ))}
           </View>
         ) : null}
+        <ImageLightbox onClose={() => setLightboxUrl(null)} url={lightboxUrl} />
 
         {body.length > 0 ? (
           <Markdown
@@ -156,19 +161,25 @@ export function SessionMessageRow({
 function AttachmentChip({
   attachment,
   isOwn,
+  onOpenImage,
 }: {
   attachment: MessageAttachment;
   isOwn: boolean;
+  onOpenImage?: (url: string) => void;
 }) {
   const mime = attachment.mime ?? "";
   if (mime.startsWith("image/")) {
     return (
-      <Image
+      <Pressable
         accessibilityRole="image"
-        resizeMode="cover"
-        source={{ uri: attachment.url }}
-        style={styles.attachmentImage}
-      />
+        onPress={onOpenImage ? () => onOpenImage(attachment.url) : undefined}
+      >
+        <Image
+          resizeMode="cover"
+          source={{ uri: attachment.url }}
+          style={styles.attachmentImage}
+        />
+      </Pressable>
     );
   }
   if (mime.startsWith("audio/")) {
