@@ -2,6 +2,7 @@ import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
+import { createActorsApi } from "../../../../src/features/actors/actor-api";
 import {
   loadPinnedSessions,
   subscribePinnedSessions,
@@ -55,6 +56,24 @@ export default function SessionsIndexRoute() {
   const [pinnedSessionIds, setPinnedSessionIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
+  const [hasAgents, setHasAgents] = useState(true);
+
+  useEffect(() => {
+    if (!activeTeamId) return;
+    let cancelled = false;
+    void createActorsApi(supabase)
+      .listActors(activeTeamId)
+      .then((rows) => {
+        if (cancelled) return;
+        setHasAgents(rows.some((row) => row.actorType === "agent"));
+      })
+      .catch(() => {
+        // Keep optimistic-true so we don't flash the empty-agents banner on transient errors.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTeamId]);
   useEffect(() => {
     let cancelled = false;
     void loadPinnedSessions().then((set) => {
@@ -79,6 +98,8 @@ export default function SessionsIndexRoute() {
 
   return (
     <SessionsListScreen
+      hasAgents={hasAgents}
+      onInviteAgent={() => router.push("/(app)/invite")}
       onArchiveBatch={async (sessionIds) => {
         const now = new Date().toISOString();
         for (const id of sessionIds) {

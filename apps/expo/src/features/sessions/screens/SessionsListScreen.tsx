@@ -25,6 +25,8 @@ import type { SessionGroup, SessionsListState } from "../session-types";
 
 type SessionsListScreenProps = {
   onArchiveBatch?: (sessionIds: string[]) => Promise<void>;
+  hasAgents?: boolean;
+  onInviteAgent?: () => void;
   onLoad: () => void;
   onMarkBatchRead?: (sessionIds: string[]) => Promise<void>;
   onMarkBatchUnread?: (sessionIds: string[]) => Promise<void>;
@@ -126,7 +128,9 @@ function HeaderBar({
 }
 
 export function SessionsListScreen({
+  hasAgents = true,
   onArchiveBatch,
+  onInviteAgent,
   onLoad,
   onMarkBatchRead,
   onMarkBatchUnread,
@@ -420,11 +424,28 @@ export function SessionsListScreen({
         </View>
       ) : (
         <View style={styles.stateBlock}>
-          <Text style={styles.stateTitle}>No sessions yet</Text>
-          <Text style={styles.stateBody}>
-            Open one to start the first thread with the team's agent.
-          </Text>
-          <PrimaryButton fullWidth={false} label="New session" onPress={handleNewSession} />
+          {!hasAgents && onInviteAgent ? (
+            <>
+              <Text style={styles.stateTitle}>Add your first agent</Text>
+              <Text style={styles.stateBody}>
+                This team doesn't have any agents yet. Invite one so you can
+                start a streaming session.
+              </Text>
+              <PrimaryButton
+                fullWidth={false}
+                label="Invite agent"
+                onPress={onInviteAgent}
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.stateTitle}>No sessions yet</Text>
+              <Text style={styles.stateBody}>
+                Open one to start the first thread with the team's agent.
+              </Text>
+              <PrimaryButton fullWidth={false} label="New session" onPress={handleNewSession} />
+            </>
+          )}
         </View>
       )}
     </ScrollView>
