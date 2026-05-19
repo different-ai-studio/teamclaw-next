@@ -151,6 +151,16 @@ public final class SessionDetailViewModel {
     public private(set) var isAgentWorking: Bool = false
     private var agentWorkingResetTask: Task<Void, Never>?
     nonisolated(unsafe) private var spawningPollTask: Task<Void, Never>?
+    /// Number of consecutive 2s polls fired while waiting for at least one
+    /// agent to leave .spawning / nil-runtimeID state. Reset to 0 whenever
+    /// the state settles (no agents need polling). Capped at `maxSpawningPolls`
+    /// to avoid burning Supabase reads forever if the daemon dies mid-spawn.
+    private var spawningPollCount: Int = 0
+    private let maxSpawningPolls: Int = 20
+    /// True while a `withObservationTracking` registration for the bound
+    /// runtime's `status` / `currentModel` is active. One-shot per fire —
+    /// `refreshMemberSheet` re-registers after each onChange.
+    private var isObservingRuntimeChanges = false
     public var participantCount: Int { session?.participantCount ?? 0 }
     public var hasRuntime: Bool { runtime != nil }
 
@@ -467,11 +477,15 @@ public final class SessionDetailViewModel {
 
     /// Re-resolves the bound Runtime (if nil) and overlays its MQTT-derived
     /// chip state + currentModel onto the matching member-sheet agent row.
+    /// Also (re-)registers a one-shot observation on the runtime so MQTT
+    /// mutations trigger an immediate refresh — removes the 2s polling
+    /// latency for state transitions once the Runtime row is known.
     private func overlayMQTTRuntimeState() {
         if runtime == nil, let ctx = startModelContext {
             runtime = RuntimeResolver.resolve(existing: nil, session: session, modelContext: ctx)
         }
         guard let liveRuntime = runtime else { return }
+        observeBoundRuntimeChanges()
         memberSheetAgents = memberSheetAgents.map { agent in
             let matches = agent.runtimeID == liveRuntime.runtimeId
                 || session?.primaryAgentId == agent.id
@@ -500,12 +514,33 @@ public final class SessionDetailViewModel {
         }
     }
 
+    /// Registers a one-shot Observation on the bound runtime's `status` and
+    /// `currentModel`. When SwiftData propagates a mutation (driven by
+    /// SessionListVM's MQTT retained-state ingest), fire a refresh so the
+    /// member sheet self-updates without waiting for the 2s poll tick.
+    /// `refreshMemberSheet` calls back into `overlayMQTTRuntimeState`, which
+    /// re-invokes this method — so the next change is observed too.
+    private func observeBoundRuntimeChanges() {
+        guard !isObservingRuntimeChanges, let runtime else { return }
+        isObservingRuntimeChanges = true
+        withObservationTracking {
+            _ = runtime.status
+            _ = runtime.currentModel
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.isObservingRuntimeChanges = false
+                await self?.refreshMemberSheet()
+            }
+        }
+    }
+
     private func scheduleSpawningRefreshIfNeeded() {
         let needsPoll = memberSheetAgents.contains {
             $0.runtimeState == .spawning || $0.runtimeID == nil
         }
-        if needsPoll {
+        if needsPoll, spawningPollCount < maxSpawningPolls {
             guard spawningPollTask == nil else { return }
+            spawningPollCount += 1
             spawningPollTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
                 self?.spawningPollTask = nil
@@ -514,6 +549,12 @@ public final class SessionDetailViewModel {
         } else {
             spawningPollTask?.cancel()
             spawningPollTask = nil
+            if !needsPoll {
+                // State settled — reset so the next fresh spawn gets a
+                // full budget of polls (covers e.g. addAgent later in the
+                // same session view).
+                spawningPollCount = 0
+            }
         }
     }
 
@@ -600,6 +641,7 @@ public final class SessionDetailViewModel {
         // shows a spinner for the ~1-3s that the RPC + ACP spawn takes.
         // The Supabase agent_runtimes row won't exist yet at this point,
         // so without the optimistic patch the row would show "default".
+        spawningPollCount = 0
         await refreshMemberSheet()
         if let idx = memberSheetAgents.firstIndex(where: { $0.id == actorID }) {
             let cur = memberSheetAgents[idx]
