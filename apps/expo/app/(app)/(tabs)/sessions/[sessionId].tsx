@@ -13,6 +13,7 @@ import type { AgentChip } from "../../../../src/features/sessions/components/Age
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
+import { impactLight, selectionTick, successTone } from "../../../../src/lib/haptics";
 import { supabase } from "../../../../src/lib/supabase/client";
 import { getOptionalMqttUrl } from "../../../../src/lib/mqtt/config";
 import { createExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
@@ -267,6 +268,7 @@ export default function SessionDetailRoute() {
           onDeleteMessage={async (messageId) => {
             try {
               await supabase.from("messages").delete().eq("id", messageId);
+              successTone();
               void controller?.load();
             } catch {
               // Surface in toast in a future pass.
@@ -300,6 +302,7 @@ export default function SessionDetailRoute() {
             void controller?.load();
           }}
           onReplyToMessage={(messageId) => {
+            selectionTick();
             const target = detailState.messages.find((m) => m.messageId === messageId);
             if (target) {
               controller?.setReplyTarget({
@@ -309,6 +312,7 @@ export default function SessionDetailRoute() {
             }
           }}
           onSend={() => {
+            impactLight();
             if (sessionId) {
               void saveComposerDraft(sessionId, "");
             }

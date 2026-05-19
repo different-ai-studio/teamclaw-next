@@ -7,6 +7,7 @@ import {
   subscribePinnedSessions,
   togglePinnedSession,
 } from "../../../../src/features/sessions/pinned-sessions";
+import { successTone, selectionTick } from "../../../../src/lib/haptics";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionsController } from "../../../../src/features/sessions/session-controller";
 import { SessionsListScreen } from "../../../../src/features/sessions/screens/SessionsListScreen";
@@ -90,6 +91,7 @@ export default function SessionsIndexRoute() {
             // continue
           }
         }
+        successTone();
         await controller.refresh();
       }}
       onLoad={() => {
@@ -112,6 +114,7 @@ export default function SessionsIndexRoute() {
         router.push("/(app)/new-session");
       }}
       onTogglePin={async (sessionId) => {
+        selectionTick();
         await togglePinnedSession(sessionId);
       }}
       pinnedSessionIds={pinnedSessionIds}

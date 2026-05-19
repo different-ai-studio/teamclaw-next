@@ -90,14 +90,28 @@ export function createIdeasApi(client: IdeasClient) {
       throwIfError(result.error);
     },
 
-    async listIdeas(teamId: string): Promise<Idea[]> {
-      const ideaResult = (await client
+    async unarchive(ideaId: string): Promise<void> {
+      const result = (await client
+        .from("ideas")
+        .update({ archived: false, updated_at: new Date().toISOString() })
+        .eq("id", ideaId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
+    async listIdeas(
+      teamId: string,
+      options: { includeArchived?: boolean } = {},
+    ): Promise<Idea[]> {
+      let query = client
         .from("ideas")
         .select(
           "id, team_id, workspace_id, created_by_actor_id, title, description, status, archived, created_at, updated_at",
         )
-        .eq("team_id", teamId)
-        .eq("archived", false)
+        .eq("team_id", teamId);
+      if (!options.includeArchived) {
+        query = query.eq("archived", false);
+      }
+      const ideaResult = (await query
         .order("updated_at", { ascending: false })) as QueryResult<IdeaRow[] | null>;
       throwIfError(ideaResult.error);
 

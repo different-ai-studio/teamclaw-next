@@ -36,6 +36,7 @@ export type IdeasListScreenProps = {
   onArchiveBatch?: (ideaIds: string[]) => Promise<void>;
   onCreate?: () => void;
   onLoad: () => void;
+  onOpenArchived?: () => void;
   onRefresh: () => void;
   onSelectIdea?: (ideaId: string) => void;
   state: IdeasListState;
@@ -44,14 +45,27 @@ export type IdeasListScreenProps = {
 function HeaderBar({
   count,
   onCreate,
+  onOpenArchived,
 }: {
   count: number;
   onCreate?: () => void;
+  onOpenArchived?: () => void;
 }) {
   return (
     <View style={styles.headerWrap}>
       <View style={styles.headerRow}>
         <View style={styles.headerSpacer} />
+        {onOpenArchived ? (
+          <Pressable
+            accessibilityLabel="Archived ideas"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={onOpenArchived}
+            style={styles.toolbarButton}
+          >
+            <Ionicons color={colors.onyx} name="archive-outline" size={22} />
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityLabel="Create Idea"
           accessibilityRole="button"
@@ -80,6 +94,7 @@ export function IdeasListScreen({
   onArchiveBatch,
   onCreate,
   onLoad,
+  onOpenArchived,
   onRefresh,
   onSelectIdea,
   state,
@@ -151,7 +166,13 @@ export function IdeasListScreen({
     return true;
   });
 
-  const headerBar = <HeaderBar count={state.ideas.length} onCreate={onCreate} />;
+  const headerBar = (
+    <HeaderBar
+      count={state.ideas.length}
+      onCreate={onCreate}
+      onOpenArchived={onOpenArchived}
+    />
+  );
 
   if (state.status === "loading" || (state.status === "idle" && state.ideas.length === 0)) {
     return (
