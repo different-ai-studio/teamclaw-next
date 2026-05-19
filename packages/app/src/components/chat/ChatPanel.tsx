@@ -34,6 +34,7 @@ import {
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
+import { uploadAttachmentsToStorage } from "@/lib/attachment-upload";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
 type SendMessageFilePart = Record<string, unknown>;
@@ -821,6 +822,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     // Single-window scope sends via MQTT + Supabase regardless.
     const text = message.text?.trim() || "";
     const mentions = message.mentions || [];
+
+    // Snapshot file state immediately so the UI clears at once, before any
+    // async work. This prevents stale images from leaking into later sends
+    // if the user types and submits again while the upload is in flight.
+    const currentImageFiles = imageFiles;
+    const currentAttachedFiles = attachedFiles;
+    setInputValue("");
+    setAttachedFiles([]);
+    setImageFiles([]);
+
+    if (!text && currentAttachedFiles.length === 0 && mentions.length === 0 && currentImageFiles.length === 0) return;
+
     // Combine engaged agent + picker-supplied agents, dedup by id.
     const allAgents: AttachedAgent[] = engagedAgent ? [engagedAgent] : [];
     for (const ea of extraMentionAgents) {
@@ -834,8 +847,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       agentIds,
     );
     const _isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
-
-    if (!text && attachedFiles.length === 0 && mentions.length === 0 && imageFiles.length === 0) return;
 
     let finalContent: string;
     const personMentions: string[] = [];
@@ -883,8 +894,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
 
     // Add attached files at the beginning
-    if (attachedFiles.length > 0) {
-      for (const filePath of attachedFiles) {
+    if (currentAttachedFiles.length > 0) {
+      for (const filePath of currentAttachedFiles) {
         parts.push(`[Attachment: ${getFileName(filePath)}] (path: ${filePath})`);
       }
     }
@@ -904,10 +915,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     // Save pasted images to workspace and build file parts
     let _imageParts: SendMessageFilePart[] | undefined;
-    if (imageFiles.length > 0) {
+    if (currentImageFiles.length > 0) {
       const savedPaths: string[] = [];
       _imageParts = await Promise.all(
-        imageFiles.map(async (file) => {
+        currentImageFiles.map(async (file) => {
           const dataUrl = await fileToDataUrl(file);
           // Save to workspace so agent tools can access the file
           if (workspacePath) {
@@ -968,6 +979,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
 
+          const attachments = currentImageFiles.length > 0
+            ? await uploadAttachmentsToStorage(currentImageFiles, teamIdForSend, sid)
+            : [];
+
           const msg = createMessage(MessageSchema, {
             messageId,
             sessionId: sid,
@@ -996,6 +1011,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             kind: "text",
             content: outgoing,
             metadata: { mention_actor_ids: mentionActorIds },
+            attachments,
           });
           if (insErr) throw insErr;
           await mqttPublish(
@@ -1012,9 +1028,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
     }
 
-    setInputValue("");
-    setAttachedFiles([]);
-    setImageFiles([]);
   };
 
   const handleSubmit = async (message: PromptInputMessage) => {
