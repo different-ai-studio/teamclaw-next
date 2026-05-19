@@ -183,6 +183,9 @@ export default function SessionDetailRoute() {
           onChangeComposerText={(value) => {
             controller?.setComposerText(value);
           }}
+          onOpenMembers={() => {
+            router.push(`/(app)/session-members?sessionId=${sessionId}`);
+          }}
           onSend={() => {
             void controller?.sendMessage();
           }}
