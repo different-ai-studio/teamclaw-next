@@ -167,6 +167,27 @@ export default function ShortcutsRoute() {
             ) : null}
           </View>
         )}
+
+        <View style={styles.section}>
+          <SectionEyebrow label="SYSTEM" style={styles.sectionEyebrow} />
+          <View style={styles.card}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push("/(app)/settings")}
+              style={({ pressed }) => [
+                styles.row,
+                pressed ? styles.rowPressed : null,
+              ]}
+            >
+              <View style={styles.iconTile}>
+                <Ionicons color={colors.basalt} name="settings-outline" size={18} />
+              </View>
+              <Text style={styles.rowLabel}>Settings</Text>
+              <View style={{ flex: 1 }} />
+              <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+            </Pressable>
+          </View>
+        </View>
       </ScrollView>
     </View>
   );
