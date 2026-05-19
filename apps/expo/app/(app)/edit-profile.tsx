@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +16,7 @@ import {
 import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
+import { uuidV4 } from "../../src/lib/uuid";
 import { supabase } from "../../src/lib/supabase/client";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
@@ -25,8 +28,11 @@ export default function EditProfileRoute() {
 
   const [displayName, setDisplayName] = useState("");
   const [initialName, setInitialName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [initialAvatarUrl, setInitialAvatarUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,16 +45,22 @@ export default function EditProfileRoute() {
       try {
         const result = await supabase
           .from("actors")
-          .select("display_name")
+          .select("display_name, avatar_url")
           .eq("id", memberActorId)
           .maybeSingle();
         if (cancelled) return;
         if (result.error) {
           setError(result.error.message);
         } else {
-          const name = (result.data as { display_name?: string } | null)?.display_name ?? "";
+          const row = result.data as
+            | { display_name?: string; avatar_url?: string }
+            | null;
+          const name = row?.display_name ?? "";
+          const avatar = row?.avatar_url ?? null;
           setDisplayName(name);
           setInitialName(name);
+          setAvatarUrl(avatar);
+          setInitialAvatarUrl(avatar);
         }
       } catch (err) {
         if (cancelled) return;
@@ -65,8 +77,53 @@ export default function EditProfileRoute() {
   const canSave =
     !isSaving &&
     !isLoading &&
+    !isUploading &&
     displayName.trim().length > 0 &&
-    displayName.trim() !== initialName.trim();
+    (displayName.trim() !== initialName.trim() || avatarUrl !== initialAvatarUrl);
+
+  const handlePickAvatar = async () => {
+    if (!memberActorId) return;
+    setError(null);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError("Photo library permission denied.");
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (picked.canceled || picked.assets.length === 0) return;
+      const asset = picked.assets[0];
+      setIsUploading(true);
+
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const ext = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
+      const path = `${memberActorId}/${uuidV4()}.${ext}`;
+
+      const upload = await supabase.storage
+        .from("avatars")
+        .upload(path, blob, {
+          cacheControl: "3600",
+          contentType: blob.type || `image/${ext}`,
+          upsert: false,
+        });
+      if (upload.error) {
+        setError(upload.error.message);
+        return;
+      }
+      const publicUrl = supabase.storage.from("avatars").getPublicUrl(path)
+        .data?.publicUrl ?? null;
+      setAvatarUrl(publicUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't upload avatar.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!memberActorId || !canSave) return;
@@ -77,6 +134,7 @@ export default function EditProfileRoute() {
         .from("actors")
         .update({
           display_name: displayName.trim(),
+          avatar_url: avatarUrl,
           updated_at: new Date().toISOString(),
         })
         .eq("id", memberActorId);
@@ -116,6 +174,42 @@ export default function EditProfileRoute() {
           </View>
         ) : (
           <>
+            <View style={styles.section}>
+              <SectionEyebrow label="AVATAR" style={styles.sectionEyebrow} />
+              <Pressable
+                accessibilityRole="button"
+                disabled={isUploading || isSaving}
+                onPress={handlePickAvatar}
+                style={({ pressed }) => [
+                  styles.avatarRow,
+                  pressed ? styles.avatarRowPressed : null,
+                ]}
+              >
+                <View style={styles.avatarTile}>
+                  {avatarUrl ? (
+                    <Image
+                      accessibilityRole="image"
+                      source={{ uri: avatarUrl }}
+                      style={styles.avatarImage}
+                    />
+                  ) : isUploading ? (
+                    <ActivityIndicator color={hai.paper} />
+                  ) : (
+                    <Ionicons color={hai.paper} name="camera-outline" size={22} />
+                  )}
+                </View>
+                <View style={styles.avatarBody}>
+                  <Text style={styles.avatarLabel}>
+                    {avatarUrl ? "Replace photo" : "Add photo"}
+                  </Text>
+                  <Text style={styles.avatarHelper}>
+                    {isUploading ? "Uploading…" : "Square crop, used everywhere your name shows."}
+                  </Text>
+                </View>
+                <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+              </Pressable>
+            </View>
+
             <View style={styles.section}>
               <SectionEyebrow label="DISPLAY NAME" style={styles.sectionEyebrow} />
               <View style={styles.card}>
@@ -165,6 +259,45 @@ const styles = StyleSheet.create({
   body: {
     color: colors.basalt,
     ...typography.secondaryBody,
+  },
+  avatarBody: {
+    flex: 1,
+    gap: 2,
+  },
+  avatarHelper: {
+    color: colors.slate,
+    ...typography.caption,
+  },
+  avatarImage: {
+    height: "100%",
+    width: "100%",
+  },
+  avatarLabel: {
+    color: colors.onyx,
+    ...typography.body,
+    fontWeight: "600",
+  },
+  avatarRow: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: radii.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  avatarRowPressed: {
+    opacity: 0.85,
+  },
+  avatarTile: {
+    alignItems: "center",
+    backgroundColor: hai.cinnabar,
+    borderRadius: 28,
+    height: 56,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: 56,
   },
   card: {
     backgroundColor: colors.paper,

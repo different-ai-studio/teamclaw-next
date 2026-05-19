@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -25,6 +26,7 @@ import {
   type Actor,
   type ActorsListState,
 } from "../actor-types";
+import { matchesQuery } from "../../search/search-matcher";
 
 type Filter = "all" | "humans" | "agents";
 
@@ -110,9 +112,22 @@ export function ActorsListScreen({
   state,
 }: ActorsListScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
 
-  const humans = useMemo(() => state.actors.filter(isMemberActor), [state.actors]);
-  const agents = useMemo(() => state.actors.filter(isAgentActor), [state.actors]);
+  const searched = useMemo(
+    () =>
+      query.trim().length === 0
+        ? state.actors
+        : state.actors.filter((actor) =>
+            matchesQuery(
+              [actor.displayName, actor.role ?? "", actor.actorType].join(" "),
+              query,
+            ),
+          ),
+    [state.actors, query],
+  );
+  const humans = useMemo(() => searched.filter(isMemberActor), [searched]);
+  const agents = useMemo(() => searched.filter(isAgentActor), [searched]);
 
   const segments: SegmentedFilterSegment<Filter>[] = [
     { tag: "all", title: "All", count: humans.length + agents.length },
@@ -176,6 +191,31 @@ export function ActorsListScreen({
       style={styles.screen}
     >
       {headerBar}
+
+      <View style={styles.searchField}>
+        <Ionicons color={colors.slate} name="search" size={16} />
+        <TextInput
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={setQuery}
+          placeholder="Search actors"
+          placeholderTextColor={colors.slate}
+          selectionColor={colors.cinnabar}
+          style={styles.searchInput}
+          value={query}
+        />
+        {query.length > 0 ? (
+          <Pressable
+            accessibilityLabel="Clear search"
+            accessibilityRole="button"
+            hitSlop={6}
+            onPress={() => setQuery("")}
+          >
+            <Ionicons color={colors.slate} name="close-circle" size={16} />
+          </Pressable>
+        ) : null}
+      </View>
+
       <SegmentedFilter onSelect={setFilter} segments={segments} selection={filter} />
 
       {humans.length + agents.length === 0 ? (
@@ -242,6 +282,24 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.mist,
     flex: 1,
+  },
+  searchField: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  searchInput: {
+    color: colors.onyx,
+    flex: 1,
+    padding: 0,
+    ...typography.body,
   },
   section: {
     gap: spacing.sm,
