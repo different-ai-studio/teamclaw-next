@@ -218,8 +218,6 @@ private struct ActorRow: View {
     let actor: CachedActor
     var isMe: Bool = false
 
-    @State private var breathe = false
-
     private var avatarInitials: String {
         let parts = actor.displayName
             .split(whereSeparator: { $0.isWhitespace || $0 == "·" })
@@ -371,11 +369,7 @@ private struct ActorRow: View {
             Circle()
                 .fill(actor.isOnline ? Color.amux.sage : Color.amux.slate)
                 .frame(width: 6, height: 6)
-                .opacity(actor.isOnline && breathe ? 0.5 : 1.0)
-                .animation(actor.isOnline
-                           ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                           : .default,
-                           value: breathe)
+                .breathingOpacity(active: actor.isOnline, dim: 0.5)
             Text("\(mockActiveSessions)")
                 .font(.caption)
                 .monospacedDigit()
@@ -431,10 +425,7 @@ private struct ActorRow: View {
                     // systemBackground, so the online dot reads as a clean
                     // pip on the Hai paper instead of a white halo.
                     .overlay(Circle().stroke(Color.amux.mist, lineWidth: 2.5))
-                    .opacity(breathe ? 0.55 : 1.0)
-                    .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true),
-                               value: breathe)
-                    .onAppear { breathe = true }
+                    .breathingOpacity(active: true, dim: 0.55)
                     .offset(x: 1, y: 1)
             }
         }
@@ -980,7 +971,7 @@ private struct ActorDetailView: View {
                     Circle()
                         .fill(Color.amux.mist)
                         .frame(width: 6, height: 6)
-                        .modifier(BreathingDot(active: true))
+                        .breathingOpacity(active: true)
                 }
                 .overlay(
                     Circle().stroke(Color(.systemGroupedBackground), lineWidth: 3)

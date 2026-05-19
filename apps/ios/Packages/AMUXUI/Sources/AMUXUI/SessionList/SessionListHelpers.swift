@@ -284,8 +284,6 @@ struct AgentRowView: View {
     let workspaceName: String
     let participants: [ParticipantPreview]
 
-    @State private var breathe = false
-
     init(
         session: Session,
         runtime: Runtime? = nil,
@@ -431,14 +429,7 @@ struct AgentRowView: View {
             Circle()
                 .fill(statusDotColor)
                 .frame(width: 5, height: 5)
-                .opacity(isRunning ? (breathe ? 0.35 : 1.0) : 1.0)
-                .animation(
-                    isRunning
-                        ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                        : .default,
-                    value: breathe
-                )
-                .onAppear { if isRunning { breathe = true } }
+                .breathingOpacity(active: isRunning)
             Text(badge.glyph)
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.2)

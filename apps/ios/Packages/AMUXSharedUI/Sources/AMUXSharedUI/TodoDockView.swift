@@ -91,7 +91,7 @@ public struct TodoDockView: View {
             .liquidGlass(in: RoundedRectangle(cornerRadius: 22), interactive: false)
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
-            .animation(.easeInOut(duration: 0.2), value: isCollapsed)
+            .animation(AMUXAnimation.fast, value: isCollapsed)
         }
     }
 

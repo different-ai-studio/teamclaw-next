@@ -103,7 +103,7 @@ struct SessionComposer: View {
                     }
                 )
                 .padding(.horizontal, 16)
-                .animation(.easeInOut(duration: 0.15), value: slashCandidates)
+                .animation(AMUXAnimation.fast, value: slashCandidates)
             }
             if !mentionCandidates.isEmpty {
                 MentionsPopup(
@@ -111,7 +111,7 @@ struct SessionComposer: View {
                     onTap: { target in pickMention(target) }
                 )
                 .padding(.horizontal, 16)
-                .animation(.easeInOut(duration: 0.15), value: mentionCandidates)
+                .animation(AMUXAnimation.fast, value: mentionCandidates)
             }
 
             if !attachments.isEmpty {

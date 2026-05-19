@@ -129,7 +129,7 @@ public struct ToolCallView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                if hasDetails { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }
+                if hasDetails { withAnimation(AMUXAnimation.fast) { isExpanded.toggle() } }
             } label: {
                 HStack(spacing: 6) {
                     ZStack {
@@ -268,7 +268,7 @@ public struct CompactToolLine: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 if hasDetails {
-                    withAnimation(.easeInOut(duration: 0.15)) { showDetail.toggle() }
+                    withAnimation(AMUXAnimation.fast) { showDetail.toggle() }
                 }
             }
 
@@ -305,7 +305,7 @@ public struct ToolRunSummaryBar: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                withAnimation(AMUXAnimation.fast) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")

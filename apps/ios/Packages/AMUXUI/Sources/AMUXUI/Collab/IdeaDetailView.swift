@@ -252,7 +252,7 @@ public struct IdeaDetailView: View {
                 Circle()
                     .fill(fg)
                     .frame(width: 6, height: 6)
-                    .modifier(BreathingDot(active: item.isInProgress))
+                    .breathingOpacity(active: item.isInProgress, dim: 0.4)
                 Text(item.statusLabel.uppercased())
                     .font(.system(size: 10.5, weight: .bold))
                     .tracking(0.3)
@@ -710,22 +710,6 @@ struct AgentAvatar: View {
     }
 }
 
-/// Reusable breathing-opacity modifier so status dots and online rings stay
-/// visually consistent across detail and list surfaces.
-struct BreathingDot: ViewModifier {
-    let active: Bool
-    @State private var on = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(active ? (on ? 0.4 : 1) : 1)
-            .animation(active
-                ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                : .default,
-                value: on)
-            .onAppear { if active { on = true } }
-    }
-}
 
 private extension Date {
     /// Short relative date string ("2h", "3d", "now") — matches the listed

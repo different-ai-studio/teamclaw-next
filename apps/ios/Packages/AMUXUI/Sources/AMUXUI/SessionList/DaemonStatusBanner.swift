@@ -11,8 +11,6 @@ struct DaemonStatusBanner: View {
     let pairing: PairingManager
     let mqtt: MQTTService
 
-    @State private var breathe = false
-
     private var isOnline: Bool { mqtt.connectionState == .connected }
     private var isConnecting: Bool {
         mqtt.connectionState == .connecting || mqtt.connectionState == .reconnecting
@@ -43,17 +41,7 @@ struct DaemonStatusBanner: View {
             Circle()
                 .fill(dotColor)
                 .frame(width: 8, height: 8)
-                .opacity(isOnline && breathe ? 0.35 : 1.0)
-                .animation(
-                    isOnline
-                        ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                        : .default,
-                    value: breathe
-                )
-                .onAppear { if isOnline { breathe = true } }
-                .onChange(of: isOnline) { _, nowOnline in
-                    breathe = nowOnline
-                }
+                .breathingOpacity(active: isOnline)
             Text(label)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(labelColor)
