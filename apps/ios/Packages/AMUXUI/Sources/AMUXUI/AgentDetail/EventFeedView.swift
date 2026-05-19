@@ -157,6 +157,9 @@ public struct EventBubbleView: View {
                         OutboxStatusDot(outboxMessageID: outboxID, onRetry: onRetryOutbox)
                     }
                     VStack(alignment: .trailing, spacing: 6) {
+                        if let outboxID = event.outboxMessageID {
+                            SentAttachmentsView(outboxMessageID: outboxID)
+                        }
                         ForEach(Array(parsed.imageURLs.enumerated()), id: \.offset) { _, url in
                             AsyncImage(url: url) { phase in
                                 switch phase {
@@ -587,6 +590,40 @@ struct OutboxStatusDot: View {
             }
         }
         .padding(.bottom, 6)
+    }
+}
+
+// MARK: - SentAttachmentsView
+
+/// Renders attachment images for a locally-sent user_prompt bubble.
+/// Queries the `OutboxMessage` row via `outboxMessageID` so the images
+/// surface as soon as the upload completes, without needing a full
+/// AgentEvent schema migration. Only fires for messages sent from this
+/// device (outboxMessageID is nil for remote messages).
+private struct SentAttachmentsView: View {
+    @Query private var rows: [OutboxMessage]
+
+    init(outboxMessageID: String) {
+        let id = outboxMessageID
+        _rows = Query(filter: #Predicate<OutboxMessage> { $0.messageID == id })
+    }
+
+    private var attachmentURLs: [URL] { rows.first?.attachmentURLs ?? [] }
+
+    var body: some View {
+        ForEach(Array(attachmentURLs.enumerated()), id: \.offset) { _, url in
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                default:
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.amux.pebble)
+                        .frame(height: 150)
+                }
+            }
+        }
     }
 }
 

@@ -110,17 +110,17 @@ public class AttachmentUploadManager: NSObject, @unchecked Sendable {
                     )
                 )
 
-            // Get public URL
-            let publicURL = try supabaseClient.storage
+            // Generate a signed URL (bucket is private; AsyncImage needs a token-signed URL)
+            let signedURL = try await supabaseClient.storage
                 .from("attachments")
-                .getPublicURL(path: uploadPath)
+                .createSignedURL(path: uploadPath, expiresIn: 31_536_000) // 1 year
 
             // Mark complete on main thread
             await MainActor.run {
                 if let upload = self.fetchUpload(byID: uploadID) {
                     upload.uploadState = .completed
                     upload.uploadedBytes = upload.fileSize
-                    upload.storageURL = publicURL.absoluteString
+                    upload.storageURL = signedURL.absoluteString
                     do {
                         try self.modelContext.save()
                     } catch {
