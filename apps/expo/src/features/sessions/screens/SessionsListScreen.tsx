@@ -1,6 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
+  ActionSheetIOS,
+  Alert,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -150,6 +153,61 @@ export function SessionsListScreen({
     });
   };
   const clearSelection = () => setSelection(new Set());
+
+  const showRowContextMenu = useCallback(
+    (sessionId: string) => {
+      const isPinned = pinnedSessionIds?.has(sessionId) ?? false;
+      const labels = [
+        isPinned ? "取消置顶" : "置顶",
+        "标为未读",
+        "标为已读",
+        "归档",
+        "选择更多…",
+        "取消",
+      ];
+      const dispatch = (index: number) => {
+        switch (index) {
+          case 0:
+            if (onTogglePin) void onTogglePin(sessionId);
+            break;
+          case 1:
+            if (onMarkBatchUnread) void onMarkBatchUnread([sessionId]);
+            break;
+          case 2:
+            if (onMarkBatchRead) void onMarkBatchRead([sessionId]);
+            break;
+          case 3:
+            if (onArchiveBatch) void onArchiveBatch([sessionId]);
+            break;
+          case 4:
+            toggleSelection(sessionId);
+            break;
+          default:
+            break;
+        }
+      };
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: labels,
+            cancelButtonIndex: 5,
+            destructiveButtonIndex: 3,
+          },
+          dispatch,
+        );
+        return;
+      }
+      Alert.alert("会话操作", undefined, [
+        { text: labels[0], onPress: () => dispatch(0) },
+        { text: labels[1], onPress: () => dispatch(1) },
+        { text: labels[2], onPress: () => dispatch(2) },
+        { text: labels[3], style: "destructive", onPress: () => dispatch(3) },
+        { text: labels[4], onPress: () => dispatch(4) },
+        { text: labels[5], style: "cancel" },
+      ]);
+    },
+    [pinnedSessionIds, onTogglePin, onMarkBatchUnread, onMarkBatchRead, onArchiveBatch],
+  );
   const handleArchiveSelected = async () => {
     if (!onArchiveBatch || selection.size === 0) return;
     setIsBatchBusy(true);
@@ -339,7 +397,13 @@ export function SessionsListScreen({
             <SessionGroupSection
               group={group}
               key={group.label}
-              onLongPressSession={(id) => toggleSelection(id)}
+              onLongPressSession={(id) => {
+                if (selectionMode) {
+                  toggleSelection(id);
+                } else {
+                  showRowContextMenu(id);
+                }
+              }}
               onSelectSession={(id) => {
                 if (selectionMode) {
                   toggleSelection(id);
