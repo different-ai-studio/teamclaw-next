@@ -1,8 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ActionSheetIOS,
+  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,8 +14,15 @@ import {
   View,
 } from "react-native";
 
+import {
+  createNotificationPrefsApi,
+  defaultNotificationPrefs,
+  type NotificationPrefs as PushPrefs,
+} from "../../src/features/notifications/notification-prefs-api";
+import { supabase } from "../../src/lib/supabase/client";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
+import { showToast } from "../../src/ui/Toast";
 import { colors, radii, spacing, typography } from "../../src/ui/theme";
 
 const STORAGE_KEY = "teamclaw.notificationPrefs.v1";
@@ -35,6 +45,11 @@ export default function NotificationsRoute() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [hydrated, setHydrated] = useState(false);
+  const [pushPrefs, setPushPrefs] = useState<PushPrefs>(defaultNotificationPrefs);
+  const userIdRef = useRef<string | null>(null);
+  const pushApiRef = useRef(
+    createNotificationPrefsApi(supabase, () => userIdRef.current),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +60,10 @@ export default function NotificationsRoute() {
           const parsed = JSON.parse(raw);
           setPrefs({ ...DEFAULT_PREFS, ...parsed });
         }
+        const { data } = await supabase.auth.getSession();
+        userIdRef.current = data.session?.user.id ?? null;
+        const remote = await pushApiRef.current.load();
+        if (!cancelled) setPushPrefs(remote);
       } catch {
         // fall through with defaults
       } finally {
@@ -64,6 +83,63 @@ export default function NotificationsRoute() {
     } catch {
       // best-effort persistence
     }
+  };
+
+  const updatePush = async (patch: Partial<PushPrefs>) => {
+    const next = { ...pushPrefs, ...patch };
+    setPushPrefs(next);
+    try {
+      await pushApiRef.current.save(next);
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Couldn't save notification prefs",
+      );
+    }
+  };
+
+  const formatDndMinutes = (value: number | null): string => {
+    if (value === null) return "—";
+    const h = Math.floor(value / 60).toString().padStart(2, "0");
+    const m = (value % 60).toString().padStart(2, "0");
+    return `${h}:${m}`;
+  };
+
+  const presetMinuteOptions = [
+    { label: "21:00", value: 21 * 60 },
+    { label: "22:00", value: 22 * 60 },
+    { label: "23:00", value: 23 * 60 },
+    { label: "00:00", value: 0 },
+    { label: "06:00", value: 6 * 60 },
+    { label: "07:00", value: 7 * 60 },
+    { label: "08:00", value: 8 * 60 },
+  ];
+
+  const showDndPicker = (which: "start" | "end") => {
+    const labels = [...presetMinuteOptions.map((o) => o.label), "Cancel"];
+    const dispatch = (index: number) => {
+      if (index < 0 || index >= presetMinuteOptions.length) return;
+      const v = presetMinuteOptions[index].value;
+      if (which === "start") void updatePush({ dndStartMin: v });
+      else void updatePush({ dndEndMin: v });
+    };
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: labels, cancelButtonIndex: labels.length - 1 },
+        dispatch,
+      );
+      return;
+    }
+    Alert.alert(
+      which === "start" ? "DND start time" : "DND end time",
+      undefined,
+      labels.map((label, index) => {
+        if (index === labels.length - 1) {
+          return { text: label, style: "cancel" as const };
+        }
+        return { text: label, onPress: () => dispatch(index) };
+      }),
+    );
   };
 
   return (
@@ -120,9 +196,67 @@ export default function NotificationsRoute() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <SectionEyebrow label="PUSH" style={styles.sectionEyebrow} />
+          <View style={styles.card}>
+            <ToggleRow
+              disabled={!hydrated}
+              helper="Master switch for push delivery (honored by the FC notification fan-out)."
+              label="Enable push"
+              onChange={(value) => updatePush({ enabled: value })}
+              value={pushPrefs.enabled}
+            />
+            <Hairline />
+            <ToggleRow
+              disabled={!hydrated}
+              helper="Skip push delivery during a fixed window each day."
+              label="Do not disturb"
+              onChange={(value) => {
+                if (value) {
+                  void updatePush({
+                    dndStartMin: pushPrefs.dndStartMin ?? 22 * 60,
+                    dndEndMin: pushPrefs.dndEndMin ?? 7 * 60,
+                  });
+                } else {
+                  void updatePush({ dndStartMin: null, dndEndMin: null });
+                }
+              }}
+              value={pushPrefs.dndStartMin !== null}
+            />
+            {pushPrefs.dndStartMin !== null ? (
+              <>
+                <Hairline />
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => showDndPicker("start")}
+                  style={({ pressed }) => [styles.row, pressed ? styles.rowPressed : null]}
+                >
+                  <View style={styles.rowBody}>
+                    <Text style={styles.rowLabel}>Start</Text>
+                  </View>
+                  <Text style={styles.rowValue}>{formatDndMinutes(pushPrefs.dndStartMin)}</Text>
+                </Pressable>
+                <Hairline />
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => showDndPicker("end")}
+                  style={({ pressed }) => [styles.row, pressed ? styles.rowPressed : null]}
+                >
+                  <View style={styles.rowBody}>
+                    <Text style={styles.rowLabel}>End</Text>
+                  </View>
+                  <Text style={styles.rowValue}>{formatDndMinutes(pushPrefs.dndEndMin)}</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+        </View>
+
         <Text style={styles.footnote}>
-          Preferences live on this device until APNs/FCM registration lands —
-          the toggle state is honored locally by future notification scheduling.
+          Per-event preferences live on this device until APNs/FCM
+          registration lands — the toggle state is honored locally by future
+          notification scheduling. The Push section syncs with Supabase and
+          the FC fan-out.
         </Text>
       </ScrollView>
     </View>
@@ -214,6 +348,13 @@ const styles = StyleSheet.create({
     color: colors.onyx,
     ...typography.body,
     fontWeight: "600",
+  },
+  rowPressed: {
+    opacity: 0.8,
+  },
+  rowValue: {
+    color: colors.basalt,
+    ...typography.monoMeta,
   },
   screen: {
     backgroundColor: colors.mist,
