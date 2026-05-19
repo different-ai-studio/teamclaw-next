@@ -56,8 +56,6 @@ public struct MembersTab: View {
             )
                 .navigationTitle("Actors")
                 .navigationBarTitleDisplayMode(.large)
-                .toolbarBackground(Color.amux.mist, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
                         Button { showSettings = true } label: {
