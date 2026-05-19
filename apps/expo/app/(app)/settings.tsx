@@ -47,6 +47,7 @@ export default function SettingsRoute() {
       onClose={() => router.back()}
       onEditProfile={() => router.push("/(app)/edit-profile")}
       onOpenNotifications={() => router.push("/(app)/notifications")}
+      onOpenTeams={() => router.push("/(app)/teams")}
       onOpenWorkspaces={() => router.push("/(app)/workspaces")}
       onSignOut={handleSignOut}
       onToggleNotifications={setNotificationsEnabled}

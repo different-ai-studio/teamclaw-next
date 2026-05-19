@@ -19,6 +19,7 @@ export type SettingsScreenProps = {
   onClose: () => void;
   onEditProfile?: () => void;
   onOpenNotifications?: () => void;
+  onOpenTeams?: () => void;
   onOpenWorkspaces?: () => void;
   onSignOut?: () => void;
   onToggleNotifications?: (enabled: boolean) => void;
@@ -44,6 +45,7 @@ export function SettingsScreen({
   onClose,
   onEditProfile,
   onOpenNotifications,
+  onOpenTeams,
   onOpenWorkspaces,
   onSignOut,
   onToggleNotifications,
@@ -117,6 +119,22 @@ export function SettingsScreen({
                     ]}
                   >
                     <Text style={styles.rowLabel}>Workspaces</Text>
+                    <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+                  </Pressable>
+                </>
+              ) : null}
+              {onOpenTeams ? (
+                <>
+                  <Hairline />
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={onOpenTeams}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed ? styles.rowPressed : null,
+                    ]}
+                  >
+                    <Text style={styles.rowLabel}>All teams</Text>
                     <Ionicons color={colors.slate} name="chevron-forward" size={16} />
                   </Pressable>
                 </>
