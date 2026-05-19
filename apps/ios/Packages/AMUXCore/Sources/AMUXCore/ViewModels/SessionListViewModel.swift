@@ -164,6 +164,18 @@ public final class SessionListViewModel {
             guard let store else { return [] }
             return Set(store.agents.compactMap(\.deviceID).filter { !$0.isEmpty })
         }()
+        // Diagnostic: if `desired` is empty we never subscribe to any
+        // runtime/+/state topic, which is the single most common reason
+        // slash commands never reach the composer popup (the daemon's
+        // retained state with availableCommands never gets delivered).
+        // Either ConnectedAgentsStore hasn't reloaded yet, or no agent
+        // has a non-empty `agents.device_id` column populated upstream.
+        let agentCount = store?.agents.count ?? 0
+        let missingDeviceCount = (store?.agents ?? []).filter {
+            ($0.deviceID ?? "").isEmpty
+        }.count
+        NSLog("[SessionListVM] resync subs: desired=%d agents=%d missing-device=%d",
+              desired.count, agentCount, missingDeviceCount)
         let toAdd = desired.subtracting(subscribedDeviceIDs)
         let toRemove = subscribedDeviceIDs.subtracting(desired)
         for id in toAdd {
@@ -215,6 +227,14 @@ public final class SessionListViewModel {
 
     private func syncRuntime(_ proto: Amux_RuntimeInfo, daemonDeviceId: String, modelContext: ModelContext) {
         let id = proto.runtimeID
+        // Diagnostic: visible from Console.app or `log stream`. Lets us tell
+        // at a glance whether the daemon's retained `runtime/{id}/state`
+        // payload carries the slash-command list (chain steps 1-4) or
+        // arrived empty (agent never emitted, daemon trim, or restart-race
+        // wiped the cache before ACP re-emitted).
+        NSLog("[SessionListVM] syncRuntime rid=%@ device=%@ status=%d cmds=%d models=%d",
+              id, daemonDeviceId, proto.status.rawValue,
+              proto.availableCommands.count, proto.availableModels.count)
         let descriptor = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == id })
         if let existing = try? modelContext.fetch(descriptor).first {
             existing.daemonDeviceId = daemonDeviceId
