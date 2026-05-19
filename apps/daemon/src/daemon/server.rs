@@ -3038,9 +3038,64 @@ impl DaemonServer {
         };
 
         // On success, fan the new current_model out via the retained per-runtime
-        // state topic so iOS subscribers see the change immediately.
+        // state topic so iOS subscribers see the change immediately. Also
+        // upsert agent_runtimes.current_model so clients that read Supabase
+        // (e.g. when MQTT delivery is flaky) see the change — without this,
+        // iOS picks up the stale current_model and the row label snaps back
+        // to the previous model after refreshMemberSheet runs.
         if success {
             self.publish_runtime_state_by_id(&runtime_id).await;
+
+            let sb = &self.supabase;
+            let agents = self.agents.lock().await;
+            let handle = agents.get_handle(&runtime_id);
+            let (acp_sid, session_id, ws_id, backend_type) = (
+                handle.map(|h| h.acp_session_id.clone()).unwrap_or_default(),
+                handle.map(|h| h.session_id.clone()).unwrap_or_default(),
+                handle.map(|h| h.workspace_id.clone()).unwrap_or_default(),
+                handle
+                    .map(|h| agents.launch_config_for(h.agent_type).backend_type)
+                    .unwrap_or("claude"),
+            );
+            let status_str: &'static str = handle
+                .map(|h| match amux::AgentStatus::try_from(h.status as i32) {
+                    Ok(amux::AgentStatus::Active) => "running",
+                    Ok(amux::AgentStatus::Idle) => "idle",
+                    Ok(amux::AgentStatus::Stopped) => "stopped",
+                    _ => "starting",
+                })
+                .unwrap_or("starting");
+            drop(agents);
+
+            let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+            });
+            let team_id = sb.config().team_id.clone();
+            let actor_id = sb.config().actor_id.clone();
+            let sb_clone = sb.clone();
+            let runtime_id_owned = runtime_id.clone();
+            let model_id_owned = model_id.clone();
+            tokio::spawn(async move {
+                let row = crate::supabase::AgentRuntimeUpsert {
+                    team_id: &team_id,
+                    agent_id: &actor_id,
+                    session_id: (!session_id.is_empty()).then_some(session_id.as_str()),
+                    workspace_id: supabase_ws_id.as_deref(),
+                    backend_type,
+                    backend_session_id: if acp_sid.is_empty() {
+                        None
+                    } else {
+                        Some(acp_sid.as_str())
+                    },
+                    runtime_id: Some(runtime_id_owned.as_str()),
+                    status: status_str,
+                    current_model: Some(model_id_owned.as_str()),
+                    last_seen_at: chrono::Utc::now(),
+                };
+                if let Err(e) = sb_clone.upsert_agent_runtime(&row).await {
+                    warn!("agent_runtimes upsert (set_model): {e}");
+                }
+            });
         }
 
         RpcResponse {
