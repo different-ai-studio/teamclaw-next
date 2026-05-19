@@ -185,31 +185,72 @@ export default function ShortcutsRoute() {
                   style={styles.sectionEyebrow}
                 />
                 <View style={styles.card}>
-                  {folders.map((folder, index) => (
-                    <View key={folder.id}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() =>
-                          setFolderStack((stack) => [
-                            ...stack,
-                            { id: folder.id, label: folder.label },
-                          ])
-                        }
-                        style={({ pressed }) => [
-                          styles.row,
-                          pressed ? styles.rowPressed : null,
-                        ]}
-                      >
-                        <View style={styles.iconTile}>
-                          <Ionicons color={colors.basalt} name="folder-outline" size={18} />
-                        </View>
-                        <Text style={styles.rowLabel}>{folder.label}</Text>
-                        <View style={{ flex: 1 }} />
-                        <Ionicons color={colors.slate} name="chevron-forward" size={16} />
-                      </Pressable>
-                      {index < folders.length - 1 ? <Hairline /> : null}
-                    </View>
-                  ))}
+                  {folders.map((folder, index) => {
+                    const isEditing = editMode && editingId === folder.id;
+                    return (
+                      <View key={folder.id}>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => {
+                            if (editMode) {
+                              setEditingId(folder.id);
+                              setEditDraft(folder.label);
+                              return;
+                            }
+                            setFolderStack((stack) => [
+                              ...stack,
+                              { id: folder.id, label: folder.label },
+                            ]);
+                          }}
+                          style={({ pressed }) => [
+                            styles.row,
+                            pressed ? styles.rowPressed : null,
+                          ]}
+                        >
+                          {editMode ? (
+                            <Pressable
+                              accessibilityLabel="Delete folder"
+                              accessibilityRole="button"
+                              hitSlop={6}
+                              onPress={() => handleDelete(folder)}
+                              style={styles.deleteTile}
+                            >
+                              <Ionicons color={hai.paper} name="remove" size={14} />
+                            </Pressable>
+                          ) : (
+                            <View style={styles.iconTile}>
+                              <Ionicons color={colors.basalt} name="folder-outline" size={18} />
+                            </View>
+                          )}
+                          {isEditing ? (
+                            <TextInput
+                              autoFocus
+                              onBlur={() => {
+                                if (editDraft.trim()) {
+                                  void handleSaveRename(folder.id);
+                                } else {
+                                  setEditingId(null);
+                                }
+                              }}
+                              onChangeText={setEditDraft}
+                              onSubmitEditing={() => void handleSaveRename(folder.id)}
+                              returnKeyType="done"
+                              selectionColor={colors.cinnabar}
+                              style={[styles.editInput, { flex: 1 }]}
+                              value={editDraft}
+                            />
+                          ) : (
+                            <Text style={styles.rowLabel}>{folder.label}</Text>
+                          )}
+                          <View style={{ flex: 1 }} />
+                          {!editMode ? (
+                            <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+                          ) : null}
+                        </Pressable>
+                        {index < folders.length - 1 ? <Hairline /> : null}
+                      </View>
+                    );
+                  })}
                 </View>
               </View>
             ) : null}

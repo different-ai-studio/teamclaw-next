@@ -11,6 +11,7 @@ import {
   type AttachmentSource,
 } from "../../src/features/sessions/screens/AttachmentDrawerSheet";
 import { supabase } from "../../src/lib/supabase/client";
+import { PermissionPrimerSheet } from "../../src/ui/PermissionPrimerSheet";
 
 type PickedAsset = {
   uri: string;
@@ -25,6 +26,7 @@ export default function AttachRoute() {
   const teamId = state.currentTeam?.id ?? "";
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [primer, setPrimer] = useState<"camera" | "photos" | null>(null);
 
   const persist = async (assets: PickedAsset[]) => {
     if (!teamId || !sessionId) {
@@ -50,38 +52,28 @@ export default function AttachRoute() {
     }
   };
 
-  const handlePick = async (source: AttachmentSource) => {
-    setErrorMessage(null);
+  const launchCamera = async () => {
     try {
-      if (source === "files") {
-        const result = await DocumentPicker.getDocumentAsync({
-          copyToCacheDirectory: true,
-          multiple: false,
-        });
-        if (result.canceled || result.assets.length === 0) return;
-        await persist(
-          result.assets.map((asset) => ({ uri: asset.uri, mime: asset.mimeType ?? undefined })),
-        );
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMessage("Camera permission denied.");
         return;
       }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        quality: 0.85,
+      });
+      if (result.canceled || result.assets.length === 0) return;
+      await persist(
+        result.assets.map((asset) => ({ uri: asset.uri, mime: asset.mimeType ?? undefined })),
+      );
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Couldn't open the camera.");
+    }
+  };
 
-      if (source === "camera") {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permission.granted) {
-          setErrorMessage("Camera permission denied.");
-          return;
-        }
-        const result = await ImagePicker.launchCameraAsync({
-          allowsEditing: false,
-          quality: 0.85,
-        });
-        if (result.canceled || result.assets.length === 0) return;
-        await persist(
-          result.assets.map((asset) => ({ uri: asset.uri, mime: asset.mimeType ?? undefined })),
-        );
-        return;
-      }
-
+  const launchPhotos = async () => {
+    try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         setErrorMessage("Photo library permission denied.");
@@ -98,17 +90,61 @@ export default function AttachRoute() {
         result.assets.map((asset) => ({ uri: asset.uri, mime: asset.mimeType ?? undefined })),
       );
     } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : "Couldn't open the picker.",
-      );
+      setErrorMessage(err instanceof Error ? err.message : "Couldn't open the picker.");
+    }
+  };
+
+  const handlePick = async (source: AttachmentSource) => {
+    setErrorMessage(null);
+    if (source === "files") {
+      try {
+        const result = await DocumentPicker.getDocumentAsync({
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+        if (result.canceled || result.assets.length === 0) return;
+        await persist(
+          result.assets.map((asset) => ({ uri: asset.uri, mime: asset.mimeType ?? undefined })),
+        );
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : "Couldn't open the picker.");
+      }
+      return;
+    }
+
+    setPrimer(source === "camera" ? "camera" : "photos");
+  };
+
+  const handlePrimerContinue = async () => {
+    const which = primer;
+    setPrimer(null);
+    if (which === "camera") {
+      await launchCamera();
+    } else if (which === "photos") {
+      await launchPhotos();
     }
   };
 
   return (
-    <AttachmentDrawerSheet
-      errorMessage={errorMessage ?? (isUploading ? "Uploading…" : null)}
-      onClose={() => router.back()}
-      onPickSource={handlePick}
-    />
+    <>
+      <AttachmentDrawerSheet
+        errorMessage={errorMessage ?? (isUploading ? "Uploading…" : null)}
+        onClose={() => router.back()}
+        onPickSource={handlePick}
+      />
+      <PermissionPrimerSheet
+        body={
+          primer === "camera"
+            ? "Teamclaw needs the camera to capture and attach photos or videos to your sessions."
+            : "Teamclaw needs the photo library so you can choose images and videos to attach."
+        }
+        ctaLabel="Continue"
+        iconName={primer === "camera" ? "camera-outline" : "images-outline"}
+        onCancel={() => setPrimer(null)}
+        onContinue={handlePrimerContinue}
+        title={primer === "camera" ? "Allow camera access" : "Allow photo library access"}
+        visible={primer !== null}
+      />
+    </>
   );
 }
