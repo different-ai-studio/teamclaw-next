@@ -25,6 +25,7 @@ public struct SessionDetailView: View {
     @State private var muted = false
     @State private var isPlansPanelPresented: Bool = false
     @State private var plansPageIndex: Int = 0
+    @State private var hasAutoOpenedPlans: Bool = false
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
@@ -198,6 +199,12 @@ public struct SessionDetailView: View {
             if let sid = viewModel.session?.sessionId {
                 CurrentSessionFocus.sessionID = sid
             }
+        }
+        .onAppear {
+            considerAutoOpeningPlans(count: viewModel.activePlanSnapshots.count)
+        }
+        .onChange(of: viewModel.activePlanSnapshots.count) { _, newCount in
+            considerAutoOpeningPlans(count: newCount)
         }
         .onDisappear {
             if let sid = viewModel.session?.sessionId,
@@ -414,6 +421,20 @@ public struct SessionDetailView: View {
         if let selectedModelId, !selectedModelId.isEmpty { return selectedModelId }
         if let current = viewModel.runtime?.currentModel, !current.isEmpty { return current }
         return nil
+    }
+
+    private func considerAutoOpeningPlans(count: Int) {
+        if count > 0 && !hasAutoOpenedPlans {
+            hasAutoOpenedPlans = true
+            withAnimation(AMUXAnimation.fast) {
+                isPlansPanelPresented = true
+            }
+        }
+        if count == 0 && isPlansPanelPresented {
+            withAnimation(AMUXAnimation.fast) {
+                isPlansPanelPresented = false
+            }
+        }
     }
 
     /// Resolve an agent actor id to a member-sheet display name. Falls
