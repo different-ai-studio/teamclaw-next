@@ -363,7 +363,7 @@ describe("createSessionsApi", () => {
       },
     ]);
     expect(messageQuery.select).toHaveBeenCalledWith(
-      "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at",
+      "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, attachments",
     );
     expect(messageQuery.eq).toHaveBeenNthCalledWith(1, "team_id", "team-1");
     expect(messageQuery.eq).toHaveBeenNthCalledWith(2, "session_id", "session-1");

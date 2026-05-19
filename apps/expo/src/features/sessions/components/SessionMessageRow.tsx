@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
+import Markdown from "react-native-markdown-display";
 
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
-import type { SessionMessage } from "../session-types";
+import type { MessageAttachment, SessionMessage } from "../session-types";
 
 const HIDDEN_MESSAGE_KINDS = new Set(["permission_request"]);
 
@@ -82,6 +83,7 @@ export function SessionMessageRow({ message, isOwnMessage = false }: SessionMess
   }
 
   const body = normalizeBody(message);
+  const attachments = message.attachments ?? [];
   return (
     <View style={[styles.row, isOwnMessage ? styles.rowOwn : styles.rowOther]}>
       <View
@@ -90,9 +92,26 @@ export function SessionMessageRow({ message, isOwnMessage = false }: SessionMess
           isOwnMessage ? styles.surfaceOwn : styles.surfaceOther,
         ]}
       >
-        <Text style={[styles.body, isOwnMessage ? styles.bodyOwn : styles.bodyOther]}>
-          {body}
-        </Text>
+        {attachments.length > 0 ? (
+          <View style={styles.attachmentList}>
+            {attachments.map((attachment, index) => (
+              <AttachmentChip
+                attachment={attachment}
+                isOwn={isOwnMessage}
+                key={`${attachment.url}:${index}`}
+              />
+            ))}
+          </View>
+        ) : null}
+
+        {body.length > 0 ? (
+          <Markdown
+            style={isOwnMessage ? ownMarkdown : otherMarkdown}
+          >
+            {body}
+          </Markdown>
+        ) : null}
+
         {timestamp ? (
           <Text style={[styles.time, isOwnMessage ? styles.timeOwn : styles.timeOther]}>
             {timestamp}
@@ -103,7 +122,107 @@ export function SessionMessageRow({ message, isOwnMessage = false }: SessionMess
   );
 }
 
+function AttachmentChip({
+  attachment,
+  isOwn,
+}: {
+  attachment: MessageAttachment;
+  isOwn: boolean;
+}) {
+  const mime = attachment.mime ?? "";
+  if (mime.startsWith("image/")) {
+    return (
+      <Image
+        accessibilityRole="image"
+        resizeMode="cover"
+        source={{ uri: attachment.url }}
+        style={styles.attachmentImage}
+      />
+    );
+  }
+  const label = attachment.path?.split("/").pop() ?? (mime || "Attachment");
+  return (
+    <View
+      style={[
+        styles.attachmentPill,
+        isOwn ? styles.attachmentPillOwn : styles.attachmentPillOther,
+      ]}
+    >
+      <Text
+        numberOfLines={1}
+        style={[styles.attachmentLabel, isOwn ? styles.attachmentLabelOwn : null]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+const ownMarkdown = {
+  body: { color: hai.paper, ...typography.body, marginBottom: 0, marginTop: 0 },
+  code_inline: {
+    backgroundColor: "rgba(248,246,241,0.18)",
+    borderRadius: 4,
+    color: hai.paper,
+    paddingHorizontal: 4,
+  },
+  code_block: {
+    backgroundColor: "rgba(248,246,241,0.18)",
+    borderRadius: 6,
+    color: hai.paper,
+    padding: 8,
+  },
+  link: { color: hai.paper, textDecorationLine: "underline" as const },
+  paragraph: { color: hai.paper, marginBottom: 0, marginTop: 0 },
+};
+
+const otherMarkdown = {
+  body: { color: hai.onyx, ...typography.body, marginBottom: 0, marginTop: 0 },
+  code_inline: {
+    backgroundColor: hai.pebble,
+    borderRadius: 4,
+    color: hai.onyx,
+    paddingHorizontal: 4,
+  },
+  code_block: {
+    backgroundColor: hai.pebble,
+    borderRadius: 6,
+    color: hai.onyx,
+    padding: 8,
+  },
+  link: { color: hai.cinnabar, textDecorationLine: "underline" as const },
+  paragraph: { color: hai.onyx, marginBottom: 0, marginTop: 0 },
+};
+
 const styles = StyleSheet.create({
+  attachmentImage: {
+    backgroundColor: hai.pebble,
+    borderRadius: 10,
+    height: 180,
+    width: 220,
+  },
+  attachmentLabel: {
+    color: hai.onyx,
+    ...typography.caption,
+    fontWeight: "600",
+  },
+  attachmentLabelOwn: {
+    color: hai.paper,
+  },
+  attachmentList: {
+    gap: 6,
+  },
+  attachmentPill: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  attachmentPillOther: {
+    backgroundColor: hai.pebble,
+  },
+  attachmentPillOwn: {
+    backgroundColor: "rgba(248,246,241,0.18)",
+  },
   body: {
     ...typography.body,
   },

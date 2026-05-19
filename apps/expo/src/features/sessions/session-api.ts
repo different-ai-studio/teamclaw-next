@@ -48,7 +48,7 @@ type OutgoingMessageInput = {
 const SESSION_COLUMNS =
   "session_id:id, team_id, title, summary, last_message_preview, last_message_at, created_at, created_by:created_by_actor_id";
 const MESSAGE_COLUMNS =
-  "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at";
+  "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, attachments";
 
 function throwIfError(error: SupabaseError): void {
   if (error) {
