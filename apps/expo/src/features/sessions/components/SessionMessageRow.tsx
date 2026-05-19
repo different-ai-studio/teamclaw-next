@@ -3,6 +3,7 @@ import Markdown from "react-native-markdown-display";
 
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import type { MessageAttachment, SessionMessage } from "../session-types";
+import { AudioPlayerChip } from "./AudioPlayerChip";
 
 const HIDDEN_MESSAGE_KINDS = new Set(["permission_request"]);
 
@@ -139,6 +140,9 @@ function AttachmentChip({
         style={styles.attachmentImage}
       />
     );
+  }
+  if (mime.startsWith("audio/")) {
+    return <AudioPlayerChip isOwn={isOwn} url={attachment.url} />;
   }
   const label = attachment.path?.split("/").pop() ?? (mime || "Attachment");
   return (

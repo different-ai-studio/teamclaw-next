@@ -50,6 +50,7 @@ export default function ActorsIndexRoute() {
   return (
     <ActorsListScreen
       currentActorId={state.currentMemberActorId}
+      onInvite={() => router.push("/(app)/invite")}
       onLoad={() => {
         void controller.load();
       }}

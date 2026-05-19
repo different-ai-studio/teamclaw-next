@@ -58,6 +58,8 @@ export default function SessionMembersRoute() {
       actors={participants}
       currentActorId={state.currentMemberActorId ?? null}
       isLoading={isLoading}
+      onAddAgent={() => router.push("/(app)/invite")}
+      onAddMember={() => router.push("/(app)/invite")}
       onClose={() => router.back()}
     />
   );
