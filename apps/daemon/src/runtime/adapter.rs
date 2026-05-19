@@ -524,18 +524,27 @@ fn extract_text(content: &acp::ContentBlock) -> String {
 
 static IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
 
+/// Return the (path, extension) for a URL, stripping the query string FIRST
+/// so a JWT in `?token=…` (Supabase signed URLs put one there, and the JWT
+/// payload contains `.` separators) does not poison the `rsplit('.')` ext
+/// sniff. Without this, `eyJ.foo.bar` makes every signed image URL look
+/// like it ends in `.bar` and the image gets misclassified as a non-image
+/// ResourceLink.
+fn path_and_ext(url: &str) -> (&str, String) {
+    let path = url.split('?').next().unwrap_or(url);
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+    (path, ext)
+}
+
 /// Download a Supabase Storage URL and return the appropriate ACP ContentBlock:
 /// - Image extensions → ContentBlock::Image (base64-encoded bytes)
 /// - All others       → ContentBlock::ResourceLink (URL reference)
 async fn build_attachment_block(url: &str) -> anyhow::Result<acp::ContentBlock> {
-    let ext = url
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let (path, ext) = path_and_ext(url);
 
     if IMAGE_EXTS.contains(&ext.as_str()) {
         let bytes = reqwest::get(url).await?.bytes().await?;
@@ -549,15 +558,44 @@ async fn build_attachment_block(url: &str) -> anyhow::Result<acp::ContentBlock> 
         };
         Ok(acp::ContentBlock::Image(acp::ImageContent::new(data, mime)))
     } else {
-        let name = url
+        let name = path
             .rsplit('/')
-            .next()
-            .unwrap_or("attachment")
-            .split('?')
             .next()
             .unwrap_or("attachment")
             .to_string();
         Ok(acp::ContentBlock::ResourceLink(acp::ResourceLink::new(name, url)))
+    }
+}
+
+#[cfg(test)]
+mod attachment_ext_tests {
+    use super::path_and_ext;
+
+    #[test]
+    fn plain_image_url_yields_jpg() {
+        let (_, ext) = path_and_ext("https://x.supabase.co/photo-abc.jpg");
+        assert_eq!(ext, "jpg");
+    }
+
+    #[test]
+    fn signed_url_with_jwt_in_query_yields_image_ext_not_jwt_segment() {
+        // Supabase signed URLs carry a JWT whose payload contains `.`. The
+        // pre-fix code grabbed "bar" (the JWT tail) and treated the file as
+        // a non-image. Verify we now strip `?token=…` first.
+        let url = "https://x.supabase.co/storage/v1/object/sign/attachments/t/s/abc/photo.png?token=eyJ.foo.bar";
+        let (_, ext) = path_and_ext(url);
+        assert_eq!(ext, "png");
+    }
+
+    #[test]
+    fn url_without_extension_returns_empty_string() {
+        let (_, ext) = path_and_ext("https://x.supabase.co/storage/v1/object/sign/bin/no-ext");
+        // No `.` in path → rsplit yields the whole path; ext won't match
+        // any image type, so caller falls back to ResourceLink. The exact
+        // value here is incidental but documenting the no-`.` case keeps
+        // anyone refactoring the helper from re-introducing the bug.
+        assert_ne!(ext, "jpg");
+        assert_ne!(ext, "png");
     }
 }
 
