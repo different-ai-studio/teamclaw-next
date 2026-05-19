@@ -18,6 +18,8 @@
     "buffer": "^6.0.3",
     "expo": "~53.0.22",
     "expo-constants": "~17.1.8",
+    "expo-document-picker": "^55.0.13",
+    "expo-image-picker": "^55.0.20",
     "expo-linking": "~7.1.7",
     "expo-router": "~5.1.11",
     "expo-status-bar": "~2.2.3",

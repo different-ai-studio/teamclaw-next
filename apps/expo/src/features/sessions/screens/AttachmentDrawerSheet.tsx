@@ -4,13 +4,14 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
-import { colors, radii, spacing, typography } from "../../../ui/theme";
+import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
 export type AttachmentSource = "files" | "camera" | "photos";
 
 export type AttachmentDrawerSheetProps = {
+  errorMessage?: string | null;
   onClose: () => void;
   onPickSource?: (source: AttachmentSource) => void;
 };
@@ -51,6 +52,7 @@ const SOURCES: SourceRow[] = [
  * / expo-image-picker calls without touching this presentation file.
  */
 export function AttachmentDrawerSheet({
+  errorMessage,
   onClose,
   onPickSource,
 }: AttachmentDrawerSheetProps) {
@@ -93,10 +95,14 @@ export function AttachmentDrawerSheet({
           ))}
         </View>
 
-        <Text style={styles.footnote}>
-          Picker integrations land in a follow-up — wiring still needs the
-          expo-document-picker / expo-image-picker permission flow.
-        </Text>
+        {errorMessage ? (
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        ) : (
+          <Text style={styles.footnote}>
+            Uploading the picked asset to Supabase Storage lands in a
+            follow-up — the picker itself is fully wired.
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -114,6 +120,11 @@ const styles = StyleSheet.create({
     borderRadius: radii.card,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
+  },
+  errorText: {
+    color: hai.cinnabarDeep,
+    paddingHorizontal: spacing.xs,
+    ...typography.caption,
   },
   footnote: {
     color: colors.slate,
