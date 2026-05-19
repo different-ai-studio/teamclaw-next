@@ -5,13 +5,17 @@ import AMUXSharedUI
 public struct ShortcutsDrawer: View {
     @Binding var isPresented: Bool
     @Bindable var store: ShortcutsStore
+    let onOpenSettings: () -> Void
 
     @State private var expandedIDs: Set<String> = []
     @State private var presentedLink: ShortcutLinkPresentation?
 
-    public init(isPresented: Binding<Bool>, store: ShortcutsStore) {
+    public init(isPresented: Binding<Bool>,
+                store: ShortcutsStore,
+                onOpenSettings: @escaping () -> Void) {
         self._isPresented = isPresented
         self.store = store
+        self.onOpenSettings = onOpenSettings
     }
 
     public var body: some View {
@@ -42,42 +46,15 @@ public struct ShortcutsDrawer: View {
 
     private func drawer(width: CGFloat) -> some View {
         VStack(spacing: 0) {
-            header
             content
+            settingsFooter
         }
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.amux.mist)
         .clipShape(.rect(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: 22, topTrailingRadius: 0))
         .shadow(color: Color.amux.onyx.opacity(0.14), radius: 22, x: 6, y: 0)
-        .ignoresSafeArea(edges: [.top, .leading, .bottom])
-    }
-
-    private var header: some View {
-        HStack(spacing: 0) {
-            Text("Shortcuts")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Color.amux.onyx)
-            Spacer(minLength: 8)
-            Button(action: close) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.amux.basalt)
-                    .frame(width: 30, height: 30)
-                    .background(Color.amux.pebble, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close shortcuts")
-            .accessibilityIdentifier("shortcuts.closeButton")
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.amux.hairline)
-                .frame(height: 0.5)
-        }
+        .ignoresSafeArea(edges: [.leading, .bottom])
     }
 
     private var content: some View {
@@ -95,7 +72,8 @@ public struct ShortcutsDrawer: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
         .background(Color.amux.mist)
         .refreshable {
@@ -112,6 +90,51 @@ public struct ShortcutsDrawer: View {
                     .padding(24)
             }
         }
+    }
+
+    private var settingsFooter: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.amux.hairline)
+                .frame(height: 0.5)
+
+            Button(action: handleSettingsTap) {
+                HStack(spacing: 10) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.amux.onyx)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.amux.pebble.opacity(0.7))
+                        )
+
+                    Text("Settings")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.amux.onyx)
+
+                    Spacer(minLength: 6)
+                }
+                .padding(.vertical, 9)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.amux.paper)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.amux.hairline, lineWidth: 0.5)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(SettingsRowButtonStyle())
+            .accessibilityIdentifier("shortcuts.settingsButton")
+            .accessibilityLabel("Settings")
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+        }
+        .background(Color.amux.mist)
     }
 
     private func section(title: String, scope: ShortcutScope) -> some View {
@@ -167,6 +190,26 @@ public struct ShortcutsDrawer: View {
 
     private func close() {
         isPresented = false
+    }
+
+    /// Close the drawer first, then ask the host to present SettingsView on the
+    /// next runloop tick. Presenting the sheet from inside the drawer would
+    /// tear it down on dismiss; routing through the host keeps the sheet alive
+    /// even after the drawer animates away.
+    private func handleSettingsTap() {
+        close()
+        DispatchQueue.main.async {
+            onOpenSettings()
+        }
+    }
+}
+
+private struct SettingsRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
