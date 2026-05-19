@@ -56,7 +56,7 @@ public struct MentionsPopup: View {
 
                 if target.id != candidates.last?.id {
                     Divider()
-                        .padding(.leading, 56)
+                        .padding(.leading, 44)
                         .opacity(0.4)
                 }
             }
@@ -76,7 +76,7 @@ private struct MentionRow: View {
     let target: MentionTarget
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             avatar
             VStack(alignment: .leading, spacing: 1) {
                 Text(target.displayName)
@@ -92,9 +92,9 @@ private struct MentionRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(minHeight: 48)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(minHeight: 36)
         .contentShape(Rectangle())
     }
 
@@ -102,9 +102,9 @@ private struct MentionRow: View {
         ZStack {
             Circle()
                 .fill(avatarBackground)
-                .frame(width: 32, height: 32)
+                .frame(width: 24, height: 24)
             Image(systemName: target.kind == .agent ? "sparkles" : "person.fill")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(avatarForeground)
         }
     }
