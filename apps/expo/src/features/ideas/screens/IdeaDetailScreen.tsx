@@ -23,7 +23,13 @@ export type IdeaDetailScreenProps = {
   onArchive?: () => void;
   onClose: () => void;
   onSaveContent?: (patch: { title: string; description: string }) => Promise<void>;
+  onSelectSession?: (sessionId: string) => void;
   onToggleStatus?: () => void;
+  relatedSessions?: ReadonlyArray<{
+    sessionId: string;
+    title: string;
+    lastMessageAt: string;
+  }>;
 };
 
 type StatusPill = {
@@ -77,7 +83,9 @@ export function IdeaDetailScreen({
   onArchive,
   onClose,
   onSaveContent,
+  onSelectSession,
   onToggleStatus,
+  relatedSessions,
 }: IdeaDetailScreenProps) {
   const [titleDraft, setTitleDraft] = useState("");
   const [descDraft, setDescDraft] = useState("");
@@ -182,6 +190,43 @@ export function IdeaDetailScreen({
                 <DetailRow label="Updated" value={formatTimestamp(idea.updatedAt)} />
               </View>
             </View>
+
+            {relatedSessions && relatedSessions.length > 0 ? (
+              <View style={styles.section}>
+                <SectionEyebrow
+                  label={`RELATED SESSIONS · ${relatedSessions.length}`}
+                  style={styles.sectionEyebrow}
+                />
+                <View style={styles.card}>
+                  {relatedSessions.map((row, index) => (
+                    <View key={row.sessionId}>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={
+                          onSelectSession
+                            ? () => onSelectSession(row.sessionId)
+                            : undefined
+                        }
+                        style={({ pressed }) => [
+                          styles.detailRow,
+                          pressed && onSelectSession ? { opacity: 0.7 } : null,
+                        ]}
+                      >
+                        <Text numberOfLines={1} style={styles.detailLabel}>
+                          {row.title || "Untitled session"}
+                        </Text>
+                        <Text style={styles.detailValue}>
+                          {row.lastMessageAt
+                            ? new Date(row.lastMessageAt).toLocaleDateString()
+                            : "—"}
+                        </Text>
+                      </Pressable>
+                      {index < relatedSessions.length - 1 ? <Hairline /> : null}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
             {(onToggleStatus || onArchive) ? (
               <View style={styles.actions}>

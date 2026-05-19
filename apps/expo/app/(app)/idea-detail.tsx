@@ -21,6 +21,9 @@ export default function IdeaDetailRoute() {
   const [creatorName, setCreatorName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [relatedSessions, setRelatedSessions] = useState<
+    Array<{ sessionId: string; title: string; lastMessageAt: string }>
+  >([]);
 
   useEffect(() => {
     if (!teamId || !ideaId) {
@@ -46,10 +49,31 @@ export default function IdeaDetailRoute() {
         } else {
           setCreatorName(null);
         }
+
+        const related = (await supabase
+          .from("sessions")
+          .select("id, title, last_message_at")
+          .eq("idea_id", ideaId)
+          .order("last_message_at", { ascending: false })
+          .limit(5)) as {
+          data:
+            | Array<{ id: string; title: string | null; last_message_at: string | null }>
+            | null;
+          error: { message?: string } | null;
+        };
+        if (cancelled) return;
+        setRelatedSessions(
+          (related.data ?? []).map((row) => ({
+            sessionId: row.id,
+            title: row.title ?? "",
+            lastMessageAt: row.last_message_at ?? "",
+          })),
+        );
       } catch {
         if (cancelled) return;
         setIdea(null);
         setCreatorName(null);
+        setRelatedSessions([]);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -112,7 +136,9 @@ export default function IdeaDetailRoute() {
       onArchive={handleArchive}
       onClose={() => router.back()}
       onSaveContent={handleSaveContent}
+      onSelectSession={(sessionId) => router.replace(`/(app)/sessions/${sessionId}`)}
       onToggleStatus={handleToggleStatus}
+      relatedSessions={relatedSessions}
     />
   );
 }

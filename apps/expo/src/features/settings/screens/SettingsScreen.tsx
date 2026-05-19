@@ -18,6 +18,7 @@ export type SettingsScreenProps = {
   notificationsEnabled?: boolean;
   onClose: () => void;
   onEditProfile?: () => void;
+  onOpenNotifications?: () => void;
   onOpenWorkspaces?: () => void;
   onSignOut?: () => void;
   onToggleNotifications?: (enabled: boolean) => void;
@@ -42,6 +43,7 @@ export function SettingsScreen({
   notificationsEnabled = false,
   onClose,
   onEditProfile,
+  onOpenNotifications,
   onOpenWorkspaces,
   onSignOut,
   onToggleNotifications,
@@ -141,6 +143,22 @@ export function SettingsScreen({
                 value={notificationsEnabled}
               />
             </View>
+            {onOpenNotifications ? (
+              <>
+                <Hairline />
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onOpenNotifications}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed ? styles.rowPressed : null,
+                  ]}
+                >
+                  <Text style={styles.rowLabel}>Per-event preferences</Text>
+                  <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </View>
 
