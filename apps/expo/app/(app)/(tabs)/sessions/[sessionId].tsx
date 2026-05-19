@@ -179,6 +179,9 @@ export default function SessionDetailRoute() {
           composerText={detailState.composerText}
           connectionState={detailState.connectionState}
           isSending={detailState.isSending}
+          onAttach={() => {
+            router.push("/(app)/attach");
+          }}
           onBack={handleBackToList}
           onChangeComposerText={(value) => {
             controller?.setComposerText(value);

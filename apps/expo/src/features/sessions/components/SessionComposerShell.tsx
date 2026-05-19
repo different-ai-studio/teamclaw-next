@@ -12,6 +12,7 @@ type SessionComposerShellProps = {
   composerText: string;
   connectionState: SessionDetailConnectionState;
   isSending: boolean;
+  onAttach?: () => void;
   onChangeText: (value: string) => void;
   onSend: () => void;
   sendErrorMessage: string | null;
@@ -19,7 +20,14 @@ type SessionComposerShellProps = {
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
-function IconChip({ name }: { name: IconName }) {
+function IconChip({ name, onPress }: { name: IconName; onPress?: () => void }) {
+  if (onPress) {
+    return (
+      <Pressable hitSlop={6} onPress={onPress} style={styles.iconChip}>
+        <Ionicons name={name} size={14} color={colors.slate} />
+      </Pressable>
+    );
+  }
   return (
     <View style={styles.iconChip}>
       <Ionicons name={name} size={14} color={colors.slate} />
@@ -31,6 +39,7 @@ export function SessionComposerShell({
   composerText,
   connectionState,
   isSending,
+  onAttach,
   onChangeText,
   onSend,
   sendErrorMessage,
@@ -65,7 +74,7 @@ export function SessionComposerShell({
               <Text style={styles.agentPillText}>TeamClaw AI</Text>
               <Text style={styles.agentChevron}>▾</Text>
             </View>
-            <IconChip name="add" />
+            <IconChip name="add" onPress={onAttach} />
             <IconChip name="at" />
             <IconChip name="sparkles-outline" />
           </View>

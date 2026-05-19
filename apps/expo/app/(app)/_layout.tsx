@@ -49,6 +49,14 @@ export default function AppLayout() {
             contentStyle: { backgroundColor: colors.mist },
           }}
         />
+        <Stack.Screen
+          name="attach"
+          options={{
+            presentation: "modal",
+            animation: "slide_from_bottom",
+            contentStyle: { backgroundColor: colors.mist },
+          }}
+        />
       </Stack>
     </View>
   );

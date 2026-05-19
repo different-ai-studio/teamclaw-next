@@ -35,6 +35,7 @@ type SessionDetailScreenProps = {
   isSending: boolean;
   onAgentInterrupt?: (agentId: string) => void;
   onAgentRemove?: (agentId: string) => void;
+  onAttach?: () => void;
   onBack: () => void;
   onChangeComposerText: (value: string) => void;
   onOpenMembers?: () => void;
@@ -115,6 +116,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     isSending,
     onAgentInterrupt,
     onAgentRemove,
+    onAttach,
     onBack,
     onChangeComposerText,
     onOpenMembers,
@@ -181,6 +183,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         composerText={composerText}
         connectionState={connectionState}
         isSending={isSending}
+        onAttach={onAttach}
         onChangeText={onChangeComposerText}
         onSend={onSend}
         sendErrorMessage={sendErrorMessage}
