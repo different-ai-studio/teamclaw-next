@@ -7,6 +7,7 @@ import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import type { Idea, IdeaStatus } from "../../src/features/ideas/idea-types";
 import { IdeaDetailScreen } from "../../src/features/ideas/screens/IdeaDetailScreen";
 import { supabase } from "../../src/lib/supabase/client";
+import { showToast } from "../../src/ui/Toast";
 
 type BusyAction = "toggleStatus" | "archive" | "save" | null;
 
@@ -116,8 +117,13 @@ export default function IdeaDetailRoute() {
         setBusyAction("archive");
         try {
           await createIdeasApi(supabase).archive(idea.ideaId);
+          showToast("success", "Idea archived");
           router.back();
-        } catch {
+        } catch (err) {
+          showToast(
+            "error",
+            err instanceof Error ? err.message : "Couldn't archive",
+          );
           setBusyAction(null);
         }
       }
@@ -134,6 +140,12 @@ export default function IdeaDetailRoute() {
             description: patch.description,
             updatedAt: new Date().toISOString(),
           });
+          showToast("success", "Saved");
+        } catch (err) {
+          showToast(
+            "error",
+            err instanceof Error ? err.message : "Couldn't save",
+          );
         } finally {
           setBusyAction(null);
         }
