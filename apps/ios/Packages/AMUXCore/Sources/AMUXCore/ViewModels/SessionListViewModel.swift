@@ -27,6 +27,8 @@ public final class SessionListViewModel {
     public var isLoading = true
     public var searchText = ""
     private var task: Task<Void, Never>?
+    // Retained so markAsRead() can mutate the same context that syncRuntime uses.
+    private var ctx: ModelContext?
 
     public init() {}
 
@@ -39,6 +41,7 @@ public final class SessionListViewModel {
         // Create a dedicated context from the same container for async work
         let container = modelContext.container
         let ctx = ModelContext(container)
+        self.ctx = ctx
 
         // Load cached data immediately
         runtimes = (try? ctx.fetch(FetchDescriptor<Runtime>(sortBy: [SortDescriptor(\.lastEventTime, order: .reverse)]))) ?? []
@@ -139,6 +142,16 @@ public final class SessionListViewModel {
     }
 
     public func stop() { task?.cancel(); task = nil }
+
+    /// Clears the unread badge for the given runtime in the same ModelContext
+    /// that syncRuntime uses, so the session list row updates immediately.
+    public func markAsRead(runtimeId: String) {
+        guard !runtimeId.isEmpty,
+              let runtime = runtimes.first(where: { $0.runtimeId == runtimeId }),
+              runtime.hasUnread else { return }
+        runtime.hasUnread = false
+        try? ctx?.save()
+    }
 
     /// Diffs the desired daemon device-id set against the currently subscribed
     /// set and adjusts `runtime/+/state` subscriptions accordingly. Idempotent.
