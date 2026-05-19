@@ -3,10 +3,12 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -31,6 +33,63 @@ export default function TeamsRoute() {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+
+  const commitRename = async (teamId: string) => {
+    const next = renameDraft.trim();
+    if (!next) return;
+    try {
+      const result = await supabase
+        .from("teams")
+        .update({ name: next, updated_at: new Date().toISOString() })
+        .eq("id", teamId);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      setMemberships((prev) =>
+        prev.map((m) => (m.teamId === teamId ? { ...m, name: next } : m)),
+      );
+      setEditingTeamId(null);
+      setRenameDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't rename team.");
+    }
+  };
+
+  const confirmLeave = (membership: Membership) => {
+    if (!memberActorId) return;
+    Alert.alert(
+      "Leave team",
+      `You'll lose access to ${membership.name}. Continue?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Leave",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const result = await supabase
+                .from("team_members")
+                .delete()
+                .eq("team_id", membership.teamId)
+                .eq("member_id", memberActorId);
+              if (result.error) {
+                setError(result.error.message);
+                return;
+              }
+              setMemberships((prev) =>
+                prev.filter((m) => m.teamId !== membership.teamId),
+              );
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Couldn't leave team.");
+            }
+          },
+        },
+      ],
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -113,32 +172,39 @@ export default function TeamsRoute() {
             <View style={styles.card}>
               {memberships.map((membership, index) => {
                 const isActive = membership.teamId === activeTeamId;
+                const isEditing = editingTeamId === membership.teamId;
+                const isOwnerOrAdmin =
+                  membership.role === "owner" || membership.role === "admin";
                 return (
                   <View key={membership.teamId}>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        if (isActive) {
-                          router.back();
-                          return;
-                        }
-                        // Best-effort soft switch: refresh onboarding so it
-                        // picks a new active team; the durable switch flow
-                        // will land when the team picker stores the choice.
-                        router.back();
-                      }}
-                      style={({ pressed }) => [
-                        styles.row,
-                        pressed ? styles.rowPressed : null,
-                      ]}
-                    >
+                    <View style={styles.row}>
                       <View style={styles.iconTile}>
                         <Text style={styles.iconText}>
                           {membership.name.charAt(0).toUpperCase()}
                         </Text>
                       </View>
                       <View style={styles.rowBody}>
-                        <Text style={styles.rowLabel}>{membership.name}</Text>
+                        {isEditing ? (
+                          <TextInput
+                            autoFocus
+                            maxLength={64}
+                            onBlur={() => {
+                              if (renameDraft.trim()) {
+                                void commitRename(membership.teamId);
+                              } else {
+                                setEditingTeamId(null);
+                              }
+                            }}
+                            onChangeText={setRenameDraft}
+                            onSubmitEditing={() => void commitRename(membership.teamId)}
+                            returnKeyType="done"
+                            selectionColor={colors.cinnabar}
+                            style={styles.rowLabel}
+                            value={renameDraft}
+                          />
+                        ) : (
+                          <Text style={styles.rowLabel}>{membership.name}</Text>
+                        )}
                         <Text style={styles.rowMeta}>
                           {membership.slug || membership.teamId.slice(0, 8)} · {membership.role}
                         </Text>
@@ -150,9 +216,31 @@ export default function TeamsRoute() {
                           size={20}
                         />
                       ) : (
-                        <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+                        <Pressable
+                          accessibilityLabel="Leave team"
+                          accessibilityRole="button"
+                          hitSlop={6}
+                          onPress={() => confirmLeave(membership)}
+                          style={styles.rowAction}
+                        >
+                          <Ionicons color={colors.cinnabar} name="exit-outline" size={18} />
+                        </Pressable>
                       )}
-                    </Pressable>
+                      {isOwnerOrAdmin && !isEditing ? (
+                        <Pressable
+                          accessibilityLabel="Rename team"
+                          accessibilityRole="button"
+                          hitSlop={6}
+                          onPress={() => {
+                            setEditingTeamId(membership.teamId);
+                            setRenameDraft(membership.name);
+                          }}
+                          style={styles.rowAction}
+                        >
+                          <Ionicons color={colors.slate} name="create-outline" size={18} />
+                        </Pressable>
+                      ) : null}
+                    </View>
                     {index < memberships.length - 1 ? <Hairline /> : null}
                   </View>
                 );
@@ -234,6 +322,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
+  },
+  rowAction: {
+    padding: 4,
   },
   rowBody: {
     flex: 1,
