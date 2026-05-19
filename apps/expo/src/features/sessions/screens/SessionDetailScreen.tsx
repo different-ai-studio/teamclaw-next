@@ -1,15 +1,22 @@
-import { FlatList, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
+import { Hairline } from "../../../ui/atoms/Hairline";
+import { StatusDot } from "../../../ui/atoms/StatusDot";
+import { colors, spacing, typography } from "../../../ui/theme";
+import { SessionComposerShell } from "../components/SessionComposerShell";
+import { SessionMessageRow } from "../components/SessionMessageRow";
 import type {
   SessionDetailConnectionState,
   SessionDetailControllerState,
 } from "../session-detail-controller";
-import type { SessionDetailState, SessionSummary } from "../session-types";
-import { SessionMessageRow } from "../components/SessionMessageRow";
-import { SessionComposerShell } from "../components/SessionComposerShell";
-import { PrimaryButton } from "../../../ui/button";
-import { AppCard } from "../../../ui/card";
-import { colors, spacing, typography } from "../../../ui/theme";
+import type { SessionSummary } from "../session-types";
 
 type SessionDetailRenderableState = SessionDetailControllerState & {
   status: "empty" | "ready" | "error";
@@ -22,247 +29,211 @@ type SessionDetailScreenProps = {
   isSending: boolean;
   onBack: () => void;
   onChangeComposerText: (value: string) => void;
+  onOpenMembers?: () => void;
   onSend: () => void;
   ownActorId?: string;
   sendErrorMessage: string | null;
   state: SessionDetailRenderableState;
 };
 
-function formatTimestamp(value: string): string {
-  if (!value) {
-    return "时间未知";
+function connectionDescriptor(
+  state: SessionDetailConnectionState,
+): { dot: "active" | "idle" | "error"; label: string } {
+  switch (state) {
+    case "connected":
+      return { dot: "active", label: "Live" };
+    case "connecting":
+      return { dot: "idle", label: "Connecting" };
+    case "disconnected":
+    default:
+      return { dot: "error", label: "Offline" };
   }
+}
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "时间未知";
-  }
+function SessionHeader({
+  connectionState,
+  onBack,
+  onOpenMembers,
+  session,
+}: {
+  connectionState: SessionDetailConnectionState;
+  onBack: () => void;
+  onOpenMembers?: () => void;
+  session: SessionSummary;
+}) {
+  const title = session.title.trim() || "Untitled session";
+  const status = connectionDescriptor(connectionState);
 
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour12: false,
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return (
+    <View>
+      <View style={styles.headerBar}>
+        <Pressable hitSlop={8} onPress={onBack} style={styles.headerSlot}>
+          <Ionicons name="chevron-back" size={26} color={colors.onyx} />
+        </Pressable>
+        <View style={styles.headerTitleBlock}>
+          <Text numberOfLines={1} style={styles.headerTitle}>
+            {title}
+          </Text>
+          <View style={styles.headerStatus}>
+            <StatusDot kind={status.dot} size={6} />
+            <Text style={styles.headerStatusLabel}>{status.label}</Text>
+            <Text style={styles.headerSeparator}>·</Text>
+            <Text style={styles.headerStatusLabel}>
+              {session.participantCount}{" "}
+              {session.participantCount === 1 ? "actor" : "actors"}
+            </Text>
+          </View>
+        </View>
+        <Pressable hitSlop={8} onPress={onOpenMembers} style={styles.headerSlot}>
+          <Ionicons
+            name="people-outline"
+            size={22}
+            color={onOpenMembers ? colors.onyx : colors.slate}
+          />
+        </Pressable>
+      </View>
+      <Hairline />
+    </View>
+  );
 }
 
 export function SessionDetailScreen(props: SessionDetailScreenProps) {
-  const { onBack, ownActorId, state } = props;
-  const { composerText, connectionState, isSending, onChangeComposerText, onSend, sendErrorMessage } =
-    props;
+  const {
+    composerText,
+    connectionState,
+    isSending,
+    onBack,
+    onChangeComposerText,
+    onOpenMembers,
+    onSend,
+    ownActorId,
+    sendErrorMessage,
+    state,
+  } = props;
   const { session } = state;
-  const title = session.title.trim() || "未命名会话";
-  const updatedAt = session.lastMessageAt || session.createdAt;
   const hasMessages = state.messages.length > 0;
-
-  if (!hasMessages) {
-    return (
-      <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
-        <View style={styles.staticContent}>
-          <View style={styles.header}>
-            <Text style={styles.eyebrow}>会话详情</Text>
-            <Text style={styles.title}>{title}</Text>
-            <Text style={styles.meta}>
-              {session.participantCount} 位参与者 · {formatTimestamp(updatedAt)}
-            </Text>
-          </View>
-
-          <AppCard style={styles.card}>
-            <Text style={styles.cardTitle}>会话元数据</Text>
-            <View style={styles.metaGrid}>
-              <Text style={styles.metaLabel}>参与者</Text>
-              <Text style={styles.metaValue}>{session.participantCount} 位</Text>
-              <Text style={styles.metaLabel}>创建时间</Text>
-              <Text style={styles.metaValue}>{formatTimestamp(session.createdAt)}</Text>
-              <Text style={styles.metaLabel}>更新时间</Text>
-              <Text style={styles.metaValue}>{formatTimestamp(updatedAt)}</Text>
-              <Text style={styles.metaLabel}>会话 ID</Text>
-              <Text selectable style={styles.metaValue}>
-                {session.sessionId}
-              </Text>
-            </View>
-          </AppCard>
-
-          <AppCard elevated style={styles.stateCard}>
-            <Text style={styles.cardTitle}>
-              {state.status === "empty" ? "还没有消息" : "消息暂时无法加载"}
-            </Text>
-            <Text style={styles.body}>
-              {state.status === "empty"
-                ? "这个会话目前还没有聊天记录。"
-                : state.errorMessage}
-            </Text>
-            <PrimaryButton fullWidth={false} label="返回会话列表" onPress={onBack} />
-          </AppCard>
-
-          <SessionComposerShell
-            composerText={composerText}
-            connectionState={connectionState}
-            isSending={isSending}
-            onChangeText={onChangeComposerText}
-            onSend={onSend}
-            sendErrorMessage={sendErrorMessage}
-          />
-        </View>
-      </ScrollView>
-    );
-  }
 
   return (
     <View style={styles.screen}>
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.eyebrow}>会话详情</Text>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.meta}>
-            {session.participantCount} 位参与者 · {formatTimestamp(updatedAt)}
-          </Text>
-        </View>
+      <SessionHeader
+        connectionState={connectionState}
+        onBack={onBack}
+        onOpenMembers={onOpenMembers}
+        session={session}
+      />
 
-        <AppCard style={styles.card}>
-          <Text style={styles.cardTitle}>会话元数据</Text>
-          <View style={styles.metaGrid}>
-            <Text style={styles.metaLabel}>参与者</Text>
-            <Text style={styles.metaValue}>{session.participantCount} 位</Text>
-            <Text style={styles.metaLabel}>创建时间</Text>
-            <Text style={styles.metaValue}>{formatTimestamp(session.createdAt)}</Text>
-            <Text style={styles.metaLabel}>更新时间</Text>
-            <Text style={styles.metaValue}>{formatTimestamp(updatedAt)}</Text>
-            <Text style={styles.metaLabel}>会话 ID</Text>
-            <Text selectable style={styles.metaValue}>
-              {session.sessionId}
+      {state.status === "error" ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{state.errorMessage}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.feed}>
+        {hasMessages ? (
+          <FlatList
+            contentContainerStyle={styles.feedContent}
+            data={state.messages}
+            keyExtractor={(message) => message.messageId}
+            renderItem={({ item }) => (
+              <SessionMessageRow
+                isOwnMessage={ownActorId ? item.senderActorId === ownActorId : false}
+                message={item}
+              />
+            )}
+          />
+        ) : (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No messages yet</Text>
+            <Text style={styles.emptyBody}>
+              Be the first to write in this session.
             </Text>
           </View>
-        </AppCard>
-
-        {state.status === "error" ? (
-          <AppCard elevated style={styles.stateCard}>
-            <Text style={styles.cardTitle}>消息暂时无法加载</Text>
-            <Text style={styles.body}>{state.errorMessage}</Text>
-          </AppCard>
-        ) : null}
-
-        <View style={styles.timelineSection}>
-          <View style={styles.timelineHeader}>
-            <Text style={styles.cardTitle}>消息时间线</Text>
-            <Text style={styles.timelineCount}>{state.messages.length} 条</Text>
-          </View>
-          <AppCard style={styles.timelineCard}>
-            <FlatList
-              contentContainerStyle={styles.timelineContent}
-              data={state.messages}
-              keyExtractor={(message) => message.messageId}
-              renderItem={({ item }) => (
-                <SessionMessageRow
-                  isOwnMessage={ownActorId ? item.senderActorId === ownActorId : false}
-                  message={item}
-                />
-              )}
-              style={styles.timelineList}
-            />
-          </AppCard>
-          <SessionComposerShell
-            composerText={composerText}
-            connectionState={connectionState}
-            isSending={isSending}
-            onChangeText={onChangeComposerText}
-            onSend={onSend}
-            sendErrorMessage={sendErrorMessage}
-          />
-        </View>
+        )}
       </View>
+
+      <SessionComposerShell
+        composerText={composerText}
+        connectionState={connectionState}
+        isSending={isSending}
+        onChangeText={onChangeComposerText}
+        onSend={onSend}
+        sendErrorMessage={sendErrorMessage}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  body: {
-    color: colors.ink2,
-    ...typography.body,
+  empty: {
+    alignItems: "center",
+    flex: 1,
+    gap: spacing.xs,
+    justifyContent: "center",
+    paddingHorizontal: spacing.xxl,
   },
-  card: {
-    gap: spacing.sm,
+  emptyBody: {
+    color: colors.basalt,
+    textAlign: "center",
+    ...typography.secondaryBody,
   },
-  cardTitle: {
-    color: colors.foreground,
+  emptyTitle: {
+    color: colors.onyx,
     ...typography.cardTitle,
   },
-  content: {
-    flex: 1,
-    gap: spacing.lg,
-    padding: spacing.xxl,
-  },
-  eyebrow: {
-    color: colors.faint,
-    ...typography.monoMeta,
-  },
-  header: {
-    gap: spacing.xs,
-  },
-  meta: {
-    color: colors.mutedForeground,
-    ...typography.meta,
-  },
-  metaGrid: {
-    borderTopColor: colors.borderSoft,
-    borderTopWidth: 1,
-    columnGap: spacing.md,
-    display: "flex",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    paddingTop: spacing.sm,
-    rowGap: spacing.sm,
-  },
-  metaLabel: {
-    color: colors.mutedForeground,
-    minWidth: 64,
-    ...typography.meta,
-  },
-  metaValue: {
-    color: colors.foreground,
-    flexShrink: 1,
-    width: "70%",
-    ...typography.monoMeta,
-  },
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  staticContent: {
-    gap: spacing.lg,
-  },
-  stateCard: {
-    gap: spacing.md,
-  },
-  timelineCard: {
-    flex: 1,
-    gap: spacing.sm,
-    paddingHorizontal: 0,
+  errorBanner: {
+    backgroundColor: "rgba(184,75,54,0.10)",
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
-  timelineCount: {
-    color: colors.faint,
-    ...typography.monoMeta,
+  errorBannerText: {
+    color: colors.cinnabarDeep,
+    ...typography.caption,
   },
-  timelineHeader: {
+  feed: {
+    flex: 1,
+  },
+  feedContent: {
+    paddingVertical: spacing.sm,
+  },
+  headerBar: {
+    alignItems: "center",
+    backgroundColor: colors.mist,
+    flexDirection: "row",
+    minHeight: 48,
+    paddingHorizontal: spacing.xs,
+  },
+  headerSeparator: {
+    color: colors.slate,
+    paddingHorizontal: 2,
+    ...typography.caption,
+  },
+  headerSlot: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
+    minWidth: 40,
+  },
+  headerStatus: {
     alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: 5,
+    marginTop: 1,
   },
-  timelineContent: {
-    paddingVertical: spacing.xs,
+  headerStatusLabel: {
+    color: colors.slate,
+    ...typography.caption,
   },
-  timelineList: {
+  headerTitle: {
+    color: colors.onyx,
+    ...typography.cardTitle,
+  },
+  headerTitleBlock: {
+    alignItems: "center",
     flex: 1,
+    paddingHorizontal: spacing.xs,
   },
-  timelineSection: {
+  screen: {
+    backgroundColor: colors.mist,
     flex: 1,
-    gap: spacing.md,
-    minHeight: 0,
-  },
-  title: {
-    color: colors.foreground,
-    ...typography.sectionTitle,
   },
 });

@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 
-import type { SessionMessage } from "../session-types";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
+import type { SessionMessage } from "../session-types";
 
 const NON_DISPLAYABLE_MESSAGE_KINDS = new Set([
   "permission_request",
@@ -18,9 +18,8 @@ export type SessionMessageRowProps = {
 export function normalizeBody(message: SessionMessage): string {
   const body = message.content.trim();
   if (!body) {
-    return "内容为空";
+    return "(empty message)";
   }
-
   return body;
 }
 
@@ -29,16 +28,10 @@ export function isNonDisplayableKind(kind: string): boolean {
 }
 
 export function formatTimestamp(value: string): string {
-  if (!value) {
-    return "时间未知";
-  }
-
+  if (!value) return "";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "时间未知";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
     hour12: false,
     hour: "2-digit",
     minute: "2-digit",
@@ -46,14 +39,27 @@ export function formatTimestamp(value: string): string {
 }
 
 export function SessionMessageRow({ message, isOwnMessage = false }: SessionMessageRowProps) {
-  const body = isNonDisplayableKind(message.kind) ? "暂未在移动端展开此消息类型" : normalizeBody(message);
+  const body = isNonDisplayableKind(message.kind)
+    ? "(unsupported event)"
+    : normalizeBody(message);
   const timestamp = formatTimestamp(message.createdAt);
 
   return (
     <View style={[styles.row, isOwnMessage ? styles.rowOwn : styles.rowOther]}>
-      <View style={[styles.surface, isOwnMessage ? styles.surfaceOwn : styles.surfaceOther]}>
-        <Text style={[styles.body, isOwnMessage ? styles.bodyOwn : styles.bodyOther]}>{body}</Text>
-        <Text style={[styles.time, isOwnMessage ? styles.metaOwn : styles.metaOther]}>{timestamp}</Text>
+      <View
+        style={[
+          styles.surface,
+          isOwnMessage ? styles.surfaceOwn : styles.surfaceOther,
+        ]}
+      >
+        <Text style={[styles.body, isOwnMessage ? styles.bodyOwn : styles.bodyOther]}>
+          {body}
+        </Text>
+        {timestamp ? (
+          <Text style={[styles.time, isOwnMessage ? styles.timeOwn : styles.timeOther]}>
+            {timestamp}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -64,19 +70,13 @@ const styles = StyleSheet.create({
     ...typography.body,
   },
   bodyOther: {
-    color: colors.foreground,
+    color: colors.onyx,
   },
   bodyOwn: {
     color: colors.paper,
   },
-  metaOther: {
-    color: colors.faint,
-  },
-  metaOwn: {
-    color: colors.panel,
-  },
   row: {
-    paddingHorizontal: spacing.xxl,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
     width: "100%",
   },
@@ -87,28 +87,33 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   surface: {
-    gap: spacing.sm,
+    gap: 4,
     maxWidth: "82%",
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   surfaceOther: {
     backgroundColor: colors.paper,
-    borderBottomLeftRadius: 6,
-    borderColor: colors.border,
+    borderBottomLeftRadius: radii.hairline,
+    borderColor: colors.hairline,
     borderRadius: radii.card,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   surfaceOwn: {
-    backgroundColor: colors.foreground,
-    borderBottomRightRadius: 6,
-    borderColor: colors.foreground,
+    backgroundColor: colors.onyx,
+    borderBottomRightRadius: radii.hairline,
     borderRadius: radii.card,
-    borderWidth: 1,
   },
   time: {
     flexShrink: 0,
     ...typography.monoMeta,
+    fontSize: 10,
+  },
+  timeOther: {
+    color: colors.slate,
+  },
+  timeOwn: {
+    color: "rgba(248,246,241,0.6)",
   },
 });
 
