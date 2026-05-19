@@ -5,7 +5,7 @@ import { colors, hai, spacing, typography } from "../../../ui/theme";
 import type { SessionDetailConnectionState } from "../session-detail-controller";
 
 export type ConnectionBannerOverlayProps = {
-  connectionState: SessionDetailConnectionState;
+  connectionState: SessionDetailConnectionState | "connected" | "connecting" | "disconnected";
   onReconnect?: () => void;
 };
 

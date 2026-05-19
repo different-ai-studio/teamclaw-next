@@ -101,9 +101,18 @@ export function IdeasListScreen({
 }: IdeasListScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [workspaceFilter, setWorkspaceFilter] = useState<string | null>(null);
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   const [isBatchBusy, setIsBatchBusy] = useState(false);
   const selectionMode = selection.size > 0;
+
+  const workspaceOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const idea of state.ideas) {
+      if (idea.workspaceName) names.add(idea.workspaceName);
+    }
+    return [...names].sort();
+  }, [state.ideas]);
 
   const toggleSelection = (id: string) => {
     setSelection((prev) => {
@@ -127,15 +136,16 @@ export function IdeasListScreen({
     }
   };
 
-  const searched = useMemo(
-    () =>
+  const searched = useMemo(() => {
+    const queryFiltered =
       query.trim().length === 0
         ? state.ideas
         : state.ideas.filter((idea) =>
             matchesAnyField([idea.title, idea.description, idea.workspaceName], query),
-          ),
-    [state.ideas, query],
-  );
+          );
+    if (!workspaceFilter) return queryFiltered;
+    return queryFiltered.filter((idea) => idea.workspaceName === workspaceFilter);
+  }, [state.ideas, query, workspaceFilter]);
 
   const counts = useMemo(() => {
     let mine = 0;
@@ -250,6 +260,51 @@ export function IdeasListScreen({
       </View>
 
       <SegmentedFilter onSelect={setFilter} segments={segments} selection={filter} />
+
+      {workspaceOptions.length > 0 ? (
+        <View style={styles.workspaceRow}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setWorkspaceFilter(null)}
+            style={[
+              styles.workspaceChip,
+              !workspaceFilter ? styles.workspaceChipSelected : null,
+            ]}
+          >
+            <Text
+              style={[
+                styles.workspaceChipText,
+                !workspaceFilter ? styles.workspaceChipTextSelected : null,
+              ]}
+            >
+              All workspaces
+            </Text>
+          </Pressable>
+          {workspaceOptions.map((name) => {
+            const selected = workspaceFilter === name;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                key={name}
+                onPress={() => setWorkspaceFilter(name)}
+                style={[
+                  styles.workspaceChip,
+                  selected ? styles.workspaceChipSelected : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.workspaceChipText,
+                    selected ? styles.workspaceChipTextSelected : null,
+                  ]}
+                >
+                  {name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       {state.ideas.length === 0 ? (
         <View style={styles.stateBlock}>
@@ -458,6 +513,28 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.mist,
     flex: 1,
+  },
+  workspaceChip: {
+    backgroundColor: colors.pebble,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  workspaceChipSelected: {
+    backgroundColor: colors.basalt,
+  },
+  workspaceChipText: {
+    color: colors.basalt,
+    ...typography.monoMeta,
+  },
+  workspaceChipTextSelected: {
+    color: colors.paper,
+  },
+  workspaceRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
   },
   searchField: {
     alignItems: "center",
