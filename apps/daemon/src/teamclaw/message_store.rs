@@ -142,6 +142,7 @@ impl MessageStore {
             model: msg.model.clone(),
             metadata_json: msg.metadata_json.clone(),
             turn_id: msg.turn_id.clone(),
+            attachment_urls: vec![],
         }
     }
 }

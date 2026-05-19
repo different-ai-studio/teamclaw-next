@@ -1448,7 +1448,7 @@ impl DaemonServer {
                     .agents
                     .lock()
                     .await
-                    .send_prompt(&runtime_id, &message.content)
+                    .send_prompt(&runtime_id, &message.content, message.attachment_urls.clone())
                     .await;
                 let _drained = match send_res {
                     Ok(d) => d,
@@ -1781,7 +1781,7 @@ impl DaemonServer {
                                                     .agents
                                                     .lock()
                                                     .await
-                                                    .send_prompt(&runtime_id, &prompt)
+                                                    .send_prompt(&runtime_id, &prompt, vec![])
                                                     .await;
                                                 if let Err(e) = send_res {
                                                     warn!(
@@ -2129,7 +2129,7 @@ impl DaemonServer {
                     .agents
                     .lock()
                     .await
-                    .send_prompt(agent_id, &prompt.text)
+                    .send_prompt(agent_id, &prompt.text, prompt.attachment_urls.clone())
                     .await;
                 match send_res {
                     Ok(_drained) => {

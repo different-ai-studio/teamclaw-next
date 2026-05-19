@@ -50,7 +50,8 @@ public actor OutboxSender {
     /// row with the same id already exists this is a no-op so callers
     /// can safely re-enqueue without double-sending.
     public func enqueue(messageID: String, sessionID: String, senderActorID: String,
-                        content: String, mentionActorIDs: [String], modelID: String?) async {
+                        content: String, mentionActorIDs: [String], modelID: String?,
+                        attachmentURLs: [URL] = []) async {
         let ctx = ModelContext(modelContainer)
         if let existing = fetchRow(messageID: messageID, in: ctx) {
             outboxLogger.notice("outbox enqueue skipped (already exists) msgId=\(String(messageID.prefix(8)), privacy: .public) state=\(existing.stateRaw, privacy: .public)")
@@ -58,7 +59,8 @@ public actor OutboxSender {
         }
         let row = OutboxMessage(messageID: messageID, sessionID: sessionID,
                                 senderActorID: senderActorID, content: content,
-                                mentionActorIDs: mentionActorIDs, modelID: modelID)
+                                mentionActorIDs: mentionActorIDs, modelID: modelID,
+                                attachmentURLs: attachmentURLs)
         ctx.insert(row)
         do {
             try ctx.save()
@@ -213,6 +215,7 @@ public actor OutboxSender {
                 content: row.content,
                 modelId: row.modelID,
                 mentionActorIDs: row.mentionActorIDs,
+                attachmentURLs: row.attachmentURLs,
                 persistFirst: true,
                 messageID: row.messageID
             )

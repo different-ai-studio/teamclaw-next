@@ -455,6 +455,7 @@ impl RuntimeManager {
         &mut self,
         agent_id: &str,
         text: &str,
+        attachment_urls: Vec<String>,
     ) -> crate::error::Result<Vec<String>> {
         let (final_text, drained_ids) = if let Some(handle) = self.agents.get_mut(agent_id) {
             let (prefix, drained) = handle.flush_pending_silent();
@@ -471,7 +472,7 @@ impl RuntimeManager {
             )));
         };
 
-        self.send_prompt_raw(agent_id, &final_text).await?;
+        self.send_prompt_raw(agent_id, &final_text, attachment_urls).await?;
         Ok(drained_ids)
     }
 
@@ -480,6 +481,7 @@ impl RuntimeManager {
         &mut self,
         agent_id: &str,
         text: &str,
+        attachment_urls: Vec<String>,
     ) -> crate::error::Result<()> {
         #[cfg(test)]
         {
@@ -492,7 +494,7 @@ impl RuntimeManager {
             let handle = self.agents.get(agent_id).ok_or_else(|| {
                 crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
             })?;
-            handle.send_prompt(text).await
+            handle.send_prompt(text, attachment_urls).await
         }
     }
 
@@ -934,7 +936,8 @@ impl RuntimeManager {
 
         // Use send_prompt_raw to bypass the pending_silent drain — the
         // gateway already framed the prompt with sender context.
-        self.send_prompt_raw(&agent_id, prompt).await?;
+        // Gateway prompts carry no file attachments.
+        self.send_prompt_raw(&agent_id, prompt, vec![]).await?;
 
         // Drive the per-runtime aggregator off the agent's event channel
         // until an `AgentReply` is emitted at Active→Idle. Hard cap so a
@@ -1169,7 +1172,7 @@ mod tests {
                 created_at: 100,
             });
         }
-        let drained = mgr.send_prompt("rt1", "real question").await.unwrap();
+        let drained = mgr.send_prompt("rt1", "real question", vec![]).await.unwrap();
         assert_eq!(drained, vec!["m1".to_string()]);
         let last = mgr.last_sent_to("rt1").unwrap();
         assert!(last.contains("Ann: earlier note"), "body was: {last}");
@@ -1179,7 +1182,7 @@ mod tests {
     #[tokio::test]
     async fn send_prompt_no_pending_sends_plain_text() {
         let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
-        let drained = mgr.send_prompt("rt1", "hello").await.unwrap();
+        let drained = mgr.send_prompt("rt1", "hello", vec![]).await.unwrap();
         assert!(drained.is_empty());
         assert_eq!(mgr.last_sent_to("rt1").as_deref(), Some("hello"));
     }
@@ -1187,7 +1190,7 @@ mod tests {
     #[tokio::test]
     async fn send_prompt_returns_err_for_missing_runtime() {
         let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
-        let result = mgr.send_prompt("nonexistent", "hello").await;
+        let result = mgr.send_prompt("nonexistent", "hello", vec![]).await;
         assert!(result.is_err());
     }
 
@@ -1236,7 +1239,7 @@ mod tests {
             let agent_id = mgr.agent_id_of(&rid).unwrap();
             let mentioned = mention_actor_ids.iter().any(|m| m == &agent_id);
             if mentioned {
-                mgr.send_prompt(&rid, "hi").await.unwrap();
+                mgr.send_prompt(&rid, "hi", vec![]).await.unwrap();
             }
         }
 

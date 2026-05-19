@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use acp::Agent as _; // bring trait methods into scope
 use agent_client_protocol as acp;
+use base64::Engine as _;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -19,7 +20,7 @@ use crate::proto::amux;
 /// Commands the main tokio runtime sends to the ACP thread.
 pub enum AcpCommand {
     /// Send a prompt to the running session.
-    Prompt { text: String },
+    Prompt { text: String, attachment_urls: Vec<String> },
     /// Cancel the current turn.
     Cancel,
     /// Resolve a pending permission request.
@@ -518,6 +519,49 @@ fn extract_text(content: &acp::ContentBlock) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Attachment → ACP ContentBlock
+// ---------------------------------------------------------------------------
+
+static IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
+
+/// Download a Supabase Storage URL and return the appropriate ACP ContentBlock:
+/// - Image extensions → ContentBlock::Image (base64-encoded bytes)
+/// - All others       → ContentBlock::ResourceLink (URL reference)
+async fn build_attachment_block(url: &str) -> anyhow::Result<acp::ContentBlock> {
+    let ext = url
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+
+    if IMAGE_EXTS.contains(&ext.as_str()) {
+        let bytes = reqwest::get(url).await?.bytes().await?;
+        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let mime = match ext.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => "image/png",
+        };
+        Ok(acp::ContentBlock::Image(acp::ImageContent::new(data, mime)))
+    } else {
+        let name = url
+            .rsplit('/')
+            .next()
+            .unwrap_or("attachment")
+            .split('?')
+            .next()
+            .unwrap_or("attachment")
+            .to_string();
+        Ok(acp::ContentBlock::ResourceLink(acp::ResourceLink::new(name, url)))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public API: spawn an ACP agent in its own thread with LocalSet
 // ---------------------------------------------------------------------------
 
@@ -854,7 +898,7 @@ async fn run_acp_session(
             let result = conn
                 .prompt(acp::PromptRequest::new(
                     session_id.clone(),
-                    vec![text.into()],
+                    vec![text.into()],  // initial_prompt carries no attachments
                 ))
                 .await;
 
@@ -880,7 +924,7 @@ async fn run_acp_session(
     // Command loop: receive commands from the main runtime
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            AcpCommand::Prompt { text } => {
+            AcpCommand::Prompt { text, attachment_urls } => {
                 let conn = conn.clone();
                 let session_id = session_id.clone();
                 let event_tx = event_tx.clone();
@@ -899,11 +943,16 @@ async fn run_acp_session(
                         })
                         .await;
 
+                    let mut blocks: Vec<acp::ContentBlock> = vec![text.into()];
+                    for url in &attachment_urls {
+                        match build_attachment_block(url).await {
+                            Ok(block) => blocks.push(block),
+                            Err(e) => warn!(url = %url, err = %e, "attachment fetch failed; skipping"),
+                        }
+                    }
+
                     let result = conn
-                        .prompt(acp::PromptRequest::new(
-                            session_id.clone(),
-                            vec![text.into()],
-                        ))
+                        .prompt(acp::PromptRequest::new(session_id.clone(), blocks))
                         .await;
 
                     if let Err(e) = result {

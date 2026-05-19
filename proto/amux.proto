@@ -158,6 +158,9 @@ message AcpRequestHistory {
 message AcpSendPrompt {
   string text = 1;
   string model_id = 2;
+  // Supabase Storage URLs for attachments (legacy bare-runtime path).
+  // Session-backed chats carry these in Teamclaw_Message.attachment_urls instead.
+  repeated string attachment_urls = 3;
 }
 
 message AcpCancel {}

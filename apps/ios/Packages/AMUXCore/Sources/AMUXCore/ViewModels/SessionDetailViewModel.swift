@@ -1839,11 +1839,7 @@ public final class SessionDetailViewModel {
             // any visible mention even though the chip is engaging an
             // agent — confusing in chat history, especially for other
             // collaborators reading along.
-            var body = composeBodyWithMentions(text)
-            if !attachmentURLs.isEmpty {
-                let urlBlock = attachmentURLs.map(\.absoluteString).joined(separator: "\n")
-                body += "\n\n" + urlBlock
-            }
+            let body = composeBodyWithMentions(text)
             let messageID = UUID().uuidString
             let mentionIDs = Array(agentChipSelection)
 
@@ -1883,7 +1879,8 @@ public final class SessionDetailViewModel {
                     senderActorID: teamclawService.currentHumanActorId ?? "",
                     content: body,
                     mentionActorIDs: mentionIDs,
-                    modelID: modelId
+                    modelID: modelId,
+                    attachmentURLs: attachmentURLs
                 )
                 return
             }
@@ -1898,6 +1895,7 @@ public final class SessionDetailViewModel {
                     content: body,
                     modelId: modelId,
                     mentionActorIDs: mentionIDs,
+                    attachmentURLs: attachmentURLs,
                     messageID: messageID
                 )
             } catch {
@@ -1917,6 +1915,9 @@ public final class SessionDetailViewModel {
             var p = Amux_AcpSendPrompt(); p.text = text
             if let modelId, !modelId.isEmpty {
                 p.modelID = modelId
+            }
+            if !attachmentURLs.isEmpty {
+                p.attachmentUrls = attachmentURLs.map(\.absoluteString)
             }
             try await sendCommand { $0.command = .sendPrompt(p) }
         }

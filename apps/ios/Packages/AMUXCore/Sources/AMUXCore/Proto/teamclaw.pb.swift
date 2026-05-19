@@ -309,6 +309,8 @@ public struct Teamclaw_Message: Sendable {
   /// messages and for non-agent kinds — renderers fall back to message_id.
   public var turnID: String = String()
 
+  public var attachmentUrls: [String] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1642,7 +1644,7 @@ extension Teamclaw_Participant: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 extension Teamclaw_Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}session_id\0\u{3}sender_actor_id\0\u{1}kind\0\u{1}content\0\u{3}created_at\0\u{3}reply_to_message_id\0\u{1}mentions\0\u{1}model\0\u{3}metadata_json\0\u{3}turn_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}session_id\0\u{3}sender_actor_id\0\u{1}kind\0\u{1}content\0\u{3}created_at\0\u{3}reply_to_message_id\0\u{1}mentions\0\u{1}model\0\u{3}metadata_json\0\u{3}turn_id\0\u{3}attachment_urls\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1661,6 +1663,7 @@ extension Teamclaw_Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 9: try { try decoder.decodeSingularStringField(value: &self.model) }()
       case 10: try { try decoder.decodeSingularStringField(value: &self.metadataJson) }()
       case 11: try { try decoder.decodeSingularStringField(value: &self.turnID) }()
+      case 12: try { try decoder.decodeRepeatedStringField(value: &self.attachmentUrls) }()
       default: break
       }
     }
@@ -1700,6 +1703,9 @@ extension Teamclaw_Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if !self.turnID.isEmpty {
       try visitor.visitSingularStringField(value: self.turnID, fieldNumber: 11)
     }
+    if !self.attachmentUrls.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.attachmentUrls, fieldNumber: 12)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1715,6 +1721,7 @@ extension Teamclaw_Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs.model != rhs.model {return false}
     if lhs.metadataJson != rhs.metadataJson {return false}
     if lhs.turnID != rhs.turnID {return false}
+    if lhs.attachmentUrls != rhs.attachmentUrls {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

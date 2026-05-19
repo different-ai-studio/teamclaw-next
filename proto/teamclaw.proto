@@ -86,6 +86,10 @@ message Message {
   // AgentReply messages into one bubble. Empty for legacy/historical
   // messages and for non-agent kinds — renderers fall back to message_id.
   string turn_id = 11;
+  // Supabase Storage URLs for file/image attachments. Sent separately from
+  // content so the daemon can build ACP ContentBlock::Image / ResourceLink
+  // instead of embedding raw URLs in the text body.
+  repeated string attachment_urls = 12;
 }
 
 message Idea {

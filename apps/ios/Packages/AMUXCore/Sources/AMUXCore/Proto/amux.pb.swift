@@ -710,6 +710,8 @@ public struct Amux_AcpSendPrompt: Sendable {
 
   public var modelID: String = String()
 
+  public var attachmentUrls: [String] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -2249,7 +2251,7 @@ extension Amux_AcpRequestHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 
 extension Amux_AcpSendPrompt: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AcpSendPrompt"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{3}model_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{3}model_id\0\u{3}attachment_urls\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2259,6 +2261,7 @@ extension Amux_AcpSendPrompt: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.modelID) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.attachmentUrls) }()
       default: break
       }
     }
@@ -2271,12 +2274,16 @@ extension Amux_AcpSendPrompt: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     if !self.modelID.isEmpty {
       try visitor.visitSingularStringField(value: self.modelID, fieldNumber: 2)
     }
+    if !self.attachmentUrls.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.attachmentUrls, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Amux_AcpSendPrompt, rhs: Amux_AcpSendPrompt) -> Bool {
     if lhs.text != rhs.text {return false}
     if lhs.modelID != rhs.modelID {return false}
+    if lhs.attachmentUrls != rhs.attachmentUrls {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

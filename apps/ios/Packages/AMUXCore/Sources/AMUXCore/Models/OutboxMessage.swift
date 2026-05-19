@@ -47,9 +47,14 @@ public final class OutboxMessage {
     /// JSON-encoded list of AttachmentUpload.attachmentID.
     /// Stored as JSON because SwiftData doesn't support [String] arrays on @Model.
     public var attachmentIDsJSON: String = "[]"
+    /// JSON-encoded list of completed Supabase Storage URLs for this message's
+    /// attachments. Populated from AttachmentUpload.storageURL after uploads
+    /// finish; sent in Teamclaw_Message.attachment_urls instead of appended to content.
+    public var attachmentUrlsJSON: String = "[]"
 
     public init(messageID: String, sessionID: String, senderActorID: String,
-                content: String, mentionActorIDs: [String], modelID: String?) {
+                content: String, mentionActorIDs: [String], modelID: String?,
+                attachmentURLs: [URL] = []) {
         self.messageID = messageID
         self.sessionID = sessionID
         self.senderActorID = senderActorID
@@ -57,6 +62,7 @@ public final class OutboxMessage {
         self.mentionActorIDsJSON = (try? String(data: JSONEncoder().encode(mentionActorIDs), encoding: .utf8)) ?? "[]"
         self.modelID = modelID
         self.attachmentIDsJSON = "[]"
+        self.attachmentUrlsJSON = (try? String(data: JSONEncoder().encode(attachmentURLs.map(\.absoluteString)), encoding: .utf8)) ?? "[]"
         self.createdAt = .now
         self.stateRaw = OutboxState.pending.rawValue
         self.attemptCount = 0
@@ -86,5 +92,12 @@ public final class OutboxMessage {
               let arr = try? JSONDecoder().decode([String].self, from: data)
         else { return [] }
         return arr
+    }
+
+    public var attachmentURLs: [URL] {
+        guard let data = attachmentUrlsJSON.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return arr.compactMap { URL(string: $0) }
     }
 }

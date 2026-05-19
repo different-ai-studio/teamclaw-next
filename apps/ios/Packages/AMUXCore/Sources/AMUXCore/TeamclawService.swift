@@ -506,6 +506,7 @@ public final class TeamclawService {
         content: String,
         modelId: String? = nil,
         mentionActorIDs: [String] = [],
+        attachmentURLs: [URL] = [],
         persistFirst: Bool = false,
         messageID: String? = nil
     ) async throws -> String {
@@ -530,6 +531,9 @@ public final class TeamclawService {
         message.createdAt = Int64(Date().timeIntervalSince1970)
         if let modelId, !modelId.isEmpty {
             message.model = modelId
+        }
+        if !attachmentURLs.isEmpty {
+            message.attachmentUrls = attachmentURLs.map(\.absoluteString)
         }
 
         var messageEnvelope = Teamclaw_SessionMessageEnvelope()

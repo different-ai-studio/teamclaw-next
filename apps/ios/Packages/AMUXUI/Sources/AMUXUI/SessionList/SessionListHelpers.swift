@@ -217,6 +217,9 @@ struct SessionListContent: View {
             if isEditing {
                 toggleSelection(session.sessionId)
             } else {
+                if let runtimeId = runtime?.runtimeId {
+                    viewModel.markAsRead(runtimeId: runtimeId)
+                }
                 navigationPath.append("session:\(session.sessionId)")
             }
         }
