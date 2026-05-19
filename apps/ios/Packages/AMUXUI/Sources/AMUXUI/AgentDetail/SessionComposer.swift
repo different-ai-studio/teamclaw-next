@@ -18,6 +18,14 @@ struct SessionComposer: View {
     let sessionID: String
     let teamID: String
 
+    /// Agent chips for the unified pre-send tray (chips share a horizontal
+    /// scroll with attachment thumbnails). Pass an empty array when no
+    /// chip-based agent routing is wired up — the tray simply omits them.
+    let agentChips: [AgentChipBar.AgentChip]
+    @Binding var agentChipSelection: Set<String>
+    let streamingAgentIDs: Set<String>
+    let onAgentInterrupt: (String) -> Void
+
     let onSend: ([URL]) -> Void
     let onAgentMention: (MentionTarget) -> Void
 
@@ -114,9 +122,21 @@ struct SessionComposer: View {
                 .animation(AMUXAnimation.fast, value: mentionCandidates)
             }
 
-            if !attachments.isEmpty {
+            // Unified pre-send tray: agent chips + attachment thumbnails
+            // share one horizontal scroll. Both are "context being added to
+            // the next send", so they belong in the same visual group.
+            if !agentChipSelection.isEmpty || !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
+                        if !agentChipSelection.isEmpty {
+                            AgentChipBar(
+                                chips: agentChips,
+                                selection: $agentChipSelection,
+                                streamingAgentIDs: streamingAgentIDs,
+                                onInterrupt: onAgentInterrupt,
+                                wrappedInScrollView: false
+                            )
+                        }
                         ForEach(attachments, id: \.self) { url in
                             AttachmentThumbnailTile(
                                 url: url,
@@ -360,12 +380,12 @@ private struct AttachmentThumbnailTile: View {
 
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, Color.black.opacity(0.55))
             }
             .buttonStyle(.plain)
-            .offset(x: 6, y: -6)
+            .offset(x: 4, y: -4)
             .accessibilityLabel("Remove attachment")
         }
         .task(id: url) {

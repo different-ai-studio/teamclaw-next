@@ -42,17 +42,24 @@ public struct AgentChipBar: View {
     @Binding var selection: Set<String>     // engaged agent_ids
     let streamingAgentIDs: Set<String>      // agent_ids whose runtime is currently producing
     let onInterrupt: (String) -> Void
+    /// When false the chips render as a bare HStack with no outer ScrollView
+    /// and no extra padding — used when the composer's unified pre-send tray
+    /// is the one providing horizontal scrolling, so we don't nest two
+    /// scroll views. Default true preserves standalone-usage behavior.
+    let wrappedInScrollView: Bool
 
     @State private var pendingInterrupt: AgentChip?
 
     public init(chips: [AgentChip],
                 selection: Binding<Set<String>>,
                 streamingAgentIDs: Set<String> = [],
-                onInterrupt: @escaping (String) -> Void = { _ in }) {
+                onInterrupt: @escaping (String) -> Void = { _ in },
+                wrappedInScrollView: Bool = true) {
         self.chips = chips
         _selection = selection
         self.streamingAgentIDs = streamingAgentIDs
         self.onInterrupt = onInterrupt
+        self.wrappedInScrollView = wrappedInScrollView
     }
 
     private var visibleChips: [AgentChip] {
@@ -61,14 +68,16 @@ public struct AgentChipBar: View {
 
     public var body: some View {
         if !visibleChips.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(visibleChips) { chip in
-                        chipLabel(chip)
+            Group {
+                if wrappedInScrollView {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        chipsRow
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                     }
+                } else {
+                    chipsRow
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
             }
             .alert(
                 "Interrupt \(pendingInterrupt?.displayName ?? "agent")?",
@@ -85,6 +94,14 @@ public struct AgentChipBar: View {
                 }
             } message: { chip in
                 Text("Stop \(chip.displayName)'s current response. The message it was working on won't be saved.")
+            }
+        }
+    }
+
+    private var chipsRow: some View {
+        HStack(spacing: 8) {
+            ForEach(visibleChips) { chip in
+                chipLabel(chip)
             }
         }
     }
