@@ -2,6 +2,10 @@ import SwiftUI
 import AMUXCore
 import AMUXSharedUI
 
+/// Plain shortcut row used inside a `HaiPaperCard`. The card and the
+/// hairline separators between siblings live in the parent, so each row
+/// renders as a bare HStack — no per-row background, no stroke, no
+/// icon container. Restraint per DESIGN.md "不足の美".
 struct ShortcutMenuRow: View {
     let node: ShortcutRecord
     let store: ShortcutsStore
@@ -11,10 +15,10 @@ struct ShortcutMenuRow: View {
 
     private var isExpanded: Bool { expandedIDs.contains(node.id) }
     private var destination: ShortcutPresentation { ShortcutPresentation.destination(for: node) }
-    private var indent: CGFloat { CGFloat(depth) * 16 }
+    private var indent: CGFloat { CGFloat(depth) * 18 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 0) {
             Button(action: handleTap) {
                 rowLabel
             }
@@ -24,15 +28,24 @@ struct ShortcutMenuRow: View {
             if isExpanded, node.type == .folder {
                 let children = store.children(parentID: node.id, scope: node.scope)
                 if children.isEmpty {
-                    Text("Empty")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Color.amux.slate)
-                        .padding(.leading, indent + 48)
-                        .padding(.vertical, 2)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    HStack {
+                        Text("Empty")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.amux.slate)
+                        Spacer()
+                    }
+                    .padding(.leading, indent + 30)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 14)
+                    .transition(.opacity)
                 } else {
-                    VStack(spacing: 6) {
-                        ForEach(children) { child in
+                    VStack(spacing: 0) {
+                        ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
+                            if idx > 0 {
+                                Divider()
+                                    .background(Color.amux.hairline)
+                                    .padding(.leading, 14 + CGFloat(depth + 1) * 18 + 26)
+                            }
                             ShortcutMenuRow(
                                 node: child,
                                 store: store,
@@ -42,66 +55,49 @@ struct ShortcutMenuRow: View {
                             )
                         }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
         }
     }
 
     private var rowLabel: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             iconView
+                .padding(.leading, indent)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(node.label)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(rowDisabled ? Color.amux.slate : Color.amux.onyx)
-                    .lineLimit(1)
-
-                if node.type == .link, let host = URL(string: node.target)?.host {
-                    Text(host)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(Color.amux.slate)
-                        .lineLimit(1)
-                }
-            }
+            Text(node.label)
+                .font(.system(size: 15))
+                .foregroundStyle(rowDisabled ? Color.amux.slate : Color.amux.onyx)
+                .lineLimit(1)
 
             Spacer(minLength: 6)
             trailingGlyph
         }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 10)
-        .padding(.leading, indent)
-        .background(rowBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.amux.hairline, lineWidth: 0.5)
-                .padding(.leading, indent)
-        )
+        .padding(.vertical, 11)
+        .padding(.horizontal, 14)
         .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private var iconView: some View {
         let kind = IconKind.detect(node.icon)
-        ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.amux.pebble.opacity(0.7))
-            switch kind {
-            case .emoji(let s):
-                Text(s)
-                    .font(.system(size: 17))
-            case .symbol(let name):
-                Image(systemName: name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(iconColor)
-            case .none:
-                Image(systemName: defaultSymbol)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(iconColor)
-            }
+        switch kind {
+        case .emoji(let s):
+            Text(s)
+                .font(.system(size: 16))
+                .frame(width: 18, alignment: .center)
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(iconColor)
+                .frame(width: 18, alignment: .center)
+        case .none:
+            Image(systemName: defaultSymbol)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(iconColor)
+                .frame(width: 18, alignment: .center)
         }
-        .frame(width: 30, height: 30)
     }
 
     @ViewBuilder
@@ -121,12 +117,6 @@ struct ShortcutMenuRow: View {
         }
     }
 
-    private var rowBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.amux.paper)
-            .padding(.leading, indent)
-    }
-
     private var rowDisabled: Bool {
         if case .disabled = destination { return true }
         return false
@@ -135,7 +125,7 @@ struct ShortcutMenuRow: View {
     private var iconColor: Color {
         switch node.type {
         case .folder: return Color.amux.basalt
-        case .link:   return Color.amux.onyx
+        case .link:   return Color.amux.basalt
         case .native: return Color.amux.slate
         }
     }
@@ -151,7 +141,7 @@ struct ShortcutMenuRow: View {
     private func handleTap() {
         switch destination {
         case .folder:
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+            withAnimation(.easeInOut(duration: 0.22)) {
                 if expandedIDs.contains(node.id) {
                     expandedIDs.remove(node.id)
                 } else {
@@ -169,8 +159,7 @@ struct ShortcutMenuRow: View {
 private struct ShortcutRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .opacity(configuration.isPressed ? 0.72 : 1.0)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .background(configuration.isPressed ? Color.amux.onyx.opacity(0.04) : Color.clear)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

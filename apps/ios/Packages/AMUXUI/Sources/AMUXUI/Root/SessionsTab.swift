@@ -190,6 +190,14 @@ public struct SessionsTab: View {
             (navigationPath.isEmpty && !showShortcuts) ? .visible : .hidden,
             for: .tabBar
         )
+        // Hide the Sessions navbar (leading grid icon + title + trailing
+        // new-session icon) while the drawer is open. Otherwise the leading
+        // grid icon peeks out above the drawer's top edge, competing with
+        // the drawer's immersive content.
+        .toolbarVisibility(
+            showShortcuts ? .hidden : .automatic,
+            for: .navigationBar
+        )
         .overlay(alignment: .top) {
             if navigationPath.isEmpty {
                 ConnectionBannerOverlay(mqtt: mqtt, onReconnect: onReconnect)
