@@ -17,6 +17,7 @@ type SessionRowProps = {
   unreadCount?: number;
 };
 
+
 const BADGE_INDENT = 38;
 
 function fallbackGlyph(session: SessionSummary): string {

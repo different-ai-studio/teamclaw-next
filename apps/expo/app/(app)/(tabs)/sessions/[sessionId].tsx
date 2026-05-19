@@ -1,6 +1,6 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Share, StyleSheet, Text, View } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
@@ -383,6 +383,20 @@ export default function SessionDetailRoute() {
             }
             void controller?.sendMessage();
           }}
+          onShare={
+            sessionId
+              ? async () => {
+                  const session = detailState.session;
+                  const title = session?.title?.trim() ?? "Teamclaw session";
+                  const url = `teamclaw://session/${sessionId}`;
+                  try {
+                    await Share.share({ message: `${title}\n${url}`, url });
+                  } catch {
+                    // user cancelled or platform refused
+                  }
+                }
+              : undefined
+          }
           ownActorId={state.currentMemberActorId ?? undefined}
           replyTarget={detailState.replyTarget}
           runtimeInfo={runtimeInfo}

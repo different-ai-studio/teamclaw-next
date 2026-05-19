@@ -71,6 +71,7 @@ type SessionDetailScreenProps = {
   onOpenMembers?: () => void;
   onReplyToMessage?: (messageId: string) => void;
   onSend: () => void;
+  onShare?: () => void;
   ownActorId?: string;
   replyTarget?: { messageId: string; content: string } | null;
   senderAvatars?: ReadonlyMap<string, string | null>;
@@ -100,12 +101,14 @@ function SessionHeader({
   headerAvatars,
   onBack,
   onOpenMembers,
+  onShare,
   session,
 }: {
   connectionState: SessionDetailConnectionState;
   headerAvatars?: ReadonlyArray<{ actorId: string; avatarUrl?: string | null; initial: string }>;
   onBack: () => void;
   onOpenMembers?: () => void;
+  onShare?: () => void;
   session: SessionSummary;
 }) {
   const title = session.title.trim() || "Untitled session";
@@ -151,6 +154,11 @@ function SessionHeader({
             </Text>
           </View>
         </View>
+        {onShare ? (
+          <Pressable hitSlop={8} onPress={onShare} style={styles.headerSlot}>
+            <Ionicons color={colors.onyx} name="share-outline" size={20} />
+          </Pressable>
+        ) : null}
         <Pressable hitSlop={8} onPress={onOpenMembers} style={styles.headerSlot}>
           <Ionicons
             name="people-outline"
@@ -185,6 +193,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onRefresh,
     onReplyToMessage,
     onSend,
+    onShare,
     ownActorId,
     replyTarget,
     runtimeInfo,
@@ -252,6 +261,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         headerAvatars={headerAvatars}
         onBack={onBack}
         onOpenMembers={onOpenMembers}
+        onShare={onShare}
         session={session}
       />
       <ConnectionBannerOverlay connectionState={connectionState} />
