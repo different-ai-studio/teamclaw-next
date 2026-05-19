@@ -421,6 +421,22 @@ public final class SessionDetailViewModel {
     public private(set) var memberSheetHumans: [MemberSheetHuman] = []
     public private(set) var memberSheetAgents: [MemberSheetAgent] = []
 
+    /// Per-agent latest plan_update parsed into a snapshot, filtered to
+    /// agents that still have unfinished items. Empty when no agent in the
+    /// session has a live plan. The `SessionDetailView` toolbar icon and
+    /// `SessionPlansPanelView` both render off this.
+    public var activePlanSnapshots: [AgentPlanSnapshot] {
+        AgentPlanSnapshot.derive(
+            events: events,
+            agentNameFor: { [self] id in self.agentDisplayName(actorID: id) }
+        )
+    }
+
+    private func agentDisplayName(actorID id: String) -> String {
+        memberSheetAgents.first(where: { $0.id == id })?.displayName
+            ?? String(id.prefix(8))
+    }
+
     /// Refreshes the member sheet data from Supabase. Called by the view
     /// each time the sheet opens. On failure keeps prior values.
     ///
