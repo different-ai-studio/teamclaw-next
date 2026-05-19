@@ -56,10 +56,14 @@ type SessionDetailScreenProps = {
   onAttach?: () => void;
   onBack: () => void;
   onChangeComposerText: (value: string) => void;
+  onClearReply?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onOpenMembers?: () => void;
+  onReplyToMessage?: (messageId: string) => void;
   onSend: () => void;
   ownActorId?: string;
+  replyTarget?: { messageId: string; content: string } | null;
+  senderNames?: ReadonlyMap<string, string>;
   sendErrorMessage: string | null;
   state: SessionDetailRenderableState;
   streamingAgentIds?: ReadonlySet<string>;
@@ -162,10 +166,14 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onAttach,
     onBack,
     onChangeComposerText,
+    onClearReply,
     onDeleteMessage,
     onOpenMembers,
+    onReplyToMessage,
     onSend,
     ownActorId,
+    replyTarget,
+    senderNames,
     sendErrorMessage,
     streamingAgentIds,
     todoText,
@@ -214,13 +222,29 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
               messageListRef.current?.scrollToEnd({ animated: false });
             }}
             ref={messageListRef}
-            renderItem={({ item }) => (
-              <SessionMessageRow
-                isOwnMessage={ownActorId ? item.senderActorId === ownActorId : false}
-                message={item}
-                onDelete={onDeleteMessage}
-              />
-            )}
+            renderItem={({ item }) => {
+              const isOwn = ownActorId ? item.senderActorId === ownActorId : false;
+              const replyToMessage =
+                item.replyToMessageId && item.replyToMessageId.length > 0
+                  ? state.messages.find((m) => m.messageId === item.replyToMessageId) ?? null
+                  : null;
+              return (
+                <SessionMessageRow
+                  isOwnMessage={isOwn}
+                  message={item}
+                  onDelete={onDeleteMessage}
+                  onReply={
+                    onReplyToMessage
+                      ? (msg) => onReplyToMessage(msg.messageId)
+                      : undefined
+                  }
+                  replyToMessage={replyToMessage}
+                  senderName={
+                    !isOwn ? senderNames?.get(item.senderActorId) ?? undefined : undefined
+                  }
+                />
+              );
+            }}
           />
         ) : (
           <View style={styles.empty}>
@@ -231,6 +255,23 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           </View>
         )}
       </View>
+
+      {replyTarget ? (
+        <View style={styles.replyBar}>
+          <View style={styles.replyBarAccent} />
+          <View style={styles.replyBarBody}>
+            <Text style={styles.replyBarLabel}>Replying to message</Text>
+            <Text numberOfLines={1} style={styles.replyBarPreview}>
+              {replyTarget.content || "(empty message)"}
+            </Text>
+          </View>
+          {onClearReply ? (
+            <Pressable hitSlop={6} onPress={onClearReply} style={styles.replyBarClose}>
+              <Ionicons color={colors.slate} name="close" size={16} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       {todoText ? <TodoDock text={todoText} /> : null}
 
@@ -358,6 +399,38 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 40,
     minWidth: 40,
+  },
+  replyBar: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderTopColor: colors.hairline,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 8,
+  },
+  replyBarAccent: {
+    backgroundColor: hai.cinnabar,
+    borderRadius: 2,
+    height: 28,
+    width: 3,
+  },
+  replyBarBody: {
+    flex: 1,
+    gap: 1,
+  },
+  replyBarClose: {
+    padding: 4,
+  },
+  replyBarLabel: {
+    color: hai.cinnabar,
+    ...typography.caption,
+    fontWeight: "700",
+  },
+  replyBarPreview: {
+    color: colors.basalt,
+    ...typography.caption,
   },
   headerStatus: {
     alignItems: "center",

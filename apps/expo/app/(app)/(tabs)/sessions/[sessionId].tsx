@@ -26,6 +26,7 @@ const fallbackDetailState: SessionDetailControllerState = {
   composerText: "",
   isSending: false,
   sendErrorMessage: null,
+  replyTarget: null,
 };
 
 function canRenderSessionDetail(
@@ -150,6 +151,14 @@ export default function SessionDetailRoute() {
     [teamActors],
   );
 
+  const senderNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const actor of teamActors) {
+      map.set(actor.actorId, actor.displayName);
+    }
+    return map;
+  }, [teamActors]);
+
   const headerAvatars = useMemo(() => {
     if (!detailState.session) return [];
     const participantIds = new Set(detailState.session.participantActorIds);
@@ -221,6 +230,7 @@ export default function SessionDetailRoute() {
           onChangeComposerText={(value) => {
             controller?.setComposerText(value);
           }}
+          onClearReply={() => controller?.setReplyTarget(null)}
           onDeleteMessage={async (messageId) => {
             try {
               await supabase.from("messages").delete().eq("id", messageId);
@@ -232,10 +242,21 @@ export default function SessionDetailRoute() {
           onOpenMembers={() => {
             router.push(`/(app)/session-members?sessionId=${sessionId}`);
           }}
+          onReplyToMessage={(messageId) => {
+            const target = detailState.messages.find((m) => m.messageId === messageId);
+            if (target) {
+              controller?.setReplyTarget({
+                messageId: target.messageId,
+                content: target.content,
+              });
+            }
+          }}
           onSend={() => {
             void controller?.sendMessage();
           }}
           ownActorId={state.currentMemberActorId ?? undefined}
+          replyTarget={detailState.replyTarget}
+          senderNames={senderNames}
           sendErrorMessage={detailState.sendErrorMessage}
           state={detailState}
         />

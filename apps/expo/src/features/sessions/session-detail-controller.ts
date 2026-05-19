@@ -30,6 +30,7 @@ export type SessionDetailControllerState = {
   composerText: string;
   isSending: boolean;
   sendErrorMessage: string | null;
+  replyTarget: { messageId: string; content: string } | null;
 };
 
 type SessionsApi = ReturnType<typeof createSessionsApi>;
@@ -55,6 +56,7 @@ type SessionDetailController = {
   getState: () => SessionDetailControllerState;
   load: () => Promise<void>;
   setComposerText: (value: string) => void;
+  setReplyTarget: (target: { messageId: string; content: string } | null) => void;
   sendMessage: () => Promise<void>;
   dispose: () => Promise<void>;
 };
@@ -68,6 +70,7 @@ const initialState: SessionDetailControllerState = {
   composerText: "",
   isSending: false,
   sendErrorMessage: null,
+  replyTarget: null,
 };
 
 function toIsoFromSeconds(value: bigint): string {
@@ -379,6 +382,12 @@ export function createSessionDetailController(
         sendErrorMessage: null,
       });
     },
+    setReplyTarget(target) {
+      setState({
+        ...state,
+        replyTarget: target,
+      });
+    },
     async sendMessage() {
       const content = state.composerText.trim();
       const session = state.session;
@@ -425,6 +434,8 @@ export function createSessionDetailController(
             }))
           : undefined;
 
+        const replyTo = state.replyTarget?.messageId ?? null;
+
         await deps.api.insertOutgoingMessage({
           id: messageId,
           teamId: deps.teamId,
@@ -434,6 +445,7 @@ export function createSessionDetailController(
           createdAt,
           metadata: { mention_actor_ids: [] },
           attachments: attachmentsPayload,
+          replyToMessageId: replyTo,
         });
 
         const optimisticMessage: SessionMessage = {
@@ -443,7 +455,7 @@ export function createSessionDetailController(
           messageId,
           metadata: { mention_actor_ids: [] },
           model: "",
-          replyToMessageId: "",
+          replyToMessageId: replyTo ?? "",
           senderActorId: actorId,
           sessionId: deps.sessionId,
           teamId: deps.teamId,
@@ -453,7 +465,9 @@ export function createSessionDetailController(
         const mergedMessages = mergeMessage(state.messages, optimisticMessage);
         setState({
           ...state,
+          composerText: "",
           messages: mergedMessages,
+          replyTarget: null,
           status: nextStatusForMessages(session, mergedMessages, state.status),
         });
 

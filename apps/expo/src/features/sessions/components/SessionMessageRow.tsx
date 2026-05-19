@@ -20,6 +20,9 @@ export type SessionMessageRowProps = {
   message: SessionMessage;
   isOwnMessage?: boolean;
   onDelete?: (messageId: string) => void;
+  onReply?: (message: SessionMessage) => void;
+  replyToMessage?: SessionMessage | null;
+  senderName?: string;
 };
 
 export function normalizeBody(message: SessionMessage): string {
@@ -70,6 +73,9 @@ export function SessionMessageRow({
   message,
   isOwnMessage = false,
   onDelete,
+  onReply,
+  replyToMessage,
+  senderName,
 }: SessionMessageRowProps) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const kindKey = message.kind.trim().toLowerCase();
@@ -86,6 +92,12 @@ export function SessionMessageRow({
         },
       },
     ];
+    if (onReply) {
+      options.push({
+        text: "Reply",
+        onPress: () => onReply(message),
+      });
+    }
     if (isOwnMessage && onDelete) {
       options.push({
         text: "Delete",
@@ -126,6 +138,37 @@ export function SessionMessageRow({
           pressed ? styles.surfacePressed : null,
         ]}
       >
+        {!isOwnMessage && senderName ? (
+          <Text numberOfLines={1} style={styles.senderName}>
+            {senderName}
+          </Text>
+        ) : null}
+
+        {replyToMessage ? (
+          <View
+            style={[
+              styles.replyContext,
+              isOwnMessage ? styles.replyContextOwn : styles.replyContextOther,
+            ]}
+          >
+            <View
+              style={[
+                styles.replyAccent,
+                isOwnMessage ? styles.replyAccentOwn : styles.replyAccentOther,
+              ]}
+            />
+            <Text
+              numberOfLines={2}
+              style={[
+                styles.replyBody,
+                isOwnMessage ? styles.replyBodyOwn : styles.replyBodyOther,
+              ]}
+            >
+              {replyToMessage.content || "(empty message)"}
+            </Text>
+          </View>
+        ) : null}
+
         {attachments.length > 0 ? (
           <View style={styles.attachmentList}>
             {attachments.map((attachment, index) => (
@@ -319,6 +362,47 @@ const styles = StyleSheet.create({
     backgroundColor: colors.onyx,
     borderBottomRightRadius: radii.hairline,
     borderRadius: radii.card,
+  },
+  replyAccent: {
+    borderRadius: 2,
+    width: 3,
+  },
+  replyAccentOther: {
+    backgroundColor: hai.cinnabar,
+  },
+  replyAccentOwn: {
+    backgroundColor: hai.paper,
+  },
+  replyBody: {
+    flex: 1,
+    ...typography.caption,
+  },
+  replyBodyOther: {
+    color: colors.basalt,
+  },
+  replyBodyOwn: {
+    color: "rgba(248,246,241,0.85)",
+  },
+  replyContext: {
+    alignSelf: "stretch",
+    borderRadius: 8,
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  replyContextOther: {
+    backgroundColor: hai.pebble,
+  },
+  replyContextOwn: {
+    backgroundColor: "rgba(248,246,241,0.12)",
+  },
+  senderName: {
+    color: colors.basalt,
+    marginBottom: 2,
+    ...typography.caption,
+    fontWeight: "700",
   },
   surfacePressed: {
     opacity: 0.88,
