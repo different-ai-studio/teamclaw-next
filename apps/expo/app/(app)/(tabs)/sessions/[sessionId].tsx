@@ -1,6 +1,6 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
@@ -238,6 +238,27 @@ export default function SessionDetailRoute() {
             } catch {
               // Surface in toast in a future pass.
             }
+          }}
+          onEditMessage={(messageId, currentContent) => {
+            Alert.prompt(
+              "Edit message",
+              undefined,
+              async (next) => {
+                const trimmed = next?.trim();
+                if (!trimmed || trimmed === currentContent.trim()) return;
+                try {
+                  await createSessionsApi(supabase).updateMessageContent(
+                    messageId,
+                    trimmed,
+                  );
+                  void controller?.load();
+                } catch {
+                  // best-effort
+                }
+              },
+              "plain-text",
+              currentContent,
+            );
           }}
           onOpenMembers={() => {
             router.push(`/(app)/session-members?sessionId=${sessionId}`);

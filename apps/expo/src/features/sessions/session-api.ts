@@ -178,6 +178,14 @@ export function createSessionsApi(client: SessionsClient) {
       return result.data?.id ?? null;
     },
 
+    async updateMessageContent(messageId: string, content: string): Promise<void> {
+      const result = (await client
+        .from("messages")
+        .update({ content, updated_at: new Date().toISOString() })
+        .eq("id", messageId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async insertOutgoingMessage(input: OutgoingMessageInput): Promise<void> {
       const payload: Record<string, unknown> = {
         id: input.id,

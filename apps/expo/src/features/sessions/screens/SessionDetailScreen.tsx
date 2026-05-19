@@ -58,6 +58,7 @@ type SessionDetailScreenProps = {
   onChangeComposerText: (value: string) => void;
   onClearReply?: () => void;
   onDeleteMessage?: (messageId: string) => void;
+  onEditMessage?: (messageId: string, currentContent: string) => void;
   onOpenMembers?: () => void;
   onReplyToMessage?: (messageId: string) => void;
   onSend: () => void;
@@ -168,6 +169,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onChangeComposerText,
     onClearReply,
     onDeleteMessage,
+    onEditMessage,
     onOpenMembers,
     onReplyToMessage,
     onSend,
@@ -233,6 +235,23 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
                   isOwnMessage={isOwn}
                   message={item}
                   onDelete={onDeleteMessage}
+                  onEdit={
+                    onEditMessage
+                      ? (msg) => onEditMessage(msg.messageId, msg.content)
+                      : undefined
+                  }
+                  onJumpToReply={(targetId) => {
+                    const index = state.messages.findIndex(
+                      (m) => m.messageId === targetId,
+                    );
+                    if (index >= 0) {
+                      messageListRef.current?.scrollToIndex({
+                        animated: true,
+                        index,
+                        viewPosition: 0.3,
+                      });
+                    }
+                  }}
                   onReply={
                     onReplyToMessage
                       ? (msg) => onReplyToMessage(msg.messageId)

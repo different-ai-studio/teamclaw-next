@@ -20,6 +20,8 @@ export type SessionMessageRowProps = {
   message: SessionMessage;
   isOwnMessage?: boolean;
   onDelete?: (messageId: string) => void;
+  onEdit?: (message: SessionMessage) => void;
+  onJumpToReply?: (messageId: string) => void;
   onReply?: (message: SessionMessage) => void;
   replyToMessage?: SessionMessage | null;
   senderName?: string;
@@ -73,6 +75,8 @@ export function SessionMessageRow({
   message,
   isOwnMessage = false,
   onDelete,
+  onEdit,
+  onJumpToReply,
   onReply,
   replyToMessage,
   senderName,
@@ -96,6 +100,12 @@ export function SessionMessageRow({
       options.push({
         text: "Reply",
         onPress: () => onReply(message),
+      });
+    }
+    if (isOwnMessage && onEdit) {
+      options.push({
+        text: "Edit",
+        onPress: () => onEdit(message),
       });
     }
     if (isOwnMessage && onDelete) {
@@ -145,10 +155,17 @@ export function SessionMessageRow({
         ) : null}
 
         {replyToMessage ? (
-          <View
-            style={[
+          <Pressable
+            accessibilityRole={onJumpToReply ? "button" : undefined}
+            onPress={
+              onJumpToReply
+                ? () => onJumpToReply(replyToMessage.messageId)
+                : undefined
+            }
+            style={({ pressed }) => [
               styles.replyContext,
               isOwnMessage ? styles.replyContextOwn : styles.replyContextOther,
+              pressed && onJumpToReply ? styles.surfacePressed : null,
             ]}
           >
             <View
@@ -166,7 +183,7 @@ export function SessionMessageRow({
             >
               {replyToMessage.content || "(empty message)"}
             </Text>
-          </View>
+          </Pressable>
         ) : null}
 
         {attachments.length > 0 ? (
