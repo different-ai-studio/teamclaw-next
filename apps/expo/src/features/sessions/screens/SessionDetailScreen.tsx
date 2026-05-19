@@ -16,6 +16,12 @@ import {
 } from "../components/AgentChipBar";
 import { SessionComposerShell } from "../components/SessionComposerShell";
 import { SessionMessageRow } from "../components/SessionMessageRow";
+import { SlashCommandsPopup } from "../components/SlashCommandsPopup";
+import {
+  filterSlashCommands,
+  SLASH_COMMANDS,
+  slashPrefix,
+} from "../components/slash-commands";
 import { TodoDock } from "../components/TodoDock";
 import type {
   SessionDetailConnectionState,
@@ -169,6 +175,20 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       </View>
 
       {todoText ? <TodoDock text={todoText} /> : null}
+
+      {(() => {
+        const prefix = slashPrefix(composerText);
+        if (prefix === null) return null;
+        const candidates = filterSlashCommands(SLASH_COMMANDS, prefix);
+        return (
+          <SlashCommandsPopup
+            candidates={candidates}
+            onSelect={(command) => {
+              onChangeComposerText(`/${command.name} `);
+            }}
+          />
+        );
+      })()}
 
       {agentChips && agentChips.length > 0 ? (
         <AgentChipBar
