@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { useOnboarding } from "../_layout";
+import { createActorsApi } from "../../src/features/actors/actor-api";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { supabase } from "../../src/lib/supabase/client";
@@ -24,6 +25,8 @@ type WorkspaceRow = {
   agent_id: string | null;
   archived: boolean;
 };
+
+type AgentChoice = { actorId: string; displayName: string };
 
 export default function WorkspacesRoute() {
   const router = useRouter();
@@ -92,6 +95,50 @@ export default function WorkspacesRoute() {
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const [editPathDraft, setEditPathDraft] = useState("");
+  const [agents, setAgents] = useState<AgentChoice[]>([]);
+  const [pickingAgentFor, setPickingAgentFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!teamId) return;
+    let cancelled = false;
+    void createActorsApi(supabase)
+      .listActors(teamId)
+      .then((rows) => {
+        if (cancelled) return;
+        setAgents(
+          rows
+            .filter((row) => row.actorType === "agent")
+            .map((row) => ({ actorId: row.actorId, displayName: row.displayName })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setAgents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId]);
+
+  const handleAgentBind = async (workspaceId: string, agentId: string | null) => {
+    try {
+      const result = await supabase
+        .from("workspaces")
+        .update({ agent_id: agentId, updated_at: new Date().toISOString() })
+        .eq("id", workspaceId);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === workspaceId ? { ...row, agent_id: agentId } : row,
+        ),
+      );
+      setPickingAgentFor(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't bind agent.");
+    }
+  };
 
   const commitPath = async (id: string) => {
     try {
@@ -269,6 +316,68 @@ export default function WorkspacesRoute() {
                           <Ionicons color={colors.slate} name="archive-outline" size={18} />
                         </Pressable>
                       </View>
+                      {pickingAgentFor === row.id ? (
+                        <View style={styles.agentPickerRow}>
+                          <Pressable
+                            accessibilityRole="button"
+                            onPress={() => handleAgentBind(row.id, null)}
+                            style={[
+                              styles.agentChip,
+                              !row.agent_id ? styles.agentChipSelected : null,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.agentChipText,
+                                !row.agent_id ? styles.agentChipTextSelected : null,
+                              ]}
+                            >
+                              None
+                            </Text>
+                          </Pressable>
+                          {agents.map((agent) => {
+                            const selected = row.agent_id === agent.actorId;
+                            return (
+                              <Pressable
+                                accessibilityRole="button"
+                                key={agent.actorId}
+                                onPress={() => handleAgentBind(row.id, agent.actorId)}
+                                style={[
+                                  styles.agentChip,
+                                  selected ? styles.agentChipSelected : null,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.agentChipText,
+                                    selected ? styles.agentChipTextSelected : null,
+                                  ]}
+                                >
+                                  {agent.displayName}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <Pressable
+                          accessibilityRole="button"
+                          hitSlop={4}
+                          onPress={() => setPickingAgentFor(row.id)}
+                          style={styles.agentBindHint}
+                        >
+                          <Ionicons
+                            color={row.agent_id ? colors.cinnabar : colors.slate}
+                            name="sparkles-outline"
+                            size={12}
+                          />
+                          <Text style={styles.agentBindText}>
+                            {row.agent_id
+                              ? agents.find((a) => a.actorId === row.agent_id)?.displayName ?? "Bound agent"
+                              : "Bind an agent"}
+                          </Text>
+                        </Pressable>
+                      )}
                       {index < active.length - 1 ? <Hairline /> : null}
                     </View>
                   );
@@ -405,6 +514,41 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
+  },
+  agentBindHint: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  agentBindText: {
+    color: colors.slate,
+    ...typography.caption,
+  },
+  agentChip: {
+    backgroundColor: hai.pebble,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  agentChipSelected: {
+    backgroundColor: hai.cinnabar,
+  },
+  agentChipText: {
+    color: hai.basalt,
+    ...typography.caption,
+    fontWeight: "600",
+  },
+  agentChipTextSelected: {
+    color: hai.paper,
+  },
+  agentPickerRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
   pathInput: {
     color: colors.basalt,
