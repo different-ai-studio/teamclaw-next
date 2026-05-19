@@ -35,6 +35,9 @@ importers:
       '@teamclaw/app':
         specifier: workspace:*
         version: link:../../packages/app
+      buffer:
+        specifier: ^6.0.3
+        version: 6.0.3
       expo:
         specifier: ~53.0.22
         version: 53.0.27(@babel/core@7.29.0)(@expo/metro-runtime@5.0.5(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.0.0)))(graphql@16.14.0)(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.0.0))(react@19.0.0)

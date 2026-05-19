@@ -9,6 +9,7 @@ import {
 
 import { decodeLiveEvent, sessionIdFromTopic } from "../../lib/teamclaw/live-events";
 import type { ExpoMqttAdapter } from "../../lib/mqtt/expo-mqtt";
+import { uuidV4 } from "../../lib/uuid";
 import {
   buildSessionDetailState,
   type SessionDetailState,
@@ -233,7 +234,7 @@ export function createSessionDetailController(
         url: deps.mqttUrl,
         options: {
           clean: true,
-          clientId: `teamclaw-expo-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
+          clientId: `teamclaw-expo-${actorId.slice(0, 8)}-${uuidV4().slice(0, 8)}`,
           password: auth.accessToken,
           reconnectPeriod: 0,
           username: actorId,
@@ -284,6 +285,10 @@ export function createSessionDetailController(
         return;
       }
 
+      console.warn(
+        "MQTT realtime connect failed",
+        error instanceof Error ? error.message : error,
+      );
       setState({
         ...state,
         connectionState: "disconnected",
@@ -407,7 +412,7 @@ export function createSessionDetailController(
         const actorId = await resolveSenderActorId();
         const createdAt = new Date().toISOString();
         const createdAtSeconds = BigInt(Math.floor(Date.parse(createdAt) / 1000));
-        const messageId = crypto.randomUUID();
+        const messageId = uuidV4();
 
         await deps.api.insertOutgoingMessage({
           id: messageId,
@@ -453,7 +458,7 @@ export function createSessionDetailController(
           mentionActorIds: [],
         });
         const envelope = create(LiveEventEnvelopeSchema, {
-          eventId: crypto.randomUUID(),
+          eventId: uuidV4(),
           eventType: "message.created",
           sessionId: deps.sessionId,
           actorId,

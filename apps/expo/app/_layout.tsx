@@ -1,3 +1,5 @@
+import "../src/lib/polyfills";
+
 import { Slot } from "expo-router";
 import {
   createContext,
