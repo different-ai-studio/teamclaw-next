@@ -101,6 +101,7 @@ private struct AgentMemberRow: View {
     let onRestart: () -> Void
     let onChangeModel: (String) -> Void
     let onRemove: () -> Void
+    @State private var isModelPickerPresented = false
 
     /// Whether tapping the row should open agent settings (model picker
     /// today, future expansion later). Allowed during .spawning as long
@@ -136,10 +137,8 @@ private struct AgentMemberRow: View {
             Text(row.agentType).foregroundStyle(.secondary).font(.caption)
             Spacer(minLength: 8)
             if isInteractive {
-                Menu {
-                    ForEach(row.availableModels, id: \.self) { m in
-                        Button(m) { onChangeModel(m) }
-                    }
+                Button {
+                    isModelPickerPresented = true
                 } label: {
                     HStack(spacing: 4) {
                         trailingLabel
@@ -149,6 +148,16 @@ private struct AgentMemberRow: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .confirmationDialog(
+                    "Select model",
+                    isPresented: $isModelPickerPresented,
+                    titleVisibility: .visible
+                ) {
+                    ForEach(row.availableModels, id: \.self) { m in
+                        Button(m) { onChangeModel(m) }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
             } else {
                 trailingLabel
             }
