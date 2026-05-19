@@ -448,6 +448,22 @@ public final class SessionDetailViewModel {
     public private(set) var memberSheetHumans: [MemberSheetHuman] = []
     public private(set) var memberSheetAgents: [MemberSheetAgent] = []
 
+    /// Per-agent latest plan_update parsed into a snapshot, filtered to
+    /// agents that still have unfinished items. Empty when no agent in the
+    /// session has a live plan. The `SessionDetailView` toolbar icon and
+    /// `SessionPlansPanelView` both render off this.
+    public var activePlanSnapshots: [AgentPlanSnapshot] {
+        AgentPlanSnapshot.derive(
+            events: events,
+            agentNameFor: { [self] id in self.agentDisplayName(actorID: id) }
+        )
+    }
+
+    private func agentDisplayName(actorID id: String) -> String {
+        memberSheetAgents.first(where: { $0.id == id })?.displayName
+            ?? String(id.prefix(8))
+    }
+
     /// Refreshes the member sheet data from Supabase. Called by the view
     /// each time the sheet opens. On failure keeps prior values.
     ///
@@ -1051,13 +1067,13 @@ public final class SessionDetailViewModel {
     // rebuilt after bulk operations (fetch, sort, insert-at-zero).
     private var toolUseIndexByToolId: [String: Int] = [:]
     private var permissionIndexByRequestId: [String: Int] = [:]
-    private var planUpdateIndex: Int?
+    private var planUpdateIndexByAgent: [String: Int] = [:]
     private var lastIncompleteOutputIndex: Int?
 
     private func rebuildIndexes() {
         toolUseIndexByToolId.removeAll(keepingCapacity: true)
         permissionIndexByRequestId.removeAll(keepingCapacity: true)
-        planUpdateIndex = nil
+        planUpdateIndexByAgent.removeAll(keepingCapacity: true)
         lastIncompleteOutputIndex = nil
         for (i, e) in events.enumerated() { registerIndex(event: e, at: i) }
     }
@@ -1069,7 +1085,7 @@ public final class SessionDetailViewModel {
         case "permission_request":
             if let id = event.toolId { permissionIndexByRequestId[id] = idx }
         case "plan_update":
-            planUpdateIndex = idx
+            planUpdateIndexByAgent[event.agentId] = idx
         case "output":
             if !event.isComplete { lastIncompleteOutputIndex = idx }
         default:
@@ -1095,7 +1111,9 @@ public final class SessionDetailViewModel {
                 permissionIndexByRequestId.removeValue(forKey: id)
             }
         case "plan_update":
-            if planUpdateIndex == idx { planUpdateIndex = nil }
+            if planUpdateIndexByAgent[removed.agentId] == idx {
+                planUpdateIndexByAgent.removeValue(forKey: removed.agentId)
+            }
         case "output":
             if lastIncompleteOutputIndex == idx { lastIncompleteOutputIndex = nil }
         default: break
@@ -1110,7 +1128,9 @@ public final class SessionDetailViewModel {
         for (k, v) in permissionIndexByRequestId where v > idx {
             permissionIndexByRequestId[k] = v - 1
         }
-        if let t = planUpdateIndex, t > idx { planUpdateIndex = t - 1 }
+        for (agent, v) in planUpdateIndexByAgent where v > idx {
+            planUpdateIndexByAgent[agent] = v - 1
+        }
         if let l = lastIncompleteOutputIndex, l > idx { lastIncompleteOutputIndex = l - 1 }
     }
 
