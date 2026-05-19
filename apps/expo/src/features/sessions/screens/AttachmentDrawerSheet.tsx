@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 import type { ComponentProps } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -96,13 +97,24 @@ export function AttachmentDrawerSheet({
         </View>
 
         {errorMessage ? (
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        ) : (
-          <Text style={styles.footnote}>
-            Uploading the picked asset to Supabase Storage lands in a
-            follow-up — the picker itself is fully wired.
-          </Text>
-        )}
+          <View style={styles.errorBlock}>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+            {/permission/i.test(errorMessage) ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  void Linking.openSettings();
+                }}
+                style={({ pressed }) => [
+                  styles.openSettings,
+                  pressed ? styles.openSettingsPressed : null,
+                ]}
+              >
+                <Text style={styles.openSettingsText}>Open Settings</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -121,10 +133,29 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
   },
+  errorBlock: {
+    gap: spacing.sm,
+  },
   errorText: {
     color: hai.cinnabarDeep,
     paddingHorizontal: spacing.xs,
     ...typography.caption,
+  },
+  openSettings: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(184,75,54,0.10)",
+    borderRadius: radii.button,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  openSettingsPressed: {
+    opacity: 0.7,
+  },
+  openSettingsText: {
+    color: hai.cinnabar,
+    ...typography.caption,
+    fontWeight: "700",
   },
   footnote: {
     color: colors.slate,
