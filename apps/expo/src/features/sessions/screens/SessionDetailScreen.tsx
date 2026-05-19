@@ -53,6 +53,7 @@ type SessionDetailScreenProps = {
   connectionState: SessionDetailConnectionState;
   headerAvatars?: ReadonlyArray<{ actorId: string; avatarUrl?: string | null; initial: string }>;
   isSending: boolean;
+  runtimeInfo?: { status: string; currentModel: string | null } | null;
   mentionPool?: ReadonlyArray<MentionTarget>;
   onAgentInterrupt?: (agentId: string) => void;
   onAgentRemove?: (agentId: string) => void;
@@ -182,6 +183,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onSend,
     ownActorId,
     replyTarget,
+    runtimeInfo,
     isRefreshing,
     senderAvatars,
     senderNames,
@@ -249,6 +251,14 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         session={session}
       />
       <ConnectionBannerOverlay connectionState={connectionState} />
+      {runtimeInfo ? (
+        <View style={styles.runtimeBar}>
+          <Text style={styles.runtimeLabel}>
+            Runtime · {runtimeInfo.status}
+            {runtimeInfo.currentModel ? ` · ${runtimeInfo.currentModel}` : ""}
+          </Text>
+        </View>
+      ) : null}
 
       {state.status === "error" ? (
         <View style={styles.errorBanner}>
@@ -498,6 +508,15 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: spacing.lg,
     paddingVertical: 8,
+  },
+  runtimeBar: {
+    backgroundColor: hai.pebble,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 4,
+  },
+  runtimeLabel: {
+    color: colors.basalt,
+    ...typography.monoMeta,
   },
   replyBarAccent: {
     backgroundColor: hai.cinnabar,

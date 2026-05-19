@@ -135,6 +135,28 @@ export default function SessionDetailRoute() {
   );
 
   const [teamActors, setTeamActors] = useState<Actor[]>([]);
+  const [runtimeInfo, setRuntimeInfo] = useState<
+    { status: string; currentModel: string | null } | null
+  >(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    void createSessionsApi(supabase)
+      .loadRuntime(sessionId)
+      .then((row) => {
+        if (cancelled) return;
+        setRuntimeInfo(
+          row ? { status: row.status, currentModel: row.currentModel } : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
   useEffect(() => {
     if (!currentTeam?.id) return;
     let cancelled = false;
@@ -325,6 +347,7 @@ export default function SessionDetailRoute() {
           }}
           ownActorId={state.currentMemberActorId ?? undefined}
           replyTarget={detailState.replyTarget}
+          runtimeInfo={runtimeInfo}
           senderAvatars={senderAvatars}
           senderNames={senderNames}
           sendErrorMessage={detailState.sendErrorMessage}

@@ -276,6 +276,43 @@ export function createSessionsApi(client: SessionsClient) {
       return sessionId;
     },
 
+    async loadRuntime(sessionId: string): Promise<
+      | {
+          runtimeId: string;
+          status: string;
+          currentModel: string | null;
+          lastSeenAt: string | null;
+          backendType: string | null;
+        }
+      | null
+    > {
+      const result = (await client
+        .from("agent_runtimes")
+        .select("id, status, current_model, last_seen_at, backend_type")
+        .eq("session_id", sessionId)
+        .maybeSingle()) as {
+        data:
+          | {
+              id: string;
+              status: string | null;
+              current_model: string | null;
+              last_seen_at: string | null;
+              backend_type: string | null;
+            }
+          | null;
+        error: SupabaseError;
+      };
+      throwIfError(result.error);
+      if (!result.data) return null;
+      return {
+        runtimeId: result.data.id,
+        status: result.data.status ?? "unknown",
+        currentModel: result.data.current_model ?? null,
+        lastSeenAt: result.data.last_seen_at ?? null,
+        backendType: result.data.backend_type ?? null,
+      };
+    },
+
     async getSession(teamId: string, sessionId: string): Promise<SessionSummary | null> {
       const result = await client
         .from("sessions")
