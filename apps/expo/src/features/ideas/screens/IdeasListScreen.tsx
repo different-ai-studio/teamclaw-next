@@ -7,8 +7,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
+
+import { matchesAnyField } from "../../search/search-matcher";
 
 
 import {
@@ -80,21 +83,32 @@ export function IdeasListScreen({
   state,
 }: IdeasListScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
+
+  const searched = useMemo(
+    () =>
+      query.trim().length === 0
+        ? state.ideas
+        : state.ideas.filter((idea) =>
+            matchesAnyField([idea.title, idea.description, idea.workspaceName], query),
+          ),
+    [state.ideas, query],
+  );
 
   const counts = useMemo(() => {
     let mine = 0;
     let open = 0;
     let done = 0;
-    for (const idea of state.ideas) {
+    for (const idea of searched) {
       if (isMineIdea(idea, currentActorId)) mine += 1;
       if (isOpenIdea(idea)) open += 1;
       if (isDoneIdea(idea)) done += 1;
     }
     return { mine, open, done };
-  }, [state.ideas, currentActorId]);
+  }, [searched, currentActorId]);
 
   const segments: SegmentedFilterSegment<Filter>[] = [
-    { tag: "all", title: "All", count: state.ideas.length },
+    { tag: "all", title: "All", count: searched.length },
     ...(currentActorId
       ? [{ tag: "mine" as const, title: "Mine", count: counts.mine }]
       : []),
@@ -102,7 +116,7 @@ export function IdeasListScreen({
     { tag: "done", title: "Done", count: counts.done },
   ];
 
-  const filteredIdeas = state.ideas.filter((idea) => {
+  const filteredIdeas = searched.filter((idea) => {
     if (filter === "all") return true;
     if (filter === "mine") return isMineIdea(idea, currentActorId);
     if (filter === "open") return isOpenIdea(idea);
@@ -163,6 +177,31 @@ export function IdeasListScreen({
       style={styles.screen}
     >
       {headerBar}
+
+      <View style={styles.searchField}>
+        <Ionicons color={colors.slate} name="search" size={16} />
+        <TextInput
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={setQuery}
+          placeholder="Search ideas"
+          placeholderTextColor={colors.slate}
+          selectionColor={colors.cinnabar}
+          style={styles.searchInput}
+          value={query}
+        />
+        {query.length > 0 ? (
+          <Pressable
+            accessibilityLabel="Clear search"
+            accessibilityRole="button"
+            hitSlop={6}
+            onPress={() => setQuery("")}
+          >
+            <Ionicons color={colors.slate} name="close-circle" size={16} />
+          </Pressable>
+        ) : null}
+      </View>
+
       <SegmentedFilter onSelect={setFilter} segments={segments} selection={filter} />
 
       {state.ideas.length === 0 ? (
@@ -250,6 +289,24 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.mist,
     flex: 1,
+  },
+  searchField: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  searchInput: {
+    color: colors.onyx,
+    flex: 1,
+    padding: 0,
+    ...typography.body,
   },
   stateBlock: {
     gap: spacing.md,
