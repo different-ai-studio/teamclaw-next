@@ -16,6 +16,7 @@ import {
 } from "../components/AgentChipBar";
 import { SessionComposerShell } from "../components/SessionComposerShell";
 import { SessionMessageRow } from "../components/SessionMessageRow";
+import { TodoDock } from "../components/TodoDock";
 import type {
   SessionDetailConnectionState,
   SessionDetailControllerState,
@@ -42,6 +43,7 @@ type SessionDetailScreenProps = {
   sendErrorMessage: string | null;
   state: SessionDetailRenderableState;
   streamingAgentIds?: ReadonlySet<string>;
+  todoText?: string;
 };
 
 function connectionDescriptor(
@@ -120,6 +122,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     ownActorId,
     sendErrorMessage,
     streamingAgentIds,
+    todoText,
     state,
   } = props;
   const { session } = state;
@@ -162,6 +165,8 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           </View>
         )}
       </View>
+
+      {todoText ? <TodoDock text={todoText} /> : null}
 
       {agentChips && agentChips.length > 0 ? (
         <AgentChipBar
