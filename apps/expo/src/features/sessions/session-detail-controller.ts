@@ -38,7 +38,11 @@ type SessionsApi = ReturnType<typeof createSessionsApi>;
 type SessionDetailControllerDeps = {
   api: Pick<
     SessionsApi,
-    "getSession" | "insertOutgoingMessage" | "listMessages" | "resolveMemberActorId"
+    | "getSession"
+    | "insertOutgoingMessage"
+    | "listMessages"
+    | "markSessionRead"
+    | "resolveMemberActorId"
   >;
   currentMemberActorId: string | null;
   getAuth: () => Promise<{ accessToken: string | null; userId: string | null }>;
@@ -266,6 +270,21 @@ export function createSessionDetailController(
           messages: mergedMessages,
           status: nextStatusForMessages(state.session, mergedMessages, state.status),
         });
+
+        // Live-update the read marker so the Sessions list stays clean
+        // while the detail screen is open. We pass the senderActorId
+        // through so a future receipts UI can resolve "who's read up
+        // to where" without an extra lookup.
+        if (
+          deps.currentMemberActorId &&
+          nextMessage.senderActorId !== deps.currentMemberActorId
+        ) {
+          void deps.api
+            .markSessionRead(deps.sessionId, deps.currentMemberActorId, nextMessage.messageId)
+            .catch(() => {
+              // best-effort
+            });
+        }
       });
 
       await deps.mqtt.subscribe(`amux/${deps.teamId}/session/${deps.sessionId}/live`);

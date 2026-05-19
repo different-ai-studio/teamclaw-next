@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 
 import { matchesAnyField } from "../../search/search-matcher";
+import { SkeletonRow } from "../../../ui/atoms/SkeletonRow";
 
 
 import {
@@ -167,12 +167,10 @@ export function IdeasListScreen({
         style={styles.screen}
       >
         {headerBar}
-        <View style={styles.stateBlock}>
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={colors.slate} />
-            <Text style={styles.stateTitle}>Loading ideas</Text>
-          </View>
-          <Text style={styles.stateBody}>Catching up with the team's notes.</Text>
+        <View>
+          <SkeletonRow avatar={false} />
+          <SkeletonRow avatar={false} />
+          <SkeletonRow avatar={false} />
         </View>
       </ScrollView>
     );

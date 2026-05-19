@@ -50,6 +50,7 @@ export default function IdeasIndexRoute() {
   return (
     <IdeasListScreen
       currentActorId={state.currentMemberActorId}
+      onCreate={() => router.push("/(app)/new-idea")}
       onArchiveBatch={async (ideaIds) => {
         const api = createIdeasApi(supabase);
         for (const id of ideaIds) {

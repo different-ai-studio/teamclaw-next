@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
+import { SkeletonRow } from "../../../ui/atoms/SkeletonRow";
 import { PrimaryButton } from "../../../ui/button";
 import { colors, spacing, typography } from "../../../ui/theme";
 import { ActorRow } from "../components/ActorRow";
@@ -154,12 +154,10 @@ export function ActorsListScreen({
         style={styles.screen}
       >
         {headerBar}
-        <View style={styles.stateBlock}>
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={colors.slate} />
-            <Text style={styles.stateTitle}>Loading actors</Text>
-          </View>
-          <Text style={styles.stateBody}>Catching up with the team roster.</Text>
+        <View>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
         </View>
       </ScrollView>
     );
