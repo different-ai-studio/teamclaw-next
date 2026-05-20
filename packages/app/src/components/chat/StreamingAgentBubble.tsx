@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
+import { ThinkingBlock } from "./ThinkingBlock";
 
 function PlanStatusIcon({ status }: { status: StreamingPlanEntry["status"] }) {
   const cls = "h-3.5 w-3.5 shrink-0";
@@ -62,12 +63,19 @@ function ErrorCard({ message, details }: { message: string; details: string }) {
 }
 
 export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
-  const hasOutput = entry.outputText.length > 0;
+  // After finalize (active=false), the persisted AGENT_REPLY ChatMessage
+  // takes over the reply text — suppress outputText here to avoid showing
+  // the same content twice. Thinking + tool calls + plan stay visible
+  // because the daemon doesn't persist those kinds (per
+  // turn_aggregator::supabase_persistent), so the bubble is the only
+  // place they survive after the turn ends.
+  const showOutput = entry.active && entry.outputText.length > 0;
   const hasToolCalls = entry.toolCalls.length > 0;
+  const hasThinking = entry.thinkingText.length > 0;
   const hasPlan = entry.planEntries.length > 0;
   const hasError = !!entry.errorMessage;
 
-  if (!hasOutput && !hasToolCalls && !hasPlan && !hasError) {
+  if (!showOutput && !hasToolCalls && !hasThinking && !hasPlan && !hasError) {
     return null;
   }
 
@@ -82,6 +90,14 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
+          {hasThinking && (
+            <ThinkingBlock
+              content={entry.thinkingText}
+              isStreaming={entry.active}
+              isOpen={!entry.active}
+            />
+          )}
+
           {hasPlan && <InlinePlan entries={entry.planEntries} />}
 
           {hasToolCalls && (
@@ -99,7 +115,7 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
             </div>
           )}
 
-          {hasOutput && (
+          {showOutput && (
             <MessageContent>
               <MessageResponse>{entry.outputText}</MessageResponse>
             </MessageContent>
