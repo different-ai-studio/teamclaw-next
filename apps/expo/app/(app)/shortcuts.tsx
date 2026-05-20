@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -358,6 +359,11 @@ export default function ShortcutsRoute() {
                 </View>
                 <Text style={styles.rowLabel}>Settings</Text>
                 <View style={{ flex: 1 }} />
+                {Constants.expoConfig?.version ? (
+                  <Text style={styles.rowVersion}>
+                    {Constants.expoConfig.version}
+                  </Text>
+                ) : null}
                 <Ionicons color={colors.slate} name="chevron-forward" size={16} />
               </Pressable>
             </View>
@@ -482,6 +488,11 @@ const styles = StyleSheet.create({
   },
   rowMeta: {
     color: colors.slate,
+    ...typography.monoMeta,
+  },
+  rowVersion: {
+    color: colors.slate,
+    paddingHorizontal: 6,
     ...typography.monoMeta,
   },
   rowPressed: {
