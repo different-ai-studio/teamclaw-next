@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -91,53 +92,51 @@ export default function TeamsRoute() {
     );
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        if (!memberActorId) {
-          if (!cancelled) setIsLoading(false);
-          return;
-        }
-        const result = (await supabase
-          .from("team_members")
-          .select("role, teams!inner(id, name, slug)")
-          .eq("member_id", memberActorId)) as {
-          data:
-            | Array<{
-                role: string | null;
-                teams: { id: string; name: string | null; slug: string | null } | null;
-              }>
-            | null;
-          error: { message?: string } | null;
-        };
-        if (cancelled) return;
-        if (result.error) {
-          setError(result.error.message ?? "Couldn't load teams.");
-          setMemberships([]);
-        } else {
-          setMemberships(
-            (result.data ?? [])
-              .filter((row) => row.teams)
-              .map((row) => ({
-                teamId: row.teams!.id,
-                name: row.teams!.name ?? "Unnamed team",
-                slug: row.teams!.slug ?? "",
-                role: row.role ?? "member",
-              })),
-          );
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Couldn't load teams.");
-      } finally {
-        if (!cancelled) setIsLoading(false);
+  const load = useCallback(async () => {
+    if (!memberActorId) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const result = (await supabase
+        .from("team_members")
+        .select("role, teams!inner(id, name, slug)")
+        .eq("member_id", memberActorId)) as {
+        data:
+          | Array<{
+              role: string | null;
+              teams: { id: string; name: string | null; slug: string | null } | null;
+            }>
+          | null;
+        error: { message?: string } | null;
+      };
+      if (result.error) {
+        setError(result.error.message ?? "Couldn't load teams.");
+        setMemberships([]);
+      } else {
+        setMemberships(
+          (result.data ?? [])
+            .filter((row) => row.teams)
+            .map((row) => ({
+              teamId: row.teams!.id,
+              name: row.teams!.name ?? "Unnamed team",
+              slug: row.teams!.slug ?? "",
+              role: row.role ?? "member",
+            })),
+        );
+        setError(null);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load teams.");
+    } finally {
+      setIsLoading(false);
+    }
   }, [memberActorId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <View style={styles.screen}>
@@ -154,6 +153,15 @@ export default function TeamsRoute() {
         contentContainerStyle={styles.content}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            onRefresh={() => {
+              void load();
+            }}
+            refreshing={isLoading && memberships.length > 0}
+            tintColor={colors.slate}
+          />
+        }
       >
         {isLoading ? (
           <View style={styles.loadingRow}>
