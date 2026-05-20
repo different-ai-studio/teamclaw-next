@@ -52,7 +52,7 @@ import type {
   SessionDetailConnectionState,
   SessionDetailControllerState,
 } from "../session-detail-controller";
-import type { SessionSummary } from "../session-types";
+import type { SessionMessage, SessionSummary } from "../session-types";
 
 type SessionDetailRenderableState = SessionDetailControllerState & {
   status: "empty" | "ready" | "error";
@@ -295,16 +295,49 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     state,
   } = props;
   const { session } = state;
-  const hasMessages = state.messages.length > 0;
+
+  const streamingRows = useMemo<SessionMessage[]>(
+    () =>
+      Array.from(state.streamingByAgent.values()).map((buf) => ({
+        messageId: buf.messageId,
+        sessionId: state.session?.sessionId ?? "",
+        teamId: state.session?.teamId ?? "",
+        senderActorId: buf.senderActorId,
+        content: buf.text,
+        kind: buf.kind,
+        createdAt: buf.startedAt,
+        metadata: null,
+        model: "",
+        replyToMessageId: "",
+        turnId: "",
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.streamingByAgent, state.session?.sessionId, state.session?.teamId],
+  );
+
+  const renderRows = useMemo(
+    () => [...state.messages, ...streamingRows],
+    [state.messages, streamingRows],
+  );
+
+  const streamingMessageIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const buf of state.streamingByAgent.values()) {
+      ids.add(buf.messageId);
+    }
+    return ids;
+  }, [state.streamingByAgent]);
+
+  const hasMessages = renderRows.length > 0;
 
   type FeedItem =
     | { kind: "separator"; key: string; label: string }
-    | { kind: "message"; key: string; message: typeof state.messages[number] };
+    | { kind: "message"; key: string; message: SessionMessage };
 
   const feedItems: FeedItem[] = [];
-  for (let i = 0; i < state.messages.length; i += 1) {
-    const current = state.messages[i];
-    const prev = i > 0 ? state.messages[i - 1] : null;
+  for (let i = 0; i < renderRows.length; i += 1) {
+    const current = renderRows[i];
+    const prev = i > 0 ? renderRows[i - 1] : null;
     if (!prev || !isSameCalendarDay(prev.createdAt, current.createdAt)) {
       feedItems.push({
         kind: "separator",
@@ -320,7 +353,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
   }
 
   const messageListRef = useRef<FlatList<FeedItem> | null>(null);
-  const lastMessageCount = useRef(state.messages.length);
+  const lastMessageCount = useRef(renderRows.length);
 
   const outboxByMessageId = useSyncExternalStore(
     subscribeOutbox,
@@ -351,20 +384,20 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       if (feedItems[i].kind === "separator") out.push(i);
     }
     return out;
-    // feedItems is derived from state.messages each render; safe to depend on length only
+    // feedItems is derived from renderRows each render; safe to depend on length only
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.messages.length]);
+  }, [renderRows.length]);
 
   useEffect(() => {
-    if (state.messages.length > lastMessageCount.current) {
+    if (renderRows.length > lastMessageCount.current) {
       // New message appended — scroll to the bottom so the user sees
       // the latest reply without manually paging down.
       requestAnimationFrame(() => {
         messageListRef.current?.scrollToEnd({ animated: true });
       });
     }
-    lastMessageCount.current = state.messages.length;
-  }, [state.messages.length]);
+    lastMessageCount.current = renderRows.length;
+  }, [renderRows.length]);
 
   return (
     <View style={styles.screen}>
@@ -451,12 +484,13 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
               const isOwn = ownActorId ? msg.senderActorId === ownActorId : false;
               const replyToMessage =
                 msg.replyToMessageId && msg.replyToMessageId.length > 0
-                  ? state.messages.find((m) => m.messageId === msg.replyToMessageId) ??
+                  ? renderRows.find((m) => m.messageId === msg.replyToMessageId) ??
                     null
                   : null;
               return (
                 <SessionMessageRow
                   isOwnMessage={isOwn}
+                  isStreaming={streamingMessageIds.has(msg.messageId)}
                   message={msg}
                   onDelete={onDeleteMessage}
                   onEdit={
