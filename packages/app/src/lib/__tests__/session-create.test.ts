@@ -48,7 +48,7 @@ describe('startAgentRuntimesAsync', () => {
           }),
         }
       }
-      if (table === 'actors') {
+      if (table === 'agents') {
         return {
           select: () => ({
             in: () => Promise.resolve({

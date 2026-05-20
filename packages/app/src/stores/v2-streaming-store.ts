@@ -28,8 +28,18 @@ export interface AgentStreamEntry {
   active: boolean;              // true while streaming; false after finalize
 }
 
+export interface ArchivedEntry extends AgentStreamEntry {
+  /** Stable React key for the archived bubble — `${sessionId}::${actorId}::${counter}`. */
+  archiveId: string;
+}
+
 interface State {
   byKey: Record<string, AgentStreamEntry>;
+  /** Prior-turn entries archived when the next turn starts. We keep these so
+   * thinking + tool_calls from earlier turns stay visible in the UI — the
+   * daemon doesn't persist non-AgentReply kinds, so the bubble is the only
+   * place they survive. Each entry has a unique `archiveId` for React keys. */
+  archived: ArchivedEntry[];
   appendOutput: (sessionId: string, actorId: string, delta: string) => void;
   appendThinking: (sessionId: string, actorId: string, delta: string) => void;
   pushToolUse: (
@@ -75,25 +85,42 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
   };
 }
 
+let archiveCounter = 0;
+
+/** Returned by mutation prep: the entry to mutate AND any prior-turn entry
+ * that should be archived in the same set() call. */
+interface MutationPrep {
+  entry: AgentStreamEntry;
+  toArchive: ArchivedEntry | null;
+}
+
 /** Get the entry to mutate. If a previous-turn entry exists but is inactive
- * (finalized), reset it for the new turn so we don't accumulate state
- * across turns. */
-function activeEntry(state: State, sessionId: string, actorId: string): AgentStreamEntry {
+ * (finalized), capture it for archival and start a fresh entry for the new
+ * turn — keeps prior turns' thinking + tool_calls visible in the UI. */
+function prepareMutation(state: State, sessionId: string, actorId: string): MutationPrep {
   const key = k(sessionId, actorId);
   const existing = state.byKey[key];
-  if (!existing || !existing.active) return emptyEntry(sessionId, actorId);
-  return existing;
+  if (!existing) return { entry: emptyEntry(sessionId, actorId), toArchive: null };
+  if (existing.active) return { entry: existing, toArchive: null };
+  archiveCounter += 1;
+  const archived: ArchivedEntry = {
+    ...existing,
+    archiveId: `${sessionId}::${actorId}::${archiveCounter}`,
+  };
+  return { entry: emptyEntry(sessionId, actorId), toArchive: archived };
 }
 
 export const useV2StreamingStore = create<State>((set, get) => ({
   byKey: {},
+  archived: [],
 
   appendOutput: (sessionId, actorId, delta) => {
     if (!delta) return;
-    const entry = activeEntry(get(), sessionId, actorId);
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
           outputText: entry.outputText + delta,
@@ -101,15 +128,17 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 
   appendThinking: (sessionId, actorId, delta) => {
     if (!delta) return;
-    const entry = activeEntry(get(), sessionId, actorId);
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
           thinkingText: entry.thinkingText + delta,
@@ -117,12 +146,14 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 
   pushToolUse: (sessionId, actorId, { toolId, toolName, description, params, toolKind }) => {
     if (!toolId) return;
-    const entry = activeEntry(get(), sessionId, actorId);
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     if (entry.toolCalls.some((tc) => tc.id === toolId)) return;
     const newToolCall: ToolCall = {
       id: toolId,
@@ -134,7 +165,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     };
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
           toolCalls: [...entry.toolCalls, newToolCall],
@@ -142,6 +173,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 
@@ -173,10 +205,11 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   },
 
   setPlan: (sessionId, actorId, entries) => {
-    const entry = activeEntry(get(), sessionId, actorId);
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
           planEntries: entries,
@@ -184,14 +217,16 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 
   setError: (sessionId, actorId, message, details) => {
-    const entry = activeEntry(get(), sessionId, actorId);
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
           errorMessage: message,
@@ -200,14 +235,16 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 
   setPermissionRequest: (sessionId, actorId, req) => {
-    const entry = activeEntry(get(), sessionId, actorId);
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
           pendingPermission: req,
@@ -215,6 +252,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 
@@ -232,8 +270,9 @@ export const useV2StreamingStore = create<State>((set, get) => ({
 
   /** Finalize a streaming turn: replace outputText with the canonical final
    * content from the daemon's published Message and mark inactive. Keep
-   * thinking + tool_calls + plan visible. The next turn's first
-   * acp.event will reset the entry via activeEntry()'s inactive-check. */
+   * thinking + tool_calls + plan visible — the next turn's first acp.event
+   * will move this entry into `archived` (see prepareMutation) so prior-turn
+   * thinking + tool_calls stay visible alongside the new turn. */
   finalize: (sessionId, actorId, finalText) => {
     const key = k(sessionId, actorId);
     const existing = get().byKey[key];
@@ -270,7 +309,12 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const key = k(sessionId, actorId);
     const next = { ...get().byKey };
     delete next[key];
-    set({ byKey: next });
+    set({
+      byKey: next,
+      archived: get().archived.filter(
+        (e) => !(e.sessionId === sessionId && e.actorId === actorId),
+      ),
+    });
   },
 
   clearSession: (sessionId) => {
@@ -278,11 +322,18 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     for (const [key, entry] of Object.entries(get().byKey)) {
       if (entry.sessionId !== sessionId) next[key] = entry;
     }
-    set({ byKey: next });
+    set({
+      byKey: next,
+      archived: get().archived.filter((e) => e.sessionId !== sessionId),
+    });
   },
 }));
 
-/** Selector helper: get all streaming entries for a session (active + finalized). */
+/** Selector helper: get all streaming entries for a session (active + finalized
+ * current turn) plus any archived prior turns. Ordered by lastUpdate so the
+ * UI can render bubbles in chronological order. */
 export function selectStreamsForSession(state: State, sessionId: string): AgentStreamEntry[] {
-  return Object.values(state.byKey).filter((e) => e.sessionId === sessionId);
+  const current = Object.values(state.byKey).filter((e) => e.sessionId === sessionId);
+  const archived = state.archived.filter((e) => e.sessionId === sessionId);
+  return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
 }

@@ -9,7 +9,7 @@ import {
   Clock,
   Award,
   Package,
-  Github,
+  GitBranch,
   Flame,
   Loader2,
   RefreshCw,
@@ -1011,7 +1011,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
             </DialogTitle>
             <DialogDescription asChild>
               <div className="flex items-center gap-2 text-sm">
-                <Github className="h-3.5 w-3.5 shrink-0" />
+                <GitBranch className="h-3.5 w-3.5 shrink-0" />
                 {selectedSkill ? (
                   <a
                     href={`https://github.com/${selectedSkill.owner}/${selectedSkill.repo}`}

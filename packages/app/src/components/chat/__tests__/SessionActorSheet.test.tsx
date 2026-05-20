@@ -63,21 +63,31 @@ beforeEach(() => {
   useRuntimeStateStore.getState().clear()
 })
 
-function makeActorsMock(myActorId = 'm-1', teamAgentRows: unknown[] = []) {
+function makeActorsMock(myActorId = 'm-1') {
+  // Only the self-actor lookup queries the bare `actors` table now.
+  // `agent_kind` / `default_agent_type` come via the `actor_directory` view.
   return {
     select: () => ({
-      eq: vi.fn().mockImplementation((col: string) => {
-        if (col === 'user_id') {
-          return {
-            in: () => Promise.resolve({ data: [{ id: myActorId }], error: null }),
-          }
-        }
-        // col === 'team_id'
-        return {
-          eq: () => Promise.resolve({ data: teamAgentRows, error: null }),
-        }
+      eq: () => ({
+        in: () => Promise.resolve({ data: [{ id: myActorId }], error: null }),
       }),
     }),
+  }
+}
+
+function makeActorDirectoryMock(actorRows: unknown[], teamAgentRows: unknown[]) {
+  return {
+    select: () => {
+      const inResult = Promise.resolve({ data: actorRows, error: null })
+      return {
+        // participants query: .select(...).in('id', ids)
+        in: () => inResult,
+        // candidate agents query: .select(...).eq('team_id', ...).eq('actor_type', 'agent')
+        eq: () => ({
+          eq: () => Promise.resolve({ data: teamAgentRows, error: null }),
+        }),
+      }
+    },
   }
 }
 
@@ -107,11 +117,7 @@ function mockJoinedRows(participantActorIds: string[], actorRows: unknown[]) {
       }
     }
     if (table === 'actor_directory') {
-      return {
-        select: () => ({
-          in: () => Promise.resolve({ data: actorRows, error: null }),
-        }),
-      }
+      return makeActorDirectoryMock(actorRows, [])
     }
     if (table === 'agent_runtimes') {
       return {
@@ -119,7 +125,7 @@ function mockJoinedRows(participantActorIds: string[], actorRows: unknown[]) {
       }
     }
     if (table === 'actors') {
-      return makeActorsMock('m-1', [])
+      return makeActorsMock('m-1')
     }
     return { select: () => Promise.resolve({ data: [], error: null }) }
   })
@@ -178,14 +184,7 @@ function mockSheetData(
       }
     }
     if (table === 'actor_directory') {
-      return {
-        select: () => {
-          const query = {
-            in: () => Promise.resolve({ data: actorRows, error: null }),
-          }
-          return query
-        },
-      }
+      return makeActorDirectoryMock(actorRows, teamAgentRows)
     }
     if (table === 'agent_runtimes') {
       return {
@@ -208,7 +207,7 @@ function mockSheetData(
       }
     }
     if (table === 'actors') {
-      return makeActorsMock('m-1', teamAgentRows)
+      return makeActorsMock('m-1')
     }
     return { select: () => Promise.resolve({ data: [], error: null }) }
   })

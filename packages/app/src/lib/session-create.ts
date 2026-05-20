@@ -1,6 +1,14 @@
+import { create as createProtoMessage, toBinary } from '@bufbuild/protobuf'
 import { supabase } from '@/lib/supabase-client'
 import { runtimeStart } from '@/lib/teamclaw-rpc'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
+import { mqttPublish } from '@/lib/mqtt-bridge'
+import {
+  LiveEventEnvelopeSchema,
+  MessageKind,
+  MessageSchema,
+  SessionMessageEnvelopeSchema,
+} from '@/lib/proto/teamclaw_pb'
 import {
   upsertSessionsBatch,
   upsertSessionParticipantsBatch,
@@ -97,6 +105,101 @@ export async function createSessionShell(
   return { sessionId }
 }
 
+export interface CreateSessionWithFirstMessageArgs {
+  teamId: string
+  creatorActorId: string
+  /** Additional participant actor IDs (members + agents). Creator is added automatically. */
+  additionalActorIds: string[]
+  /** Subset of `additionalActorIds` that are agents — used to fan out runtime spawns. */
+  agentActorIds: string[]
+  /** Opening message text. Sent verbatim — no @-mention prefix. */
+  messageText: string
+  ideaId?: string | null
+}
+
+export interface CreateSessionWithFirstMessageResult {
+  sessionId: string
+}
+
+/**
+ * One-shot helper that backs the "新会话" dialog: creates the session shell,
+ * publishes the opening message via MQTT + Supabase, kicks off runtime spawn
+ * for any agents added. The first message intentionally carries no @-mentions
+ * (see desktop UX spec — per-agent engagement happens after the user replies
+ * inside the session).
+ */
+export async function createSessionWithFirstMessage(
+  args: CreateSessionWithFirstMessageArgs,
+): Promise<CreateSessionWithFirstMessageResult> {
+  const trimmed = args.messageText.trim()
+  if (!trimmed) throw new Error('Opening message cannot be empty')
+
+  const titleSource = trimmed.split('\n')[0]?.trim().slice(0, 80) || 'New chat'
+
+  const { sessionId } = await createSessionShell({
+    teamId: args.teamId,
+    creatorActorId: args.creatorActorId,
+    title: titleSource,
+    additionalActorIds: args.additionalActorIds,
+    ideaId: args.ideaId ?? null,
+  })
+
+  const messageId = crypto.randomUUID()
+  const createdAt = BigInt(Math.floor(Date.now() / 1000))
+
+  const protoMessage = createProtoMessage(MessageSchema, {
+    messageId,
+    sessionId,
+    senderActorId: args.creatorActorId,
+    kind: MessageKind.TEXT,
+    content: trimmed,
+    createdAt,
+  })
+  const sessionEnvelope = createProtoMessage(SessionMessageEnvelopeSchema, {
+    message: protoMessage,
+    mentionActorIds: [],
+  })
+  const liveEnvelope = createProtoMessage(LiveEventEnvelopeSchema, {
+    eventId: crypto.randomUUID(),
+    eventType: 'message.created',
+    sessionId,
+    actorId: args.creatorActorId,
+    sentAt: createdAt,
+    body: toBinary(SessionMessageEnvelopeSchema, sessionEnvelope),
+  })
+
+  const { error: insertError } = await supabase.from('messages').insert({
+    id: messageId,
+    team_id: args.teamId,
+    session_id: sessionId,
+    sender_actor_id: args.creatorActorId,
+    kind: 'text',
+    content: trimmed,
+    metadata: { mention_actor_ids: [] },
+  })
+  if (insertError) {
+    throw new Error(`Failed to persist message: ${insertError.message}`)
+  }
+
+  await mqttPublish(
+    `amux/${args.teamId}/session/${sessionId}/live`,
+    toBinary(LiveEventEnvelopeSchema, liveEnvelope),
+    false,
+  ).catch((publishErr) => {
+    console.warn('[session-create] MQTT publish failed (non-fatal):', publishErr)
+  })
+
+  if (args.agentActorIds.length > 0) {
+    void startAgentRuntimesAsync({
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+    })
+  }
+
+  return { sessionId }
+}
+
 export interface StartAgentRuntimesArgs {
   sessionId: string
   teamId: string
@@ -134,9 +237,12 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
   // Fetch each agent's explicitly-set default_agent_type — it wins over the
   // prior runtime's backend_type because the operator may have changed the
   // default after the last spawn (or there is no prior spawn at all).
+  // agent_kind / default_agent_type live on public.agents (actors only carries
+  // the shared identity/display fields). Query agents directly so private
+  // agents that aren't team-visible still resolve their backend defaults.
   const defaultByAgent = new Map<string, { agent_kind: string | null; default_agent_type: string | null }>()
   const { data: agentRows } = await supabase
-    .from('actors')
+    .from('agents')
     .select('id, agent_kind, default_agent_type')
     .in('id', args.agentActorIds)
   for (const r of agentRows ?? []) {

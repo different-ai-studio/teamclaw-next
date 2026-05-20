@@ -1,9 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Inbox, AtSign, Keyboard, Pin } from 'lucide-react'
+import { Inbox, AtSign, Keyboard, Pin, SquarePen } from 'lucide-react'
 import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
 import { useCronStore } from '@/stores/cron'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { IdeasSection } from '@/components/sidebar/IdeasSection'
 import { ActorsSection } from '@/components/sidebar/ActorsSection'
 import { cn } from '@/lib/utils'
@@ -50,6 +51,8 @@ export function NavRail() {
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const sessions = useSessionStore((s) => s.sessions)
   const cronSessionIds = useCronStore((s) => s.cronSessionIds)
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const hasWorkspace = !!workspacePath
 
   const sessionsCount = React.useMemo(
     () => sessions.filter((s) => !s.parentID && !cronSessionIds.has(s.id)).length,
@@ -60,8 +63,41 @@ export function NavRail() {
     void import('sonner').then((m) => m.toast(t('common.comingSoon', 'Coming soon')))
   }
 
+  const handleNewChat = React.useCallback(() => {
+    if (!hasWorkspace) return
+    useUIStore.getState().openNewSessionDialog()
+  }, [hasWorkspace])
+
+  // ⌘N opens the new-session dialog (mirrors the hint shown on the button).
+  React.useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        handleNewChat()
+      }
+    }
+    document.addEventListener('keydown', down)
+    return () => document.removeEventListener('keydown', down)
+  }, [handleNewChat])
+
   return (
     <div className="flex h-full w-full min-w-0 flex-col gap-2 overflow-y-auto px-3 pt-0 pb-3">
+      <button
+        type="button"
+        onClick={handleNewChat}
+        disabled={!hasWorkspace}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-xl bg-coral px-3 py-2.5 text-left text-[14px] font-semibold text-white shadow-sm transition-colors',
+          'hover:bg-coral/90 disabled:opacity-40 disabled:cursor-not-allowed',
+        )}
+      >
+        <SquarePen className="h-[16px] w-[16px] shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{t('chat.newChat', 'New Chat')}</span>
+        <span className="shrink-0 rounded-md bg-black/15 px-1.5 py-0.5 font-mono text-[11px] font-medium tracking-tight text-white/95">
+          ⌘N
+        </span>
+      </button>
+
       <div className="flex flex-col">
         <TopEntry
           label={t('sidebar.sessions', 'Sessions')}

@@ -1,16 +1,16 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { supabase } from '@/lib/supabase-client'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { useSessionListStore } from '@/stores/session-list-store'
 import { useSessionStore } from '@/stores/session'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
@@ -22,11 +22,11 @@ import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
 // ────────────────────────────────────────────────────────────────────────────
 
 interface AgentSelectorDockProps {
-  engagedAgent: AttachedAgent | null
-  onEngageAgent: (agent: AttachedAgent) => void
+  /** All agents currently @-mentioned for the active session — one pill each. */
+  engagedAgents: AttachedAgent[]
+  /** Remove a single agent (clicked the X on the chip / "Remove" in dropdown). */
+  onRemoveAgent: (agentId: string) => void
 }
-
-type SessionAgent = { id: string; display_name: string }
 
 type FallbackModel = { id: string; displayName: string }
 
@@ -48,12 +48,7 @@ function fallbackModels(backendType: string | undefined): FallbackModel[] {
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Status dot helper
-// ────────────────────────────────────────────────────────────────────────────
-
-/** Gray = waiting for init / unknown. Green = idle. Red = actively
- * streaming output or errored. */
+/** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */
 function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: boolean } {
   if (!info) return { color: 'bg-muted-foreground/40', pulse: false }
   switch (info.state) {
@@ -79,48 +74,25 @@ function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: bool
 // Component
 // ────────────────────────────────────────────────────────────────────────────
 
-export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelectorDockProps) {
-  const { t } = useTranslation()
+export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelectorDockProps) {
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
-  const sessionRow = useSessionListStore((s) => s.rows.find((r) => r.id === activeSessionId))
-  const fallbackTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null)
-  const _teamId = sessionRow?.team_id ?? fallbackTeamId
 
-  const [sessionAgents, setSessionAgents] = React.useState<SessionAgent[]>([])
   const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
   const [agentToBackendType, setAgentToBackendType] = React.useState<Map<string, string>>(new Map())
   const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
 
-  // Load session participants + agent_runtimes mapping when session changes.
+  // Load agent → runtime mapping for the active session. Refetched whenever
+  // a daemon retain arrives for an engaged agent we don't yet know about
+  // (covers the race where the daemon's INSERT into agent_runtimes hasn't
+  // landed when this component mounts).
   React.useEffect(() => {
     if (!activeSessionId) {
-      setSessionAgents([])
       setAgentToRuntimeId(new Map())
+      setAgentToBackendType(new Map())
       return
     }
     let cancelled = false
     void (async () => {
-      // Fetch session participants
-      const { data: parts } = await supabase
-        .from('session_participants')
-        .select('actor_id')
-        .eq('session_id', activeSessionId)
-      if (cancelled) return
-      const actorIds = (parts ?? []).map((r: { actor_id: string }) => r.actor_id)
-      if (actorIds.length === 0) {
-        setSessionAgents([])
-        setAgentToRuntimeId(new Map())
-        return
-      }
-      const { data: actors } = await supabase
-        .from('actors')
-        .select('id, display_name, actor_type')
-        .in('id', actorIds)
-        .eq('actor_type', 'agent')
-      if (cancelled) return
-      setSessionAgents((actors ?? []) as SessionAgent[])
-
-      // Fetch agent_runtimes for live RuntimeInfo + backend_type lookup
       const { data: rtRows } = await supabase
         .from('agent_runtimes')
         .select('agent_id, runtime_id, backend_type')
@@ -138,23 +110,22 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
     return () => { cancelled = true }
   }, [activeSessionId])
 
-  // Refetch agent_runtimes when a runtime retain arrives for an agent
-  // we don't yet have mapped — the initial supabase fetch can race the
-  // daemon's INSERT into agent_runtimes, leaving the dock stuck on
-  // Loading even though the runtime is live.
+  // Retain-driven refetch: if any engaged agent has a retain but we haven't
+  // mapped its runtime_id yet, re-pull agent_runtimes.
   const retainSignature = React.useMemo(() => {
-    if (!engagedAgent) return ''
+    const ids = engagedAgents.map((a) => a.id)
     return Object.entries(runtimeStates)
-      .filter(([, e]) => e.daemonDeviceId === engagedAgent.id)
+      .filter(([, e]) => ids.includes(e.daemonDeviceId))
       .map(([rid]) => rid)
       .sort()
       .join(',')
-  }, [runtimeStates, engagedAgent])
+  }, [runtimeStates, engagedAgents])
 
   React.useEffect(() => {
-    if (!engagedAgent || !activeSessionId) return
-    if (agentToRuntimeId.has(engagedAgent.id)) return
-    if (!retainSignature) return // no retain for this agent yet — nothing to refetch
+    if (!activeSessionId || engagedAgents.length === 0) return
+    const missing = engagedAgents.some((a) => !agentToRuntimeId.has(a.id))
+    if (!missing) return
+    if (!retainSignature) return
     let cancelled = false
     void (async () => {
       const { data: rtRows } = await supabase
@@ -169,54 +140,107 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
         if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
       }
       setAgentToRuntimeId(map)
-      setAgentToBackendType(prev => {
+      setAgentToBackendType((prev) => {
         const next = new Map(prev)
         btMap.forEach((bt, id) => next.set(id, bt))
         return next
       })
     })()
     return () => { cancelled = true }
-  }, [engagedAgent, activeSessionId, agentToRuntimeId, retainSignature])
+  }, [engagedAgents, activeSessionId, agentToRuntimeId, retainSignature])
 
-  // When engagedAgent is set but we have no backend_type yet (brand-new session
-  // with no agent_runtimes row), pull backend_type from the agent's most recent
-  // historical runtime — mirrors iOS CachedAgentRuntime lookup in RuntimeResolver.
+  // Backfill backend_type from the agent's most recent historical runtime
+  // when we have no live entry yet — mirrors iOS CachedAgentRuntime fallback.
   React.useEffect(() => {
-    if (!engagedAgent) return
-    if (agentToBackendType.has(engagedAgent.id)) return
+    const missing = engagedAgents.filter((a) => !agentToBackendType.has(a.id))
+    if (missing.length === 0) return
     let cancelled = false
     void (async () => {
       const { data: rows } = await supabase
         .from('agent_runtimes')
-        .select('backend_type')
-        .eq('agent_id', engagedAgent.id)
+        .select('agent_id, backend_type, updated_at')
+        .in('agent_id', missing.map((a) => a.id))
         .not('backend_type', 'is', null)
         .order('updated_at', { ascending: false })
-        .limit(1)
       if (cancelled) return
-      const bt = (rows as Array<{ backend_type: string | null }>)?.[0]?.backend_type
-      if (bt) {
-        setAgentToBackendType(prev => new Map(prev).set(engagedAgent.id, bt))
+      const latestByAgent = new Map<string, string>()
+      for (const r of (rows ?? []) as { agent_id: string; backend_type: string | null }[]) {
+        if (r.agent_id && r.backend_type && !latestByAgent.has(r.agent_id)) {
+          latestByAgent.set(r.agent_id, r.backend_type)
+        }
+      }
+      if (latestByAgent.size > 0) {
+        setAgentToBackendType((prev) => {
+          const next = new Map(prev)
+          latestByAgent.forEach((bt, id) => next.set(id, bt))
+          return next
+        })
       }
     })()
     return () => { cancelled = true }
-  }, [engagedAgent, agentToBackendType])
+  }, [engagedAgents, agentToBackendType])
 
-  const engagedRuntimeId = engagedAgent ? agentToRuntimeId.get(engagedAgent.id) : undefined
-  const engagedRuntimeInfo = engagedRuntimeId ? runtimeStates[engagedRuntimeId]?.info : undefined
-  const { color: dotColor, pulse } = dotClasses(engagedRuntimeInfo)
-  const engagedBackendType = engagedAgent ? agentToBackendType.get(engagedAgent.id) : undefined
+  if (engagedAgents.length === 0) return null
 
-  const liveModels = engagedRuntimeInfo?.availableModels ?? []
-  const availableModels = liveModels.length > 0 ? liveModels : fallbackModels(engagedBackendType)
-  const currentModel = engagedRuntimeInfo?.currentModel ?? ''
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {engagedAgents.map((agent) => (
+        <AgentPill
+          key={agent.id}
+          agent={agent}
+          runtimeId={agentToRuntimeId.get(agent.id)}
+          backendType={agentToBackendType.get(agent.id)}
+          runtimeInfo={(() => {
+            const rid = agentToRuntimeId.get(agent.id)
+            return rid ? runtimeStates[rid]?.info : undefined
+          })()}
+          onRemove={() => onRemoveAgent(agent.id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Per-agent pill
+// ────────────────────────────────────────────────────────────────────────────
+
+function AgentPill({
+  agent,
+  runtimeId,
+  backendType,
+  runtimeInfo,
+  onRemove,
+}: {
+  agent: AttachedAgent
+  runtimeId: string | undefined
+  backendType: string | undefined
+  runtimeInfo: RuntimeInfo | undefined
+  onRemove: () => void
+}) {
+  const { t } = useTranslation()
+  const { color: dotColor, pulse } = dotClasses(runtimeInfo)
+
+  const liveModels = runtimeInfo?.availableModels ?? []
+  const availableModels = liveModels.length > 0 ? liveModels : fallbackModels(backendType)
+  const currentModel = runtimeInfo?.currentModel ?? ''
+  const displayedModel = currentModel || availableModels[0]?.id || ''
+  // Only `currentModel` reflects what the live runtime is actually using.
+  // When we fall back to availableModels[0] it's just a "what the dropdown
+  // would default to" placeholder, not the agent's real model — render it
+  // de-emphasized so the user can tell.
+  const isPlaceholderModel = !currentModel && !!displayedModel
+
+  // Only show spinner when we have neither live runtime info nor a backend_type
+  // to derive fallback models from.
+  const runtimeInfoLoading = !runtimeInfo && !backendType
 
   const handlePickModel = React.useCallback(async (modelId: string) => {
-    if (!engagedAgent || !engagedRuntimeId) return
+    if (!runtimeId) return
     try {
       await setModel({
-        targetDeviceId: engagedAgent.id,  // daemon device_id == agent actor_id convention
-        runtimeId: engagedRuntimeId,
+        targetDeviceId: agent.id, // daemon device_id == agent actor_id convention
+        runtimeId,
         modelId,
       })
     } catch (e) {
@@ -224,112 +248,79 @@ export function AgentSelectorDock({ engagedAgent, onEngageAgent }: AgentSelector
       toast.error(t('chat.agentSelector.modelChangeFailed', 'Failed to change model'))
       console.error('[AgentSelectorDock] setModel failed', e)
     }
-  }, [engagedAgent, engagedRuntimeId, t])
-
-  // No agents in this session → hide the dock entirely. The parent
-  // composer falls back to its empty state until at least one agent
-  // joins (via picker / Add agent button / @-mention).
-  if (sessionAgents.length === 0 && !engagedAgent) return null
-
-  // Only show spinner when we have neither live runtime info nor a backend_type
-  // to derive fallback models from — i.e., a genuinely unknown agent state.
-  const runtimeInfoLoading = !!engagedAgent && !engagedRuntimeInfo && !engagedBackendType
+  }, [agent.id, runtimeId, t])
 
   return (
-    <div className="flex items-center gap-1">
-      {/* Agent dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 rounded-full bg-muted/40 px-2 text-xs font-medium"
-          >
-            <span className={cn(
-              'h-2 w-2 rounded-full',
-              dotColor,
-              pulse && 'animate-pulse',
-            )} />
-            <span className="truncate max-w-[10rem]">
-              {engagedAgent?.displayName ?? t('chat.agentSelector.noAgent', 'No agent')}
-            </span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-[12rem]">
-          {sessionAgents.length === 0 ? (
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-              {t('chat.agentSelector.pickAgent', 'Add an agent to this session first')}
-            </div>
-          ) : (
-            sessionAgents.map((a) => (
-              <DropdownMenuItem
-                key={a.id}
-                onClick={() => onEngageAgent({ id: a.id, displayName: a.display_name })}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 rounded-full bg-muted/40 px-2 text-xs font-medium"
+        >
+          <span
+            className={cn('h-2 w-2 rounded-full', dotColor, pulse && 'animate-pulse')}
+          />
+          <span className="truncate max-w-[8rem]">{agent.displayName}</span>
+          {runtimeInfoLoading ? (
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          ) : displayedModel ? (
+            <>
+              <span className="text-muted-foreground/70">·</span>
+              <span
                 className={cn(
-                  'text-xs py-1.5',
-                  engagedAgent?.id === a.id && 'bg-muted',
+                  'truncate max-w-[10rem] font-mono text-[11px]',
+                  isPlaceholderModel
+                    ? 'italic text-muted-foreground/50'
+                    : 'text-muted-foreground',
                 )}
+                title={isPlaceholderModel
+                  ? t('chat.agentSelector.placeholderModelHint', 'No live runtime — dropdown will default to this model')
+                  : undefined}
               >
-                <span className="truncate">{a.display_name}</span>
-              </DropdownMenuItem>
-            ))
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* Model dropdown — only when an agent is engaged */}
-      {engagedAgent && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 rounded-full bg-muted/40 px-2 text-xs text-muted-foreground"
-            >
-              {runtimeInfoLoading ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span className="truncate">{t('chat.agentSelector.loading', 'Loading…')}</span>
-                </>
-              ) : (
-                <>
-                  <span className="truncate max-w-[8rem]">
-                    {currentModel || availableModels[0]?.id || t('chat.agentSelector.noModels', '—')}
-                  </span>
-                  <ChevronDown className="h-3 w-3" />
-                </>
+                {displayedModel}
+              </span>
+            </>
+          ) : null}
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[14rem]">
+        <div className="px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+          {t('chat.agentSelector.modelHeading', 'Model')}
+        </div>
+        {runtimeInfoLoading ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+            {t('chat.agentSelector.loading', 'Loading…')}
+          </div>
+        ) : availableModels.length === 0 ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+            {t('chat.agentSelector.noModels', 'No models advertised')}
+          </div>
+        ) : (
+          availableModels.map((m) => (
+            <DropdownMenuItem
+              key={m.id}
+              onClick={() => void handlePickModel(m.id)}
+              className={cn(
+                'text-xs py-1.5',
+                m.id === currentModel && 'bg-muted',
               )}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-[10rem]">
-            {runtimeInfoLoading ? (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                {t('chat.agentSelector.loading', 'Loading…')}
-              </div>
-            ) : availableModels.length === 0 ? (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                {t('chat.agentSelector.noModels', 'No models advertised')}
-              </div>
-            ) : (
-              availableModels.map((m) => (
-                <DropdownMenuItem
-                  key={m.id}
-                  onClick={() => void handlePickModel(m.id)}
-                  className={cn(
-                    'text-xs py-1.5',
-                    m.id === currentModel && 'bg-muted',
-                  )}
-                >
-                  <span className="truncate">{m.displayName || m.id}</span>
-                </DropdownMenuItem>
-              ))
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </div>
+            >
+              <span className="truncate">{m.displayName || m.id}</span>
+            </DropdownMenuItem>
+          ))
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={onRemove}
+          className="text-xs py-1.5 text-destructive focus:bg-destructive/10 focus:text-destructive"
+        >
+          <X className="h-3.5 w-3.5 mr-1.5" />
+          {t('chat.agentSelector.removeMention', 'Remove mention')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

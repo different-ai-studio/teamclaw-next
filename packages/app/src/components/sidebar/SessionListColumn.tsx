@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Search, SquarePen, Loader2, MessageSquare, Pin, Archive, Pencil, Ellipsis } from 'lucide-react'
+import { Search, Loader2, MessageSquare, Pin, Archive, Pencil, Ellipsis } from 'lucide-react'
 import { useSessionStore } from '@/stores/session'
 import { useStreamingStore } from '@/stores/streaming'
 import { useUIStore } from '@/stores/ui'
@@ -275,22 +275,6 @@ export function SessionListColumn() {
     return ''
   })()
 
-  const handleNewChat = () => {
-    if (!hasWorkspace) return
-    if (filter.kind === 'actor') {
-      useUIStore.getState().enterActorDraft({
-        id: filter.actorId,
-        displayName: filter.displayName,
-        kind: filter.actorType,
-      })
-      return
-    }
-    useUIStore.getState().startNewChat()
-    if (filter.kind === 'idea') {
-      useUIStore.getState().setDraftIdeaId(filter.ideaId)
-    }
-  }
-
   const handleSelectSession = (id: string) => useUIStore.getState().switchToSession(id)
 
   // Native list type-ahead: with no input focused, typing letters / digits /
@@ -494,16 +478,6 @@ export function SessionListColumn() {
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-40"
-            disabled={!hasWorkspace}
-            onClick={handleNewChat}
-            title={t('chat.newChat', 'New Chat')}
-          >
-            <SquarePen className="h-4 w-4" />
-          </Button>
           <Button
             variant="ghost"
             size="icon"

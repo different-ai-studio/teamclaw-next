@@ -61,6 +61,7 @@ import {
 import { SidebarSecondColumn } from "@/components/sidebar/SidebarSecondColumn";
 import { isWorkspaceUIVariant } from "@/lib/ui-variant";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { NewSessionDialog } from "@/components/chat/NewSessionDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { UpdateDialogContainer } from "@/components/updater/UpdateDialog";
 import { RightPanel, ShortcutsPanel } from "@/components/panel";
@@ -82,6 +83,7 @@ import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import { decodeLiveEvent, sessionIdFromTopic } from "@/lib/teamclaw-events";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtime-state-store";
+import { initDevicePresenceStore, disposeDevicePresenceStore } from "@/stores/device-presence-store";
 import { supabase } from "@/lib/supabase-client";
 import { create as createMessage } from "@bufbuild/protobuf";
 import { MessageSchema, MessageKind } from "@/lib/proto/teamclaw_pb";
@@ -994,6 +996,10 @@ function AppContent() {
         await initRuntimeStateStore(firstTeamId);
         console.log('[runtime-state] initialized for team', firstTeamId);
 
+        // Device presence: subscribe to daemon LWT-backed online/offline state.
+        await initDevicePresenceStore(firstTeamId);
+        console.log('[device-presence] initialized for team', firstTeamId);
+
         // Background: sync actor directory into local cache so display-name
         // lookups hit libsql instead of Supabase on subsequent renders.
         void syncActorsForTeam(firstTeamId).catch((e) =>
@@ -1026,6 +1032,7 @@ function AppContent() {
       unlisten?.();
       disposeTeamclawRpc();
       disposeRuntimeStateStore();
+      disposeDevicePresenceStore();
     };
   }, [userId, firstTeamId]);
 
@@ -1649,6 +1656,7 @@ function App() {
             }}
           />
           <UpdateDialogContainer />
+          <NewSessionDialog />
           <TelemetryConsentDialog
             open={showConsentDialog}
             onComplete={() => setShowConsentDialog(false)}
