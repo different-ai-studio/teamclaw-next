@@ -129,7 +129,7 @@ export function SettingsScreen({
             <SectionEyebrow label="TEAM" style={styles.sectionEyebrow} />
             <View style={styles.card}>
               <View style={styles.row}>
-                <Text style={styles.rowLabel}>Workspace</Text>
+                <Text style={styles.rowLabel}>Name</Text>
                 <Text style={styles.rowValue}>{team.name}</Text>
               </View>
               <Hairline />
