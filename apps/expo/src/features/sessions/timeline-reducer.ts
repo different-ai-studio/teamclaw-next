@@ -65,8 +65,26 @@ export function reduceTimeline(state: TimelineState, event: TimelineEvent): Time
       }
       return { messages, streamingByAgent };
     }
-    case "streamingDelta":
-    case "streamingDone":
-      return state;
+    case "streamingDelta": {
+      const prev = state.streamingByAgent.get(event.agentId);
+      const next: StreamingBuffer = prev && prev.messageId === event.messageId
+        ? { ...prev, text: prev.text + event.deltaText }
+        : {
+            messageId: event.messageId,
+            text: event.deltaText,
+            kind: event.messageKind,
+            startedAt: event.createdAt,
+            senderActorId: event.agentId,
+          };
+      const streamingByAgent = new Map(state.streamingByAgent);
+      streamingByAgent.set(event.agentId, next);
+      return { ...state, streamingByAgent };
+    }
+    case "streamingDone": {
+      if (!state.streamingByAgent.has(event.agentId)) return state;
+      const streamingByAgent = new Map(state.streamingByAgent);
+      streamingByAgent.delete(event.agentId);
+      return { ...state, streamingByAgent };
+    }
   }
 }

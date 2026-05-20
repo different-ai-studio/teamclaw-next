@@ -43,3 +43,41 @@ describe("reduceTimeline · messageCommitted", () => {
     expect(s.streamingByAgent.has("agent-1")).toBe(false);
   });
 });
+
+describe("reduceTimeline · streamingDelta", () => {
+  it("appends delta into a buffer keyed by agentId", () => {
+    let s = emptyTimelineState();
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "Hel", createdAt: "2026-05-20T10:00:00.000Z" });
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "lo", createdAt: "2026-05-20T10:00:00.500Z" });
+    expect(s.streamingByAgent.get("a")?.text).toBe("Hello");
+  });
+
+  it("two agents stream independently", () => {
+    let s = emptyTimelineState();
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "Hi", createdAt: "2026-05-20T10:00:00.000Z" });
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "b", messageId: "m2",
+      messageKind: "agent_reply", deltaText: "Sup", createdAt: "2026-05-20T10:00:00.000Z" });
+    expect(s.streamingByAgent.get("a")?.text).toBe("Hi");
+    expect(s.streamingByAgent.get("b")?.text).toBe("Sup");
+  });
+
+  it("does not modify messages array", () => {
+    let s = emptyTimelineState();
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "Hi", createdAt: "2026-05-20T10:00:00.000Z" });
+    expect(s.messages).toEqual([]);
+  });
+});
+
+describe("reduceTimeline · streamingDone", () => {
+  it("clears the agent's buffer", () => {
+    let s = emptyTimelineState();
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "Hi", createdAt: "2026-05-20T10:00:00.000Z" });
+    s = reduceTimeline(s, { kind: "streamingDone", agentId: "a", messageId: "m1" });
+    expect(s.streamingByAgent.has("a")).toBe(false);
+  });
+});
