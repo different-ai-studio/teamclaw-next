@@ -23,6 +23,7 @@ import {
 } from "../../actors/components/SegmentedFilter";
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { PrimaryButton } from "../../../ui/button";
+import { impactLight, selectionTick } from "../../../lib/haptics";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
 import { IdeaRow } from "../components/IdeaRow";
 import {
@@ -120,6 +121,7 @@ export function IdeasListScreen({
   }, [state.ideas]);
 
   const toggleSelection = (id: string) => {
+    selectionTick();
     setSelection((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -132,6 +134,7 @@ export function IdeasListScreen({
 
   const showRowContextMenu = useCallback(
     (ideaId: string) => {
+      impactLight();
       const labels = ["归档", "选择更多…", "取消"];
       const dispatch = (index: number) => {
         switch (index) {
