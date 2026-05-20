@@ -426,6 +426,9 @@ export default function SessionDetailRoute() {
           onOpenMembers={() => {
             router.push(`/(app)/session-members?sessionId=${sessionId}`);
           }}
+          onReconnect={() => {
+            void controller?.load();
+          }}
           onRefresh={() => {
             void controller?.load();
           }}

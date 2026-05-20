@@ -68,6 +68,7 @@ type SessionDetailScreenProps = {
   onClearReply?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string, currentContent: string) => void;
+  onReconnect?: () => void;
   onRefresh?: () => void;
   onOpenMembers?: () => void;
   onReplyToMessage?: (messageId: string) => void;
@@ -214,6 +215,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onDeleteMessage,
     onEditMessage,
     onOpenMembers,
+    onReconnect,
     onRefresh,
     onReplyToMessage,
     onSend,
@@ -292,7 +294,10 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         onToggleMute={onToggleMute}
         session={session}
       />
-      <ConnectionBannerOverlay connectionState={connectionState} />
+      <ConnectionBannerOverlay
+        connectionState={connectionState}
+        onReconnect={onReconnect}
+      />
       {runtimeInfo ? (
         <Pressable
           accessibilityRole={onChangeRuntimeModel ? "button" : undefined}
