@@ -20,7 +20,10 @@ import {
   type SessionDetailState,
   type SessionMessage,
   type SessionSummary,
+  type StreamingBuffer,
+  type TimelineEvent,
 } from "./session-types";
+import { reduceTimeline, emptyTimelineState, type TimelineState } from "./timeline-reducer";
 import { createSessionsApi } from "./session-api";
 
 export type SessionDetailConnectionState = "connecting" | "connected" | "disconnected";
@@ -35,6 +38,7 @@ export type SessionDetailControllerState = {
   isSending: boolean;
   sendErrorMessage: string | null;
   replyTarget: { messageId: string; content: string } | null;
+  streamingByAgent: ReadonlyMap<string, StreamingBuffer>;
 };
 
 type SessionsApi = ReturnType<typeof createSessionsApi>;
@@ -81,6 +85,7 @@ const initialState: SessionDetailControllerState = {
   isSending: false,
   sendErrorMessage: null,
   replyTarget: null,
+  streamingByAgent: emptyTimelineState().streamingByAgent,
 };
 
 function toIsoFromSeconds(value: bigint): string {
@@ -125,27 +130,6 @@ function mapProtoMessage(message: Message, teamId: string): SessionMessage | nul
   };
 }
 
-function messageTimeValue(message: SessionMessage): number {
-  const parsed = Date.parse(message.createdAt);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function mergeMessage(messages: SessionMessage[], nextMessage: SessionMessage): SessionMessage[] {
-  const existingIndex = messages.findIndex((message) => message.messageId === nextMessage.messageId);
-  if (existingIndex >= 0) {
-    return messages;
-  }
-
-  return [...messages, nextMessage].sort((left, right) => {
-    const timeDiff = messageTimeValue(left) - messageTimeValue(right);
-    if (timeDiff !== 0) {
-      return timeDiff;
-    }
-
-    return left.messageId.localeCompare(right.messageId);
-  });
-}
-
 function nextStatusForMessages(
   session: SessionSummary | null,
   messages: SessionMessage[],
@@ -167,6 +151,7 @@ export function createSessionDetailController(
 ): SessionDetailController {
   const listeners = new Set<() => void>();
   let state = initialState;
+  let timeline: TimelineState = emptyTimelineState();
   let disposed = false;
   let cleanupMessageListener: (() => void) | null = null;
   let cleanupConnectionStateListener: (() => void) | null = null;
@@ -270,13 +255,16 @@ export function createSessionDetailController(
           return;
         }
 
-        const mergedMessages = mergeMessage(state.messages, nextMessage);
+        const event: TimelineEvent = { kind: "messageCommitted", message: nextMessage };
+        const next = reduceTimeline(timeline, event);
+        timeline = next;
         setState({
           ...state,
-          messages: mergedMessages,
-          status: nextStatusForMessages(state.session, mergedMessages, state.status),
+          messages: next.messages,
+          streamingByAgent: next.streamingByAgent,
+          status: nextStatusForMessages(state.session, next.messages, state.status),
         });
-        void deps.cache?.saveMessages(deps.sessionId, mergedMessages);
+        void deps.cache?.saveMessages(deps.sessionId, next.messages);
 
         // Live-update the read marker so the Sessions list stays clean
         // while the detail screen is open. We pass the senderActorId
@@ -302,13 +290,18 @@ export function createSessionDetailController(
         return;
       }
 
-      const mergedMessages = latestMessages.reduce(mergeMessage, state.messages);
+      let next = timeline;
+      for (const m of latestMessages) {
+        next = reduceTimeline(next, { kind: "messageCommitted", message: m });
+      }
+      timeline = next;
 
       setState({
         ...state,
         connectionState: "connected",
-        messages: mergedMessages,
-        status: nextStatusForMessages(state.session, mergedMessages, state.status),
+        messages: next.messages,
+        streamingByAgent: next.streamingByAgent,
+        status: nextStatusForMessages(state.session, next.messages, state.status),
       });
     } catch (error) {
       if (disposed || currentToken !== loadToken) {
@@ -526,11 +519,14 @@ export function createSessionDetailController(
           turnId: "",
         };
 
-        const mergedMessages = mergeMessage(state.messages, optimisticMessage);
+        const optimisticNext = reduceTimeline(timeline, { kind: "messageCommitted", message: optimisticMessage });
+        timeline = optimisticNext;
+        const mergedMessages = optimisticNext.messages;
         setState({
           ...state,
           composerText: "",
           messages: mergedMessages,
+          streamingByAgent: optimisticNext.streamingByAgent,
           replyTarget: null,
           status: nextStatusForMessages(session, mergedMessages, state.status),
         });
@@ -587,6 +583,7 @@ export function createSessionDetailController(
             setState({
               ...state,
               messages: mergedMessages,
+              streamingByAgent: optimisticNext.streamingByAgent,
               status: nextStatusForMessages(session, mergedMessages, state.status),
               composerText: "",
               isSending: false,
@@ -600,6 +597,7 @@ export function createSessionDetailController(
         setState({
           ...state,
           messages: mergedMessages,
+          streamingByAgent: optimisticNext.streamingByAgent,
           status: nextStatusForMessages(session, mergedMessages, state.status),
           composerText: "",
           isSending: false,

@@ -23,6 +23,7 @@ import type { OutboxRow, OutboxSqliteDb } from "../../../../src/features/session
 import { syncOutboxFromDao } from "../../../../src/features/sessions/outbox-store";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
+import { emptyTimelineState } from "../../../../src/features/sessions/timeline-reducer";
 import { createSessionDetailCache } from "../../../../src/features/sessions/session-detail-cache";
 import { createSessionMutesApi } from "../../../../src/features/sessions/session-mutes";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
@@ -87,6 +88,7 @@ const fallbackDetailState: SessionDetailControllerState = {
   isSending: false,
   sendErrorMessage: null,
   replyTarget: null,
+  streamingByAgent: emptyTimelineState().streamingByAgent,
 };
 
 function canRenderSessionDetail(
