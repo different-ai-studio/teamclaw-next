@@ -91,6 +91,8 @@ fn main() -> anyhow::Result<()> {
                     tokio::sync::oneshot::channel::<Option<String>>();
                 let (acp_session_id_tx, _acp_session_id_rx) =
                     tokio::sync::oneshot::channel::<String>();
+                let (available_models_tx, _available_models_rx) =
+                    tokio::sync::oneshot::channel::<Vec<proto::amux::ModelInfo>>();
                 let _cmd_tx = runtime::adapter::spawn_acp_agent(
                     binary,
                     Vec::new(),
@@ -101,6 +103,7 @@ fn main() -> anyhow::Result<()> {
                     initial_model_tx,
                     None,
                     acp_session_id_tx,
+                    available_models_tx,
                     None,
                     None,
                 )?;

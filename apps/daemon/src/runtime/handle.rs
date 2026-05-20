@@ -54,6 +54,13 @@ pub struct RuntimeHandle {
     /// TODO(task9): capture and store the returned row id from
     /// `upsert_agent_runtime` once that helper returns it.
     pub supabase_runtime_row_id: Option<String>,
+    /// Models the underlying ACP agent reported in its
+    /// `session/new` / `session/load` response (via
+    /// `SessionModelState.available_models`). Populated by the adapter on
+    /// spawn / resume. Falls back to the hardcoded
+    /// `crate::runtime::models::available_models_for(agent_type)` table
+    /// when the agent does not implement `unstable_session_model`.
+    pub available_models: Vec<amux::ModelInfo>,
     /// The `messages.id` of the last message this runtime processed (sent or
     /// queued as silent). Used by Task 9 catch-up logic to replay missed
     /// messages on session reopen.
@@ -90,6 +97,7 @@ impl RuntimeHandle {
             pending_silent: Vec::new(),
             supabase_runtime_row_id: None,
             last_processed_message_id: None,
+            available_models: Vec::new(),
         }
     }
 
@@ -100,13 +108,14 @@ impl RuntimeHandle {
 
     /// Build a `RuntimeInfo` for this agent.
     ///
-    /// `available_models`, `current_model`, and `available_commands` are
-    /// passed in by the caller (typically `RuntimeManager`) so the handle
-    /// does not need to know about the model registry or the daemon-side
-    /// caches. Pass empty Vecs / empty String for unknown / unset.
+    /// `available_models` is read from `self` — the adapter populates it
+    /// from the live ACP `session/new` response (or the hardcoded fallback
+    /// table for agents that don't implement `unstable_session_model`).
+    /// `current_model` and `available_commands` are passed in by the
+    /// caller (`RuntimeManager`) which tracks them in its own caches.
+    /// Pass empty Vec / empty String for unset.
     pub fn to_proto_info(
         &self,
-        available_models: Vec<amux::ModelInfo>,
         current_model: String,
         available_commands: Vec<amux::AcpAvailableCommand>,
     ) -> amux::RuntimeInfo {
@@ -122,7 +131,7 @@ impl RuntimeHandle {
             session_title: self.session_title.clone(),
             last_output_summary: self.last_output_summary.clone(),
             tool_use_count: self.tool_use_count,
-            available_models,
+            available_models: self.available_models.clone(),
             current_model,
             // Lifecycle fields — not yet populated by the live adapter;
             // will be wired in a later phase.
@@ -239,6 +248,7 @@ impl RuntimeHandle {
             pending_silent: Vec::new(),
             supabase_runtime_row_id: None,
             last_processed_message_id: None,
+            available_models: Vec::new(),
         }
     }
 }

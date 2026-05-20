@@ -267,6 +267,8 @@ impl RuntimeManager {
         let (initial_model_tx, initial_model_rx) =
             tokio::sync::oneshot::channel::<Option<String>>();
         let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel::<String>();
+        let (available_models_tx, available_models_rx) =
+            tokio::sync::oneshot::channel::<Vec<amux::ModelInfo>>();
 
         let launch = self.launch_config_for(agent_type);
         let cmd_tx = adapter::spawn_acp_agent(
@@ -279,6 +281,7 @@ impl RuntimeManager {
             initial_model_tx,
             None,
             acp_session_id_tx,
+            available_models_tx,
             initial_model_override.clone(),
             mcp_config_path,
         )?;
@@ -290,6 +293,16 @@ impl RuntimeManager {
         self.agents.insert(agent_id.clone(), handle);
         self.aggregators
             .insert(agent_id.clone(), TurnAggregator::new());
+
+        // Capture the available_models list the agent reported on session/new
+        // (or the hardcoded fallback for agents that don't implement
+        // unstable_session_model). Stored on the handle so retained
+        // runtime/{id}/state reflects what the agent can actually run.
+        if let Ok(models) = available_models_rx.await {
+            if let Some(h) = self.agents.get_mut(&agent_id) {
+                h.available_models = models;
+            }
+        }
 
         // Wait for the adapter to report the model it applied. None means no
         // model was applied (no models known for this agent type, or the ACP
@@ -368,6 +381,8 @@ impl RuntimeManager {
         let (initial_model_tx, initial_model_rx) =
             tokio::sync::oneshot::channel::<Option<String>>();
         let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel::<String>();
+        let (available_models_tx, available_models_rx) =
+            tokio::sync::oneshot::channel::<Vec<amux::ModelInfo>>();
 
         let launch = self.launch_config_for(agent_type);
         let cmd_tx = adapter::spawn_acp_agent(
@@ -380,6 +395,7 @@ impl RuntimeManager {
             initial_model_tx,
             Some(acp_session_id.to_string()),
             acp_session_id_tx,
+            available_models_tx,
             None,
             None,
         )?;
@@ -391,6 +407,13 @@ impl RuntimeManager {
         self.agents.insert(agent_id.to_string(), handle);
         self.aggregators
             .insert(agent_id.to_string(), TurnAggregator::new());
+
+        // Capture available_models the agent reported on resume.
+        if let Ok(models) = available_models_rx.await {
+            if let Some(h) = self.agents.get_mut(agent_id) {
+                h.available_models = models;
+            }
+        }
 
         // Capture initial model
         if let Ok(Some(model_id)) = initial_model_rx.await {
@@ -714,7 +737,6 @@ impl RuntimeManager {
                 .agents
                 .iter()
                 .map(|(id, h)| {
-                    let available = crate::runtime::models::available_models_for(h.agent_type);
                     let current = self
                         .current_model_per_agent
                         .get(id)
@@ -725,7 +747,7 @@ impl RuntimeManager {
                         .get(id)
                         .cloned()
                         .unwrap_or_default();
-                    h.to_proto_info(available, current, commands)
+                    h.to_proto_info(current, commands)
                 })
                 .collect(),
         }
@@ -735,7 +757,6 @@ impl RuntimeManager {
     /// from the manager's tracking state. Returns None if the agent is unknown.
     pub fn to_proto_info(&self, agent_id: &str) -> Option<amux::RuntimeInfo> {
         let handle = self.agents.get(agent_id)?;
-        let available = crate::runtime::models::available_models_for(handle.agent_type);
         let current = self
             .current_model_per_agent
             .get(agent_id)
@@ -746,7 +767,7 @@ impl RuntimeManager {
             .get(agent_id)
             .cloned()
             .unwrap_or_default();
-        Some(handle.to_proto_info(available, current, commands))
+        Some(handle.to_proto_info(current, commands))
     }
 
     pub fn agent_ids(&self) -> Vec<String> {

@@ -603,20 +603,24 @@ mod attachment_ext_tests {
 // Public API: spawn an ACP agent in its own thread with LocalSet
 // ---------------------------------------------------------------------------
 
-/// Spawn a Claude Code agent using the ACP protocol.
+/// Spawn an ACP-speaking agent (claude-code, opencode, codex, …).
 ///
 /// Returns a command sender that the main runtime uses to send prompts,
 /// permission responses, and cancellation signals.
 ///
 /// Events from the agent flow through `event_tx`.
 ///
-/// `agent_type` is used to look up the default model from
-/// `crate::runtime::models::available_models_for` and apply it via
-/// `session/set_model` immediately after Initialize.
+/// `available_models_tx` receives the list the agent reported in its
+/// `session/new` (or `session/load`) response via
+/// `SessionModelState.available_models`. Agents that don't implement the
+/// `unstable_session_model` ACP capability cause the hardcoded fallback
+/// table `crate::runtime::models::available_models_for(agent_type)` to be
+/// sent instead.
 ///
-/// `initial_model_tx` receives `Some(model_id)` if the model was applied
-/// successfully, or `None` if no models are configured for `agent_type` or
-/// the ACP `set_session_model` call failed.
+/// `initial_model_tx` receives `Some(model_id)` once the session is on a
+/// known model (either the agent's own default, or the explicit override
+/// after a successful `session/set_model`), or `None` if no model could be
+/// applied.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_acp_agent(
     binary: String,
@@ -628,11 +632,12 @@ pub fn spawn_acp_agent(
     initial_model_tx: oneshot::Sender<Option<String>>,
     resume_acp_session_id: Option<String>,
     acp_session_id_tx: oneshot::Sender<String>,
+    available_models_tx: oneshot::Sender<Vec<amux::ModelInfo>>,
     // When `Some`, the ACP session is initialised on this model id instead of
-    // the first entry from `available_models_for(agent_type)`. Used by the
-    // gateway adapter to honour per-session `set_model` overrides on first
-    // spawn. Pass a full model id ("claude-sonnet-4-6"), not a short name —
-    // callers translate short names via `model_id_for_short_name`.
+    // the agent's reported default. Used by the gateway adapter to honour
+    // per-session `set_model` overrides on first spawn. Pass a full model
+    // id ("claude-sonnet-4-6"), not a short name — callers translate short
+    // names via `model_id_for_short_name`.
     initial_model_override: Option<String>,
     // When `Some`, the path is forwarded as `--mcp-config <path>` to the
     // underlying claude-code child. Gateway sessions use this to mount
@@ -670,6 +675,7 @@ pub fn spawn_acp_agent(
                     initial_model_tx,
                     resume_acp_session_id,
                     acp_session_id_tx,
+                    available_models_tx,
                     initial_model_override,
                     mcp_config_path,
                 )
@@ -714,6 +720,7 @@ async fn run_acp_session(
     initial_model_tx: oneshot::Sender<Option<String>>,
     resume_acp_session_id: Option<String>,
     acp_session_id_tx: oneshot::Sender<String>,
+    available_models_tx: oneshot::Sender<Vec<amux::ModelInfo>>,
     initial_model_override: Option<String>,
     mcp_config_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
@@ -841,70 +848,105 @@ async fn run_acp_session(
         req
     };
 
-    let session_id = if let Some(ref resume_id) = resume_acp_session_id {
-        let resume_req = acp::ResumeSessionRequest::new(
-            acp::SessionId::new(resume_id.clone()),
-            worktree_path.clone(),
-        );
-        match conn.resume_session(resume_req).await {
-            Ok(_resp) => {
-                let sid = acp::SessionId::new(resume_id.clone());
-                info!(session_id = %sid, "ACP session resumed");
-                sid
+    // Capture both the session id AND the optional `SessionModelState` the
+    // agent advertises in its session response. opencode and codex populate
+    // this via the `unstable_session_model` capability; claude-agent-acp
+    // currently does not, so it stays None and the hardcoded fallback table
+    // takes over below.
+    let (session_id, acp_model_state): (acp::SessionId, Option<acp::SessionModelState>) =
+        if let Some(ref resume_id) = resume_acp_session_id {
+            let resume_req = acp::ResumeSessionRequest::new(
+                acp::SessionId::new(resume_id.clone()),
+                worktree_path.clone(),
+            );
+            match conn.resume_session(resume_req).await {
+                Ok(resp) => {
+                    let sid = acp::SessionId::new(resume_id.clone());
+                    info!(session_id = %sid, "ACP session resumed");
+                    (sid, resp.models)
+                }
+                Err(e) => {
+                    warn!(
+                        resume_id,
+                        "ACP resume_session failed ({}), falling back to new_session", e
+                    );
+                    let resp = conn
+                        .new_session(build_new_req(worktree_path.clone()))
+                        .await
+                        .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
+                    let sid = resp.session_id.clone();
+                    info!(session_id = %sid, "ACP session created (fallback)");
+                    (sid, resp.models)
+                }
             }
-            Err(e) => {
-                warn!(
-                    resume_id,
-                    "ACP resume_session failed ({}), falling back to new_session", e
-                );
-                let resp = conn
-                    .new_session(build_new_req(worktree_path.clone()))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
-                let sid = resp.session_id.clone();
-                info!(session_id = %sid, "ACP session created (fallback)");
-                sid
-            }
-        }
-    } else {
-        let resp = conn
-            .new_session(build_new_req(worktree_path))
-            .await
-            .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
-        let sid = resp.session_id.clone();
-        info!(session_id = %sid, "ACP session created");
-        sid
-    };
+        } else {
+            let resp = conn
+                .new_session(build_new_req(worktree_path))
+                .await
+                .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
+            let sid = resp.session_id.clone();
+            info!(session_id = %sid, "ACP session created");
+            (sid, resp.models)
+        };
 
     // Report the ACP session_id back to the caller
     let _ = acp_session_id_tx.send(session_id.to_string());
 
+    // Translate the agent-reported model list to amux's wire type, or fall
+    // back to the hardcoded table for agents (claude-agent-acp today) that
+    // don't implement `unstable_session_model`.
+    let acp_current_model_id: Option<String> = acp_model_state
+        .as_ref()
+        .map(|s| s.current_model_id.0.to_string());
+    let available_models: Vec<amux::ModelInfo> = match acp_model_state.as_ref() {
+        Some(state) => crate::runtime::models::acp_models_to_proto(state),
+        None => crate::runtime::models::available_models_for(agent_type),
+    };
+    info!(
+        agent_type = ?agent_type,
+        source = if acp_model_state.is_some() { "acp" } else { "fallback" },
+        count = available_models.len(),
+        "available models resolved",
+    );
+    let _ = available_models_tx.send(available_models.clone());
+
     // Apply the initial model before any prompt runs. Precedence:
     //   1. `initial_model_override` (gateway `set_model` chose this on spawn)
-    //   2. first entry from `available_models_for(agent_type)` (default)
-    // Either way we send `session/set_model` and report the id we landed on.
+    //   2. agent-reported `current_model_id` (no set_model needed; the
+    //      session is already on it)
+    //   3. first entry from the fallback table (claude legacy path)
+    // We only issue `session/set_model` when the chosen id differs from
+    // the agent's current — otherwise we'd round-trip a no-op call.
     let initial_model: Option<String> = {
-        let chosen = initial_model_override.or_else(|| {
-            let models = crate::runtime::models::available_models_for(agent_type);
-            models.first().map(|m| m.id.clone())
-        });
-        if let Some(model_id) = chosen {
-            let req = acp::SetSessionModelRequest::new(
-                session_id.clone(),
-                acp::ModelId::new(model_id.clone()),
-            );
-            match conn.set_session_model(req).await {
-                Ok(_) => {
-                    info!(model_id = %model_id, "ACP initial set_session_model applied");
-                    Some(model_id)
-                }
-                Err(e) => {
-                    warn!(error = %e, model_id = %model_id, "initial set_session_model failed");
-                    None
+        let chosen = initial_model_override
+            .clone()
+            .or_else(|| acp_current_model_id.clone())
+            .or_else(|| available_models.first().map(|m| m.id.clone()));
+        match chosen {
+            Some(model_id) if acp_current_model_id.as_ref() == Some(&model_id) => {
+                info!(model_id = %model_id, "ACP session already on selected model");
+                Some(model_id)
+            }
+            Some(model_id) => {
+                let req = acp::SetSessionModelRequest::new(
+                    session_id.clone(),
+                    acp::ModelId::new(model_id.clone()),
+                );
+                match conn.set_session_model(req).await {
+                    Ok(_) => {
+                        info!(model_id = %model_id, "ACP initial set_session_model applied");
+                        Some(model_id)
+                    }
+                    Err(e) => {
+                        warn!(error = %e, model_id = %model_id, "initial set_session_model failed");
+                        // Fall back to whatever the agent already runs on,
+                        // so the daemon still reports a current_model when
+                        // the agent self-reported one.
+                        acp_current_model_id.clone()
+                    }
                 }
             }
-        } else {
-            None
+            None => None,
         }
     };
     // Notify the caller (manager) of the chosen model. None means no model
