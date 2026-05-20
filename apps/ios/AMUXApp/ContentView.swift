@@ -264,6 +264,7 @@ private actor FailingOnboardingStore: AppOnboardingStore {
     func signOut() async throws { throw error }
     func signInAnonymously() async throws { throw error }
     func isAnonymous() async -> Bool { false }
+    func currentUserEmail() async -> String? { nil }
     func upgradeWithPassword(email: String, password: String) async throws { throw error }
     func upgradeWithAppleCredential(idToken: String, nonce: String) async throws { throw error }
     func claimInvite(token: String) async throws -> ClaimResult { throw error }
