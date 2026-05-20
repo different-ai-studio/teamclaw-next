@@ -131,9 +131,28 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     }
   }
 
+  // Fetch each agent's explicitly-set default_agent_type — it wins over the
+  // prior runtime's backend_type because the operator may have changed the
+  // default after the last spawn (or there is no prior spawn at all).
+  const defaultByAgent = new Map<string, { agent_kind: string | null; default_agent_type: string | null }>()
+  const { data: agentRows } = await supabase
+    .from('actors')
+    .select('id, agent_kind, default_agent_type')
+    .in('id', args.agentActorIds)
+  for (const r of agentRows ?? []) {
+    defaultByAgent.set(r.id, {
+      agent_kind: r.agent_kind ?? null,
+      default_agent_type: r.default_agent_type ?? null,
+    })
+  }
+
   await Promise.all(args.agentActorIds.map(async (agentActorId) => {
     const prior = priorByAgent.get(agentActorId)
-    const agentType = resolveAmuxAgentType(prior?.backend_type)
+    const agentDefaults = defaultByAgent.get(agentActorId)
+    const agentType = resolveAmuxAgentType(
+      agentDefaults?.default_agent_type ?? prior?.backend_type ?? null,
+      agentDefaults?.agent_kind ?? null,
+    )
     try {
       // Current amuxd convention: daemon device_id == its actor_id, so the
       // RPC topic is amux/{team}/device/{agentActorId}/rpc/req. Multi-daemon

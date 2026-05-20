@@ -359,7 +359,7 @@ public struct NewSessionSheet: View {
             return workspaces.first?.id
         }()
         guard let workspaceID else { return nil }
-        let type = AgentConfigSheet.AgentType(rawValue: actor.agentKind ?? "claude") ?? .claude
+        let type = AgentConfigSheet.AgentType(rawValue: actor.defaultAgentType ?? "claude_code") ?? .claude
         return AgentConfigSheet.Selection(workspaceID: workspaceID, agentType: type)
     }
 

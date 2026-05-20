@@ -30,6 +30,8 @@ pub struct AgentsConfig {
     pub claude_code: Option<AgentBackendConfig>,
     #[serde(default)]
     pub opencode: Option<AgentBackendConfig>,
+    #[serde(default)]
+    pub codex: Option<AgentBackendConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

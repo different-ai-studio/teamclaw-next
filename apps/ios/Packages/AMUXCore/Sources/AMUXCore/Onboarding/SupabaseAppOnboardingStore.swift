@@ -135,6 +135,10 @@ public actor SupabaseAppOnboardingStore: AppOnboardingStore {
         client.auth.currentSession?.user.isAnonymous ?? false
     }
 
+    public func currentUserEmail() async -> String? {
+        client.auth.currentSession?.user.email
+    }
+
     public func loadBootstrap() async throws -> AppBootstrap {
         let client = self.client
         // `auth.session` triggers a JWT refresh round-trip when the cached

@@ -63,7 +63,7 @@ public struct MemberListContent: View {
         guard !q.isEmpty else { return actors }
         let norm = q.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         return actors.filter { a in
-            [a.displayName, a.roleLabel, a.agentKind ?? "", a.actorId]
+            [a.displayName, a.roleLabel, a.defaultAgentType ?? "", a.actorId]
                 .joined(separator: " ")
                 .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
                 .contains(norm)
@@ -244,11 +244,11 @@ private struct ActorRow: View {
     private var avatarStyle: AvatarStyle {
         if actor.isAgent {
             let fg: Color
-            switch actor.agentKind {
-            case "claude":   fg = Color.amux.cinnabar
-            case "opencode": fg = Color.amux.sage
-            case "codex":    fg = Color.amux.basalt
-            default:         fg = Color.amux.basalt
+            switch actor.defaultAgentType {
+            case "claude_code": fg = Color.amux.cinnabar
+            case "opencode":    fg = Color.amux.sage
+            case "codex":       fg = Color.amux.basalt
+            default:            fg = Color.amux.basalt
             }
             return AvatarStyle(background: Color.amux.pebble, foreground: fg)
         }
@@ -275,7 +275,13 @@ private struct ActorRow: View {
             return "you"
         }
         if actor.isMember { return actor.roleLabel }
-        let kind = actor.agentKind?.capitalized ?? "Agent"
+        let kind: String
+        switch actor.defaultAgentType {
+        case "claude_code": kind = "Claude"
+        case "opencode":    kind = "OpenCode"
+        case "codex":       kind = "Codex"
+        default:            kind = "Agent"
+        }
         let status = actor.agentStatus ?? ""
         return status.isEmpty ? kind : "\(kind) · \(status)"
     }
@@ -518,7 +524,7 @@ private struct ActorDetailView: View {
                         LabeledContent("Role",   value: actor.roleLabel)
                         LabeledContent("Status", value: actor.memberStatus?.capitalized ?? "—")
                     } else {
-                        LabeledContent("Agent kind", value: actor.agentKind ?? "—")
+                        LabeledContent("Agent type", value: actor.defaultAgentType ?? actor.agentKind ?? "—")
                         LabeledContent("Status",     value: actor.agentStatus?.capitalized ?? "—")
                     }
                     LabeledContent("Joined",
@@ -1145,12 +1151,12 @@ private struct ActorDetailView: View {
     //
     // Per-agent defaults that New Session and Add Agent flows read so the user
     // doesn't have to repeat workspace + agent-type picks. Backed by
-    // `agents.default_workspace_id` and `agents.agent_kind`.
+    // `agents.default_workspace_id` and `agents.default_agent_type`.
 
     private static let agentKindOptions: [(String, String)] = [
-        ("claude",   "Claude"),
-        ("opencode", "OpenCode"),
-        ("codex",    "Codex"),
+        ("claude_code", "Claude"),
+        ("opencode",    "OpenCode"),
+        ("codex",       "Codex"),
     ]
 
     @ViewBuilder
@@ -1203,21 +1209,21 @@ private struct ActorDetailView: View {
     private var defaultWorkspaceBinding: Binding<String?> {
         Binding(
             get: { actor.defaultWorkspaceId },
-            set: { newValue in saveDefaults(workspaceID: newValue, agentKind: nil) }
+            set: { newValue in saveDefaults(workspaceID: newValue, defaultAgentType: nil) }
         )
     }
 
     private var agentKindBinding: Binding<String> {
         Binding(
             get: {
-                let raw = actor.agentKind ?? "claude"
-                return Self.agentKindOptions.contains(where: { $0.0 == raw }) ? raw : "claude"
+                let raw = actor.defaultAgentType ?? "claude_code"
+                return Self.agentKindOptions.contains(where: { $0.0 == raw }) ? raw : "claude_code"
             },
-            set: { newValue in saveDefaults(workspaceID: nil, agentKind: newValue) }
+            set: { newValue in saveDefaults(workspaceID: nil, defaultAgentType: newValue) }
         )
     }
 
-    private func saveDefaults(workspaceID: String?, agentKind: String?) {
+    private func saveDefaults(workspaceID: String?, defaultAgentType: String?) {
         guard !isSavingDefaults else { return }
         // Apply the local change immediately so the picker reflects the new
         // value before the round-trip completes. ActorStore.reload() will
@@ -1225,8 +1231,8 @@ private struct ActorDetailView: View {
         if let workspaceID {
             actor.defaultWorkspaceId = workspaceID
         }
-        if let agentKind {
-            actor.agentKind = agentKind
+        if let defaultAgentType {
+            actor.defaultAgentType = defaultAgentType
         }
         isSavingDefaults = true
         defaultsErrorMessage = nil
@@ -1235,7 +1241,8 @@ private struct ActorDetailView: View {
             let result = await store.updateAgentDefaults(
                 actorID: actorID,
                 defaultWorkspaceID: workspaceID,
-                agentKind: agentKind
+                agentKind: nil,
+                defaultAgentType: defaultAgentType
             )
             await MainActor.run {
                 isSavingDefaults = false

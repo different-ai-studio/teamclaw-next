@@ -40,24 +40,49 @@ fn resolve_requested_agent_type(
     config: &DaemonConfig,
     requested: amux::AgentType,
 ) -> amux::AgentType {
+    let has_claude = config.agents.claude_code.is_some();
+    let has_opencode = config.agents.opencode.is_some();
+    let has_codex = config.agents.codex.is_some();
+
+    // When the explicitly-requested backend isn't configured, fall back to
+    // whatever IS configured (preferring opencode, then claude_code, then
+    // codex) instead of silently spawning the hard-coded "claude" default —
+    // that path would pair a wrong binary with the wrong ACP adapter.
+    let fallback = || {
+        if has_opencode {
+            amux::AgentType::Opencode
+        } else if has_claude {
+            amux::AgentType::ClaudeCode
+        } else if has_codex {
+            amux::AgentType::Codex
+        } else {
+            amux::AgentType::ClaudeCode
+        }
+    };
+
     match requested {
-        amux::AgentType::Unknown => {
-            // opencode is the preferred default; fall back to claude_code only when absent
-            if config.agents.opencode.is_some() {
-                amux::AgentType::Opencode
-            } else {
-                amux::AgentType::ClaudeCode
-            }
-        }
+        amux::AgentType::Unknown => fallback(),
         amux::AgentType::ClaudeCode => {
-            // explicit ClaudeCode request: reroute only when claude_code binary absent
-            if config.agents.claude_code.is_none() && config.agents.opencode.is_some() {
-                amux::AgentType::Opencode
-            } else {
+            if has_claude {
                 amux::AgentType::ClaudeCode
+            } else {
+                fallback()
             }
         }
-        _ => requested,
+        amux::AgentType::Opencode => {
+            if has_opencode {
+                amux::AgentType::Opencode
+            } else {
+                fallback()
+            }
+        }
+        amux::AgentType::Codex => {
+            if has_codex {
+                amux::AgentType::Codex
+            } else {
+                fallback()
+            }
+        }
     }
 }
 
@@ -188,6 +213,12 @@ impl DaemonServer {
                     opencode.default_flags.clone(),
                     "opencode",
                 ),
+            );
+        }
+        if let Some(codex) = config.agents.codex.as_ref() {
+            launch_configs.insert(
+                amux::AgentType::Codex,
+                AgentLaunchConfig::new(codex.binary.clone(), codex.default_flags.clone(), "codex"),
             );
         }
 
@@ -1457,7 +1488,11 @@ impl DaemonServer {
                     .agents
                     .lock()
                     .await
-                    .send_prompt(&runtime_id, &message.content, message.attachment_urls.clone())
+                    .send_prompt(
+                        &runtime_id,
+                        &message.content,
+                        message.attachment_urls.clone(),
+                    )
                     .await;
                 let _drained = match send_res {
                     Ok(d) => d,
@@ -1931,8 +1966,8 @@ impl DaemonServer {
 
         match cmd {
             amux::acp_command::Command::StartAgent(start) => {
-                let requested = amux::AgentType::try_from(start.agent_type)
-                    .unwrap_or(amux::AgentType::Unknown);
+                let requested =
+                    amux::AgentType::try_from(start.agent_type).unwrap_or(amux::AgentType::Unknown);
                 let at = resolve_requested_agent_type(&self.config, requested);
 
                 info!(
@@ -3902,6 +3937,64 @@ mod runtime_backend_resolution_tests {
         assert_eq!(
             resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
             amux::AgentType::ClaudeCode
+        );
+    }
+
+    #[test]
+    fn explicit_codex_request_honoured_when_codex_configured() {
+        let mut cfg = base_config();
+        cfg.agents.codex = Some(crate::config::AgentBackendConfig {
+            binary: "codex".to_string(),
+            default_flags: Vec::new(),
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Codex),
+            amux::AgentType::Codex
+        );
+    }
+
+    #[test]
+    fn codex_request_reroutes_to_opencode_when_codex_absent() {
+        // Codex requested but only opencode is configured — reroute instead of
+        // silently spawning the wrong adapter via the hard-coded fallback.
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Codex),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn opencode_request_reroutes_to_claude_when_opencode_absent() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
+            amux::AgentType::ClaudeCode
+        );
+    }
+
+    #[test]
+    fn unknown_request_resolves_to_codex_when_only_codex_configured() {
+        let mut cfg = base_config();
+        cfg.agents.codex = Some(crate::config::AgentBackendConfig {
+            binary: "codex".to_string(),
+            default_flags: Vec::new(),
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::Codex
         );
     }
 }

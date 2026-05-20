@@ -167,6 +167,12 @@ public struct SettingsView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Color.amux.basalt)
                     }
+                    if let email = onboarding?.currentUserEmail {
+                        Text(email)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.amux.basalt.opacity(0.6))
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "pencil")
@@ -268,7 +274,15 @@ public struct SettingsView: View {
 
     private func connectedAgentRow(_ agent: ConnectedAgent) -> some View {
         let dotColor: Color = agent.isOnline ? Color.amux.sage : Color.amux.slate
-        let metaParts: [String] = [agent.agentKind, agent.permissionLevel, agent.visibility]
+        let agentTypeLabel: String = {
+            switch agent.defaultAgentType {
+            case "claude_code": return "Claude"
+            case "opencode":    return "OpenCode"
+            case "codex":       return "Codex"
+            default:            return ""
+            }
+        }()
+        let metaParts: [String] = [agentTypeLabel, agent.permissionLevel, agent.visibility]
             .filter { !$0.isEmpty }
         let meta = metaParts.joined(separator: " · ")
         return HStack(spacing: 10) {

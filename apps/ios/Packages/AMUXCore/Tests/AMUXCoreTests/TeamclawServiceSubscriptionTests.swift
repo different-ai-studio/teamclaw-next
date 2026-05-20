@@ -27,7 +27,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         let agent = ConnectedAgent(
             id: "agent-\(deviceID)",
             displayName: "Test",
-            agentKind: "claude",
+            agentKind: "daemon",
             permissionLevel: "owner",
             lastActiveAt: .now,
             deviceID: deviceID

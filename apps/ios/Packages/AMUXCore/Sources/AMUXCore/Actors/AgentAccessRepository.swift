@@ -69,7 +69,7 @@ public actor SupabaseAgentAccessRepository: AgentAccessRepository {
             .value
         async let agentRowsTask: [AgentKindRow] = client
             .from("agents")
-            .select("id, agent_kind, device_id, visibility, owner_member_id")
+            .select("id, agent_kind, default_agent_type, device_id, visibility, owner_member_id")
             .in("id", values: agentIDs)
             .execute()
             .value
@@ -86,6 +86,7 @@ public actor SupabaseAgentAccessRepository: AgentAccessRepository {
                 id: row.agentID,
                 displayName: actor.displayName,
                 agentKind: agent.agentKind,
+                defaultAgentType: agent.defaultAgentType,
                 permissionLevel: row.permissionLevel,
                 lastActiveAt: actor.lastActiveAt,
                 deviceID: agent.deviceID,
@@ -173,7 +174,7 @@ public actor SupabaseAgentAccessRepository: AgentAccessRepository {
     public func deviceID(for agentID: String) async throws -> String? {
         let rows: [AgentKindRow] = try await client
             .from("agents")
-            .select("id, agent_kind, device_id, visibility, owner_member_id")
+            .select("id, agent_kind, default_agent_type, device_id, visibility, owner_member_id")
             .eq("id", value: agentID)
             .execute()
             .value
@@ -271,12 +272,14 @@ private struct AgentActorRow: Decodable, Sendable {
 private struct AgentKindRow: Decodable, Sendable {
     let id: String
     let agentKind: String
+    let defaultAgentType: String?
     let deviceID: String?
     let visibility: String
     let ownerMemberID: String
     enum CodingKeys: String, CodingKey {
         case id
         case agentKind = "agent_kind"
+        case defaultAgentType = "default_agent_type"
         case deviceID = "device_id"
         case visibility
         case ownerMemberID = "owner_member_id"
