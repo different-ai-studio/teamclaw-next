@@ -31,7 +31,7 @@ function runtimeKind(state: AgentRuntimeState): StatusDotKind {
     case "idle":
       return "active";
     case "active":
-      return "active";
+      return "working";
     case "error":
       return "error";
     case "spawning":

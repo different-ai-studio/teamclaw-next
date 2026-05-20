@@ -87,12 +87,16 @@ type SessionDetailScreenProps = {
   todoText?: string;
 };
 
-function runtimeStatusKind(status: string): "active" | "idle" | "error" | "muted" {
+function runtimeStatusKind(
+  status: string,
+): "active" | "working" | "idle" | "error" | "muted" {
   switch (status.trim().toLowerCase()) {
     case "ready":
     case "idle":
-    case "running":
       return "active";
+    case "running":
+    case "streaming":
+      return "working";
     case "spawning":
     case "starting":
       return "idle";
