@@ -142,7 +142,7 @@ describe("OutboxDao", () => {
       content: "hi", mentionActorIds: [], replyToMessageId: null,
       attachments: [], createdAt: NOW,
     });
-    await dao.markFailedExhausted("m1", "boom");
+    await dao.markFailedExhausted("m1", 20, "boom");
     await dao.retry("m1");
     const row = await dao.getByMessageId("m1");
     expect(row?.state).toBe("pending");

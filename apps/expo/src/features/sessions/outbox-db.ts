@@ -38,7 +38,7 @@ export type OutboxDao = {
   markInFlight: (messageId: string, now: number) => Promise<void>;
   markDelivered: (messageId: string) => Promise<void>;
   markFailedRetry: (messageId: string, attemptCount: number, nextAttemptAt: number, error: string) => Promise<void>;
-  markFailedExhausted: (messageId: string, error: string) => Promise<void>;
+  markFailedExhausted: (messageId: string, attemptCount: number, error: string) => Promise<void>;
   retry: (messageId: string) => Promise<void>;
   getByMessageId: (messageId: string) => Promise<OutboxRow | null>;
 };
@@ -107,11 +107,11 @@ export function createOutboxDao(db: OutboxSqliteDb): OutboxDao {
         attemptCount, nextAttemptAt, error, messageId,
       );
     },
-    async markFailedExhausted(messageId, error) {
+    async markFailedExhausted(messageId, attemptCount, error) {
       await db.runAsync(
-        `UPDATE outbox SET state = 'failed', last_error = ?, next_attempt_at = NULL
+        `UPDATE outbox SET state = 'failed', attempt_count = ?, last_error = ?, next_attempt_at = NULL
          WHERE message_id = ?`,
-        error, messageId,
+        attemptCount, error, messageId,
       );
     },
     async retry(messageId) {
