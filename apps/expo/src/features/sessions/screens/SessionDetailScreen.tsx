@@ -387,6 +387,11 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           />
         ) : (
           <View style={styles.empty}>
+            <Ionicons
+              color={colors.slate}
+              name="chatbubbles-outline"
+              size={40}
+            />
             <Text style={styles.emptyTitle}>No messages yet</Text>
             <Text style={styles.emptyBody}>
               Be the first to write in this session.
@@ -482,7 +487,7 @@ const styles = StyleSheet.create({
   empty: {
     alignItems: "center",
     flex: 1,
-    gap: spacing.xs,
+    gap: spacing.md,
     justifyContent: "center",
     paddingHorizontal: spacing.xxl,
   },
