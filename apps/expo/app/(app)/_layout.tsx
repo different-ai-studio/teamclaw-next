@@ -28,9 +28,11 @@ export default function AppLayout() {
         <Stack.Screen
           name="session-members"
           options={{
-            presentation: "modal",
+            presentation: "formSheet",
             animation: "slide_from_bottom",
             contentStyle: { backgroundColor: colors.mist },
+            sheetAllowedDetents: [0.6, 1],
+            sheetGrabberVisible: true,
           }}
         />
         <Stack.Screen
@@ -70,9 +72,11 @@ export default function AppLayout() {
         <Stack.Screen
           name="edit-profile"
           options={{
-            presentation: "modal",
+            presentation: "formSheet",
             animation: "slide_from_bottom",
             contentStyle: { backgroundColor: colors.mist },
+            sheetAllowedDetents: [0.55, 1],
+            sheetGrabberVisible: true,
           }}
         />
         <Stack.Screen
