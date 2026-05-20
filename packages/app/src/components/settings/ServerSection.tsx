@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { CheckCircle2, Database, Loader2, Save, Server, Wifi, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { mqttConnect, mqttStatus } from "@/lib/mqtt-bridge";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
@@ -95,6 +96,7 @@ function trimConfig(config: ServerConfig): ServerConfig {
     supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
+    mqttUseTls: config.mqttUseTls,
   };
 }
 
@@ -139,6 +141,34 @@ export function ServerSection() {
     void loadConfig();
   }, [loadConfig]);
 
+  // Live-update the connection badge when the Rust event loop emits
+  // mqtt:connected events. Without this, the badge only refreshes when
+  // the user re-opens the settings panel — so a connection that died
+  // mid-session keeps showing "connected" until the next visit.
+  React.useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      if (cancelled) return;
+      const off = await listen<boolean>("mqtt:connected", (event) => {
+        setMqttProbe({
+          state: event.payload ? "ok" : "idle",
+          message: event.payload ? t("settings.server.mqttConnected", "Connected") : null,
+        });
+      });
+      if (cancelled) {
+        off();
+        return;
+      }
+      unlisten = off;
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [t]);
+
   const updateSaved = React.useCallback((patch: Partial<ServerConfig>) => {
     setSaved((current) => trimConfig({ ...current, ...patch }));
   }, []);
@@ -175,6 +205,7 @@ export function ServerSection() {
         throw new Error(t("settings.server.mqttMissingActor", "No member actor found for this team"));
       }
 
+      const useTls = config.mqttUseTls ?? true;
       await mqttConnect({
         brokerHost: config.mqttHost,
         brokerPort: config.mqttPort ?? 1883,
@@ -182,8 +213,13 @@ export function ServerSection() {
         password: accessToken,
         clientId: `teamclaw-settings-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
         teamId,
+        useTls,
       });
-      setMqttProbe({ state: "ok", message: `${config.mqttHost}:${config.mqttPort ?? 1883}` });
+      const scheme = useTls ? "mqtts" : "mqtt";
+      setMqttProbe({
+        state: "ok",
+        message: `${scheme}://${config.mqttHost}:${config.mqttPort ?? 1883}`,
+      });
       return true;
     } catch (e) {
       setMqttProbe({ state: "error", message: e instanceof Error ? e.message : String(e) });
@@ -310,6 +346,23 @@ export function ServerSection() {
             type="number"
           />
         </div>
+        <label className="mt-4 flex items-center justify-between gap-3 rounded-[10px] border border-border-soft bg-background px-3 py-2">
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-medium text-foreground">
+              {t("settings.server.mqttUseTls", "Use TLS (mqtts://)")}
+            </div>
+            <div className="text-[11.5px] text-muted-foreground">
+              {t(
+                "settings.server.mqttUseTlsHint",
+                "Enable for brokers on port 8883. Disable for plain TCP on 1883.",
+              )}
+            </div>
+          </div>
+          <Switch
+            checked={saved.mqttUseTls ?? effective.mqttUseTls ?? true}
+            onCheckedChange={(checked) => updateSaved({ mqttUseTls: checked })}
+          />
+        </label>
       </SettingCard>
 
       <div className="flex items-center justify-between gap-3">
