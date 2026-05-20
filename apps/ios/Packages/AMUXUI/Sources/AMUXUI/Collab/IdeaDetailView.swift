@@ -348,7 +348,13 @@ public struct IdeaDetailView: View {
     }
 
     private func agentSubtitle(_ a: CachedActor) -> String {
-        let kind = a.agentKind?.capitalized ?? "Agent"
+        let kind: String
+        switch a.defaultAgentType {
+        case "claude_code": kind = "Claude"
+        case "opencode":    kind = "OpenCode"
+        case "codex":       kind = "Codex"
+        default:            kind = "Agent"
+        }
         if let s = a.agentStatus, !s.isEmpty {
             return "\(kind) · \(s)"
         }

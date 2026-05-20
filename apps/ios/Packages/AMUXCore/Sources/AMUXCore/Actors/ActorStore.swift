@@ -88,20 +88,21 @@ public final class ActorStore {
         }
     }
 
-    /// Updates an agent's stored defaults (workspace + agent_kind). Either
-    /// argument may be nil to leave the existing value untouched. Refreshes
-    /// the local cache on success.
+    /// Updates an agent's stored defaults (workspace, agent_kind, default_agent_type).
+    /// Any nil argument leaves the existing value untouched. Refreshes the local cache on success.
     @discardableResult
     public func updateAgentDefaults(
         actorID: String,
         defaultWorkspaceID: String?,
-        agentKind: String?
+        agentKind: String?,
+        defaultAgentType: String?
     ) async -> AgentDefaults? {
         do {
             let updated = try await repository.updateAgentDefaults(
                 actorID: actorID,
                 defaultWorkspaceID: defaultWorkspaceID,
-                agentKind: agentKind
+                agentKind: agentKind,
+                defaultAgentType: defaultAgentType
             )
             await reload()
             return updated

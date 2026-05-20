@@ -9,7 +9,7 @@ import AMUXSharedUI
 /// in the session member sheet. Each row is a `ConnectedAgent` candidate
 /// (already filtered to exclude agents currently in the session); tapping
 /// one resolves the agent's stored defaults (default_workspace_id +
-/// agent_kind, mirrored on `CachedActor`) and immediately calls `onConfirm`
+/// default_agent_type, mirrored on `CachedActor`) and immediately calls `onConfirm`
 /// with `(actorID, workspaceID, workspacePath, agentType)`.
 ///
 /// Workspace fallback chain matches `NewSessionSheet.resolveAgentDefaults`:
@@ -62,8 +62,8 @@ public struct AddAgentSheet: View {
                                     .frame(width: 8, height: 8)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(agent.displayName).font(.body)
-                                    if !agent.agentKind.isEmpty {
-                                        Text(agent.agentKind.capitalized)
+                                    if let agentType = agent.defaultAgentType, !agentType.isEmpty {
+                                        Text(AgentConfigSheet.AgentType(rawValue: agentType)?.label ?? agentType)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -111,7 +111,7 @@ public struct AddAgentSheet: View {
     private func handleTap(_ agent: ConnectedAgent) {
         let cached = cachedActors.first(where: { $0.actorId == agent.id })
         let defaultWorkspaceID = cached?.defaultWorkspaceId
-        let kindString = cached?.agentKind ?? agent.agentKind
+        let kindString = cached?.defaultAgentType ?? agent.defaultAgentType ?? "claude_code"
 
         let workspaceID: String? = {
             if let id = defaultWorkspaceID,

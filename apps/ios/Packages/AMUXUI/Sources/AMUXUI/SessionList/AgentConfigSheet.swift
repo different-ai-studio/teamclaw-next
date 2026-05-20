@@ -8,7 +8,8 @@ public struct AgentConfigSheet: View {
     }
 
     public enum AgentType: String, CaseIterable, Identifiable, Sendable {
-        case claude, opencode, codex
+        case claude = "claude_code"
+        case opencode, codex
         public var id: String { rawValue }
         public var label: String {
             switch self {
