@@ -4,11 +4,13 @@ import android.app.Application
 import io.github.jan.supabase.SupabaseClient
 import io.sentry.android.core.SentryAndroid
 import tech.teamclaw.android.core.auth.ActorStore
+import tech.teamclaw.android.core.auth.IdeaStore
 import tech.teamclaw.android.core.auth.MqttService
 import tech.teamclaw.android.core.auth.OnboardingCoordinator
 import tech.teamclaw.android.core.auth.SessionDetailStore
 import tech.teamclaw.android.core.auth.SessionListStore
 import tech.teamclaw.android.core.auth.SupabaseActorRepository
+import tech.teamclaw.android.core.auth.SupabaseIdeaRepository
 import tech.teamclaw.android.core.auth.SupabaseMessagesRepository
 import tech.teamclaw.android.core.auth.SupabaseOnboardingStore
 import tech.teamclaw.android.core.auth.SupabaseSessionsRepository
@@ -43,6 +45,8 @@ class TeamclawApplication : Application() {
     lateinit var actorStoreFactory: (teamId: String) -> ActorStore
         private set
     lateinit var workspaceStoreFactory: (teamId: String) -> WorkspaceStore
+        private set
+    lateinit var ideaStoreFactory: (teamId: String) -> IdeaStore
         private set
     lateinit var mqttService: MqttService
         private set
@@ -111,5 +115,7 @@ class TeamclawApplication : Application() {
         actorStoreFactory = { teamId -> ActorStore(teamId, actorRepo) }
         val workspaceRepo = SupabaseWorkspaceRepository(supabaseClient)
         workspaceStoreFactory = { teamId -> WorkspaceStore(teamId, workspaceRepo) }
+        val ideaRepo = SupabaseIdeaRepository(supabaseClient)
+        ideaStoreFactory = { teamId -> IdeaStore(teamId, ideaRepo) }
     }
 }
