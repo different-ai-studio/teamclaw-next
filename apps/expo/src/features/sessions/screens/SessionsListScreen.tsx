@@ -18,6 +18,7 @@ import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { SkeletonRow } from "../../../ui/atoms/SkeletonRow";
 import { PrimaryButton } from "../../../ui/button";
 import { AppCard } from "../../../ui/card";
+import { impactLight, selectionTick } from "../../../lib/haptics";
 import { colors, spacing, typography } from "../../../ui/theme";
 import { matchesAnyField } from "../../search/search-matcher";
 import { SessionRow } from "../components/SessionRow";
@@ -149,6 +150,7 @@ export function SessionsListScreen({
   const [isBatchBusy, setIsBatchBusy] = useState(false);
   const selectionMode = selection.size > 0;
   const toggleSelection = (id: string) => {
+    selectionTick();
     setSelection((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -160,6 +162,7 @@ export function SessionsListScreen({
 
   const showRowContextMenu = useCallback(
     (sessionId: string) => {
+      impactLight();
       const isPinned = pinnedSessionIds?.has(sessionId) ?? false;
       const labels = [
         isPinned ? "取消置顶" : "置顶",
