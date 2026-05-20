@@ -1,4 +1,4 @@
-import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Alert, Share, StyleSheet, Text, View } from "react-native";
 
@@ -52,9 +52,22 @@ function canRenderSessionDetail(
 
 export default function SessionDetailRoute() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { sessionId: rawSessionId } = useLocalSearchParams<{
     sessionId?: string | string[];
   }>();
+
+  // Hide the parent Tabs bar while a session detail is on screen, matching
+  // the iOS NavigationStack behavior. Restore on unmount so the bar comes
+  // back when the user pops back to the list.
+  useEffect(() => {
+    const parent = navigation.getParent();
+    if (!parent) return;
+    parent.setOptions({ tabBarStyle: { display: "none" } });
+    return () => {
+      parent.setOptions({ tabBarStyle: undefined });
+    };
+  }, [navigation]);
   const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
   const { state } = useOnboarding();
   const currentTeam = state.currentTeam;
