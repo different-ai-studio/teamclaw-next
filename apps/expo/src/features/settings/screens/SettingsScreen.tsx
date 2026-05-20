@@ -14,6 +14,7 @@ export type SettingsScreenProps = {
   appVersion: string;
   buildNumber: string;
   displayName: string;
+  isAnonymous?: boolean;
   isSigningOut?: boolean;
   notificationsEnabled?: boolean;
   onClose: () => void;
@@ -23,6 +24,7 @@ export type SettingsScreenProps = {
   onOpenWorkspaces?: () => void;
   onSignOut?: () => void;
   onToggleNotifications?: (enabled: boolean) => void;
+  onUpgrade?: () => void;
   team: SettingsTeam | null;
   userEmail: string | null;
 };
@@ -40,6 +42,7 @@ export function SettingsScreen({
   appVersion,
   buildNumber,
   displayName,
+  isAnonymous = false,
   isSigningOut = false,
   notificationsEnabled = false,
   onClose,
@@ -49,6 +52,7 @@ export function SettingsScreen({
   onOpenWorkspaces,
   onSignOut,
   onToggleNotifications,
+  onUpgrade,
   team,
   userEmail,
 }: SettingsScreenProps) {
@@ -93,6 +97,31 @@ export function SettingsScreen({
             <Ionicons color={colors.slate} name="chevron-forward" size={18} />
           ) : null}
         </Pressable>
+
+        {isAnonymous && onUpgrade ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={onUpgrade}
+            style={({ pressed }) => [
+              styles.upgradeBanner,
+              pressed ? styles.upgradeBannerPressed : null,
+            ]}
+          >
+            <Ionicons
+              color={hai.cinnabar}
+              name="shield-checkmark-outline"
+              size={22}
+            />
+            <View style={styles.upgradeBody}>
+              <Text style={styles.upgradeTitle}>Upgrade your account</Text>
+              <Text style={styles.upgradeHelper}>
+                You're signed in anonymously. Attach an email and password so you
+                don't lose this workspace.
+              </Text>
+            </View>
+            <Ionicons color={colors.slate} name="chevron-forward" size={16} />
+          </Pressable>
+        ) : null}
 
         {team ? (
           <View style={styles.section}>
@@ -277,6 +306,32 @@ const styles = StyleSheet.create({
   },
   identityCardPressed: {
     opacity: 0.85,
+  },
+  upgradeBanner: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: radii.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  upgradeBannerPressed: {
+    opacity: 0.85,
+  },
+  upgradeBody: {
+    flex: 1,
+    gap: 2,
+  },
+  upgradeHelper: {
+    color: colors.basalt,
+    ...typography.caption,
+  },
+  upgradeTitle: {
+    color: colors.onyx,
+    ...typography.cardTitle,
   },
   identityEmail: {
     color: colors.slate,

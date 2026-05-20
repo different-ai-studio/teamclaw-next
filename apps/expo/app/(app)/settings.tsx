@@ -56,6 +56,7 @@ export default function SettingsRoute() {
       appVersion={appVersion}
       buildNumber={buildNumber}
       displayName={displayName}
+      isAnonymous={state.isAnonymous}
       isSigningOut={isSigningOut}
       notificationsEnabled={notificationsEnabled}
       onClose={() => router.back()}
@@ -65,6 +66,7 @@ export default function SettingsRoute() {
       onOpenWorkspaces={() => router.push("/(app)/workspaces")}
       onSignOut={handleSignOut}
       onToggleNotifications={setNotificationsEnabled}
+      onUpgrade={() => router.push("/(app)/upgrade-account")}
       team={
         state.currentTeam
           ? { name: state.currentTeam.name, role: state.currentTeam.role ?? null }
