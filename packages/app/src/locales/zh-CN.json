@@ -525,7 +525,9 @@
     "dateEarlier": "更早",
     "participantCount": "{{count}} 位",
     "unread": "未读",
-    "loadMoreSessions": "加载更多"
+    "loadMoreSessions": "加载更多",
+    "mqttDisconnected": "MQTT 未连接",
+    "mqttDisconnectedHint": "点击配置服务器"
   },
   "setup": {
     "title": "需要设置",

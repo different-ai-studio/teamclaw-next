@@ -87,13 +87,13 @@ export function NavRail() {
         onClick={handleNewChat}
         disabled={!hasWorkspace}
         className={cn(
-          'flex w-full items-center gap-2 rounded-xl bg-coral px-3 py-2.5 text-left text-[14px] font-semibold text-white shadow-sm transition-colors',
+          'flex w-full items-center gap-2 rounded-lg bg-coral px-2.5 py-1.5 text-left text-[13px] font-semibold text-white shadow-sm transition-colors',
           'hover:bg-coral/90 disabled:opacity-40 disabled:cursor-not-allowed',
         )}
       >
-        <SquarePen className="h-[16px] w-[16px] shrink-0" />
+        <SquarePen className="h-[14px] w-[14px] shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t('chat.newChat', 'New Chat')}</span>
-        <span className="shrink-0 rounded-md bg-black/15 px-1.5 py-0.5 font-mono text-[11px] font-medium tracking-tight text-white/95">
+        <span className="shrink-0 rounded bg-black/15 px-1 py-0.5 font-mono text-[10px] font-medium tracking-tight text-white/95">
           ⌘N
         </span>
       </button>
