@@ -162,6 +162,21 @@ export function createSessionsApi(client: SessionsClient) {
       throwIfError(result.error);
     },
 
+    async addParticipants(
+      sessionId: string,
+      actorIds: ReadonlyArray<string>,
+    ): Promise<void> {
+      if (actorIds.length === 0) return;
+      const rows = actorIds.map((actorId) => ({
+        session_id: sessionId,
+        actor_id: actorId,
+      }));
+      const result = (await client
+        .from("session_participants")
+        .upsert(rows, { onConflict: "session_id,actor_id" })) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async markSessionRead(
       sessionId: string,
       actorId: string,

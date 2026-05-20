@@ -22,10 +22,14 @@ export type SessionMemberSheetProps = {
   actors: Actor[];
   currentActorId: string | null;
   isLoading: boolean;
+  /** Maps actorId → current model id, used to label the row's trailing chip. */
+  agentModelByActorId?: ReadonlyMap<string, string | null>;
   onAddAgent?: () => void;
   onAddMember?: () => void;
+  onChangeAgentModel?: (actorId: string) => void;
   onClose: () => void;
   onRemoveActor?: (actorId: string) => void;
+  onRestartAgentRuntime?: (actorId: string) => void;
 };
 
 function ToolbarButton({
@@ -59,14 +63,18 @@ export function SessionMemberSheet({
   actors,
   currentActorId,
   isLoading,
+  agentModelByActorId,
   onAddAgent,
   onAddMember,
+  onChangeAgentModel,
   onClose,
+  onRemoveActor,
+  onRestartAgentRuntime,
 }: SessionMemberSheetProps) {
   const humans = actors.filter(isMemberActor);
   const agents = actors.filter(isAgentActor);
 
-  const showRemoveSheet = useCallback(
+  const showHumanActionSheet = useCallback(
     (actor: Actor) => {
       if (!onRemoveActor) return;
       const labels = [`Remove ${actor.displayName}`, "Cancel"];
@@ -91,6 +99,72 @@ export function SessionMemberSheet({
     },
     [onRemoveActor],
   );
+
+  const showAgentActionSheet = useCallback(
+    (actor: Actor) => {
+      // Mirrors iOS SessionMemberSheet swipe actions (Change model / Restart /
+      // Remove). React Native doesn't have a 1:1 swipeActions equivalent on
+      // ScrollView rows, so we surface the same menu via long-press instead.
+      const labels: string[] = [];
+      const handlers: Array<() => void> = [];
+      if (onChangeAgentModel) {
+        labels.push("Change model…");
+        handlers.push(() => onChangeAgentModel(actor.actorId));
+      }
+      if (onRestartAgentRuntime) {
+        labels.push("Restart runtime");
+        handlers.push(() => onRestartAgentRuntime(actor.actorId));
+      }
+      if (onRemoveActor) {
+        labels.push(`Remove ${actor.displayName}`);
+        handlers.push(() => onRemoveActor(actor.actorId));
+      }
+      if (labels.length === 0) return;
+      labels.push("Cancel");
+
+      const destructiveButtonIndex = onRemoveActor ? labels.length - 2 : -1;
+      const cancelButtonIndex = labels.length - 1;
+
+      const dispatch = (index: number) => {
+        const handler = handlers[index];
+        if (handler) handler();
+      };
+
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: labels,
+            cancelButtonIndex,
+            destructiveButtonIndex:
+              destructiveButtonIndex >= 0 ? destructiveButtonIndex : undefined,
+          },
+          dispatch,
+        );
+        return;
+      }
+      Alert.alert(
+        actor.displayName,
+        undefined,
+        labels.map((label, index) => {
+          if (index === cancelButtonIndex) {
+            return { text: label, style: "cancel" as const };
+          }
+          if (index === destructiveButtonIndex) {
+            return {
+              text: label,
+              style: "destructive" as const,
+              onPress: () => dispatch(index),
+            };
+          }
+          return { text: label, onPress: () => dispatch(index) };
+        }),
+      );
+    },
+    [onChangeAgentModel, onRemoveActor, onRestartAgentRuntime],
+  );
+
+  const agentRowDisabled =
+    !onChangeAgentModel && !onRestartAgentRuntime && !onRemoveActor;
 
   return (
     <View style={styles.screen}>
@@ -141,7 +215,7 @@ export function SessionMemberSheet({
                       delayLongPress={350}
                       disabled={!onRemoveActor || actor.actorId === currentActorId}
                       key={actor.actorId}
-                      onLongPress={() => showRemoveSheet(actor)}
+                      onLongPress={() => showHumanActionSheet(actor)}
                     >
                       <ActorRow actor={actor} isMe={actor.actorId === currentActorId} />
                       {index < humans.length - 1 ? (
@@ -159,19 +233,53 @@ export function SessionMemberSheet({
                   style={styles.sectionLabel}
                 />
                 <View>
-                  {agents.map((actor, index) => (
-                    <Pressable
-                      delayLongPress={350}
-                      disabled={!onRemoveActor}
-                      key={actor.actorId}
-                      onLongPress={() => showRemoveSheet(actor)}
-                    >
-                      <ActorRow actor={actor} />
-                      {index < agents.length - 1 ? (
-                        <Hairline style={styles.rowDivider} />
-                      ) : null}
-                    </Pressable>
-                  ))}
+                  {agents.map((actor, index) => {
+                    const model = agentModelByActorId?.get(actor.actorId) ?? null;
+                    return (
+                      <Pressable
+                        delayLongPress={350}
+                        disabled={agentRowDisabled}
+                        key={actor.actorId}
+                        onLongPress={() => showAgentActionSheet(actor)}
+                      >
+                        <View style={styles.agentRow}>
+                          <View style={styles.agentRowMain}>
+                            <ActorRow actor={actor} />
+                          </View>
+                          {model || onChangeAgentModel ? (
+                            <Pressable
+                              accessibilityLabel="Change model"
+                              accessibilityRole="button"
+                              disabled={!onChangeAgentModel}
+                              hitSlop={6}
+                              onPress={() => onChangeAgentModel?.(actor.actorId)}
+                              style={styles.modelChip}
+                            >
+                              <Text
+                                numberOfLines={1}
+                                style={[
+                                  styles.modelChipText,
+                                  model ? null : styles.modelChipTextMuted,
+                                ]}
+                              >
+                                {model ?? "default"}
+                              </Text>
+                              {onChangeAgentModel ? (
+                                <Ionicons
+                                  color={colors.slate}
+                                  name="chevron-down"
+                                  size={12}
+                                />
+                              ) : null}
+                            </Pressable>
+                          ) : null}
+                        </View>
+                        {index < agents.length - 1 ? (
+                          <Hairline style={styles.rowDivider} />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </View>
             ) : null}
@@ -183,6 +291,13 @@ export function SessionMemberSheet({
 }
 
 const styles = StyleSheet.create({
+  agentRow: {
+    alignItems: "center",
+    flexDirection: "row",
+  },
+  agentRowMain: {
+    flex: 1,
+  },
   content: {
     gap: spacing.md,
     paddingBottom: spacing.xxxl,
@@ -223,6 +338,20 @@ const styles = StyleSheet.create({
   loadingText: {
     color: colors.basalt,
     ...typography.secondaryBody,
+  },
+  modelChip: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 2,
+    marginRight: spacing.lg,
+    maxWidth: 140,
+  },
+  modelChipText: {
+    color: colors.basalt,
+    ...typography.caption,
+  },
+  modelChipTextMuted: {
+    color: colors.slate,
   },
   rowDivider: {
     marginLeft: 70,

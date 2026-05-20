@@ -14,6 +14,7 @@ describe("isActorOnline", () => {
           role: "member",
           lastActiveAt: new Date(now - 60 * 1000).toISOString(),
           avatarUrl: null,
+          agentKind: null,
         },
         now,
       ),
@@ -33,6 +34,7 @@ describe("isActorOnline", () => {
           role: "member",
           lastActiveAt: new Date(now - 10 * 60 * 1000).toISOString(),
           avatarUrl: null,
+          agentKind: null,
         },
         now,
       ),
@@ -50,6 +52,7 @@ describe("isActorOnline", () => {
         role: null,
         lastActiveAt: null,
         avatarUrl: null,
+        agentKind: null,
       }),
     ).toBe(false);
   });

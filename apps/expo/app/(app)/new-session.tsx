@@ -1,17 +1,16 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
+import type { Actor } from "../../src/features/actors/actor-types";
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
-import { isOpenIdea } from "../../src/features/ideas/idea-types";
+import { isOpenIdea, type Idea } from "../../src/features/ideas/idea-types";
+import { buildFirstMessageWithIdea } from "../../src/features/sessions/idea-preface";
 import { createSessionsApi } from "../../src/features/sessions/session-api";
 import { NewSessionScreen } from "../../src/features/sessions/screens/NewSessionScreen";
 import { supabase } from "../../src/lib/supabase/client";
 import { uuidV4 } from "../../src/lib/uuid";
-
-type AgentChoice = { actorId: string; displayName: string };
-type IdeaChoice = { ideaId: string; displayTitle: string };
 
 function deriveTitle(firstMessage: string): string {
   const trimmed = firstMessage.trim();
@@ -27,8 +26,8 @@ export default function NewSessionRoute() {
   const { state } = useOnboarding();
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [agents, setAgents] = useState<AgentChoice[]>([]);
-  const [ideas, setIdeas] = useState<IdeaChoice[]>([]);
+  const [actors, setActors] = useState<Actor[]>([]);
+  const [ideas, setIdeas] = useState<Idea[]>([]);
 
   useEffect(() => {
     const teamId = state.currentTeam?.id;
@@ -40,23 +39,12 @@ export default function NewSessionRoute() {
     ])
       .then(([actorRows, ideaRows]) => {
         if (cancelled) return;
-        setAgents(
-          actorRows
-            .filter((row) => row.actorType === "agent")
-            .map((row) => ({ actorId: row.actorId, displayName: row.displayName })),
-        );
-        setIdeas(
-          ideaRows
-            .filter(isOpenIdea)
-            .map((row) => ({
-              ideaId: row.ideaId,
-              displayTitle: row.title.trim() || "Untitled idea",
-            })),
-        );
+        setActors(actorRows);
+        setIdeas(ideaRows.filter(isOpenIdea));
       })
       .catch(() => {
         if (cancelled) return;
-        setAgents([]);
+        setActors([]);
         setIdeas([]);
       });
     return () => {
@@ -64,15 +52,30 @@ export default function NewSessionRoute() {
     };
   }, [state.currentTeam?.id]);
 
+  const ideaChoices = useMemo(
+    () =>
+      ideas.map((idea) => ({
+        ideaId: idea.ideaId,
+        displayTitle: idea.title.trim() || "Untitled idea",
+      })),
+    [ideas],
+  );
+
   return (
     <NewSessionScreen
-      agents={agents}
+      actors={actors}
+      currentMemberActorId={state.currentMemberActorId}
       errorMessage={errorMessage}
-      ideas={ideas}
+      ideas={ideaChoices}
       isBusy={isBusy}
       selectedIdeaId={ideaId}
       onClose={() => router.back()}
-      onCreate={async ({ firstMessage, agentActorId, ideaId: chosenIdeaId }) => {
+      onCreate={async ({
+        firstMessage,
+        collaboratorActorIds,
+        primaryAgentActorId,
+        ideaId: chosenIdeaId,
+      }) => {
         if (!state.currentTeam) {
           setErrorMessage("No active team — bootstrap first.");
           return;
@@ -87,20 +90,34 @@ export default function NewSessionRoute() {
         setErrorMessage(null);
         try {
           const sessionsApi = createSessionsApi(supabase);
+          const idea = chosenIdeaId
+            ? ideas.find((row) => row.ideaId === chosenIdeaId)
+            : undefined;
+          const expandedMessage = buildFirstMessageWithIdea(firstMessage, idea);
           const sessionId = await sessionsApi.createSession({
             title: deriveTitle(firstMessage),
-            mode: "agent",
-            primaryAgentId: agentActorId,
+            mode: collaboratorActorIds.length > 1 ? "collab" : "agent",
+            primaryAgentId: primaryAgentActorId,
             ideaId: chosenIdeaId,
           });
 
-          if (firstMessage.trim().length > 0) {
+          // create_session seeds session_participants with the caller and the
+          // primary agent. Add any other picked collaborators (extra agents,
+          // humans) on top.
+          const extras = collaboratorActorIds.filter(
+            (id) => id !== primaryAgentActorId && id !== memberActorId,
+          );
+          if (extras.length > 0) {
+            await sessionsApi.addParticipants(sessionId, extras);
+          }
+
+          if (expandedMessage.trim().length > 0) {
             await sessionsApi.insertOutgoingMessage({
               id: uuidV4(),
               teamId: state.currentTeam.id,
               sessionId,
               senderActorId: memberActorId,
-              content: firstMessage.trim(),
+              content: expandedMessage.trim(),
               metadata: { mention_actor_ids: [] },
             });
           }

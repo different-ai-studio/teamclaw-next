@@ -9,6 +9,9 @@
     ],
     "android": {
       "package": "com.bertrand319.teamclawexpo"
+    },
+    "ios": {
+      "bundleIdentifier": "com.bertrand319.teamclawexpo"
     }
   }
 }

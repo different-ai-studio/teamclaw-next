@@ -280,4 +280,115 @@ describe("createSessionsController", () => {
 
     expect(listener).toHaveBeenCalledTimes(4);
   });
+
+  describe("cache hydration", () => {
+    it("hydrates rows from cache before the network responds", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 4, 18, 12, 0, 0));
+
+      const { createSessionsController } = await import("../features/sessions/session-controller");
+      const cached = [
+        createSession(
+          "cached-1",
+          new Date(2026, 4, 18, 10, 0, 0).toISOString(),
+          new Date(2026, 4, 17, 10, 0, 0).toISOString(),
+        ),
+      ];
+      const deferredLoad = createDeferredPromise<SessionSummary[]>();
+      const api: SessionsApi = {
+        listSessions: vi.fn().mockReturnValue(deferredLoad.promise),
+      };
+      const cache = {
+        load: vi.fn().mockResolvedValue(cached),
+        save: vi.fn().mockResolvedValue(undefined),
+        clear: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const controller = createSessionsController(api as any, "team-1", null, cache);
+      const loadPromise = controller.load();
+
+      // Flush the cache.load microtasks so hydration applies.
+      await vi.waitFor(() => {
+        expect(controller.getState().sessions).toHaveLength(1);
+      });
+      expect(controller.getState()).toMatchObject({
+        status: "loaded",
+        sessions: cached,
+      });
+
+      const fresh = [
+        createSession(
+          "fresh-1",
+          new Date(2026, 4, 18, 11, 0, 0).toISOString(),
+          new Date(2026, 4, 17, 11, 0, 0).toISOString(),
+        ),
+      ];
+      deferredLoad.resolve(fresh);
+      await loadPromise;
+
+      expect(controller.getState().sessions).toEqual(fresh);
+      expect(cache.save).toHaveBeenCalledWith("team-1", fresh);
+    });
+
+    it("keeps cached rows visible when the network load fails", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 4, 18, 12, 0, 0));
+
+      const { createSessionsController } = await import("../features/sessions/session-controller");
+      const cached = [
+        createSession(
+          "cached-1",
+          new Date(2026, 4, 18, 10, 0, 0).toISOString(),
+          new Date(2026, 4, 17, 10, 0, 0).toISOString(),
+        ),
+      ];
+      const api: SessionsApi = {
+        listSessions: vi.fn().mockRejectedValue(new Error("offline")),
+      };
+      const cache = {
+        load: vi.fn().mockResolvedValue(cached),
+        save: vi.fn().mockResolvedValue(undefined),
+        clear: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const controller = createSessionsController(api as any, "team-1", null, cache);
+      await controller.load();
+
+      expect(controller.getState()).toMatchObject({
+        status: "error",
+        errorMessage: "offline",
+        sessions: cached,
+      });
+    });
+
+    it("saves to cache after a successful refresh", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 4, 18, 12, 0, 0));
+
+      const { createSessionsController } = await import("../features/sessions/session-controller");
+      const fresh = [
+        createSession(
+          "fresh-1",
+          new Date(2026, 4, 18, 11, 0, 0).toISOString(),
+          new Date(2026, 4, 17, 11, 0, 0).toISOString(),
+        ),
+      ];
+      const api: SessionsApi = {
+        listSessions: vi.fn().mockResolvedValue(fresh),
+      };
+      const cache = {
+        load: vi.fn().mockResolvedValue(null),
+        save: vi.fn().mockResolvedValue(undefined),
+        clear: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const controller = createSessionsController(api as any, "team-1", null, cache);
+      await controller.load();
+      await controller.refresh();
+
+      // load() saves once, refresh() saves once more.
+      expect(cache.save).toHaveBeenCalledTimes(2);
+      expect(cache.save).toHaveBeenLastCalledWith("team-1", fresh);
+    });
+  });
 });

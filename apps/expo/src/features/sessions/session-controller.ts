@@ -1,3 +1,4 @@
+import type { SessionsCache } from "./session-cache";
 import { groupSessionsByRecency, type SessionGroup, type SessionSummary } from "./session-types";
 import { setUnreadSessionCount } from "./unread-store";
 
@@ -72,9 +73,11 @@ export function createSessionsController(
   api: SessionsApi,
   teamId: string,
   currentActorId?: string | null,
+  cache?: SessionsCache,
 ) {
   let state = INITIAL_STATE;
   let requestId = 0;
+  let hydratedFromCache = false;
   const listeners = new Set<SessionsControllerListener>();
 
   const notify = () => {
@@ -98,8 +101,28 @@ export function createSessionsController(
 
   const isCurrentRequest = (id: number) => id === requestId;
 
+  const hydrateFromCache = async (currentRequestId: number) => {
+    if (!cache || hydratedFromCache || !teamId) return;
+    hydratedFromCache = true;
+    try {
+      const cached = await cache.load(teamId);
+      if (!cached || !isCurrentRequest(currentRequestId)) return;
+      // Don't clobber rows that arrived from the network while disk I/O
+      // was in flight — the network is authoritative.
+      if (state.sessions.length > 0) return;
+      setUnreadSessionCount(cached.filter((s) => s.hasUnread).length);
+      setState(buildDerivedState(cached));
+    } catch {
+      // best-effort
+    }
+  };
+
   const load = async () => {
     const { currentRequestId } = beginRequest("load");
+
+    // Kick off the cache hydration in parallel — first paint comes from
+    // disk while the network fetch is still pending.
+    void hydrateFromCache(currentRequestId);
 
     try {
       const sessions = await api.listSessions(teamId, currentActorId ?? undefined);
@@ -109,12 +132,16 @@ export function createSessionsController(
 
       setUnreadSessionCount(sessions.filter((s) => s.hasUnread).length);
       setState(buildDerivedState(sessions));
+      void cache?.save(teamId, sessions);
     } catch (error) {
       if (!isCurrentRequest(currentRequestId)) {
         return;
       }
 
-      setState(buildErrorState(state, false, toErrorMessage(error)));
+      // If the cache already hydrated rows, keep them visible and just
+      // surface the error message inline rather than blanking the list.
+      const preserveRows = state.sessions.length > 0;
+      setState(buildErrorState(state, preserveRows, toErrorMessage(error)));
     }
   };
 
@@ -129,6 +156,7 @@ export function createSessionsController(
 
       setUnreadSessionCount(sessions.filter((s) => s.hasUnread).length);
       setState(buildDerivedState(sessions));
+      void cache?.save(teamId, sessions);
     } catch (error) {
       if (!isCurrentRequest(currentRequestId)) {
         return;

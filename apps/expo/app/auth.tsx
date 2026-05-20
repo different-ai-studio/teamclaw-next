@@ -19,10 +19,14 @@ export default function AuthRoute() {
       isBusy={state.isBusy}
       pendingEmail={state.pendingEmailOTPEmail}
       onBack={() => {
-        router.replace("/welcome");
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace("/choose-auth");
+        }
       }}
       onRequestOtp={controller.requestOtp}
-      onSignInAnonymously={controller.signInAnonymously}
+      onResetPendingEmail={controller.resetPendingEmail}
       onVerifyOtp={controller.verifyOtp}
     />
   );
