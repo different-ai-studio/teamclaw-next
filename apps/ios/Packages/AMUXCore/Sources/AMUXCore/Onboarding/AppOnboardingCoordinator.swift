@@ -103,6 +103,10 @@ public protocol AppOnboardingStore: Sendable {
     // (`auth.users.is_anonymous`). Returns false when no session exists.
     func isAnonymous() async -> Bool
 
+    /// Email address for the currently authenticated user, or nil for
+    /// anonymous sessions and Apple Sign-In accounts without an email.
+    func currentUserEmail() async -> String?
+
     // Promote the current anonymous session to a permanent account by
     // attaching credentials. Same auth.users.id, so all team / actor / access
     // rows the user accumulated as anonymous are preserved.
@@ -134,6 +138,10 @@ public final class AppOnboardingCoordinator {
     /// onboarding screen). Stashed here so it can replay through the
     /// existing `amuxInviteTokenReceived` pipeline after sign-in.
     public var pendingInviteToken: String?
+
+    /// Email address of the current auth user. Nil for anonymous sessions
+    /// and Apple accounts without an email address. Set during bootstrap.
+    public var currentUserEmail: String?
 
     /// Active team-scoped runtime state. Built by `prepareTeamRuntime` once
     /// the user has a `currentContext`, replaced atomically when the active
@@ -261,6 +269,7 @@ public final class AppOnboardingCoordinator {
         do {
             try await measureOnboarding("ensureSession") { try await store.ensureSession() }
             isAnonymous = await measureOnboarding("isAnonymous") { await store.isAnonymous() }
+            currentUserEmail = await store.currentUserEmail()
             var bootstrap = try await measureOnboarding("loadBootstrap") { try await store.loadBootstrap() }
             pendingCreatedTeam = nil
             var preferred = preferringTeamID
@@ -541,6 +550,7 @@ public final class AppOnboardingCoordinator {
         pendingCreatedTeam = nil
         pendingEmailOTPEmail = nil
         isAnonymous = false
+        currentUserEmail = nil
         route = .needsAuth
         isBusy = false
     }

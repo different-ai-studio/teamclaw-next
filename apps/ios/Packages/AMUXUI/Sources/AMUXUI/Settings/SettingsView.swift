@@ -167,6 +167,12 @@ public struct SettingsView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Color.amux.basalt)
                     }
+                    if let email = onboarding?.currentUserEmail {
+                        Text(email)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.amux.basalt.opacity(0.6))
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "pencil")
