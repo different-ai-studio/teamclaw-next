@@ -16,7 +16,7 @@ export default function WelcomeRoute() {
   return (
     <WelcomeScreen
       onGetStarted={() => {
-        router.push("/auth");
+        router.push("/choose-auth");
       }}
     />
   );

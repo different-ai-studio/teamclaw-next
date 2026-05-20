@@ -23,6 +23,7 @@ import {
 } from "../../actors/components/SegmentedFilter";
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { PrimaryButton } from "../../../ui/button";
+import { SwipeableRow } from "../../../ui/SwipeableRow";
 import { impactLight, selectionTick } from "../../../lib/haptics";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
 import { IdeaRow } from "../components/IdeaRow";
@@ -383,45 +384,63 @@ export function IdeasListScreen({
             const checked = selection.has(idea.ideaId);
             return (
               <View key={idea.ideaId}>
-                <Pressable
-                  onLongPress={() => {
-                    if (selectionMode) {
-                      toggleSelection(idea.ideaId);
-                    } else {
-                      showRowContextMenu(idea.ideaId);
-                    }
-                  }}
-                  onPress={() => {
-                    if (selectionMode) {
-                      toggleSelection(idea.ideaId);
-                    } else if (onSelectIdea) {
-                      onSelectIdea(idea.ideaId);
-                    }
-                  }}
-                  style={({ pressed }) => [
-                    styles.ideaRowOuter,
-                    checked ? styles.ideaRowChecked : null,
-                    pressed ? styles.ideaRowPressed : null,
-                  ]}
+                <SwipeableRow
+                  enabled={!selectionMode && !!onArchiveBatch}
+                  trailingActions={
+                    onArchiveBatch
+                      ? [
+                          {
+                            label: "Archive",
+                            iconName: "archive-outline",
+                            destructive: true,
+                            onPress: () => {
+                              void onArchiveBatch([idea.ideaId]);
+                            },
+                          },
+                        ]
+                      : []
+                  }
                 >
-                  {selectionMode ? (
-                    <View style={[styles.checkbox, checked ? styles.checkboxOn : null]}>
-                      {checked ? (
-                        <Ionicons color="#F8F6F1" name="checkmark" size={14} />
-                      ) : null}
+                  <Pressable
+                    onLongPress={() => {
+                      if (selectionMode) {
+                        toggleSelection(idea.ideaId);
+                      } else {
+                        showRowContextMenu(idea.ideaId);
+                      }
+                    }}
+                    onPress={() => {
+                      if (selectionMode) {
+                        toggleSelection(idea.ideaId);
+                      } else if (onSelectIdea) {
+                        onSelectIdea(idea.ideaId);
+                      }
+                    }}
+                    style={({ pressed }) => [
+                      styles.ideaRowOuter,
+                      checked ? styles.ideaRowChecked : null,
+                      pressed ? styles.ideaRowPressed : null,
+                    ]}
+                  >
+                    {selectionMode ? (
+                      <View style={[styles.checkbox, checked ? styles.checkboxOn : null]}>
+                        {checked ? (
+                          <Ionicons color="#F8F6F1" name="checkmark" size={14} />
+                        ) : null}
+                      </View>
+                    ) : null}
+                    <View style={styles.ideaRowBody}>
+                      <IdeaRow
+                        creatorName={
+                          idea.createdByActorId
+                            ? actorNames?.get(idea.createdByActorId) ?? null
+                            : null
+                        }
+                        idea={idea}
+                      />
                     </View>
-                  ) : null}
-                  <View style={styles.ideaRowBody}>
-                    <IdeaRow
-                    creatorName={
-                      idea.createdByActorId
-                        ? actorNames?.get(idea.createdByActorId) ?? null
-                        : null
-                    }
-                    idea={idea}
-                  />
-                  </View>
-                </Pressable>
+                  </Pressable>
+                </SwipeableRow>
                 {index < filteredIdeas.length - 1 ? (
                   <Hairline style={styles.rowDivider} />
                 ) : null}

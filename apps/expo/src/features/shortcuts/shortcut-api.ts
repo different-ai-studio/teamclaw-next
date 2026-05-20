@@ -1,4 +1,4 @@
-import type { Shortcut, ShortcutNodeType } from "./shortcut-types";
+import type { Shortcut, ShortcutNodeType, ShortcutScope } from "./shortcut-types";
 
 type SupabaseError = { message?: string } | null;
 type QueryResult<T> = { data: T; error: SupabaseError };
@@ -15,6 +15,7 @@ type ShortcutRow = {
   target: string | null;
   order: number | null;
   parent_id: string | null;
+  scope: string | null;
 };
 
 function throwIfError(error: SupabaseError) {
@@ -34,6 +35,10 @@ function toNodeType(value: string | null): ShortcutNodeType {
   }
 }
 
+function toScope(value: string | null): ShortcutScope {
+  return value === "team" ? "team" : "personal";
+}
+
 function toShortcut(row: ShortcutRow): Shortcut {
   return {
     id: row.id,
@@ -43,6 +48,7 @@ function toShortcut(row: ShortcutRow): Shortcut {
     target: row.target ?? null,
     order: row.order ?? 0,
     parentId: row.parent_id ?? null,
+    scope: toScope(row.scope),
   };
 }
 
@@ -51,7 +57,7 @@ export function createShortcutsApi(client: ShortcutsClient) {
     async listShortcuts(teamId: string): Promise<Shortcut[]> {
       const result = (await client
         .from("shortcuts")
-        .select("id, label, icon, node_type, target, \"order\", parent_id")
+        .select("id, label, icon, node_type, target, \"order\", parent_id, scope")
         .eq("team_id", teamId)
         .order("order", { ascending: true })) as QueryResult<ShortcutRow[] | null>;
       throwIfError(result.error);

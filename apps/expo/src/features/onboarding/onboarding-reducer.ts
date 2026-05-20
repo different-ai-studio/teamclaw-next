@@ -32,6 +32,12 @@ export function onboardingReducer(
         pendingEmailOTPEmail: action.email,
         isBusy: false,
       };
+    case "resetPendingEmail":
+      return {
+        ...state,
+        pendingEmailOTPEmail: null,
+        errorMessage: null,
+      };
     case "bootstrapResolved":
       return {
         ...state,

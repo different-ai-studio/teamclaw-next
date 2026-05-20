@@ -1,5 +1,7 @@
 export type ShortcutNodeType = "folder" | "url" | "team" | "session" | "external";
 
+export type ShortcutScope = "personal" | "team";
+
 export type Shortcut = {
   id: string;
   label: string;
@@ -8,6 +10,7 @@ export type Shortcut = {
   target: string | null;
   order: number;
   parentId: string | null;
+  scope: ShortcutScope;
 };
 
 export function isLeafShortcut(node: Shortcut): boolean {

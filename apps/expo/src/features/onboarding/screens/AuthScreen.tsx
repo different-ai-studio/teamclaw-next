@@ -1,19 +1,21 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
+import type { ComponentProps } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
-import { PrimaryButton } from "../../../ui/button";
-import { AppCard } from "../../../ui/card";
-import { AppInput } from "../../../ui/input";
-import { colors, radii, spacing, typography } from "../../../ui/theme";
-import { getOtpValidationError, OTP_CODE_LENGTH, sanitizeOtpInput } from "../auth-otp";
+import { colors, spacing, typography } from "../../../ui/theme";
+import { OTP_CODE_LENGTH, sanitizeOtpInput } from "../auth-otp";
 
 type AuthScreenProps = {
   errorMessage: string | null;
@@ -21,302 +23,444 @@ type AuthScreenProps = {
   pendingEmail: string | null;
   onBack: () => void;
   onRequestOtp: (email: string) => Promise<void>;
-  onSignInAnonymously: () => Promise<void>;
   onVerifyOtp: (token: string) => Promise<void>;
+  onResetPendingEmail: () => void;
+  onSignInWithApple?: () => Promise<void> | void;
+  onSignInWithGoogle?: () => Promise<void> | void;
 };
 
 function isValidEmail(value: string) {
   return /\S+@\S+\.\S+/.test(value);
 }
 
+/**
+ * 1:1 port of `apps/ios/AMUXApp/LoginView.swift`. Email-OTP first, then
+ * "Sign in with Apple" / "Sign in with Google" rails below an "or" divider.
+ * Guest / private-workspace lives on the ChooseAuthScreen — same as iOS.
+ */
 export function AuthScreen({
   errorMessage,
   isBusy,
   pendingEmail,
   onBack,
   onRequestOtp,
-  onSignInAnonymously,
   onVerifyOtp,
+  onResetPendingEmail,
+  onSignInWithApple,
+  onSignInWithGoogle,
 }: AuthScreenProps) {
   const [email, setEmail] = useState(pendingEmail ?? "");
-  const [otpCode, setOtpCode] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [isServerErrorDismissed, setIsServerErrorDismissed] = useState(false);
+  const [code, setCode] = useState("");
 
   useEffect(() => {
-    if (pendingEmail) {
-      setEmail(pendingEmail);
-    }
+    if (pendingEmail) setEmail(pendingEmail);
   }, [pendingEmail]);
 
-  useEffect(() => {
-    if (errorMessage === null) {
-      setIsServerErrorDismissed(false);
-    }
-  }, [errorMessage]);
+  const isCodeStep = pendingEmail != null;
 
-  const requestCode = async () => {
-    const nextEmail = email.trim().toLowerCase();
-    if (!isValidEmail(nextEmail)) {
-      setLocalError("Enter a valid email address.");
+  const sendCode = async () => {
+    const next = email.trim().toLowerCase();
+    if (!isValidEmail(next)) return;
+    try {
+      await onRequestOtp(next);
+    } catch {}
+  };
+
+  const verify = async () => {
+    const next = code.trim();
+    if (next.length !== OTP_CODE_LENGTH) return;
+    try {
+      await onVerifyOtp(next);
+    } catch {}
+  };
+
+  const useDifferentEmail = () => {
+    setCode("");
+    onResetPendingEmail();
+  };
+
+  const handleApple = () => {
+    if (onSignInWithApple) {
+      void onSignInWithApple();
       return;
     }
-
-    setLocalError(null);
-    setIsServerErrorDismissed(false);
-
-    try {
-      await onRequestOtp(nextEmail);
-    } catch {}
+    Alert.alert("Sign in with Apple", "Coming soon on Expo. Use email for now.");
   };
 
-  const verifyCode = async () => {
-    const nextCode = otpCode.trim();
-    const validationError = getOtpValidationError(nextCode);
-    if (validationError) {
-      setLocalError(validationError);
+  const handleGoogle = () => {
+    if (onSignInWithGoogle) {
+      void onSignInWithGoogle();
       return;
     }
-
-    setLocalError(null);
-    setIsServerErrorDismissed(false);
-
-    try {
-      await onVerifyOtp(nextCode);
-    } catch {}
+    Alert.alert("Sign in with Google", "Coming soon on Expo. Use email for now.");
   };
 
-  const signInAsGuest = async () => {
-    setLocalError(null);
-    setIsServerErrorDismissed(false);
-
-    try {
-      await onSignInAnonymously();
-    } catch {}
-  };
-
-  const visibleError =
-    localError ?? (isServerErrorDismissed ? null : errorMessage);
-  const activeEmail = pendingEmail ?? email.trim().toLowerCase();
+  const canSubmit = isCodeStep
+    ? code.length === OTP_CODE_LENGTH
+    : email.trim().length > 0;
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.select({ ios: "padding", default: undefined })}
       style={styles.screen}
     >
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Pressable onPress={onBack} style={({ pressed }) => [styles.backLink, pressed && styles.pressed]}>
-          <Text style={styles.backText}>Back</Text>
-        </Pressable>
+      <Pressable
+        accessibilityLabel="Back"
+        accessibilityRole="button"
+        hitSlop={12}
+        onPress={onBack}
+        style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+      >
+        <Ionicons color={colors.onyx} name="chevron-back" size={26} />
+      </Pressable>
 
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
-          <Text style={styles.title}>Join TeamClaw</Text>
-          <Text style={styles.body}>
-            Continue with a guest session, or ask for a one-time code by email.
+          <Text style={styles.title}>
+            {isCodeStep ? "Enter the code" : "Sign in"}
+          </Text>
+          <Text style={styles.subtitle}>
+            {isCodeStep
+              ? "Check your inbox for an 8-digit code."
+              : "We'll email you an 8-digit code."}
           </Text>
         </View>
 
-        <AppCard elevated style={styles.card}>
-          <AppInput
-            autoCapitalize="none"
-            autoComplete="email"
-            editable={!isBusy}
-            keyboardType="email-address"
-            label="Work email"
-            onChangeText={(value) => {
-              setEmail(value);
-              if (localError) {
-                setLocalError(null);
-              }
-              if (errorMessage) {
-                setIsServerErrorDismissed(true);
-              }
-            }}
-            placeholder="name@company.com"
-            value={email}
-          />
+        {isCodeStep ? (
+          <View style={styles.section}>
+            <Text style={styles.helper}>
+              Code sent to{" "}
+              <Text style={styles.helperStrong}>{pendingEmail}</Text>
+            </Text>
 
-          {pendingEmail ? (
-            <>
-              <Text style={styles.helper}>
-                We sent a login code to <Text style={styles.helperStrong}>{activeEmail}</Text>.
-              </Text>
-              <AppInput
+            <View style={styles.authField}>
+              <TextInput
+                accessibilityLabel="8-digit code"
                 editable={!isBusy}
                 keyboardType="number-pad"
-                label="One-time code"
                 maxLength={OTP_CODE_LENGTH}
-                onChangeText={(value) => {
-                  setOtpCode(sanitizeOtpInput(value));
-                  if (localError) {
-                    setLocalError(null);
-                  }
-                  if (errorMessage) {
-                    setIsServerErrorDismissed(true);
-                  }
-                }}
-                placeholder="12345678"
-                value={otpCode}
+                onChangeText={(value) => setCode(sanitizeOtpInput(value))}
+                placeholder="8-digit code"
+                placeholderTextColor={colors.slate}
+                selectionColor={colors.cinnabar}
+                style={styles.fieldText}
+                textContentType="oneTimeCode"
+                value={code}
               />
-            </>
-          ) : null}
+            </View>
 
-          {visibleError ? <Text style={styles.error}>{visibleError}</Text> : null}
-
-          <PrimaryButton
-            isLoading={isBusy}
-            label={pendingEmail ? "Verify and continue" : "Send login code"}
-            onPress={() => {
-              void (pendingEmail ? verifyCode() : requestCode());
-            }}
-          />
-
-          {pendingEmail ? (
-            <Pressable
-              disabled={isBusy}
+            <PrimaryButton
+              busy={isBusy}
+              enabled={canSubmit}
+              label="Verify"
               onPress={() => {
-                void requestCode();
+                void verify();
               }}
+            />
+
+            <Pressable
+              accessibilityRole="button"
+              disabled={isBusy}
+              onPress={useDifferentEmail}
               style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && !isBusy && styles.pressed,
-                isBusy && styles.disabled,
+                styles.linkButton,
+                pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.secondaryButtonText}>Resend code</Text>
+              <Text style={styles.linkText}>Use a different email</Text>
             </Pressable>
-          ) : null}
-        </AppCard>
-
-        <AppCard compact style={styles.card}>
-          <Text style={styles.cardTitle}>Try the product first</Text>
-          <Text style={styles.cardBody}>
-            Guest mode creates an anonymous session so you can set up a team before connecting
-            a full account.
-          </Text>
-          <Pressable
-            disabled={isBusy}
-            onPress={() => {
-              void signInAsGuest();
-            }}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed && !isBusy && styles.pressed,
-              isBusy && styles.disabled,
-            ]}
-          >
-            <Text style={styles.secondaryButtonText}>Continue as guest</Text>
-          </Pressable>
-        </AppCard>
-
-        <AppCard compact style={styles.oauthCard}>
-          <Text style={styles.cardTitle}>More sign-in options</Text>
-          <Text style={styles.cardBody}>
-            Apple and Google sign-in will live here later. For now, use email code or guest
-            access.
-          </Text>
-          <View style={styles.oauthRow}>
-            <View style={styles.oauthPill}>
-              <Text style={styles.oauthText}>Apple coming soon</Text>
-            </View>
-            <View style={styles.oauthPill}>
-              <Text style={styles.oauthText}>Google coming soon</Text>
-            </View>
           </View>
-        </AppCard>
+        ) : (
+          <View style={styles.section}>
+            <View style={styles.authField}>
+              <TextInput
+                accessibilityLabel="Email"
+                autoCapitalize="none"
+                autoComplete="email"
+                autoCorrect={false}
+                editable={!isBusy}
+                keyboardType="email-address"
+                onChangeText={setEmail}
+                placeholder="Email"
+                placeholderTextColor={colors.slate}
+                selectionColor={colors.cinnabar}
+                style={styles.fieldText}
+                textContentType="emailAddress"
+                value={email}
+              />
+            </View>
+
+            <PrimaryButton
+              busy={isBusy}
+              enabled={canSubmit}
+              label="Send code"
+              onPress={() => {
+                void sendCode();
+              }}
+            />
+          </View>
+        )}
+
+        {errorMessage ? (
+          <Text style={styles.error}>{errorMessage}</Text>
+        ) : null}
+
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>or</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        <View style={styles.socialColumn}>
+          <SocialButton
+            disabled={isBusy}
+            icon="logo-apple"
+            label="Sign in with Apple"
+            onPress={handleApple}
+          />
+          <SocialButton
+            disabled={isBusy}
+            icon="globe-outline"
+            label="Sign in with Google"
+            onPress={handleGoogle}
+          />
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
+function PrimaryButton({
+  busy,
+  enabled,
+  label,
+  onPress,
+}: {
+  busy: boolean;
+  enabled: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  const disabled = !enabled || busy;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.primaryButton,
+        enabled ? styles.primaryButtonEnabled : styles.primaryButtonDisabled,
+        pressed && !disabled ? styles.pressed : null,
+      ]}
+    >
+      <View style={styles.primaryButtonContent}>
+        {busy ? (
+          <ActivityIndicator
+            color={enabled ? "#FFFFFF" : colors.slate}
+            size="small"
+          />
+        ) : null}
+        <Text
+          style={[
+            styles.primaryButtonLabel,
+            enabled
+              ? styles.primaryButtonLabelEnabled
+              : styles.primaryButtonLabelDisabled,
+          ]}
+        >
+          {label}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function SocialButton({
+  disabled,
+  icon,
+  label,
+  onPress,
+}: {
+  disabled?: boolean;
+  icon: ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.socialButton,
+        pressed && !disabled ? styles.pressed : null,
+        disabled ? styles.disabled : null,
+      ]}
+    >
+      <View style={styles.socialIconWrap}>
+        <Ionicons color={colors.onyx} name={icon} size={19} />
+      </View>
+      <Text style={styles.socialLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  backLink: {
-    alignSelf: "flex-start",
+  authField: {
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  backText: {
-    color: colors.mutedForeground,
-    ...typography.caption,
-  },
-  body: {
-    color: colors.ink2,
-    ...typography.body,
-  },
-  card: {
-    gap: spacing.md,
-  },
-  cardBody: {
-    color: colors.ink2,
-    ...typography.secondaryBody,
-  },
-  cardTitle: {
-    color: colors.foreground,
-    ...typography.cardTitle,
+  backButton: {
+    left: spacing.md,
+    padding: spacing.xs,
+    position: "absolute",
+    top: spacing.sm,
+    zIndex: 10,
   },
   content: {
-    gap: spacing.lg,
-    padding: spacing.xxl,
+    gap: 24,
+    paddingBottom: 36,
+    paddingHorizontal: 24,
+    paddingTop: 72,
   },
   disabled: {
-    opacity: 0.4,
+    opacity: 0.5,
+  },
+  divider: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 14,
+  },
+  dividerLine: {
+    backgroundColor: colors.hairline,
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  dividerText: {
+    color: colors.slate,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 13,
   },
   error: {
-    color: colors.danger,
-    ...typography.caption,
+    color: colors.cinnabarDeep,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  fieldText: {
+    color: colors.onyx,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 17,
+    lineHeight: 22,
+    padding: 0,
   },
   header: {
-    gap: spacing.sm,
+    gap: 10,
   },
   helper: {
-    color: colors.ink2,
-    ...typography.secondaryBody,
+    color: colors.basalt,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 13,
+    lineHeight: 18,
   },
   helperStrong: {
-    color: colors.foreground,
-    ...typography.monoMeta,
+    color: colors.basalt,
+    fontWeight: "700",
   },
-  oauthCard: {
-    gap: spacing.sm,
+  linkButton: {
+    alignItems: "center",
+    paddingVertical: 6,
   },
-  oauthPill: {
-    backgroundColor: colors.panel,
-    borderColor: colors.border,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  oauthRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  oauthText: {
-    color: colors.mutedForeground,
-    ...typography.secondaryBody,
+  linkText: {
+    color: colors.cinnabarDeep,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 13,
+    fontWeight: "500",
   },
   pressed: {
-    opacity: 0.8,
+    opacity: 0.85,
+  },
+  primaryButton: {
+    alignItems: "center",
+    borderRadius: 18,
+    justifyContent: "center",
+    paddingVertical: 15,
+  },
+  primaryButtonContent: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+  },
+  primaryButtonDisabled: {
+    backgroundColor: "rgba(226,223,217,0.82)",
+  },
+  primaryButtonEnabled: {
+    backgroundColor: colors.cinnabar,
+    elevation: 3,
+    shadowColor: colors.onyx,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+  },
+  primaryButtonLabel: {
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 17,
+    fontWeight: "600",
+  },
+  primaryButtonLabelDisabled: {
+    color: colors.slate,
+  },
+  primaryButtonLabelEnabled: {
+    color: "#FFFFFF",
   },
   screen: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.mist,
     flex: 1,
   },
-  secondaryButton: {
-    alignItems: "center",
-    borderColor: colors.border,
-    borderRadius: radii.button,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 44,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+  section: {
+    gap: 12,
   },
-  secondaryButtonText: {
-    color: colors.foreground,
-    ...typography.cardTitle,
+  socialButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(248,246,241,0.82)",
+    borderColor: colors.hairline,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "center",
+    paddingVertical: 15,
+  },
+  socialIconWrap: {
+    alignItems: "center",
+    width: 24,
+  },
+  socialLabel: {
+    color: colors.onyx,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 17,
+    fontWeight: "600",
+  },
+  subtitle: {
+    color: colors.basalt,
+    fontFamily: typography.sans.fontFamily,
+    fontSize: 17,
+    lineHeight: 23,
   },
   title: {
-    color: colors.foreground,
-    ...typography.sectionTitle,
+    color: colors.onyx,
+    fontFamily: typography.serif.fontFamily,
+    fontSize: 38,
+    fontWeight: "400",
+    letterSpacing: -0.5,
+    lineHeight: 44,
   },
 });

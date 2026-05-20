@@ -1,5 +1,6 @@
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Modal } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
@@ -10,8 +11,18 @@ import {
 } from "../../../../src/features/sessions/pinned-sessions";
 import { successTone, selectionTick } from "../../../../src/lib/haptics";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
+import { createSessionsCache } from "../../../../src/features/sessions/session-cache";
 import { createSessionsController } from "../../../../src/features/sessions/session-controller";
 import { SessionsListScreen } from "../../../../src/features/sessions/screens/SessionsListScreen";
+import { ZeroAgentReminderSheet } from "../../../../src/features/sessions/screens/ZeroAgentReminderSheet";
+import {
+  hasShownZeroAgentReminder,
+  markZeroAgentReminderShown,
+} from "../../../../src/features/sessions/zero-agent-reminder-store";
+import {
+  ShortcutsDrawer,
+  openShortcutTarget,
+} from "../../../../src/features/shortcuts/ShortcutsDrawer";
 import { supabase } from "../../../../src/lib/supabase/client";
 
 export default function SessionsIndexRoute() {
@@ -27,6 +38,7 @@ export default function SessionsIndexRoute() {
       createSessionsApi(supabase),
       activeTeamId,
       state.currentMemberActorId,
+      createSessionsCache(),
     );
     teamIdRef.current = activeTeamId;
   }
@@ -60,6 +72,9 @@ export default function SessionsIndexRoute() {
   const [actorGlyphById, setActorGlyphById] = useState<ReadonlyMap<string, string>>(
     new Map(),
   );
+  const [zeroAgentSheetOpen, setZeroAgentSheetOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const zeroAgentCheckedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeTeamId) return;
@@ -118,6 +133,29 @@ export default function SessionsIndexRoute() {
     };
   }, []);
 
+  // Show the zero-agent reminder sheet at most once per team. iOS uses
+  // SwiftData for "have I shown this?"; here it lives in AsyncStorage.
+  useEffect(() => {
+    if (!activeTeamId || hasAgents) return;
+    if (zeroAgentCheckedRef.current === activeTeamId) return;
+    zeroAgentCheckedRef.current = activeTeamId;
+    let cancelled = false;
+    void hasShownZeroAgentReminder(activeTeamId).then((shown) => {
+      if (cancelled || shown) return;
+      setZeroAgentSheetOpen(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTeamId, hasAgents]);
+
+  const dismissZeroAgentSheet = useCallback(() => {
+    setZeroAgentSheetOpen(false);
+    if (activeTeamId) {
+      void markZeroAgentReminderShown(activeTeamId);
+    }
+  }, [activeTeamId]);
+
   if (state.route !== "ready") {
     return <Redirect href={href ?? "/"} />;
   }
@@ -127,6 +165,7 @@ export default function SessionsIndexRoute() {
   }
 
   return (
+    <>
     <SessionsListScreen
       actorGlyphById={actorGlyphById}
       hasAgents={hasAgents}
@@ -190,9 +229,37 @@ export default function SessionsIndexRoute() {
         router.push(`/(app)/sessions/${sessionId}`);
       }}
       onShortcuts={() => {
-        router.push("/(app)/shortcuts");
+        setShortcutsOpen(true);
       }}
       state={listState}
     />
+    <Modal
+      animationType="slide"
+      onRequestClose={dismissZeroAgentSheet}
+      presentationStyle="pageSheet"
+      visible={zeroAgentSheetOpen}
+    >
+      <ZeroAgentReminderSheet
+        onAdd={() => {
+          dismissZeroAgentSheet();
+          router.push("/(app)/invite");
+        }}
+        onDismiss={dismissZeroAgentSheet}
+      />
+    </Modal>
+    <ShortcutsDrawer
+      isPresented={shortcutsOpen}
+      onClose={() => setShortcutsOpen(false)}
+      onOpenSettings={() => router.push("/(app)/settings")}
+      onOpenShortcut={(shortcut) => {
+        void openShortcutTarget(shortcut, { push: router.push });
+      }}
+      profileName={state.currentTeam?.name ?? "Signed out"}
+      profileSubtitle={
+        state.currentTeam ? `Team · ${state.currentTeam.name}` : null
+      }
+      teamId={activeTeamId}
+    />
+    </>
   );
 }

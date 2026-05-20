@@ -168,6 +168,11 @@ export function createOnboardingController(api: OnboardingApi) {
     dispatchIfCurrent(token, { type: "signedOut" });
   };
 
+  const resetPendingEmail = () => {
+    beginOperation();
+    dispatch({ type: "resetPendingEmail" });
+  };
+
   return {
     getState() {
       return state;
@@ -182,6 +187,7 @@ export function createOnboardingController(api: OnboardingApi) {
     signInAnonymously,
     requestOtp,
     verifyOtp,
+    resetPendingEmail,
     createTeam,
     signOut,
   };

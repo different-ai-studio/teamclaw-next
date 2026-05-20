@@ -40,6 +40,9 @@ export type OnboardingAction =
       email: string;
     }
   | {
+      type: "resetPendingEmail";
+    }
+  | {
       type: "bootstrapResolved";
       payload: BootstrapResult;
     }

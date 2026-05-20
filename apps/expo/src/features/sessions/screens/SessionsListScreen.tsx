@@ -105,11 +105,9 @@ function SessionGroupSection({
 }
 
 function HeaderBar({
-  count,
   onNewSession,
   onShortcuts,
 }: {
-  count: number;
   onNewSession: () => void;
   onShortcuts: () => void;
 }) {
@@ -126,7 +124,6 @@ function HeaderBar({
       </View>
       <View style={styles.titleRow}>
         <Text style={styles.title}>Sessions</Text>
-        {count > 0 ? <Text style={styles.titleCount}>· {count}</Text> : null}
       </View>
     </View>
   );
@@ -307,7 +304,6 @@ export function SessionsListScreen({
 
   const headerBar = (
     <HeaderBar
-      count={state.sessions.length}
       onNewSession={handleNewSession}
       onShortcuts={handleShortcuts}
     />
@@ -437,10 +433,10 @@ export function SessionsListScreen({
         <View style={styles.stateBlock}>
           {!hasAgents && onInviteAgent ? (
             <>
-              <Text style={styles.stateTitle}>Add your first agent</Text>
+              <Text style={styles.stateTitle}>Invite your first agent</Text>
               <Text style={styles.stateBody}>
-                This team doesn't have any agents yet. Invite one so you can
-                start a streaming session.
+                You don't have access to any agent in this team yet. Invite one
+                to start a session.
               </Text>
               <PrimaryButton
                 fullWidth={false}
@@ -450,11 +446,8 @@ export function SessionsListScreen({
             </>
           ) : (
             <>
-              <Text style={styles.stateTitle}>No sessions yet</Text>
-              <Text style={styles.stateBody}>
-                Open one to start the first thread with the team's agent.
-              </Text>
-              <PrimaryButton fullWidth={false} label="New session" onPress={handleNewSession} />
+              <Text style={styles.stateTitle}>No Sessions</Text>
+              <Text style={styles.stateBody}>Start a new session to begin</Text>
             </>
           )}
         </View>
