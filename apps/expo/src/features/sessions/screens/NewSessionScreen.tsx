@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -13,47 +14,110 @@ import {
   View,
 } from "react-native";
 
+import { isAgentActor, type Actor } from "../../actors/actor-types";
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
+import {
+  AgentConfigSheet,
+  type AgentConfigSelection,
+  type AgentType,
+} from "../components/AgentConfigSheet";
+import { MemberPickerSheet } from "./MemberPickerSheet";
+
+const STUB_WORKSPACES = [{ id: "default", path: "/" }];
+
+const AGENT_TYPE_LABELS: Record<AgentType, string> = {
+  claude: "Claude",
+  opencode: "OpenCode",
+  codex: "Codex",
+};
 
 export type NewSessionScreenProps = {
-  agents?: ReadonlyArray<{ actorId: string; displayName: string }>;
+  actors?: ReadonlyArray<Actor>;
+  currentMemberActorId?: string | null;
   errorMessage?: string | null;
   ideas?: ReadonlyArray<{ ideaId: string; displayTitle: string }>;
   isBusy?: boolean;
   onClose: () => void;
   onCreate: (payload: {
     firstMessage: string;
-    agentActorId: string | null;
+    collaboratorActorIds: string[];
+    primaryAgentActorId: string | null;
     ideaId: string | null;
   }) => Promise<void> | void;
-  selectedAgentActorId?: string | null;
   selectedIdeaId?: string | null;
 };
 
 export function NewSessionScreen({
-  agents = [],
+  actors = [],
+  currentMemberActorId = null,
   errorMessage = null,
   ideas = [],
   isBusy = false,
   onClose,
   onCreate,
-  selectedAgentActorId,
   selectedIdeaId = null,
 }: NewSessionScreenProps) {
   const [firstMessage, setFirstMessage] = useState("");
-  const [pickedAgentId, setPickedAgentId] = useState<string | null>(
-    selectedAgentActorId ?? agents[0]?.actorId ?? null,
-  );
+  const [collaboratorIds, setCollaboratorIds] = useState<string[]>([]);
+  const [primaryAgentId, setPrimaryAgentId] = useState<string | null>(null);
   const [pickedIdeaId, setPickedIdeaId] = useState<string | null>(selectedIdeaId);
-  const canSubmit = firstMessage.trim().length > 0 && !isBusy;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [agentConfigOpen, setAgentConfigOpen] = useState(false);
+  const [agentConfig, setAgentConfig] = useState<AgentConfigSelection | null>(null);
+
+  const actorById = useMemo(() => {
+    const map = new Map<string, Actor>();
+    for (const actor of actors) {
+      map.set(actor.actorId, actor);
+    }
+    return map;
+  }, [actors]);
+
+  const collaborators = useMemo(() => {
+    return collaboratorIds
+      .map((id) => actorById.get(id))
+      .filter((actor): actor is Actor => Boolean(actor));
+  }, [collaboratorIds, actorById]);
+
+  const pickedAgentIds = useMemo(
+    () => collaborators.filter(isAgentActor).map((actor) => actor.actorId),
+    [collaborators],
+  );
+
+  const effectivePrimaryAgentId = useMemo(() => {
+    if (pickedAgentIds.length === 0) return null;
+    if (primaryAgentId && pickedAgentIds.includes(primaryAgentId)) {
+      return primaryAgentId;
+    }
+    return pickedAgentIds[0];
+  }, [pickedAgentIds, primaryAgentId]);
+
+  const excludedFromPicker = useMemo(() => {
+    const set = new Set<string>();
+    if (currentMemberActorId) set.add(currentMemberActorId);
+    return set;
+  }, [currentMemberActorId]);
+
+  const removeCollaborator = useCallback((actorId: string) => {
+    setCollaboratorIds((prev) => prev.filter((id) => id !== actorId));
+    setPrimaryAgentId((prev) => (prev === actorId ? null : prev));
+  }, []);
+
+  const cyclePrimaryAgent = useCallback((actorId: string) => {
+    setPrimaryAgentId(actorId);
+  }, []);
+
+  const canSubmit =
+    firstMessage.trim().length > 0 && collaboratorIds.length > 0 && !isBusy;
 
   const handleStart = () => {
     if (!canSubmit) return;
     void onCreate({
       firstMessage: firstMessage.trim(),
-      agentActorId: pickedAgentId,
+      collaboratorActorIds: collaboratorIds,
+      primaryAgentActorId: effectivePrimaryAgentId,
       ideaId: pickedIdeaId,
     });
   };
@@ -112,54 +176,80 @@ export function NewSessionScreen({
         >
           <View style={styles.section}>
             <SectionEyebrow label="01 · COLLABORATORS" />
-            <View style={styles.paperCard}>
-              <Text style={styles.cardTitle}>Pick an agent</Text>
-              {agents.length === 0 ? (
-                <Text style={styles.cardBody}>
-                  No agents on this team yet — invite one from the Actors tab
-                  to engage the session.
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setPickerOpen(true)}
+              style={({ pressed }) => [
+                styles.paperCard,
+                styles.collaboratorsRow,
+                pressed ? styles.rowPressed : null,
+              ]}
+            >
+              <View style={styles.collaboratorsBody}>
+                {collaborators.length === 0 ? (
+                  <Text style={styles.collaboratorsPlaceholder}>Just you</Text>
+                ) : (
+                  <ScrollView
+                    contentContainerStyle={styles.chipRow}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                  >
+                    {collaborators.map((actor) => {
+                      const isAgent = isAgentActor(actor);
+                      const isPrimary =
+                        isAgent && actor.actorId === effectivePrimaryAgentId;
+                      return (
+                        <CollaboratorChip
+                          actor={actor}
+                          isPrimary={isPrimary}
+                          key={actor.actorId}
+                          onMakePrimary={
+                            isAgent ? () => cyclePrimaryAgent(actor.actorId) : undefined
+                          }
+                          onRemove={() => removeCollaborator(actor.actorId)}
+                        />
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
+              <Ionicons color={colors.slate} name="chevron-forward" size={14} />
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <SectionEyebrow label="02 · AGENT" />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setAgentConfigOpen(true)}
+              style={({ pressed }) => [
+                styles.paperCard,
+                styles.agentRow,
+                pressed ? styles.rowPressed : null,
+              ]}
+            >
+              <Text style={styles.cardTitle}>Configure agent</Text>
+              <View style={styles.agentValue}>
+                <Text numberOfLines={1} style={styles.cardBody}>
+                  {agentConfig
+                    ? `${AGENT_TYPE_LABELS[agentConfig.agentType]} · ${agentConfig.workspaceId}`
+                    : "Default"}
                 </Text>
-              ) : (
-                <View style={styles.agentRow}>
-                  {agents.map((agent) => {
-                    const selected = agent.actorId === pickedAgentId;
-                    return (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        key={agent.actorId}
-                        onPress={() => setPickedAgentId(agent.actorId)}
-                        style={[
-                          styles.agentChip,
-                          selected ? styles.agentChipSelected : null,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.agentChipText,
-                            selected ? styles.agentChipTextSelected : null,
-                          ]}
-                        >
-                          {agent.displayName}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
+                <Ionicons color={colors.slate} name="chevron-forward" size={14} />
+              </View>
+            </Pressable>
           </View>
 
           {ideas.length > 0 ? (
             <View style={styles.section}>
-              <SectionEyebrow label="02 · IDEA" />
+              <SectionEyebrow label="03 · IDEA" />
               <Pressable
                 accessibilityRole="button"
                 onPress={showIdeaPicker}
                 style={({ pressed }) => [
                   styles.paperCard,
                   styles.ideaRow,
-                  pressed ? styles.ideaRowPressed : null,
+                  pressed ? styles.rowPressed : null,
                 ]}
               >
                 <Text style={styles.cardTitle}>Link to idea</Text>
@@ -181,7 +271,7 @@ export function NewSessionScreen({
 
           <View style={styles.section}>
             <SectionEyebrow
-              label={ideas.length > 0 ? "03 · FIRST MESSAGE" : "02 · FIRST MESSAGE"}
+              label={ideas.length > 0 ? "04 · FIRST MESSAGE" : "03 · FIRST MESSAGE"}
             />
             <View style={styles.paperCard}>
               <TextInput
@@ -218,6 +308,102 @@ export function NewSessionScreen({
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setPickerOpen(false)}
+        presentationStyle="pageSheet"
+        visible={pickerOpen}
+      >
+        <MemberPickerSheet
+          actors={actors as Actor[]}
+          excludeActorIds={excludedFromPicker}
+          initialSelectedIds={collaboratorIds}
+          onCancel={() => setPickerOpen(false)}
+          onConfirm={(picked) => {
+            setCollaboratorIds(picked);
+            const stillPicked = primaryAgentId && picked.includes(primaryAgentId);
+            if (!stillPicked) setPrimaryAgentId(null);
+            setPickerOpen(false);
+          }}
+          primaryAgentId={effectivePrimaryAgentId}
+        />
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setAgentConfigOpen(false)}
+        presentationStyle="formSheet"
+        visible={agentConfigOpen}
+      >
+        <AgentConfigSheet
+          actorDisplayName="Agent"
+          defaultType={agentConfig?.agentType ?? "claude"}
+          onCancel={() => setAgentConfigOpen(false)}
+          onConfirm={(selection) => {
+            setAgentConfig(selection);
+            setAgentConfigOpen(false);
+          }}
+          workspaces={STUB_WORKSPACES}
+        />
+      </Modal>
+    </View>
+  );
+}
+
+type CollaboratorChipProps = {
+  actor: Actor;
+  isPrimary: boolean;
+  onMakePrimary?: () => void;
+  onRemove: () => void;
+};
+
+function CollaboratorChip({
+  actor,
+  isPrimary,
+  onMakePrimary,
+  onRemove,
+}: CollaboratorChipProps) {
+  return (
+    <View
+      style={[
+        styles.chip,
+        isPrimary ? styles.chipPrimary : null,
+      ]}
+    >
+      {onMakePrimary ? (
+        <Pressable
+          accessibilityLabel={isPrimary ? "Primary agent" : "Make primary agent"}
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onMakePrimary}
+          style={styles.chipStar}
+        >
+          <Ionicons
+            color={isPrimary ? colors.cinnabar : colors.slate}
+            name={isPrimary ? "star" : "star-outline"}
+            size={12}
+          />
+        </Pressable>
+      ) : null}
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.chipText,
+          isPrimary ? styles.chipTextPrimary : null,
+        ]}
+      >
+        {actor.displayName}
+      </Text>
+      <Pressable
+        accessibilityLabel={`Remove ${actor.displayName}`}
+        accessibilityRole="button"
+        hitSlop={6}
+        onPress={onRemove}
+        style={styles.chipClose}
+      >
+        <Ionicons color={colors.basalt} name="close" size={12} />
+      </Pressable>
     </View>
   );
 }
@@ -225,6 +411,18 @@ export function NewSessionScreen({
 const styles = StyleSheet.create({
   actionsBar: {
     padding: spacing.lg,
+  },
+  agentRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  agentValue: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+    maxWidth: 200,
   },
   body: {
     flex: 1,
@@ -240,6 +438,56 @@ const styles = StyleSheet.create({
   cardTitle: {
     color: colors.onyx,
     ...typography.cardTitle,
+  },
+  chip: {
+    alignItems: "center",
+    backgroundColor: colors.pebble,
+    borderRadius: radii.pill,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  chipClose: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 2,
+  },
+  chipPrimary: {
+    backgroundColor: "rgba(184,75,54,0.10)",
+  },
+  chipRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingVertical: 1,
+  },
+  chipStar: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingRight: 2,
+  },
+  chipText: {
+    color: colors.onyx,
+    ...typography.body,
+    fontSize: 13.5,
+    fontWeight: "600",
+  },
+  chipTextPrimary: {
+    color: colors.cinnabarDeep,
+  },
+  collaboratorsBody: {
+    flex: 1,
+  },
+  collaboratorsPlaceholder: {
+    color: colors.slate,
+    ...typography.body,
+  },
+  collaboratorsRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 48,
   },
   cta: {
     alignItems: "center",
@@ -282,44 +530,11 @@ const styles = StyleSheet.create({
     color: colors.onyx,
     ...typography.sectionTitle,
   },
-  input: {
-    color: colors.onyx,
-    minHeight: 96,
-    padding: 0,
-    textAlignVertical: "top",
-    ...typography.body,
-  },
-  agentChip: {
-    backgroundColor: colors.pebble,
-    borderRadius: radii.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  agentChipSelected: {
-    backgroundColor: colors.onyx,
-  },
-  agentChipText: {
-    color: colors.basalt,
-    ...typography.body,
-    fontWeight: "600",
-  },
-  agentChipTextSelected: {
-    color: colors.paper,
-  },
-  agentRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    paddingTop: 4,
-  },
   ideaRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.sm,
     justifyContent: "space-between",
-  },
-  ideaRowPressed: {
-    opacity: 0.8,
   },
   ideaValue: {
     alignItems: "center",
@@ -330,6 +545,13 @@ const styles = StyleSheet.create({
   ideaValueMuted: {
     color: colors.slate,
   },
+  input: {
+    color: colors.onyx,
+    minHeight: 96,
+    padding: 0,
+    textAlignVertical: "top",
+    ...typography.body,
+  },
   paperCard: {
     backgroundColor: colors.paper,
     borderColor: colors.hairline,
@@ -337,6 +559,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     padding: spacing.md,
+  },
+  rowPressed: {
+    opacity: 0.8,
   },
   screen: {
     backgroundColor: colors.mist,
