@@ -69,7 +69,11 @@ export default function SettingsRoute() {
       onUpgrade={() => router.push("/(app)/upgrade-account")}
       team={
         state.currentTeam
-          ? { name: state.currentTeam.name, role: state.currentTeam.role ?? null }
+          ? {
+              id: state.currentTeam.id,
+              name: state.currentTeam.name,
+              role: state.currentTeam.role ?? null,
+            }
           : null
       }
       userEmail={userEmail}

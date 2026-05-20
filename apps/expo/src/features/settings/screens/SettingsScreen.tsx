@@ -6,6 +6,7 @@ import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 
 export type SettingsTeam = {
+  id?: string;
   name: string;
   role: string | null;
 };
@@ -136,6 +137,17 @@ export function SettingsScreen({
                 <Text style={styles.rowLabel}>Role</Text>
                 <Text style={styles.rowValue}>{team.role ?? "member"}</Text>
               </View>
+              {team.id ? (
+                <>
+                  <Hairline />
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>ID</Text>
+                    <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+                      {team.id}
+                    </Text>
+                  </View>
+                </>
+              ) : null}
               {onOpenWorkspaces ? (
                 <>
                   <Hairline />
