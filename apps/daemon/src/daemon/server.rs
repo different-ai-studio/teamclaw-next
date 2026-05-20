@@ -41,7 +41,16 @@ fn resolve_requested_agent_type(
     requested: amux::AgentType,
 ) -> amux::AgentType {
     match requested {
-        amux::AgentType::Unknown | amux::AgentType::ClaudeCode => {
+        amux::AgentType::Unknown => {
+            // opencode is the preferred default; fall back to claude_code only when absent
+            if config.agents.opencode.is_some() {
+                amux::AgentType::Opencode
+            } else {
+                amux::AgentType::ClaudeCode
+            }
+        }
+        amux::AgentType::ClaudeCode => {
+            // explicit ClaudeCode request: reroute only when claude_code binary absent
             if config.agents.claude_code.is_none() && config.agents.opencode.is_some() {
                 amux::AgentType::Opencode
             } else {
@@ -1922,8 +1931,9 @@ impl DaemonServer {
 
         match cmd {
             amux::acp_command::Command::StartAgent(start) => {
-                let at = amux::AgentType::try_from(start.agent_type)
-                    .unwrap_or(amux::AgentType::ClaudeCode);
+                let requested = amux::AgentType::try_from(start.agent_type)
+                    .unwrap_or(amux::AgentType::Unknown);
+                let at = resolve_requested_agent_type(&self.config, requested);
 
                 info!(
                     workspace_id = %start.workspace_id,
@@ -3858,7 +3868,27 @@ mod runtime_backend_resolution_tests {
     }
 
     #[test]
-    fn keeps_unknown_request_on_claude_when_claude_backend_is_available() {
+    fn resolves_unknown_to_opencode_when_both_configured() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        // opencode is the preferred default; Unknown resolves to it even when
+        // claude_code is also configured.
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn explicit_claude_code_request_honoured_when_both_configured() {
         let mut cfg = base_config();
         cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
             binary: "claude".to_string(),
@@ -3870,7 +3900,7 @@ mod runtime_backend_resolution_tests {
         });
 
         assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
             amux::AgentType::ClaudeCode
         );
     }
