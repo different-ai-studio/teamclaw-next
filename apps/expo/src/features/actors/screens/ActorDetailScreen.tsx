@@ -11,6 +11,8 @@ import {
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
+import { StatusDot } from "../../../ui/atoms/StatusDot";
+import { formatRelativeTime } from "../../../lib/relative-time";
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import { isActorOnline, type Actor } from "../actor-types";
 
@@ -146,30 +148,37 @@ export function ActorDetailScreen({
                   style={styles.sectionEyebrow}
                 />
                 <View style={styles.card}>
-                  {recentSessions.map((row, index) => (
-                    <View key={row.sessionId}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={
-                          onSelectSession
-                            ? () => onSelectSession(row.sessionId)
-                            : undefined
-                        }
-                        style={({ pressed }) => [
-                          styles.detailRow,
-                          pressed && onSelectSession ? { opacity: 0.7 } : null,
-                        ]}
-                      >
-                        <Text numberOfLines={1} style={styles.detailLabel}>
-                          {row.title || "Untitled session"}
-                        </Text>
-                        <Text style={styles.detailValue}>
-                          {row.lastMessageAt ? new Date(row.lastMessageAt).toLocaleDateString() : "—"}
-                        </Text>
-                      </Pressable>
-                      {index < recentSessions.length - 1 ? <Hairline /> : null}
-                    </View>
-                  ))}
+                  {recentSessions.map((row, index) => {
+                    const ts = row.lastMessageAt
+                      ? Date.parse(row.lastMessageAt)
+                      : 0;
+                    const isFresh = ts > 0 && Date.now() - ts < 5 * 60 * 1000;
+                    return (
+                      <View key={row.sessionId}>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={
+                            onSelectSession
+                              ? () => onSelectSession(row.sessionId)
+                              : undefined
+                          }
+                          style={({ pressed }) => [
+                            styles.recentSessionRow,
+                            pressed && onSelectSession ? { opacity: 0.7 } : null,
+                          ]}
+                        >
+                          <StatusDot kind={isFresh ? "active" : "muted"} size={8} />
+                          <Text numberOfLines={1} style={styles.recentSessionTitle}>
+                            {row.title || "Untitled session"}
+                          </Text>
+                          <Text style={styles.recentSessionTime}>
+                            {row.lastMessageAt ? formatRelativeTime(row.lastMessageAt) : "—"}
+                          </Text>
+                        </Pressable>
+                        {index < recentSessions.length - 1 ? <Hairline /> : null}
+                      </View>
+                    );
+                  })}
                 </View>
               </View>
             ) : null}
@@ -271,6 +280,22 @@ const styles = StyleSheet.create({
   },
   detailValue: {
     color: colors.onyx,
+    ...typography.body,
+  },
+  recentSessionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  recentSessionTime: {
+    color: colors.slate,
+    ...typography.caption,
+  },
+  recentSessionTitle: {
+    color: colors.onyx,
+    flex: 1,
     ...typography.body,
   },
   headerBar: {
