@@ -46,6 +46,7 @@ import {
   filterSlashCommands,
   BUILT_IN_SLASH_COMMANDS,
   slashPrefix,
+  type SlashCommand,
 } from "../components/slash-commands";
 import { TodoDock } from "../components/TodoDock";
 import type {
@@ -96,6 +97,7 @@ type SessionDetailScreenProps = {
   senderAvatarGlyphs?: ReadonlyMap<string, string>;
   senderNames?: ReadonlyMap<string, string>;
   sendErrorMessage: string | null;
+  slashCommands?: readonly SlashCommand[];
   state: SessionDetailRenderableState;
   streamingAgentIds?: ReadonlySet<string>;
   todoText?: string;
@@ -290,6 +292,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     senderAvatarGlyphs,
     senderNames,
     sendErrorMessage,
+    slashCommands,
     streamingAgentIds,
     todoText,
     state,
@@ -589,7 +592,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       {(() => {
         const prefix = slashPrefix(composerText);
         if (prefix === null) return null;
-        const candidates = filterSlashCommands(BUILT_IN_SLASH_COMMANDS, prefix);
+        const candidates = filterSlashCommands(slashCommands ?? BUILT_IN_SLASH_COMMANDS, prefix);
         return (
           <SlashCommandsPopup
             candidates={candidates}

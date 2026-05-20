@@ -9,7 +9,10 @@ import { Redirect, Stack, useLocalSearchParams, useNavigation, useRouter } from 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Share, StyleSheet, Text, View } from "react-native";
 
-import { routeToHref, useOnboarding, useTeamMqtt } from "../../../_layout";
+import { routeToHref, useConnectedAgentsStore, useOnboarding, useTeamMqtt } from "../../../_layout";
+import { resolveSlashCommands } from "../../../../src/features/sessions/components/runtime-commands";
+import { BUILT_IN_SLASH_COMMANDS } from "../../../../src/features/sessions/components/slash-commands";
+import type { RuntimeInfo } from "../../../../src/features/actors/connected-agent-types";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
 import type { Actor } from "../../../../src/features/actors/actor-types";
 import {
@@ -257,6 +260,28 @@ export default function SessionDetailRoute() {
     controller?.getState ?? (() => fallbackDetailState),
     controller?.getState ?? (() => fallbackDetailState),
   );
+
+  const connectedAgentsStore = useConnectedAgentsStore();
+  const emptyAgentsState = useMemo(() => ({
+    agents: [],
+    runtimeInfoByAgentId: new Map() as ReadonlyMap<string, RuntimeInfo>,
+    isLoading: false,
+    errorMessage: null,
+  }), []);
+  const agentsState = useSyncExternalStore(
+    (listener) => connectedAgentsStore?.subscribe(listener) ?? (() => {}),
+    () => connectedAgentsStore?.getState() ?? emptyAgentsState,
+    () => connectedAgentsStore?.getState() ?? emptyAgentsState,
+  );
+
+  const dynamicSlashCommands = useMemo(() => {
+    const session = detailState.session;
+    if (!session) return [...BUILT_IN_SLASH_COMMANDS];
+    const runtimeInfos = session.participantActorIds
+      .map((id) => agentsState.runtimeInfoByAgentId.get(id))
+      .filter((r): r is RuntimeInfo => r != null);
+    return resolveSlashCommands(runtimeInfos, BUILT_IN_SLASH_COMMANDS);
+  }, [detailState.session, agentsState.runtimeInfoByAgentId]);
 
   const [teamActors, setTeamActors] = useState<Actor[]>([]);
   const [runtimeInfo, setRuntimeInfo] = useState<
@@ -610,6 +635,7 @@ export default function SessionDetailRoute() {
           senderAvatarGlyphs={senderAvatarGlyphs}
           senderNames={senderNames}
           sendErrorMessage={detailState.sendErrorMessage}
+          slashCommands={dynamicSlashCommands}
           state={detailState}
         />
       ) : null}
