@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -66,7 +67,18 @@ export default function ArchivedIdeasRoute() {
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            onRefresh={() => {
+              void refresh();
+            }}
+            refreshing={isLoading && ideas.length > 0}
+            tintColor={colors.slate}
+          />
+        }
+      >
         {isLoading ? (
           <View>
             <SkeletonRow avatar={false} />
