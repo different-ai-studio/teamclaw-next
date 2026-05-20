@@ -245,6 +245,21 @@ export function reduceSessionDetailRouteState(
   };
 }
 
+export type StreamingBuffer = {
+  messageId: string;
+  text: string;
+  kind: string;
+  startedAt: string;
+  senderActorId: string;
+};
+
+export type TimelineEvent =
+  | { kind: "messageCommitted"; message: SessionMessage }
+  | { kind: "streamingDelta";
+      agentId: string; messageId: string; messageKind: string;
+      deltaText: string; createdAt: string; }
+  | { kind: "streamingDone"; agentId: string; messageId: string };
+
 export function groupSessionsByRecency(sessions: SessionSummary[], now = new Date()): SessionGroup[] {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
