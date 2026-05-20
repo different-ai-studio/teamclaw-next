@@ -18,6 +18,7 @@ import {
 import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { UserMessageWithMentions } from "./UserMessageWithMentions";
+import { MessageStatusDot } from "./MessageStatusDot";
 import { ActorLabel } from "./ActorLabel";
 import { MessageTokenUsage } from "./MessageTokenUsage";
 import { MessageTokenSummary } from "./MessageTokenSummary";
@@ -253,9 +254,14 @@ export const ChatMessage = React.memo(function ChatMessage({
         </div>
       )}
 
-      {/* User message */}
+      {/* User message — Message itself is `flex justify-end`; render the
+          status dot as its first child so the dot sits to the LEFT of the
+          bubble while MessageContent's `max-w-[85%]` keeps the bubble
+          properly sized (wrapping the Message in another flex container
+          collapsed it to min-content and made each character wrap). */}
       {isUser && (
-        <Message from="user" basePath={basePath}>
+        <Message from="user" basePath={basePath} className="items-end gap-1.5">
+          <MessageStatusDot messageId={message.id} />
           <MessageContent>
             <UserMessageWithMentions content={textContent} basePath={basePath} />
           </MessageContent>

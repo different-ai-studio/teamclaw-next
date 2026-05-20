@@ -130,6 +130,11 @@
     "title": "聊天",
     "inputPlaceholder": "在此输入您的消息...",
     "send": "发送",
+    "sendStatus": {
+      "sending": "发送中…",
+      "delivered": "已送达",
+      "failedClickToRetry": "发送失败 — 点击重试"
+    },
     "clear": "清空聊天",
     "newChat": "新聊天",
     "backToActiveSession": "返回活跃会话",

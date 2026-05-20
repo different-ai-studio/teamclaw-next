@@ -9,6 +9,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 use super::registry::{TerminalError, TerminalStatus};
 use super::ring::RingBuffer;
+use super::shell_integration;
 
 const READER_BATCH_BYTES: usize = 4096;
 const READER_FLUSH_INTERVAL: Duration = Duration::from_millis(10);
@@ -58,9 +59,7 @@ impl PtyHandle {
             .map_err(|e| TerminalError::SpawnFailed(e.to_string()))?;
 
         let mut cmd = CommandBuilder::new(&args.shell);
-        if shell_takes_login_flag(&args.shell) {
-            cmd.arg("-l");
-        }
+        configure_shell_command(&mut cmd, &args.shell);
         cmd.cwd(&args.cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -196,12 +195,58 @@ impl PtyHandle {
     }
 }
 
-fn shell_takes_login_flag(shell: &str) -> bool {
+#[derive(Clone, Copy)]
+enum ShellKind {
+    Zsh,
+    Bash,
+    OtherLogin,
+    Other,
+}
+
+fn detect_shell_kind(shell: &str) -> ShellKind {
     let name = Path::new(shell)
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("");
-    matches!(name, "zsh" | "bash" | "sh" | "fish")
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    match name {
+        "zsh" => ShellKind::Zsh,
+        "bash" => ShellKind::Bash,
+        "sh" | "fish" => ShellKind::OtherLogin,
+        _ => ShellKind::Other,
+    }
+}
+
+/// Apply shell-specific args and env so OSC 633 shell integration is sourced
+/// when supported. Falls back to a plain login shell if integration can't be
+/// materialized.
+fn configure_shell_command(cmd: &mut CommandBuilder, shell: &str) {
+    match detect_shell_kind(shell) {
+        ShellKind::Zsh => {
+            cmd.arg("-l");
+            if let Some(dir) = shell_integration::ensure_dir() {
+                if let Ok(orig) = std::env::var("ZDOTDIR") {
+                    if !orig.is_empty() {
+                        cmd.env("TEAMCLAW_USER_ZDOTDIR", orig);
+                    }
+                }
+                cmd.env("ZDOTDIR", dir);
+            }
+        }
+        ShellKind::Bash => {
+            if let Some(dir) = shell_integration::ensure_dir() {
+                cmd.arg("--rcfile");
+                cmd.arg(shell_integration::bash_rc_path(dir));
+                cmd.arg("-i");
+            } else {
+                cmd.arg("-l");
+            }
+        }
+        ShellKind::OtherLogin => {
+            cmd.arg("-l");
+        }
+        ShellKind::Other => {}
+    }
 }
 
 #[cfg(test)]

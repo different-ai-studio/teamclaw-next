@@ -130,6 +130,11 @@
     "title": "Chat",
     "inputPlaceholder": "Type your message here...",
     "send": "Send",
+    "sendStatus": {
+      "sending": "Sending…",
+      "delivered": "Delivered",
+      "failedClickToRetry": "Failed — click to retry"
+    },
     "clear": "Clear Chat",
     "newChat": "New Chat",
     "backToActiveSession": "Back to active session",

@@ -86,6 +86,13 @@ async function resolveMentionActorIdsForSession(
 ): Promise<string[]> {
   if (engagedAgentId) return [engagedAgentId];
 
+  // Honor an explicit "Remove mention" — see matching guard in ChatPanel's
+  // copy of this resolver. Without it the sole-agent fallback below would
+  // silently re-engage the agent the user just unpinned.
+  if (useEngagedAgentStore.getState().wasExplicitlyCleared[sessionId]) {
+    return [];
+  }
+
   const { data: participants, error: participantError } = await supabase
     .from("session_participants")
     .select("actor_id")

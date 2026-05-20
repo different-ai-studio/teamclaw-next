@@ -19,6 +19,13 @@ For **UI / visual design** work, source-of-truth depends on the platform:
 3. Push and open a PR via `gh pr create`
 4. Do not merge or push to `main` directly, even for small fixes
 
+**Do not auto-create branches without approval.** If you (the AI) decide a new
+git branch is needed (`git checkout -b`, `git switch -c`, `git branch <name>`,
+etc.), you must stop and ask the user for explicit approval before creating it.
+Creating a worktree is acceptable without prior approval, but spinning up a
+fresh branch is not. When already on an appropriate feature branch, keep
+working on it instead of branching again.
+
 ## Project Overview
 
 TeamClaw is an AI Agent Desktop Platform built with Tauri 2.0 + React 19. Three-column layout chat/collaboration tool with local AI agents, team P2P/OSS sync, and multi-channel gateways.
