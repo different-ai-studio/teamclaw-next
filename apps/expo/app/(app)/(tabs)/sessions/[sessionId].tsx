@@ -246,11 +246,29 @@ export default function SessionDetailRoute() {
     return teamActors
       .filter((actor) => participantIds.has(actor.actorId))
       .slice(0, 3)
-      .map((actor) => ({
-        actorId: actor.actorId,
-        avatarUrl: actor.avatarUrl,
-        initial: actor.displayName.charAt(0).toUpperCase() || "?",
-      }));
+      .map((actor) => {
+        let initial = actor.displayName.charAt(0).toUpperCase() || "?";
+        if (actor.actorType === "agent") {
+          switch (actor.agentKind) {
+            case "claude":
+              initial = "CC";
+              break;
+            case "opencode":
+              initial = "OC";
+              break;
+            case "codex":
+              initial = "CX";
+              break;
+            default:
+              break;
+          }
+        }
+        return {
+          actorId: actor.actorId,
+          avatarUrl: actor.avatarUrl,
+          initial,
+        };
+      });
   }, [detailState.session, teamActors]);
 
   return (

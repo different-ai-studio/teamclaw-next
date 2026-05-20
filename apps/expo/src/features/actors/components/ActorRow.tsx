@@ -58,7 +58,14 @@ function deriveTag(actor: Actor, isMe: boolean): Tag | null {
 function deriveSubtitle(actor: Actor, isMe: boolean): string {
   if (isMe) return "you";
   if (actor.actorType === "member") return actor.role ?? "member";
-  if (actor.actorType === "agent") return "Agent";
+  if (actor.actorType === "agent") {
+    if (actor.agentKind) {
+      const kind =
+        actor.agentKind.charAt(0).toUpperCase() + actor.agentKind.slice(1);
+      return `Agent · ${kind}`;
+    }
+    return "Agent";
+  }
   return "External";
 }
 
@@ -67,11 +74,25 @@ export type ActorRowProps = {
   isMe?: boolean;
 };
 
+function agentKindGlyph(actor: Actor): string | null {
+  if (actor.actorType !== "agent") return null;
+  switch (actor.agentKind) {
+    case "claude":
+      return "CC";
+    case "opencode":
+      return "OC";
+    case "codex":
+      return "CX";
+    default:
+      return null;
+  }
+}
+
 export function ActorRow({ actor, isMe = false }: ActorRowProps) {
   const avatar = deriveAvatar(actor, isMe);
   const tag = deriveTag(actor, isMe);
   const subtitle = deriveSubtitle(actor, isMe);
-  const initials = avatarInitials(actor.displayName);
+  const initials = agentKindGlyph(actor) ?? avatarInitials(actor.displayName);
   const online = isActorOnline(actor);
   const subtitleStyle = isMe || actor.actorType !== "member" ? styles.subtitleMono : styles.subtitle;
 
