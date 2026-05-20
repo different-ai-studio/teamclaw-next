@@ -23,30 +23,31 @@ describe("slashPrefix", () => {
 
 describe("filterSlashCommands", () => {
   it("returns commands whose name starts with the prefix, sorted", async () => {
-    const { filterSlashCommands, SLASH_COMMANDS } = await import(
+    const { filterSlashCommands, BUILT_IN_SLASH_COMMANDS } = await import(
       "../features/sessions/components/slash-commands"
     );
-    expect(filterSlashCommands(SLASH_COMMANDS, "c").map((c) => c.name)).toEqual([
+    expect(filterSlashCommands(BUILT_IN_SLASH_COMMANDS, "c").map((c) => c.name)).toEqual([
       "clear",
       "compact",
+      "cost",
     ]);
   });
 
   it("is case-insensitive on the prefix", async () => {
-    const { filterSlashCommands, SLASH_COMMANDS } = await import(
+    const { filterSlashCommands, BUILT_IN_SLASH_COMMANDS } = await import(
       "../features/sessions/components/slash-commands"
     );
-    expect(filterSlashCommands(SLASH_COMMANDS, "AS").map((c) => c.name)).toEqual([
-      "ask",
+    expect(filterSlashCommands(BUILT_IN_SLASH_COMMANDS, "MO").map((c) => c.name)).toEqual([
+      "model",
     ]);
   });
 
   it("returns the full set when prefix is empty", async () => {
-    const { filterSlashCommands, SLASH_COMMANDS } = await import(
+    const { filterSlashCommands, BUILT_IN_SLASH_COMMANDS } = await import(
       "../features/sessions/components/slash-commands"
     );
-    expect(filterSlashCommands(SLASH_COMMANDS, "").length).toBe(
-      [...SLASH_COMMANDS].length,
+    expect(filterSlashCommands(BUILT_IN_SLASH_COMMANDS, "").length).toBe(
+      BUILT_IN_SLASH_COMMANDS.length,
     );
   });
 });

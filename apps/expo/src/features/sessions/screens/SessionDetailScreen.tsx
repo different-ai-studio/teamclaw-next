@@ -44,7 +44,7 @@ import {
 import { SlashCommandsPopup } from "../components/SlashCommandsPopup";
 import {
   filterSlashCommands,
-  SLASH_COMMANDS,
+  BUILT_IN_SLASH_COMMANDS,
   slashPrefix,
 } from "../components/slash-commands";
 import { TodoDock } from "../components/TodoDock";
@@ -589,21 +589,11 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       {(() => {
         const prefix = slashPrefix(composerText);
         if (prefix === null) return null;
-        const candidates = filterSlashCommands(SLASH_COMMANDS, prefix);
+        const candidates = filterSlashCommands(BUILT_IN_SLASH_COMMANDS, prefix);
         return (
           <SlashCommandsPopup
             candidates={candidates}
             onSelect={(command) => {
-              if (command.action === "clear") {
-                onChangeComposerText("");
-                return;
-              }
-              if (command.action === "compact") {
-                onChangeComposerText(
-                  "/compact Please summarize the conversation so far and replace earlier messages with a recap.",
-                );
-                return;
-              }
               onChangeComposerText(`/${command.name} `);
             }}
           />
