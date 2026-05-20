@@ -96,7 +96,10 @@ export function AvatarStack({
 const styles = StyleSheet.create({
   cell: {
     alignItems: "center",
-    borderColor: colors.paper,
+    // iOS spec uses a Mist ring (1.5pt) so the avatar stack reads as
+    // overlapping chips against the Mist-tinted list background. Using
+    // Paper here punched a near-white halo through the list.
+    borderColor: colors.mist,
     borderWidth: dotSize.avatarRingWidth,
     justifyContent: "center",
   },
