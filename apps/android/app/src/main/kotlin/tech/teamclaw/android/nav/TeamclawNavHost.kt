@@ -14,6 +14,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import tech.teamclaw.android.core.auth.ActorStore
+import tech.teamclaw.android.core.auth.IdeaStore
 import tech.teamclaw.android.core.auth.OnboardingCoordinator
 import tech.teamclaw.android.core.auth.OnboardingRoute
 import tech.teamclaw.android.core.auth.SessionDetailStore
@@ -21,13 +22,15 @@ import tech.teamclaw.android.core.auth.SessionListStore
 import tech.teamclaw.android.core.auth.WorkspaceStore
 import tech.teamclaw.android.core.auth.apple.AppleSignInHandler
 import tech.teamclaw.android.core.auth.google.GoogleSignInHandler
+import tech.teamclaw.android.core.model.ActorRecord
+import tech.teamclaw.android.core.model.IdeaRecord
+import tech.teamclaw.android.core.model.InviteKind
 import tech.teamclaw.android.core.model.SessionRecord
 import tech.teamclaw.android.core.model.TeamSummary
-import tech.teamclaw.android.core.model.ActorRecord
-import tech.teamclaw.android.core.model.InviteKind
 import tech.teamclaw.android.feature.onboarding.ActorDetailScreen
 import tech.teamclaw.android.feature.onboarding.ChooseAuthScreen
 import tech.teamclaw.android.feature.onboarding.CreateTeamScreen
+import tech.teamclaw.android.feature.onboarding.IdeaDetailScreen
 import tech.teamclaw.android.feature.onboarding.InviteJoinSheet
 import tech.teamclaw.android.feature.onboarding.InviteMemberSheet
 import tech.teamclaw.android.feature.onboarding.LobsterSplashScreen
@@ -48,6 +51,7 @@ fun TeamclawNavHost(
     sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore,
     actorStoreFactory: (teamId: String) -> ActorStore,
     workspaceStoreFactory: (teamId: String) -> WorkspaceStore,
+    ideaStoreFactory: (teamId: String) -> IdeaStore,
     versionName: String,
     versionCode: Int,
     onStartVoiceInput: ((onResult: (String) -> Unit) -> Unit)? = null,
@@ -102,6 +106,7 @@ fun TeamclawNavHost(
                     sessionDetailStoreFactory = sessionDetailStoreFactory,
                     actorStoreFactory = actorStoreFactory,
                     workspaceStoreFactory = workspaceStoreFactory,
+                    ideaStoreFactory = ideaStoreFactory,
                     versionName = versionName,
                     versionCode = versionCode,
                     onStartVoiceInput = onStartVoiceInput,
@@ -121,6 +126,7 @@ private fun ReadyFlow(
     sessionDetailStoreFactory: (teamId: String, sessionId: String, currentActorId: String) -> SessionDetailStore,
     actorStoreFactory: (teamId: String) -> ActorStore,
     workspaceStoreFactory: (teamId: String) -> WorkspaceStore,
+    ideaStoreFactory: (teamId: String) -> IdeaStore,
     versionName: String,
     versionCode: Int,
     onStartVoiceInput: ((onResult: (String) -> Unit) -> Unit)? = null,
@@ -129,6 +135,7 @@ private fun ReadyFlow(
     val teamName = team.name
     var openSession by remember { mutableStateOf<SessionRecord?>(null) }
     var openActor by remember { mutableStateOf<ActorRecord?>(null) }
+    var openIdea by remember { mutableStateOf<IdeaRecord?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showUpgrade by remember { mutableStateOf(false) }
     var showInviteMember by remember { mutableStateOf(false) }
@@ -140,10 +147,14 @@ private fun ReadyFlow(
     val actorStore = remember(teamId) { actorStoreFactory(teamId) }
     val actorState by actorStore.state.collectAsStateWithLifecycle()
     val workspaceStore = remember(teamId) { workspaceStoreFactory(teamId) }
+    val workspaceState by workspaceStore.state.collectAsStateWithLifecycle()
+    val ideaStore = remember(teamId) { ideaStoreFactory(teamId) }
+    val ideaState by ideaStore.state.collectAsStateWithLifecycle()
     LaunchedEffect(teamId) {
         listStore.reload()
         actorStore.reload()
         workspaceStore.reload()
+        ideaStore.reload()
     }
     LaunchedEffect(listState.justCreatedSessionId) {
         val id = listState.justCreatedSessionId ?: return@LaunchedEffect
@@ -153,6 +164,7 @@ private fun ReadyFlow(
 
     val active = openSession
     val activeActor = openActor
+    val activeIdea = openIdea
     when {
         showSettings -> {
             SettingsScreen(
@@ -186,6 +198,37 @@ private fun ReadyFlow(
                     },
                 )
             }
+        }
+        activeIdea != null -> {
+            IdeaDetailScreen(
+                idea = activeIdea,
+                workspaces = workspaceState.workspaces,
+                isSaving = ideaState.isLoading,
+                errorMessage = ideaState.errorMessage,
+                onBack = { openIdea = null },
+                onSave = { title, description, status, workspaceId ->
+                    coordinator.launch {
+                        val ok = ideaStore.update(
+                            ideaId = activeIdea.id,
+                            title = title,
+                            description = description,
+                            status = status,
+                            workspaceId = workspaceId,
+                        )
+                        if (ok) {
+                            // Re-bind to the fresh record so the screen
+                            // reflects the saved state.
+                            openIdea = ideaStore.idea(activeIdea.id)
+                        }
+                    }
+                },
+                onArchiveToggle = { archived ->
+                    coordinator.launch {
+                        val ok = ideaStore.setArchived(activeIdea.id, archived)
+                        if (ok) openIdea = null
+                    }
+                },
+            )
         }
         activeActor != null -> {
             ActorDetailScreen(
@@ -255,9 +298,11 @@ private fun ReadyFlow(
                 sessionListStore = listStore,
                 actorStore = actorStore,
                 workspaceStore = workspaceStore,
+                ideaStore = ideaStore,
                 onOpenSession = { openSession = it },
                 onOpenSettings = { showSettings = true },
                 onOpenActorDetail = { openActor = it },
+                onOpenIdea = { openIdea = it },
                 onInviteMember = { showInviteMember = true },
                 onSignOut = { coordinator.launch { coordinator.signOut() } },
             )

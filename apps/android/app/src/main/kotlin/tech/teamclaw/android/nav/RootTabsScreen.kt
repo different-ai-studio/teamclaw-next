@@ -25,15 +25,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.teamclaw.android.core.auth.ActorStore
+import tech.teamclaw.android.core.auth.IdeaStore
 import tech.teamclaw.android.core.auth.OnboardingCoordinator
 import tech.teamclaw.android.core.auth.SessionListStore
 import tech.teamclaw.android.core.auth.WorkspaceStore
 import tech.teamclaw.android.core.design.Hai
 import tech.teamclaw.android.core.model.ActorRecord
+import tech.teamclaw.android.core.model.IdeaRecord
 import tech.teamclaw.android.core.model.SessionRecord
 import tech.teamclaw.android.core.model.TeamSummary
-import tech.teamclaw.android.feature.onboarding.IdeasTabPlaceholder
+import tech.teamclaw.android.feature.onboarding.IdeaListScreen
 import tech.teamclaw.android.feature.onboarding.MembersScreen
+import tech.teamclaw.android.feature.onboarding.NewIdeaSheet
 import tech.teamclaw.android.feature.onboarding.NewSessionSheet
 import tech.teamclaw.android.feature.onboarding.SearchTabPlaceholder
 import tech.teamclaw.android.feature.onboarding.SessionListScreen
@@ -55,21 +58,25 @@ enum class RootTab { Sessions, Ideas, Actors, Search }
 fun RootTabsScreen(
     coordinator: OnboardingCoordinator,
     team: TeamSummary,
-    @Suppress("UNUSED_PARAMETER") currentActorId: String,
+    currentActorId: String,
     sessionListStore: SessionListStore,
     actorStore: ActorStore,
     workspaceStore: WorkspaceStore,
+    ideaStore: IdeaStore,
     onOpenSession: (SessionRecord) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenActorDetail: (ActorRecord) -> Unit,
+    onOpenIdea: (IdeaRecord) -> Unit,
     onInviteMember: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(RootTab.Sessions) }
     var showNewSession by remember { mutableStateOf(false) }
+    var showNewIdea by remember { mutableStateOf(false) }
     val listState by sessionListStore.state.collectAsStateWithLifecycle()
     val actorState by actorStore.state.collectAsStateWithLifecycle()
     val workspaceState by workspaceStore.state.collectAsStateWithLifecycle()
+    val ideaState by ideaStore.state.collectAsStateWithLifecycle()
 
     Column(modifier = Modifier.fillMaxSize().background(Hai.Mist)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -85,7 +92,24 @@ fun RootTabsScreen(
                     onNewSession = { showNewSession = true },
                     onSignOut = onSignOut,
                 )
-                RootTab.Ideas -> IdeasTabPlaceholder()
+                RootTab.Ideas -> IdeaListScreen(
+                    ideas = ideaState.ideas,
+                    archivedCount = ideaState.archivedIdeas.size,
+                    actors = actorState.actors,
+                    currentActorId = currentActorId,
+                    isLoading = ideaState.isLoading,
+                    errorMessage = ideaState.errorMessage,
+                    onRefresh = { coordinator.launch { ideaStore.reload() } },
+                    onOpenIdea = onOpenIdea,
+                    onArchive = { idea ->
+                        coordinator.launch { ideaStore.setArchived(idea.id, archived = true) }
+                    },
+                    // Phase 1 ships archive-toggle on the detail screen and a
+                    // tap-to-archive on each row; the dedicated archived-list
+                    // view lands in a follow-up — see PARITY.md Phase 1.
+                    onOpenArchived = { /* TODO(parity): archived list screen */ },
+                    onNewIdea = { showNewIdea = true },
+                )
                 RootTab.Actors -> MembersScreen(
                     teamName = team.name,
                     actors = actorState.actors,
@@ -118,6 +142,21 @@ fun RootTabsScreen(
                         agentActorId = input.agentActorId,
                         firstMessage = input.firstMessage,
                     )
+                }
+            },
+        )
+    }
+
+    if (showNewIdea) {
+        NewIdeaSheet(
+            workspaces = workspaceState.workspaces,
+            isSubmitting = ideaState.isLoading,
+            errorMessage = ideaState.errorMessage,
+            onDismiss = { showNewIdea = false },
+            onSubmit = { title, description, workspaceId ->
+                coordinator.launch {
+                    val ok = ideaStore.create(title, description, workspaceId)
+                    if (ok) showNewIdea = false
                 }
             },
         )

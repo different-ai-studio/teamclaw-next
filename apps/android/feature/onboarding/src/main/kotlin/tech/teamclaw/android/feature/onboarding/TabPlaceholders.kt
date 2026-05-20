@@ -21,26 +21,11 @@ import androidx.compose.ui.unit.sp
 import tech.teamclaw.android.core.design.Hai
 
 /**
- * Phase 0 placeholders for tabs that don't yet have a real screen.
- *
- *   Ideas — `apps/ios/Packages/AMUXUI/Sources/AMUXUI/Collab/IdeaListView.swift`
- *   Search — `apps/ios/Packages/AMUXUI/Sources/AMUXUI/Root/SearchTab.swift`
- *
- * See `apps/android/PARITY.md` Phase 1 (Ideas) and Phase 7 (Search) for the
- * planned implementation. The empty-state copy mirrors the iOS
+ * Placeholder used by the Search tab until Phase 7 lands. The Ideas
+ * placeholder has been replaced by [IdeaListScreen] (Phase 1 — PR for
+ * the Ideas feature). The empty-state copy mirrors the iOS
  * `ContentUnavailableView` voice.
  */
-
-@Composable
-fun IdeasTabPlaceholder(modifier: Modifier = Modifier) {
-    TabPlaceholderContent(
-        glyph = "✦",
-        title = "Ideas",
-        subtitle = "Capture decisions and threads. Coming soon on Android.",
-        testTag = "ideas.placeholder",
-        modifier = modifier,
-    )
-}
 
 @Composable
 fun SearchTabPlaceholder(modifier: Modifier = Modifier) {

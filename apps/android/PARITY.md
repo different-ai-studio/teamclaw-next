@@ -19,9 +19,9 @@ This file is the running gap list and phased plan. Update it as work lands.
 
 | Feature                                | iOS source                                      | Android | Notes |
 | -------------------------------------- | ----------------------------------------------- | :-----: | --- |
-| Bottom 4-tab nav (Sessions/Ideas/Actors/Search) | `AMUXUI/Root/RootTabView.swift`        |   🟡    | scaffold landed; Ideas/Search are placeholders |
+| Bottom 4-tab nav (Sessions/Ideas/Actors/Search) | `AMUXUI/Root/RootTabView.swift`        |   🟡    | scaffold landed (Phase 0); Search still placeholder |
 | Tab 1 — Sessions                       | `AMUXUI/SessionList/*`                          |   🟡    | list + detail exist; missing Hai paper styling, participant cluster, agent badge, daemon banner |
-| Tab 2 — Ideas                          | `AMUXUI/Collab/*`                               |   🟥    | placeholder only |
+| Tab 2 — Ideas                          | `AMUXUI/Collab/*`                               |   🟡    | Phase 1 — list + new sheet + detail editor; archived-list view + cache sync are follow-ups |
 | Tab 3 — Actors (Members)               | `AMUXUI/Members/*`                              |   🟡    | basic list + invite; missing Humans/Agents segmented filter, "YOU" badge |
 | Tab 4 — Search                         | `AMUXCore/Search/SearchMatcher.swift`           |   🟥    | placeholder only |
 | Shortcuts (in Sessions drawer)         | `AMUXUI/Shortcuts/*`                            |   🟥    | not implemented (lives inside Sessions tab on iOS) |
@@ -66,11 +66,11 @@ This file is the running gap list and phased plan. Update it as work lands.
 
 | Feature                  | iOS source                            | Android | Notes |
 | ------------------------ | ------------------------------------- | :-----: | --- |
-| Idea list + search       | `Collab/IdeaListView.swift`           |   🟥    | not implemented |
-| Idea detail (inline edit)| `Collab/IdeaDetailView.swift`         |   🟥    | not implemented |
-| New idea Hai sheet       | `Collab/IdeaSheet.swift`              |   🟥    | not implemented |
-| Archived ideas           | `Collab/ArchivedIdeasView.swift`      |   🟥    | not implemented |
-| Idea store + repo        | `Ideas/IdeaStore.swift` + repo + sync |   🟥    | not implemented |
+| Idea list                | `Collab/IdeaListView.swift`           |    ✅   | Phase 1 — `IdeaListScreen` with All/Mine/Open/Done filter + tap-to-archive |
+| Idea detail (inline edit)| `Collab/IdeaDetailView.swift`         |    ✅   | Phase 1 — `IdeaDetailScreen` (title + description + status + workspace + archive toggle) |
+| New idea Hai sheet       | `Collab/IdeaSheet.swift`              |    ✅   | Phase 1 — `NewIdeaSheet` with Hai paper card layout |
+| Archived ideas list view | `Collab/ArchivedIdeasView.swift`      |   🟥    | follow-up — counter wired into list footer; dedicated archived screen pending |
+| Idea store + repo        | `Ideas/IdeaStore.swift` + repo + sync |   🟡    | Phase 1 — `IdeaStore` + `SupabaseIdeaRepository`; MQTT live-sync (`IdeaCacheSynchronizer`) is a follow-up |
 
 ## 5. Members
 
