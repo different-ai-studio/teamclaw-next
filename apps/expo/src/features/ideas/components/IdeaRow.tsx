@@ -69,9 +69,17 @@ export function IdeaRow({ creatorName, idea }: IdeaRowProps) {
       ) : null}
 
       {creatorName ? (
-        <Text numberOfLines={1} style={styles.creatorFooter}>
-          {creatorName}
-        </Text>
+        <View style={styles.creatorFooter}>
+          <Text style={styles.creatorFooterPrefix}>Created by</Text>
+          <View style={styles.creatorAvatar}>
+            <Text style={styles.creatorAvatarText}>
+              {creatorName.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <Text numberOfLines={1} style={styles.creatorFooterName}>
+            {creatorName}
+          </Text>
+        </View>
       ) : null}
     </View>
   );
@@ -119,8 +127,33 @@ const styles = StyleSheet.create({
     ...typography.monoMeta,
   },
   creatorFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingTop: 2,
+  },
+  creatorFooterPrefix: {
     color: colors.slate,
     ...typography.caption,
+  },
+  creatorFooterName: {
+    color: colors.onyx,
+    flexShrink: 1,
+    ...typography.caption,
+    fontWeight: "600",
+  },
+  creatorAvatar: {
+    alignItems: "center",
+    backgroundColor: hai.basalt,
+    borderRadius: 9,
+    height: 18,
+    justifyContent: "center",
+    width: 18,
+  },
+  creatorAvatarText: {
+    color: hai.paper,
+    fontSize: 9,
+    fontWeight: "700",
   },
 });
 
