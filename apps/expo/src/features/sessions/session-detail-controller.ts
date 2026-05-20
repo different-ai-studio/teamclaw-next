@@ -10,7 +10,11 @@ import {
 import { decodeLiveEvent, sessionIdFromTopic } from "../../lib/teamclaw/live-events";
 import type { ExpoMqttAdapter } from "../../lib/mqtt/expo-mqtt";
 import { uuidV4 } from "../../lib/uuid";
+import { setOutboxStatus, syncOutboxFromDao } from "./outbox-store";
+import type { OutboxDao } from "./outbox-db";
+import type { OutboxSender } from "./outbox-sender";
 import { takePendingAttachments } from "./pending-attachments";
+import type { SessionDetailCache } from "./session-detail-cache";
 import {
   buildSessionDetailState,
   type SessionDetailState,
@@ -53,6 +57,8 @@ type SessionDetailControllerDeps = {
   mqttUrl: string | null;
   sessionId: string;
   teamId: string;
+  cache?: SessionDetailCache;
+  outbox?: { sender: OutboxSender; dao: OutboxDao };
 };
 
 type SessionDetailController = {
@@ -270,6 +276,7 @@ export function createSessionDetailController(
           messages: mergedMessages,
           status: nextStatusForMessages(state.session, mergedMessages, state.status),
         });
+        void deps.cache?.saveMessages(deps.sessionId, mergedMessages);
 
         // Live-update the read marker so the Sessions list stays clean
         // while the detail screen is open. We pass the senderActorId
@@ -344,6 +351,25 @@ export function createSessionDetailController(
         sendErrorMessage: null,
       });
 
+      deps.outbox?.sender.start();
+
+      // Hydrate from disk first so the user sees the timeline immediately on
+      // cold start. The network results below overlay on top once they land.
+      if (deps.cache) {
+        void deps.cache.load(deps.sessionId).then((cached) => {
+          if (disposed || currentToken !== loadToken || !cached) return;
+          if (state.session) return; // network beat the disk read
+          const detailState = buildSessionDetailState(cached.session, cached.messages);
+          setState({
+            ...state,
+            status: detailState.status,
+            session: cached.session,
+            messages: detailState.messages,
+            errorMessage: null,
+          });
+        });
+      }
+
       const [sessionResult, messagesResult] = await Promise.allSettled([
         deps.api.getSession(deps.teamId, deps.sessionId),
         deps.api.listMessages(deps.teamId, deps.sessionId),
@@ -354,11 +380,21 @@ export function createSessionDetailController(
       }
 
       if (sessionResult.status === "rejected") {
-        setState({
-          ...state,
-          status: "error",
-          errorMessage: toErrorMessage(sessionResult.reason, "加载会话失败。"),
-        });
+        // If cached rows already paint, keep them and surface the network
+        // error inline rather than blanking the screen.
+        if (state.session) {
+          setState({
+            ...state,
+            status: "error",
+            errorMessage: toErrorMessage(sessionResult.reason, "加载会话失败。"),
+          });
+        } else {
+          setState({
+            ...state,
+            status: "error",
+            errorMessage: toErrorMessage(sessionResult.reason, "加载会话失败。"),
+          });
+        }
         return;
       }
 
@@ -376,7 +412,7 @@ export function createSessionDetailController(
           ...state,
           status: "error",
           session,
-          messages: [],
+          messages: state.messages,
           errorMessage: toErrorMessage(messagesResult.reason, "加载消息失败。"),
         });
         await connectRealtime(session, currentToken);
@@ -390,6 +426,12 @@ export function createSessionDetailController(
         session,
         messages: detailState.messages,
         errorMessage: null,
+      });
+
+      // Persist authoritative network state for the next cold start.
+      void deps.cache?.save(deps.sessionId, {
+        session,
+        messages: detailState.messages,
       });
 
       await connectRealtime(session, currentToken);
@@ -432,6 +474,7 @@ export function createSessionDetailController(
         sendErrorMessage: null,
       });
 
+      let outboxMessageId: string | null = null;
       try {
         const auth = await deps.getAuth();
         if (!auth.accessToken) {
@@ -442,6 +485,8 @@ export function createSessionDetailController(
         const createdAt = new Date().toISOString();
         const createdAtSeconds = BigInt(Math.floor(Date.parse(createdAt) / 1000));
         const messageId = uuidV4();
+        outboxMessageId = messageId;
+        setOutboxStatus(messageId, "sending");
 
         const pendingAttachments = takePendingAttachments(deps.teamId, deps.sessionId);
         const attachmentsPayload = pendingAttachments.length > 0
@@ -490,45 +535,68 @@ export function createSessionDetailController(
           status: nextStatusForMessages(session, mergedMessages, state.status),
         });
 
-        const protoMessage = create(MessageSchema, {
-          messageId,
-          sessionId: deps.sessionId,
-          senderActorId: actorId,
-          kind: MessageKind.TEXT,
-          content,
-          createdAt: createdAtSeconds,
-        });
-        const sessionMessage = create(SessionMessageEnvelopeSchema, {
-          message: protoMessage,
-          mentionActorIds: [],
-        });
-        const envelope = create(LiveEventEnvelopeSchema, {
-          eventId: uuidV4(),
-          eventType: "message.created",
-          sessionId: deps.sessionId,
-          actorId,
-          sentAt: createdAtSeconds,
-          body: toBinary(SessionMessageEnvelopeSchema, sessionMessage),
-        });
-
-        try {
-          await deps.mqtt.publish(
-            `amux/${deps.teamId}/session/${deps.sessionId}/live`,
-            toBinary(LiveEventEnvelopeSchema, envelope),
-            false,
-          );
-        } catch {
-          setState({
-            ...state,
-            messages: mergedMessages,
-            status: nextStatusForMessages(session, mergedMessages, state.status),
-            composerText: "",
-            isSending: false,
-            sendErrorMessage: "消息已写入，但实时分发失败，请稍后刷新确认。",
+        if (deps.outbox) {
+          await deps.outbox.sender.enqueue({
+            messageId,
+            sessionId: deps.sessionId,
+            teamId: deps.teamId,
+            senderActorId: actorId,
+            content,
+            mentionActorIds: [],
+            replyToMessageId: replyTo,
+            attachments: pendingAttachments.map((row) => ({
+              url: row.publicUrl || row.path,
+              path: row.path,
+              mime: row.mime,
+              size: row.size,
+            })),
+            createdAt: Date.parse(createdAt),
           });
-          return;
+          await syncOutboxFromDao(deps.outbox.dao, [messageId]);
+        } else {
+          // Fallback path (existing inline publish)
+          const protoMessage = create(MessageSchema, {
+            messageId,
+            sessionId: deps.sessionId,
+            senderActorId: actorId,
+            kind: MessageKind.TEXT,
+            content,
+            createdAt: createdAtSeconds,
+          });
+          const sessionMessage = create(SessionMessageEnvelopeSchema, {
+            message: protoMessage,
+            mentionActorIds: [],
+          });
+          const envelope = create(LiveEventEnvelopeSchema, {
+            eventId: uuidV4(),
+            eventType: "message.created",
+            sessionId: deps.sessionId,
+            actorId,
+            sentAt: createdAtSeconds,
+            body: toBinary(SessionMessageEnvelopeSchema, sessionMessage),
+          });
+
+          try {
+            await deps.mqtt.publish(
+              `amux/${deps.teamId}/session/${deps.sessionId}/live`,
+              toBinary(LiveEventEnvelopeSchema, envelope),
+              false,
+            );
+          } catch {
+            setOutboxStatus(messageId, "failed");
+            setState({
+              ...state,
+              messages: mergedMessages,
+              status: nextStatusForMessages(session, mergedMessages, state.status),
+              composerText: "",
+              isSending: false,
+              sendErrorMessage: "消息已写入，但实时分发失败，请稍后刷新确认。",
+            });
+            return;
+          }
         }
 
+        setOutboxStatus(messageId, "sent");
         setState({
           ...state,
           messages: mergedMessages,
@@ -538,6 +606,9 @@ export function createSessionDetailController(
           sendErrorMessage: null,
         });
       } catch (error) {
+        if (outboxMessageId) {
+          setOutboxStatus(outboxMessageId, "failed");
+        }
         setState({
           ...state,
           isSending: false,
@@ -547,6 +618,7 @@ export function createSessionDetailController(
     },
     async dispose() {
       disposed = true;
+      deps.outbox?.sender.stop();
       await disconnectRealtime();
       setState({
         ...state,
