@@ -333,6 +333,7 @@ export function createSessionDetailController(
     async load() {
       loadToken += 1;
       const currentToken = loadToken;
+      timeline = emptyTimelineState();
 
       setState({
         ...state,
