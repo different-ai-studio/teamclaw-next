@@ -143,6 +143,15 @@ export interface Message {
     overflow?: boolean;
     completed?: boolean;
   };
+  /** Outbox delivery status for outgoing messages (user-authored). Drives the
+   * leading status dot in the bubble (circle / check / error). `undefined`
+   * means "already delivered" — historical messages from Supabase have no
+   * outbox row and shouldn't show any indicator. */
+  sendStatus?: "pending" | "inFlight" | "delivered" | "failed";
+  /** Mirrors `OutboxRow.attempt_count` — surfaced for click-to-retry UX. */
+  sendAttempt?: number;
+  /** Mirrors `OutboxRow.last_error` — shown in tooltip on failed bubble. */
+  sendError?: string;
 }
 
 export interface PlanEntry {

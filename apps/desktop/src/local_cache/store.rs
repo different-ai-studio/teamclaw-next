@@ -85,6 +85,34 @@ pub struct MessageRow {
     pub updated_at: String,
     pub deleted_at: Option<String>,
     pub synced_at: String,
+    /// Serialized `MessagePart[]` (thinking / tool_call / text). Populated when
+    /// streaming finalize merges runtime events into the persisted message so
+    /// that reloading the session restores the full conversation, not just
+    /// the AGENT_REPLY text body. NULL for plain messages with no merged parts.
+    pub parts_json: Option<String>,
+}
+
+/// Outbox row — mirrors iOS `OutboxMessage` SwiftData model. Tracks one
+/// pending/in-flight send through Supabase + MQTT with exponential backoff
+/// retry. `message_id` is the same UUID used in `Message.id` so optimistic
+/// UI bubbles can match the live echo by id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboxRow {
+    pub message_id: String,
+    pub team_id: String,
+    pub session_id: String,
+    pub sender_actor_id: String,
+    pub content: String,
+    pub mention_actor_ids_json: Option<String>,
+    pub attachment_urls_json: Option<String>,
+    pub state: String,
+    pub attempt_count: i64,
+    pub last_attempt_at: Option<String>,
+    pub next_attempt_at: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,15 +321,59 @@ impl LocalCacheStore {
                 created_at          TEXT NOT NULL,
                 updated_at          TEXT NOT NULL,
                 deleted_at          TEXT,
-                synced_at           TEXT NOT NULL
+                synced_at           TEXT NOT NULL,
+                parts_json          TEXT
             )",
             (),
         )
         .await
         .map_err(|e| format!("Failed to create message table: {}", e))?;
 
+        // Additive migration for users on older schema. Idempotent; ignores
+        // "duplicate column" errors from a previously-applied add.
+        conn.execute("ALTER TABLE message ADD COLUMN parts_json TEXT", ())
+            .await
+            .ok();
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_message_session ON message(session_id, created_at)",
+            (),
+        )
+        .await
+        .ok();
+
+        // ── outbox ────────────────────────────────────────────────────────
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS outbox (
+                message_id              TEXT PRIMARY KEY,
+                team_id                 TEXT NOT NULL,
+                session_id              TEXT NOT NULL,
+                sender_actor_id         TEXT NOT NULL,
+                content                 TEXT NOT NULL,
+                mention_actor_ids_json  TEXT,
+                attachment_urls_json    TEXT,
+                state                   TEXT NOT NULL,
+                attempt_count           INTEGER NOT NULL DEFAULT 0,
+                last_attempt_at         TEXT,
+                next_attempt_at         TEXT,
+                last_error              TEXT,
+                created_at              TEXT NOT NULL,
+                updated_at              TEXT NOT NULL
+            )",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to create outbox table: {}", e))?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(state, next_attempt_at)",
+            (),
+        )
+        .await
+        .ok();
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_outbox_session ON outbox(session_id, created_at)",
             (),
         )
         .await
@@ -789,8 +861,8 @@ impl LocalCacheStore {
                 "INSERT INTO message
                     (id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id,
                      kind, content, metadata_json, model, mentions_json, origin,
-                     created_at, updated_at, deleted_at, synced_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+                     created_at, updated_at, deleted_at, synced_at, parts_json)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
                  ON CONFLICT(id) DO UPDATE SET
                     team_id             = excluded.team_id,
                     session_id          = excluded.session_id,
@@ -806,7 +878,8 @@ impl LocalCacheStore {
                     created_at          = excluded.created_at,
                     updated_at          = excluded.updated_at,
                     deleted_at          = excluded.deleted_at,
-                    synced_at           = excluded.synced_at
+                    synced_at           = excluded.synced_at,
+                    parts_json          = COALESCE(excluded.parts_json, message.parts_json)
                  WHERE excluded.updated_at >= message.updated_at",
                 params![
                     r.id.clone(),
@@ -824,12 +897,32 @@ impl LocalCacheStore {
                     r.created_at.clone(),
                     r.updated_at.clone(),
                     opt_val(&r.deleted_at),
-                    r.synced_at.clone()
+                    r.synced_at.clone(),
+                    opt_val(&r.parts_json)
                 ],
             )
             .await
             .map_err(|e| format!("message_upsert_batch: {}", e))?;
         }
+        Ok(())
+    }
+
+    /// Merge parts_json into an existing message row. Used when the streaming
+    /// pipeline finalizes after the persisted AGENT_REPLY has already landed —
+    /// we need to attach thinking/tool_call parts without bumping updated_at
+    /// (so subsequent Supabase syncs with the same updated_at still apply).
+    pub async fn message_set_parts(
+        &self,
+        message_id: &str,
+        parts_json: &str,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE message SET parts_json = ?1 WHERE id = ?2",
+            params![parts_json.to_string(), message_id.to_string()],
+        )
+        .await
+        .map_err(|e| format!("message_set_parts: {}", e))?;
         Ok(())
     }
 
@@ -842,12 +935,12 @@ impl LocalCacheStore {
         let sql = if include_deleted {
             "SELECT id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id,
                     kind, content, metadata_json, model, mentions_json, origin,
-                    created_at, updated_at, deleted_at, synced_at
+                    created_at, updated_at, deleted_at, synced_at, parts_json
              FROM message WHERE session_id = ?1 ORDER BY created_at ASC"
         } else {
             "SELECT id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id,
                     kind, content, metadata_json, model, mentions_json, origin,
-                    created_at, updated_at, deleted_at, synced_at
+                    created_at, updated_at, deleted_at, synced_at, parts_json
              FROM message WHERE session_id = ?1 AND deleted_at IS NULL ORDER BY created_at ASC"
         };
         let mut rows = conn
@@ -877,6 +970,7 @@ impl LocalCacheStore {
                 updated_at: row.get::<String>(13).unwrap_or_default(),
                 deleted_at: row.get::<String>(14).ok().filter(|s| !s.is_empty()),
                 synced_at: row.get::<String>(15).unwrap_or_default(),
+                parts_json: row.get::<String>(16).ok().filter(|s| !s.is_empty()),
             });
         }
         Ok(result)
@@ -1257,6 +1351,103 @@ impl LocalCacheStore {
         Ok(())
     }
 
+    // ─── outbox ───────────────────────────────────────────────────────────
+
+    /// Upsert an outbox row. Used both for initial enqueue (state="pending",
+    /// attempt_count=0) and for state transitions after a send attempt
+    /// (state, attempt_count, last_attempt_at, next_attempt_at, last_error).
+    pub async fn outbox_upsert(&self, row: &OutboxRow) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO outbox
+                (message_id, team_id, session_id, sender_actor_id, content,
+                 mention_actor_ids_json, attachment_urls_json,
+                 state, attempt_count, last_attempt_at, next_attempt_at, last_error,
+                 created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+             ON CONFLICT(message_id) DO UPDATE SET
+                state            = excluded.state,
+                attempt_count    = excluded.attempt_count,
+                last_attempt_at  = excluded.last_attempt_at,
+                next_attempt_at  = excluded.next_attempt_at,
+                last_error       = excluded.last_error,
+                updated_at       = excluded.updated_at",
+            params![
+                row.message_id.clone(),
+                row.team_id.clone(),
+                row.session_id.clone(),
+                row.sender_actor_id.clone(),
+                row.content.clone(),
+                opt_val(&row.mention_actor_ids_json),
+                opt_val(&row.attachment_urls_json),
+                row.state.clone(),
+                row.attempt_count,
+                opt_val(&row.last_attempt_at),
+                opt_val(&row.next_attempt_at),
+                opt_val(&row.last_error),
+                row.created_at.clone(),
+                row.updated_at.clone()
+            ],
+        )
+        .await
+        .map_err(|e| format!("outbox_upsert: {}", e))?;
+        Ok(())
+    }
+
+    /// Delete an outbox row by message_id. Called after `delivered` rows have
+    /// been observed by the UI (or by a periodic GC pass).
+    pub async fn outbox_delete(&self, message_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM outbox WHERE message_id = ?1",
+            params![message_id.to_string()],
+        )
+        .await
+        .map_err(|e| format!("outbox_delete: {}", e))?;
+        Ok(())
+    }
+
+    /// Load all outbox rows ordered by created_at ASC. Frontend uses this on
+    /// boot to rehydrate the outbox store and resume retry loop.
+    pub async fn outbox_list_all(&self) -> Result<Vec<OutboxRow>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT message_id, team_id, session_id, sender_actor_id, content,
+                        mention_actor_ids_json, attachment_urls_json,
+                        state, attempt_count, last_attempt_at, next_attempt_at, last_error,
+                        created_at, updated_at
+                 FROM outbox ORDER BY created_at ASC",
+                (),
+            )
+            .await
+            .map_err(|e| format!("outbox_list_all: {}", e))?;
+        let mut result = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("outbox_list_all row: {}", e))?
+        {
+            result.push(OutboxRow {
+                message_id: row.get::<String>(0).unwrap_or_default(),
+                team_id: row.get::<String>(1).unwrap_or_default(),
+                session_id: row.get::<String>(2).unwrap_or_default(),
+                sender_actor_id: row.get::<String>(3).unwrap_or_default(),
+                content: row.get::<String>(4).unwrap_or_default(),
+                mention_actor_ids_json: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
+                attachment_urls_json: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
+                state: row.get::<String>(7).unwrap_or_default(),
+                attempt_count: row.get::<i64>(8).unwrap_or(0),
+                last_attempt_at: row.get::<String>(9).ok().filter(|s| !s.is_empty()),
+                next_attempt_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
+                last_error: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(12).unwrap_or_default(),
+                updated_at: row.get::<String>(13).unwrap_or_default(),
+            });
+        }
+        Ok(result)
+    }
+
     // ─── sync watermark ───────────────────────────────────────────────────
 
     pub async fn watermark_get(
@@ -1337,6 +1528,13 @@ impl LocalCacheStore {
         )
         .await
         .map_err(|e| format!("clear_team message: {}", e))?;
+
+        conn.execute(
+            "DELETE FROM outbox WHERE team_id = ?1",
+            params![team_id.to_string()],
+        )
+        .await
+        .map_err(|e| format!("clear_team outbox: {}", e))?;
 
         conn.execute(
             "DELETE FROM idea WHERE team_id = ?1",

@@ -17,6 +17,12 @@ export interface TerminalTab {
   status: "running" | "exited";
   exitCode?: number;
   exitedAt?: number;
+  /** Last command line the user pressed Enter on (from OSC 633 ; E). */
+  lastCommand?: string;
+  /** Exit code of the most recently finished command (from OSC 633 ; D). */
+  lastCommandExit?: number;
+  /** Wall-clock timestamp when the last command finished. */
+  lastCommandAt?: number;
 }
 
 interface OpenOpts {
@@ -41,6 +47,9 @@ interface TerminalActions {
   setPanelHeight(workspaceId: string, px: number): void;
   hydrateForWorkspace(workspaceId: string): Promise<void>;
   markExited(id: TerminalTabId, code: number | null): void;
+  updateCwd(id: TerminalTabId, cwd: string): void;
+  recordCommandStart(id: TerminalTabId, command: string): void;
+  recordCommandFinish(id: TerminalTabId, exitCode: number | null): void;
 }
 
 const HEIGHT_KEY = (ws: string) => `teamclaw.terminal.height.${ws}`;
@@ -195,7 +204,50 @@ export const useTerminalStore = create<TerminalState & TerminalActions>((set, ge
       return { tabsByWorkspace: out };
     });
   },
+
+  updateCwd(id, cwd) {
+    set(state => patchTab(state, id, t => (t.cwd === cwd ? t : { ...t, cwd })));
+  },
+
+  recordCommandStart(id, command) {
+    const trimmed = command.trim();
+    if (!trimmed) return;
+    set(state =>
+      patchTab(state, id, t => ({ ...t, lastCommand: trimmed, lastCommandExit: undefined })),
+    );
+  },
+
+  recordCommandFinish(id, exitCode) {
+    set(state =>
+      patchTab(state, id, t => ({
+        ...t,
+        lastCommandExit: exitCode ?? undefined,
+        lastCommandAt: Date.now(),
+      })),
+    );
+  },
 }));
+
+function patchTab(
+  state: TerminalState,
+  id: TerminalTabId,
+  patch: (tab: TerminalTab) => TerminalTab,
+): Partial<TerminalState> {
+  let touched = false;
+  const out: Record<string, TerminalTab[]> = {};
+  for (const [ws, tabs] of Object.entries(state.tabsByWorkspace)) {
+    let tabsChanged = false;
+    const nextTabs = tabs.map(t => {
+      if (t.id !== id) return t;
+      const next = patch(t);
+      if (next !== t) tabsChanged = true;
+      return next;
+    });
+    out[ws] = tabsChanged ? nextTabs : tabs;
+    if (tabsChanged) touched = true;
+  }
+  return touched ? { tabsByWorkspace: out } : {};
+}
 
 function deriveTitle(shell: string): string {
   const base = shell.split(/[\\/]/).pop() ?? "shell";
