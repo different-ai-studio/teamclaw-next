@@ -724,7 +724,13 @@ async fn run_acp_session(
         let mut c = tokio::process::Command::new("npx");
         c.arg("--yes").arg("@zed-industries/claude-agent-acp");
         c
-    } else if agent_type == amux::AgentType::Opencode && args.is_empty() {
+    } else if (agent_type == amux::AgentType::Opencode
+        || agent_type == amux::AgentType::Codex)
+        && args.is_empty()
+    {
+        // Both opencode and codex CLIs expose ACP via an `acp` subcommand.
+        // Operators can override this default by supplying `default_flags`
+        // in daemon.toml's [agents.opencode] / [agents.codex] section.
         let mut c = tokio::process::Command::new(&binary);
         c.arg("acp");
         c
