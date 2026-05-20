@@ -21,8 +21,9 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, "node_modules"),
 ];
 
-config.resolver.disableHierarchicalLookup = true;
-
+// Alias react / react-native so transitive deps resolve to the same copy
+// apps/expo declares, regardless of which dep graph Metro walks. Keep
+// hierarchical lookup ON so hoisted workspace packages still resolve.
 config.resolver.extraNodeModules = {
   react: path.resolve(projectRoot, "node_modules/react"),
   "react-native": path.resolve(projectRoot, "node_modules/react-native"),
