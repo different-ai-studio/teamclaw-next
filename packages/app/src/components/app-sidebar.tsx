@@ -129,7 +129,7 @@ export function SidebarSecondarySessionActions({
 
   /** Match sidebar surface (#fff light); border uses `secondary` (same fill as New Chat) so edge reads as that gray, not page `background`. */
   const workspaceToolbarSquareBtn =
-    "h-9 w-9 shrink-0 rounded-lg border border-secondary !bg-sidebar p-0 font-normal shadow-none disabled:opacity-40 dark:!bg-sidebar"
+    "h-7 w-7 shrink-0 rounded-lg border border-secondary !bg-sidebar p-0 font-normal shadow-none disabled:opacity-40 dark:!bg-sidebar"
 
   const searchCronRow = showSearchAndCron ? (
     <>
@@ -183,12 +183,12 @@ export function SidebarSecondarySessionActions({
         <div className={cn("flex w-full items-stretch gap-1.5", className)}>
           <Button
             variant="secondary"
-            className="h-9 min-w-0 flex-1 justify-center gap-2 rounded-lg px-3 font-normal shadow-none disabled:opacity-40"
+            className="h-7 min-w-0 flex-1 justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal shadow-none disabled:opacity-40"
             onClick={handleNewSession}
             disabled={!hasWorkspace}
             title={hasWorkspace ? newChatLabel : t('sidebar.selectWorkspaceFirst', 'Please select a workspace first')}
           >
-            <SquarePen className="h-4 w-4 shrink-0" />
+            <SquarePen className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{newChatLabel}</span>
           </Button>
           {showSearchAndCron && (
@@ -203,7 +203,7 @@ export function SidebarSecondarySessionActions({
                 onClick={() => includeSearchDialog && setSearchOpen(true)}
                 title={hasWorkspace ? t('sidebar.searchWithShortcut', 'Search (⌘K)') : t('sidebar.selectWorkspaceFirst', 'Please select a workspace first')}
               >
-                <Search className="h-4 w-4" />
+                <Search className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="outline"
@@ -218,7 +218,7 @@ export function SidebarSecondarySessionActions({
                 onClick={toggleShowCronSessions}
                 title={showCronSessions ? t('sidebar.showAllSessions', 'Show all sessions') : t('sidebar.showCronSessions', 'Show scheduled sessions')}
               >
-                <AnimatedClock className="h-4 w-4" animate={showCronSessions} />
+                <AnimatedClock className="h-3.5 w-3.5" animate={showCronSessions} />
               </Button>
             </>
           )}
