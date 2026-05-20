@@ -26,6 +26,7 @@ import type { SessionGroup, SessionsListState } from "../session-types";
 
 type SessionsListScreenProps = {
   onArchiveBatch?: (sessionIds: string[]) => Promise<void>;
+  actorGlyphById?: ReadonlyMap<string, string>;
   hasAgents?: boolean;
   onInviteAgent?: () => void;
   onLoad: () => void;
@@ -42,6 +43,7 @@ type SessionsListScreenProps = {
 };
 
 function SessionGroupSection({
+  actorGlyphById,
   group,
   onLongPressSession,
   onSelectSession,
@@ -50,6 +52,7 @@ function SessionGroupSection({
   selectionMode,
   selection,
 }: {
+  actorGlyphById?: ReadonlyMap<string, string>;
   group: SessionGroup;
   onLongPressSession?: (id: string) => void;
   onSelectSession: (sessionId: string) => void;
@@ -78,6 +81,7 @@ function SessionGroupSection({
               ) : null}
               <View style={{ flex: 1 }}>
                 <SessionRow
+                  actorGlyphById={actorGlyphById}
                   isActive={selectedSessionId === session.sessionId}
                   isPinned={pinnedSessionIds?.has(session.sessionId) ?? false}
                   onLongPress={
@@ -129,6 +133,7 @@ function HeaderBar({
 }
 
 export function SessionsListScreen({
+  actorGlyphById,
   hasAgents = true,
   onArchiveBatch,
   onInviteAgent,
@@ -402,6 +407,7 @@ export function SessionsListScreen({
         <View style={styles.groups}>
           {filteredGroups.map((group) => (
             <SessionGroupSection
+              actorGlyphById={actorGlyphById}
               group={group}
               key={group.label}
               onLongPressSession={(id) => {

@@ -9,6 +9,8 @@ import { colors, spacing, typography } from "../../../ui/theme";
 import type { SessionSummary } from "../session-types";
 
 type SessionRowProps = {
+  /** Per-actor glyph override (e.g. "CC"/"OC"/"CX" for known agent kinds). */
+  actorGlyphById?: ReadonlyMap<string, string>;
   isActive?: boolean;
   isPinned?: boolean;
   session: SessionSummary;
@@ -28,14 +30,19 @@ function fallbackGlyph(session: SessionSummary): string {
   return ch.toUpperCase() || "·";
 }
 
-function buildAvatars(session: SessionSummary): AvatarEntry[] {
+function buildAvatars(
+  session: SessionSummary,
+  actorGlyphById?: ReadonlyMap<string, string>,
+): AvatarEntry[] {
   const ids = session.participantActorIds.length
     ? session.participantActorIds.slice(0, 3)
     : [session.createdBy].filter(Boolean);
 
   return ids.map((id) => {
     const palette = actorAvatarColor(id);
-    const initials = id.replace(/[^A-Za-z0-9一-龥]/g, "").slice(0, 2) || "·";
+    const override = actorGlyphById?.get(id);
+    const initials =
+      override ?? (id.replace(/[^A-Za-z0-9一-龥]/g, "").slice(0, 2) || "·");
     return {
       id,
       initials,
@@ -46,6 +53,7 @@ function buildAvatars(session: SessionSummary): AvatarEntry[] {
 }
 
 export function SessionRow({
+  actorGlyphById,
   isActive = false,
   isPinned = false,
   session,
@@ -98,7 +106,7 @@ export function SessionRow({
           {session.participantCount} {session.participantCount === 1 ? "actor" : "actors"}
         </Text>
         <View style={styles.metaSpacer} />
-        <AvatarStack avatars={buildAvatars(session)} max={3} size={18} />
+        <AvatarStack avatars={buildAvatars(session, actorGlyphById)} max={3} size={18} />
       </View>
     </Pressable>
   );

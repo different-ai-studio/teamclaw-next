@@ -26,6 +26,11 @@ type MembershipRow = {
   role: string | null;
 };
 
+type AgentRow = {
+  id: string;
+  agent_kind: string | null;
+};
+
 function throwIfError(error: SupabaseError): void {
   if (error?.message) {
     throw new Error(error.message);
@@ -44,7 +49,11 @@ function toActorType(value: string | null): ActorType {
   }
 }
 
-function toActor(row: ActorRow, role: string | null): Actor {
+function toActor(
+  row: ActorRow,
+  role: string | null,
+  agentKind: string | null,
+): Actor {
   return {
     actorId: row.id,
     teamId: row.team_id ?? "",
@@ -53,6 +62,7 @@ function toActor(row: ActorRow, role: string | null): Actor {
     role,
     lastActiveAt: row.last_active_at ?? null,
     avatarUrl: row.avatar_url ?? null,
+    agentKind,
   };
 }
 
@@ -72,6 +82,9 @@ export function createActorsApi(client: ActorsClient) {
       const memberIds = rows
         .filter((row) => row.actor_type === "member")
         .map((row) => row.id);
+      const agentIds = rows
+        .filter((row) => row.actor_type === "agent")
+        .map((row) => row.id);
 
       let rolesByMemberId = new Map<string, string>();
       if (memberIds.length > 0) {
@@ -86,7 +99,30 @@ export function createActorsApi(client: ActorsClient) {
         );
       }
 
-      return rows.map((row) => toActor(row, rolesByMemberId.get(row.id) ?? null));
+      let agentKindById = new Map<string, string>();
+      if (agentIds.length > 0) {
+        const agentResult = (await client
+          .from("agents")
+          .select("id, agent_kind")
+          .in("id", agentIds)) as QueryResult<AgentRow[] | null>;
+        if (!agentResult.error) {
+          agentKindById = new Map(
+            (agentResult.data ?? [])
+              .filter((row): row is AgentRow & { agent_kind: string } => Boolean(row.agent_kind))
+              .map((row) => [row.id, row.agent_kind]),
+          );
+        }
+        // Agents are visibility-filtered (actor_directory hides personal
+        // agents); errors are best-effort and shouldn't block the actor list.
+      }
+
+      return rows.map((row) =>
+        toActor(
+          row,
+          rolesByMemberId.get(row.id) ?? null,
+          agentKindById.get(row.id) ?? null,
+        ),
+      );
     },
   };
 }

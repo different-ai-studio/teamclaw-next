@@ -57,6 +57,9 @@ export default function SessionsIndexRoute() {
     new Set(),
   );
   const [hasAgents, setHasAgents] = useState(true);
+  const [actorGlyphById, setActorGlyphById] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
 
   useEffect(() => {
     if (!activeTeamId) return;
@@ -66,6 +69,33 @@ export default function SessionsIndexRoute() {
       .then((rows) => {
         if (cancelled) return;
         setHasAgents(rows.some((row) => row.actorType === "agent"));
+        const glyphs = new Map<string, string>();
+        for (const row of rows) {
+          if (row.actorType === "agent") {
+            switch (row.agentKind) {
+              case "claude":
+                glyphs.set(row.actorId, "CC");
+                break;
+              case "opencode":
+                glyphs.set(row.actorId, "OC");
+                break;
+              case "codex":
+                glyphs.set(row.actorId, "CX");
+                break;
+              default:
+                if (row.displayName.length > 0) {
+                  glyphs.set(
+                    row.actorId,
+                    row.displayName.charAt(0).toUpperCase() || "·",
+                  );
+                }
+                break;
+            }
+          } else if (row.displayName.length > 0) {
+            glyphs.set(row.actorId, row.displayName.charAt(0).toUpperCase());
+          }
+        }
+        setActorGlyphById(glyphs);
       })
       .catch(() => {
         // Keep optimistic-true so we don't flash the empty-agents banner on transient errors.
@@ -98,6 +128,7 @@ export default function SessionsIndexRoute() {
 
   return (
     <SessionsListScreen
+      actorGlyphById={actorGlyphById}
       hasAgents={hasAgents}
       onInviteAgent={() => router.push("/(app)/invite")}
       onArchiveBatch={async (sessionIds) => {

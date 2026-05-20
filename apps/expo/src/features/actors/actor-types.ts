@@ -8,6 +8,8 @@ export type Actor = {
   role: string | null;
   lastActiveAt: string | null;
   avatarUrl: string | null;
+  /** "claude" | "opencode" | "codex" | … — only set when actorType === "agent". */
+  agentKind: string | null;
 };
 
 export type ActorsListState = {
