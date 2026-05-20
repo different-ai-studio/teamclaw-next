@@ -106,7 +106,7 @@ export function SessionRow({
           {session.participantCount} {session.participantCount === 1 ? "actor" : "actors"}
         </Text>
         <View style={styles.metaSpacer} />
-        <AvatarStack avatars={buildAvatars(session, actorGlyphById)} max={3} size={18} />
+        <AvatarStack avatars={buildAvatars(session, actorGlyphById)} max={3} size={22} />
       </View>
     </Pressable>
   );
