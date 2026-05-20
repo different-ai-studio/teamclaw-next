@@ -26,3 +26,10 @@ export type AgentAuthorizedHuman = {
   grantedByActorId: string | null;
   lastActiveAt: string | null;
 };
+
+export function isAgentOnline(agent: Pick<ConnectedAgent, "lastActiveAt">, now = Date.now()): boolean {
+  if (!agent.lastActiveAt) return false;
+  const t = Date.parse(agent.lastActiveAt);
+  if (!Number.isFinite(t)) return false;
+  return now - t < 120_000;
+}
