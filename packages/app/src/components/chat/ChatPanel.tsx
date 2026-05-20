@@ -7,6 +7,7 @@ import { cn, isTauri } from "@/lib/utils";
 import { SKILLS_CHANGED_EVENT } from "@/hooks/useAppInit";
 import { useSessionStore } from "@/stores/session";
 import { useSessionMessageStore } from "@/stores/session-message-store";
+import { useOutboxStore } from "@/stores/outbox-store";
 import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useStreamingStore } from "@/stores/streaming";
 import { useVoiceInputStore } from "@/stores/voice-input";
@@ -324,8 +325,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // Existing sessions can be reopened after a reload with no in-memory
   // engaged agents selected. If there is exactly one agent participant,
   // route messages to it automatically so sends still trigger a reply.
+  // Runs at most once per sessionId per app lifetime so that explicitly
+  // removing a mention ("Remove mention" in the agent pill dropdown) isn't
+  // immediately undone by this effect re-firing on engagedAgents.length 1→0.
+  const autoEngagedSessionsRef = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
-    if (!activeSessionId || engagedAgents.length > 0) return;
+    if (!activeSessionId) return;
+    if (autoEngagedSessionsRef.current.has(activeSessionId)) return;
+    if (engagedAgents.length > 0) {
+      autoEngagedSessionsRef.current.add(activeSessionId);
+      return;
+    }
+    autoEngagedSessionsRef.current.add(activeSessionId);
 
     let cancelled = false;
     void (async () => {
@@ -931,11 +942,14 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
     }
 
-    // v2 send: build LiveEventEnvelope, publish via MQTT, persist to
-    // Supabase, and locally append for immediate render.
+    // Optimistic v2 send: synthesize the proto Message and append to the
+    // session store immediately so the bubble renders instantly. The actual
+    // Supabase insert + MQTT publish are handled asynchronously by
+    // `outbox-sender` which retries with exponential backoff on failure.
+    // The bubble shows a leading status dot (pending/inFlight/delivered/
+    // failed) bound to the matching outbox entry, mirroring iOS.
     const outgoing = finalContent;
     if (outgoing && outgoing.trim()) {
-      // authSession and teamIdForSend were resolved above (before attachment upload).
       if (sid && authSession && teamIdForSend) {
         try {
           const senderActorId = await resolveCurrentMemberActorId(
@@ -943,10 +957,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             authSession.user.id,
             {
               currentTeamId: useCurrentTeamStore.getState().team?.id ?? null,
-              currentMemberId: useCurrentTeamStore.getState().currentMember?.id ?? null,
+              currentMemberId:
+                useCurrentTeamStore.getState().currentMember?.id ?? null,
             },
           );
-          if (!senderActorId) throw new Error(`No actor found for user in team ${teamIdForSend}`);
+          if (!senderActorId)
+            throw new Error(`No actor found for user in team ${teamIdForSend}`);
+
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
 
@@ -958,41 +975,26 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             content: outgoing,
             createdAt,
           });
-          const sessionMsg = createMessage(SessionMessageEnvelopeSchema, {
-            message: msg,
-            mentionActorIds,
-          });
-          const live = createMessage(LiveEventEnvelopeSchema, {
-            eventId: crypto.randomUUID(),
-            eventType: "message.created",
-            sessionId: sid,
-            actorId: senderActorId,
-            sentAt: createdAt,
-            body: toBinary(SessionMessageEnvelopeSchema, sessionMsg),
-          });
-          const { error: insErr } = await supabase.from("messages").insert({
-            id: messageId,
-            team_id: teamIdForSend,
-            session_id: sid,
-            sender_actor_id: senderActorId,
-            kind: "text",
-            content: outgoing,
-            metadata: {
-              mention_actor_ids: mentionActorIds,
-              ...(attachmentUrls.length > 0 ? { attachment_urls: attachmentUrls } : {}),
-            },
-          });
-          if (insErr) throw insErr;
-          await mqttPublish(
-            `amux/${teamIdForSend}/session/${sid}/live`,
-            toBinary(LiveEventEnvelopeSchema, live),
-            false,
-          ).catch((publishErr) => {
-            console.warn("[MQTT] publish failed", publishErr);
-          });
+
+          // 1. Optimistic UI append — bubble renders before the network
+          //    round-trip. dedup-by-id in session-message-store means the
+          //    eventual live echo (same messageId) is a no-op.
           useSessionMessageStore.getState().appendMessage(sid, msg);
+
+          // 2. Enqueue to outbox — write-through to libsql so a crash
+          //    before the first send attempt doesn't lose the message.
+          //    `outbox-sender` (started in App.tsx) picks it up on next tick.
+          await useOutboxStore.getState().enqueue({
+            messageId,
+            teamId: teamIdForSend,
+            sessionId: sid,
+            senderActorId,
+            content: outgoing,
+            mentionActorIds,
+            attachmentUrls,
+          });
         } catch (e) {
-          console.error("[ChatPanel] send failed:", e);
+          console.error("[ChatPanel] send enqueue failed:", e);
         }
       }
     }

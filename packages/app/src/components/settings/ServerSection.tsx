@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { CheckCircle2, Database, Loader2, Save, Server, Wifi, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { mqttConnect, mqttStatus } from "@/lib/mqtt-bridge";
@@ -34,16 +35,13 @@ function Field({
   return (
     <label className="block space-y-1.5">
       <span className="text-[12px] font-medium text-muted-foreground">{label}</span>
-      <input
+      <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type={type}
-        autoCapitalize="none"
-        autoCorrect="off"
         autoComplete="off"
-        spellCheck={false}
-        className="h-9 w-full rounded-[8px] border border-border bg-background px-3 font-mono text-[12.5px] text-foreground outline-none transition-colors placeholder:text-faint focus:border-muted-foreground/40"
+        className="rounded-[8px] border-border bg-background font-mono text-[12.5px] text-foreground placeholder:text-faint"
       />
     </label>
   );
