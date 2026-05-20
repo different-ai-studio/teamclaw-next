@@ -329,6 +329,8 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           <FlatList
             contentContainerStyle={styles.feedContent}
             data={feedItems}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
             keyExtractor={(item) => item.key}
             onContentSizeChange={() => {
               messageListRef.current?.scrollToEnd({ animated: false });
