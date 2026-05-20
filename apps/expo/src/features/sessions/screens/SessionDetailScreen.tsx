@@ -87,6 +87,26 @@ type SessionDetailScreenProps = {
   todoText?: string;
 };
 
+function runtimeStatusKind(status: string): "active" | "idle" | "error" | "muted" {
+  switch (status.trim().toLowerCase()) {
+    case "ready":
+    case "idle":
+    case "running":
+      return "active";
+    case "spawning":
+    case "starting":
+      return "idle";
+    case "error":
+    case "failed":
+      return "error";
+    case "stopped":
+    case "exited":
+      return "muted";
+    default:
+      return "idle";
+  }
+}
+
 function connectionDescriptor(
   state: SessionDetailConnectionState,
 ): { dot: "active" | "idle" | "error"; label: string } {
@@ -308,6 +328,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
             pressed && onChangeRuntimeModel ? styles.runtimeBarPressed : null,
           ]}
         >
+          <StatusDot kind={runtimeStatusKind(runtimeInfo.status)} size={6} />
           <Text style={styles.runtimeLabel}>
             Runtime · {runtimeInfo.status}
             {runtimeInfo.currentModel ? ` · ${runtimeInfo.currentModel}` : ""}
