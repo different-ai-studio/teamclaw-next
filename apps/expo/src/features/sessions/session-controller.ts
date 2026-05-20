@@ -1,4 +1,5 @@
 import { groupSessionsByRecency, type SessionGroup, type SessionSummary } from "./session-types";
+import { setUnreadSessionCount } from "./unread-store";
 
 type SessionsApi = ReturnType<(typeof import("./session-api"))["createSessionsApi"]>;
 
@@ -67,7 +68,11 @@ function toErrorMessage(error: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
-export function createSessionsController(api: SessionsApi, teamId: string) {
+export function createSessionsController(
+  api: SessionsApi,
+  teamId: string,
+  currentActorId?: string | null,
+) {
   let state = INITIAL_STATE;
   let requestId = 0;
   const listeners = new Set<SessionsControllerListener>();
@@ -97,11 +102,12 @@ export function createSessionsController(api: SessionsApi, teamId: string) {
     const { currentRequestId } = beginRequest("load");
 
     try {
-      const sessions = await api.listSessions(teamId);
+      const sessions = await api.listSessions(teamId, currentActorId ?? undefined);
       if (!isCurrentRequest(currentRequestId)) {
         return;
       }
 
+      setUnreadSessionCount(sessions.filter((s) => s.hasUnread).length);
       setState(buildDerivedState(sessions));
     } catch (error) {
       if (!isCurrentRequest(currentRequestId)) {
@@ -116,11 +122,12 @@ export function createSessionsController(api: SessionsApi, teamId: string) {
     const { currentRequestId, preserveRows } = beginRequest("refresh");
 
     try {
-      const sessions = await api.listSessions(teamId);
+      const sessions = await api.listSessions(teamId, currentActorId ?? undefined);
       if (!isCurrentRequest(currentRequestId)) {
         return;
       }
 
+      setUnreadSessionCount(sessions.filter((s) => s.hasUnread).length);
       setState(buildDerivedState(sessions));
     } catch (error) {
       if (!isCurrentRequest(currentRequestId)) {

@@ -9,7 +9,15 @@ export interface SessionSummary {
   lastMessageAt: string;
   createdAt: string;
   createdBy: string;
+  hasUnread?: boolean;
 }
+
+export type MessageAttachment = {
+  url: string;
+  path?: string;
+  mime?: string;
+  size?: number | null;
+};
 
 export interface SessionMessage {
   content: string;
@@ -23,6 +31,7 @@ export interface SessionMessage {
   sessionId: string;
   teamId: string;
   turnId: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface SessionRecord {
@@ -49,6 +58,7 @@ export interface MessageRecord {
   team_id: string | null;
   turn_id: string | null;
   id: string | null;
+  attachments?: unknown | null;
 }
 
 export interface SessionGroup {
@@ -132,6 +142,27 @@ export function mapSessionRecord(record: SessionRecord): SessionSummary {
   };
 }
 
+function coerceAttachments(value: unknown): MessageAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const out: MessageAttachment[] = [];
+  for (const entry of value) {
+    if (entry && typeof entry === "object") {
+      const row = entry as Record<string, unknown>;
+      const url = typeof row.url === "string" ? row.url : null;
+      if (!url) continue;
+      out.push({
+        url,
+        path: typeof row.path === "string" ? row.path : undefined,
+        mime: typeof row.mime === "string" ? row.mime : undefined,
+        size: typeof row.size === "number" ? row.size : null,
+      });
+    } else if (typeof entry === "string") {
+      out.push({ url: entry });
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export function mapMessageRecord(record: MessageRecord): SessionMessage {
   return {
     content: record.content ?? "",
@@ -145,6 +176,7 @@ export function mapMessageRecord(record: MessageRecord): SessionMessage {
     sessionId: record.session_id ?? "",
     teamId: record.team_id ?? "",
     turnId: record.turn_id ?? "",
+    attachments: coerceAttachments(record.attachments),
   };
 }
 

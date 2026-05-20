@@ -9,6 +9,8 @@ import {
 
 import { decodeLiveEvent, sessionIdFromTopic } from "../../lib/teamclaw/live-events";
 import type { ExpoMqttAdapter } from "../../lib/mqtt/expo-mqtt";
+import { uuidV4 } from "../../lib/uuid";
+import { takePendingAttachments } from "./pending-attachments";
 import {
   buildSessionDetailState,
   type SessionDetailState,
@@ -28,6 +30,7 @@ export type SessionDetailControllerState = {
   composerText: string;
   isSending: boolean;
   sendErrorMessage: string | null;
+  replyTarget: { messageId: string; content: string } | null;
 };
 
 type SessionsApi = ReturnType<typeof createSessionsApi>;
@@ -35,7 +38,11 @@ type SessionsApi = ReturnType<typeof createSessionsApi>;
 type SessionDetailControllerDeps = {
   api: Pick<
     SessionsApi,
-    "getSession" | "insertOutgoingMessage" | "listMessages" | "resolveMemberActorId"
+    | "getSession"
+    | "insertOutgoingMessage"
+    | "listMessages"
+    | "markSessionRead"
+    | "resolveMemberActorId"
   >;
   currentMemberActorId: string | null;
   getAuth: () => Promise<{ accessToken: string | null; userId: string | null }>;
@@ -53,6 +60,7 @@ type SessionDetailController = {
   getState: () => SessionDetailControllerState;
   load: () => Promise<void>;
   setComposerText: (value: string) => void;
+  setReplyTarget: (target: { messageId: string; content: string } | null) => void;
   sendMessage: () => Promise<void>;
   dispose: () => Promise<void>;
 };
@@ -66,6 +74,7 @@ const initialState: SessionDetailControllerState = {
   composerText: "",
   isSending: false,
   sendErrorMessage: null,
+  replyTarget: null,
 };
 
 function toIsoFromSeconds(value: bigint): string {
@@ -233,7 +242,7 @@ export function createSessionDetailController(
         url: deps.mqttUrl,
         options: {
           clean: true,
-          clientId: `teamclaw-expo-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
+          clientId: `teamclaw-expo-${actorId.slice(0, 8)}-${uuidV4().slice(0, 8)}`,
           password: auth.accessToken,
           reconnectPeriod: 0,
           username: actorId,
@@ -261,6 +270,21 @@ export function createSessionDetailController(
           messages: mergedMessages,
           status: nextStatusForMessages(state.session, mergedMessages, state.status),
         });
+
+        // Live-update the read marker so the Sessions list stays clean
+        // while the detail screen is open. We pass the senderActorId
+        // through so a future receipts UI can resolve "who's read up
+        // to where" without an extra lookup.
+        if (
+          deps.currentMemberActorId &&
+          nextMessage.senderActorId !== deps.currentMemberActorId
+        ) {
+          void deps.api
+            .markSessionRead(deps.sessionId, deps.currentMemberActorId, nextMessage.messageId)
+            .catch(() => {
+              // best-effort
+            });
+        }
       });
 
       await deps.mqtt.subscribe(`amux/${deps.teamId}/session/${deps.sessionId}/live`);
@@ -284,6 +308,10 @@ export function createSessionDetailController(
         return;
       }
 
+      console.warn(
+        "MQTT realtime connect failed",
+        error instanceof Error ? error.message : error,
+      );
       setState({
         ...state,
         connectionState: "disconnected",
@@ -373,6 +401,12 @@ export function createSessionDetailController(
         sendErrorMessage: null,
       });
     },
+    setReplyTarget(target) {
+      setState({
+        ...state,
+        replyTarget: target,
+      });
+    },
     async sendMessage() {
       const content = state.composerText.trim();
       const session = state.session;
@@ -407,7 +441,19 @@ export function createSessionDetailController(
         const actorId = await resolveSenderActorId();
         const createdAt = new Date().toISOString();
         const createdAtSeconds = BigInt(Math.floor(Date.parse(createdAt) / 1000));
-        const messageId = crypto.randomUUID();
+        const messageId = uuidV4();
+
+        const pendingAttachments = takePendingAttachments(deps.teamId, deps.sessionId);
+        const attachmentsPayload = pendingAttachments.length > 0
+          ? pendingAttachments.map((row) => ({
+              url: row.publicUrl || row.path,
+              path: row.path,
+              mime: row.mime,
+              size: row.size,
+            }))
+          : undefined;
+
+        const replyTo = state.replyTarget?.messageId ?? null;
 
         await deps.api.insertOutgoingMessage({
           id: messageId,
@@ -417,6 +463,8 @@ export function createSessionDetailController(
           content,
           createdAt,
           metadata: { mention_actor_ids: [] },
+          attachments: attachmentsPayload,
+          replyToMessageId: replyTo,
         });
 
         const optimisticMessage: SessionMessage = {
@@ -426,7 +474,7 @@ export function createSessionDetailController(
           messageId,
           metadata: { mention_actor_ids: [] },
           model: "",
-          replyToMessageId: "",
+          replyToMessageId: replyTo ?? "",
           senderActorId: actorId,
           sessionId: deps.sessionId,
           teamId: deps.teamId,
@@ -436,7 +484,9 @@ export function createSessionDetailController(
         const mergedMessages = mergeMessage(state.messages, optimisticMessage);
         setState({
           ...state,
+          composerText: "",
           messages: mergedMessages,
+          replyTarget: null,
           status: nextStatusForMessages(session, mergedMessages, state.status),
         });
 
@@ -453,7 +503,7 @@ export function createSessionDetailController(
           mentionActorIds: [],
         });
         const envelope = create(LiveEventEnvelopeSchema, {
-          eventId: crypto.randomUUID(),
+          eventId: uuidV4(),
           eventType: "message.created",
           sessionId: deps.sessionId,
           actorId,

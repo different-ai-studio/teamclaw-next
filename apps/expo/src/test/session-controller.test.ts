@@ -61,7 +61,7 @@ describe("createSessionsController", () => {
 
     await expect(controller.load()).resolves.toBeUndefined();
 
-    expect(api.listSessions).toHaveBeenCalledWith("team-1");
+    expect(api.listSessions).toHaveBeenCalledWith("team-1", undefined);
     expect(controller.getState()).toMatchObject({
       status: "loaded",
       isLoading: false,

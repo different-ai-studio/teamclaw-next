@@ -1,3 +1,5 @@
+import "../src/lib/polyfills";
+
 import { Slot } from "expo-router";
 import {
   createContext,
@@ -10,6 +12,7 @@ import {
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ToastHost } from "../src/ui/Toast";
 import { createOnboardingController } from "../src/features/onboarding/onboarding-store";
 import type {
   OnboardingRoute,
@@ -102,6 +105,7 @@ export default function RootLayout() {
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
         <View style={styles.layout}>
           <Slot />
+          <ToastHost />
         </View>
       </SafeAreaView>
     </OnboardingProvider>

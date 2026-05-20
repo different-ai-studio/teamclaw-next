@@ -145,6 +145,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn(),
       listMessages: vi.fn().mockResolvedValue([createRowMessage("message-1")]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -181,6 +182,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn().mockResolvedValue(undefined),
       listMessages: vi.fn().mockResolvedValue([]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -222,6 +224,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn().mockResolvedValue(undefined),
       listMessages: vi.fn().mockResolvedValue([]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -260,6 +263,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn(),
       listMessages: vi.fn().mockResolvedValue([createRowMessage("message-1")]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -298,6 +302,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn(),
       listMessages: vi.fn().mockResolvedValue([]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -345,6 +350,7 @@ describe("createSessionDetailController", () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([createRowMessage("message-gap", "actor-agent")]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -378,6 +384,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn().mockRejectedValue(new Error("insert failed")),
       listMessages: vi.fn().mockResolvedValue([]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -415,6 +422,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn(),
       listMessages: vi.fn().mockResolvedValue([]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({
@@ -448,6 +456,7 @@ describe("createSessionDetailController", () => {
       insertOutgoingMessage: vi.fn(),
       listMessages: vi.fn().mockResolvedValue([]),
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const controller = createSessionDetailController({

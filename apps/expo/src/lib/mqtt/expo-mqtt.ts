@@ -1,5 +1,17 @@
-import * as mqtt from "mqtt";
+import mqttPkg from "mqtt";
+import * as mqttNamespace from "mqtt";
 import type { IClientOptions, MqttClient } from "mqtt";
+
+// Metro's React-Native condition resolves the `mqtt` package to its prebuilt
+// ESM bundle (`dist/mqtt.esm.js`), which only ships `export default`. Node
+// resolution exposes a namespace with `connect` directly. Pick whichever
+// shape actually has `connect` so vitest, Metro, and Node tests all work.
+type MqttNamespace = {
+  connect: (url: string, options?: IClientOptions) => unknown;
+};
+const mqtt: MqttNamespace = (mqttPkg && typeof (mqttPkg as MqttNamespace).connect === "function"
+  ? (mqttPkg as MqttNamespace)
+  : (mqttNamespace as unknown as MqttNamespace));
 
 export type ExpoMqttMessage = {
   topic: string;

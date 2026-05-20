@@ -10,7 +10,10 @@ import {
 type SupabaseError = { message?: string } | null;
 
 type SessionsClient = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   from: (table: string) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc: (fn: string, args?: Record<string, unknown>) => any;
 };
 
 type ParticipantRow = {
@@ -39,12 +42,13 @@ type OutgoingMessageInput = {
   model?: string | null;
   turnId?: string | null;
   replyToMessageId?: string | null;
+  attachments?: unknown[] | null;
 };
 
 const SESSION_COLUMNS =
   "session_id:id, team_id, title, summary, last_message_preview, last_message_at, created_at, created_by:created_by_actor_id";
 const MESSAGE_COLUMNS =
-  "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at";
+  "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, attachments";
 
 function throwIfError(error: SupabaseError): void {
   if (error) {
@@ -120,6 +124,64 @@ function toSessionSummary(
 
 export function createSessionsApi(client: SessionsClient) {
   return {
+    async loadReadMarkers(
+      sessionIds: string[],
+      actorId: string,
+    ): Promise<Map<string, string>> {
+      if (sessionIds.length === 0 || !actorId) return new Map();
+      const result = (await client
+        .from("session_read_markers")
+        .select("session_id, last_read_at")
+        .in("session_id", sessionIds)
+        .eq("actor_id", actorId)) as QueryResult<
+        Array<{ session_id: string; last_read_at: string | null }> | null
+      >;
+      throwIfError(result.error);
+      const map = new Map<string, string>();
+      for (const row of result.data ?? []) {
+        if (row.last_read_at) map.set(row.session_id, row.last_read_at);
+      }
+      return map;
+    },
+
+    async markSessionUnread(sessionId: string, actorId: string): Promise<void> {
+      const result = (await client
+        .from("session_read_markers")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("actor_id", actorId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
+    async removeParticipant(sessionId: string, actorId: string): Promise<void> {
+      const result = (await client
+        .from("session_participants")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("actor_id", actorId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
+    async markSessionRead(
+      sessionId: string,
+      actorId: string,
+      lastMessageId: string | null,
+    ): Promise<void> {
+      const result = (await client
+        .from("session_read_markers")
+        .upsert(
+          {
+            session_id: sessionId,
+            actor_id: actorId,
+            last_read_at: new Date().toISOString(),
+            last_read_message_id: lastMessageId,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "session_id,actor_id" },
+        )) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
     async resolveMemberActorId(teamId: string, userId: string): Promise<string | null> {
       const result = (await client
         .from("actors")
@@ -132,6 +194,14 @@ export function createSessionsApi(client: SessionsClient) {
       throwIfError(result.error);
 
       return result.data?.id ?? null;
+    },
+
+    async updateMessageContent(messageId: string, content: string): Promise<void> {
+      const result = (await client
+        .from("messages")
+        .update({ content, updated_at: new Date().toISOString() })
+        .eq("id", messageId)) as QueryResult<null>;
+      throwIfError(result.error);
     },
 
     async insertOutgoingMessage(input: OutgoingMessageInput): Promise<void> {
@@ -147,6 +217,10 @@ export function createSessionsApi(client: SessionsClient) {
         turn_id: input.turnId ?? null,
         reply_to_message_id: input.replyToMessageId ?? null,
       };
+
+      if (input.attachments && input.attachments.length > 0) {
+        payload.attachments = input.attachments;
+      }
 
       if (input.createdAt) {
         payload.created_at = input.createdAt;
@@ -169,7 +243,7 @@ export function createSessionsApi(client: SessionsClient) {
       return [...(result.data ?? [])].sort(compareMessageRecords).map((row) => mapMessageRecord(row));
     },
 
-    async listSessions(teamId: string): Promise<SessionSummary[]> {
+    async listSessions(teamId: string, currentActorId?: string): Promise<SessionSummary[]> {
       const result = await client
         .from("sessions")
         .select(SESSION_COLUMNS)
@@ -179,12 +253,90 @@ export function createSessionsApi(client: SessionsClient) {
       throwIfError(result.error);
 
       const rows = (result.data ?? []) as SessionRecord[];
-      const participantMeta = await loadParticipantMeta(
-        client,
-        nonEmptySessionIds(rows.map((row) => row.session_id)),
-      );
+      const sessionIds = nonEmptySessionIds(rows.map((row) => row.session_id));
+      const [participantMeta, readMarkers] = await Promise.all([
+        loadParticipantMeta(client, sessionIds),
+        currentActorId
+          ? this.loadReadMarkers(sessionIds, currentActorId).catch(() => new Map())
+          : Promise.resolve(new Map<string, string>()),
+      ]);
 
-      return rows.map((row) => toSessionSummary(row, participantMeta[row.session_id ?? ""]));
+      return rows.map((row) => {
+        const summary = toSessionSummary(row, participantMeta[row.session_id ?? ""]);
+        if (!currentActorId) return summary;
+        const lastReadIso = readMarkers.get(summary.sessionId);
+        if (!summary.lastMessageAt) return summary;
+        if (!lastReadIso) return { ...summary, hasUnread: true };
+        const lastMessageMs = Date.parse(summary.lastMessageAt);
+        const lastReadMs = Date.parse(lastReadIso);
+        if (Number.isNaN(lastMessageMs) || Number.isNaN(lastReadMs)) return summary;
+        return { ...summary, hasUnread: lastMessageMs > lastReadMs + 500 };
+      });
+    },
+
+    async createSession(input: {
+      title: string;
+      mode?: string;
+      primaryAgentId?: string | null;
+      ideaId?: string | null;
+    }): Promise<string> {
+      const result = (await client.rpc("create_session", {
+        p_primary_agent_id: input.primaryAgentId ?? null,
+        p_idea_id: input.ideaId ?? null,
+        p_mode: input.mode ?? "agent",
+        p_title: input.title,
+      })) as QueryResult<string | null>;
+      throwIfError(result.error);
+      const sessionId = result.data;
+      if (!sessionId || typeof sessionId !== "string") {
+        throw new Error("create_session returned no session id");
+      }
+      return sessionId;
+    },
+
+    async updateRuntimeModel(runtimeId: string, model: string): Promise<void> {
+      const result = (await client
+        .from("agent_runtimes")
+        .update({ current_model: model, updated_at: new Date().toISOString() })
+        .eq("id", runtimeId)) as QueryResult<null>;
+      throwIfError(result.error);
+    },
+
+    async loadRuntime(sessionId: string): Promise<
+      | {
+          runtimeId: string;
+          status: string;
+          currentModel: string | null;
+          lastSeenAt: string | null;
+          backendType: string | null;
+        }
+      | null
+    > {
+      const result = (await client
+        .from("agent_runtimes")
+        .select("id, status, current_model, last_seen_at, backend_type")
+        .eq("session_id", sessionId)
+        .maybeSingle()) as {
+        data:
+          | {
+              id: string;
+              status: string | null;
+              current_model: string | null;
+              last_seen_at: string | null;
+              backend_type: string | null;
+            }
+          | null;
+        error: SupabaseError;
+      };
+      throwIfError(result.error);
+      if (!result.data) return null;
+      return {
+        runtimeId: result.data.id,
+        status: result.data.status ?? "unknown",
+        currentModel: result.data.current_model ?? null,
+        lastSeenAt: result.data.last_seen_at ?? null,
+        backendType: result.data.backend_type ?? null,
+      };
     },
 
     async getSession(teamId: string, sessionId: string): Promise<SessionSummary | null> {

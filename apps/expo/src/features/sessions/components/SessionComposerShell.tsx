@@ -1,24 +1,38 @@
+import { Ionicons } from "@expo/vector-icons";
+import type { ComponentProps } from "react";
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { colors, radii, shadows, spacing, typography } from "../../../ui/theme";
+import { colors, hai, radii, shadows, spacing, typography } from "../../../ui/theme";
 import {
   buildComposerPresentation,
 } from "./session-composer-copy";
+import { useVoiceRecorder } from "./voice-recorder";
 import type { SessionDetailConnectionState } from "../session-detail-controller";
 
 type SessionComposerShellProps = {
   composerText: string;
   connectionState: SessionDetailConnectionState;
   isSending: boolean;
+  onAttach?: () => void;
   onChangeText: (value: string) => void;
   onSend: () => void;
   sendErrorMessage: string | null;
 };
 
-function IconChip({ label }: { label: string }) {
+type IconName = ComponentProps<typeof Ionicons>["name"];
+
+function IconChip({ name, onPress }: { name: IconName; onPress?: () => void }) {
+  if (onPress) {
+    return (
+      <Pressable hitSlop={6} onPress={onPress} style={styles.iconChip}>
+        <Ionicons name={name} size={14} color={colors.slate} />
+      </Pressable>
+    );
+  }
   return (
     <View style={styles.iconChip}>
-      <Text style={styles.iconChipText}>{label}</Text>
+      <Ionicons name={name} size={14} color={colors.slate} />
     </View>
   );
 }
@@ -27,6 +41,7 @@ export function SessionComposerShell({
   composerText,
   connectionState,
   isSending,
+  onAttach,
   onChangeText,
   onSend,
   sendErrorMessage,
@@ -37,6 +52,24 @@ export function SessionComposerShell({
     isSending,
     sendErrorMessage,
   });
+  const recorder = useVoiceRecorder();
+  const [recordError, setRecordError] = useState<string | null>(null);
+
+  const handleMicToggle = async () => {
+    setRecordError(null);
+    try {
+      if (recorder.isRecording) {
+        const uri = await recorder.stop();
+        if (uri) {
+          onChangeText(`${composerText}${composerText.length > 0 ? " " : ""}🎙️ ${uri}`);
+        }
+      } else {
+        await recorder.start();
+      }
+    } catch (err) {
+      setRecordError(err instanceof Error ? err.message : "Couldn't access microphone.");
+    }
+  };
 
   return (
     <View style={styles.wrapper}>
@@ -61,13 +94,29 @@ export function SessionComposerShell({
               <Text style={styles.agentPillText}>TeamClaw AI</Text>
               <Text style={styles.agentChevron}>▾</Text>
             </View>
-            <IconChip label="＋" />
-            <IconChip label="@" />
-            <IconChip label="✦" />
+            <IconChip name="add" onPress={onAttach} />
+            <IconChip name="at" />
+            <IconChip name="sparkles-outline" />
           </View>
 
           <View style={styles.footerRight}>
-            <Text style={styles.keyboardHint}>⌘↵</Text>
+            {composerText.trim().length === 0 ? (
+              <Pressable
+                accessibilityLabel={recorder.isRecording ? "Stop recording" : "Voice memo"}
+                accessibilityRole="button"
+                hitSlop={6}
+                onPress={handleMicToggle}
+                style={[styles.micButton, recorder.isRecording ? styles.micButtonRecording : null]}
+              >
+                <Ionicons
+                  color={recorder.isRecording ? hai.paper : colors.slate}
+                  name={recorder.isRecording ? "stop" : "mic-outline"}
+                  size={18}
+                />
+              </Pressable>
+            ) : (
+              <Text style={styles.keyboardHint}>⌘↵</Text>
+            )}
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ disabled: presentation.isDisabled }}
@@ -85,7 +134,14 @@ export function SessionComposerShell({
         </View>
       </View>
 
-      {presentation.helperText ? (
+      {recordError ? (
+        <Text style={styles.helperTextError}>{recordError}</Text>
+      ) : recorder.isRecording ? (
+        <Text style={styles.helperText}>
+          Recording · {Math.floor(recorder.durationMs / 1000)}s — tap the stop
+          button to insert.
+        </Text>
+      ) : presentation.helperText ? (
         <Text style={styles.helperText}>{presentation.helperText}</Text>
       ) : null}
     </View>
@@ -173,15 +229,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 24,
   },
-  iconChipText: {
-    color: colors.faint,
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 14,
-  },
   keyboardHint: {
     color: colors.faint,
     ...typography.monoMeta,
+  },
+  helperTextError: {
+    color: hai.cinnabarDeep,
+    ...typography.caption,
+  },
+  micButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 28,
+    justifyContent: "center",
+    width: 28,
+  },
+  micButtonRecording: {
+    backgroundColor: hai.cinnabar,
   },
   placeholder: {
     color: colors.mutedForeground,
