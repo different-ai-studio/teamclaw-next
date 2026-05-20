@@ -163,7 +163,11 @@ export default function EditProfileRoute() {
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
         {isLoading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={colors.slate} />

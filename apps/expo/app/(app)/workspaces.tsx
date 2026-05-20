@@ -201,7 +201,11 @@ export default function WorkspacesRoute() {
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.section}>
           <SectionEyebrow label="NEW WORKSPACE" style={styles.sectionEyebrow} />
           <View style={styles.card}>

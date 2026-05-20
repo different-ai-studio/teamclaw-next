@@ -150,7 +150,11 @@ export default function TeamsRoute() {
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
         {isLoading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={colors.slate} />
