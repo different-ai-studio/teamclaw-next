@@ -135,6 +135,15 @@ export default function AppLayout() {
             contentStyle: { backgroundColor: colors.mist },
           }}
         />
+        <Stack.Screen
+          name="shortcut-web"
+          options={{
+            presentation: "fullScreenModal",
+            headerShown: false,
+            animation: "slide_from_right",
+            gestureEnabled: true,
+          }}
+        />
       </Stack>
     </View>
   );

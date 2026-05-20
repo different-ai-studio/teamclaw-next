@@ -82,27 +82,21 @@ function createDeferred<T>() {
 }
 
 function createMockMqtt() {
-  const listeners = new Set<(message: { topic: string; payload: Uint8Array }) => void>();
+  // Maps filter → handler. Uses the first registered handler per filter
+  // for simplicity (the controller only subscribes once per topic).
+  const topicHandlers = new Map<string, (payload: Uint8Array, topic: string) => void>();
   const connectionStateListeners = new Set<
     (state: "connecting" | "connected" | "disconnected") => void
   >();
 
   return {
-    connect: vi.fn().mockImplementation(async () => {
-      for (const listener of connectionStateListeners) {
-        listener("connecting");
-      }
-      for (const listener of connectionStateListeners) {
-        listener("connected");
-      }
-    }),
-    disconnect: vi.fn().mockImplementation(async () => {
-      for (const listener of connectionStateListeners) {
-        listener("disconnected");
-      }
-    }),
     publish: vi.fn().mockResolvedValue(undefined),
-    subscribe: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn((filter: string, handler: (payload: Uint8Array, topic: string) => void) => {
+      topicHandlers.set(filter, handler);
+      return () => {
+        topicHandlers.delete(filter);
+      };
+    }),
     onConnectionState: vi.fn(
       (handler: (state: "connecting" | "connected" | "disconnected") => void) => {
         connectionStateListeners.add(handler);
@@ -111,15 +105,13 @@ function createMockMqtt() {
         };
       },
     ),
-    onMessage: vi.fn((handler: (message: { topic: string; payload: Uint8Array }) => void) => {
-      listeners.add(handler);
-      return () => {
-        listeners.delete(handler);
-      };
-    }),
+    /** Simulate an inbound MQTT message on a given topic. */
     emit(topic: string, payload: Uint8Array) {
-      for (const listener of listeners) {
-        listener({ topic, payload });
+      for (const [filter, handler] of topicHandlers) {
+        // Simple exact-match check is sufficient for these tests.
+        if (filter === topic) {
+          handler(payload, topic);
+        }
       }
     },
     emitConnectionState(state: "connecting" | "connected" | "disconnected") {
@@ -168,8 +160,10 @@ describe("createSessionDetailController", () => {
       messages: [expect.objectContaining({ messageId: "message-1" })],
       status: "ready",
     });
-    expect(mqtt.connect).toHaveBeenCalled();
-    expect(mqtt.subscribe).toHaveBeenCalledWith("amux/team-1/session/session-1/live");
+    expect(mqtt.subscribe).toHaveBeenCalledWith(
+      "amux/team-1/session/session-1/live",
+      expect.any(Function),
+    );
   });
 
   it("optimistically appends a sent message and clears the composer text", async () => {
@@ -212,17 +206,16 @@ describe("createSessionDetailController", () => {
     const { createSessionDetailController } = await import(
       "../features/sessions/session-detail-controller"
     );
-    const deferredConnect = createDeferred<void>();
+    // Defer the second listMessages call (the one inside connectRealtime)
+    // so the controller stays in "connecting" long enough to test the guard.
+    const deferredListMessages = createDeferred<ReturnType<typeof createRowMessage>[]>();
     const mqtt = createMockMqtt();
-    mqtt.connect.mockImplementationOnce(async () => {
-      mqtt.emitConnectionState("connecting");
-      await deferredConnect.promise;
-      mqtt.emitConnectionState("connected");
-    });
     const api = {
       getSession: vi.fn().mockResolvedValue(createSession()),
       insertOutgoingMessage: vi.fn().mockResolvedValue(undefined),
-      listMessages: vi.fn().mockResolvedValue([]),
+      listMessages: vi.fn()
+        .mockResolvedValueOnce([]) // first call (load phase)
+        .mockReturnValueOnce(deferredListMessages.promise), // second call (connectRealtime)
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
       markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
@@ -241,15 +234,18 @@ describe("createSessionDetailController", () => {
     });
 
     const loadPromise = controller.load();
+    // Flush enough microtasks so that connectRealtime has started but not finished.
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     controller.setComposerText("too early");
     await controller.sendMessage();
 
+    // connectionState should not yet be "connected" so send is blocked.
     expect(controller.getState().sendErrorMessage).toMatch(/^实时连接/);
     expect(api.insertOutgoingMessage).not.toHaveBeenCalled();
 
-    deferredConnect.resolve();
+    deferredListMessages.resolve([]);
     await loadPromise;
   });
 
@@ -414,13 +410,16 @@ describe("createSessionDetailController", () => {
     const { createSessionDetailController } = await import(
       "../features/sessions/session-detail-controller"
     );
-    const deferredConnect = createDeferred<void>();
+    // Defer the second listMessages call inside connectRealtime so we can
+    // dispose the controller while it is still mid-flight.
+    const deferredListMessages = createDeferred<ReturnType<typeof createRowMessage>[]>();
     const mqtt = createMockMqtt();
-    mqtt.connect.mockReturnValueOnce(deferredConnect.promise);
     const api = {
       getSession: vi.fn().mockResolvedValue(createSession()),
       insertOutgoingMessage: vi.fn(),
-      listMessages: vi.fn().mockResolvedValue([]),
+      listMessages: vi.fn()
+        .mockResolvedValueOnce([]) // first call (load phase)
+        .mockReturnValueOnce(deferredListMessages.promise), // second call (connectRealtime)
       resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
       markSessionRead: vi.fn().mockResolvedValue(undefined),
     };
@@ -440,7 +439,7 @@ describe("createSessionDetailController", () => {
 
     const loadPromise = controller.load();
     controller.dispose();
-    deferredConnect.resolve();
+    deferredListMessages.resolve([]);
     await loadPromise;
 
     expect(controller.getState().connectionState).toBe("disconnected");

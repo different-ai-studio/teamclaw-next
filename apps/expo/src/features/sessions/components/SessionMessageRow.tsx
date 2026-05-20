@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
+  Animated,
   Image,
   Platform,
   Pressable,
@@ -17,8 +18,9 @@ import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import type { MessageAttachment, SessionMessage } from "../session-types";
 import { AudioPlayerChip } from "./AudioPlayerChip";
 import { ImageLightbox } from "./ImageLightbox";
+import { PermissionBanner } from "./PermissionBanner";
 
-const HIDDEN_MESSAGE_KINDS = new Set(["permission_request"]);
+const HIDDEN_MESSAGE_KINDS = new Set<string>([]);
 
 const AGENT_NOTE_KINDS = new Set([
   "agent_thinking",
@@ -33,11 +35,21 @@ export type SessionMessageRowProps = {
   onEdit?: (message: SessionMessage) => void;
   onJumpToReply?: (messageId: string) => void;
   onReply?: (message: SessionMessage) => void;
+  /** Click handler for the trailing outbox dot when the row is in `failed` state. */
+  onRetryOutbox?: (messageId: string) => void;
+  /** Outbox lifecycle for this row's user_prompt — mirrors iOS OutboxStatusDot states. */
+  outboxStatus?: "sending" | "sent" | "failed";
+  onGrantPermission?: (requestId: string) => void;
+  onDenyPermission?: (requestId: string) => void;
+  /** When set, marks a permission request row as resolved with the given decision. */
+  resolvedPermission?: { granted: boolean } | null;
   replyToMessage?: SessionMessage | null;
   /** Optional glyph override (e.g. CC/OC/CX for known agent kinds). */
   senderAvatarGlyph?: string | null;
   senderAvatarUrl?: string | null;
   senderName?: string;
+  /** When true, appends a blinking cursor to indicate live streaming. */
+  isStreaming?: boolean;
 };
 
 export function normalizeBody(message: SessionMessage): string {
@@ -91,13 +103,32 @@ export function SessionMessageRow({
   onEdit,
   onJumpToReply,
   onReply,
+  onRetryOutbox,
+  outboxStatus,
+  onGrantPermission,
+  onDenyPermission,
+  resolvedPermission,
   replyToMessage,
   senderAvatarGlyph,
   senderAvatarUrl,
   senderName,
+  isStreaming = false,
 }: SessionMessageRowProps) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [noteExpanded, setNoteExpanded] = useState(false);
+
+  const cursorOpacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!isStreaming) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(cursorOpacity, { toValue: 0.2, duration: 300, useNativeDriver: true }),
+        Animated.timing(cursorOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [isStreaming, cursorOpacity]);
   const kindKey = message.kind.trim().toLowerCase();
   if (isHiddenMessageKind(kindKey)) return null;
 
@@ -158,6 +189,36 @@ export function SessionMessageRow({
       })),
     );
   };
+
+  if (kindKey === "permission_request") {
+    const metadata =
+      message.metadata && typeof message.metadata === "object"
+        ? (message.metadata as Record<string, unknown>)
+        : {};
+    const toolName =
+      typeof metadata.tool_name === "string" && metadata.tool_name.trim().length > 0
+        ? (metadata.tool_name as string)
+        : typeof metadata.toolName === "string"
+          ? (metadata.toolName as string)
+          : "";
+    const requestId =
+      (typeof metadata.tool_id === "string" && (metadata.tool_id as string)) ||
+      (typeof metadata.request_id === "string" && (metadata.request_id as string)) ||
+      message.messageId;
+    return (
+      <View style={[styles.row, styles.rowOther, styles.permissionRowContainer]}>
+        <PermissionBanner
+          description={message.content.trim()}
+          isResolved={resolvedPermission !== null && resolvedPermission !== undefined}
+          onDeny={onDenyPermission}
+          onGrant={onGrantPermission}
+          requestId={requestId}
+          toolName={toolName}
+          wasGranted={resolvedPermission?.granted ?? null}
+        />
+      </View>
+    );
+  }
 
   if (isAgentNoteKind(kindKey)) {
     const note = agentNoteStyle(kindKey);
@@ -283,14 +344,88 @@ export function SessionMessageRow({
           </Markdown>
         ) : null}
 
-        {timestamp ? (
-          <Text style={[styles.time, isOwnMessage ? styles.timeOwn : styles.timeOther]}>
-            {timestamp}
-          </Text>
+        {isStreaming ? (
+          <Animated.Text
+            style={[
+              styles.body,
+              isOwnMessage ? styles.bodyOwn : styles.bodyOther,
+              { opacity: cursorOpacity },
+            ]}
+          >
+            {" ▌"}
+          </Animated.Text>
         ) : null}
+
+        <View style={styles.footerRow}>
+          {timestamp ? (
+            <Text
+              style={[styles.time, isOwnMessage ? styles.timeOwn : styles.timeOther]}
+            >
+              {timestamp}
+            </Text>
+          ) : null}
+          {isOwnMessage && outboxStatus ? (
+            <OutboxStatusDot
+              messageId={message.messageId}
+              onRetry={onRetryOutbox}
+              status={outboxStatus}
+            />
+          ) : null}
+        </View>
       </Pressable>
     </View>
   );
+}
+
+function OutboxStatusDot({
+  messageId,
+  onRetry,
+  status,
+}: {
+  messageId: string;
+  onRetry?: (messageId: string) => void;
+  status: "sending" | "sent" | "failed";
+}) {
+  if (status === "sending") {
+    return (
+      <Ionicons
+        accessibilityLabel="Sending"
+        color={colors.basalt}
+        name="ellipsis-horizontal"
+        size={12}
+        style={styles.outboxDot}
+      />
+    );
+  }
+  if (status === "sent") {
+    return (
+      <Ionicons
+        accessibilityLabel="Delivered"
+        color={colors.slate}
+        name="checkmark"
+        size={12}
+        style={styles.outboxDot}
+      />
+    );
+  }
+  if (status === "failed") {
+    return (
+      <Pressable
+        accessibilityLabel="Retry sending message"
+        accessibilityRole="button"
+        hitSlop={6}
+        onPress={onRetry ? () => onRetry(messageId) : undefined}
+      >
+        <Ionicons
+          color={colors.cinnabarDeep}
+          name="alert-circle"
+          size={14}
+          style={styles.outboxDot}
+        />
+      </Pressable>
+    );
+  }
+  return null;
 }
 
 function AttachmentChip({
@@ -537,6 +672,19 @@ const styles = StyleSheet.create({
   },
   timeOwn: {
     color: "rgba(248,246,241,0.6)",
+  },
+  footerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "flex-end",
+  },
+  outboxDot: {
+    marginLeft: 2,
+  },
+  permissionRowContainer: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
   },
 });
 
