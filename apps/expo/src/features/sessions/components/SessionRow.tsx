@@ -22,7 +22,14 @@ type SessionRowProps = {
 
 const BADGE_INDENT = 38;
 
-function fallbackGlyph(session: SessionSummary): string {
+function fallbackGlyph(
+  session: SessionSummary,
+  actorGlyphById?: ReadonlyMap<string, string>,
+): string {
+  for (const actorId of session.participantActorIds) {
+    const glyph = actorGlyphById?.get(actorId);
+    if (glyph && glyph.length > 1) return glyph;
+  }
   const source = (session.title || session.sessionId).trim();
   const last = source.split("/").pop() ?? source;
   if (!last) return "·";
@@ -82,7 +89,7 @@ export function SessionRow({
     >
       <View style={styles.headerRow}>
         <AgentBadge
-          label={fallbackGlyph(session)}
+          label={fallbackGlyph(session, actorGlyphById)}
           status="active"
           bg={colors.pebble}
           fg={colors.basalt}
