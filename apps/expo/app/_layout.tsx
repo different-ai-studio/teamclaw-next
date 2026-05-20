@@ -70,6 +70,12 @@ export function useTeamMqtt(): TeamMqttClient | null {
   return useContext(TeamMqttContext);
 }
 
+export const ConnectedAgentsContext = createContext<ConnectedAgentsStore | null>(null);
+
+export function useConnectedAgentsStore(): ConnectedAgentsStore | null {
+  return useContext(ConnectedAgentsContext);
+}
+
 export function routeToHref(route: OnboardingRoute): string | null {
   switch (route) {
     case "needsAuth":
@@ -95,6 +101,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
   const teamMqttRef = useRef<TeamMqttClient | null>(null);
   const connectedAgentsStoreRef = useRef<ConnectedAgentsStore | null>(null);
   const [teamMqtt, setTeamMqtt] = useState<TeamMqttClient | null>(null);
+  const [connectedAgentsStore, setConnectedAgentsStore] = useState<ConnectedAgentsStore | null>(null);
 
   useEffect(() => {
     void controller.bootstrap().catch(() => {
@@ -227,6 +234,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
         return;
       }
       await store.reload();
+      if (!disposed) setConnectedAgentsStore(store);
     })();
 
     return () => {
@@ -236,6 +244,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
       connectedAgentsStoreRef.current = null;
       teamMqttRef.current = null;
       setTeamMqtt(null);
+      setConnectedAgentsStore(null);
     };
   }, [state.route, state.currentTeam?.id, state.currentMemberActorId]);
 
@@ -250,7 +259,9 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
   return (
     <OnboardingContext.Provider value={value}>
       <TeamMqttContext.Provider value={teamMqtt}>
-        {children}
+        <ConnectedAgentsContext.Provider value={connectedAgentsStore}>
+          {children}
+        </ConnectedAgentsContext.Provider>
       </TeamMqttContext.Provider>
     </OnboardingContext.Provider>
   );
