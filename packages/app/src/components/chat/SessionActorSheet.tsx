@@ -31,10 +31,16 @@ type Row = {
   member_status: string | null
   agent_status: string | null
   agent_kind: string | null
+  default_agent_type: string | null
   last_active_at: string | null
 }
 
-type CandidateAgent = { id: string; display_name: string }
+type CandidateAgent = {
+  id: string
+  display_name: string
+  agent_kind: string | null
+  default_agent_type: string | null
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -96,6 +102,7 @@ function mapCachedActor(a: {
     member_status: a.memberStatus ?? null,
     agent_status: a.agentStatus ?? null,
     agent_kind: null,
+    default_agent_type: null,
     last_active_at: null,
   }
 }
@@ -112,7 +119,7 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
 
   const { data: actors, error: actorsError } = await supabase
     .from('actor_directory')
-    .select('id, actor_type, display_name, member_status, agent_status')
+    .select('id, actor_type, display_name, member_status, agent_status, agent_kind, default_agent_type, last_active_at')
     .in('id', ids)
   if (actorsError) throw actorsError
 
@@ -129,6 +136,7 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
         member_status: a.member_status ?? null,
         agent_status: a.agent_status ?? null,
         agent_kind: a.agent_kind ?? null,
+        default_agent_type: a.default_agent_type ?? null,
         last_active_at: a.last_active_at ?? null,
       })),
   }
@@ -137,13 +145,24 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
 async function fetchCandidateAgentsFromSupabase(teamId: string, presentIds: Set<string>): Promise<CandidateAgent[]> {
   const { data, error } = await supabase
     .from('actors')
-    .select('id, display_name, actor_type')
+    .select('id, display_name, actor_type, agent_kind, default_agent_type')
     .eq('team_id', teamId)
     .eq('actor_type', 'agent')
   if (error) throw error
-  return ((data ?? []) as Array<{ id: string; display_name: string; actor_type: string }>)
+  return ((data ?? []) as Array<{
+    id: string
+    display_name: string
+    actor_type: string
+    agent_kind: string | null
+    default_agent_type: string | null
+  }>)
     .filter((a) => a.actor_type === 'agent' && !presentIds.has(a.id))
-    .map((a) => ({ id: a.id, display_name: a.display_name }))
+    .map((a) => ({
+      id: a.id,
+      display_name: a.display_name,
+      agent_kind: a.agent_kind ?? null,
+      default_agent_type: a.default_agent_type ?? null,
+    }))
 }
 
 // ── ActorRowView ───────────────────────────────────────────────────────────
@@ -163,8 +182,16 @@ function ActorRowView({
   const isAgent = actor.actor_type === 'agent'
   const initials = actor.display_name?.slice(0, 2).toUpperCase() || ''
   const { color: dotColor, breathing } = computeDotStateAndAnimation(actor, runtimeInfo)
-  const modelName = isAgent ? (runtimeInfo?.currentModel || null) : null
-  const subline = isAgent ? (modelName || actor.agent_kind || '') : (actor.member_status || '')
+  const modelName = isAgent ? (runtimeInfo?.currentModel || actor.default_agent_type || null) : null
+  let subline: string
+  if (isAgent) {
+    const parts: string[] = []
+    if (actor.agent_kind) parts.push(actor.agent_kind)
+    if (modelName) parts.push(modelName)
+    subline = parts.join(' · ')
+  } else {
+    subline = actor.member_status || ''
+  }
 
   return (
     <div className="group relative flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40">
@@ -263,7 +290,12 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           setCandidateAgents(
             cached
               .filter(a => a.actorType === 'agent')
-              .map(a => ({ id: a.id, display_name: a.displayName })),
+              .map(a => ({
+                id: a.id,
+                display_name: a.displayName,
+                agent_kind: null,
+                default_agent_type: null,
+              })),
           )
           setLoading(false)
           // Phase 2: refresh in background.
@@ -313,9 +345,17 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         .filter((a): a is NonNullable<typeof a> => !!a)
         .map(mapCachedActor)
 
-      let cachedCandidates = cachedTeamActors
+      let cachedCandidates: CandidateAgent[] = cachedTeamActors
         .filter(a => a.actorType === 'agent' && !cachedPresentSet.has(a.id))
-        .map(a => ({ id: a.id, display_name: a.displayName }))
+        .map(a => ({
+          id: a.id,
+          display_name: a.displayName,
+          // ActorRow cache lacks agent_kind / default_agent_type today; the
+          // supabase fallback (`fetchCandidateAgentsFromSupabase`) supplies
+          // them when no cached row matches.
+          agent_kind: null,
+          default_agent_type: null,
+        }))
 
       let effectiveActorIds = cachedActorIds
       if (cachedRows.length === 0) {
@@ -366,9 +406,17 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           .filter((a): a is NonNullable<typeof a> => !!a)
           .map(mapCachedActor)
 
-        let freshCandidates = freshTeamActors
+        let freshCandidates: CandidateAgent[] = freshTeamActors
           .filter(a => a.actorType === 'agent' && !freshPresent.has(a.id))
-          .map(a => ({ id: a.id, display_name: a.displayName }))
+          .map(a => ({
+          id: a.id,
+          display_name: a.displayName,
+          // ActorRow cache lacks agent_kind / default_agent_type today; the
+          // supabase fallback (`fetchCandidateAgentsFromSupabase`) supplies
+          // them when no cached row matches.
+          agent_kind: null,
+          default_agent_type: null,
+        }))
 
         let effectiveFreshIds = freshIds
         if (freshRows.length === 0) {
@@ -481,6 +529,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       member_status: null,
       agent_status: 'starting',
       agent_kind: null,
+      default_agent_type: null,
       last_active_at: null,
     }
     setRows(prev => [...prev, newRow])
@@ -508,8 +557,11 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         .limit(1)
 
       const workspaceId = priorRows?.[0]?.workspace_id ?? ''
+      // Prefer the agent's explicit default_agent_type (set via UI) over the
+      // backend_type recorded from the agent's prior runtime — the prior value
+      // can lag if the operator changed the default after the last spawn.
       const agentType = resolveAmuxAgentType(
-        priorRows?.[0]?.backend_type ?? null,
+        candidate.default_agent_type ?? priorRows?.[0]?.backend_type ?? null,
         candidate.agent_kind,
       )
 
