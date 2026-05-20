@@ -10,6 +10,7 @@ const DEFAULT_SUPABASE_URL: &str = "https://srhaytajyfrniuvnkfpd.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_CJavqYCusEBD7cIebhH5tQ_K_I9AXpE";
 const DEFAULT_MQTT_HOST: &str = "ai.ucar.cc";
 const DEFAULT_MQTT_PORT: u16 = 8883;
+const DEFAULT_MQTT_USE_TLS: bool = true;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +23,8 @@ pub struct ServerConfig {
     pub mqtt_host: Option<String>,
     #[serde(default)]
     pub mqtt_port: Option<u16>,
+    #[serde(default)]
+    pub mqtt_use_tls: Option<bool>,
 }
 
 fn config_base_dir() -> PathBuf {
@@ -54,6 +57,7 @@ fn default_server_config() -> ServerConfig {
         supabase_anon_key: Some(DEFAULT_SUPABASE_ANON_KEY.to_string()),
         mqtt_host: Some(DEFAULT_MQTT_HOST.to_string()),
         mqtt_port: Some(DEFAULT_MQTT_PORT),
+        mqtt_use_tls: Some(DEFAULT_MQTT_USE_TLS),
     }
 }
 
@@ -83,6 +87,9 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
     }
     if config.mqtt_port.is_none() {
         config.mqtt_port = defaults.mqtt_port;
+    }
+    if config.mqtt_use_tls.is_none() {
+        config.mqtt_use_tls = defaults.mqtt_use_tls;
     }
 
     config
@@ -183,6 +190,7 @@ mod tests {
             supabase_anon_key: Some("anon-key".to_string()),
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
+            mqtt_use_tls: Some(false),
         }
     }
 
@@ -227,6 +235,7 @@ mod tests {
         assert_eq!(loaded.supabase_url.as_deref(), Some(DEFAULT_SUPABASE_URL));
         assert_eq!(loaded.mqtt_host.as_deref(), Some(DEFAULT_MQTT_HOST));
         assert_eq!(loaded.mqtt_port, Some(DEFAULT_MQTT_PORT));
+        assert_eq!(loaded.mqtt_use_tls, Some(DEFAULT_MQTT_USE_TLS));
         assert!(current.exists());
     }
 
@@ -241,6 +250,7 @@ mod tests {
                 supabase_anon_key: None,
                 mqtt_host: None,
                 mqtt_port: Some(1883),
+                mqtt_use_tls: Some(false),
             },
         )
         .unwrap();
@@ -259,5 +269,6 @@ mod tests {
         );
         assert_eq!(loaded.mqtt_host.as_deref(), Some(DEFAULT_MQTT_HOST));
         assert_eq!(loaded.mqtt_port, Some(1883));
+        assert_eq!(loaded.mqtt_use_tls, Some(false));
     }
 }

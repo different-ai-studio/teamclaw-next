@@ -6,6 +6,7 @@ export interface ServerConfig {
   supabaseAnonKey?: string;
   mqttHost?: string;
   mqttPort?: number;
+  mqttUseTls?: boolean;
 }
 
 const STORAGE_KEY = "teamclaw.serverConfig";
@@ -29,11 +30,19 @@ function writeLocalConfig(config: ServerConfig) {
 
 function envConfig(): ServerConfig {
   const mqttPort = Number(import.meta.env.VITE_MQTT_PORT ?? "");
+  const rawUseTls = import.meta.env.VITE_MQTT_USE_TLS?.trim().toLowerCase();
+  const mqttUseTls =
+    rawUseTls === "true" || rawUseTls === "1"
+      ? true
+      : rawUseTls === "false" || rawUseTls === "0"
+        ? false
+        : undefined;
   return {
     supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
     supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
     mqttHost: import.meta.env.VITE_MQTT_HOST,
     mqttPort: Number.isFinite(mqttPort) ? mqttPort : undefined,
+    mqttUseTls,
   };
 }
 
@@ -54,6 +63,7 @@ export async function saveServerConfig(config: ServerConfig): Promise<ServerConf
     supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
+    mqttUseTls: config.mqttUseTls,
   };
 
   writeLocalConfig(normalized);
@@ -71,5 +81,6 @@ export async function getEffectiveServerConfig(): Promise<ServerConfig> {
     supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
+    mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
   };
 }

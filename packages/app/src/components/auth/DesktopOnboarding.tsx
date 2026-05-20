@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { buildConfig } from "@/lib/build-config";
 import { parseInviteTokenInput } from "@/lib/invite-deeplink";
 import { saveServerConfig, type ServerConfig } from "@/lib/server-config";
@@ -268,6 +269,23 @@ function ServerStep({ onBack }: { onBack: () => void }) {
               type="number"
               value={config.mqttPort == null ? "" : String(config.mqttPort)}
               onChange={(event) => update({ mqttPort: event.target.value ? Number(event.target.value) : undefined })}
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3 rounded-[10px] border border-border bg-background px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-[12.5px] font-medium text-ink-2">
+                {t("auth.onboarding.mqttUseTls", "Use TLS (mqtts://)")}
+              </div>
+              <div className="text-[11.5px] text-muted-foreground">
+                {t(
+                  "auth.onboarding.mqttUseTlsHint",
+                  "Enable for brokers on port 8883. Disable for plain TCP on 1883.",
+                )}
+              </div>
+            </div>
+            <Switch
+              checked={config.mqttUseTls ?? true}
+              onCheckedChange={(checked) => update({ mqttUseTls: checked })}
             />
           </label>
         </div>

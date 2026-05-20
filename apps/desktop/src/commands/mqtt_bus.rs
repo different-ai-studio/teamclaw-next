@@ -19,6 +19,7 @@ pub async fn mqtt_connect(
     password: String,
     client_id: String,
     team_id: String,
+    use_tls: bool,
 ) -> Result<(), String> {
     let cfg = ClientConfig {
         broker_host,
@@ -27,8 +28,13 @@ pub async fn mqtt_connect(
         username,
         password,
         team_id,
+        use_tls,
     };
     let client = MqttClient::connect(cfg).map_err(|e| e.to_string())?;
+    // Reset to false until the event loop observes a CONNACK. Without this,
+    // a stale `true` from a previous session could leak into the UI between
+    // `mqtt_connect` returning and the broker's CONNACK arriving.
+    bus.set_connected(false);
     *bus.client.lock().await = Some(client);
 
     let bus_arc = (*bus).clone();
@@ -72,7 +78,11 @@ pub async fn mqtt_publish(
 
 #[tauri::command]
 pub async fn mqtt_status(bus: State<'_, MqttBus>) -> Result<MqttStatus, String> {
-    let connected = bus.client.lock().await.is_some();
+    // Honest connection check: the bus's `connected` flag is only true after
+    // the event loop has observed a CONNACK from the broker and not since seen
+    // a network error or DISCONNECT. The previous heuristic (`client.is_some()`)
+    // reported "connected" even when the TCP/TLS connection had died silently.
+    let connected = bus.is_connected();
     let subscribed_topics: Vec<String> = bus.subscribed.lock().await.iter().cloned().collect();
     Ok(MqttStatus {
         connected,

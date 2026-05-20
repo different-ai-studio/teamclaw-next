@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS};
+use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, TlsConfiguration, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -11,6 +11,7 @@ pub struct ClientConfig {
     pub username: String,
     pub password: String,
     pub team_id: String,
+    pub use_tls: bool,
 }
 
 pub struct MqttClient {
@@ -25,6 +26,15 @@ impl MqttClient {
         opts.set_credentials(&cfg.username, &cfg.password);
         opts.set_clean_session(false);
         opts.set_keep_alive(Duration::from_secs(30));
+        // Attachments + ACP events can be a few hundred KB. Keep room.
+        opts.set_max_packet_size(4 * 1024 * 1024, 4 * 1024 * 1024);
+
+        if cfg.use_tls {
+            // `TlsConfiguration::default()` (use-rustls) loads the OS native
+            // trust roots and builds a `ClientConfig` with no client auth.
+            // Good enough for connecting to a public broker over TLS.
+            opts.set_transport(Transport::tls_with_config(TlsConfiguration::default()));
+        }
 
         let lwt_topic = super::topics::device_state(&cfg.team_id, &cfg.client_id);
         let lwt_payload = serde_json::json!({"status":"offline"})
@@ -57,11 +67,23 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
             guard.as_ref().map(|c| c.event_loop.clone())
         };
         let Some(event_loop) = event_loop_arc else {
+            bus.set_connected(false);
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         };
         let mut event_loop = event_loop.lock().await;
         match event_loop.poll().await {
+            Ok(Event::Incoming(Packet::ConnAck(ack))) => {
+                backoff_secs = 1;
+                bus.set_connected(true);
+                tracing::info!("mqtt CONNACK: {:?}", ack.code);
+                let _ = app.emit("mqtt:connected", true);
+            }
+            Ok(Event::Incoming(Packet::Disconnect)) => {
+                bus.set_connected(false);
+                tracing::warn!("mqtt broker sent DISCONNECT");
+                let _ = app.emit("mqtt:connected", false);
+            }
             Ok(Event::Incoming(Packet::Publish(p))) => {
                 backoff_secs = 1;
                 let payload = serde_json::json!({
@@ -74,6 +96,8 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
                 backoff_secs = 1;
             }
             Err(e) => {
+                bus.set_connected(false);
+                let _ = app.emit("mqtt:connected", false);
                 tracing::warn!("mqtt event loop error: {e}, retry in {backoff_secs}s");
                 drop(event_loop);
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;

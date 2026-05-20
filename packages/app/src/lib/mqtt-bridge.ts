@@ -13,6 +13,7 @@ export async function mqttConnect(args: {
   password: string;
   clientId: string;
   teamId: string;
+  useTls: boolean;
 }): Promise<void> {
   await invoke("mqtt_connect", {
     brokerHost: args.brokerHost,
@@ -21,6 +22,7 @@ export async function mqttConnect(args: {
     password: args.password,
     clientId: args.clientId,
     teamId: args.teamId,
+    useTls: args.useTls,
   });
 }
 

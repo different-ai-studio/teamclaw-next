@@ -749,6 +749,7 @@ function AppContent() {
         const serverConfig = await getEffectiveServerConfig();
         const brokerHost = serverConfig.mqttHost;
         const brokerPort = serverConfig.mqttPort ?? 1883;
+        const useTls = serverConfig.mqttUseTls ?? true;
         if (!brokerHost) {
           console.warn("[MQTT] missing broker host — configure it in Settings > Server");
           return;
@@ -756,6 +757,7 @@ function AppContent() {
         console.info("[MQTT] connecting", {
           brokerHost,
           brokerPort,
+          useTls,
           teamId: firstTeamId,
           actorId,
         });
@@ -767,6 +769,7 @@ function AppContent() {
           password: accessToken,
           clientId: `teamclaw-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
           teamId: firstTeamId,
+          useTls,
         });
         if (cancelled) return;
 

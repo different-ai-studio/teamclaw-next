@@ -17,11 +17,23 @@ describe("mqtt-bridge", () => {
     invokeMock.mockResolvedValueOnce(undefined);
     await mqttConnect({
       brokerHost: "h", brokerPort: 1883, username: "u", password: "p",
-      clientId: "c", teamId: "t",
+      clientId: "c", teamId: "t", useTls: false,
     });
     expect(invokeMock).toHaveBeenCalledWith("mqtt_connect", {
       brokerHost: "h", brokerPort: 1883, username: "u", password: "p",
-      clientId: "c", teamId: "t",
+      clientId: "c", teamId: "t", useTls: false,
+    });
+  });
+
+  it("mqttConnect forwards useTls true", async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+    await mqttConnect({
+      brokerHost: "h", brokerPort: 8883, username: "u", password: "p",
+      clientId: "c", teamId: "t", useTls: true,
+    });
+    expect(invokeMock).toHaveBeenCalledWith("mqtt_connect", {
+      brokerHost: "h", brokerPort: 8883, username: "u", password: "p",
+      clientId: "c", teamId: "t", useTls: true,
     });
   });
 

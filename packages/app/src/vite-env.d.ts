@@ -11,6 +11,7 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_ANON_KEY: string;
   readonly VITE_MQTT_HOST?: string;
   readonly VITE_MQTT_PORT?: string;
+  readonly VITE_MQTT_USE_TLS?: string;
   readonly VITE_MQTT_USERNAME?: string;
   readonly VITE_MQTT_PASSWORD?: string;
 }
@@ -65,5 +66,6 @@ interface Window {
     supabaseAnonKey?: string;
     mqttHost?: string;
     mqttPort?: number;
+    mqttUseTls?: boolean;
   };
 }
