@@ -20,7 +20,7 @@ import type { AgentChip } from "../../../../src/features/sessions/components/Age
 import { createOutboxDao } from "../../../../src/features/sessions/outbox-db";
 import { createOutboxSender } from "../../../../src/features/sessions/outbox-sender";
 import type { OutboxRow, OutboxSqliteDb } from "../../../../src/features/sessions/outbox-db";
-import { syncOutboxFromDao } from "../../../../src/features/sessions/outbox-store";
+import { resetOutbox, syncOutboxFromDao } from "../../../../src/features/sessions/outbox-store";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
 import { emptyTimelineState } from "../../../../src/features/sessions/timeline-reducer";
@@ -231,6 +231,8 @@ export default function SessionDetailRoute() {
       outboxRef.current?.sender.stop();
       outboxRef.current = null;
       recentMessageIdsRef.current = new Set();
+      void controller?.dispose();
+      resetOutbox();
     };
   }, [currentTeam, sessionId, state.currentMemberActorId, state.route, teamMqtt]);
 
