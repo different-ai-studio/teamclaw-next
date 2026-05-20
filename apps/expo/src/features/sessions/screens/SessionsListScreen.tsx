@@ -361,6 +361,8 @@ export function SessionsListScreen({
     <View style={styles.screen}>
     <ScrollView
       contentContainerStyle={styles.content}
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
           onRefresh={onRefresh}
