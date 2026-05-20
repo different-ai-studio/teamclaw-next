@@ -23,16 +23,33 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import tech.teamclaw.android.core.design.Hai
+import tech.teamclaw.android.core.design.HaiSegment
+import tech.teamclaw.android.core.design.HaiSegmentedFilterBar
 import tech.teamclaw.android.core.design.TeamclawTheme
 import tech.teamclaw.android.core.model.ActorRecord
+
+/**
+ * Port of iOS `Members/MemberListContent.swift`. Adds the Humans/Agents
+ * segmented filter and "YOU" badge on the signed-in user's row that
+ * iOS ships.
+ */
+enum class ActorKindFilter { ALL, HUMANS, AGENTS }
 
 @Composable
 fun MembersScreen(
@@ -44,8 +61,20 @@ fun MembersScreen(
     onInvite: () -> Unit,
     onActorClick: (ActorRecord) -> Unit,
     onBack: (() -> Unit)? = null,
+    currentActorId: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    var filter by rememberSaveable { mutableStateOf(ActorKindFilter.ALL) }
+    val humansCount = remember(actors) { actors.count { !it.isAgent } }
+    val agentsCount = remember(actors) { actors.count { it.isAgent } }
+    val filtered = remember(actors, filter) {
+        when (filter) {
+            ActorKindFilter.ALL -> actors
+            ActorKindFilter.HUMANS -> actors.filter { !it.isAgent }
+            ActorKindFilter.AGENTS -> actors.filter { it.isAgent }
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize().background(Hai.Mist)) {
         MembersTopBar(teamName, onBack, onRefresh, onInvite)
 
@@ -59,6 +88,19 @@ fun MembersScreen(
             }
         }
 
+        if (actors.isNotEmpty()) {
+            HaiSegmentedFilterBar(
+                segments = listOf(
+                    HaiSegment(ActorKindFilter.ALL, "All", actors.size),
+                    HaiSegment(ActorKindFilter.HUMANS, "Humans", humansCount),
+                    HaiSegment(ActorKindFilter.AGENTS, "Agents", agentsCount),
+                ),
+                selection = filter,
+                onSelect = { filter = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         if (isLoading && actors.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Hai.Cinnabar)
@@ -67,10 +109,26 @@ fun MembersScreen(
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No members yet.", style = MaterialTheme.typography.bodyLarge, color = Hai.Basalt)
             }
+        } else if (filtered.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    when (filter) {
+                        ActorKindFilter.HUMANS -> "No humans yet"
+                        ActorKindFilter.AGENTS -> "No agents yet"
+                        ActorKindFilter.ALL -> "No members yet."
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Hai.Basalt,
+                )
+            }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().testTag("members.list")) {
-                items(items = actors, key = { it.id }) { actor ->
-                    ActorRow(actor, onClick = { onActorClick(actor) })
+                items(items = filtered, key = { it.id }) { actor ->
+                    ActorRow(
+                        actor = actor,
+                        isCurrentUser = actor.id == currentActorId,
+                        onClick = { onActorClick(actor) },
+                    )
                     HorizontalDivider(color = Hai.Hairline)
                 }
             }
@@ -106,7 +164,11 @@ private fun MembersTopBar(
 }
 
 @Composable
-private fun ActorRow(actor: ActorRecord, onClick: () -> Unit) {
+private fun ActorRow(
+    actor: ActorRecord,
+    isCurrentUser: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth()
             .clickable(onClick = onClick)
@@ -135,6 +197,25 @@ private fun ActorRow(actor: ActorRecord, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                if (isCurrentUser) {
+                    Spacer(Modifier.size(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Hai.Onyx)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("members.row.youBadge"),
+                    ) {
+                        Text(
+                            text = "YOU",
+                            color = androidx.compose.ui.graphics.Color.White,
+                            fontFamily = FontFamily.SansSerif,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 9.sp,
+                            letterSpacing = 0.5.sp,
+                        )
+                    }
+                }
                 if (actor.isOnline) {
                     Spacer(Modifier.size(6.dp))
                     Box(Modifier.size(8.dp).clip(CircleShape).background(Hai.Sage))
@@ -163,6 +244,7 @@ private fun MembersPreview() {
             ),
             isLoading = false, errorMessage = null,
             onRefresh = {}, onInvite = {}, onActorClick = {}, onBack = {},
+            currentActorId = "1",
         )
     }
 }

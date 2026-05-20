@@ -119,6 +119,7 @@ fun RootTabsScreen(
                     onInvite = onInviteMember,
                     onActorClick = onOpenActorDetail,
                     onBack = null,
+                    currentActorId = currentActorId,
                 )
                 RootTab.Search -> SearchTabPlaceholder()
             }

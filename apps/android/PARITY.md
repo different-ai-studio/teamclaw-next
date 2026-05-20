@@ -76,8 +76,8 @@ This file is the running gap list and phased plan. Update it as work lands.
 
 | Feature                          | iOS source                                | Android | Notes |
 | -------------------------------- | ----------------------------------------- | :-----: | --- |
-| Member list                      | `Members/MemberListContent.swift`         |   🟡    | exists; missing segmented filter, "YOU" badge |
-| Humans / Agents segmented filter | `Shared/SegmentedFilterBar.swift`         |   🟥    | not implemented |
+| Member list                      | `Members/MemberListContent.swift`         |    ✅   | segmented filter + "YOU" badge landed; search still TODO (deferred to Phase 7) |
+| Humans / Agents segmented filter | `Shared/SegmentedFilterBar.swift`         |    ✅   | uses `HaiSegmentedFilterBar`, counts shown |
 | Invite sheet (Hai paper)         | `Members/MemberInviteSheet.swift`         |   🟡    | exists; needs Hai paper visuals |
 
 ## 6. Workspace management
