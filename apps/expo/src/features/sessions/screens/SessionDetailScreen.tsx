@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   FlatList,
   Image,
@@ -31,6 +31,16 @@ import {
 } from "../components/mentions";
 import { SessionComposerShell } from "../components/SessionComposerShell";
 import { SessionMessageRow } from "../components/SessionMessageRow";
+import { SessionPlansPanel } from "../components/SessionPlansPanel";
+import {
+  getOutboxSnapshot,
+  subscribeOutbox,
+  type OutboxStatus,
+} from "../outbox-store";
+import {
+  deriveAgentPlanSnapshots,
+  type AgentPlanSnapshot,
+} from "../plan-snapshot";
 import { SlashCommandsPopup } from "../components/SlashCommandsPopup";
 import {
   filterSlashCommands,
@@ -68,9 +78,13 @@ type SessionDetailScreenProps = {
   onClearReply?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string, currentContent: string) => void;
+  onGrantPermission?: (requestId: string) => void;
+  onDenyPermission?: (requestId: string) => void;
+  resolvedPermissionsByRequestId?: ReadonlyMap<string, boolean>;
   onReconnect?: () => void;
   onRefresh?: () => void;
   onOpenMembers?: () => void;
+  onRetryFailed?: (messageId: string) => void;
   onReplyToMessage?: (messageId: string) => void;
   onSend: () => void;
   onShare?: () => void;
@@ -132,6 +146,8 @@ function SessionHeader({
   onBack,
   onOpenMembers,
   onShare,
+  onTogglePlans,
+  plansPanelOpen,
   onToggleMute,
   session,
 }: {
@@ -141,6 +157,8 @@ function SessionHeader({
   onBack: () => void;
   onOpenMembers?: () => void;
   onShare?: () => void;
+  onTogglePlans?: () => void;
+  plansPanelOpen?: boolean;
   onToggleMute?: () => void;
   session: SessionSummary;
 }) {
@@ -187,6 +205,21 @@ function SessionHeader({
             </Text>
           </View>
         </View>
+        {onTogglePlans ? (
+          <Pressable
+            accessibilityLabel={plansPanelOpen ? "Hide plans" : "Show plans"}
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={onTogglePlans}
+            style={styles.headerSlot}
+          >
+            <Ionicons
+              color={plansPanelOpen ? colors.cinnabar : colors.onyx}
+              name="list-outline"
+              size={20}
+            />
+          </Pressable>
+        ) : null}
         {onShare ? (
           <Pressable hitSlop={8} onPress={onShare} style={styles.headerSlot}>
             <Ionicons color={colors.onyx} name="share-outline" size={20} />
@@ -238,9 +271,13 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     onClearReply,
     onDeleteMessage,
     onEditMessage,
+    onGrantPermission,
+    onDenyPermission,
+    resolvedPermissionsByRequestId,
     onOpenMembers,
     onReconnect,
     onRefresh,
+    onRetryFailed,
     onReplyToMessage,
     onSend,
     onShare,
@@ -285,6 +322,29 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
   const messageListRef = useRef<FlatList<FeedItem> | null>(null);
   const lastMessageCount = useRef(state.messages.length);
 
+  const outboxByMessageId = useSyncExternalStore(
+    subscribeOutbox,
+    getOutboxSnapshot,
+    getOutboxSnapshot,
+  );
+
+  const planSnapshots = useMemo<AgentPlanSnapshot[]>(
+    () =>
+      deriveAgentPlanSnapshots(state.messages, (agentId) => {
+        return senderNames?.get(agentId) ?? "";
+      }),
+    [state.messages, senderNames],
+  );
+  const [plansPanelOpen, setPlansPanelOpen] = useState(true);
+  useEffect(() => {
+    // Reopen the panel automatically whenever a *new* agent gains an
+    // unfinished plan. Doesn't reopen when the same set of agents just
+    // updates their items.
+    if (planSnapshots.length === 0) return;
+    setPlansPanelOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planSnapshots.length]);
+
   const separatorIndices = useMemo(() => {
     const out: number[] = [];
     for (let i = 0; i < feedItems.length; i += 1) {
@@ -315,6 +375,12 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         onBack={onBack}
         onOpenMembers={onOpenMembers}
         onShare={onShare}
+        onTogglePlans={
+          planSnapshots.length > 0
+            ? () => setPlansPanelOpen((value) => !value)
+            : undefined
+        }
+        plansPanelOpen={plansPanelOpen && planSnapshots.length > 0}
         onToggleMute={onToggleMute}
         session={session}
       />
@@ -322,6 +388,12 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         connectionState={connectionState}
         onReconnect={onReconnect}
       />
+      {plansPanelOpen && planSnapshots.length > 0 ? (
+        <SessionPlansPanel
+          onClose={() => setPlansPanelOpen(false)}
+          snapshots={planSnapshots}
+        />
+      ) : null}
       {runtimeInfo ? (
         <Pressable
           accessibilityRole={onChangeRuntimeModel ? "button" : undefined}
@@ -404,11 +476,34 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
                       });
                     }
                   }}
+                  onRetryOutbox={onRetryFailed}
                   onReply={
                     onReplyToMessage
                       ? (m) => onReplyToMessage(m.messageId)
                       : undefined
                   }
+                  outboxStatus={
+                    isOwn
+                      ? (outboxByMessageId.get(msg.messageId) as OutboxStatus | undefined)
+                      : undefined
+                  }
+                  onGrantPermission={onGrantPermission}
+                  onDenyPermission={onDenyPermission}
+                  resolvedPermission={(() => {
+                    if (msg.kind.trim().toLowerCase() !== "permission_request")
+                      return null;
+                    const meta =
+                      msg.metadata && typeof msg.metadata === "object"
+                        ? (msg.metadata as Record<string, unknown>)
+                        : {};
+                    const requestId =
+                      (typeof meta.tool_id === "string" && (meta.tool_id as string)) ||
+                      (typeof meta.request_id === "string" &&
+                        (meta.request_id as string)) ||
+                      msg.messageId;
+                    const decision = resolvedPermissionsByRequestId?.get(requestId);
+                    return decision === undefined ? null : { granted: decision };
+                  })()}
                   replyToMessage={replyToMessage}
                   senderAvatarGlyph={
                     !isOwn ? senderAvatarGlyphs?.get(msg.senderActorId) ?? null : null

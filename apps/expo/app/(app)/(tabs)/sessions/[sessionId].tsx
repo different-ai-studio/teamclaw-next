@@ -1,6 +1,13 @@
+import { create, toBinary } from "@bufbuild/protobuf";
+import {
+  LiveEventEnvelopeSchema,
+  MessageKind,
+  MessageSchema,
+  SessionMessageEnvelopeSchema,
+} from "@teamclaw/app/proto/teamclaw_pb";
 import { Redirect, Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, Alert, Share, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Share, StyleSheet, Text, View } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
@@ -10,19 +17,65 @@ import {
   saveComposerDraft,
 } from "../../../../src/features/sessions/composer-drafts";
 import type { AgentChip } from "../../../../src/features/sessions/components/AgentChipBar";
+import { createOutboxDao } from "../../../../src/features/sessions/outbox-db";
+import { createOutboxSender } from "../../../../src/features/sessions/outbox-sender";
+import type { OutboxRow, OutboxSqliteDb } from "../../../../src/features/sessions/outbox-db";
+import { syncOutboxFromDao } from "../../../../src/features/sessions/outbox-store";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
+import { createSessionDetailCache } from "../../../../src/features/sessions/session-detail-cache";
 import { createSessionMutesApi } from "../../../../src/features/sessions/session-mutes";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
 import { impactLight, selectionTick, successTone } from "../../../../src/lib/haptics";
 import { showToast } from "../../../../src/ui/Toast";
 import { supabase } from "../../../../src/lib/supabase/client";
+import { getDb } from "../../../../src/lib/db/sqlite";
 import { getOptionalMqttUrl } from "../../../../src/lib/mqtt/config";
 import { createExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
+import type { ExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
+import { uuidV4 } from "../../../../src/lib/uuid";
 import { PrimaryButton } from "../../../../src/ui/button";
 import { AppCard } from "../../../../src/ui/card";
+import { TextPromptModal } from "../../../../src/ui/TextPromptModal";
 import { colors, spacing, typography } from "../../../../src/ui/theme";
 import type { SessionDetailControllerState } from "../../../../src/features/sessions/session-detail-controller";
+
+/**
+ * Build the proto LiveEventEnvelope for an outbox row and publish it via MQTT.
+ * This mirrors the fallback path in session-detail-controller but lives here at
+ * the route so the sender closure can capture the live mqtt adapter reference.
+ */
+async function sendOutboxRowViaMqtt(
+  row: OutboxRow,
+  mqtt: Pick<ExpoMqttAdapter, "publish">,
+): Promise<void> {
+  const createdAtSeconds = BigInt(Math.floor(row.createdAt / 1000));
+  const protoMessage = create(MessageSchema, {
+    messageId: row.messageId,
+    sessionId: row.sessionId,
+    senderActorId: row.senderActorId,
+    kind: MessageKind.TEXT,
+    content: row.content,
+    createdAt: createdAtSeconds,
+  });
+  const sessionMessage = create(SessionMessageEnvelopeSchema, {
+    message: protoMessage,
+    mentionActorIds: row.mentionActorIds,
+  });
+  const envelope = create(LiveEventEnvelopeSchema, {
+    eventId: uuidV4(),
+    eventType: "message.created",
+    sessionId: row.sessionId,
+    actorId: row.senderActorId,
+    sentAt: createdAtSeconds,
+    body: toBinary(SessionMessageEnvelopeSchema, sessionMessage),
+  });
+  await mqtt.publish(
+    `amux/${row.teamId}/session/${row.sessionId}/live`,
+    toBinary(LiveEventEnvelopeSchema, envelope),
+    false,
+  );
+}
 
 const fallbackDetailState: SessionDetailControllerState = {
   status: "loading",
@@ -75,6 +128,14 @@ export default function SessionDetailRoute() {
   const [controller, setController] = useState<ReturnType<typeof createSessionDetailController> | null>(
     null,
   );
+
+  // Durable outbox: DAO + sender live here at the route so they survive
+  // across controller rebuilds and we can call sender.retry() from UI.
+  type OutboxHandle = { dao: ReturnType<typeof createOutboxDao>; sender: ReturnType<typeof createOutboxSender> };
+  const outboxRef = useRef<OutboxHandle | null>(null);
+  // Tracks message ids sent in this session so onChange can sync them.
+  const recentMessageIdsRef = useRef<Set<string>>(new Set());
+
   const handleBackToList = () => {
     router.replace("/(app)/sessions");
   };
@@ -96,33 +157,69 @@ export default function SessionDetailRoute() {
       );
     }
 
-    const nextController = createSessionDetailController({
-      api: createSessionsApi(supabase),
-      currentMemberActorId: state.currentMemberActorId,
-      getAuth: async () => {
-        const { data } = await supabase.auth.getSession();
-        return {
-          accessToken: data.session?.access_token ?? null,
-          userId: data.session?.user.id ?? null,
-        };
-      },
-      mqtt: createExpoMqttAdapter(),
-      mqttUrl: getOptionalMqttUrl(),
-      sessionId,
-      teamId: currentTeam.id,
-    });
-    setController(nextController);
-    void nextController.load();
+    let cancelled = false;
+    // Keep a stable reference to the mqtt adapter so the send closure can
+    // capture it without going stale.
+    const mqttAdapter = createExpoMqttAdapter();
 
-    // Restore any composer draft saved for this session on a prior visit.
-    void loadComposerDraft(sessionId).then((draft) => {
-      if (draft.length > 0) {
+    void (async () => {
+      // Build the outbox before the controller so load() has it available
+      // on the very first call.
+      const db = await getDb();
+      if (cancelled) return;
+
+      const dao = createOutboxDao(db as unknown as OutboxSqliteDb);
+      const sender = createOutboxSender({
+        dao,
+        send: (row) => {
+          // Track this id so onChange can sync its status from the DAO.
+          recentMessageIdsRef.current.add(row.messageId);
+          return sendOutboxRowViaMqtt(row, mqttAdapter);
+        },
+        onChange: () => {
+          void syncOutboxFromDao(dao, Array.from(recentMessageIdsRef.current));
+        },
+      });
+      outboxRef.current = { dao, sender };
+
+      const nextController = createSessionDetailController({
+        api: createSessionsApi(supabase),
+        cache: createSessionDetailCache(),
+        currentMemberActorId: state.currentMemberActorId,
+        getAuth: async () => {
+          const { data } = await supabase.auth.getSession();
+          return {
+            accessToken: data.session?.access_token ?? null,
+            userId: data.session?.user.id ?? null,
+          };
+        },
+        mqtt: mqttAdapter,
+        mqttUrl: getOptionalMqttUrl(),
+        outbox: { dao, sender },
+        sessionId,
+        teamId: currentTeam.id,
+      });
+
+      if (cancelled) {
+        void nextController.dispose();
+        return;
+      }
+
+      setController(nextController);
+      await nextController.load();
+
+      // Restore any composer draft saved for this session on a prior visit.
+      const draft = await loadComposerDraft(sessionId);
+      if (!cancelled && draft.length > 0) {
         nextController.setComposerText(draft);
       }
-    });
+    })();
 
     return () => {
-      void nextController.dispose();
+      cancelled = true;
+      outboxRef.current?.sender.stop();
+      outboxRef.current = null;
+      recentMessageIdsRef.current = new Set();
     };
   }, [currentTeam, sessionId, state.currentMemberActorId, state.route]);
 
@@ -153,6 +250,13 @@ export default function SessionDetailRoute() {
     { runtimeId: string; status: string; currentModel: string | null } | null
   >(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [isModelPromptOpen, setIsModelPromptOpen] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<
+    { messageId: string; content: string } | null
+  >(null);
+  const [resolvedPermissions, setResolvedPermissions] = useState<
+    ReadonlyMap<string, boolean>
+  >(new Map());
   const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -359,6 +463,29 @@ export default function SessionDetailRoute() {
           onAttach={() => {
             router.push(`/(app)/attach?sessionId=${sessionId}`);
           }}
+          onGrantPermission={(requestId) => {
+            setResolvedPermissions((prev) => {
+              const next = new Map(prev);
+              next.set(requestId, true);
+              return next;
+            });
+            showToast(
+              "success",
+              "Allowed — daemon delivery via mobile isn't wired yet; respond on the desktop app to actually unlock the tool call.",
+            );
+          }}
+          onDenyPermission={(requestId) => {
+            setResolvedPermissions((prev) => {
+              const next = new Map(prev);
+              next.set(requestId, false);
+              return next;
+            });
+            showToast(
+              "success",
+              "Denied locally — desktop app remains the source of truth for the daemon-side response.",
+            );
+          }}
+          resolvedPermissionsByRequestId={resolvedPermissions}
           onBack={handleBackToList}
           onChangeComposerText={(value) => {
             controller?.setComposerText(value);
@@ -370,36 +497,7 @@ export default function SessionDetailRoute() {
             }
           }}
           onChangeRuntimeModel={
-            runtimeInfo
-              ? () => {
-                  Alert.prompt(
-                    "Change model",
-                    "Set the model the runtime uses for the next turn (e.g. claude-sonnet-4-6).",
-                    async (next) => {
-                      const trimmed = next?.trim();
-                      if (!trimmed) return;
-                      try {
-                        await createSessionsApi(supabase).updateRuntimeModel(
-                          runtimeInfo.runtimeId,
-                          trimmed,
-                        );
-                        setRuntimeInfo({
-                          ...runtimeInfo,
-                          currentModel: trimmed,
-                        });
-                        showToast("success", `Model set to ${trimmed}`);
-                      } catch (err) {
-                        showToast(
-                          "error",
-                          err instanceof Error ? err.message : "Couldn't update model",
-                        );
-                      }
-                    },
-                    "plain-text",
-                    runtimeInfo.currentModel ?? "",
-                  );
-                }
-              : undefined
+            runtimeInfo ? () => setIsModelPromptOpen(true) : undefined
           }
           onClearReply={() => controller?.setReplyTarget(null)}
           onDeleteMessage={async (messageId) => {
@@ -416,25 +514,7 @@ export default function SessionDetailRoute() {
             }
           }}
           onEditMessage={(messageId, currentContent) => {
-            Alert.prompt(
-              "Edit message",
-              undefined,
-              async (next) => {
-                const trimmed = next?.trim();
-                if (!trimmed || trimmed === currentContent.trim()) return;
-                try {
-                  await createSessionsApi(supabase).updateMessageContent(
-                    messageId,
-                    trimmed,
-                  );
-                  void controller?.load();
-                } catch {
-                  // best-effort
-                }
-              },
-              "plain-text",
-              currentContent,
-            );
+            setEditingMessage({ messageId, content: currentContent });
           }}
           onOpenMembers={() => {
             router.push(`/(app)/session-members?sessionId=${sessionId}`);
@@ -454,6 +534,15 @@ export default function SessionDetailRoute() {
                 content: target.content,
               });
             }
+          }}
+          onRetryFailed={(messageId) => {
+            recentMessageIdsRef.current.add(messageId);
+            void outboxRef.current?.sender.retry(messageId).then(() => {
+              void syncOutboxFromDao(
+                outboxRef.current!.dao,
+                Array.from(recentMessageIdsRef.current),
+              );
+            });
           }}
           onSend={() => {
             impactLight();
@@ -509,6 +598,60 @@ export default function SessionDetailRoute() {
           state={detailState}
         />
       ) : null}
+
+      <TextPromptModal
+        confirmLabel="Update"
+        description="Set the model the runtime uses for the next turn (e.g. claude-sonnet-4-6)."
+        initialValue={runtimeInfo?.currentModel ?? ""}
+        isVisible={isModelPromptOpen && runtimeInfo !== null}
+        onCancel={() => setIsModelPromptOpen(false)}
+        onSubmit={async (next) => {
+          const trimmed = next.trim();
+          setIsModelPromptOpen(false);
+          if (!trimmed || !runtimeInfo) return;
+          try {
+            await createSessionsApi(supabase).updateRuntimeModel(
+              runtimeInfo.runtimeId,
+              trimmed,
+            );
+            setRuntimeInfo({ ...runtimeInfo, currentModel: trimmed });
+            showToast("success", `Model set to ${trimmed}`);
+          } catch (err) {
+            showToast(
+              "error",
+              err instanceof Error ? err.message : "Couldn't update model",
+            );
+          }
+        }}
+        placeholder="claude-sonnet-4-6"
+        title="Change model"
+      />
+
+      <TextPromptModal
+        confirmLabel="Save"
+        initialValue={editingMessage?.content ?? ""}
+        isVisible={editingMessage !== null}
+        onCancel={() => setEditingMessage(null)}
+        onSubmit={async (next) => {
+          const trimmed = next.trim();
+          const target = editingMessage;
+          setEditingMessage(null);
+          if (!target || !trimmed || trimmed === target.content.trim()) return;
+          try {
+            await createSessionsApi(supabase).updateMessageContent(
+              target.messageId,
+              trimmed,
+            );
+            void controller?.load();
+          } catch (err) {
+            showToast(
+              "error",
+              err instanceof Error ? err.message : "Couldn't edit message",
+            );
+          }
+        }}
+        title="Edit message"
+      />
     </View>
   );
 }
