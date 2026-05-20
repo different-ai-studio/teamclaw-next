@@ -23,6 +23,9 @@ public struct SessionDetailView: View {
     @State private var isAddAgentSheetPresented: Bool = false
     @State private var isAddMemberSheetPresented: Bool = false
     @State private var muted = false
+    @State private var isPlansPanelPresented: Bool = false
+    @State private var plansPageIndex: Int = 0
+    @State private var hasAutoOpenedPlans: Bool = false
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
@@ -145,6 +148,20 @@ public struct SessionDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                if !viewModel.activePlanSnapshots.isEmpty {
+                    Button {
+                        withAnimation(AMUXAnimation.fast) {
+                            isPlansPanelPresented.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "list.bullet.clipboard")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.amux.cinnabar)
+                    }
+                    .accessibilityLabel("Plans")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
                         isMemberSheetPresented = true
@@ -183,6 +200,12 @@ public struct SessionDetailView: View {
                 CurrentSessionFocus.sessionID = sid
             }
         }
+        .onAppear {
+            considerAutoOpeningPlans(count: viewModel.activePlanSnapshots.count)
+        }
+        .onChange(of: viewModel.activePlanSnapshots.count) { _, newCount in
+            considerAutoOpeningPlans(count: newCount)
+        }
         .onDisappear {
             if let sid = viewModel.session?.sessionId,
                CurrentSessionFocus.sessionID == sid {
@@ -194,6 +217,17 @@ public struct SessionDetailView: View {
         // Keeping it here meant the modifier was alive until this view
         // fully unmounted on pop, so the bar only animated back after
         // the pop transition finished — a multi-beat lag.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isPlansPanelPresented {
+                let snapshots = viewModel.activePlanSnapshots
+                if !snapshots.isEmpty {
+                    SessionPlansPanelView(
+                        snapshots: snapshots,
+                        pageIndex: $plansPageIndex
+                    )
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 SessionComposer(
@@ -387,6 +421,20 @@ public struct SessionDetailView: View {
         if let selectedModelId, !selectedModelId.isEmpty { return selectedModelId }
         if let current = viewModel.runtime?.currentModel, !current.isEmpty { return current }
         return nil
+    }
+
+    private func considerAutoOpeningPlans(count: Int) {
+        if count > 0 && !hasAutoOpenedPlans {
+            hasAutoOpenedPlans = true
+            withAnimation(AMUXAnimation.fast) {
+                isPlansPanelPresented = true
+            }
+        }
+        if count == 0 && isPlansPanelPresented {
+            withAnimation(AMUXAnimation.fast) {
+                isPlansPanelPresented = false
+            }
+        }
     }
 
     /// Resolve an agent actor id to a member-sheet display name. Falls

@@ -1,5 +1,6 @@
 import Testing
 @testable import AMUXSharedUI
+@testable import AMUXCore
 
 @Suite("parseTodoText")
 struct TodoDockParsingTests {
