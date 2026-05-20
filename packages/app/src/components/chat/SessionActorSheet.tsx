@@ -18,6 +18,7 @@ import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncParticipantsForSession } from '@/lib/sync/session-participant-sync'
 import { cn } from '@/lib/utils'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
+import { useDevicePresenceStore } from '@/stores/device-presence-store'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import { useSessionParticipantStore } from '@/stores/session-participant-store'
@@ -54,6 +55,7 @@ function isOnline(lastActiveAt: string | null): boolean {
 function computeDotStateAndAnimation(
   actor: Row,
   runtimeInfo: RuntimeInfo | undefined,
+  agentDeviceOnline: boolean | undefined,
 ): { color: string; breathing: boolean } {
   if (actor.actor_type === 'member') {
     return {
@@ -61,7 +63,12 @@ function computeDotStateAndAnimation(
       breathing: false,
     }
   }
-  // Agent
+  // Agent. Offline-wins: MQTT DeviceState (LWT-backed) is authoritative for
+  // "is the daemon reachable?". An ACTIVE runtime retain can linger on the
+  // broker after the daemon dies, so suppress green when device is offline.
+  if (agentDeviceOnline === false) {
+    return { color: 'bg-muted-foreground/40', breathing: false }
+  }
   if (!runtimeInfo) {
     return { color: 'bg-muted-foreground/40', breathing: false }
   }
@@ -142,9 +149,43 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
   }
 }
 
-async function fetchCandidateAgentsFromSupabase(teamId: string, presentIds: Set<string>): Promise<CandidateAgent[]> {
+// Rows built from the local libsql cache only mirror columns on public.actors,
+// so agent_kind / default_agent_type (which live on public.agents) come back
+// null. Patch them in via a single actor_directory lookup so the subline can
+// render "<agent_kind> · <model>" for cached agent rows too.
+async function enrichAgentMetadata<T extends { id: string; agent_kind: string | null; default_agent_type: string | null }>(
+  rows: T[],
+  isAgent: (row: T) => boolean,
+): Promise<T[]> {
+  const missingIds = rows
+    .filter((r) => isAgent(r) && (r.agent_kind == null || r.default_agent_type == null))
+    .map((r) => r.id)
+  if (missingIds.length === 0) return rows
   const { data, error } = await supabase
-    .from('actors')
+    .from('actor_directory')
+    .select('id, agent_kind, default_agent_type')
+    .in('id', missingIds)
+  if (error || !data) return rows
+  const byId = new Map(
+    (data as Array<{ id: string; agent_kind: string | null; default_agent_type: string | null }>)
+      .map((d) => [d.id, d] as const),
+  )
+  return rows.map((r) => {
+    const extra = byId.get(r.id)
+    if (!extra) return r
+    return {
+      ...r,
+      agent_kind: r.agent_kind ?? extra.agent_kind ?? null,
+      default_agent_type: r.default_agent_type ?? extra.default_agent_type ?? null,
+    }
+  })
+}
+
+async function fetchCandidateAgentsFromSupabase(teamId: string, presentIds: Set<string>): Promise<CandidateAgent[]> {
+  // agent_kind / default_agent_type live on public.agents; actor_directory
+  // joins them through and applies the visibility=team filter for us.
+  const { data, error } = await supabase
+    .from('actor_directory')
     .select('id, display_name, actor_type, agent_kind, default_agent_type')
     .eq('team_id', teamId)
     .eq('actor_type', 'agent')
@@ -181,12 +222,22 @@ function ActorRowView({
   const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
   const initials = actor.display_name?.slice(0, 2).toUpperCase() || ''
-  const { color: dotColor, breathing } = computeDotStateAndAnimation(actor, runtimeInfo)
-  const modelName = isAgent ? (runtimeInfo?.currentModel || actor.default_agent_type || null) : null
+  // For agents, the daemon's device_id == its actor_id, so look up presence
+  // by actor id. `undefined` (no retain yet) ≠ `false` (LWT fired): only the
+  // explicit `false` should suppress the green dot.
+  const agentDeviceOnline = useDevicePresenceStore((s) =>
+    isAgent ? s.byDeviceId[actor.id]?.online : undefined,
+  )
+  const { color: dotColor, breathing } = computeDotStateAndAnimation(actor, runtimeInfo, agentDeviceOnline)
+  // For agents, show "<backend type> · <model>" — e.g. "claude_code · claude-opus-4-7".
+  // backend type = default_agent_type (claude_code | opencode | codex).
+  // model = runtimeInfo.currentModel when a runtime is live; otherwise omitted.
+  // agent_kind (daemon | cli) is the runner kind, not user-facing here.
+  const modelName = isAgent ? (runtimeInfo?.currentModel || null) : null
   let subline: string
   if (isAgent) {
     const parts: string[] = []
-    if (actor.agent_kind) parts.push(actor.agent_kind)
+    if (actor.default_agent_type) parts.push(actor.default_agent_type)
     if (modelName) parts.push(modelName)
     subline = parts.join(' · ')
   } else {
@@ -363,12 +414,18 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         if (cancelled) return
         cachedRows = live.rows
         effectiveActorIds = live.ids
+      } else {
+        cachedRows = await enrichAgentMetadata(cachedRows, (r) => r.actor_type === 'agent')
+        if (cancelled) return
       }
       if (teamId && cachedCandidates.length === 0) {
         cachedCandidates = await fetchCandidateAgentsFromSupabase(
           teamId,
           new Set(effectiveActorIds),
         )
+        if (cancelled) return
+      } else {
+        cachedCandidates = await enrichAgentMetadata(cachedCandidates, () => true)
         if (cancelled) return
       }
 
@@ -424,12 +481,18 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           if (cancelled) return
           freshRows = live.rows
           effectiveFreshIds = live.ids
+        } else {
+          freshRows = await enrichAgentMetadata(freshRows, (r) => r.actor_type === 'agent')
+          if (cancelled) return
         }
         if (freshCandidates.length === 0) {
           freshCandidates = await fetchCandidateAgentsFromSupabase(
             teamId,
             new Set(effectiveFreshIds),
           )
+          if (cancelled) return
+        } else {
+          freshCandidates = await enrichAgentMetadata(freshCandidates, () => true)
           if (cancelled) return
         }
 

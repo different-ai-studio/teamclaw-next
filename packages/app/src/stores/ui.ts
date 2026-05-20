@@ -16,8 +16,8 @@ export type DefaultMoreDestination = 'settings'
 /** Preselected actor for the draft chat state: when the user taps an actor
  * row in the Actors tab, we record it here, switch nav back to Session, and
  * clear activeSessionId. ChatPanel's "no active session" branch then renders
- * a draft view that uses this actor's name as the title and skips the
- * NewSessionActorPicker on send. */
+ * a draft view that uses this actor's name as the title and creates a solo
+ * session directly on send, bypassing the new-session dialog. */
 export type DraftActor = { id: string; displayName: string; kind: 'member' | 'agent' }
 
 /** Selector for what the workspace sidebar's column 2 displays. */
@@ -48,6 +48,14 @@ interface UIState {
   ideasSectionCollapsed: boolean
   actorsSectionCollapsed: boolean
   draftIdeaId: string | null
+  /** Modal "新会话" dialog (NavRail entry + intercepted send-with-no-session). */
+  newSessionDialogOpen: boolean
+  /** Message text the dialog opens with — used when the user typed in the
+   * empty-session input then hit send (we redirect into the dialog so the
+   * draft isn't lost). */
+  newSessionDialogInitialMessage: string | null
+  openNewSessionDialog: (initialMessage?: string | null) => void
+  closeNewSessionDialog: () => void
   setSidebarFilter: (filter: SidebarFilter) => void
   toggleIdeasSection: () => void
   toggleActorsSection: () => void
@@ -112,6 +120,17 @@ export const useUIStore = create<UIState>((set, get) => ({
   ideasSectionCollapsed: false,
   actorsSectionCollapsed: false,
   draftIdeaId: null,
+  newSessionDialogOpen: false,
+  newSessionDialogInitialMessage: null,
+
+  openNewSessionDialog: (initialMessage) => set({
+    newSessionDialogOpen: true,
+    newSessionDialogInitialMessage: initialMessage ?? null,
+  }),
+  closeNewSessionDialog: () => set({
+    newSessionDialogOpen: false,
+    newSessionDialogInitialMessage: null,
+  }),
 
   setView: (view) => set({ currentView: view }),
 

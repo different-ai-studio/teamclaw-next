@@ -15,6 +15,9 @@ vi.mock('@/lib/supabase-client', () => ({
         eq: () => Promise.resolve({ data: [], error: null }),
         in: () => ({
           eq: () => Promise.resolve({ data: [], error: null }),
+          not: () => ({
+            order: () => Promise.resolve({ data: [], error: null }),
+          }),
         }),
       }),
     }),
@@ -24,11 +27,6 @@ vi.mock('@/lib/supabase-client', () => ({
 vi.mock('@/stores/runtime-state-store', () => ({
   useRuntimeStateStore: (selector: (s: unknown) => unknown) =>
     selector({ byRuntimeId: {} }),
-}))
-
-vi.mock('@/stores/session-list-store', () => ({
-  useSessionListStore: (selector: (s: unknown) => unknown) =>
-    selector({ rows: [] }),
 }))
 
 vi.mock('@/stores/session', () => ({
@@ -45,23 +43,27 @@ describe('AgentSelectorDock', () => {
     vi.clearAllMocks()
   })
 
-  it('hides when no agent is engaged and no session agents exist', () => {
-    render(
+  it('renders nothing when no agents are engaged', () => {
+    const { container } = render(
       <AgentSelectorDock
-        engagedAgent={null}
-        onEngageAgent={vi.fn()}
+        engagedAgents={[]}
+        onRemoveAgent={vi.fn()}
       />,
     )
-    expect(screen.queryByText('No agent')).not.toBeInTheDocument()
+    expect(container.firstChild).toBeNull()
   })
 
-  it('renders the engaged agent display name', () => {
+  it('renders one pill per engaged agent', () => {
     render(
       <AgentSelectorDock
-        engagedAgent={{ id: 'a-1', displayName: 'Reviewer Bot' }}
-        onEngageAgent={vi.fn()}
+        engagedAgents={[
+          { id: 'a-1', displayName: 'Reviewer Bot' },
+          { id: 'a-2', displayName: 'Ops Buddy' },
+        ]}
+        onRemoveAgent={vi.fn()}
       />,
     )
     expect(screen.getByText('Reviewer Bot')).toBeInTheDocument()
+    expect(screen.getByText('Ops Buddy')).toBeInTheDocument()
   })
 })

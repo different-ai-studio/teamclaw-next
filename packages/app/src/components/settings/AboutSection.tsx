@@ -6,7 +6,7 @@ import {
   Download,
   Loader2,
   ExternalLink,
-  Github,
+  GitBranch,
   FileText,
   Heart,
   Shield,
@@ -178,7 +178,7 @@ export const AboutSection = React.memo(function AboutSection() {
               href: "#",
             },
             {
-              icon: Github,
+              icon: GitBranch,
               label: "GitHub",
               href: "https://github.com/different-ai-studio/teamclaw",
             },

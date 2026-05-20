@@ -165,9 +165,9 @@ interface ChatInputAreaProps {
   onHeightChange?: (height: number) => void;
   bottomOffsetPx?: number;
   headerContent?: React.ReactNode;
-  engagedAgent: AttachedAgent | null;
+  engagedAgents: AttachedAgent[];
   onEngageAgent: (agent: AttachedAgent) => void;
-  onClearAgent: () => void;
+  onRemoveAgent: (agentId: string) => void;
 }
 
 function isImagePath(path: string): boolean {
@@ -192,9 +192,9 @@ export function ChatInputArea({
   onHeightChange,
   bottomOffsetPx = 0,
   headerContent,
-  engagedAgent = null,
+  engagedAgents = [],
   onEngageAgent = () => {},
-  onClearAgent: _onClearAgent = () => {},
+  onRemoveAgent = () => {},
 }: ChatInputAreaProps) {
   const { t } = useTranslation();
 
@@ -492,8 +492,8 @@ export function ChatInputArea({
               {teamMode ? (
                 /* v2 team-mode: replace legacy team ModelSelector with AgentSelectorDock */
                 <AgentSelectorDock
-                  engagedAgent={engagedAgent}
-                  onEngageAgent={onEngageAgent}
+                  engagedAgents={engagedAgents}
+                  onRemoveAgent={onRemoveAgent}
                 />
               ) : (
                 <ModelSelector

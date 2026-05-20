@@ -47,9 +47,7 @@ import { SessionErrorAlert } from "./SessionErrorAlert";
 import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
-import { NewSessionActorPicker } from "./NewSessionActorPicker";
 import { SessionContinueBanner } from "./SessionContinueBanner";
-import { shouldOpenNewSessionActorPicker } from "./chat-panel-routing";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
@@ -58,6 +56,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 
 
 const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_AGENTS: AttachedAgent[] = [];
 
 function parseSlashToken(body: string): { type: "role" | "skill" | "command"; name: string } {
   if (body.startsWith("role:")) return { type: "role", name: body.slice("role:".length) };
@@ -150,17 +149,26 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const sessions = useSessionStore(s => s.sessions);
 
   // ── V2 agent streaming (acp.event deltas) ───────────────────────────
-  // Only render ACTIVE bubbles. On finalize, the envelope handler appends
-  // the completed reply to useSessionStore.messages — the regular
-  // ChatMessage takes over chronological placement, and the bubble
-  // disappears so multiple turns don't clobber prior replies.
+  // Render ALL bubbles for the active session — current turn (active or
+  // finalized) plus any archived prior turns. The daemon only persists
+  // AGENT_REPLY to Supabase, so thinking + tool_calls + plan only survive
+  // in the in-memory streaming entry. Filtering by `active` would make
+  // them vanish the moment the turn finished. The bubble itself suppresses
+  // the outputText after finalize so the persisted AGENT_REPLY ChatMessage
+  // doesn't render the reply twice.
   const v2StreamsByKey = useV2StreamingStore(s => s.byKey);
+  const v2StreamsArchived = useV2StreamingStore(s => s.archived);
   const v2Streams = React.useMemo(
-    () =>
-      Object.values(v2StreamsByKey).filter(
-        e => e.sessionId === activeSessionId && e.active,
-      ),
-    [v2StreamsByKey, activeSessionId],
+    () => {
+      const current = Object.values(v2StreamsByKey).filter(
+        e => e.sessionId === activeSessionId,
+      );
+      const archived = v2StreamsArchived.filter(
+        e => e.sessionId === activeSessionId,
+      );
+      return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
+    },
+    [v2StreamsByKey, v2StreamsArchived, activeSessionId],
   );
 
   // ── Archived session viewing ────────────────────────────────────────
@@ -289,27 +297,35 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const inputValue = draftInput;
   const setInputValue = setDraftInput;
   const [attachedFiles, setAttachedFiles] = React.useState<string[]>([]);
-  // engagedAgent is per-session: stored in a zustand slice keyed by
-  // sessionId, so switching away from a session and back restores its
-  // engaged agent rather than carrying one across sessions globally.
-  // For brand-new chats (activeSessionId === null), engagedAgent is null.
-  const engagedAgent = useEngagedAgentStore((s) =>
-    activeSessionId ? s.bySession[activeSessionId] ?? null : null,
+  // engagedAgents is per-session: each @-mentioned agent shows as a pill in
+  // the prompt-input toolbar. Switching away from a session and back
+  // restores its engaged set rather than carrying one across sessions.
+  // For brand-new chats (activeSessionId === null), the list is empty.
+  const engagedAgents = useEngagedAgentStore((s) =>
+    activeSessionId ? s.bySession[activeSessionId] ?? EMPTY_AGENTS : EMPTY_AGENTS,
   );
-  const setEngagedAgentForSession = React.useCallback(
-    (agent: AttachedAgent | null) => {
+  const addAgentForSession = React.useCallback(
+    (agent: AttachedAgent) => {
       const sid = useSessionSelectionStore.getState().activeSessionId;
       if (!sid) return;
-      useEngagedAgentStore.getState().setEngagedAgent(sid, agent);
+      useEngagedAgentStore.getState().addAgent(sid, agent);
+    },
+    [],
+  );
+  const removeAgentForSession = React.useCallback(
+    (agentId: string) => {
+      const sid = useSessionSelectionStore.getState().activeSessionId;
+      if (!sid) return;
+      useEngagedAgentStore.getState().removeAgent(sid, agentId);
     },
     [],
   );
 
   // Existing sessions can be reopened after a reload with no in-memory
-  // engaged agent selected. If there is exactly one agent participant, route
-  // messages to it automatically so sends still trigger a reply.
+  // engaged agents selected. If there is exactly one agent participant,
+  // route messages to it automatically so sends still trigger a reply.
   React.useEffect(() => {
-    if (!activeSessionId || engagedAgent) return;
+    if (!activeSessionId || engagedAgents.length > 0) return;
 
     let cancelled = false;
     void (async () => {
@@ -331,26 +347,24 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
       if ((actors ?? []).length === 1) {
         const soleAgent = actors[0] as { id: string; display_name: string };
-        useEngagedAgentStore.getState().setEngagedAgent(activeSessionId, {
+        useEngagedAgentStore.getState().setAgents(activeSessionId, [{
           id: soleAgent.id,
           displayName: soleAgent.display_name,
-        });
+        }]);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId, engagedAgent]);
+  }, [activeSessionId, engagedAgents.length]);
   // Dedupe runtimeStart RPCs across re-engages within the same session.
   const ensuredRuntimesRef = React.useRef<Set<string>>(new Set());
-  const [pendingFirstMessage, setPendingFirstMessage] = React.useState<PromptInputMessage | null>(null);
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId));
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
   // When activeSessionId is null (brand-new chat), fall back to any row's
   // team_id so SessionActorSheet still has a team context for the add flow.
   const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null);
-  const currentMemberId = useCurrentTeamStore(s => s.currentMember?.id ?? null);
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
   const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
@@ -799,8 +813,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     if (!text && currentAttachedFiles.length === 0 && mentions.length === 0 && currentImageFiles.length === 0) return;
 
-    // Combine engaged agent + picker-supplied agents, dedup by id.
-    const allAgents: AttachedAgent[] = engagedAgent ? [engagedAgent] : [];
+    // Combine engaged agents + picker-supplied agents, dedup by id.
+    const allAgents: AttachedAgent[] = [...engagedAgents];
     for (const ea of extraMentionAgents) {
       if (!allAgents.some((a) => a.id === ea.id)) allAgents.push(ea);
     }
@@ -987,12 +1001,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (!activeSessionId) {
-      // No session yet. Two paths:
+      // No session yet.
       //   1. Actor-draft mode (user tapped an actor row → draftPreselectedActor
-      //      is set): skip the picker, create the session with that one actor
-      //      and send straight away.
-      //   2. Otherwise: open the picker; the picker's confirm calls back into
-      //      the same creation routine via handlePickerConfirm.
+      //      is set): create the session with that one actor and send straight
+      //      away — bypasses the new-session dialog by design.
+      //   2. Otherwise: redirect into the new-session dialog so the user can
+      //      pick participants. The typed text is preserved as the opening
+      //      message rather than dropped.
       if (draftPreselectedActor) {
         const picks =
           draftPreselectedActor.kind === 'agent'
@@ -1013,15 +1028,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         await createSessionAndSendFirst(message, picks);
         return;
       }
-      setPendingFirstMessage(message);
-      return;
-    }
-    if (shouldOpenNewSessionActorPicker({
-      activeSessionId,
-      activeMessageCount: activeMessages?.length ?? 0,
-      hasDraftPreselectedActor: !!draftPreselectedActor,
-    })) {
-      setPendingFirstMessage(message);
+      useUIStore.getState().openNewSessionDialog(message.text ?? null);
       return;
     }
     await sendIntoSession(activeSessionId, message);
@@ -1114,7 +1121,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           ? picks.agents[0]
           : null;
       if (soleAgent) {
-        useEngagedAgentStore.getState().setEngagedAgent(sessionId, soleAgent);
+        useEngagedAgentStore.getState().setAgents(sessionId, [soleAgent]);
       }
       const autoMentionAgents: AttachedAgent[] = soleAgent ? [soleAgent] : [];
       await sendIntoSession(sessionId, firstMessage, autoMentionAgents);
@@ -1140,24 +1147,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       const { toast } = await import('sonner');
       toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
     }
-  };
-
-  // ── New-session picker handlers ────────────────────────────────────────
-
-  const handlePickerConfirm = async (
-    picks: {
-      members: { id: string; displayName: string }[]
-      agents: { id: string; displayName: string }[]
-    },
-  ) => {
-    if (!pendingFirstMessage) return;
-    const message = pendingFirstMessage;
-    setPendingFirstMessage(null);
-    await createSessionAndSendFirst(message, picks);
-  };
-
-  const handlePickerCancel = () => {
-    setPendingFirstMessage(null);
   };
 
   const handleSuggestionClick = React.useCallback(
@@ -1197,7 +1186,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   //      is known. Show the actor's name as the heading and skip the
   //      generic suggestions.
   //   2. Generic: show "Start a New Chat" + suggestions; first message
-  //      triggers NewSessionActorPicker.
+  //      redirects into the NewSessionDialog (with the text pre-filled).
   const emptyState = React.useMemo(() => {
     if (draftPreselectedActor) {
       return (
@@ -1283,9 +1272,12 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   const messageBottomContent = !isViewingChild ? (
     <>
-      {v2Streams.map(entry => (
-        <StreamingAgentBubble key={entry.actorId} entry={entry} />
-      ))}
+      {v2Streams.map(entry => {
+        const bubbleKey = "archiveId" in entry
+          ? (entry as { archiveId: string }).archiveId
+          : `current::${entry.actorId}`;
+        return <StreamingAgentBubble key={bubbleKey} entry={entry} />;
+      })}
       {visibleSessionError ? (
         <SessionErrorAlert
           error={visibleSessionError}
@@ -1349,14 +1341,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
       {/* Actors panel mounts in RightPanel for the 'actors' tab; trigger
        *  lives in App.tsx header alongside Knowledge / Changes. */}
-
-      <NewSessionActorPicker
-        open={!!pendingFirstMessage}
-        onCancel={handlePickerCancel}
-        onConfirm={(picks) => { void handlePickerConfirm(picks); }}
-        teamId={sheetTeamId ?? ''}
-        selfActorId={currentMemberId}
-      />
 
       {/* Inactivity warning - task still running but no events */}
       {inactivityWarning && isStreaming && isConnected && (
@@ -1517,9 +1501,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             attachedFiles={attachedFiles}
             onFilesChange={handleFilesChange}
             onRemoveFile={removeFile}
-            engagedAgent={engagedAgent}
+            engagedAgents={engagedAgents}
             onEngageAgent={(a) => {
-              setEngagedAgentForSession(a);
+              addAgentForSession(a);
               // Bootstrap a runtime for this (session, agent) if we haven't
               // already — otherwise the daemon has no process to deliver
               // the mention to and AgentSelectorDock has no RuntimeInfo
@@ -1544,7 +1528,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                 }
               })();
             }}
-            onClearAgent={() => setEngagedAgentForSession(null)}
+            onRemoveAgent={removeAgentForSession}
             imageFiles={imageFiles}
             onImageFilesChange={handleImageFilesChange}
             onRemoveImageFile={removeImageFile}

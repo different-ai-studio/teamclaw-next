@@ -166,10 +166,10 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     } as Partial<SessionState>);
 
     if (soleAgent) {
-      useEngagedAgentStore.getState().setEngagedAgent(sessionId, {
+      useEngagedAgentStore.getState().setAgents(sessionId, [{
         id: soleAgent.id,
         displayName: soleAgent.display_name || "AI",
-      });
+      }]);
       void startAgentRuntimesAsync({
         sessionId,
         teamId: currentTeam.id,
