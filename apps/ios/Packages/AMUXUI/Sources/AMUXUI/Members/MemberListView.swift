@@ -93,7 +93,7 @@ public struct MemberListView: View {
         guard !q.isEmpty else { return visibleActors }
         let norm = q.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         return visibleActors.filter { a in
-            [a.displayName, a.roleLabel, a.agentKind ?? "", a.actorId]
+            [a.displayName, a.roleLabel, a.defaultAgentType ?? "", a.actorId]
                 .joined(separator: " ")
                 .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
                 .contains(norm)
@@ -240,8 +240,8 @@ public struct PrimaryAgentSheet: View {
                                     .font(.title3)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(agent.displayName).font(.body)
-                                    if let kind = agent.agentKind, !kind.isEmpty {
-                                        Text(kind.capitalized)
+                                    if let agentType = agent.defaultAgentType, !agentType.isEmpty {
+                                        Text(AgentConfigSheet.AgentType(rawValue: agentType)?.label ?? agentType)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -296,7 +296,13 @@ private struct ActorRow: View {
             return actor.roleLabel
         }
         if actor.isAgent {
-            let kind = actor.agentKind?.capitalized ?? "Agent"
+            let kind: String
+            switch actor.defaultAgentType {
+            case "claude_code": kind = "Claude"
+            case "opencode":    kind = "OpenCode"
+            case "codex":       kind = "Codex"
+            default:            kind = "Agent"
+            }
             let status = actor.agentStatus ?? ""
             return status.isEmpty ? kind : "\(kind) · \(status)"
         }

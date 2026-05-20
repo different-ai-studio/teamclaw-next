@@ -94,7 +94,7 @@ struct SessionListContent: View {
                 displayName: actor?.displayName ?? "",
                 isAgent: actor?.isAgent ?? false,
                 isCurrentUser: id == currentActorID,
-                agentKind: actor?.agentKind
+                defaultAgentType: actor?.defaultAgentType
             )
         }
     }

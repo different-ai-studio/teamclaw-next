@@ -44,8 +44,8 @@ public actor SupabaseActorRepository: ActorRepository {
             .select("""
                 id, team_id, actor_type, user_id, invited_by_actor_id,
                 display_name, avatar_url, last_active_at, created_at, updated_at,
-                member_status, team_role, agent_kind, agent_status,
-                default_workspace_id
+                member_status, team_role, agent_kind, default_agent_type,
+                agent_status, default_workspace_id
             """)
             .eq("team_id", value: teamID)
             .order("display_name", ascending: true)
@@ -158,13 +158,15 @@ public actor SupabaseActorRepository: ActorRepository {
     public func updateAgentDefaults(
         actorID: String,
         defaultWorkspaceID: String?,
-        agentKind: String?
+        agentKind: String?,
+        defaultAgentType: String?
     ) async throws -> AgentDefaults {
         let rows: [AgentDefaultsRow] = try await client
             .rpc("update_agent_defaults", params: UpdateAgentDefaultsParams(
                 agentID: actorID,
                 defaultWorkspaceID: defaultWorkspaceID,
-                agentKind: agentKind?.trimmingCharacters(in: .whitespacesAndNewlines)
+                agentKind: agentKind?.trimmingCharacters(in: .whitespacesAndNewlines),
+                defaultAgentType: defaultAgentType?.trimmingCharacters(in: .whitespacesAndNewlines)
             ))
             .execute()
             .value
@@ -175,7 +177,8 @@ public actor SupabaseActorRepository: ActorRepository {
         return AgentDefaults(
             agentID: row.agentID,
             defaultWorkspaceID: row.defaultWorkspaceID,
-            agentKind: row.agentKind
+            agentKind: row.agentKind,
+            defaultAgentType: row.defaultAgentType
         )
     }
 }
@@ -184,10 +187,12 @@ private struct UpdateAgentDefaultsParams: Encodable {
     let agentID: String
     let defaultWorkspaceID: String?
     let agentKind: String?
+    let defaultAgentType: String?
     enum CodingKeys: String, CodingKey {
         case agentID = "p_agent_id"
         case defaultWorkspaceID = "p_default_workspace_id"
         case agentKind = "p_agent_kind"
+        case defaultAgentType = "p_default_agent_type"
     }
 }
 
@@ -195,10 +200,12 @@ private struct AgentDefaultsRow: Decodable, Sendable {
     let agentID: String
     let defaultWorkspaceID: String?
     let agentKind: String?
+    let defaultAgentType: String?
     enum CodingKeys: String, CodingKey {
         case agentID = "agent_id"
         case defaultWorkspaceID = "default_workspace_id"
         case agentKind = "agent_kind"
+        case defaultAgentType = "default_agent_type"
     }
 }
 
@@ -242,8 +249,8 @@ private struct ActorDirectoryRow: Decodable, Sendable {
     let displayName: String; let avatarURL: String?; let lastActiveAt: Date?
     let createdAt: Date; let updatedAt: Date
     let memberStatus: String?; let teamRole: String?
-    let agentKind: String?;   let agentStatus: String?
-    let defaultWorkspaceID: String?
+    let agentKind: String?;   let defaultAgentType: String?
+    let agentStatus: String?; let defaultWorkspaceID: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -252,8 +259,8 @@ private struct ActorDirectoryRow: Decodable, Sendable {
         case displayName = "display_name", avatarURL = "avatar_url", lastActiveAt = "last_active_at"
         case createdAt = "created_at", updatedAt = "updated_at"
         case memberStatus = "member_status", teamRole = "team_role"
-        case agentKind = "agent_kind", agentStatus = "agent_status"
-        case defaultWorkspaceID = "default_workspace_id"
+        case agentKind = "agent_kind", defaultAgentType = "default_agent_type"
+        case agentStatus = "agent_status", defaultWorkspaceID = "default_workspace_id"
     }
 
     init(from decoder: Decoder) throws {
@@ -271,9 +278,8 @@ private struct ActorDirectoryRow: Decodable, Sendable {
         memberStatus = try c.decodeIfPresent(String.self, forKey: .memberStatus)
         teamRole = try c.decodeIfPresent(String.self, forKey: .teamRole)
         agentKind = try c.decodeIfPresent(String.self, forKey: .agentKind)
+        defaultAgentType = try c.decodeIfPresent(String.self, forKey: .defaultAgentType)
         agentStatus = try c.decodeIfPresent(String.self, forKey: .agentStatus)
-        // RPCs returned older row shapes before migration 20260518100001 lands —
-        // tolerate a missing column so the client can deploy ahead of the DB.
         defaultWorkspaceID = try c.decodeIfPresent(String.self, forKey: .defaultWorkspaceID)
     }
 
@@ -284,8 +290,8 @@ private struct ActorDirectoryRow: Decodable, Sendable {
             displayName: displayName, avatarURL: avatarURL, lastActiveAt: lastActiveAt,
             createdAt: createdAt, updatedAt: updatedAt,
             memberStatus: memberStatus, teamRole: teamRole,
-            agentKind: agentKind, agentStatus: agentStatus,
-            defaultWorkspaceID: defaultWorkspaceID
+            agentKind: agentKind, defaultAgentType: defaultAgentType,
+            agentStatus: agentStatus, defaultWorkspaceID: defaultWorkspaceID
         )
     }
 }

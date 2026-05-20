@@ -268,7 +268,15 @@ public struct SettingsView: View {
 
     private func connectedAgentRow(_ agent: ConnectedAgent) -> some View {
         let dotColor: Color = agent.isOnline ? Color.amux.sage : Color.amux.slate
-        let metaParts: [String] = [agent.agentKind, agent.permissionLevel, agent.visibility]
+        let agentTypeLabel: String = {
+            switch agent.defaultAgentType {
+            case "claude_code": return "Claude"
+            case "opencode":    return "OpenCode"
+            case "codex":       return "Codex"
+            default:            return ""
+            }
+        }()
+        let metaParts: [String] = [agentTypeLabel, agent.permissionLevel, agent.visibility]
             .filter { !$0.isEmpty }
         let meta = metaParts.joined(separator: " · ")
         return HStack(spacing: 10) {

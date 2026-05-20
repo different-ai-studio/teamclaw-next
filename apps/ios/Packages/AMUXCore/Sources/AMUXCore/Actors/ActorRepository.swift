@@ -66,10 +66,13 @@ public struct AgentDefaults: Equatable, Sendable {
     public let agentID: String
     public let defaultWorkspaceID: String?
     public let agentKind: String?
-    public init(agentID: String, defaultWorkspaceID: String?, agentKind: String?) {
+    public let defaultAgentType: String?
+    public init(agentID: String, defaultWorkspaceID: String?, agentKind: String?,
+                defaultAgentType: String? = nil) {
         self.agentID = agentID
         self.defaultWorkspaceID = defaultWorkspaceID
         self.agentKind = agentKind
+        self.defaultAgentType = defaultAgentType
     }
 }
 
@@ -81,5 +84,6 @@ public protocol ActorRepository: Sendable {
     func removeActor(actorID: String) async throws
     func uploadAvatar(actorID: String, imageData: Data, contentType: String) async throws -> String
     func updateCurrentActorProfile(actorID: String, displayName: String, avatarURL: String?) async throws -> ActorRecord
-    func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?) async throws -> AgentDefaults
+    func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?,
+                             defaultAgentType: String?) async throws -> AgentDefaults
 }

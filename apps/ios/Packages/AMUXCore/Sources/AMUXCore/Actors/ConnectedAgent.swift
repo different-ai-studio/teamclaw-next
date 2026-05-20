@@ -4,6 +4,8 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
     public let id: String
     public let displayName: String
     public let agentKind: String
+    /// Preferred LLM backend for this agent. Nil = daemon's compiled-in default.
+    public let defaultAgentType: String?
     public let permissionLevel: String
     public let visibility: String
     public let isOwner: Bool
@@ -14,6 +16,7 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
     public let deviceID: String?
 
     public init(id: String, displayName: String, agentKind: String,
+                defaultAgentType: String? = nil,
                 permissionLevel: String, lastActiveAt: Date?,
                 deviceID: String? = nil,
                 visibility: String = "team",
@@ -21,6 +24,7 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
         self.id = id
         self.displayName = displayName
         self.agentKind = agentKind
+        self.defaultAgentType = defaultAgentType
         self.permissionLevel = permissionLevel
         self.visibility = visibility
         self.isOwner = isOwner
