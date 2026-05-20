@@ -9,7 +9,7 @@ import { Redirect, Stack, useLocalSearchParams, useNavigation, useRouter } from 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Share, StyleSheet, Text, View } from "react-native";
 
-import { routeToHref, useOnboarding } from "../../../_layout";
+import { routeToHref, useOnboarding, useTeamMqtt } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
 import type { Actor } from "../../../../src/features/actors/actor-types";
 import {
@@ -32,8 +32,7 @@ import { showToast } from "../../../../src/ui/Toast";
 import { supabase } from "../../../../src/lib/supabase/client";
 import { getDb } from "../../../../src/lib/db/sqlite";
 import { getOptionalMqttUrl } from "../../../../src/lib/mqtt/config";
-import { createExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
-import type { ExpoMqttAdapter } from "../../../../src/lib/mqtt/expo-mqtt";
+import type { TeamMqttClient } from "../../../../src/lib/mqtt/team-mqtt";
 import { uuidV4 } from "../../../../src/lib/uuid";
 import { PrimaryButton } from "../../../../src/ui/button";
 import { AppCard } from "../../../../src/ui/card";
@@ -48,7 +47,7 @@ import type { SessionDetailControllerState } from "../../../../src/features/sess
  */
 async function sendOutboxRowViaMqtt(
   row: OutboxRow,
-  mqtt: Pick<ExpoMqttAdapter, "publish">,
+  mqtt: Pick<TeamMqttClient, "publish">,
 ): Promise<void> {
   const createdAtSeconds = BigInt(Math.floor(row.createdAt / 1000));
   const protoMessage = create(MessageSchema, {
@@ -125,6 +124,7 @@ export default function SessionDetailRoute() {
   }, [navigation]);
   const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
   const { state } = useOnboarding();
+  const teamMqtt = useTeamMqtt();
   const currentTeam = state.currentTeam;
   const href = routeToHref(state.route);
   const [controller, setController] = useState<ReturnType<typeof createSessionDetailController> | null>(
@@ -160,9 +160,11 @@ export default function SessionDetailRoute() {
     }
 
     let cancelled = false;
-    // Keep a stable reference to the mqtt adapter so the send closure can
-    // capture it without going stale.
-    const mqttAdapter = createExpoMqttAdapter();
+    // Capture the shared team MQTT client for the outbox sender's send closure.
+    // teamMqtt may be null while the root layout is still connecting; in that
+    // case the outbox falls back to a no-op publish and the controller shows
+    // a disconnected state.
+    const mqttSnapshot = teamMqtt;
 
     void (async () => {
       // Build the outbox before the controller so load() has it available
@@ -176,13 +178,20 @@ export default function SessionDetailRoute() {
         send: (row) => {
           // Track this id so onChange can sync its status from the DAO.
           recentMessageIdsRef.current.add(row.messageId);
-          return sendOutboxRowViaMqtt(row, mqttAdapter);
+          if (!mqttSnapshot) return Promise.resolve();
+          return sendOutboxRowViaMqtt(row, mqttSnapshot);
         },
         onChange: () => {
           void syncOutboxFromDao(dao, Array.from(recentMessageIdsRef.current));
         },
       });
       outboxRef.current = { dao, sender };
+
+      const noOpMqtt: Pick<TeamMqttClient, "subscribe" | "publish" | "onConnectionState"> = {
+        subscribe: () => () => {},
+        publish: async () => {},
+        onConnectionState: () => () => {},
+      };
 
       const nextController = createSessionDetailController({
         api: createSessionsApi(supabase),
@@ -195,7 +204,7 @@ export default function SessionDetailRoute() {
             userId: data.session?.user.id ?? null,
           };
         },
-        mqtt: mqttAdapter,
+        mqtt: mqttSnapshot ?? noOpMqtt,
         mqttUrl: getOptionalMqttUrl(),
         outbox: { dao, sender },
         sessionId,
@@ -223,7 +232,7 @@ export default function SessionDetailRoute() {
       outboxRef.current = null;
       recentMessageIdsRef.current = new Set();
     };
-  }, [currentTeam, sessionId, state.currentMemberActorId, state.route]);
+  }, [currentTeam, sessionId, state.currentMemberActorId, state.route, teamMqtt]);
 
   // Persist composer text per-session as it changes (debounced via ref).
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

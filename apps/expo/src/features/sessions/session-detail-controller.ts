@@ -7,8 +7,8 @@ import {
   type Message,
 } from "@teamclaw/app/proto/teamclaw_pb";
 
-import { decodeLiveEvent, sessionIdFromTopic } from "../../lib/teamclaw/live-events";
-import type { ExpoMqttAdapter } from "../../lib/mqtt/expo-mqtt";
+import { decodeLiveEvent } from "../../lib/teamclaw/live-events";
+import type { TeamMqttClient } from "../../lib/mqtt/team-mqtt";
 import { uuidV4 } from "../../lib/uuid";
 import { setOutboxStatus, syncOutboxFromDao } from "./outbox-store";
 import type { OutboxDao } from "./outbox-db";
@@ -54,10 +54,7 @@ type SessionDetailControllerDeps = {
   >;
   currentMemberActorId: string | null;
   getAuth: () => Promise<{ accessToken: string | null; userId: string | null }>;
-  mqtt: Pick<
-    ExpoMqttAdapter,
-    "connect" | "disconnect" | "publish" | "subscribe" | "onMessage" | "onConnectionState"
-  >;
+  mqtt: Pick<TeamMqttClient, "subscribe" | "publish" | "onConnectionState">;
   mqttUrl: string | null;
   sessionId: string;
   teamId: string;
@@ -153,7 +150,7 @@ export function createSessionDetailController(
   let state = initialState;
   let timeline: TimelineState = emptyTimelineState();
   let disposed = false;
-  let cleanupMessageListener: (() => void) | null = null;
+  let unsubscribeSession: (() => void) | null = null;
   let cleanupConnectionStateListener: (() => void) | null = null;
   let loadToken = 0;
 
@@ -168,12 +165,11 @@ export function createSessionDetailController(
     emit();
   }
 
-  async function disconnectRealtime() {
+  function disconnectRealtime() {
     cleanupConnectionStateListener?.();
     cleanupConnectionStateListener = null;
-    cleanupMessageListener?.();
-    cleanupMessageListener = null;
-    await deps.mqtt.disconnect();
+    unsubscribeSession?.();
+    unsubscribeSession = null;
   }
 
   async function resolveSenderActorId(): Promise<string> {
@@ -194,25 +190,7 @@ export function createSessionDetailController(
     return resolved;
   }
 
-  async function connectRealtime(session: SessionSummary, currentToken: number) {
-    if (!deps.mqttUrl) {
-      setState({
-        ...state,
-        connectionState: "disconnected",
-      });
-      return;
-    }
-
-    const auth = await deps.getAuth();
-    if (!auth.accessToken) {
-      setState({
-        ...state,
-        connectionState: "disconnected",
-      });
-      return;
-    }
-
-    const actorId = await resolveSenderActorId();
+  async function connectRealtime(_session: SessionSummary, currentToken: number) {
     if (disposed || currentToken !== loadToken) {
       return;
     }
@@ -229,23 +207,13 @@ export function createSessionDetailController(
         });
       });
 
-      await deps.mqtt.connect({
-        url: deps.mqttUrl,
-        options: {
-          clean: true,
-          clientId: `teamclaw-expo-${actorId.slice(0, 8)}-${uuidV4().slice(0, 8)}`,
-          password: auth.accessToken,
-          reconnectPeriod: 0,
-          username: actorId,
-        },
-      });
-
-      cleanupMessageListener = deps.mqtt.onMessage((incoming) => {
-        if (disposed || sessionIdFromTopic(incoming.topic) !== deps.sessionId) {
+      const topic = `amux/${deps.teamId}/session/${deps.sessionId}/live`;
+      unsubscribeSession = deps.mqtt.subscribe(topic, (payload) => {
+        if (disposed || currentToken !== loadToken) {
           return;
         }
 
-        const decoded = decodeLiveEvent(incoming.payload);
+        const decoded = decodeLiveEvent(payload);
         if (!decoded?.message) {
           return;
         }
@@ -282,11 +250,10 @@ export function createSessionDetailController(
         }
       });
 
-      await deps.mqtt.subscribe(`amux/${deps.teamId}/session/${deps.sessionId}/live`);
       const latestMessages = await deps.api.listMessages(deps.teamId, deps.sessionId);
 
       if (disposed || currentToken !== loadToken) {
-        await disconnectRealtime();
+        disconnectRealtime();
         return;
       }
 
@@ -618,7 +585,7 @@ export function createSessionDetailController(
     async dispose() {
       disposed = true;
       deps.outbox?.sender.stop();
-      await disconnectRealtime();
+      disconnectRealtime();
       setState({
         ...state,
         connectionState: "disconnected",
