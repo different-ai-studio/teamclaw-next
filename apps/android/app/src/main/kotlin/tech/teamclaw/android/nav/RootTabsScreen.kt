@@ -38,7 +38,7 @@ import tech.teamclaw.android.feature.onboarding.IdeaListScreen
 import tech.teamclaw.android.feature.onboarding.MembersScreen
 import tech.teamclaw.android.feature.onboarding.NewIdeaSheet
 import tech.teamclaw.android.feature.onboarding.NewSessionSheet
-import tech.teamclaw.android.feature.onboarding.SearchTabPlaceholder
+import tech.teamclaw.android.feature.onboarding.SearchScreen
 import tech.teamclaw.android.feature.onboarding.SessionListScreen
 
 /**
@@ -121,7 +121,14 @@ fun RootTabsScreen(
                     onBack = null,
                     currentActorId = currentActorId,
                 )
-                RootTab.Search -> SearchTabPlaceholder()
+                RootTab.Search -> SearchScreen(
+                    sessions = listState.sessions,
+                    ideas = ideaState.ideas,
+                    actors = actorState.actors,
+                    onOpenSession = onOpenSession,
+                    onOpenIdea = onOpenIdea,
+                    onOpenActor = onOpenActorDetail,
+                )
             }
         }
 
