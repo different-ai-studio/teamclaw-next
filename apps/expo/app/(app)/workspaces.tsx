@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -205,6 +206,15 @@ export default function WorkspacesRoute() {
         contentContainerStyle={styles.content}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            onRefresh={() => {
+              void load();
+            }}
+            refreshing={isLoading && rows.length > 0}
+            tintColor={colors.slate}
+          />
+        }
       >
         <View style={styles.section}>
           <SectionEyebrow label="NEW WORKSPACE" style={styles.sectionEyebrow} />
