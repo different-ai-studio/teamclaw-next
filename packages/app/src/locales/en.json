@@ -525,7 +525,9 @@
     "dateEarlier": "Earlier",
     "participantCount": "{{count}} participants",
     "unread": "Unread",
-    "loadMoreSessions": "Load more"
+    "loadMoreSessions": "Load more",
+    "mqttDisconnected": "MQTT disconnected",
+    "mqttDisconnectedHint": "Tap to configure server"
   },
   "setup": {
     "title": "Setup Required",

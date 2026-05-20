@@ -41,6 +41,7 @@ import { TrafficLights } from "@/components/ui/traffic-lights"
 import { buildSessionListActivityMap, type SessionListActivity } from "@/lib/session-list-activity"
 import { SessionSearchDialog } from "@/components/sidebar/session-search-dialog"
 import { NavRail } from "@/components/sidebar/NavRail"
+import { MqttDisconnectedNotice } from "@/components/sidebar/MqttDisconnectedNotice"
 
 function SessionActivityBadge({ activity }: { activity?: SessionListActivity }) {
   const { t } = useTranslation()
@@ -786,6 +787,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarContent>
 
         <SidebarFooter className="gap-1 px-2 pb-1 pt-1">
+          <MqttDisconnectedNotice />
+
           {!isWorkspaceUIVariant() && <DefaultBottomNav />}
 
           {isWorkspaceUIVariant() && (
