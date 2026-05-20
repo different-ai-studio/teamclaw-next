@@ -1,7 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useState } from "react";
-import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActionSheetIOS,
+  Alert,
+  Image,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import Markdown from "react-native-markdown-display";
 
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
@@ -95,35 +104,59 @@ export function SessionMessageRow({
   const timestamp = formatTimestamp(message.createdAt);
 
   const handleLongPress = () => {
-    const options: { text: string; style?: "default" | "cancel" | "destructive"; onPress?: () => void }[] = [
+    type Action = {
+      label: string;
+      style?: "default" | "cancel" | "destructive";
+      run?: () => void;
+    };
+    const actions: Action[] = [
       {
-        text: "Copy",
-        onPress: () => {
+        label: "Copy",
+        run: () => {
           void Clipboard.setStringAsync(message.content);
         },
       },
     ];
     if (onReply) {
-      options.push({
-        text: "Reply",
-        onPress: () => onReply(message),
-      });
+      actions.push({ label: "Reply", run: () => onReply(message) });
     }
     if (isOwnMessage && onEdit) {
-      options.push({
-        text: "Edit",
-        onPress: () => onEdit(message),
-      });
+      actions.push({ label: "Edit", run: () => onEdit(message) });
     }
     if (isOwnMessage && onDelete) {
-      options.push({
-        text: "Delete",
+      actions.push({
+        label: "Delete",
         style: "destructive",
-        onPress: () => onDelete(message.messageId),
+        run: () => onDelete(message.messageId),
       });
     }
-    options.push({ text: "Cancel", style: "cancel" });
-    Alert.alert("Message", message.content.slice(0, 80), options);
+    actions.push({ label: "Cancel", style: "cancel" });
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: actions.map((a) => a.label),
+          cancelButtonIndex: actions.length - 1,
+          destructiveButtonIndex: actions.findIndex(
+            (a) => a.style === "destructive",
+          ),
+        },
+        (index) => {
+          const action = actions[index];
+          if (action?.run) action.run();
+        },
+      );
+      return;
+    }
+    Alert.alert(
+      "Message",
+      message.content.slice(0, 80),
+      actions.map((a) => ({
+        text: a.label,
+        style: a.style,
+        onPress: a.run,
+      })),
+    );
   };
 
   if (isAgentNoteKind(kindKey)) {
