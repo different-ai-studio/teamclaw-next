@@ -536,10 +536,12 @@ export default function SessionDetailRoute() {
             }
           }}
           onRetryFailed={(messageId) => {
+            const handle = outboxRef.current;
+            if (!handle) return;
             recentMessageIdsRef.current.add(messageId);
-            void outboxRef.current?.sender.retry(messageId).then(() => {
+            void handle.sender.retry(messageId).then(() => {
               void syncOutboxFromDao(
-                outboxRef.current!.dao,
+                handle.dao,
                 Array.from(recentMessageIdsRef.current),
               );
             });
