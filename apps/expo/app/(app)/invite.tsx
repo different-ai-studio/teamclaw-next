@@ -110,7 +110,11 @@ export default function InviteRoute() {
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.section}>
           <SectionEyebrow label="KIND" style={styles.sectionEyebrow} />
           <View style={styles.segmented}>

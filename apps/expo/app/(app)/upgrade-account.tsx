@@ -75,6 +75,7 @@ export default function UpgradeAccountRoute() {
       >
         <ScrollView
           contentContainerStyle={styles.content}
+          keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.lede}>

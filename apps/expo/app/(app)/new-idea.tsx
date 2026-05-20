@@ -137,7 +137,11 @@ export default function NewIdeaRoute() {
       </View>
       <Hairline />
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.section}>
           <SectionEyebrow label="TITLE" style={styles.sectionEyebrow} />
           <View style={styles.card}>
