@@ -240,6 +240,27 @@ export default function SessionDetailRoute() {
     return map;
   }, [teamActors]);
 
+  const senderAvatarGlyphs = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const actor of teamActors) {
+      if (actor.actorType !== "agent") continue;
+      switch (actor.agentKind) {
+        case "claude":
+          map.set(actor.actorId, "CC");
+          break;
+        case "opencode":
+          map.set(actor.actorId, "OC");
+          break;
+        case "codex":
+          map.set(actor.actorId, "CX");
+          break;
+        default:
+          break;
+      }
+    }
+    return map;
+  }, [teamActors]);
+
   const headerAvatars = useMemo(() => {
     if (!detailState.session) return [];
     const participantIds = new Set(detailState.session.participantActorIds);
@@ -466,6 +487,7 @@ export default function SessionDetailRoute() {
           replyTarget={detailState.replyTarget}
           runtimeInfo={runtimeInfo}
           senderAvatars={senderAvatars}
+          senderAvatarGlyphs={senderAvatarGlyphs}
           senderNames={senderNames}
           sendErrorMessage={detailState.sendErrorMessage}
           state={detailState}

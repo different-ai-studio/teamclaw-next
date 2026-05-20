@@ -25,6 +25,8 @@ export type SessionMessageRowProps = {
   onJumpToReply?: (messageId: string) => void;
   onReply?: (message: SessionMessage) => void;
   replyToMessage?: SessionMessage | null;
+  /** Optional glyph override (e.g. CC/OC/CX for known agent kinds). */
+  senderAvatarGlyph?: string | null;
   senderAvatarUrl?: string | null;
   senderName?: string;
 };
@@ -81,6 +83,7 @@ export function SessionMessageRow({
   onJumpToReply,
   onReply,
   replyToMessage,
+  senderAvatarGlyph,
   senderAvatarUrl,
   senderName,
 }: SessionMessageRowProps) {
@@ -160,7 +163,8 @@ export function SessionMessageRow({
 
   const body = normalizeBody(message);
   const attachments = message.attachments ?? [];
-  const senderInitial = (senderName ?? "").charAt(0).toUpperCase() || "?";
+  const senderInitial =
+    senderAvatarGlyph ?? ((senderName ?? "").charAt(0).toUpperCase() || "?");
   return (
     <View style={[styles.row, isOwnMessage ? styles.rowOwn : styles.rowOther]}>
       {!isOwnMessage ? (

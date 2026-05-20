@@ -77,6 +77,8 @@ type SessionDetailScreenProps = {
   ownActorId?: string;
   replyTarget?: { messageId: string; content: string } | null;
   senderAvatars?: ReadonlyMap<string, string | null>;
+  /** Optional override for per-actor avatar glyph (e.g. CC/OC/CX). */
+  senderAvatarGlyphs?: ReadonlyMap<string, string>;
   senderNames?: ReadonlyMap<string, string>;
   sendErrorMessage: string | null;
   state: SessionDetailRenderableState;
@@ -222,6 +224,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     runtimeInfo,
     isRefreshing,
     senderAvatars,
+    senderAvatarGlyphs,
     senderNames,
     sendErrorMessage,
     streamingAgentIds,
@@ -375,6 +378,9 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
                       : undefined
                   }
                   replyToMessage={replyToMessage}
+                  senderAvatarGlyph={
+                    !isOwn ? senderAvatarGlyphs?.get(msg.senderActorId) ?? null : null
+                  }
                   senderAvatarUrl={
                     !isOwn ? senderAvatars?.get(msg.senderActorId) ?? null : null
                   }
