@@ -23,8 +23,13 @@ export const hai = {
   hairlineStrong: "rgba(34,32,29,0.16)",
 } as const;
 
+// Android: `"Inter"` would be ideal but we don't bundle it via expo-font yet,
+// and asking Android for an unknown family + an explicit fontWeight can cause
+// some devices to render nothing at all (notably visible on the Sessions list,
+// where every row uses typography.body). Fall back to the Android system
+// sans-serif (Roboto) until we ship Inter as an asset.
 const sansFontFamily = Platform.select({
-  android: "Inter",
+  android: "sans-serif",
   ios: "PingFang SC",
   web: '"Inter", "PingFang SC", "Noto Sans SC", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
   default: "System",
