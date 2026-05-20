@@ -3,7 +3,12 @@ package tech.teamclaw.android.core.auth
 import amux.AcpEvent
 import amux.AgentStatus
 import amux.Envelope
-import amux.TodoItem as ProtoTodoItem
+// TODO(parity): re-enable once `TodoItem` / `todo_update` are added to
+// the shared proto schema (`/proto/amux.proto`). iOS hides the same code
+// path behind the same gap — see `apps/android/PARITY.md` (Phase 4: Chat
+// polish). The `DecodedEvent.TodoUpdate` sealed-interface variant is
+// retained so the renderer compiles; emitting it requires the proto type.
+// import amux.TodoItem as ProtoTodoItem
 import tech.teamclaw.android.core.model.SlashCommand
 
 /**
@@ -173,17 +178,8 @@ object SessionEventDecoder {
                 description = it.description,
             )
         }
-        event.todo_update?.let { todo ->
-            return DecodedEvent.TodoUpdate(
-                runtimeId, timestampMs, sequence,
-                items = todo.items.map { item ->
-                    DecodedEvent.TodoUpdate.Item(
-                        content = item.content,
-                        status = mapTodoStatus(item.status),
-                    )
-                },
-            )
-        }
+        // TODO(parity): wire `event.todo_update` once the proto schema gains
+        // `TodoItem`. See note at the top of this file.
         event.available_commands?.let { palette ->
             return DecodedEvent.AvailableCommands(
                 runtimeId, timestampMs, sequence,
@@ -209,11 +205,8 @@ object SessionEventDecoder {
         )
     }
 
-    private fun mapTodoStatus(status: ProtoTodoItem.Status): DecodedEvent.TodoStatus = when (status) {
-        ProtoTodoItem.Status.PENDING -> DecodedEvent.TodoStatus.PENDING
-        ProtoTodoItem.Status.IN_PROGRESS -> DecodedEvent.TodoStatus.IN_PROGRESS
-        ProtoTodoItem.Status.COMPLETED -> DecodedEvent.TodoStatus.COMPLETED
-    }
+    // TODO(parity): restore `mapTodoStatus(status: ProtoTodoItem.Status)`
+    // once the proto schema gains `TodoItem`. See note at the top of this file.
 
     private fun mapAgentStatus(status: AgentStatus): DecodedEvent.AgentLifeStatus = when (status) {
         AgentStatus.AGENT_STATUS_UNKNOWN -> DecodedEvent.AgentLifeStatus.UNKNOWN

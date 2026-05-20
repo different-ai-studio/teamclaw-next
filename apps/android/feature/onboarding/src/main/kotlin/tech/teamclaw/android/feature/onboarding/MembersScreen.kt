@@ -43,7 +43,7 @@ fun MembersScreen(
     onRefresh: () -> Unit,
     onInvite: () -> Unit,
     onActorClick: (ActorRecord) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize().background(Hai.Mist)) {
@@ -80,13 +80,17 @@ fun MembersScreen(
 
 @Composable
 private fun MembersTopBar(
-    teamName: String, onBack: () -> Unit, onRefresh: () -> Unit, onInvite: () -> Unit,
+    teamName: String, onBack: (() -> Unit)?, onRefresh: () -> Unit, onInvite: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = onBack) { Text("Back", color = Hai.Cinnabar) }
+        if (onBack != null) {
+            TextButton(onClick = onBack) { Text("Back", color = Hai.Cinnabar) }
+        } else {
+            Spacer(Modifier.size(8.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text("Actors", style = MaterialTheme.typography.titleLarge, color = Hai.Onyx)
             Text(teamName, style = MaterialTheme.typography.bodySmall, color = Hai.Basalt)
