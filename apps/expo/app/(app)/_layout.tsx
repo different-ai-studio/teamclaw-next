@@ -52,9 +52,11 @@ export default function AppLayout() {
         <Stack.Screen
           name="attach"
           options={{
-            presentation: "modal",
+            presentation: "formSheet",
             animation: "slide_from_bottom",
             contentStyle: { backgroundColor: colors.mist },
+            sheetAllowedDetents: [0.4, 1],
+            sheetGrabberVisible: true,
           }}
         />
         <Stack.Screen
