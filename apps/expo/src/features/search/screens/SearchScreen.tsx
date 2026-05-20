@@ -116,6 +116,7 @@ export function SearchScreen({
   return (
     <ScrollView
       contentContainerStyle={styles.content}
+      keyboardDismissMode="interactive"
       keyboardShouldPersistTaps="handled"
       style={styles.screen}
     >
