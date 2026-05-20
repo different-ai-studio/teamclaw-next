@@ -141,13 +141,20 @@ export function ActorDetailScreen({
               </View>
             ) : null}
 
-            {recentSessions && recentSessions.length > 0 ? (
+            {recentSessions ? (
               <View style={styles.section}>
                 <SectionEyebrow
-                  label={`RECENT SESSIONS · ${recentSessions.length}`}
+                  label={
+                    recentSessions.length > 0
+                      ? `RECENT SESSIONS · ${recentSessions.length}`
+                      : "RECENT SESSIONS"
+                  }
                   style={styles.sectionEyebrow}
                 />
                 <View style={styles.card}>
+                  {recentSessions.length === 0 ? (
+                    <Text style={styles.emptyRecent}>No recent sessions yet.</Text>
+                  ) : null}
                   {recentSessions.map((row, index) => {
                     const ts = row.lastMessageAt
                       ? Date.parse(row.lastMessageAt)
@@ -297,6 +304,12 @@ const styles = StyleSheet.create({
     color: colors.onyx,
     flex: 1,
     ...typography.body,
+  },
+  emptyRecent: {
+    color: colors.slate,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    ...typography.secondaryBody,
   },
   headerBar: {
     alignItems: "center",
