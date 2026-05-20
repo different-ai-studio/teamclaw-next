@@ -9,14 +9,31 @@ export type ConnectedAgent = {
   lastActiveAt: string | null;
 };
 
+export type RuntimeAvailableCommand = {
+  name: string;
+  description: string;
+  inputHint: string;
+};
+
 export type RuntimeInfo = {
   runtimeId: string;
-  status: number;
-  currentModel: string;
-  availableModels: { id: string; displayName: string }[];
-  sessionTitle?: string;
-  currentPrompt?: string;
   agentType: number;
+  worktree: string;
+  branch: string;
+  status: number;
+  startedAt: number;
+  currentPrompt: string;
+  workspaceId: string;
+  sessionTitle: string;
+  toolUseCount: number;
+  availableModels: { id: string; displayName: string }[];
+  currentModel: string;
+  state: number;
+  stage: string;
+  errorCode: string;
+  errorMessage: string;
+  failedStage: string;
+  availableCommands: RuntimeAvailableCommand[];
 };
 
 export type AgentAuthorizedHuman = {

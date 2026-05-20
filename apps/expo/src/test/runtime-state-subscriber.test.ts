@@ -29,7 +29,14 @@ describe("RuntimeStateSubscriber", () => {
     const subscribeSpy = vi.spyOn(mqtt, "subscribe");
     const sub = createRuntimeStateSubscriber({
       mqtt, teamId: "team1",
-      decode: () => ({ runtimeId: "r1", status: 1, currentModel: "", availableModels: [], agentType: 1 }),
+      decode: () => ({
+        runtimeId: "r1", agentType: 1, worktree: "", branch: "",
+        status: 1, startedAt: 0, currentPrompt: "", workspaceId: "",
+        sessionTitle: "", toolUseCount: 0,
+        availableModels: [], currentModel: "",
+        state: 0, stage: "", errorCode: "", errorMessage: "", failedStage: "",
+        availableCommands: [],
+      }),
       onRuntimeInfo: () => {},
     });
     sub.watchDevice("dev1");
@@ -42,7 +49,14 @@ describe("RuntimeStateSubscriber", () => {
   it("invokes onRuntimeInfo with (deviceId, runtimeId, info) extracted from the topic", () => {
     const mqtt = fakeMqtt();
     const cb = vi.fn();
-    const decodedInfo = { runtimeId: "rt-from-decode", status: 5, currentModel: "m", availableModels: [], agentType: 1 };
+    const decodedInfo = {
+      runtimeId: "rt-from-decode", agentType: 1, worktree: "", branch: "",
+      status: 5, startedAt: 0, currentPrompt: "", workspaceId: "",
+      sessionTitle: "", toolUseCount: 0,
+      availableModels: [], currentModel: "m",
+      state: 0, stage: "", errorCode: "", errorMessage: "", failedStage: "",
+      availableCommands: [],
+    };
     const sub = createRuntimeStateSubscriber({
       mqtt, teamId: "team1",
       decode: () => decodedInfo,

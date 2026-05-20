@@ -69,8 +69,12 @@ describe("ConnectedAgentsStore", () => {
     const store = createConnectedAgentsStore({ teamId: "t", api: fakeApi(agents), subscriber: sub });
     await store.reload();
     store.handleRuntimeInfo("d1", "r1", {
-      runtimeId: "r1", status: 1, currentModel: "claude-sonnet-4-6",
-      availableModels: [], agentType: 1,
+      runtimeId: "r1", agentType: 1, worktree: "", branch: "",
+      status: 1, startedAt: 0, currentPrompt: "", workspaceId: "",
+      sessionTitle: "", toolUseCount: 0,
+      availableModels: [], currentModel: "claude-sonnet-4-6",
+      state: 0, stage: "", errorCode: "", errorMessage: "", failedStage: "",
+      availableCommands: [],
     });
     expect(store.getState().runtimeInfoByAgentId.get("a1")?.currentModel).toBe("claude-sonnet-4-6");
     expect(store.getState().agents[0].lastActiveAt).not.toBeNull();
