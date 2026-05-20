@@ -81,6 +81,9 @@ import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridg
 import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import { decodeLiveEvent, sessionIdFromTopic } from "@/lib/teamclaw-events";
+import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
+import { useOutboxStore } from "@/stores/outbox-store";
+import { startOutboxSender } from "@/services/outbox-sender";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtime-state-store";
 import { initDevicePresenceStore, disposeDevicePresenceStore } from "@/stores/device-presence-store";
@@ -717,6 +720,17 @@ function AppContent() {
     void useSessionListStore.getState().load();
   }, []);
 
+  // Boot the outbox: hydrate any pending/failed rows from libsql so a
+  // crashed/closed app resumes in-flight sends, then start the sender loop
+  // (idempotent). `startOutboxSender` schedules a tick every second; the
+  // first tick fires immediately after hydration.
+  useEffect(() => {
+    void (async () => {
+      await useOutboxStore.getState().hydrate();
+      startOutboxSender();
+    })();
+  }, []);
+
   // v2 Phase 1 — Task 1D.4: connect MQTT after auth, subscribe to all teams'
   // session live topics, decode incoming LiveEventEnvelope and append to
   // useSessionStore so ActorMessageList re-renders. The orphan
@@ -810,13 +824,32 @@ function AppContent() {
             const streamKey = senderActorId
               ? streamingStore.byKey[`${sid}::${senderActorId}`]
               : undefined;
-            if (streamKey) {
-              // Agent reply for an in-flight stream: finalize the streaming
-              // bubble (marks inactive) AND append to the regular message
-              // store so the completed reply survives subsequent turns.
-              // The bubble disappears on inactive (filtered in ChatPanel);
-              // the ChatMessage takes its place in chronological order.
-              streamingStore.finalize(sid, senderActorId!, decoded.message.content);
+            if (
+              streamKey &&
+              senderActorId &&
+              decoded.message.kind === MessageKind.AGENT_REPLY
+            ) {
+              // Agent reply for an in-flight stream: synthesize proto rows
+              // for the streaming entry's thinking + tool_calls (sharing the
+              // reply's turn_id), append them so v2-message-adapter groups
+              // everything into one unified bubble, persist to libsql so
+              // reload restores the full conversation, then clear the
+              // streaming entry so the bubble doesn't double-render.
+              void persistStreamingPartsForReply(
+                sid,
+                senderActorId,
+                decoded.message,
+              );
+              useSessionMessageStore
+                .getState()
+                .appendMessage(sid, decoded.message);
+              streamingStore.clearActor(sid, senderActorId);
+            } else if (streamKey) {
+              streamingStore.finalize(
+                sid,
+                senderActorId!,
+                decoded.message.content,
+              );
               useSessionMessageStore.getState().appendMessage(sid, decoded.message);
             } else {
               useSessionMessageStore.getState().appendMessage(sid, decoded.message);
@@ -1124,6 +1157,8 @@ function AppContent() {
       content: string;
       model?: string | null;
       createdAt: string;
+      turnId?: string | null;
+      metadataJson?: string | null;
     }) {
       return createMessage(MessageSchema, {
         messageId: r.id,
@@ -1132,6 +1167,8 @@ function AppContent() {
         kind: kindMap[r.kind] ?? MessageKind.TEXT,
         content: r.content ?? "",
         model: r.model ?? "",
+        turnId: r.turnId ?? "",
+        metadataJson: r.metadataJson ?? "",
         createdAt: BigInt(Math.floor(new Date(r.createdAt).getTime() / 1000)),
       });
     }

@@ -1,5 +1,5 @@
 use super::store::{
-    ActorRow, AgentRuntimeEventRow, ClaimRow, IdeaRow, LocalCacheStore, MessageRow,
+    ActorRow, AgentRuntimeEventRow, ClaimRow, IdeaRow, LocalCacheStore, MessageRow, OutboxRow,
     SessionParticipantRow, SessionRow, SubmissionRow,
 };
 use std::sync::Arc;
@@ -187,6 +187,44 @@ pub async fn local_cache_message_soft_delete(
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
     db.message_soft_delete(&id, &deleted_at).await
+}
+
+#[tauri::command]
+pub async fn local_cache_message_set_parts(
+    state: tauri::State<'_, LocalCacheState>,
+    message_id: String,
+    parts_json: String,
+) -> Result<(), String> {
+    let db = get_db(&state).await?;
+    db.message_set_parts(&message_id, &parts_json).await
+}
+
+// ─── outbox commands ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn local_cache_outbox_upsert(
+    state: tauri::State<'_, LocalCacheState>,
+    row: OutboxRow,
+) -> Result<(), String> {
+    let db = get_db(&state).await?;
+    db.outbox_upsert(&row).await
+}
+
+#[tauri::command]
+pub async fn local_cache_outbox_delete(
+    state: tauri::State<'_, LocalCacheState>,
+    message_id: String,
+) -> Result<(), String> {
+    let db = get_db(&state).await?;
+    db.outbox_delete(&message_id).await
+}
+
+#[tauri::command]
+pub async fn local_cache_outbox_list_all(
+    state: tauri::State<'_, LocalCacheState>,
+) -> Result<Vec<OutboxRow>, String> {
+    let db = get_db(&state).await?;
+    db.outbox_list_all().await
 }
 
 // ─── idea commands ────────────────────────────────────────────────────────

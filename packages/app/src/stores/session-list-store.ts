@@ -9,6 +9,32 @@ import {
   type SessionRow,
 } from "@/lib/local-cache";
 
+// localStorage key for the most-recently-known teamId. Persisted so that
+// on first ever app boot the libsql phase-1 hydrate can fire — without it,
+// `teamId` is null until the first Supabase RPC returns, defeating the
+// "instant render from cache" path on cold start.
+const LAST_TEAM_ID_KEY = "teamclaw.sessionList.lastTeamId";
+
+function readLastTeamId(): string | null {
+  try {
+    return typeof localStorage !== "undefined"
+      ? localStorage.getItem(LAST_TEAM_ID_KEY)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastTeamId(teamId: string): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LAST_TEAM_ID_KEY, teamId);
+    }
+  } catch {
+    // localStorage unavailable (private mode, etc.) — non-fatal.
+  }
+}
+
 export interface SessionListEntry {
   id: string;
   title: string;
@@ -155,11 +181,13 @@ export const useSessionListStore = create<State>((set, get) => ({
     }
     set({ loading: true, error: null });
 
-    // Derive the team_id: use user's metadata or first row already in store
-    // The primary source is the first row already loaded (set by prior loads).
-    // On first boot we fall through to Supabase which populates it.
+    // Derive the team_id for libsql hydrate:
+    //   1. First row already in store (set by prior load), OR
+    //   2. localStorage cache from a previous app session (so first boot
+    //      still gets phase-1 instant render before the Supabase RPC).
+    // The Supabase RPC below populates either path going forward.
     const existingRows = useSessionListStore.getState().rows;
-    const teamId = existingRows[0]?.team_id ?? null;
+    const teamId = existingRows[0]?.team_id ?? readLastTeamId();
 
     // ── Phase 1: hydrate instantly from local cache (Tauri only) ──────────
     if (isTauri() && teamId) {
@@ -174,6 +202,11 @@ export const useSessionListStore = create<State>((set, get) => ({
       set({ loading: false, error: error.message });
       return;
     }
+
+    // Persist teamId for the next cold boot — pick from fresh rows if we have
+    // any; otherwise keep whatever the libsql hydrate already exposed.
+    const freshTeamId = rows[0]?.team_id ?? teamId;
+    if (freshTeamId) writeLastTeamId(freshTeamId);
 
     if (isTauri() && teamId && rows.length > 0) {
       const cacheRows: SessionRow[] = rows.map((r) => ({

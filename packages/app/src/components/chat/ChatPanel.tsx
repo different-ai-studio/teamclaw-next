@@ -7,6 +7,7 @@ import { cn, isTauri } from "@/lib/utils";
 import { SKILLS_CHANGED_EVENT } from "@/hooks/useAppInit";
 import { useSessionStore } from "@/stores/session";
 import { useSessionMessageStore } from "@/stores/session-message-store";
+import { useOutboxStore } from "@/stores/outbox-store";
 import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useStreamingStore } from "@/stores/streaming";
 import { useVoiceInputStore } from "@/stores/voice-input";
@@ -84,6 +85,15 @@ async function resolveMentionActorIdsForSession(
 ): Promise<string[]> {
   const explicit = Array.from(new Set([...memberIds, ...agentIds]));
   if (explicit.length > 0) return explicit;
+
+  // No explicit mentions. If the user explicitly cleared the engaged agents
+  // ("Remove mention" → engagedAgents went from non-empty to empty), honor
+  // that intent — sending without @ should NOT silently re-engage anyone.
+  // Without this guard the fallback below would auto-mention the sole
+  // session agent and effectively undo the user's Remove Mention click.
+  if (useEngagedAgentStore.getState().wasExplicitlyCleared[sessionId]) {
+    return [];
+  }
 
   const { data: participants, error: participantError } = await supabase
     .from("session_participants")
@@ -171,6 +181,23 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     [v2StreamsByKey, v2StreamsArchived, activeSessionId],
   );
 
+  // Plan entries from the active agent's stream surface in the TodoList dock
+  // above the prompt input (v1 style) rather than inline in the message
+  // bubble. Render only the most-recently-updated stream's plan to avoid
+  // stacking plans from multiple engaged agents — typical sessions have
+  // one planner at a time. Mapped to the Todo shape the TodoList consumes;
+  // status/content carry over, priority is dropped (Todo has no slot).
+  const planTodos = React.useMemo(() => {
+    if (v2Streams.length === 0) return [] as Array<{ id: string; status: string; content: string }>;
+    const latest = v2Streams[v2Streams.length - 1];
+    if (!latest.planEntries || latest.planEntries.length === 0) return [];
+    return latest.planEntries.map((e, i) => ({
+      id: `plan:${latest.actorId}:${i}`,
+      status: e.status,
+      content: e.content,
+    }));
+  }, [v2Streams]);
+
   // ── Archived session viewing ────────────────────────────────────────
   const viewingArchivedSessionId = useSessionStore(s => s.viewingArchivedSessionId);
   const archivedSessionMessages = useSessionStore(s =>
@@ -203,9 +230,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const showInlineTodo = React.useMemo(() => {
     if (isViewingArchived) return false;
     if (isViewingChild) return false;
-    if (todos.length === 0 && messageQueue.length === 0) return false;
+    if (todos.length === 0 && messageQueue.length === 0 && planTodos.length === 0)
+      return false;
     return !hasVisiblePendingPermissions(activeSessionId, sessions, pendingPermissions);
-  }, [activeSessionId, isViewingArchived, isViewingChild, messageQueue.length, pendingPermissions, sessions, todos]);
+  }, [activeSessionId, isViewingArchived, isViewingChild, messageQueue.length, pendingPermissions, sessions, todos, planTodos.length]);
+
+  // Render order: planTodos first (live, being worked on) then static todos.
+  // Dedup pass not needed — plan ids are namespaced `plan:` while todos use
+  // their own id space.
+  const combinedTodos = React.useMemo(
+    () => (planTodos.length > 0 ? [...planTodos, ...todos] : todos),
+    [planTodos, todos],
+  );
   const displayedChildSessionMessages = React.useMemo(() => {
     if (!isViewingChild || !viewingChildSessionId) return EMPTY_MESSAGES;
 
@@ -324,8 +360,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // Existing sessions can be reopened after a reload with no in-memory
   // engaged agents selected. If there is exactly one agent participant,
   // route messages to it automatically so sends still trigger a reply.
+  // Runs at most once per sessionId per app lifetime so that explicitly
+  // removing a mention ("Remove mention" in the agent pill dropdown) isn't
+  // immediately undone by this effect re-firing on engagedAgents.length 1→0.
+  const autoEngagedSessionsRef = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
-    if (!activeSessionId || engagedAgents.length > 0) return;
+    if (!activeSessionId) return;
+    if (autoEngagedSessionsRef.current.has(activeSessionId)) return;
+    if (engagedAgents.length > 0) {
+      autoEngagedSessionsRef.current.add(activeSessionId);
+      return;
+    }
+    autoEngagedSessionsRef.current.add(activeSessionId);
 
     let cancelled = false;
     void (async () => {
@@ -931,11 +977,14 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
     }
 
-    // v2 send: build LiveEventEnvelope, publish via MQTT, persist to
-    // Supabase, and locally append for immediate render.
+    // Optimistic v2 send: synthesize the proto Message and append to the
+    // session store immediately so the bubble renders instantly. The actual
+    // Supabase insert + MQTT publish are handled asynchronously by
+    // `outbox-sender` which retries with exponential backoff on failure.
+    // The bubble shows a leading status dot (pending/inFlight/delivered/
+    // failed) bound to the matching outbox entry, mirroring iOS.
     const outgoing = finalContent;
     if (outgoing && outgoing.trim()) {
-      // authSession and teamIdForSend were resolved above (before attachment upload).
       if (sid && authSession && teamIdForSend) {
         try {
           const senderActorId = await resolveCurrentMemberActorId(
@@ -943,10 +992,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             authSession.user.id,
             {
               currentTeamId: useCurrentTeamStore.getState().team?.id ?? null,
-              currentMemberId: useCurrentTeamStore.getState().currentMember?.id ?? null,
+              currentMemberId:
+                useCurrentTeamStore.getState().currentMember?.id ?? null,
             },
           );
-          if (!senderActorId) throw new Error(`No actor found for user in team ${teamIdForSend}`);
+          if (!senderActorId)
+            throw new Error(`No actor found for user in team ${teamIdForSend}`);
+
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
 
@@ -958,41 +1010,26 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             content: outgoing,
             createdAt,
           });
-          const sessionMsg = createMessage(SessionMessageEnvelopeSchema, {
-            message: msg,
-            mentionActorIds,
-          });
-          const live = createMessage(LiveEventEnvelopeSchema, {
-            eventId: crypto.randomUUID(),
-            eventType: "message.created",
-            sessionId: sid,
-            actorId: senderActorId,
-            sentAt: createdAt,
-            body: toBinary(SessionMessageEnvelopeSchema, sessionMsg),
-          });
-          const { error: insErr } = await supabase.from("messages").insert({
-            id: messageId,
-            team_id: teamIdForSend,
-            session_id: sid,
-            sender_actor_id: senderActorId,
-            kind: "text",
-            content: outgoing,
-            metadata: {
-              mention_actor_ids: mentionActorIds,
-              ...(attachmentUrls.length > 0 ? { attachment_urls: attachmentUrls } : {}),
-            },
-          });
-          if (insErr) throw insErr;
-          await mqttPublish(
-            `amux/${teamIdForSend}/session/${sid}/live`,
-            toBinary(LiveEventEnvelopeSchema, live),
-            false,
-          ).catch((publishErr) => {
-            console.warn("[MQTT] publish failed", publishErr);
-          });
+
+          // 1. Optimistic UI append — bubble renders before the network
+          //    round-trip. dedup-by-id in session-message-store means the
+          //    eventual live echo (same messageId) is a no-op.
           useSessionMessageStore.getState().appendMessage(sid, msg);
+
+          // 2. Enqueue to outbox — write-through to libsql so a crash
+          //    before the first send attempt doesn't lose the message.
+          //    `outbox-sender` (started in App.tsx) picks it up on next tick.
+          await useOutboxStore.getState().enqueue({
+            messageId,
+            teamId: teamIdForSend,
+            sessionId: sid,
+            senderActorId,
+            content: outgoing,
+            mentionActorIds,
+            attachmentUrls,
+          });
         } catch (e) {
-          console.error("[ChatPanel] send failed:", e);
+          console.error("[ChatPanel] send enqueue failed:", e);
         }
       }
     }
@@ -1544,7 +1581,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                 {showInlineTodo ? (
                   <TodoList
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    todos={todos as any}
+                    todos={combinedTodos as any}
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     queue={messageQueue as any}
                     onRemoveFromQueue={removeFromQueue}

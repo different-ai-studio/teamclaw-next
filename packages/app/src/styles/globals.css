@@ -228,16 +228,10 @@ input,
     user-select: text;
 }
 
-/* Keep text-entry focus treatment inside TeamClaw's neutral design system.
-   Native WebView outlines use the OS accent color (often bright blue), which
-   is too loud for the settings and modal surfaces. */
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-    outline: 1.5px solid color-mix(in srgb, var(--foreground) 28%, transparent);
-    outline-offset: 1px;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--foreground) 8%, transparent);
-}
+/* Focus styling is owned per-component (Input/Textarea via Tailwind
+   `focus-visible:ring-*`, cmdk via `outline-hidden`, etc.) rather than
+   imposed globally. The previous global outline+halo here felt heavy
+   inside popovers and small surfaces. */
 
 /* Honor system "Reduce motion" preference (macOS System Settings →
    Accessibility → Display → Reduce motion; Windows Settings → Accessibility

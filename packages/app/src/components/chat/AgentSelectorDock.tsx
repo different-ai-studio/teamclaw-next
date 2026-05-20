@@ -1,14 +1,17 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, Loader2, X } from 'lucide-react'
+import { Check, ChevronDown, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu'
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command'
 import { supabase } from '@/lib/supabase-client'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useSessionStore } from '@/stores/session'
@@ -250,9 +253,11 @@ function AgentPill({
     }
   }, [agent.id, runtimeId, t])
 
+  const [open, setOpen] = React.useState(false)
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button
           type="button"
           variant="ghost"
@@ -285,42 +290,79 @@ function AgentPill({
           ) : null}
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[14rem]">
-        <div className="px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground/80">
-          {t('chat.agentSelector.modelHeading', 'Model')}
-        </div>
-        {runtimeInfoLoading ? (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">
-            {t('chat.agentSelector.loading', 'Loading…')}
-          </div>
-        ) : availableModels.length === 0 ? (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">
-            {t('chat.agentSelector.noModels', 'No models advertised')}
-          </div>
-        ) : (
-          availableModels.map((m) => (
-            <DropdownMenuItem
-              key={m.id}
-              onClick={() => void handlePickModel(m.id)}
-              className={cn(
-                'text-xs py-1.5',
-                m.id === currentModel && 'bg-muted',
-              )}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-[18rem] p-0"
+      >
+        <Command>
+          {availableModels.length > 6 ? (
+            <CommandInput
+              placeholder={t('chat.agentSelector.searchModelPlaceholder', 'Search models…')}
+              className="text-xs"
+            />
+          ) : null}
+          <CommandList className="max-h-[18rem]">
+            {runtimeInfoLoading ? (
+              <div className="px-2 py-3 text-xs text-muted-foreground">
+                {t('chat.agentSelector.loading', 'Loading…')}
+              </div>
+            ) : availableModels.length === 0 ? (
+              <div className="px-2 py-3 text-xs text-muted-foreground">
+                {t('chat.agentSelector.noModels', 'No models advertised')}
+              </div>
+            ) : (
+              <>
+                <CommandEmpty className="py-3 text-xs">
+                  {t('chat.agentSelector.noMatchingModels', 'No matching models')}
+                </CommandEmpty>
+                <CommandGroup
+                  heading={t('chat.agentSelector.modelHeading', 'Model')}
+                >
+                  {availableModels.map((m) => {
+                    const label = m.displayName || m.id
+                    const selected = m.id === currentModel
+                    return (
+                      <CommandItem
+                        key={m.id}
+                        value={`${label} ${m.id}`}
+                        onSelect={() => {
+                          setOpen(false)
+                          void handlePickModel(m.id)
+                        }}
+                        className="text-xs py-1.5"
+                      >
+                        <Check
+                          className={cn(
+                            'h-3.5 w-3.5 mr-1.5 shrink-0',
+                            selected ? 'opacity-100' : 'opacity-0',
+                          )}
+                        />
+                        <span className="truncate">{label}</span>
+                      </CommandItem>
+                    )
+                  })}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+          <CommandSeparator />
+          <div className="p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                onRemove()
+              }}
+              className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 focus:bg-destructive/10 focus:outline-none"
             >
-              <span className="truncate">{m.displayName || m.id}</span>
-            </DropdownMenuItem>
-          ))
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={onRemove}
-          className="text-xs py-1.5 text-destructive focus:bg-destructive/10 focus:text-destructive"
-        >
-          <X className="h-3.5 w-3.5 mr-1.5" />
-          {t('chat.agentSelector.removeMention', 'Remove mention')}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              <X className="h-3.5 w-3.5 mr-1.5" />
+              {t('chat.agentSelector.removeMention', 'Remove mention')}
+            </button>
+          </div>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }

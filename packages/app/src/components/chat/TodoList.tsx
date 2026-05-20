@@ -197,24 +197,26 @@ function InlineTodoList({
               >
                 <div
                   data-testid="todo-list-inline-scroll"
-                  className={cn("space-y-2 overflow-y-auto max-h-[8.75rem]", inlineDockScrollbarClass)}
+                  className={cn("overflow-y-auto max-h-[8.75rem]", inlineDockScrollbarClass)}
                 >
                   {todos.map((todo, index) => (
                     <div
                       key={todo.id}
                       className={cn(
-                        "grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2.5",
+                        "grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 py-0.5",
                         todo.status === "completed" && "opacity-65",
                       )}
                     >
-                      <div>{getTodoStatusIcon(todo.status, "h-3.5 w-3.5")}</div>
+                      <div className="pt-0.5">
+                        {getTodoStatusIcon(todo.status, "h-3 w-3")}
+                      </div>
                       <div
                         className={cn(
-                          "text-[14px] leading-6 text-foreground",
+                          "text-[12px] leading-5 text-foreground",
                           todo.status === "completed" && "text-muted-foreground line-through",
                         )}
                       >
-                        <span className="mr-1.5 text-muted-foreground">{index + 1}.</span>
+                        <span className="mr-1 text-muted-foreground">{index + 1}.</span>
                         {todo.content}
                       </div>
                     </div>

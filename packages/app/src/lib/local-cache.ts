@@ -65,6 +65,31 @@ export type MessageRow = {
   updatedAt: string;
   deletedAt?: string | null;
   syncedAt: string;
+  /** Serialized MessagePart[] (thinking / tool_call / text). Populated when
+   * the streaming pipeline merges runtime events into the persisted message
+   * so that reloading the session restores the full conversation. */
+  partsJson?: string | null;
+};
+
+/** Mirror of Rust `OutboxRow`. One pending/in-flight send through Supabase +
+ * MQTT with exponential backoff. `messageId` matches the optimistic UI bubble
+ * id so live echo can flip status → delivered. */
+export type OutboxRow = {
+  messageId: string;
+  teamId: string;
+  sessionId: string;
+  senderActorId: string;
+  content: string;
+  mentionActorIdsJson?: string | null;
+  attachmentUrlsJson?: string | null;
+  /** 'pending' | 'inFlight' | 'delivered' | 'failed' */
+  state: string;
+  attemptCount: number;
+  lastAttemptAt?: string | null;
+  nextAttemptAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type IdeaRow = {
@@ -223,6 +248,34 @@ export async function softDeleteMessage(
 ): Promise<void> {
   if (!isTauri()) return;
   await invoke("local_cache_message_soft_delete", { id, deletedAt });
+}
+
+/** Merge parts_json into an existing message row without bumping updated_at.
+ * Used when the streaming pipeline finalizes — we attach thinking/tool_call
+ * parts to the AGENT_REPLY that already landed via Supabase/MQTT. */
+export async function setMessageParts(
+  messageId: string,
+  partsJson: string,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("local_cache_message_set_parts", { messageId, partsJson });
+}
+
+// ── outbox ─────────────────────────────────────────────────────────────────
+
+export async function upsertOutbox(row: OutboxRow): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("local_cache_outbox_upsert", { row });
+}
+
+export async function deleteOutbox(messageId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("local_cache_outbox_delete", { messageId });
+}
+
+export async function listAllOutbox(): Promise<OutboxRow[]> {
+  if (!isTauri()) return [];
+  return invoke<OutboxRow[]>("local_cache_outbox_list_all");
 }
 
 // ── idea ───────────────────────────────────────────────────────────────────

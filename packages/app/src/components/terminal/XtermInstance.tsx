@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
 import {
@@ -13,6 +15,8 @@ import {
 } from "@/lib/terminal/client";
 import { buildXtermFont, buildXtermTheme } from "@/lib/terminal/theme";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { TerminalSearchOverlay, type SearchController } from "./TerminalSearchOverlay";
+import { handleOsc633 } from "@/lib/terminal/osc633";
 
 interface Props {
   tabId: string;
@@ -23,7 +27,28 @@ export function XtermInstance({ tabId, active }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
   const markExited = useTerminalStore(s => s.markExited);
+  const updateCwd = useTerminalStore(s => s.updateCwd);
+  const recordCommandStart = useTerminalStore(s => s.recordCommandStart);
+  const recordCommandFinish = useTerminalStore(s => s.recordCommandFinish);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Stable controller — closes over refs that update across renders.
+  const searchController = useMemo<SearchController>(
+    () => ({
+      findNext: (text, caseSensitive) => {
+        searchRef.current?.findNext(text, { caseSensitive });
+      },
+      findPrevious: (text, caseSensitive) => {
+        searchRef.current?.findPrevious(text, { caseSensitive });
+      },
+      clear: () => {
+        termRef.current?.clearSelection();
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const el = containerRef.current;
@@ -32,6 +57,8 @@ export function XtermInstance({ tabId, active }: Props) {
     let unlistenExit: (() => void) | null = null;
     let onDataDisposer: { dispose: () => void } | null = null;
     let onResizeDisposer: { dispose: () => void } | null = null;
+    let oscDisposer: { dispose: () => void } | null = null;
+    let webglAddon: WebglAddon | null = null;
     let cancelled = false;
 
     const font = buildXtermFont();
@@ -45,12 +72,49 @@ export function XtermInstance({ tabId, active }: Props) {
       scrollback: 5000,
     });
     const fit = new FitAddon();
+    const search = new SearchAddon();
     term.loadAddon(fit);
+    term.loadAddon(search);
     term.loadAddon(new WebLinksAddon());
     term.open(el);
     fit.fit();
     termRef.current = term;
     fitRef.current = fit;
+    searchRef.current = search;
+
+    // WebGL renderer — falls back to canvas/DOM if context creation fails or is lost.
+    try {
+      const addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        addon.dispose();
+        webglAddon = null;
+      });
+      term.loadAddon(addon);
+      webglAddon = addon;
+    } catch (err) {
+      console.warn("[terminal] WebGL renderer unavailable, using fallback", err);
+    }
+
+    // Intercept Cmd/Ctrl+F before xterm consumes it.
+    term.attachCustomKeyEventHandler(e => {
+      if (e.type !== "keydown") return true;
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+        setSearchOpen(true);
+        return false;
+      }
+      return true;
+    });
+
+    // OSC 633 — VS Code shell integration. Parses cwd / command start / command exit.
+    oscDisposer = term.parser.registerOscHandler(633, data => {
+      handleOsc633(data, {
+        onCwd: cwd => updateCwd(tabId, cwd),
+        onCommandStart: cmd => recordCommandStart(tabId, cmd),
+        onCommandFinish: exit => recordCommandFinish(tabId, exit),
+      });
+      return true;
+    });
 
     (async () => {
       try {
@@ -115,11 +179,14 @@ export function XtermInstance({ tabId, active }: Props) {
       unlistenExit?.();
       onDataDisposer?.dispose();
       onResizeDisposer?.dispose();
+      oscDisposer?.dispose();
+      webglAddon?.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
     };
-  }, [tabId, markExited]);
+  }, [tabId, markExited, updateCwd, recordCommandStart, recordCommandFinish]);
 
   useEffect(() => {
     if (active && termRef.current) {
@@ -129,11 +196,18 @@ export function XtermInstance({ tabId, active }: Props) {
   }, [active]);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full"
-      style={{ display: active ? "block" : "none" }}
-    />
+    <div className="relative h-full w-full" style={{ display: active ? "block" : "none" }}>
+      <div ref={containerRef} className="h-full w-full" />
+      {searchOpen && (
+        <TerminalSearchOverlay
+          controller={searchController}
+          onClose={() => {
+            setSearchOpen(false);
+            termRef.current?.focus();
+          }}
+        />
+      )}
+    </div>
   );
 }
 
