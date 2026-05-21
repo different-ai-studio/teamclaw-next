@@ -86,6 +86,13 @@ fn resolve_requested_agent_type(
     }
 }
 
+fn runtime_start_initial_model_override(
+    start: &crate::proto::teamclaw::RuntimeStartRequest,
+) -> Option<String> {
+    let model_id = start.model_id.trim();
+    (!model_id.is_empty()).then(|| model_id.to_string())
+}
+
 pub struct DaemonServer {
     config: DaemonConfig,
     /// Path the daemon's `daemon.toml` was loaded from. Stashed so
@@ -2135,6 +2142,7 @@ impl DaemonServer {
                         &start.worktree,
                         &start.session_id,
                         &start.initial_prompt,
+                        None,
                     )
                     .await;
 
@@ -2861,6 +2869,7 @@ impl DaemonServer {
         worktree: &str,
         session_id: &str,
         initial_prompt: &str,
+        initial_model_override: Option<String>,
     ) -> Result<StartRuntimeOutcome, StartRuntimeError> {
         info!(workspace_id, worktree, session_id, "apply_start_runtime");
 
@@ -2990,13 +2999,15 @@ impl DaemonServer {
             .agents
             .lock()
             .await
-            .spawn_agent(
+            .spawn_agent_with_model(
                 agent_type,
                 &resolved_worktree,
                 initial_prompt,
                 &ws_id,
                 supabase_ws_id,
                 session_id_opt,
+                initial_model_override,
+                None,
             )
             .await;
         let new_id = match spawn_res {
@@ -3152,10 +3163,7 @@ impl DaemonServer {
             info!(requested = ?requested, resolved = ?at, "runtimeStart agent_type overridden by daemon config");
         }
 
-        // Note: start.model_id is accepted for wire compatibility but not yet
-        // threaded through apply_start_runtime — the legacy AcpStartAgent path
-        // doesn't carry it either. Future work (Phase 1c+).
-
+        let initial_model_override = runtime_start_initial_model_override(start);
         let outcome = self
             .apply_start_runtime(
                 at,
@@ -3163,6 +3171,7 @@ impl DaemonServer {
                 &start.worktree,
                 &start.session_id,
                 &start.initial_prompt,
+                initial_model_override,
             )
             .await;
 
@@ -4133,6 +4142,29 @@ mod runtime_backend_resolution_tests {
             resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
             amux::AgentType::ClaudeCode
         );
+    }
+
+    #[test]
+    fn runtime_start_model_id_becomes_initial_spawn_override() {
+        let start = crate::proto::teamclaw::RuntimeStartRequest {
+            model_id: "opencode/deepseek-v4-flash-free".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            runtime_start_initial_model_override(&start).as_deref(),
+            Some("opencode/deepseek-v4-flash-free")
+        );
+    }
+
+    #[test]
+    fn runtime_start_empty_model_id_has_no_initial_spawn_override() {
+        let start = crate::proto::teamclaw::RuntimeStartRequest {
+            model_id: "   ".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(runtime_start_initial_model_override(&start), None);
     }
 
     #[test]

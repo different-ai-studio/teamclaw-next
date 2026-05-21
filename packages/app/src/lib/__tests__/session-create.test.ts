@@ -109,6 +109,28 @@ describe('startAgentRuntimesAsync', () => {
     )
   })
 
+  it('starts daemon agents as opencode even without runtime history', async () => {
+    mockTables({
+      runtimes: [],
+      actors: [{ id: 'agent-daemon', agent_kind: 'daemon', default_agent_type: null }],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-daemon'],
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-daemon',
+        workspaceId: '',
+        agentType: AgentType.OPENCODE,
+      }),
+    )
+  })
+
   it('prefers actor.default_agent_type over prior runtime backend_type', async () => {
     // Prior runtime was opencode, but the operator has since set the agent's
     // default_agent_type to codex — the next spawn should respect that.
