@@ -9,6 +9,59 @@ pub struct SessionStore {
     pub sessions: Vec<StoredSession>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session(
+        runtime_id: &str,
+        session_id: &str,
+        status: amux::AgentStatus,
+    ) -> StoredSession {
+        StoredSession {
+            runtime_id: runtime_id.to_string(),
+            acp_session_id: format!("acp-{runtime_id}"),
+            session_id: session_id.to_string(),
+            agent_type: amux::AgentType::ClaudeCode as i32,
+            workspace_id: "workspace-1".to_string(),
+            worktree: "/tmp/workspace-1".to_string(),
+            status: status as i32,
+            created_at: 1,
+            last_prompt: String::new(),
+            last_output_summary: String::new(),
+            tool_use_count: 0,
+        }
+    }
+
+    #[test]
+    fn resumable_for_collab_session_returns_non_stopped_runtime_ids() {
+        let mut store = SessionStore::default();
+        store.upsert(make_session(
+            "rt-active",
+            "session-1",
+            amux::AgentStatus::Active,
+        ));
+        store.upsert(make_session(
+            "rt-stopped",
+            "session-1",
+            amux::AgentStatus::Stopped,
+        ));
+        store.upsert(make_session(
+            "rt-other",
+            "session-2",
+            amux::AgentStatus::Active,
+        ));
+
+        let ids: Vec<String> = store
+            .resumable_sessions_for_session("session-1")
+            .into_iter()
+            .map(|s| s.runtime_id)
+            .collect();
+
+        assert_eq!(ids, vec!["rt-active".to_string()]);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredSession {
     /// Daemon's 8-char runtime/spawn id. Pre-rename TOML files used
@@ -83,6 +136,17 @@ impl SessionStore {
         self.sessions
             .iter_mut()
             .find(|s| s.runtime_id == runtime_id)
+    }
+
+    pub fn resumable_sessions_for_session(&self, session_id: &str) -> Vec<StoredSession> {
+        self.sessions
+            .iter()
+            .filter(|s| {
+                s.session_id == session_id
+                    && amux::AgentStatus::try_from(s.status) != Ok(amux::AgentStatus::Stopped)
+            })
+            .cloned()
+            .collect()
     }
 
     pub fn to_proto_agent_list(&self) -> Vec<amux::RuntimeInfo> {
