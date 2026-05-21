@@ -26,6 +26,14 @@ public struct SessionDetailView: View {
     @State private var isPlansPanelPresented: Bool = false
     @State private var plansPageIndex: Int = 0
     @State private var hasAutoOpenedPlans: Bool = false
+    /// First-paint suppression for the bottom-follow animation. The
+    /// initial `feedItems` populate happens *after* the ScrollView lays
+    /// out, so `.defaultScrollAnchor(.bottom, for: .initialOffset)` lands
+    /// on empty content and the subsequent count change animates from
+    /// top → bottom. Skip the animation on that first transition so the
+    /// session opens already at the bottom; animate only for new messages
+    /// arriving while the user is viewing.
+    @State private var didInitialScroll: Bool = false
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
@@ -125,6 +133,15 @@ public struct SessionDetailView: View {
                 // bottom-aligns content smaller than the viewport, which
                 // makes a one-message session sit above the composer.
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .onAppear {
+                    // Cache-hit path: feed is already populated when the
+                    // view appears, so `defaultScrollAnchor` lands at the
+                    // bottom on first paint. Mark initial scroll done so
+                    // the first new message animates like a normal arrival.
+                    if !viewModel.feedItems.isEmpty {
+                        didInitialScroll = true
+                    }
+                }
                 .onChange(of: viewModel.feedItems.count) {
                     // New user prompts, new agent replies, and new active
                     // stream cards all change feedItems.count — that's the
@@ -133,7 +150,12 @@ public struct SessionDetailView: View {
                     // need scroll-following at this level (the card itself
                     // stays put; the detail view handles the per-token
                     // scroll when the user opens it).
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    if didInitialScroll {
+                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    } else {
+                        didInitialScroll = true
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
                 }
             }
         }
