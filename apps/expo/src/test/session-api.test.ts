@@ -499,6 +499,26 @@ describe("createSessionsApi", () => {
     expect(participantQuery.in).toHaveBeenCalledWith("session_id", ["session-1", "session-2"]);
   });
 
+  it("createSession defaults to the iOS collab mode", async () => {
+    const { createSessionsApi } = await import("../features/sessions/session-api");
+
+    const rpc = vi.fn().mockResolvedValue({ data: "session-1", error: null });
+    const api = createSessionsApi({ from: vi.fn(), rpc } as any);
+
+    await expect(api.createSession({
+      title: "Hello",
+      primaryAgentId: "agent-1",
+      ideaId: null,
+    })).resolves.toBe("session-1");
+
+    expect(rpc).toHaveBeenCalledWith("create_session", {
+      p_primary_agent_id: "agent-1",
+      p_idea_id: null,
+      p_mode: "collab",
+      p_title: "Hello",
+    });
+  });
+
   it("getSession returns a mapped session for the requested id", async () => {
     const { createSessionsApi } = await import("../features/sessions/session-api");
 

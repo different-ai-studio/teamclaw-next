@@ -20,6 +20,25 @@ describe("buildComposerPresentation", () => {
     });
   });
 
+  it("enables send when a pending attachment is present without text", async () => {
+    const { buildComposerPresentation } = await import(
+      "../features/sessions/components/session-composer-copy"
+    );
+
+    expect(
+      buildComposerPresentation({
+        composerText: "",
+        connectionState: "connected",
+        isSending: false,
+        pendingAttachmentCount: 1,
+        sendErrorMessage: null,
+      }),
+    ).toMatchObject({
+      canSend: true,
+      isDisabled: false,
+    });
+  });
+
   it("shows a disconnected helper when realtime is unavailable", async () => {
     const { buildComposerPresentation } = await import(
       "../features/sessions/components/session-composer-copy"

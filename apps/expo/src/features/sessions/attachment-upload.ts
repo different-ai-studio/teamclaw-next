@@ -1,3 +1,6 @@
+import { Buffer } from "buffer";
+import * as FileSystem from "expo-file-system";
+
 import { uuidV4 } from "../../lib/uuid";
 
 type StorageClient = {
@@ -10,6 +13,14 @@ type StorageClient = {
 export type UploadedAttachment = {
   path: string;
   publicUrl: string;
+  mime: string;
+  size: number | null;
+};
+
+const SIGNED_URL_EXPIRES_IN_SECONDS = 31_536_000;
+
+type LocalFileBody = {
+  body: ArrayBuffer;
   mime: string;
   size: number | null;
 };
@@ -39,15 +50,51 @@ function inferExtension(uri: string, mime: string): string {
   return "bin";
 }
 
+function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+async function readLocalFileForUpload(uri: string, fallbackMime: string): Promise<LocalFileBody> {
+  try {
+    const response = await fetch(uri);
+    if (!response.ok) {
+      throw new Error(`Couldn't read picked file (${response.status}).`);
+    }
+    const blob = await response.blob();
+    const body = await blob.arrayBuffer();
+    return {
+      body,
+      mime: blob.type || fallbackMime,
+      size: blob.size ?? body.byteLength,
+    };
+  } catch (fetchError) {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const bytes = Buffer.from(base64, "base64");
+      return {
+        body: copyToArrayBuffer(bytes),
+        mime: fallbackMime,
+        size: bytes.byteLength,
+      };
+    } catch {
+      throw fetchError;
+    }
+  }
+}
+
 /**
- * Reads the file behind `localUri` via fetch + blob and uploads it to
+ * Reads the file behind `localUri` and uploads it to
  * the `attachments` bucket under `<teamId>/<sessionId>/<uuid>.<ext>`.
  * The path convention matches the iOS app's
  * `AttachmentUploadManager.makeRemotePath` so the same row in
  * `message_attachments` can be read interchangeably.
  *
- * Returns the storage path, a public URL (the bucket is public), the
- * resolved MIME, and the size when available.
+ * Returns the storage path, a signed read URL for the private bucket,
+ * the resolved MIME, and the size when available.
  */
 export async function uploadAttachment(
   client: StorageClient,
@@ -58,17 +105,13 @@ export async function uploadAttachment(
     fallbackMime?: string;
   },
 ): Promise<UploadedAttachment> {
-  const response = await fetch(args.localUri);
-  if (!response.ok) {
-    throw new Error(`Couldn't read picked file (${response.status}).`);
-  }
-  const blob = await response.blob();
-  const mime = blob.type || inferMime(args.localUri, args.fallbackMime ?? "application/octet-stream");
+  const fallbackMime = inferMime(args.localUri, args.fallbackMime ?? "application/octet-stream");
+  const { body, mime, size } = await readLocalFileForUpload(args.localUri, fallbackMime);
   const ext = inferExtension(args.localUri, mime);
   const path = `${args.teamId}/${args.sessionId}/${uuidV4()}.${ext}`;
 
   const bucket = client.storage.from("attachments");
-  const result = await bucket.upload(path, blob, {
+  const result = await bucket.upload(path, body, {
     cacheControl: "3600",
     contentType: mime,
     upsert: false,
@@ -77,11 +120,15 @@ export async function uploadAttachment(
     throw new Error(result.error.message);
   }
 
-  const publicUrl = bucket.getPublicUrl(path).data?.publicUrl ?? "";
+  const signedUrlResult = await bucket.createSignedUrl(path, SIGNED_URL_EXPIRES_IN_SECONDS);
+  if (signedUrlResult.error) {
+    throw new Error(signedUrlResult.error.message);
+  }
+  const publicUrl = signedUrlResult.data?.signedUrl ?? "";
   return {
     path,
     publicUrl,
     mime,
-    size: blob.size ?? null,
+    size,
   };
 }

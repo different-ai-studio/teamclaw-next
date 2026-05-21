@@ -15,6 +15,7 @@ type Listener = (key: string) => void;
 
 const pending = new Map<string, UploadedAttachment[]>();
 const listeners = new Set<Listener>();
+const EMPTY_ATTACHMENTS: readonly UploadedAttachment[] = [];
 
 function key(teamId: string, sessionId: string): string {
   return `${teamId}:${sessionId}`;
@@ -44,11 +45,35 @@ export function takePendingAttachments(
   return value;
 }
 
+export function getPendingAttachmentSnapshot(
+  teamId: string,
+  sessionId: string,
+): readonly UploadedAttachment[] {
+  return pending.get(key(teamId, sessionId)) ?? EMPTY_ATTACHMENTS;
+}
+
 export function peekPendingAttachments(
   teamId: string,
   sessionId: string,
 ): UploadedAttachment[] {
   return [...(pending.get(key(teamId, sessionId)) ?? [])];
+}
+
+export function removePendingAttachment(
+  teamId: string,
+  sessionId: string,
+  path: string,
+): void {
+  const k = key(teamId, sessionId);
+  const current = pending.get(k) ?? [];
+  const next = current.filter((attachment) => attachment.path !== path);
+  if (next.length === current.length) return;
+  if (next.length > 0) {
+    pending.set(k, next);
+  } else {
+    pending.delete(k);
+  }
+  for (const listener of listeners) listener(k);
 }
 
 export function subscribePendingAttachments(listener: Listener): () => void {

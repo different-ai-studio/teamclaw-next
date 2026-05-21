@@ -96,7 +96,7 @@ export default function NewSessionRoute() {
           const expandedMessage = buildFirstMessageWithIdea(firstMessage, idea);
           const sessionId = await sessionsApi.createSession({
             title: deriveTitle(firstMessage),
-            mode: collaboratorActorIds.length > 1 ? "collab" : "agent",
+            mode: "collab",
             primaryAgentId: primaryAgentActorId,
             ideaId: chosenIdeaId,
           });

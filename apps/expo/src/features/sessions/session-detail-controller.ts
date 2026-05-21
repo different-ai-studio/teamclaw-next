@@ -13,7 +13,7 @@ import { uuidV4 } from "../../lib/uuid";
 import { setOutboxStatus, syncOutboxFromDao } from "./outbox-store";
 import type { OutboxDao } from "./outbox-db";
 import type { OutboxSender } from "./outbox-sender";
-import { takePendingAttachments } from "./pending-attachments";
+import { peekPendingAttachments, takePendingAttachments } from "./pending-attachments";
 import type { SessionDetailCache } from "./session-detail-cache";
 import {
   buildSessionDetailState,
@@ -414,7 +414,13 @@ export function createSessionDetailController(
       const content = state.composerText.trim();
       const session = state.session;
 
-      if (!content || !session) {
+      if (!session) {
+        return;
+      }
+
+      const hasPendingAttachments =
+        peekPendingAttachments(deps.teamId, deps.sessionId).length > 0;
+      if (!content && !hasPendingAttachments) {
         return;
       }
 
@@ -485,6 +491,7 @@ export function createSessionDetailController(
           sessionId: deps.sessionId,
           teamId: deps.teamId,
           turnId: "",
+          attachments: attachmentsPayload,
         };
 
         const optimisticNext = reduceTimeline(timeline, { kind: "messageCommitted", message: optimisticMessage });

@@ -12,9 +12,11 @@ export function buildComposerPresentation(input: {
   composerText: string;
   connectionState: SessionDetailConnectionState;
   isSending: boolean;
+  pendingAttachmentCount?: number;
   sendErrorMessage: string | null;
 }): SessionComposerPresentation {
   const trimmed = input.composerText.trim();
+  const hasBody = trimmed.length > 0 || (input.pendingAttachmentCount ?? 0) > 0;
 
   if (input.connectionState === "connecting") {
     return {
@@ -37,9 +39,9 @@ export function buildComposerPresentation(input: {
   }
 
   return {
-    canSend: trimmed.length > 0 && !input.isSending,
+    canSend: hasBody && !input.isSending,
     helperText: input.sendErrorMessage,
-    isDisabled: trimmed.length === 0 || input.isSending,
+    isDisabled: !hasBody || input.isSending,
     placeholder: "发送消息到这个会话",
     sendLabel: input.isSending ? "发送中…" : "发送",
   };

@@ -10,6 +10,9 @@
     "android": {
       "package": "com.bertrand319.teamclawexpo"
     },
+    "plugins": [
+      "expo-audio"
+    ],
     "ios": {
       "bundleIdentifier": "com.bertrand319.teamclawexpo"
     }
