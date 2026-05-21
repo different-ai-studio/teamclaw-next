@@ -2612,7 +2612,33 @@
   "actors": {
     "loading": "Loading actors...",
     "empty": "No actors in this team yet",
-    "error": "Failed to load actors"
+    "error": "Failed to load actors",
+    "contextMenu": {
+      "viewProfile": "View profile",
+      "copyName": "Copy name",
+      "copyId": "Copy ID",
+      "remove": "Remove from team"
+    },
+    "detail": {
+      "title": "Actor details",
+      "member": "Member",
+      "agent": "Agent",
+      "online": "Online",
+      "offline": "Offline",
+      "lastActive": "Last active {{when}}",
+      "copyId": "Copy ID"
+    },
+    "removeConfirm": {
+      "titleAgent": "Remove agent?",
+      "titleMember": "Remove member?",
+      "body": "Remove {{name}} from the team. This cannot be undone.",
+      "cta": "Remove"
+    },
+    "copiedName": "Copied name",
+    "copiedId": "Copied actor ID",
+    "copyFailed": "Copy failed",
+    "removed": "Removed from team",
+    "removeFailed": "Remove failed: {{msg}}"
   },
   "ideas": {
     "loading": "Loading ideas...",
@@ -2626,7 +2652,35 @@
     "descriptionPlaceholder": "What's the constraint, what's the win?",
     "createButton": "Create",
     "created": "Idea created",
-    "createFailed": "Failed to create idea: {{msg}}"
+    "createFailed": "Failed to create idea: {{msg}}",
+    "contextMenu": {
+      "view": "View",
+      "status": "Status",
+      "statusOpen": "Open",
+      "statusInProgress": "In progress",
+      "statusDone": "Done",
+      "rename": "Rename",
+      "copyId": "Copy ID",
+      "delete": "Delete"
+    },
+    "deleteConfirm": {
+      "title": "Delete idea?",
+      "body": "Delete \"{{title}}\". This archives the idea and removes it from the list.",
+      "cta": "Delete"
+    },
+    "renameDialog": {
+      "title": "Rename idea",
+      "placeholder": "Idea title",
+      "save": "Save"
+    },
+    "archived": "Idea deleted",
+    "copiedId": "Copied idea ID",
+    "copyFailed": "Copy failed",
+    "deleteFailed": "Delete failed: {{msg}}",
+    "statusUpdated": "Status updated",
+    "statusFailed": "Status update failed: {{msg}}",
+    "renamed": "Idea renamed",
+    "renameFailed": "Rename failed: {{msg}}"
   },
   "invite": {
     "title": "Invite to team",
