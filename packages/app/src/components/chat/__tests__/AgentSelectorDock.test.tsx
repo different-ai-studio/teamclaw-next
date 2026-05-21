@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: null as string | null,
   agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null }>,
   runtimeStates: {} as Record<string, unknown>,
+  providerModels: [] as Array<{ provider: string; id: string; name: string }>,
 }))
 
 vi.mock('react-i18next', () => ({
@@ -40,6 +42,11 @@ vi.mock('@/stores/session', () => ({
     selector({ activeSessionId: mocks.activeSessionId }),
 }))
 
+vi.mock('@/stores/provider', () => ({
+  useProviderStore: (selector: (s: unknown) => unknown) =>
+    selector({ models: mocks.providerModels }),
+}))
+
 vi.mock('@/lib/teamclaw-rpc', () => ({
   setModel: vi.fn(),
 }))
@@ -50,6 +57,7 @@ describe('AgentSelectorDock', () => {
     mocks.activeSessionId = null
     mocks.agentRuntimeRows = []
     mocks.runtimeStates = {}
+    mocks.providerModels = []
   })
 
   it('renders nothing when no agents are engaged', () => {
@@ -82,5 +90,43 @@ describe('AgentSelectorDock', () => {
     expect(resolveAgentAvailableModels({
       availableModels: [{ id: 'm-1', displayName: 'Model One' }],
     } as any)).toEqual([{ id: 'm-1', displayName: 'Model One' }])
+  })
+
+  it('uses dynamic provider-store models for the agent backend while waiting for runtime advertised models', async () => {
+    mocks.activeSessionId = 'session-1'
+    mocks.agentRuntimeRows = [
+      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode' },
+    ]
+    mocks.runtimeStates = {
+      'runtime-1': {
+        daemonDeviceId: 'a-1',
+        lastUpdated: Date.now(),
+        info: {
+          availableModels: [],
+          currentModel: '',
+        },
+      },
+    }
+    mocks.providerModels = [
+      { provider: 'opencode', id: 'opencode/qwen3.6-plus-free', name: 'OpenCode Zen/Qwen3.6 Plus Free' },
+      { provider: 'scnet', id: 'minimax-m2.5', name: 'MiniMax-M2.5' },
+      { provider: 'claude-code', id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    ]
+
+    render(
+      <AgentSelectorDock
+        engagedAgents={[
+          { id: 'a-1', displayName: 'OpenCode Bot' },
+        ]}
+        onRemoveAgent={vi.fn()}
+      />,
+    )
+
+    await screen.findByText('opencode/qwen3.6-plus-free')
+    await userEvent.click(screen.getByRole('button', { name: /OpenCode Bot/i }))
+
+    expect(await screen.findByText('OpenCode Zen/Qwen3.6 Plus Free')).toBeInTheDocument()
+    expect(screen.getByText('MiniMax-M2.5')).toBeInTheDocument()
+    expect(screen.queryByText('Claude Sonnet 4.6')).not.toBeInTheDocument()
   })
 })

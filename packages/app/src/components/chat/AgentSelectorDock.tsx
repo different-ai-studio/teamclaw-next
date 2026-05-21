@@ -15,6 +15,7 @@ import {
 import { supabase } from '@/lib/supabase-client'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useSessionStore } from '@/stores/session'
+import { useProviderStore, type ModelOption } from '@/stores/provider'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
@@ -32,8 +33,50 @@ interface AgentSelectorDockProps {
   onRemoveAgent: (agentId: string) => void
 }
 
-export function resolveAgentAvailableModels(runtimeInfo: RuntimeInfo | undefined): Array<{ id: string; displayName: string }> {
-  return runtimeInfo?.availableModels ?? []
+type AgentModelOption = { id: string; displayName: string }
+
+const OPENCODE_STATIC_PROVIDER_IDS = new Set(['claude-code', 'codex'])
+
+function providerIdForBackendType(backendType: string | undefined): string | null {
+  switch (backendType) {
+    case 'claude-code':
+    case 'claude':
+    case 'claude_code':
+      return 'claude-code'
+    case 'opencode':
+      return 'opencode'
+    case 'codex':
+      return 'codex'
+    default:
+      return null
+  }
+}
+
+function modelIdForAgentBackend(model: ModelOption, providerId: string): string {
+  if (model.provider === providerId) return model.id
+  return `${model.provider}/${model.id}`
+}
+
+export function resolveAgentAvailableModels(
+  runtimeInfo: RuntimeInfo | undefined,
+  backendType?: string,
+  providerModels: ModelOption[] = [],
+): AgentModelOption[] {
+  if (runtimeInfo?.availableModels.length) {
+    return runtimeInfo.availableModels
+  }
+
+  const providerId = providerIdForBackendType(backendType)
+  if (!providerId) return []
+
+  const models = providerId === 'opencode'
+    ? providerModels.filter((model) => !OPENCODE_STATIC_PROVIDER_IDS.has(model.provider))
+    : providerModels.filter((model) => model.provider === providerId)
+
+  return models.map((model) => ({
+    id: modelIdForAgentBackend(model, providerId),
+    displayName: model.name || modelIdForAgentBackend(model, providerId),
+  }))
 }
 
 /** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */
@@ -208,8 +251,9 @@ function AgentPill({
 }) {
   const { t } = useTranslation()
   const { color: dotColor, pulse } = dotClasses(runtimeInfo)
+  const providerModels = useProviderStore((s) => s.models)
 
-  const availableModels = resolveAgentAvailableModels(runtimeInfo)
+  const availableModels = resolveAgentAvailableModels(runtimeInfo, backendType, providerModels)
   const currentModel = runtimeInfo?.currentModel ?? ''
   const displayedModel = currentModel || availableModels[0]?.id || ''
   // Only `currentModel` reflects what the live runtime is actually using.
