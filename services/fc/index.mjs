@@ -11,6 +11,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createApnsJwtCache } from './lib/apns-jwt.mjs';
 import { createApnsClient, createHttp2Transport } from './lib/apns.mjs';
 import { dispatchPush } from './lib/push-dispatch.mjs';
+import { createMqttPublisher } from './lib/mqtt-client.mjs';
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -42,6 +43,11 @@ const APNS_KEY_ID           = () => process.env.APNS_KEY_ID || '';
 const APNS_TEAM_ID          = () => process.env.APNS_TEAM_ID || '';
 const APNS_TOPIC            = () => process.env.APNS_TOPIC || '';
 const APNS_ENV              = () => (process.env.APNS_ENV || 'production').toLowerCase();
+
+// MQTT publisher (for inbox red-dot fan-out alongside APNs)
+const MQTT_BROKER_URL       = () => process.env.MQTT_BROKER_URL || '';
+const MQTT_USERNAME         = () => process.env.MQTT_USERNAME || '';
+const MQTT_PASSWORD         = () => process.env.MQTT_PASSWORD || '';
 
 /** Default team max spend (USD) applied on POST /ai/setup-team → LiteLLM /team/new */
 const LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD = () => {
@@ -319,7 +325,14 @@ function pushDeps() {
     jwt, topic: APNS_TOPIC(),
     transport: createHttp2Transport(apnsHost),
   });
-  _pushDeps = { sb, apns };
+  const mqtt = MQTT_BROKER_URL()
+    ? createMqttPublisher({
+        url: MQTT_BROKER_URL(),
+        username: MQTT_USERNAME(),
+        password: MQTT_PASSWORD(),
+      })
+    : null;
+  _pushDeps = { sb, apns, mqtt };
   return _pushDeps;
 }
 
