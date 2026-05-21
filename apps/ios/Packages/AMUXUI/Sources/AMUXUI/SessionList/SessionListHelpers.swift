@@ -306,7 +306,13 @@ struct AgentRowView: View {
     }
 
     private var lastMessage: String { session.lastMessagePreview }
-    private var isUnread: Bool { runtime?.hasUnread ?? false }
+    // Two distinct unread signals:
+    //   - runtime.hasUnread: this client noticed new agent output it hasn't shown
+    //   - session.hasUnread: server says a peer's message arrived since last view
+    //                         (computed by list_current_actor_sessions from
+    //                          session_read_markers + sessions.last_message_at)
+    // Either is sufficient to surface a red dot.
+    private var isUnread: Bool { (runtime?.hasUnread ?? false) || session.hasUnread }
 
     private var isRunning: Bool {
         if let runtime { return runtime.status == 2 }

@@ -18,6 +18,16 @@ public struct SessionRecord: Equatable, Sendable {
 
 public protocol SessionsRepository: Sendable {
     func listSessions(teamID: String) async throws -> [SessionRecord]
+    /// Returns the `(session_id, has_unread)` map computed server-side by
+    /// `list_current_actor_sessions` (sessions.last_message_at > session_read_markers.last_read_at).
+    /// Used by the inbox red-dot feature to authoritatively know which
+    /// sessions have unseen peer messages without each client tracking the
+    /// state locally.
+    func fetchUnreadFlags(limit: Int) async throws -> [String: Bool]
+    /// Marks the current actor as having viewed `sessionId` up to
+    /// `lastReadMessageId`. Server upserts `session_read_markers` so other
+    /// devices' next `fetchUnreadFlags` reflects the read.
+    func markSessionViewed(sessionId: String, lastReadMessageId: String?) async throws
 }
 
 public actor SupabaseSessionsRepository: SessionsRepository {
@@ -36,6 +46,31 @@ public actor SupabaseSessionsRepository: SessionsRepository {
             supabaseURL: configuration.url,
             supabaseKey: configuration.publishableKey
         )
+    }
+
+    public func fetchUnreadFlags(limit: Int = 100) async throws -> [String: Bool] {
+        let rows: [CurrentActorSessionRow] = try await client
+            .rpc(
+                "list_current_actor_sessions",
+                params: ListCurrentActorSessionsParams(p_limit: limit)
+            )
+            .execute()
+            .value
+        return rows.reduce(into: [String: Bool]()) { acc, row in
+            acc[row.id] = row.hasUnread
+        }
+    }
+
+    public func markSessionViewed(sessionId: String, lastReadMessageId: String? = nil) async throws {
+        _ = try await client
+            .rpc(
+                "mark_current_actor_session_viewed",
+                params: MarkSessionViewedParams(
+                    p_session_id: sessionId,
+                    p_last_read_message_id: lastReadMessageId
+                )
+            )
+            .execute()
     }
 
     public func listSessions(teamID: String) async throws -> [SessionRecord] {
@@ -128,4 +163,23 @@ private struct SessionParticipantCountRow: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
     }
+}
+
+private struct CurrentActorSessionRow: Decodable, Sendable {
+    let id: String
+    let hasUnread: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case hasUnread = "has_unread"
+    }
+}
+
+private struct ListCurrentActorSessionsParams: Encodable, Sendable {
+    let p_limit: Int
+}
+
+private struct MarkSessionViewedParams: Encodable, Sendable {
+    let p_session_id: String
+    let p_last_read_message_id: String?
 }

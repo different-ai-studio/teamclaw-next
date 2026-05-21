@@ -168,6 +168,8 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
 
     func isAnonymous() async -> Bool { false }
 
+    func currentUserEmail() async -> String? { nil }
+
     func upgradeWithPassword(email: String, password: String) async throws {
         // no-op
     }

@@ -25,6 +25,13 @@ public final class Session {
     /// "loading" gate: composer disabled while non-nil so the user can't
     /// race in a second message before the first one has been delivered.
     public var pendingFirstMessage: String?
+    /// Server-driven unread flag, computed by `list_current_actor_sessions`
+    /// (sessions.last_message_at > session_read_markers.last_read_at).
+    /// Set on inbox MQTT ping (FC fan-out after message INSERT); cleared
+    /// when the user opens the session via `mark_current_actor_session_viewed`.
+    /// Distinct from `Runtime.hasUnread`, which tracks local agent output
+    /// rather than peer messages — the UI ORs the two signals together.
+    public var hasUnread: Bool = false
 
     public init(
         sessionId: String,
@@ -39,7 +46,8 @@ public final class Session {
         ideaId: String = "",
         isPinned: Bool = false,
         isArchived: Bool = false,
-        pendingFirstMessage: String? = nil
+        pendingFirstMessage: String? = nil,
+        hasUnread: Bool = false
     ) {
         self.sessionId = sessionId
         self.teamId = teamId
@@ -54,5 +62,6 @@ public final class Session {
         self.isPinned = isPinned
         self.isArchived = isArchived
         self.pendingFirstMessage = pendingFirstMessage
+        self.hasUnread = hasUnread
     }
 }
