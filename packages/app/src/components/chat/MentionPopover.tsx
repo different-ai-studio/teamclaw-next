@@ -110,21 +110,24 @@ export function MentionPopover({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t('chat.mentionPopoverTitle', 'Mention people or agents')}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           />
         </div>
         <CommandList className="max-h-60 overflow-y-auto">
           {loading && (
-            <div className="py-4 text-center text-sm text-muted-foreground">…</div>
+            <div className="py-4 text-center text-xs text-muted-foreground">…</div>
           )}
           {error && (
-            <CommandEmpty>{t('chat.mentionPopoverError', 'Failed to load participants')}</CommandEmpty>
+            <CommandEmpty className="py-6 text-center text-xs">{t('chat.mentionPopoverError', 'Failed to load participants')}</CommandEmpty>
           )}
           {isEmpty && (
-            <CommandEmpty>{t('chat.mentionEmptyState', 'No one to mention in this session yet')}</CommandEmpty>
+            <CommandEmpty className="py-6 text-center text-xs">{t('chat.mentionEmptyState', 'No one to mention in this session yet')}</CommandEmpty>
           )}
           {members.length > 0 && (
-            <CommandGroup heading={t('chat.mentionGroupMembers', 'Members')}>
+            <CommandGroup
+              heading={t('chat.mentionGroupMembers', 'Members')}
+              className="[&_[cmdk-group-heading]]:text-[10px]"
+            >
               {members.map(m => (
                 <CommandItem
                   key={m.id}
@@ -136,13 +139,16 @@ export function MentionPopover({
                   className="flex items-center gap-2 cursor-pointer"
                 >
                   <User className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span className="text-sm font-medium truncate">{m.display_name}</span>
+                  <span className="text-xs font-medium truncate">{m.display_name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
           )}
           {agents.length > 0 && (
-            <CommandGroup heading={t('chat.mentionGroupAgents', 'Agents')}>
+            <CommandGroup
+              heading={t('chat.mentionGroupAgents', 'Agents')}
+              className="[&_[cmdk-group-heading]]:text-[10px]"
+            >
               {agents.map(a => (
                 <CommandItem
                   key={a.id}
@@ -154,7 +160,7 @@ export function MentionPopover({
                   className="flex items-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="h-4 w-4 text-orange-500 shrink-0" />
-                  <span className="text-sm font-medium truncate">{a.display_name}</span>
+                  <span className="text-xs font-medium truncate">{a.display_name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
