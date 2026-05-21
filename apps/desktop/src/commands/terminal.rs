@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::terminal::pty::{EmitContext, PtyHandle, SpawnArgs};
@@ -80,14 +81,33 @@ pub async fn terminal_subscribe(
     })
 }
 
+/// Writes raw bytes to a PTY.
+///
+/// Uses Tauri raw-body IPC instead of a JSON `Vec<u8>` to keep per-keystroke
+/// latency low — JSON-encoding each byte as a decimal number doubles to triples
+/// the payload size and adds parse work on both sides for every keypress. The
+/// terminal id rides in the `x-terminal-id` header so the body can stay raw.
 #[tauri::command]
 pub async fn terminal_write(
     registry: State<'_, Arc<Registry>>,
-    id: String,
-    data: Vec<u8>,
+    request: Request<'_>,
 ) -> Result<(), TerminalError> {
+    let id = request
+        .headers()
+        .get("x-terminal-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| TerminalError::BadRequest("missing x-terminal-id header".into()))?
+        .to_string();
+    let bytes: &[u8] = match request.body() {
+        InvokeBody::Raw(b) => b.as_slice(),
+        InvokeBody::Json(_) => {
+            return Err(TerminalError::BadRequest(
+                "terminal_write expects raw body, got JSON".into(),
+            ))
+        }
+    };
     let h = registry.get(&id).ok_or(TerminalError::NotFound(id))?;
-    h.write(&data)
+    h.write(bytes)
 }
 
 #[tauri::command]

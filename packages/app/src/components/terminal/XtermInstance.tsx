@@ -155,6 +155,14 @@ export function XtermInstance({ tabId, active }: Props) {
           term.write(remainingLiveBytes);
         }
 
+        // Force WebGL to paint the current viewport. In some WebView builds the
+        // first frame after attach is silently dropped — buffer has the prompt
+        // but nothing is drawn until a later keystroke/resize triggers refresh.
+        term.write("", () => {
+          if (cancelled) return;
+          term.refresh(0, term.rows - 1);
+        });
+
         const dims = fit.proposeDimensions();
         if (dims) await resizeTerminal(tabId, dims.cols, dims.rows);
 
@@ -192,11 +200,20 @@ export function XtermInstance({ tabId, active }: Props) {
     if (active && termRef.current) {
       termRef.current.focus();
       fitRef.current?.fit();
+      // Force a repaint when becoming active. Inactive tabs are hidden via
+      // the parent's `visibility: hidden`, so their xterm container always
+      // has a real size — but WebGL still skips frames while not visible.
+      termRef.current.refresh(0, termRef.current.rows - 1);
     }
   }, [active]);
 
+  // Container visibility is owned by the parent (visibility: hidden on
+  // inactive tabs). We deliberately do not toggle `display: none` here —
+  // `display: none` collapses the container to 0×0, which breaks fit() and
+  // leaves the WebGL canvas initialised at zero size for tabs that mount
+  // while inactive (e.g. opening a new tab without switching to it first).
   return (
-    <div className="relative h-full w-full" style={{ display: active ? "block" : "none" }}>
+    <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
       {searchOpen && (
         <TerminalSearchOverlay
