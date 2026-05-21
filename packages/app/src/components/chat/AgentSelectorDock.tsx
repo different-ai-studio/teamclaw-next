@@ -14,7 +14,6 @@ import {
 } from '@/components/ui/command'
 import { supabase } from '@/lib/supabase-client'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { useSessionStore } from '@/stores/session'
 import { useProviderStore, type ModelOption } from '@/stores/provider'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
@@ -27,6 +26,8 @@ import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
 // ────────────────────────────────────────────────────────────────────────────
 
 interface AgentSelectorDockProps {
+  /** The session currently displayed by ChatPanel. */
+  activeSessionId: string | null
   /** All agents currently @-mentioned for the active session — one pill each. */
   engagedAgents: AttachedAgent[]
   /** Remove a single agent (clicked the X on the chip / "Remove" in dropdown). */
@@ -105,9 +106,7 @@ function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: bool
 // Component
 // ────────────────────────────────────────────────────────────────────────────
 
-export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelectorDockProps) {
-  const activeSessionId = useSessionStore((s) => s.activeSessionId)
-
+export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgent }: AgentSelectorDockProps) {
   const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
   const [agentToBackendType, setAgentToBackendType] = React.useState<Map<string, string>>(new Map())
   const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
@@ -124,10 +123,15 @@ export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelecto
     }
     let cancelled = false
     void (async () => {
-      const { data: rtRows } = await supabase
+      const { data: rtRows, error } = await supabase
         .from('agent_runtimes')
         .select('agent_id, runtime_id, backend_type')
         .eq('session_id', activeSessionId)
+      if (error) {
+        sessionFlowError('agent_selector.runtime_map.load_failed', error, {
+          sessionId: activeSessionId,
+        })
+      }
       if (cancelled) return
       const map = new Map<string, string>()
       const btMap = new Map<string, string>()
@@ -135,6 +139,12 @@ export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelecto
         if (r.agent_id && r.runtime_id) map.set(r.agent_id, r.runtime_id)
         if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
       }
+      sessionFlowLog('agent_selector.runtime_map.loaded', {
+        sessionId: activeSessionId,
+        rowCount: rtRows?.length ?? 0,
+        runtimeAgentIds: Array.from(map.keys()),
+        backendAgentIds: Array.from(btMap.keys()),
+      })
       setAgentToRuntimeId(map)
       setAgentToBackendType(btMap)
     })()
@@ -159,10 +169,16 @@ export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelecto
     if (!retainSignature) return
     let cancelled = false
     void (async () => {
-      const { data: rtRows } = await supabase
+      const { data: rtRows, error } = await supabase
         .from('agent_runtimes')
         .select('agent_id, runtime_id, backend_type')
         .eq('session_id', activeSessionId)
+      if (error) {
+        sessionFlowError('agent_selector.runtime_map.refetch_failed', error, {
+          sessionId: activeSessionId,
+          retainSignature,
+        })
+      }
       if (cancelled) return
       const map = new Map<string, string>()
       const btMap = new Map<string, string>()
@@ -170,6 +186,12 @@ export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelecto
         if (r.agent_id && r.runtime_id) map.set(r.agent_id, r.runtime_id)
         if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
       }
+      sessionFlowLog('agent_selector.runtime_map.refetched', {
+        sessionId: activeSessionId,
+        rowCount: rtRows?.length ?? 0,
+        missingAgentIds: engagedAgents.filter((a) => !agentToRuntimeId.has(a.id)).map((a) => a.id),
+        retainSignature,
+      })
       setAgentToRuntimeId(map)
       setAgentToBackendType((prev) => {
         const next = new Map(prev)
@@ -187,12 +209,18 @@ export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelecto
     if (missing.length === 0) return
     let cancelled = false
     void (async () => {
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from('agent_runtimes')
         .select('agent_id, backend_type, updated_at')
         .in('agent_id', missing.map((a) => a.id))
         .not('backend_type', 'is', null)
         .order('updated_at', { ascending: false })
+      if (error) {
+        sessionFlowError('agent_selector.backend_type.backfill_failed', error, {
+          sessionId: activeSessionId,
+          missingAgentIds: missing.map((a) => a.id),
+        })
+      }
       if (cancelled) return
       const latestByAgent = new Map<string, string>()
       for (const r of (rows ?? []) as { agent_id: string; backend_type: string | null }[]) {
@@ -201,6 +229,10 @@ export function AgentSelectorDock({ engagedAgents, onRemoveAgent }: AgentSelecto
         }
       }
       if (latestByAgent.size > 0) {
+        sessionFlowLog('agent_selector.backend_type.backfilled', {
+          sessionId: activeSessionId,
+          backendTypesByAgent: Object.fromEntries(latestByAgent),
+        })
         setAgentToBackendType((prev) => {
           const next = new Map(prev)
           latestByAgent.forEach((bt, id) => next.set(id, bt))
@@ -253,7 +285,10 @@ function AgentPill({
   const { color: dotColor, pulse } = dotClasses(runtimeInfo)
   const providerModels = useProviderStore((s) => s.models)
 
-  const availableModels = resolveAgentAvailableModels(runtimeInfo, backendType, providerModels)
+  const availableModels = React.useMemo(
+    () => resolveAgentAvailableModels(runtimeInfo, backendType, providerModels),
+    [runtimeInfo, backendType, providerModels],
+  )
   const currentModel = runtimeInfo?.currentModel ?? ''
   const displayedModel = currentModel || availableModels[0]?.id || ''
   // Only `currentModel` reflects what the live runtime is actually using.
@@ -263,6 +298,30 @@ function AgentPill({
   const isPlaceholderModel = !currentModel && !!displayedModel
 
   const runtimeInfoLoading = !runtimeInfo && !backendType
+
+  React.useEffect(() => {
+    sessionFlowLog('agent_selector.model_options.resolved', {
+      agentId: agent.id,
+      agentName: agent.displayName,
+      runtimeId,
+      backendType,
+      runtimeCurrentModel: runtimeInfo?.currentModel ?? null,
+      runtimeAvailableModelIds: runtimeInfo?.availableModels.map((m) => m.id) ?? [],
+      providerModelKeys: providerModels.map((m) => `${m.provider}/${m.id}`),
+      resolvedModelIds: availableModels.map((m) => m.id),
+      runtimeInfoLoading,
+    })
+  }, [
+    agent.id,
+    agent.displayName,
+    runtimeId,
+    backendType,
+    runtimeInfo?.currentModel,
+    runtimeInfo?.availableModels,
+    providerModels,
+    availableModels,
+    runtimeInfoLoading,
+  ])
 
   const handlePickModel = React.useCallback(async (modelId: string) => {
     sessionFlowLog('agent_selector.model_pick.begin', {
