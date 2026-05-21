@@ -15,6 +15,7 @@ import {
 import { supabase } from '@/lib/supabase-client'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useSessionStore } from '@/stores/session'
+import { useProviderStore, type ModelOption } from '@/stores/provider'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import { cn } from '@/lib/utils'
@@ -33,20 +34,37 @@ interface AgentSelectorDockProps {
 
 type FallbackModel = { id: string; displayName: string }
 
+const STATIC_RUNTIME_PROVIDER_IDS = new Set(['claude-code'])
+
 // Mirrors iOS RuntimeResolver.encodedDefaultModels / SessionMemberSheetLoader.fallbackModelIDs.
 // Called when the live runtime hasn't reported availableModels yet so the model
 // picker is usable immediately rather than stuck on "Loading…".
-function fallbackModels(backendType: string | undefined): FallbackModel[] {
+function fallbackModels(
+  backendType: string | undefined,
+  providerModels: ModelOption[],
+  currentModel?: string,
+): FallbackModel[] {
+  const configuredOpencodeModels = providerModels
+    .filter((model) => !STATIC_RUNTIME_PROVIDER_IDS.has(model.provider))
+    .map((model) => ({
+      id: `${model.provider}/${model.id}`,
+      displayName: model.name || model.id,
+    }))
+
   switch (backendType) {
+    case 'opencode':
+      return configuredOpencodeModels
     case 'claude':
     case 'claude_code':
-    case 'opencode':
       return [
         { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5' },
         { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6' },
         { id: 'claude-opus-4-7', displayName: 'Claude Opus 4.7' },
       ]
     default:
+      if (currentModel && configuredOpencodeModels.some((model) => model.id === currentModel)) {
+        return configuredOpencodeModels
+      }
       return []
   }
 }
@@ -223,10 +241,13 @@ function AgentPill({
 }) {
   const { t } = useTranslation()
   const { color: dotColor, pulse } = dotClasses(runtimeInfo)
+  const providerModels = useProviderStore((s) => s.models)
 
   const liveModels = runtimeInfo?.availableModels ?? []
-  const availableModels = liveModels.length > 0 ? liveModels : fallbackModels(backendType)
   const currentModel = runtimeInfo?.currentModel ?? ''
+  const availableModels = liveModels.length > 0
+    ? liveModels
+    : fallbackModels(backendType, providerModels, currentModel)
   const displayedModel = currentModel || availableModels[0]?.id || ''
   // Only `currentModel` reflects what the live runtime is actually using.
   // When we fall back to availableModels[0] it's just a "what the dropdown

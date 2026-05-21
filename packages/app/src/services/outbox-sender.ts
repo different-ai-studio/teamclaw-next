@@ -88,15 +88,27 @@ async function attempt(entry: OutboxEntry): Promise<void> {
     // before we got the ACK). Treat as success — the row is persisted.
     if (insErr && insErr.code !== "23505") throw insErr;
 
-    await mqttPublish(
-      `amux/${entry.teamId}/session/${entry.sessionId}/live`,
-      toBinary(LiveEventEnvelopeSchema, live),
-      false,
-    ).catch((err) => {
-      // MQTT publish failure shouldn't fail the send — Supabase is the
-      // source of truth and other clients hydrate from there. Just log.
+    try {
+      await mqttPublish(
+        `amux/${entry.teamId}/session/${entry.sessionId}/live`,
+        toBinary(LiveEventEnvelopeSchema, live),
+        false,
+      );
+    } catch (err) {
+      if (entry.mentionActorIds.length > 0) {
+        console.warn("[outbox] agent-mentioned MQTT publish failed; will retry", {
+          messageId: entry.messageId,
+          sessionId: entry.sessionId,
+          topic: `amux/${entry.teamId}/session/${entry.sessionId}/live`,
+          error: err,
+        });
+        throw err;
+      }
+      // Unmentioned messages are passive session history; Supabase is enough
+      // for other clients to hydrate them later. Agent-mentioned messages must
+      // reach the live topic because that is what wakes the daemon runtime.
       console.warn("[outbox] MQTT publish failed (best-effort):", err);
-    });
+    }
 
     await store.updateState(entry.messageId, {
       state: "delivered",
