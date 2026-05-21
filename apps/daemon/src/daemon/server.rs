@@ -1443,25 +1443,37 @@ impl DaemonServer {
         message: &crate::proto::teamclaw::Message,
         mention_actor_ids: &[String],
     ) {
-        use crate::runtime::PendingMessage;
-
         // Skip messages this daemon authored — those are the agent reply we
         // just emitted; routing them back into our own runtimes would loop.
         if message.sender_actor_id == self.actor_id {
             return;
         }
 
-        // Resolve sender display name once (cheap; in-memory).
-        let sender_display = self
-            .display_name_for_actor(&message.sender_actor_id)
-            .unwrap_or_else(|| message.sender_actor_id.chars().take(8).collect());
-
         let runtime_ids = self.agents.lock().await.runtime_ids_for_session(session_id);
         if runtime_ids.is_empty() {
+            if self
+                .resume_historical_runtimes_for_session(session_id)
+                .await
+            {
+                return;
+            }
+
+            let runtime_ids = self.agents.lock().await.runtime_ids_for_session(session_id);
+            if !runtime_ids.is_empty() {
+                self.route_session_message_to_runtimes(
+                    session_id,
+                    message,
+                    mention_actor_ids,
+                    runtime_ids,
+                )
+                .await;
+                return;
+            }
+
             // We're subscribed to session/{sid}/live but have no runtime
-            // for it — typically the runtime exited (or never spawned in
-            // this daemon process) while the subscription persisted. The
-            // message is dropped here; iOS will see no agent reply.
+            // for it and no resumable historical runtime on disk. The daemon
+            // cannot infer worktree/backend session details from the live
+            // message alone, so this message cannot be routed locally.
             warn!(
                 session_id = %session_id,
                 message_id = %message.message_id,
@@ -1470,6 +1482,28 @@ impl DaemonServer {
             );
             return;
         }
+
+        self.route_session_message_to_runtimes(session_id, message, mention_actor_ids, runtime_ids)
+            .await;
+    }
+
+    async fn route_session_message_to_runtimes(
+        &mut self,
+        _session_id: &str,
+        message: &crate::proto::teamclaw::Message,
+        mention_actor_ids: &[String],
+        runtime_ids: Vec<String>,
+    ) {
+        use crate::runtime::PendingMessage;
+
+        if message.sender_actor_id == self.actor_id {
+            return;
+        }
+
+        let sender_display = self
+            .display_name_for_actor(&message.sender_actor_id)
+            .unwrap_or_else(|| message.sender_actor_id.chars().take(8).collect());
+
         // Each runtime in this list belongs to this daemon, so a mention of
         // this daemon's actor engages the runtime. The handle's `agent_id`
         // is the 8-char runtime key (per CLAUDE.md glossary), NOT the actor
@@ -1550,22 +1584,126 @@ impl DaemonServer {
         }
     }
 
+    async fn resume_historical_runtimes_for_session(&mut self, session_id: &str) -> bool {
+        let stored_sessions = self.sessions.resumable_sessions_for_session(session_id);
+        if stored_sessions.is_empty() {
+            return false;
+        }
+
+        let mut resumed_any = false;
+        for stored in stored_sessions {
+            if self
+                .agents
+                .lock()
+                .await
+                .get_handle(&stored.runtime_id)
+                .is_some()
+            {
+                resumed_any = true;
+                continue;
+            }
+
+            let at =
+                amux::AgentType::try_from(stored.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
+            let supabase_ws_id = self
+                .workspaces
+                .find_by_id(&stored.workspace_id)
+                .and_then(|w| {
+                    (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+                });
+
+            info!(
+                runtime_id = %stored.runtime_id,
+                session_id = %session_id,
+                "lazy-resuming historical runtime for session/live message"
+            );
+
+            let resume_res = self
+                .agents
+                .lock()
+                .await
+                .resume_agent(
+                    &stored.runtime_id,
+                    &stored.acp_session_id,
+                    at,
+                    &stored.worktree,
+                    &stored.workspace_id,
+                    supabase_ws_id.as_deref(),
+                    Some(session_id),
+                    "",
+                )
+                .await;
+
+            let new_acp_sid = match resume_res {
+                Ok(sid) => sid,
+                Err(e) => {
+                    warn!(
+                        runtime_id = %stored.runtime_id,
+                        session_id = %session_id,
+                        "session/live lazy resume failed: {}",
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            match self
+                .supabase
+                .fetch_agent_runtime_for_session(session_id, &stored.runtime_id, &new_acp_sid)
+                .await
+            {
+                Ok(Some(row)) => {
+                    self.agents.lock().await.set_supabase_runtime_metadata(
+                        &stored.runtime_id,
+                        Some(row.id),
+                        row.last_processed_message_id,
+                    );
+                }
+                Ok(None) => {
+                    warn!(
+                        runtime_id = %stored.runtime_id,
+                        session_id = %session_id,
+                        "resumed runtime has no matching agent_runtimes row"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        runtime_id = %stored.runtime_id,
+                        session_id = %session_id,
+                        "fetch_agent_runtime_for_session failed after resume: {}",
+                        e
+                    );
+                }
+            }
+
+            if let Some(s) = self.sessions.find_by_id_mut(&stored.runtime_id) {
+                s.acp_session_id = new_acp_sid;
+                s.status = amux::AgentStatus::Active as i32;
+            }
+            let _ = self.sessions.save(&self.sessions_path);
+            self.publish_runtime_state_by_id(&stored.runtime_id).await;
+            resumed_any |= self.catchup_runtime(&stored.runtime_id).await;
+        }
+
+        resumed_any
+    }
+
     /// Replay any session messages that arrived before this runtime was spawned.
     ///
     /// Fetches all messages after the runtime's `last_processed_message_id`
-    /// cursor (None → fetch all) and routes each through `route_session_message`
+    /// cursor (None → fetch all) and routes each through the no-resume message router
     /// so live and catchup share identical semantics (mentioned → real prompt,
     /// un-mentioned → pending_silent queue).
-    pub async fn catchup_runtime(&mut self, runtime_id: &str) {
+    pub async fn catchup_runtime(&mut self, runtime_id: &str) -> bool {
         let (session_id, last_processed_message_id) = {
             let agents = self.agents.lock().await;
             let Some(h) = agents.get_handle(runtime_id) else {
-                return;
+                return false;
             };
             (h.session_id.clone(), h.last_processed_message_id.clone())
         };
         if session_id.is_empty() {
-            return;
+            return false;
         }
 
         let messages = match self
@@ -1576,16 +1714,23 @@ impl DaemonServer {
             Ok(m) => m,
             Err(e) => {
                 warn!(?e, runtime_id, "catchup messages_after_cursor failed");
-                return;
+                return false;
             }
         };
         if messages.is_empty() {
-            return;
+            return false;
         }
 
         info!(runtime_id, count = messages.len(), "catching up runtime");
 
         for m in messages {
+            if self.agents.lock().await.get_handle(runtime_id).is_none() {
+                warn!(
+                    runtime_id,
+                    session_id, "catchup found no runtime after resume"
+                );
+                return false;
+            }
             let mention_ids = parse_mention_actor_ids(&m.metadata_json);
             let proto = crate::proto::teamclaw::Message {
                 message_id: m.id.clone(),
@@ -1596,9 +1741,15 @@ impl DaemonServer {
                 created_at: m.created_at,
                 ..Default::default()
             };
-            self.route_session_message(&session_id, &proto, &mention_ids)
-                .await;
+            self.route_session_message_to_runtimes(
+                &session_id,
+                &proto,
+                &mention_ids,
+                vec![runtime_id.to_string()],
+            )
+            .await;
         }
+        true
     }
 
     /// Look up a display name for an actor_id from the in-memory peer tracker.

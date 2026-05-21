@@ -2,6 +2,7 @@ import { create as createZustand } from 'zustand'
 import { fromBinary } from '@bufbuild/protobuf'
 import { RuntimeInfoSchema, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import { mqttSubscribe, listenForEnvelopes, type IncomingEnvelope } from '@/lib/mqtt-bridge'
+import { sessionFlowLog } from '@/lib/session-flow-log'
 
 export type RuntimeStateEntry = {
   info: RuntimeInfo
@@ -57,6 +58,17 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
       console.warn('[runtime-state] failed to decode RuntimeInfo', e)
       return
     }
+    sessionFlowLog('runtime_state.retain.received', {
+      teamId: parsed.teamId,
+      daemonDeviceId: parsed.daemonDeviceId,
+      runtimeId: parsed.runtimeId,
+      infoRuntimeId: info.runtimeId,
+      agentType: info.agentType,
+      currentModel: info.currentModel,
+      availableModelIds: info.availableModels.map((model) => model.id),
+      state: info.state,
+      status: info.status,
+    })
     useRuntimeStateStore.getState().upsert(parsed.runtimeId, parsed.daemonDeviceId, info)
   })
   initialized = true

@@ -1,6 +1,6 @@
 import { create as createProtoMessage, toBinary } from '@bufbuild/protobuf'
 import { supabase } from '@/lib/supabase-client'
-import { runtimeStart } from '@/lib/teamclaw-rpc'
+import { runtimeStart, setModel } from '@/lib/teamclaw-rpc'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import { mqttPublish } from '@/lib/mqtt-bridge'
 import {
@@ -16,6 +16,11 @@ import {
   type SessionParticipantRow,
 } from '@/lib/local-cache'
 import { isTauri } from '@/lib/utils'
+import {
+  sessionFlowError,
+  sessionFlowLog,
+  summarizeText,
+} from '@/lib/session-flow-log'
 
 export interface CreateSessionShellArgs {
   teamId: string
@@ -43,6 +48,14 @@ export async function createSessionShell(
 ): Promise<CreateSessionShellResult> {
   const sessionId = crypto.randomUUID()
   const trimmedTitle = (args.title.split('\n')[0] || args.title).trim().slice(0, 80) || 'New chat'
+  sessionFlowLog('session_shell.begin', {
+    sessionId,
+    teamId: args.teamId,
+    creatorActorId: args.creatorActorId,
+    additionalActorCount: args.additionalActorIds.length,
+    hasIdeaId: !!args.ideaId,
+    title: trimmedTitle,
+  })
 
   const { error: sessionErr } = await supabase
     .from('sessions')
@@ -54,13 +67,40 @@ export async function createSessionShell(
       title: trimmedTitle,
       idea_id: args.ideaId ?? null,
     })
-  if (sessionErr) throw new Error(`Failed to create session: ${sessionErr.message}`)
+  if (sessionErr) {
+    sessionFlowError('session_shell.insert_session.failed', sessionErr, {
+      sessionId,
+      teamId: args.teamId,
+    })
+    throw new Error(`Failed to create session: ${sessionErr.message}`)
+  }
+  sessionFlowLog('session_shell.insert_session.ok', {
+    sessionId,
+    teamId: args.teamId,
+  })
 
   const participantActorIds = Array.from(new Set([args.creatorActorId, ...args.additionalActorIds]))
   if (participantActorIds.length > 0) {
     const rows = participantActorIds.map(actorId => ({ session_id: sessionId, actor_id: actorId }))
+    sessionFlowLog('session_shell.insert_participants.begin', {
+      sessionId,
+      teamId: args.teamId,
+      participantActorIds,
+    })
     const { error: partErr } = await supabase.from('session_participants').insert(rows)
-    if (partErr) throw new Error(`Failed to add participants: ${partErr.message}`)
+    if (partErr) {
+      sessionFlowError('session_shell.insert_participants.failed', partErr, {
+        sessionId,
+        teamId: args.teamId,
+        participantCount: participantActorIds.length,
+      })
+      throw new Error(`Failed to add participants: ${partErr.message}`)
+    }
+    sessionFlowLog('session_shell.insert_participants.ok', {
+      sessionId,
+      teamId: args.teamId,
+      participantCount: participantActorIds.length,
+    })
   }
 
   // Mirror into local libsql immediately so the session-list-store + Actors
@@ -95,13 +135,31 @@ export async function createSessionShell(
       syncedAt: now,
     }))
     try {
+      sessionFlowLog('session_shell.local_cache.begin', {
+        sessionId,
+        teamId: args.teamId,
+        participantCount: partRows.length,
+      })
       await upsertSessionsBatch([sessionRow])
       if (partRows.length > 0) await upsertSessionParticipantsBatch(partRows)
+      sessionFlowLog('session_shell.local_cache.ok', {
+        sessionId,
+        teamId: args.teamId,
+        participantCount: partRows.length,
+      })
     } catch (e) {
+      sessionFlowError('session_shell.local_cache.failed', e, {
+        sessionId,
+        teamId: args.teamId,
+      })
       console.warn('[session-create] local cache upsert failed (non-fatal):', e)
     }
   }
 
+  sessionFlowLog('session_shell.ok', {
+    sessionId,
+    teamId: args.teamId,
+  })
   return { sessionId }
 }
 
@@ -114,6 +172,10 @@ export interface CreateSessionWithFirstMessageArgs {
   agentActorIds: string[]
   /** Opening message text. Sent verbatim — no @-mention prefix. */
   messageText: string
+  /** Model chosen before creating the session; passed to each started agent runtime. */
+  modelId?: string
+  /** Backend chosen before creating the session; overrides agent defaults/history. */
+  agentType?: number
   ideaId?: string | null
 }
 
@@ -133,6 +195,16 @@ export async function createSessionWithFirstMessage(
 ): Promise<CreateSessionWithFirstMessageResult> {
   const trimmed = args.messageText.trim()
   if (!trimmed) throw new Error('Opening message cannot be empty')
+  sessionFlowLog('session_with_first_message.begin', {
+    teamId: args.teamId,
+    creatorActorId: args.creatorActorId,
+    additionalActorCount: args.additionalActorIds.length,
+    agentActorCount: args.agentActorIds.length,
+    agentType: args.agentType,
+    modelId: args.modelId,
+    hasIdeaId: !!args.ideaId,
+    ...summarizeText(trimmed),
+  })
 
   const titleSource = trimmed.split('\n')[0]?.trim().slice(0, 80) || 'New chat'
 
@@ -154,6 +226,7 @@ export async function createSessionWithFirstMessage(
     kind: MessageKind.TEXT,
     content: trimmed,
     createdAt,
+    model: args.modelId ?? '',
   })
   const sessionEnvelope = createProtoMessage(SessionMessageEnvelopeSchema, {
     message: protoMessage,
@@ -175,28 +248,69 @@ export async function createSessionWithFirstMessage(
     sender_actor_id: args.creatorActorId,
     kind: 'text',
     content: trimmed,
+    model: args.modelId ?? null,
     metadata: { mention_actor_ids: [] },
   })
   if (insertError) {
+    sessionFlowError('session_with_first_message.insert_message.failed', insertError, {
+      sessionId,
+      teamId: args.teamId,
+      messageId,
+    })
     throw new Error(`Failed to persist message: ${insertError.message}`)
   }
+  sessionFlowLog('session_with_first_message.insert_message.ok', {
+    sessionId,
+    teamId: args.teamId,
+    messageId,
+  })
 
+  sessionFlowLog('session_with_first_message.mqtt_publish.begin', {
+    sessionId,
+    teamId: args.teamId,
+    messageId,
+    topic: `amux/${args.teamId}/session/${sessionId}/live`,
+  })
   await mqttPublish(
     `amux/${args.teamId}/session/${sessionId}/live`,
     toBinary(LiveEventEnvelopeSchema, liveEnvelope),
     false,
   ).catch((publishErr) => {
+    sessionFlowError('session_with_first_message.mqtt_publish.failed', publishErr, {
+      sessionId,
+      teamId: args.teamId,
+      messageId,
+    })
     console.warn('[session-create] MQTT publish failed (non-fatal):', publishErr)
+  })
+  sessionFlowLog('session_with_first_message.mqtt_publish.done', {
+    sessionId,
+    teamId: args.teamId,
+    messageId,
   })
 
   if (args.agentActorIds.length > 0) {
+    sessionFlowLog('session_with_first_message.runtime_start.begin', {
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      agentType: args.agentType,
+      modelId: args.modelId,
+    })
     void startAgentRuntimesAsync({
       sessionId,
       teamId: args.teamId,
       agentActorIds: args.agentActorIds,
+      agentType: args.agentType,
+      modelId: args.modelId,
     })
   }
 
+  sessionFlowLog('session_with_first_message.ok', {
+    sessionId,
+    teamId: args.teamId,
+    messageId,
+  })
   return { sessionId }
 }
 
@@ -204,6 +318,8 @@ export interface StartAgentRuntimesArgs {
   sessionId: string
   teamId: string
   agentActorIds: string[]
+  agentType?: number
+  modelId?: string
 }
 
 /**
@@ -217,6 +333,13 @@ export interface StartAgentRuntimesArgs {
  */
 export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<void> {
   if (args.agentActorIds.length === 0) return
+  sessionFlowLog('runtime_start.batch.begin', {
+    sessionId: args.sessionId,
+    teamId: args.teamId,
+    agentActorIds: args.agentActorIds,
+    agentType: args.agentType,
+    modelId: args.modelId,
+  })
 
   const priorByAgent = new Map<string, { workspace_id: string | null; backend_type: string | null }>()
   const { data: priorRows } = await supabase
@@ -255,11 +378,19 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
   await Promise.all(args.agentActorIds.map(async (agentActorId) => {
     const prior = priorByAgent.get(agentActorId)
     const agentDefaults = defaultByAgent.get(agentActorId)
-    const agentType = resolveAmuxAgentType(
+    const agentType = args.agentType ?? resolveAmuxAgentType(
       agentDefaults?.default_agent_type ?? prior?.backend_type ?? null,
       agentDefaults?.agent_kind ?? null,
     )
     try {
+      sessionFlowLog('runtime_start.request.begin', {
+        sessionId: args.sessionId,
+        teamId: args.teamId,
+        agentActorId,
+        agentType,
+        modelId: args.modelId,
+        workspaceId: prior?.workspace_id ?? '',
+      })
       // Current amuxd convention: daemon device_id == its actor_id, so the
       // RPC topic is amux/{team}/device/{agentActorId}/rpc/req. Multi-daemon
       // teams would need a separate (actor -> deviceId) lookup.
@@ -270,23 +401,87 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         sessionId: args.sessionId,
         agentType,
         initialPrompt: '',
+        ...(args.modelId ? { modelId: args.modelId } : {}),
       })
       if (!result.accepted) {
+        sessionFlowLog('runtime_start.request.rejected', {
+          sessionId: args.sessionId,
+          teamId: args.teamId,
+          agentActorId,
+          modelId: args.modelId,
+          reason: result.rejectedReason,
+        }, 'warn')
         console.error('[session-create] runtimeStart rejected', {
           agentActorId,
           reason: result.rejectedReason,
         })
       } else {
+        sessionFlowLog('runtime_start.request.accepted', {
+          sessionId: args.sessionId,
+          teamId: args.teamId,
+          agentActorId,
+          runtimeId: result.runtimeId,
+          modelId: args.modelId,
+        })
         console.info('[session-create] runtimeStart accepted', {
           agentActorId,
           runtimeId: result.runtimeId,
         })
+        if (args.modelId) {
+          sessionFlowLog('runtime_start.set_model.begin', {
+            sessionId: args.sessionId,
+            teamId: args.teamId,
+            agentActorId,
+            runtimeId: result.runtimeId,
+            modelId: args.modelId,
+          })
+          try {
+            await setModel({
+              targetDeviceId: agentActorId,
+              runtimeId: result.runtimeId,
+              modelId: args.modelId,
+            })
+            sessionFlowLog('runtime_start.set_model.ok', {
+              sessionId: args.sessionId,
+              teamId: args.teamId,
+              agentActorId,
+              runtimeId: result.runtimeId,
+              modelId: args.modelId,
+            })
+          } catch (modelErr) {
+            sessionFlowError('runtime_start.set_model.failed', modelErr, {
+              sessionId: args.sessionId,
+              teamId: args.teamId,
+              agentActorId,
+              runtimeId: result.runtimeId,
+              modelId: args.modelId,
+            })
+            console.warn('[session-create] setModel after runtimeStart failed', {
+              agentActorId,
+              runtimeId: result.runtimeId,
+              modelId: args.modelId,
+              reason: modelErr instanceof Error ? modelErr.message : String(modelErr),
+            })
+          }
+        }
       }
     } catch (e) {
+      sessionFlowError('runtime_start.request.failed', e, {
+        sessionId: args.sessionId,
+        teamId: args.teamId,
+        agentActorId,
+        modelId: args.modelId,
+      })
       console.error('[session-create] runtimeStart threw', {
         agentActorId,
         reason: e instanceof Error ? e.message : String(e),
       })
     }
   }))
+  sessionFlowLog('runtime_start.batch.done', {
+    sessionId: args.sessionId,
+    teamId: args.teamId,
+    agentActorIds: args.agentActorIds,
+    modelId: args.modelId,
+  })
 }

@@ -8,6 +8,7 @@ describe('resolveAmuxAgentType', () => {
   it('prefers explicit backend type when present', () => {
     expect(resolveAmuxAgentType('opencode')).toBe(AgentType.OPENCODE)
     expect(resolveAmuxAgentType('codex')).toBe(AgentType.CODEX)
+    expect(resolveAmuxAgentType('claude-code')).toBe(AgentType.CLAUDE_CODE)
     expect(resolveAmuxAgentType('claude')).toBe(AgentType.CLAUDE_CODE)
     expect(resolveAmuxAgentType('claude_code')).toBe(AgentType.CLAUDE_CODE)
   })

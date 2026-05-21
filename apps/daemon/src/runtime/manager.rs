@@ -451,8 +451,17 @@ impl RuntimeManager {
                     .map(|s| s.as_str()),
                 last_seen_at: Utc::now(),
             };
-            if let Err(e) = sb.upsert_agent_runtime(&row).await {
-                warn!("agent_runtimes upsert (starting/resume): {e}");
+            match sb.upsert_agent_runtime(&row).await {
+                Ok(Some(row_id)) => {
+                    if let Some(handle) = self.agents.get_mut(agent_id) {
+                        handle.supabase_runtime_row_id = Some(row_id);
+                    }
+                }
+                Ok(None) => warn!(
+                    agent_id,
+                    "upsert_agent_runtime returned no row id on resume"
+                ),
+                Err(e) => warn!("agent_runtimes upsert (starting/resume): {e}"),
             }
         }
 
@@ -495,7 +504,8 @@ impl RuntimeManager {
             )));
         };
 
-        self.send_prompt_raw(agent_id, &final_text, attachment_urls).await?;
+        self.send_prompt_raw(agent_id, &final_text, attachment_urls)
+            .await?;
         Ok(drained_ids)
     }
 
@@ -795,6 +805,22 @@ impl RuntimeManager {
         self.agents
             .get(runtime_id)
             .and_then(|h| h.supabase_runtime_row_id.clone())
+    }
+
+    pub fn set_supabase_runtime_metadata(
+        &mut self,
+        runtime_id: &str,
+        row_id: Option<String>,
+        last_processed_message_id: Option<String>,
+    ) {
+        if let Some(handle) = self.agents.get_mut(runtime_id) {
+            if row_id.is_some() {
+                handle.supabase_runtime_row_id = row_id;
+            }
+            if last_processed_message_id.is_some() {
+                handle.last_processed_message_id = last_processed_message_id;
+            }
+        }
     }
 
     // ── Gateway adapter hooks ────────────────────────────────────────────────
@@ -1193,7 +1219,10 @@ mod tests {
                 created_at: 100,
             });
         }
-        let drained = mgr.send_prompt("rt1", "real question", vec![]).await.unwrap();
+        let drained = mgr
+            .send_prompt("rt1", "real question", vec![])
+            .await
+            .unwrap();
         assert_eq!(drained, vec!["m1".to_string()]);
         let last = mgr.last_sent_to("rt1").unwrap();
         assert!(last.contains("Ann: earlier note"), "body was: {last}");

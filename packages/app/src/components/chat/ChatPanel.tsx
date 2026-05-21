@@ -13,6 +13,7 @@ import { useStreamingStore } from "@/stores/streaming";
 import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useProviderStore, type ModelOption } from "@/stores/provider";
+import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { useTeamModeStore } from "@/stores/team-mode";
 import { useSuggestionsStore } from "@/stores/suggestions";
 import { useShortcutsStore } from "@/stores/shortcuts";
@@ -35,6 +36,7 @@ import {
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
+import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
 import { Suggestions, Suggestion } from "@/packages/ai/suggestion";
@@ -52,6 +54,12 @@ import { SessionContinueBanner } from "./SessionContinueBanner";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
+import { loadSessionActiveModel } from "@/lib/session-active-model";
+import {
+  sessionFlowError,
+  sessionFlowLog,
+  summarizeText,
+} from "@/lib/session-flow-log";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { useTerminalStore } from "@/stores/terminal-store";
 
@@ -466,6 +474,19 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // ── Provider store ────────────────────────────────────────────────────
   const currentModelKey = useProviderStore(s => s.currentModelKey);
   const initProviderStore = useProviderStore(s => s.initAll);
+  const storeSelectModel = useProviderStore(s => s.selectModel);
+  const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId);
+  const runtimeModelSignature = useRuntimeStateStore((s) =>
+    Object.entries(s.byRuntimeId)
+      .map(([runtimeId, entry]) => {
+        const models = entry.info.availableModels
+          .map((model) => `${model.id}:${model.displayName}`)
+          .join("|");
+        return `${runtimeId}:${entry.info.agentType}:${entry.info.currentModel}:${models}`;
+      })
+      .sort()
+      .join(";"),
+  );
   // Derive selected model from currentModelKey + models. Use useMemo with a
   // ref to avoid returning a new object when the logical value hasn't changed.
   // This prevents re-render cascades when initAll() rebuilds the models array
@@ -574,7 +595,37 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
       initProviderStore();
     });
-  }, [workspaceReady, workspacePath]);
+  }, [workspaceReady, workspacePath, initProviderStore]);
+
+  React.useEffect(() => {
+    if (!workspaceReady || !runtimeModelSignature) return;
+    void initProviderStore();
+  }, [workspaceReady, runtimeModelSignature, initProviderStore]);
+
+  React.useEffect(() => {
+    if (!activeSessionId || providerModels.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const resolved = await loadSessionActiveModel({
+        sessionId: activeSessionId,
+        runtimeStates,
+        models: providerModels,
+      });
+      if (cancelled || !resolved) return;
+      const nextKey = `${resolved.provider}/${resolved.modelId}`;
+      if (useProviderStore.getState().currentModelKey === nextKey) return;
+      sessionFlowLog("session_model.apply_to_provider", {
+        sessionId: activeSessionId,
+        provider: resolved.provider,
+        modelId: resolved.modelId,
+        source: resolved.source,
+      });
+      await storeSelectModel(resolved.provider, resolved.modelId, resolved.name);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, providerModels, runtimeStates, storeSelectModel]);
 
   // ── Team config hot reload via file watcher ─────────────────────────
   React.useEffect(() => {
@@ -847,6 +898,16 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     // Single-window scope sends via MQTT + Supabase regardless.
     const text = message.text?.trim() || "";
     const mentions = message.mentions || [];
+    sessionFlowLog("send.begin", {
+      sessionId: sid,
+      hasText: text.length > 0,
+      mentionCount: mentions.length,
+      engagedAgentCount: engagedAgents.length,
+      extraMentionAgentCount: extraMentionAgents.length,
+      attachedFileCount: attachedFiles.length,
+      imageFileCount: imageFiles.length,
+      ...summarizeText(text),
+    });
 
     // Snapshot file state immediately so the UI clears at once, before any
     // async work. This prevents stale images from leaking into later sends
@@ -871,14 +932,24 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       memberIds,
       agentIds,
     );
+    sessionFlowLog("send.mentions_resolved", {
+      sessionId: sid,
+      memberMentionCount: memberIds.length,
+      agentMentionCount: agentIds.length,
+      mentionActorIds,
+    });
     const _isPlanMode = !!(message as PromptInputMessage & { _planMode?: boolean })._planMode;
 
 
     // Resolve teamId early — needed for attachment upload path before building content.
     const authSession = useAuthStore.getState().session;
-    let teamIdForSend: string | null =
+    const teamIdFromSessionList =
       useSessionListStore.getState().rows.find(r => r.id === sid)?.team_id ?? null;
+    let teamIdForSend: string | null = teamIdFromSessionList;
     if (!teamIdForSend && sid) {
+      sessionFlowLog("send.resolve_team_from_supabase.begin", {
+        sessionId: sid,
+      });
       const { data: sessionRow } = await supabase
         .from("sessions")
         .select("team_id")
@@ -886,6 +957,12 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         .maybeSingle();
       teamIdForSend = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
     }
+    sessionFlowLog("send.team_resolved", {
+      sessionId: sid,
+      teamId: teamIdForSend,
+      source: teamIdFromSessionList ? "session-list-store" : "supabase",
+      hasAuthSession: !!authSession,
+    });
 
 
     let finalContent: string;
@@ -959,6 +1036,12 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     const attachmentUrls: string[] = [];
     if (currentImageFiles.length > 0 && teamIdForSend) {
       try {
+        sessionFlowLog("send.attachments_upload.begin", {
+          sessionId: sid,
+          teamId: teamIdForSend,
+          imageFileCount: currentImageFiles.length,
+          imageFileNames: currentImageFiles.map((file) => file.name),
+        });
         const uploaded = await Promise.all(
           currentImageFiles.map((file) =>
             uploadAttachment(file, { teamId: teamIdForSend!, sessionId: sid }),
@@ -969,7 +1052,17 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           attachmentUrls.push(att.signedUrl);
         }
         finalContent = parts.join("\n\n");
+        sessionFlowLog("send.attachments_upload.ok", {
+          sessionId: sid,
+          teamId: teamIdForSend,
+          uploadedCount: uploaded.length,
+        });
       } catch (e) {
+        sessionFlowError("send.attachments_upload.failed", e, {
+          sessionId: sid,
+          teamId: teamIdForSend,
+          imageFileCount: currentImageFiles.length,
+        });
         console.error("[ChatPanel] attachment upload failed:", e);
         const { toast } = await import("sonner");
         toast.error("Failed to upload attachment — message not sent");
@@ -987,6 +1080,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     if (outgoing && outgoing.trim()) {
       if (sid && authSession && teamIdForSend) {
         try {
+          sessionFlowLog("send.resolve_sender.begin", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+            userId: authSession.user.id,
+          });
           const senderActorId = await resolveCurrentMemberActorId(
             teamIdForSend,
             authSession.user.id,
@@ -1001,6 +1099,17 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
+          const outgoingModel = selectedModelOption?.id ?? "";
+          sessionFlowLog("send.proto_created", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+            messageId,
+            senderActorId,
+            mentionActorCount: mentionActorIds.length,
+            attachmentUrlCount: attachmentUrls.length,
+            model: outgoingModel || null,
+            ...summarizeText(outgoing),
+          });
 
           const msg = createMessage(MessageSchema, {
             messageId,
@@ -1009,34 +1118,69 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             kind: MessageKind.TEXT,
             content: outgoing,
             createdAt,
+            model: outgoingModel,
           });
 
           // 1. Optimistic UI append — bubble renders before the network
           //    round-trip. dedup-by-id in session-message-store means the
           //    eventual live echo (same messageId) is a no-op.
           useSessionMessageStore.getState().appendMessage(sid, msg);
+          sessionFlowLog("send.optimistic_append.ok", {
+            sessionId: sid,
+            messageId,
+            currentMessageCount:
+              useSessionMessageStore.getState().messages[sid]?.length ?? 0,
+          });
 
           // 2. Enqueue to outbox — write-through to libsql so a crash
           //    before the first send attempt doesn't lose the message.
           //    `outbox-sender` (started in App.tsx) picks it up on next tick.
+          sessionFlowLog("send.outbox_enqueue.begin", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+            messageId,
+          });
           await useOutboxStore.getState().enqueue({
             messageId,
             teamId: teamIdForSend,
             sessionId: sid,
             senderActorId,
             content: outgoing,
+            model: outgoingModel || null,
             mentionActorIds,
             attachmentUrls,
           });
+          sessionFlowLog("send.outbox_enqueue.ok", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+            messageId,
+          });
         } catch (e) {
+          sessionFlowError("send.failed_before_outbox", e, {
+            sessionId: sid,
+            teamId: teamIdForSend,
+          });
           console.error("[ChatPanel] send enqueue failed:", e);
         }
+      } else {
+        sessionFlowLog("send.skipped_missing_context", {
+          sessionId: sid,
+          hasAuthSession: !!authSession,
+          teamId: teamIdForSend,
+          hasOutgoing: outgoing.trim().length > 0,
+        }, "warn");
       }
     }
 
   };
 
   const handleSubmit = async (message: PromptInputMessage) => {
+    sessionFlowLog("submit.received", {
+      activeSessionId,
+      hasDraftPreselectedActor: !!draftPreselectedActor,
+      mentionCount: message.mentions?.length ?? 0,
+      ...summarizeText(message.text ?? ""),
+    });
     if (!activeSessionId) {
       // No session yet.
       //   1. Actor-draft mode (user tapped an actor row → draftPreselectedActor
@@ -1066,6 +1210,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         return;
       }
       useUIStore.getState().openNewSessionDialog(message.text ?? null);
+      sessionFlowLog("submit.open_new_session_dialog", {
+        ...summarizeText(message.text ?? ""),
+      });
       return;
     }
     await sendIntoSession(activeSessionId, message);
@@ -1081,13 +1228,23 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     },
   ) => {
     const teamIdForSend = sheetTeamId;
+    sessionFlowLog("session_create.begin", {
+      teamId: teamIdForSend,
+      pickedMemberCount: picks.members.length,
+      pickedAgentCount: picks.agents.length,
+      ...summarizeText(firstMessage.text ?? ""),
+    });
     if (!teamIdForSend) {
+      sessionFlowLog("session_create.missing_team", {}, "warn");
       console.error('[ChatPanel] no team_id available; cannot create session');
       return;
     }
 
     const authSession = useAuthStore.getState().session;
     if (!authSession?.user?.id) {
+      sessionFlowLog("session_create.missing_auth", {
+        teamId: teamIdForSend,
+      }, "warn");
       console.error('[ChatPanel] no auth session');
       return;
     }
@@ -1100,6 +1257,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       },
     );
     if (!myActorId) {
+      sessionFlowLog("session_create.missing_actor", {
+        teamId: teamIdForSend,
+        userId: authSession.user.id,
+      }, "warn");
       console.error('[ChatPanel] no actor record for user in team', teamIdForSend);
       const { toast } = await import('sonner');
       toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
@@ -1127,12 +1288,24 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       const agentIds = picks.agents.map((a) => a.id);
       const allAdditional = Array.from(new Set([...memberIds, ...agentIds]));
       const draftIdeaId = useUIStore.getState().draftIdeaId;
+      sessionFlowLog("session_create.shell.begin", {
+        teamId: teamIdForSend,
+        creatorActorId: myActorId,
+        additionalActorCount: allAdditional.length,
+        agentActorCount: agentIds.length,
+        hasIdeaId: !!draftIdeaId,
+        title: titleSource,
+      });
       const { sessionId } = await createSessionShell({
         teamId: teamIdForSend,
         creatorActorId: myActorId,
         title: titleSource,
         additionalActorIds: allAdditional,
         ideaId: draftIdeaId,
+      });
+      sessionFlowLog("session_create.shell.ok", {
+        teamId: teamIdForSend,
+        sessionId,
       });
       if (draftIdeaId) {
         useUIStore.getState().clearDraftIdeaId();
@@ -1142,13 +1315,36 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // first message — otherwise the daemon's acp.event + message.created
       // can arrive before the reactive per-rows subscribe catches up.
       const { ensureSessionLiveSubscribed } = await import('@/App');
+      sessionFlowLog("session_create.subscribe_live.begin", {
+        teamId: teamIdForSend,
+        sessionId,
+      });
       await ensureSessionLiveSubscribed(teamIdForSend, sessionId);
+      sessionFlowLog("session_create.subscribe_live.ok", {
+        teamId: teamIdForSend,
+        sessionId,
+      });
 
       // Refresh session-list-store so the new row appears in the sidebar
       // and sendIntoSession can find it by id.
+      sessionFlowLog("session_create.session_list_reload.begin", {
+        teamId: teamIdForSend,
+        sessionId,
+      });
       await useSessionListStore.getState().load();
+      sessionFlowLog("session_create.session_list_reload.ok", {
+        teamId: teamIdForSend,
+        sessionId,
+        rowCount: useSessionListStore.getState().rows.length,
+      });
       useSessionStore.getState().addHighlightedSession(sessionId);
+      sessionFlowLog("session_create.switch.begin", {
+        sessionId,
+      });
       await useUIStore.getState().switchToSession(sessionId);
+      sessionFlowLog("session_create.switch.ok", {
+        sessionId,
+      });
 
       // Auto-engage + auto-mention ONLY when there's exactly one agent
       // (no members). Anything more ambiguous leaves the dock empty and
@@ -1173,13 +1369,23 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         for (const aid of agentIds) {
           ensuredRuntimesRef.current.add(`${sessionId}:${aid}`);
         }
+        sessionFlowLog("session_create.runtime_start.begin", {
+          teamId: teamIdForSend,
+          sessionId,
+          agentActorIds: agentIds,
+        });
         void startAgentRuntimesAsync({
           sessionId,
           teamId: teamIdForSend,
           agentActorIds: agentIds,
+          agentType: selectedModelOption ? resolveAmuxAgentType(selectedModelOption.provider) : undefined,
+          modelId: selectedModelOption?.id,
         });
       }
     } catch (e) {
+      sessionFlowError("session_create.failed", e, {
+        teamId: teamIdForSend,
+      });
       console.error('[ChatPanel] session creation failed:', e);
       const { toast } = await import('sonner');
       toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));

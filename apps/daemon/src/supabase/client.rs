@@ -288,6 +288,13 @@ pub struct AgentRuntimeUpsert<'a> {
     pub last_seen_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentRuntimeRow {
+    pub id: String,
+    #[serde(default)]
+    pub last_processed_message_id: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct WorkspaceUpsert<'a> {
     pub team_id: &'a str,
@@ -431,6 +438,46 @@ impl SupabaseClient {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         Ok(row_id)
+    }
+
+    pub async fn fetch_agent_runtime_for_session(
+        &self,
+        session_id: &str,
+        runtime_id: &str,
+        backend_session_id: &str,
+    ) -> SupabaseResult<Option<AgentRuntimeRow>> {
+        let token = self.access_token().await?;
+        let mut url = format!(
+            "{}/rest/v1/agent_runtimes?agent_id=eq.{}&session_id=eq.{}&select=id,last_processed_message_id",
+            self.cfg.url, self.cfg.actor_id, session_id
+        );
+        if !backend_session_id.is_empty() {
+            url.push_str("&backend_session_id=eq.");
+            url.push_str(backend_session_id);
+        } else if !runtime_id.is_empty() {
+            url.push_str("&runtime_id=eq.");
+            url.push_str(runtime_id);
+        }
+        url.push_str("&limit=1");
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("apikey", &self.cfg.anon_key)
+            .bearer_auth(token)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: text,
+            });
+        }
+
+        let rows: Vec<AgentRuntimeRow> = resp.json().await?;
+        Ok(rows.into_iter().next())
     }
 
     /// Record this daemon's MQTT device identifier on its `agents` row so
