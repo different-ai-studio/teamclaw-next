@@ -1,4 +1,5 @@
 pub mod mqtt;
+pub mod services_defaults;
 
 pub type ActorId = String;
 pub type DeviceId = String;

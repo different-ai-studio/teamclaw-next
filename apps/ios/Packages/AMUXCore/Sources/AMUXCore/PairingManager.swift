@@ -5,9 +5,9 @@ import Observation
 public final class PairingManager {
     public private(set) var isPaired: Bool = false
     public private(set) var brokerHost: String = ""
-    public private(set) var brokerPort: Int = 8883
+    public private(set) var brokerPort: Int = SharedDefaults.services.mqttPort
     public private(set) var authToken: String = ""
-    public private(set) var useTLS: Bool = true
+    public private(set) var useTLS: Bool = SharedDefaults.services.mqttUseTls
 
     private let store: CredentialStore
 
@@ -38,17 +38,18 @@ public final class PairingManager {
     public func unpair() throws {
         isPaired = false
         brokerHost = ""
-        brokerPort = 8883
+        brokerPort = SharedDefaults.services.mqttPort
         authToken = ""
-        useTLS = true
+        useTLS = SharedDefaults.services.mqttUseTls
         try store.clear()
     }
 
     private func applyDefaults() {
+        let services = SharedDefaults.services
         let defaults = PairingCredentials(
-            brokerHost: "ai.ucar.cc",
-            brokerPort: 8883,
-            useTLS: true,
+            brokerHost: services.mqttHost,
+            brokerPort: services.mqttPort,
+            useTLS: services.mqttUseTls,
             authToken: authToken
         )
         try? store.save(defaults)

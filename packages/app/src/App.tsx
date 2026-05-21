@@ -766,7 +766,7 @@ function AppContent() {
         const serverConfig = await getEffectiveServerConfig();
         const brokerHost = serverConfig.mqttHost;
         const brokerPort = serverConfig.mqttPort ?? 1883;
-        const useTls = serverConfig.mqttUseTls ?? true;
+        const useTls = serverConfig.mqttUseTls ?? false;
         if (!brokerHost) {
           console.warn("[MQTT] missing broker host — configure it in Settings > Server");
           return;
