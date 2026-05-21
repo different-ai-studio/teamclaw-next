@@ -34,6 +34,7 @@ let package = Package(
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "Supabase", package: "supabase-swift"),
             ],
+            resources: [.process("Resources")],
             // Pinned to Swift 5 mode: MQTTService is not yet Sendable-clean for Swift 6 strict concurrency. Migrate after audit.
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

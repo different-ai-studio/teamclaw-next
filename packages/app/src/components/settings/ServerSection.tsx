@@ -203,7 +203,7 @@ export function ServerSection() {
         throw new Error(t("settings.server.mqttMissingActor", "No member actor found for this team"));
       }
 
-      const useTls = config.mqttUseTls ?? true;
+      const useTls = config.mqttUseTls ?? false;
       await mqttConnect({
         brokerHost: config.mqttHost,
         brokerPort: config.mqttPort ?? 1883,
@@ -357,7 +357,7 @@ export function ServerSection() {
             </div>
           </div>
           <Switch
-            checked={saved.mqttUseTls ?? effective.mqttUseTls ?? true}
+            checked={saved.mqttUseTls ?? effective.mqttUseTls ?? false}
             onCheckedChange={(checked) => updateSaved({ mqttUseTls: checked })}
           />
         </label>

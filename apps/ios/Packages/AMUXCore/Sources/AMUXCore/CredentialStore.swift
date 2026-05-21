@@ -46,7 +46,7 @@ public final class UserDefaultsCredentialStore: CredentialStore, @unchecked Send
             return nil
         }
         var port = integer(forKey: Keys.brokerPort, legacyKey: LegacyKeys.brokerPort)
-        if port == 0 { port = 8883 }
+        if port == 0 { port = SharedDefaults.services.mqttPort }
         return PairingCredentials(
             brokerHost: host,
             brokerPort: port,
