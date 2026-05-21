@@ -22,6 +22,7 @@ export interface UseActorsForTeamResult {
   loading: boolean
   error: boolean
   teamId: string | null
+  refetch: () => void
 }
 
 export function useActorsForTeam(): UseActorsForTeamResult {
@@ -30,6 +31,7 @@ export function useActorsForTeam(): UseActorsForTeamResult {
   const [actors, setActors] = React.useState<ActorRow[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(false)
+  const [refreshTick, setRefreshTick] = React.useState(0)
 
   React.useEffect(() => {
     if (teamId) return
@@ -115,9 +117,13 @@ export function useActorsForTeam(): UseActorsForTeamResult {
     })()
 
     return () => { cancelled = true }
-  }, [teamId])
+  }, [teamId, refreshTick])
 
-  return { actors, loading, error, teamId }
+  const refetch = React.useCallback(() => {
+    setRefreshTick((n) => n + 1)
+  }, [])
+
+  return { actors, loading, error, teamId, refetch }
 }
 
 export function isActorOnline(lastActiveAt: string | null): boolean {
