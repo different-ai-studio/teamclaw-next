@@ -140,7 +140,6 @@ export function NewSessionDialog() {
     () => candidates.filter((c) => picked.has(c.id)),
     [candidates, picked],
   )
-  const pickedAgentCount = pickedActors.filter((p) => p.actor_type === 'agent').length
   const runtimeModels = React.useMemo(
     () => models.filter((m) => RUNTIME_BACKENDS.has(m.provider)),
     [models],
@@ -194,10 +193,7 @@ export function NewSessionDialog() {
 
   const clearPicks = () => setPicked(new Set())
 
-  const canSubmit =
-    message.trim().length > 0 &&
-    !submitting &&
-    (pickedAgentCount === 0 || !!selectedModel)
+  const canSubmit = message.trim().length > 0 && !submitting
 
   const handleClose = () => {
     if (submitting) return
@@ -225,7 +221,6 @@ export function NewSessionDialog() {
       }
       const additionalActorIds = Array.from(picked)
       const agentActorIds = pickedActors.filter((p) => p.actor_type === 'agent').map((p) => p.id)
-      if (agentActorIds.length > 0 && !selectedModel) return
       if (selectedModel) {
         await selectModel(selectedModel.provider, selectedModel.id, selectedModel.name)
       }
