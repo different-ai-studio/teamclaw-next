@@ -25,6 +25,11 @@ import {
   useOutboxStore,
   type OutboxEntry,
 } from "@/stores/outbox-store";
+import {
+  sessionFlowError,
+  sessionFlowLog,
+  summarizeText,
+} from "@/lib/session-flow-log";
 
 const TICK_MS = 1000;
 const DELIVERED_GC_MS = 5000;
@@ -36,6 +41,17 @@ let inflightTick = false;
 async function attempt(entry: OutboxEntry): Promise<void> {
   const store = useOutboxStore.getState();
   const now = new Date().toISOString();
+  sessionFlowLog("outbox_sender.attempt.begin", {
+    messageId: entry.messageId,
+    sessionId: entry.sessionId,
+    teamId: entry.teamId,
+    senderActorId: entry.senderActorId,
+    model: entry.model ?? null,
+    attemptCount: entry.attemptCount,
+    mentionActorCount: entry.mentionActorIds.length,
+    attachmentUrlCount: entry.attachmentUrls.length,
+    ...summarizeText(entry.content),
+  });
 
   await store.updateState(entry.messageId, {
     state: "inFlight",
@@ -54,6 +70,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       kind: MessageKind.TEXT,
       content: entry.content,
       createdAt: createdAtSec,
+      model: entry.model ?? "",
     });
     const sessionEnv = createMessage(SessionMessageEnvelopeSchema, {
       message: proto,
@@ -68,6 +85,11 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       body: toBinary(SessionMessageEnvelopeSchema, sessionEnv),
     });
 
+    sessionFlowLog("outbox_sender.supabase_insert.begin", {
+      messageId: entry.messageId,
+      sessionId: entry.sessionId,
+      teamId: entry.teamId,
+    });
     const { error: insErr } = await supabase.from("messages").insert({
       id: entry.messageId,
       team_id: entry.teamId,
@@ -75,6 +97,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       sender_actor_id: entry.senderActorId,
       kind: "text",
       content: entry.content,
+      model: entry.model ?? null,
       metadata: {
         mention_actor_ids: entry.mentionActorIds,
         ...(entry.attachmentUrls.length > 0
@@ -87,24 +110,58 @@ async function attempt(entry: OutboxEntry): Promise<void> {
     // already landed on a prior attempt (the network round-trip dropped
     // before we got the ACK). Treat as success — the row is persisted.
     if (insErr && insErr.code !== "23505") throw insErr;
+    sessionFlowLog("outbox_sender.supabase_insert.ok", {
+      messageId: entry.messageId,
+      sessionId: entry.sessionId,
+      teamId: entry.teamId,
+      duplicateAlreadyInserted: insErr?.code === "23505",
+    });
 
+    sessionFlowLog("outbox_sender.mqtt_publish.begin", {
+      messageId: entry.messageId,
+      sessionId: entry.sessionId,
+      teamId: entry.teamId,
+      topic: `amux/${entry.teamId}/session/${entry.sessionId}/live`,
+    });
     await mqttPublish(
       `amux/${entry.teamId}/session/${entry.sessionId}/live`,
       toBinary(LiveEventEnvelopeSchema, live),
       false,
     ).catch((err) => {
+      sessionFlowError("outbox_sender.mqtt_publish.failed", err, {
+        messageId: entry.messageId,
+        sessionId: entry.sessionId,
+        teamId: entry.teamId,
+      });
       // MQTT publish failure shouldn't fail the send — Supabase is the
       // source of truth and other clients hydrate from there. Just log.
       console.warn("[outbox] MQTT publish failed (best-effort):", err);
+    });
+    sessionFlowLog("outbox_sender.mqtt_publish.done", {
+      messageId: entry.messageId,
+      sessionId: entry.sessionId,
+      teamId: entry.teamId,
     });
 
     await store.updateState(entry.messageId, {
       state: "delivered",
       lastError: null,
     });
+    sessionFlowLog("outbox_sender.attempt.delivered", {
+      messageId: entry.messageId,
+      sessionId: entry.sessionId,
+      teamId: entry.teamId,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const nextAttempt = entry.attemptCount + 1;
+    sessionFlowError("outbox_sender.attempt.failed", e, {
+      messageId: entry.messageId,
+      sessionId: entry.sessionId,
+      teamId: entry.teamId,
+      nextAttempt,
+      willRetry: nextAttempt < OUTBOX_MAX_ATTEMPTS,
+    });
     if (nextAttempt >= OUTBOX_MAX_ATTEMPTS) {
       await store.updateState(entry.messageId, {
         state: "failed",
@@ -143,6 +200,13 @@ async function tick(): Promise<void> {
         if (since >= DELIVERED_GC_MS) deliveredToGc.push(entry.messageId);
       }
     }
+    if (due.length > 0 || deliveredToGc.length > 0) {
+      sessionFlowLog("outbox_sender.tick", {
+        dueCount: due.length,
+        deliveredToGcCount: deliveredToGc.length,
+        dueMessageIds: due.map((entry) => entry.messageId),
+      });
+    }
 
     for (const id of deliveredToGc) {
       await useOutboxStore.getState().remove(id);
@@ -160,6 +224,7 @@ async function tick(): Promise<void> {
 export function startOutboxSender(): void {
   if (started) return;
   started = true;
+  sessionFlowLog("outbox_sender.start");
   // Fire one tick immediately so a freshly-enqueued message goes out without
   // waiting up to TICK_MS — feels responsive.
   void tick();

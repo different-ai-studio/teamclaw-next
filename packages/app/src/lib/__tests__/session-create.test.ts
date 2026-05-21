@@ -7,11 +7,13 @@ const mockRuntimeStart = vi.fn().mockResolvedValue({
   sessionId: 'sess-1',
   rejectedReason: '',
 })
+const mockSetModel = vi.fn().mockResolvedValue({})
 
 const supabaseFrom = vi.fn()
 
 vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
+  setModel: (...args: unknown[]) => mockSetModel(...args),
 }))
 
 vi.mock('@/lib/supabase-client', () => ({
@@ -23,6 +25,7 @@ vi.mock('@/lib/supabase-client', () => ({
 describe('startAgentRuntimesAsync', () => {
   beforeEach(() => {
     mockRuntimeStart.mockClear()
+    mockSetModel.mockClear()
     supabaseFrom.mockReset()
   })
 
@@ -125,6 +128,73 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-3',
         agentType: AgentType.CODEX,
+      }),
+    )
+  })
+
+  it('passes the selected model to runtimeStart', async () => {
+    mockTables({
+      runtimes: [{ agent_id: 'agent-4', workspace_id: 'ws-model', backend_type: 'claude_code' }],
+      actors: [{ id: 'agent-4', agent_kind: 'daemon', default_agent_type: null }],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-4'],
+      modelId: 'claude-opus-4-7',
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-4',
+        modelId: 'claude-opus-4-7',
+      }),
+    )
+  })
+
+  it('applies the selected model after runtimeStart accepts the runtime', async () => {
+    mockTables({
+      runtimes: [{ agent_id: 'agent-6', workspace_id: 'ws-model', backend_type: 'opencode' }],
+      actors: [{ id: 'agent-6', agent_kind: 'daemon', default_agent_type: null }],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-6'],
+      modelId: 'opencode/deepseek-v4-flash-free',
+    })
+
+    expect(mockSetModel).toHaveBeenCalledWith({
+      targetDeviceId: 'agent-6',
+      runtimeId: 'rt-1',
+      modelId: 'opencode/deepseek-v4-flash-free',
+    })
+  })
+
+  it('uses the selected backend instead of prior runtime backend_type', async () => {
+    mockTables({
+      runtimes: [{ agent_id: 'agent-5', workspace_id: 'ws-backend', backend_type: 'opencode' }],
+      actors: [{ id: 'agent-5', agent_kind: 'daemon', default_agent_type: null }],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-5'],
+      agentType: AgentType.CLAUDE_CODE,
+      modelId: 'claude-sonnet-4-6',
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-5',
+        agentType: AgentType.CLAUDE_CODE,
+        modelId: 'claude-sonnet-4-6',
       }),
     )
   })

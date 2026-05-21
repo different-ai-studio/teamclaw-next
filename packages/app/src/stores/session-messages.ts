@@ -9,6 +9,7 @@ import {
 } from "@/lib/proto/teamclaw_pb";
 import { supabase } from "@/lib/supabase-client";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
+import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import { getOpenCodeClient, isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
@@ -173,6 +174,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     } as Partial<SessionState>);
 
     if (soleAgent) {
+      const { selectedModel } = get();
       useEngagedAgentStore.getState().setAgents(sessionId, [{
         id: soleAgent.id,
         displayName: soleAgent.display_name || "AI",
@@ -181,6 +183,8 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
         sessionId,
         teamId: currentTeam.id,
         agentActorIds: [soleAgent.id],
+        agentType: selectedModel ? resolveAmuxAgentType(selectedModel.providerID) : undefined,
+        modelId: selectedModel?.modelID,
       });
     }
 
@@ -231,6 +235,8 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     );
     const messageId = crypto.randomUUID();
     const createdAt = BigInt(Math.floor(Date.now() / 1000));
+    const selectedModel = get().selectedModel;
+    const messageModel = selectedModel?.modelID ?? "";
 
     const protoMessage = createProtoMessage(MessageSchema, {
       messageId,
@@ -239,6 +245,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
       kind: MessageKind.TEXT,
       content,
       createdAt,
+      model: messageModel,
     });
     const sessionEnvelope = createProtoMessage(SessionMessageEnvelopeSchema, {
       message: protoMessage,
@@ -260,6 +267,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
       sender_actor_id: senderActorId,
       kind: "text",
       content,
+      model: messageModel || null,
       metadata: { mention_actor_ids: mentionActorIds },
     });
     if (insertError) {

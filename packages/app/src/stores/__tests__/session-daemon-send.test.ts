@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fromBinary } from '@bufbuild/protobuf'
+import {
+  LiveEventEnvelopeSchema,
+  SessionMessageEnvelopeSchema,
+} from '@/lib/proto/teamclaw_pb'
 
 const mocks = vi.hoisted(() => {
   const client = {
@@ -221,6 +226,40 @@ describe('session store daemon send path', () => {
         metadata: { mention_actor_ids: ['agent-1'] },
       }),
     )
+  })
+
+  it('stamps the selected model on daemon session messages', async () => {
+    const { useSessionStore } = await import('../session-store')
+
+    useSessionStore.setState({
+      activeSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+      currentSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+      selectedModel: {
+        providerID: 'opencode',
+        modelID: 'opencode/qwen3.6-plus-free',
+        name: 'OpenCode Zen/Qwen3.6 Plus Free',
+      },
+      sessions: [{
+        id: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+        title: 'Collab Session',
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }],
+    })
+
+    await useSessionStore.getState().sendMessage('hello daemon')
+
+    expect(mocks.supabaseInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'opencode/qwen3.6-plus-free',
+      }),
+    )
+
+    const publishBytes = mocks.mqttPublish.mock.calls[0][1] as Uint8Array
+    const live = fromBinary(LiveEventEnvelopeSchema, publishBytes)
+    const sessionMessage = fromBinary(SessionMessageEnvelopeSchema, live.body)
+    expect(sessionMessage.message?.model).toBe('opencode/qwen3.6-plus-free')
   })
 
   it('treats personal_agent participants as agent mentions for daemon sessions', async () => {

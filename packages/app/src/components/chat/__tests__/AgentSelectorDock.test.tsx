@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { AgentSelectorDock } from '../AgentSelectorDock'
+import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -65,5 +65,13 @@ describe('AgentSelectorDock', () => {
     )
     expect(screen.getByText('Reviewer Bot')).toBeInTheDocument()
     expect(screen.getByText('Ops Buddy')).toBeInTheDocument()
+  })
+
+  it('does not synthesize fallback models when runtime info has not advertised models', () => {
+    expect(resolveAgentAvailableModels(undefined)).toEqual([])
+    expect(resolveAgentAvailableModels({ availableModels: [] } as any)).toEqual([])
+    expect(resolveAgentAvailableModels({
+      availableModels: [{ id: 'm-1', displayName: 'Model One' }],
+    } as any)).toEqual([{ id: 'm-1', displayName: 'Model One' }])
   })
 })

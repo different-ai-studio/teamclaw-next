@@ -9,6 +9,7 @@ export function resolveAmuxAgentType(
       return AgentType.OPENCODE
     case "codex":
       return AgentType.CODEX
+    case "claude-code":
     case "claude":
     case "claude_code":
       return AgentType.CLAUDE_CODE

@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase-client'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useSessionStore } from '@/stores/session'
 import { setModel } from '@/lib/teamclaw-rpc'
+import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import { cn } from '@/lib/utils'
 import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
@@ -31,24 +32,8 @@ interface AgentSelectorDockProps {
   onRemoveAgent: (agentId: string) => void
 }
 
-type FallbackModel = { id: string; displayName: string }
-
-// Mirrors iOS RuntimeResolver.encodedDefaultModels / SessionMemberSheetLoader.fallbackModelIDs.
-// Called when the live runtime hasn't reported availableModels yet so the model
-// picker is usable immediately rather than stuck on "Loading…".
-function fallbackModels(backendType: string | undefined): FallbackModel[] {
-  switch (backendType) {
-    case 'claude':
-    case 'claude_code':
-    case 'opencode':
-      return [
-        { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5' },
-        { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6' },
-        { id: 'claude-opus-4-7', displayName: 'Claude Opus 4.7' },
-      ]
-    default:
-      return []
-  }
+export function resolveAgentAvailableModels(runtimeInfo: RuntimeInfo | undefined): Array<{ id: string; displayName: string }> {
+  return runtimeInfo?.availableModels ?? []
 }
 
 /** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */
@@ -224,8 +209,7 @@ function AgentPill({
   const { t } = useTranslation()
   const { color: dotColor, pulse } = dotClasses(runtimeInfo)
 
-  const liveModels = runtimeInfo?.availableModels ?? []
-  const availableModels = liveModels.length > 0 ? liveModels : fallbackModels(backendType)
+  const availableModels = resolveAgentAvailableModels(runtimeInfo)
   const currentModel = runtimeInfo?.currentModel ?? ''
   const displayedModel = currentModel || availableModels[0]?.id || ''
   // Only `currentModel` reflects what the live runtime is actually using.
@@ -234,24 +218,47 @@ function AgentPill({
   // de-emphasized so the user can tell.
   const isPlaceholderModel = !currentModel && !!displayedModel
 
-  // Only show spinner when we have neither live runtime info nor a backend_type
-  // to derive fallback models from.
   const runtimeInfoLoading = !runtimeInfo && !backendType
 
   const handlePickModel = React.useCallback(async (modelId: string) => {
-    if (!runtimeId) return
+    sessionFlowLog('agent_selector.model_pick.begin', {
+      agentId: agent.id,
+      agentName: agent.displayName,
+      runtimeId,
+      currentModel,
+      modelId,
+      availableModelIds: availableModels.map((m) => m.id),
+    })
+    if (!runtimeId) {
+      sessionFlowLog('agent_selector.model_pick.skipped_missing_runtime', {
+        agentId: agent.id,
+        modelId,
+      }, 'warn')
+      return
+    }
     try {
-      await setModel({
+      const result = await setModel({
         targetDeviceId: agent.id, // daemon device_id == agent actor_id convention
         runtimeId,
         modelId,
       })
+      sessionFlowLog('agent_selector.model_pick.ok', {
+        agentId: agent.id,
+        runtimeId,
+        modelId,
+        result,
+      })
     } catch (e) {
+      sessionFlowError('agent_selector.model_pick.failed', e, {
+        agentId: agent.id,
+        runtimeId,
+        modelId,
+      })
       const { toast } = await import('sonner')
       toast.error(t('chat.agentSelector.modelChangeFailed', 'Failed to change model'))
       console.error('[AgentSelectorDock] setModel failed', e)
     }
-  }, [agent.id, runtimeId, t])
+  }, [agent.id, agent.displayName, runtimeId, t, currentModel, availableModels])
 
   const [open, setOpen] = React.useState(false)
 

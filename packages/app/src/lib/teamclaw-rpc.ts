@@ -106,6 +106,7 @@ async function sendRequest(
 
   const req = create(RpcRequestSchema, {
     requestId,
+    senderDeviceId: requesterClientId,
     requesterClientId,
     requesterActorId,
     requesterDeviceId: '', // desktop has no daemon device id of its own

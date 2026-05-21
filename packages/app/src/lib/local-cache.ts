@@ -80,6 +80,7 @@ export type OutboxRow = {
   sessionId: string;
   senderActorId: string;
   content: string;
+  model?: string | null;
   mentionActorIdsJson?: string | null;
   attachmentUrlsJson?: string | null;
   /** 'pending' | 'inFlight' | 'delivered' | 'failed' */

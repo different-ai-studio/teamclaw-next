@@ -5,6 +5,11 @@ import {
   upsertOutbox,
   type OutboxRow,
 } from "@/lib/local-cache";
+import {
+  sessionFlowError,
+  sessionFlowLog,
+  summarizeText,
+} from "@/lib/session-flow-log";
 
 export type OutboxState = "pending" | "inFlight" | "delivered" | "failed";
 
@@ -14,6 +19,7 @@ export interface OutboxEntry {
   sessionId: string;
   senderActorId: string;
   content: string;
+  model?: string | null;
   mentionActorIds: string[];
   attachmentUrls: string[];
   state: OutboxState;
@@ -67,6 +73,7 @@ const rowToEntry = (r: OutboxRow): OutboxEntry => ({
   sessionId: r.sessionId,
   senderActorId: r.senderActorId,
   content: r.content,
+  model: r.model ?? null,
   mentionActorIds: r.mentionActorIdsJson
     ? (JSON.parse(r.mentionActorIdsJson) as string[])
     : [],
@@ -88,6 +95,7 @@ const entryToRow = (e: OutboxEntry): OutboxRow => ({
   sessionId: e.sessionId,
   senderActorId: e.senderActorId,
   content: e.content,
+  model: e.model ?? null,
   mentionActorIdsJson:
     e.mentionActorIds.length > 0 ? JSON.stringify(e.mentionActorIds) : null,
   attachmentUrlsJson:
@@ -110,17 +118,34 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     if (hydrated) return;
     hydrated = true;
     try {
+      sessionFlowLog("outbox.hydrate.begin");
       const rows = await listAllOutbox();
       const byId: Record<string, OutboxEntry> = {};
       for (const r of rows) byId[r.messageId] = rowToEntry(r);
       set({ byId });
+      sessionFlowLog("outbox.hydrate.ok", {
+        rowCount: rows.length,
+        pendingCount: rows.filter((r) => r.state === "pending").length,
+        failedCount: rows.filter((r) => r.state === "failed").length,
+      });
     } catch (e) {
+      sessionFlowError("outbox.hydrate.failed", e);
       console.warn("[outbox] hydrate failed", e);
     }
   },
 
   enqueue: async (input) => {
     const now = new Date().toISOString();
+    sessionFlowLog("outbox.enqueue.begin", {
+      messageId: input.messageId,
+      sessionId: input.sessionId,
+      teamId: input.teamId,
+      senderActorId: input.senderActorId,
+      model: input.model ?? null,
+      mentionActorCount: input.mentionActorIds.length,
+      attachmentUrlCount: input.attachmentUrls.length,
+      ...summarizeText(input.content),
+    });
     const entry: OutboxEntry = {
       ...input,
       state: "pending",
@@ -134,7 +159,19 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     set((s) => ({ byId: { ...s.byId, [entry.messageId]: entry } }));
     try {
       await upsertOutbox(entryToRow(entry));
+      sessionFlowLog("outbox.enqueue.ok", {
+        messageId: entry.messageId,
+        sessionId: entry.sessionId,
+        teamId: entry.teamId,
+        state: entry.state,
+        nextAttemptAt: entry.nextAttemptAt,
+      });
     } catch (e) {
+      sessionFlowError("outbox.enqueue.persist_failed", e, {
+        messageId: entry.messageId,
+        sessionId: entry.sessionId,
+        teamId: entry.teamId,
+      });
       console.warn("[outbox] enqueue persist failed", e);
     }
   },
@@ -144,15 +181,38 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     if (!prev) return;
     const now = new Date().toISOString();
     const next: OutboxEntry = { ...prev, ...patch, updatedAt: now };
+    sessionFlowLog("outbox.state_update", {
+      messageId,
+      sessionId: prev.sessionId,
+      teamId: prev.teamId,
+      fromState: prev.state,
+      toState: next.state,
+      attemptCount: next.attemptCount,
+      nextAttemptAt: next.nextAttemptAt,
+      hasLastError: !!next.lastError,
+    });
     set((s) => ({ byId: { ...s.byId, [messageId]: next } }));
     try {
       await upsertOutbox(entryToRow(next));
     } catch (e) {
+      sessionFlowError("outbox.state_update.persist_failed", e, {
+        messageId,
+        sessionId: prev.sessionId,
+        teamId: prev.teamId,
+        toState: next.state,
+      });
       console.warn("[outbox] updateState persist failed", e);
     }
   },
 
   remove: async (messageId) => {
+    const prev = get().byId[messageId];
+    sessionFlowLog("outbox.remove.begin", {
+      messageId,
+      sessionId: prev?.sessionId,
+      teamId: prev?.teamId,
+      state: prev?.state,
+    });
     set((s) => {
       const next = { ...s.byId };
       delete next[messageId];
@@ -160,7 +220,13 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     });
     try {
       await deleteOutbox(messageId);
+      sessionFlowLog("outbox.remove.ok", { messageId });
     } catch (e) {
+      sessionFlowError("outbox.remove.persist_failed", e, {
+        messageId,
+        sessionId: prev?.sessionId,
+        teamId: prev?.teamId,
+      });
       console.warn("[outbox] remove persist failed", e);
     }
   },
@@ -169,6 +235,13 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     const prev = get().byId[messageId];
     if (!prev) return;
     const now = new Date().toISOString();
+    sessionFlowLog("outbox.retry", {
+      messageId,
+      sessionId: prev.sessionId,
+      teamId: prev.teamId,
+      previousAttemptCount: prev.attemptCount,
+      previousError: prev.lastError,
+    });
     const next: OutboxEntry = {
       ...prev,
       state: "pending",
@@ -182,6 +255,11 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     try {
       await upsertOutbox(entryToRow(next));
     } catch (e) {
+      sessionFlowError("outbox.retry.persist_failed", e, {
+        messageId,
+        sessionId: prev.sessionId,
+        teamId: prev.teamId,
+      });
       console.warn("[outbox] retry persist failed", e);
     }
   },

@@ -44,6 +44,8 @@ import { Button } from "@/components/ui/button";
 import { FileInputButton } from "./FileInputButton";
 import { ContextUsageBadge } from "./ContextUsageBadge";
 import { type QueuedMessage, useSessionStore } from "@/stores/session";
+import { applySessionRuntimeModel } from "@/lib/session-runtime-model";
+import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
 import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
@@ -223,10 +225,57 @@ export function ChatInputArea({
 
   // Model selector
   const [modelSelectorOpen, setModelSelectorOpen] = React.useState(false);
-  const models = useProviderStore(s => s.models);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const providerModels = useProviderStore((s) => s.models);
+  const currentModelKey = useProviderStore((s) => s.currentModelKey);
   const configuredProvidersLoading = useProviderStore(s => s.configuredProvidersLoading);
   const storeSelectModel = useProviderStore(s => s.selectModel);
   const selectedModelOption = useProviderStore((s) => getSelectedModelOption(s));
+  const models = React.useMemo(() => {
+    if (!currentModelKey) return providerModels;
+    const idx = currentModelKey.indexOf("/");
+    if (idx < 0) return providerModels;
+    const provider = currentModelKey.slice(0, idx);
+    return providerModels.filter((model) => model.provider === provider);
+  }, [providerModels, currentModelKey]);
+  const handleSelectModel = React.useCallback(async (model: { provider: string; id: string; name: string }) => {
+    sessionFlowLog("chat_input.model_select.begin", {
+      sessionId: activeSessionId,
+      provider: model.provider,
+      modelId: model.id,
+      modelName: model.name,
+      engagedAgentIds: engagedAgents.map((agent) => agent.id),
+      currentModelKey,
+    });
+    setModelSelectorOpen(false);
+    await storeSelectModel(model.provider, model.id, model.name);
+    sessionFlowLog("chat_input.model_select.store_updated", {
+      sessionId: activeSessionId,
+      provider: model.provider,
+      modelId: model.id,
+    });
+    try {
+      await applySessionRuntimeModel({
+        sessionId: activeSessionId,
+        agentActorIds: engagedAgents.map((agent) => agent.id),
+        modelId: model.id,
+      });
+      sessionFlowLog("chat_input.model_select.runtime_apply_done", {
+        sessionId: activeSessionId,
+        provider: model.provider,
+        modelId: model.id,
+      });
+    } catch (error) {
+      sessionFlowError("chat_input.model_select.runtime_apply_failed", error, {
+        sessionId: activeSessionId,
+        provider: model.provider,
+        modelId: model.id,
+      });
+      console.error("[ChatInputArea] failed to apply runtime model:", error);
+      const { toast } = await import("sonner");
+      toast.error(t("chat.agentSelector.modelChangeFailed", "Failed to change model"));
+    }
+  }, [activeSessionId, engagedAgents, storeSelectModel, t, currentModelKey]);
 
   // Handle file paths dropped from file tree - insert as @{filepath} mention (same as "Add to Agent")
   const handleFilePathsDrop = React.useCallback((paths: string[]) => {
@@ -540,14 +589,7 @@ export function ChatInputArea({
                               .map((model) => (
                                 <ModelSelectorItem
                                   key={`${model.provider}-${model.id}`}
-                                  onSelect={() => {
-                                    setModelSelectorOpen(false);
-                                    storeSelectModel(
-                                      model.provider,
-                                      model.id,
-                                      model.name,
-                                    );
-                                  }}
+                                  onSelect={() => void handleSelectModel(model)}
                                 >
                                   <ModelSelectorLogo
                                     provider={model.provider}
