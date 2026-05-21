@@ -54,6 +54,7 @@ import { SessionContinueBanner } from "./SessionContinueBanner";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
+import { loadSessionActiveModel } from "@/lib/session-active-model";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -473,6 +474,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // ── Provider store ────────────────────────────────────────────────────
   const currentModelKey = useProviderStore(s => s.currentModelKey);
   const initProviderStore = useProviderStore(s => s.initAll);
+  const storeSelectModel = useProviderStore(s => s.selectModel);
+  const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId);
   const runtimeModelSignature = useRuntimeStateStore((s) =>
     Object.entries(s.byRuntimeId)
       .map(([runtimeId, entry]) => {
@@ -598,6 +601,31 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     if (!workspaceReady || !runtimeModelSignature) return;
     void initProviderStore();
   }, [workspaceReady, runtimeModelSignature, initProviderStore]);
+
+  React.useEffect(() => {
+    if (!activeSessionId || providerModels.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const resolved = await loadSessionActiveModel({
+        sessionId: activeSessionId,
+        runtimeStates,
+        models: providerModels,
+      });
+      if (cancelled || !resolved) return;
+      const nextKey = `${resolved.provider}/${resolved.modelId}`;
+      if (useProviderStore.getState().currentModelKey === nextKey) return;
+      sessionFlowLog("session_model.apply_to_provider", {
+        sessionId: activeSessionId,
+        provider: resolved.provider,
+        modelId: resolved.modelId,
+        source: resolved.source,
+      });
+      await storeSelectModel(resolved.provider, resolved.modelId, resolved.name);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, providerModels, runtimeStates, storeSelectModel]);
 
   // ── Team config hot reload via file watcher ─────────────────────────
   React.useEffect(() => {
