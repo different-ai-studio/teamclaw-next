@@ -1,11 +1,23 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Plus, Sparkles, User as UserIcon } from 'lucide-react'
-import { useActorsForTeam, isActorOnline, type ActorRow } from '@/components/panel/ActorsView'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase-client'
+import { useActorsForTeam, type ActorRow as ActorRowData } from '@/components/panel/ActorsView'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
+import { ActorRow } from '@/components/sidebar/ActorRow'
+import { ActorDetailDialog } from '@/components/sidebar/ActorDetailDialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useUIStore } from '@/stores/ui'
-import { cn } from '@/lib/utils'
-import { actorAvatarColor } from '@/lib/actor-color'
 
 export function ActorsSection() {
   const { t } = useTranslation()
@@ -13,10 +25,13 @@ export function ActorsSection() {
   const toggle = useUIStore((s) => s.toggleActorsSection)
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
-  const { actors, loading, teamId } = useActorsForTeam()
+  const { actors, loading, teamId, refetch } = useActorsForTeam()
   const [inviteOpen, setInviteOpen] = React.useState(false)
+  const [detailFor, setDetailFor] = React.useState<ActorRowData | null>(null)
+  const [removeFor, setRemoveFor] = React.useState<ActorRowData | null>(null)
+  const [removing, setRemoving] = React.useState(false)
 
-  const handleClick = (actor: ActorRow) => {
+  const handleSelect = (actor: ActorRowData) => {
     setFilter({
       kind: 'actor',
       actorId: actor.id,
@@ -25,9 +40,45 @@ export function ActorsSection() {
     })
   }
 
+  const handleCopyName = async (actor: ActorRowData) => {
+    try {
+      await navigator.clipboard.writeText(actor.display_name)
+      toast.success(t('actors.copiedName', 'Copied name'))
+    } catch {
+      toast.error(t('actors.copyFailed', 'Copy failed'))
+    }
+  }
+
+  const handleCopyId = async (actor: ActorRowData) => {
+    try {
+      await navigator.clipboard.writeText(actor.id)
+      toast.success(t('actors.copiedId', 'Copied actor ID'))
+    } catch {
+      toast.error(t('actors.copyFailed', 'Copy failed'))
+    }
+  }
+
+  const confirmRemove = async () => {
+    if (!removeFor) return
+    setRemoving(true)
+    try {
+      const { error } = await supabase.rpc('remove_team_actor', { p_actor_id: removeFor.id })
+      if (error) {
+        toast.error(t('actors.removeFailed', 'Remove failed: {{msg}}', { msg: error.message }))
+        return
+      }
+      toast.success(t('actors.removed', 'Removed from team'))
+      setRemoveFor(null)
+      refetch()
+    } finally {
+      setRemoving(false)
+    }
+  }
+
+  const removeIsAgent = removeFor?.actor_type === 'agent'
+
   return (
     <div className="flex flex-col">
-      {/* Group header: 10.5px faint, count suffix `· N`. AGENTS.md §2. */}
       <div className="flex items-center gap-1 pr-1">
         <button
           type="button"
@@ -53,6 +104,27 @@ export function ActorsSection() {
         </button>
       </div>
       <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} teamId={teamId} />
+      <ActorDetailDialog actor={detailFor} onOpenChange={(open) => { if (!open) setDetailFor(null) }} />
+      <AlertDialog open={!!removeFor} onOpenChange={(open) => { if (!open) setRemoveFor(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {removeIsAgent
+                ? t('actors.removeConfirm.titleAgent', 'Remove agent?')
+                : t('actors.removeConfirm.titleMember', 'Remove member?')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('actors.removeConfirm.body', 'Remove {{name}} from the team. This cannot be undone.', { name: removeFor?.display_name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRemove} disabled={removing}>
+              {t('actors.removeConfirm.cta', 'Remove')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {!collapsed && (
         <div className="flex flex-col">
           {loading && (
@@ -61,48 +133,18 @@ export function ActorsSection() {
           {!loading && actors.length === 0 && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.empty', 'No actors in this team yet')}</div>
           )}
-          {actors.map((actor) => {
-            const active = filter.kind === 'actor' && filter.actorId === actor.id
-            const online = isActorOnline(actor.last_active_at)
-            const isAgent = actor.actor_type === 'agent'
-            return (
-              <button
-                key={actor.id}
-                type="button"
-                onClick={() => handleClick(actor)}
-                className={cn(
-                  // Direction B row: tight 5×9 padding, selected fill on active,
-                  // no left bar (reserved for session list cards). AGENTS.md §2.
-                  'flex w-full items-center gap-[9px] rounded-md px-[9px] py-[5px] text-left text-[12.5px] transition-colors',
-                  active
-                    ? 'bg-selected font-semibold text-foreground'
-                    : 'text-ink-2 hover:bg-selected/60',
-                )}
-              >
-                <div
-                  className={cn(
-                    'relative flex h-5 w-5 shrink-0 items-center justify-center text-[10px] font-semibold',
-                    isAgent ? 'rounded' : 'rounded-full',
-                  )}
-                  style={(() => {
-                    const c = actorAvatarColor(actor.id)
-                    return { background: c.bg, color: c.fg }
-                  })()}
-                >
-                  {actor.display_name?.slice(0, 1).toUpperCase() || (isAgent ? <Sparkles className="h-3 w-3" /> : <UserIcon className="h-3 w-3" />)}
-                  {online && (
-                    <span className="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-paper" />
-                  )}
-                </div>
-                <span className="min-w-0 flex-1 truncate">{actor.display_name}</span>
-                {isAgent && (
-                  <span className="shrink-0 font-mono text-[9px] font-semibold tracking-wider text-coral">
-                    AI
-                  </span>
-                )}
-              </button>
-            )
-          })}
+          {actors.map((actor) => (
+            <ActorRow
+              key={actor.id}
+              actor={actor}
+              active={filter.kind === 'actor' && filter.actorId === actor.id}
+              onSelect={handleSelect}
+              onViewDetail={setDetailFor}
+              onCopyName={handleCopyName}
+              onCopyId={handleCopyId}
+              onRequestRemove={setRemoveFor}
+            />
+          ))}
         </div>
       )}
     </div>
