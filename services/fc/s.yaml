@@ -35,6 +35,9 @@ resources:
         APNS_TEAM_ID: ${env('APNS_TEAM_ID')}
         APNS_TOPIC: ${env('APNS_TOPIC')}
         APNS_ENV: ${env('APNS_ENV')}
+        MQTT_BROKER_URL: ${env('MQTT_BROKER_URL')}
+        MQTT_USERNAME: ${env('MQTT_USERNAME')}
+        MQTT_PASSWORD: ${env('MQTT_PASSWORD')}
       triggers:
         - triggerName: http-trigger
           triggerType: http
