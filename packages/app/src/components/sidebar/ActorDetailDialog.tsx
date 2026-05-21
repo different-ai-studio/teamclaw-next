@@ -23,25 +23,29 @@ interface Props {
 
 export function ActorDetailDialog({ actor, onOpenChange }: Props) {
   const { t } = useTranslation()
-  const isAgent = actor?.actor_type === 'agent'
+  const lastActorRef = React.useRef<ActorRow | null>(null)
+  if (actor) lastActorRef.current = actor
+  const displayActor = actor ?? lastActorRef.current
+
+  const isAgent = displayActor?.actor_type === 'agent'
   const agentPresence = useDevicePresenceStore((s) =>
-    actor && isAgent ? s.byDeviceId[actor.id] : undefined,
+    displayActor && isAgent ? s.byDeviceId[displayActor.id] : undefined,
   )
 
-  if (!actor) return null
+  if (!displayActor) return null
 
   const online = isAgent
-    ? (agentPresence ? agentPresence.online : isActorOnline(actor.last_active_at))
-    : isActorOnline(actor.last_active_at)
-  const status = isAgent ? actor.agent_status : actor.member_status
-  const c = actorAvatarColor(actor.id)
-  const lastActive = actor.last_active_at
-    ? formatRelativeTime(new Date(actor.last_active_at))
+    ? (agentPresence ? agentPresence.online : isActorOnline(displayActor.last_active_at))
+    : isActorOnline(displayActor.last_active_at)
+  const status = isAgent ? displayActor.agent_status : displayActor.member_status
+  const c = actorAvatarColor(displayActor.id)
+  const lastActive = displayActor.last_active_at
+    ? formatRelativeTime(new Date(displayActor.last_active_at))
     : null
 
   const copyId = async () => {
     try {
-      await navigator.clipboard.writeText(actor.id)
+      await navigator.clipboard.writeText(displayActor.id)
       toast.success(t('actors.copiedId', 'Copied actor ID'))
     } catch {
       toast.error(t('actors.copyFailed', 'Copy failed'))
@@ -62,11 +66,11 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
             )}
             style={{ background: c.bg, color: c.fg }}
           >
-            {actor.display_name?.slice(0, 1).toUpperCase()
+            {displayActor.display_name?.slice(0, 1).toUpperCase()
               || (isAgent ? <Sparkles className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />)}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-base font-semibold">{actor.display_name}</div>
+            <div className="truncate text-base font-semibold">{displayActor.display_name}</div>
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <span>{isAgent
                 ? t('actors.detail.agent', 'Agent')
