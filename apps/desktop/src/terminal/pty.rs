@@ -3,7 +3,6 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
@@ -11,8 +10,7 @@ use super::registry::{TerminalError, TerminalStatus};
 use super::ring::RingBuffer;
 use super::shell_integration;
 
-const READER_BATCH_BYTES: usize = 4096;
-const READER_FLUSH_INTERVAL: Duration = Duration::from_millis(10);
+const READ_BUF_BYTES: usize = 4096;
 
 pub struct PtyHandle {
     pub id: String,
@@ -112,29 +110,23 @@ impl PtyHandle {
             .name(format!("pty-reader-{}", &handle.id))
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let mut tmp = [0u8; 4096];
-                    let mut batch: Vec<u8> = Vec::with_capacity(READER_BATCH_BYTES);
-                    let mut last_flush = Instant::now();
+                    let mut tmp = [0u8; READ_BUF_BYTES];
 
+                    // `reader.read` blocks until bytes are available, so the OS
+                    // already coalesces short bursts into a single syscall.
+                    // Emit each returned chunk immediately — holding bytes back
+                    // for further batching stalls short writes (e.g. a freshly
+                    // drawn prompt) until the *next* read returns, which can
+                    // take seconds if the user is idle.
                     loop {
                         match reader.read(&mut tmp) {
                             Ok(0) => break,
                             Ok(n) => {
                                 ring.lock().unwrap().write(&tmp[..n]);
-                                batch.extend_from_slice(&tmp[..n]);
-                                if batch.len() >= READER_BATCH_BYTES
-                                    || last_flush.elapsed() >= READER_FLUSH_INTERVAL
-                                {
-                                    (emit.emit_data)(&data_event, std::mem::take(&mut batch));
-                                    last_flush = Instant::now();
-                                }
+                                (emit.emit_data)(&data_event, tmp[..n].to_vec());
                             }
                             Err(_) => break,
                         }
-                    }
-
-                    if !batch.is_empty() {
-                        (emit.emit_data)(&data_event, batch);
                     }
                 }));
 
@@ -254,6 +246,7 @@ fn configure_shell_command(cmd: &mut CommandBuilder, shell: &str) {
 mod tests {
     use super::*;
     use std::sync::mpsc;
+    use std::time::Duration;
 
     fn make_emit() -> (
         EmitContext,
