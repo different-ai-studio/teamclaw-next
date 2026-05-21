@@ -4,8 +4,11 @@ use crate::supabase::error::{SupabaseError, SupabaseResult};
 use crate::supabase::{SupabaseClient, SupabaseConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use teamclaw_types::services_defaults::services_defaults;
 
-const DEFAULT_MQTT_BROKER_URL: &str = "mqtts://ai.ucar.cc:8883";
+fn default_mqtt_broker_url() -> String {
+    services_defaults().mqtt_broker_url()
+}
 
 pub struct InitOutcome {
     pub actor_id: String,
@@ -82,7 +85,7 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
             name: display_name.to_string(),
         },
         mqtt: MqttConfig {
-            broker_url: DEFAULT_MQTT_BROKER_URL.to_string(),
+            broker_url: default_mqtt_broker_url(),
         },
         agents: AgentsConfig::default(),
         team_id: None,
@@ -178,7 +181,7 @@ fn daemon_config_for_invite(
     daemon_cfg.mqtt.broker_url = invite
         .broker_url
         .clone()
-        .unwrap_or_else(|| DEFAULT_MQTT_BROKER_URL.to_string());
+        .unwrap_or_else(default_mqtt_broker_url);
     daemon_cfg
 }
 
@@ -216,7 +219,7 @@ mod tests {
                 broker_url: None,
             },
         );
-        assert_eq!(cfg.mqtt.broker_url, DEFAULT_MQTT_BROKER_URL);
+        assert_eq!(cfg.mqtt.broker_url, default_mqtt_broker_url());
     }
 
     #[test]

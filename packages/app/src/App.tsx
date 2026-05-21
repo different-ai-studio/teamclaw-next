@@ -81,6 +81,7 @@ import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridg
 import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import { decodeLiveEvent, sessionIdFromTopic } from "@/lib/teamclaw-events";
+import { handleInboxEnvelope } from "@/lib/inbox-handler";
 import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
 import { useOutboxStore } from "@/stores/outbox-store";
 import { startOutboxSender } from "@/services/outbox-sender";
@@ -765,7 +766,7 @@ function AppContent() {
         const serverConfig = await getEffectiveServerConfig();
         const brokerHost = serverConfig.mqttHost;
         const brokerPort = serverConfig.mqttPort ?? 1883;
-        const useTls = serverConfig.mqttUseTls ?? true;
+        const useTls = serverConfig.mqttUseTls ?? false;
         if (!brokerHost) {
           console.warn("[MQTT] missing broker host — configure it in Settings > Server");
           return;
@@ -789,7 +790,21 @@ function AppContent() {
         });
         if (cancelled) return;
 
+        // Per-user inbox topic for unread red-dot pings fan'd out by FC after
+        // each message INSERT. Single subscription per user (not per session)
+        // keeps broker topic count bounded. See handleInboxEnvelope below.
+        try {
+          await mqttSubscribe(`inbox/${actorId}`);
+        } catch (e) {
+          console.warn("[inbox] subscribe failed", e);
+        }
+        if (cancelled) return;
+
         unlisten = await listenForEnvelopes((env) => {
+          if (env.topic.startsWith("inbox/")) {
+            handleInboxEnvelope(env, actorId, useSessionListStore.getState());
+            return;
+          }
           const sid = sessionIdFromTopic(env.topic);
           if (!sid) return;
           const decoded = decodeLiveEvent(new Uint8Array(env.bytes));

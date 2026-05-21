@@ -27,6 +27,7 @@ public final class SessionListViewModel {
     public var isLoading = true
     public var searchText = ""
     private var task: Task<Void, Never>?
+    private var inboxTask: Task<Void, Never>?
     // Retained so markAsRead() can mutate the same context that syncRuntime uses.
     private var ctx: ModelContext?
 
@@ -141,7 +142,142 @@ public final class SessionListViewModel {
         }
     }
 
-    public func stop() { task?.cancel(); task = nil }
+    public func stop() {
+        task?.cancel(); task = nil
+        inboxTask?.cancel(); inboxTask = nil
+    }
+
+    // MARK: - Inbox red-dot subscription
+    //
+    // Server fans out a `{session_id, ts}` ping to `inbox/<actor_id>` after
+    // every message INSERT in a session the actor belongs to (see FC
+    // push-dispatch fan-out, PR #98). The client subscribes to this single
+    // per-user topic and updates the local Session.hasUnread cache.
+    // has_unread itself is computed server-side from `session_read_markers`
+    // + `sessions.last_message_at` — see SupabaseSessionsRepository.
+
+    /// Subscribes to `inbox/<actorID>` on the MQTT broker and updates
+    /// Session.hasUnread on each ping. Safe to call after start(); cancels
+    /// any previous inbox subscription.
+    public func startInboxSubscription(
+        mqtt: MQTTService,
+        hub: MQTTMessageHub,
+        actorID: String,
+        sessionsRepo: SessionsRepository?,
+        modelContext: ModelContext
+    ) {
+        guard !actorID.isEmpty else {
+            NSLog("[SessionListVM] startInboxSubscription: empty actorID, skipping")
+            return
+        }
+        let topic = "inbox/\(actorID)"
+
+        inboxTask?.cancel()
+        let container = modelContext.container
+        inboxTask = Task { [weak self] in
+            guard let self else { return }
+            let ctx = ModelContext(container)
+
+            // Wait for MQTT connect (same pattern as the runtime-state loop).
+            var waited = 0
+            while mqtt.connectionState != .connected {
+                try? await Task.sleep(for: .milliseconds(200))
+                if Task.isCancelled { return }
+                waited += 200
+                if waited >= 15_000 {
+                    NSLog("[SessionListVM] inbox: timed out waiting for MQTT")
+                    return
+                }
+            }
+
+            do {
+                try await mqtt.subscribe(topic)
+                NSLog("[SessionListVM] inbox: subscribed to %@", topic)
+            } catch {
+                NSLog("[SessionListVM] inbox: subscribe failed: %@", String(describing: error))
+                return
+            }
+
+            let stream = await hub.messages(matching: { msg in msg.topic == topic })
+            for await msg in stream {
+                if Task.isCancelled { return }
+                switch parseInboxEnvelope(topic: msg.topic, payload: msg.payload, expectedUserID: actorID) {
+                case .success(let ping):
+                    await self.applyInboxPing(ping, sessionsRepo: sessionsRepo, modelContext: ctx)
+                case .failure(let err):
+                    NSLog("[SessionListVM] inbox: parse failed (%@)", String(describing: err))
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func applyInboxPing(_ ping: InboxPing, sessionsRepo: SessionsRepository?, modelContext: ModelContext) async {
+        let sid = ping.sessionID
+        let descriptor = FetchDescriptor<Session>(predicate: #Predicate { $0.sessionId == sid })
+        if let session = try? modelContext.fetch(descriptor).first {
+            // Optimistic local update — server already knows the truth, the
+            // next applyUnreadFlags() will confirm it. Skipping the no-op
+            // avoids an unnecessary SwiftData save and UI churn.
+            if !session.hasUnread {
+                session.hasUnread = true
+                try? modelContext.save()
+                reloadSessions(modelContext: modelContext)
+            }
+        } else if let repo = sessionsRepo {
+            // Unknown session id — likely a brand-new session for this user.
+            // Pull the authoritative set so the row appears with the right flag.
+            if let flags = try? await repo.fetchUnreadFlags(limit: 100) {
+                applyUnreadFlags(flags, modelContext: modelContext)
+            }
+        }
+    }
+
+    /// Overlays the server-side `(session_id, has_unread)` map onto local
+    /// Session rows. Sessions absent from the map keep their current local
+    /// state — the map represents the user's current session set, but the
+    /// caller may have a broader local cache (e.g., archived sessions).
+    @MainActor
+    public func applyUnreadFlags(_ flags: [String: Bool], modelContext: ModelContext) {
+        let existing = (try? modelContext.fetch(FetchDescriptor<Session>())) ?? []
+        var changed = false
+        for session in existing {
+            guard let serverUnread = flags[session.sessionId] else { continue }
+            if session.hasUnread != serverUnread {
+                session.hasUnread = serverUnread
+                changed = true
+            }
+        }
+        if changed {
+            try? modelContext.save()
+            reloadSessions(modelContext: modelContext)
+        }
+    }
+
+    /// Clears the unread flag locally for immediate UI feedback and tells
+    /// the server via `mark_current_actor_session_viewed`. Fire-and-forget:
+    /// the server call's success is not awaited — the next inbox ping or
+    /// applyUnreadFlags() will reconcile if the write was lost.
+    @MainActor
+    public func markSessionViewed(
+        sessionId: String,
+        sessionsRepo: SessionsRepository?,
+        modelContext: ModelContext,
+        lastReadMessageId: String? = nil
+    ) {
+        let sid = sessionId
+        let descriptor = FetchDescriptor<Session>(predicate: #Predicate { $0.sessionId == sid })
+        if let session = try? modelContext.fetch(descriptor).first, session.hasUnread {
+            session.hasUnread = false
+            try? modelContext.save()
+            reloadSessions(modelContext: modelContext)
+        }
+        if let repo = sessionsRepo {
+            Task {
+                try? await repo.markSessionViewed(sessionId: sid, lastReadMessageId: lastReadMessageId)
+            }
+        }
+    }
 
     /// Clears the unread badge for the given runtime in the same ModelContext
     /// that syncRuntime uses, so the session list row updates immediately.

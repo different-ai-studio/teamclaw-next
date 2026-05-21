@@ -117,31 +117,44 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       duplicateAlreadyInserted: insErr?.code === "23505",
     });
 
+    const topic = `amux/${entry.teamId}/session/${entry.sessionId}/live`;
     sessionFlowLog("outbox_sender.mqtt_publish.begin", {
       messageId: entry.messageId,
       sessionId: entry.sessionId,
       teamId: entry.teamId,
-      topic: `amux/${entry.teamId}/session/${entry.sessionId}/live`,
+      topic,
     });
-    await mqttPublish(
-      `amux/${entry.teamId}/session/${entry.sessionId}/live`,
-      toBinary(LiveEventEnvelopeSchema, live),
-      false,
-    ).catch((err) => {
+    try {
+      await mqttPublish(
+        topic,
+        toBinary(LiveEventEnvelopeSchema, live),
+        false,
+      );
+      sessionFlowLog("outbox_sender.mqtt_publish.done", {
+        messageId: entry.messageId,
+        sessionId: entry.sessionId,
+        teamId: entry.teamId,
+      });
+    } catch (err) {
       sessionFlowError("outbox_sender.mqtt_publish.failed", err, {
         messageId: entry.messageId,
         sessionId: entry.sessionId,
         teamId: entry.teamId,
       });
-      // MQTT publish failure shouldn't fail the send — Supabase is the
-      // source of truth and other clients hydrate from there. Just log.
+      if (entry.mentionActorIds.length > 0) {
+        console.warn("[outbox] agent-mentioned MQTT publish failed; will retry", {
+          messageId: entry.messageId,
+          sessionId: entry.sessionId,
+          topic,
+          error: err,
+        });
+        throw err;
+      }
+      // Unmentioned messages are passive session history; Supabase is enough
+      // for other clients to hydrate them later. Agent-mentioned messages must
+      // reach the live topic because that is what wakes the daemon runtime.
       console.warn("[outbox] MQTT publish failed (best-effort):", err);
-    });
-    sessionFlowLog("outbox_sender.mqtt_publish.done", {
-      messageId: entry.messageId,
-      sessionId: entry.sessionId,
-      teamId: entry.teamId,
-    });
+    }
 
     await store.updateState(entry.messageId, {
       state: "delivered",

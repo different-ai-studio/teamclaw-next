@@ -91,4 +91,31 @@ describe('outbox sender', () => {
     const sessionMessage = fromBinary(SessionMessageEnvelopeSchema, live.body)
     expect(sessionMessage.message?.model).toBe('opencode/qwen3.6-plus-free')
   })
+
+  it('retries agent-mentioned messages when MQTT publish fails', async () => {
+    mocks.mqttPublish.mockRejectedValue(new Error('mqtt not connected'))
+
+    const { useOutboxStore } = await import('@/stores/outbox-store')
+    const { startOutboxSender } = await import('../outbox-sender')
+
+    await useOutboxStore.getState().enqueue({
+      messageId: 'msg-1',
+      teamId: 'team-1',
+      sessionId: 'session-1',
+      senderActorId: 'member-1',
+      content: '@Agent hello',
+      model: null,
+      mentionActorIds: ['agent-1'],
+      attachmentUrls: [],
+    })
+
+    startOutboxSender()
+
+    await vi.waitFor(() => {
+      const entry = useOutboxStore.getState().byId['msg-1']
+      expect(entry.state).toBe('pending')
+      expect(entry.attemptCount).toBe(1)
+      expect(entry.lastError).toMatch(/mqtt not connected/)
+    })
+  })
 })

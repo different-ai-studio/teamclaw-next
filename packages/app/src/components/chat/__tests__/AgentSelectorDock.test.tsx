@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
 
+const mocks = vi.hoisted(() => ({
+  activeSessionId: null as string | null,
+  agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null }>,
+  runtimeStates: {} as Record<string, unknown>,
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback ?? key,
@@ -12,7 +18,7 @@ vi.mock('@/lib/supabase-client', () => ({
   supabase: {
     from: () => ({
       select: () => ({
-        eq: () => Promise.resolve({ data: [], error: null }),
+        eq: () => Promise.resolve({ data: mocks.agentRuntimeRows, error: null }),
         in: () => ({
           eq: () => Promise.resolve({ data: [], error: null }),
           not: () => ({
@@ -26,12 +32,12 @@ vi.mock('@/lib/supabase-client', () => ({
 
 vi.mock('@/stores/runtime-state-store', () => ({
   useRuntimeStateStore: (selector: (s: unknown) => unknown) =>
-    selector({ byRuntimeId: {} }),
+    selector({ byRuntimeId: mocks.runtimeStates }),
 }))
 
 vi.mock('@/stores/session', () => ({
   useSessionStore: (selector: (s: unknown) => unknown) =>
-    selector({ activeSessionId: null }),
+    selector({ activeSessionId: mocks.activeSessionId }),
 }))
 
 vi.mock('@/lib/teamclaw-rpc', () => ({
@@ -41,6 +47,9 @@ vi.mock('@/lib/teamclaw-rpc', () => ({
 describe('AgentSelectorDock', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.activeSessionId = null
+    mocks.agentRuntimeRows = []
+    mocks.runtimeStates = {}
   })
 
   it('renders nothing when no agents are engaged', () => {

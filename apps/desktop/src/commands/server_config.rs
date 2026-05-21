@@ -1,16 +1,12 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use teamclaw_types::services_defaults::services_defaults;
 
 const APP_CONFIG_DIR: &str = "teamclaw";
 const LEGACY_CONFIG_DIR: &str = "amux";
 const SERVER_CONFIG_FILE: &str = "teamclaw.json";
 const LEGACY_SERVER_CONFIG_FILE: &str = "server-config.json";
-const DEFAULT_SUPABASE_URL: &str = "https://srhaytajyfrniuvnkfpd.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_CJavqYCusEBD7cIebhH5tQ_K_I9AXpE";
-const DEFAULT_MQTT_HOST: &str = "ai.ucar.cc";
-const DEFAULT_MQTT_PORT: u16 = 8883;
-const DEFAULT_MQTT_USE_TLS: bool = true;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,12 +48,13 @@ fn legacy_teamclaw_config_path() -> PathBuf {
 }
 
 fn default_server_config() -> ServerConfig {
+    let d = services_defaults();
     ServerConfig {
-        supabase_url: Some(DEFAULT_SUPABASE_URL.to_string()),
-        supabase_anon_key: Some(DEFAULT_SUPABASE_ANON_KEY.to_string()),
-        mqtt_host: Some(DEFAULT_MQTT_HOST.to_string()),
-        mqtt_port: Some(DEFAULT_MQTT_PORT),
-        mqtt_use_tls: Some(DEFAULT_MQTT_USE_TLS),
+        supabase_url: Some(d.supabase_url.clone()),
+        supabase_anon_key: Some(d.supabase_anon_key.clone()),
+        mqtt_host: Some(d.mqtt_host.clone()),
+        mqtt_port: Some(d.mqtt_port),
+        mqtt_use_tls: Some(d.mqtt_use_tls),
     }
 }
 
@@ -232,10 +229,11 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(loaded.supabase_url.as_deref(), Some(DEFAULT_SUPABASE_URL));
-        assert_eq!(loaded.mqtt_host.as_deref(), Some(DEFAULT_MQTT_HOST));
-        assert_eq!(loaded.mqtt_port, Some(DEFAULT_MQTT_PORT));
-        assert_eq!(loaded.mqtt_use_tls, Some(DEFAULT_MQTT_USE_TLS));
+        let d = services_defaults();
+        assert_eq!(loaded.supabase_url.as_deref(), Some(d.supabase_url.as_str()));
+        assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
+        assert_eq!(loaded.mqtt_port, Some(d.mqtt_port));
+        assert_eq!(loaded.mqtt_use_tls, Some(d.mqtt_use_tls));
         assert!(current.exists());
     }
 
@@ -263,11 +261,12 @@ mod tests {
             loaded.supabase_url.as_deref(),
             Some("https://custom.supabase.co")
         );
+        let d = services_defaults();
         assert_eq!(
             loaded.supabase_anon_key.as_deref(),
-            Some(DEFAULT_SUPABASE_ANON_KEY)
+            Some(d.supabase_anon_key.as_str())
         );
-        assert_eq!(loaded.mqtt_host.as_deref(), Some(DEFAULT_MQTT_HOST));
+        assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
         assert_eq!(loaded.mqtt_port, Some(1883));
         assert_eq!(loaded.mqtt_use_tls, Some(false));
     }

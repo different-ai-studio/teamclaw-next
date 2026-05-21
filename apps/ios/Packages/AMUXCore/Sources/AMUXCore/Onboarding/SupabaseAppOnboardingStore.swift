@@ -9,11 +9,11 @@ public enum SupabaseProjectConfigurationError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .missingURL:
-            return "SUPABASE_URL is missing from Info.plist."
+            return "Supabase URL is missing from services.default.json."
         case .invalidURL(let value):
-            return "SUPABASE_URL is invalid: \(value)"
+            return "Supabase URL is invalid: \(value)"
         case .missingPublishableKey:
-            return "SUPABASE_PUBLISHABLE_KEY is missing from Info.plist."
+            return "Supabase publishable key is missing from services.default.json."
         }
     }
 }
@@ -43,13 +43,12 @@ public struct SupabaseProjectConfiguration: Sendable {
 
     /// Resolve the effective Supabase config. User-overridden values in
     /// UserDefaults (set via the Settings "Supabase Server" editor) win over
-    /// Info.plist bake-ins, which in turn win over no config at all.
+    /// the bundled `services.default.json` defaults.
     public static func fromMainBundle() throws -> Self {
-        let bundle = Bundle.main
         let defaults = UserDefaults.standard
+        let services = SharedDefaults.services
 
-        let rawURL = (SupabaseServerStore.storedURL(in: defaults)
-                      ?? bundle.object(forInfoDictionaryKey: "SUPABASE_URL") as? String ?? "")
+        let rawURL = (SupabaseServerStore.storedURL(in: defaults) ?? services.supabaseUrl)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rawURL.isEmpty else {
             throw SupabaseProjectConfigurationError.missingURL
@@ -57,8 +56,7 @@ public struct SupabaseProjectConfiguration: Sendable {
         guard let url = URL(string: rawURL) else {
             throw SupabaseProjectConfigurationError.invalidURL(rawURL)
         }
-        let publishableKey = (SupabaseServerStore.storedKey(in: defaults)
-                              ?? bundle.object(forInfoDictionaryKey: "SUPABASE_PUBLISHABLE_KEY") as? String ?? "")
+        let publishableKey = (SupabaseServerStore.storedKey(in: defaults) ?? services.supabaseAnonKey)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !publishableKey.isEmpty else {
             throw SupabaseProjectConfigurationError.missingPublishableKey
@@ -68,9 +66,9 @@ public struct SupabaseProjectConfiguration: Sendable {
 }
 
 /// Persists Supabase URL + publishable key overrides in UserDefaults. Falls
-/// back to Info.plist bake-ins when nothing is stored. Changing values requires
-/// an app relaunch — existing Supabase clients are captured with the old
-/// config.
+/// back to the bundled `services.default.json` when nothing is stored.
+/// Changing values requires an app relaunch — existing Supabase clients are
+/// captured with the old config.
 public enum SupabaseServerStore {
     public static let urlKey = "teamclaw_supabase_url"
     public static let keyKey = "teamclaw_supabase_key"
@@ -78,15 +76,11 @@ public enum SupabaseServerStore {
     private static let legacyKeyKey = "amux_supabase_key"
 
     public static func currentURL() -> String {
-        storedURL(in: .standard)
-            ?? Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String
-            ?? ""
+        storedURL(in: .standard) ?? SharedDefaults.services.supabaseUrl
     }
 
     public static func currentKey() -> String {
-        storedKey(in: .standard)
-            ?? Bundle.main.object(forInfoDictionaryKey: "SUPABASE_PUBLISHABLE_KEY") as? String
-            ?? ""
+        storedKey(in: .standard) ?? SharedDefaults.services.supabaseAnonKey
     }
 
     public static func save(url: String, key: String) {

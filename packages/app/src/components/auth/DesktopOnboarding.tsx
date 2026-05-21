@@ -284,7 +284,7 @@ function ServerStep({ onBack }: { onBack: () => void }) {
               </div>
             </div>
             <Switch
-              checked={config.mqttUseTls ?? true}
+              checked={config.mqttUseTls ?? false}
               onCheckedChange={(checked) => update({ mqttUseTls: checked })}
             />
           </label>

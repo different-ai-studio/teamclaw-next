@@ -1224,6 +1224,21 @@ public final class SessionDetailViewModel {
             }
         }
 
+        // Inbox red-dot clear: local first for instant UI, then the
+        // server upsert so other devices' next fetchUnreadFlags() reflects
+        // the read. Building the repo on demand avoids plumbing it through
+        // every SessionDetailView call site; the SupabaseClient is cheap.
+        if let session, session.hasUnread {
+            session.hasUnread = false
+            try? modelContext.save()
+        }
+        if let sessionId = session?.sessionId {
+            Task.detached {
+                guard let repo = try? SupabaseSessionsRepository() else { return }
+                try? await repo.markSessionViewed(sessionId: sessionId, lastReadMessageId: nil)
+            }
+        }
+
         // Load cached events immediately (works offline). Scope keys on
         // session_id when present so collab-only sessions (no runtime yet)
         // still see past Supabase-seeded messages.
