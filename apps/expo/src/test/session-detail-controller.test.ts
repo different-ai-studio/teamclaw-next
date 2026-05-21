@@ -202,6 +202,70 @@ describe("createSessionDetailController", () => {
     expect(mqtt.publish).toHaveBeenCalledTimes(1);
   });
 
+  it("sends a pending attachment even when composer text is empty", async () => {
+    const { createSessionDetailController } = await import(
+      "../features/sessions/session-detail-controller"
+    );
+    const { appendPendingAttachment, takePendingAttachments } = await import(
+      "../features/sessions/pending-attachments"
+    );
+    takePendingAttachments("team-1", "session-1");
+    const mqtt = createMockMqtt();
+    const api = {
+      getSession: vi.fn().mockResolvedValue(createSession()),
+      insertOutgoingMessage: vi.fn().mockResolvedValue(undefined),
+      listMessages: vi.fn().mockResolvedValue([]),
+      resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
+    };
+
+    appendPendingAttachment("team-1", "session-1", {
+      path: "team-1/session-1/photo.png",
+      publicUrl: "https://storage.example.test/photo.png?token=abc",
+      mime: "image/png",
+      size: 123,
+    });
+    const controller = createSessionDetailController({
+      api: api as any,
+      currentMemberActorId: "actor-1",
+      getAuth: vi.fn().mockResolvedValue({
+        accessToken: "jwt-token",
+        userId: "user-1",
+      }),
+      mqtt: mqtt as any,
+      mqttUrl: "wss://broker.example.com/mqtt",
+      sessionId: "session-1",
+      teamId: "team-1",
+    });
+
+    await controller.load();
+    await controller.sendMessage();
+
+    expect(api.insertOutgoingMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "",
+        attachments: [
+          {
+            url: "https://storage.example.test/photo.png?token=abc",
+            path: "team-1/session-1/photo.png",
+            mime: "image/png",
+            size: 123,
+          },
+        ],
+      }),
+    );
+    expect(controller.getState().messages[0]).toMatchObject({
+      content: "",
+      attachments: [
+        {
+          url: "https://storage.example.test/photo.png?token=abc",
+          path: "team-1/session-1/photo.png",
+        },
+      ],
+    });
+    expect(takePendingAttachments("team-1", "session-1")).toHaveLength(0);
+  });
+
   it("blocks sends until realtime has finished connecting", async () => {
     const { createSessionDetailController } = await import(
       "../features/sessions/session-detail-controller"

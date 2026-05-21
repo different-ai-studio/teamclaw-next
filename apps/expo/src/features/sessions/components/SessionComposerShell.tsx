@@ -1,13 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { colors, hai, radii, shadows, spacing, typography } from "../../../ui/theme";
 import {
   buildComposerPresentation,
 } from "./session-composer-copy";
 import { useVoiceRecorder } from "./voice-recorder";
+import type { UploadedAttachment } from "../attachment-upload";
 import type { SessionDetailConnectionState } from "../session-detail-controller";
 
 type SessionComposerShellProps = {
@@ -16,7 +17,9 @@ type SessionComposerShellProps = {
   isSending: boolean;
   onAttach?: () => void;
   onChangeText: (value: string) => void;
+  onRemovePendingAttachment?: (path: string) => void;
   onSend: () => void;
+  pendingAttachments?: readonly UploadedAttachment[];
   sendErrorMessage: string | null;
 };
 
@@ -43,17 +46,21 @@ export function SessionComposerShell({
   isSending,
   onAttach,
   onChangeText,
+  onRemovePendingAttachment,
   onSend,
+  pendingAttachments = [],
   sendErrorMessage,
 }: SessionComposerShellProps) {
   const presentation = buildComposerPresentation({
     composerText,
     connectionState,
     isSending,
+    pendingAttachmentCount: pendingAttachments.length,
     sendErrorMessage,
   });
   const recorder = useVoiceRecorder();
   const [recordError, setRecordError] = useState<string | null>(null);
+  const hasPendingAttachments = pendingAttachments.length > 0;
 
   const handleMicToggle = async () => {
     setRecordError(null);
@@ -73,6 +80,27 @@ export function SessionComposerShell({
 
   return (
     <View style={styles.wrapper}>
+      {hasPendingAttachments ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.attachmentTray}
+          contentContainerStyle={styles.attachmentTrayContent}
+        >
+          {pendingAttachments.map((attachment) => (
+            <PendingAttachmentTile
+              attachment={attachment}
+              key={attachment.path}
+              onRemove={
+                onRemovePendingAttachment
+                  ? () => onRemovePendingAttachment(attachment.path)
+                  : undefined
+              }
+            />
+          ))}
+        </ScrollView>
+      ) : null}
+
       <View style={styles.composerCard}>
         <View style={styles.editorSurface}>
           <TextInput
@@ -100,7 +128,7 @@ export function SessionComposerShell({
           </View>
 
           <View style={styles.footerRight}>
-            {composerText.trim().length === 0 ? (
+            {composerText.trim().length === 0 && !hasPendingAttachments ? (
               <Pressable
                 accessibilityLabel={recorder.isRecording ? "Stop recording" : "Voice memo"}
                 accessibilityRole="button"
@@ -148,6 +176,48 @@ export function SessionComposerShell({
   );
 }
 
+function PendingAttachmentTile({
+  attachment,
+  onRemove,
+}: {
+  attachment: UploadedAttachment;
+  onRemove?: () => void;
+}) {
+  const mime = attachment.mime ?? "";
+  const isImage = mime.startsWith("image/");
+  const label = attachment.path.split("/").pop() ?? "Attachment";
+  return (
+    <View style={styles.attachmentTile}>
+      {isImage && attachment.publicUrl ? (
+        <Image
+          accessibilityLabel={label}
+          resizeMode="cover"
+          source={{ uri: attachment.publicUrl }}
+          style={styles.attachmentPreviewImage}
+        />
+      ) : (
+        <View style={styles.attachmentFilePreview}>
+          <Ionicons color={colors.basalt} name="document-outline" size={18} />
+          <Text numberOfLines={1} style={styles.attachmentFileLabel}>
+            {label}
+          </Text>
+        </View>
+      )}
+      {onRemove ? (
+        <Pressable
+          accessibilityLabel={`Remove ${label}`}
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onRemove}
+          style={styles.attachmentRemoveButton}
+        >
+          <Ionicons color={colors.paper} name="close" size={12} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   agentChevron: {
     color: colors.faint,
@@ -173,6 +243,55 @@ const styles = StyleSheet.create({
   agentPillText: {
     color: colors.ink2,
     ...typography.caption,
+  },
+  attachmentFileLabel: {
+    color: colors.basalt,
+    maxWidth: 58,
+    textAlign: "center",
+    ...typography.caption,
+  },
+  attachmentFilePreview: {
+    alignItems: "center",
+    backgroundColor: colors.panel,
+    gap: 4,
+    height: "100%",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    width: "100%",
+  },
+  attachmentPreviewImage: {
+    borderRadius: radii.card,
+    height: "100%",
+    width: "100%",
+  },
+  attachmentRemoveButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(34,32,29,0.72)",
+    borderColor: colors.paper,
+    borderRadius: 999,
+    height: 20,
+    justifyContent: "center",
+    position: "absolute",
+    right: 4,
+    top: 4,
+    width: 20,
+  },
+  attachmentTile: {
+    backgroundColor: colors.paper,
+    borderColor: colors.border,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    height: 64,
+    overflow: "hidden",
+    width: 64,
+  },
+  attachmentTray: {
+    flexGrow: 0,
+  },
+  attachmentTrayContent: {
+    gap: spacing.sm,
+    paddingHorizontal: 2,
+    paddingTop: 2,
   },
   composerCard: {
     backgroundColor: colors.paper,

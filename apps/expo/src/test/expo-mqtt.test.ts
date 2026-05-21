@@ -73,6 +73,76 @@ function createMockClient() {
 }
 
 describe("createExpoMqttAdapter", () => {
+  it("uses the native MQTT module when one is available", async () => {
+    const listeners = new Map<string, Set<(event: never) => void>>();
+    const nativeModule = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const nativeEvents = {
+      addListener: vi.fn((event: string, handler: (event: never) => void) => {
+        const eventListeners = listeners.get(event) ?? new Set();
+        eventListeners.add(handler);
+        listeners.set(event, eventListeners);
+        return {
+          remove: () => eventListeners.delete(handler),
+        };
+      }),
+    };
+    const { createExpoMqttAdapter } = await import("../lib/mqtt/expo-mqtt");
+    const adapter = createExpoMqttAdapter({ nativeModule, nativeEvents });
+    const states: string[] = [];
+    const messages: Array<{ topic: string; payload: Uint8Array }> = [];
+    adapter.onConnectionState((state) => states.push(state));
+    adapter.onMessage((message) => messages.push(message));
+
+    await adapter.connect({
+      url: "mqtts://ai.ucar.cc:8883",
+      options: {
+        clientId: "client-1",
+        username: "actor-1",
+        password: "token-1",
+        keepalive: 90,
+        connectTimeout: 15000,
+      },
+    });
+    await adapter.subscribe("amux/team-1/session/session-1/live");
+    await adapter.publish("topic", new Uint8Array([1, 2, 3]), true);
+    listeners.get("TeamClawMqttConnectionState")?.forEach((handler) =>
+      handler({ state: "connected" } as never),
+    );
+    listeners.get("TeamClawMqttMessage")?.forEach((handler) =>
+      handler({ topic: "topic", payload: [7, 8] } as never),
+    );
+    await adapter.disconnect();
+
+    expect(nativeModule.connect).toHaveBeenCalledWith({
+      host: "ai.ucar.cc",
+      port: 8883,
+      useTls: true,
+      username: "actor-1",
+      password: "token-1",
+      clientId: "client-1",
+      keepalive: 90,
+      connectTimeout: 15000,
+    });
+    expect(nativeModule.subscribe).toHaveBeenCalledWith("amux/team-1/session/session-1/live");
+    expect(nativeModule.publish).toHaveBeenCalledWith("topic", [1, 2, 3], true);
+    expect(nativeModule.disconnect).toHaveBeenCalled();
+    expect(states).toEqual(["connecting", "connected", "disconnected"]);
+    expect(messages).toEqual([{ topic: "topic", payload: new Uint8Array([7, 8]) }]);
+    expect(nativeEvents.addListener).toHaveBeenCalledWith(
+      "TeamClawMqttMessage",
+      expect.any(Function),
+    );
+    expect(nativeEvents.addListener).toHaveBeenCalledWith(
+      "TeamClawMqttConnectionState",
+      expect.any(Function),
+    );
+  });
+
   it("waits for connect readiness and rejects on connection error", async () => {
     const client = createMockClient();
     const createClient = vi.fn(() => client);

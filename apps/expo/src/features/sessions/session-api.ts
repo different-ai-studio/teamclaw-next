@@ -45,6 +45,8 @@ type OutgoingMessageInput = {
   attachments?: unknown[] | null;
 };
 
+type SessionMode = "solo" | "collab" | "control";
+
 const SESSION_COLUMNS =
   "session_id:id, team_id, title, summary, last_message_preview, last_message_at, created_at, created_by:created_by_actor_id";
 const MESSAGE_COLUMNS =
@@ -291,14 +293,14 @@ export function createSessionsApi(client: SessionsClient) {
 
     async createSession(input: {
       title: string;
-      mode?: string;
+      mode?: SessionMode;
       primaryAgentId?: string | null;
       ideaId?: string | null;
     }): Promise<string> {
       const result = (await client.rpc("create_session", {
         p_primary_agent_id: input.primaryAgentId ?? null,
         p_idea_id: input.ideaId ?? null,
-        p_mode: input.mode ?? "agent",
+        p_mode: input.mode ?? "collab",
         p_title: input.title,
       })) as QueryResult<string | null>;
       throwIfError(result.error);

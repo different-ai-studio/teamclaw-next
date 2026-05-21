@@ -428,6 +428,9 @@ const styles = StyleSheet.create({
   section: {
     gap: 12,
   },
+  socialColumn: {
+    gap: 12,
+  },
   socialButton: {
     alignItems: "center",
     backgroundColor: "rgba(248,246,241,0.82)",

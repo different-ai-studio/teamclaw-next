@@ -38,6 +38,11 @@ import {
   type OutboxStatus,
 } from "../outbox-store";
 import {
+  getPendingAttachmentSnapshot,
+  removePendingAttachment,
+  subscribePendingAttachments,
+} from "../pending-attachments";
+import {
   deriveAgentPlanSnapshots,
   type AgentPlanSnapshot,
 } from "../plan-snapshot";
@@ -363,6 +368,11 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
     getOutboxSnapshot,
     getOutboxSnapshot,
   );
+  const pendingAttachments = useSyncExternalStore(
+    subscribePendingAttachments,
+    () => getPendingAttachmentSnapshot(state.session.teamId, state.session.sessionId),
+    () => getPendingAttachmentSnapshot(state.session.teamId, state.session.sessionId),
+  );
 
   const planSnapshots = useMemo<AgentPlanSnapshot[]>(
     () =>
@@ -635,7 +645,11 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
           isSending={isSending}
           onAttach={onAttach}
           onChangeText={onChangeComposerText}
+          onRemovePendingAttachment={(path) => {
+            removePendingAttachment(state.session.teamId, state.session.sessionId, path);
+          }}
           onSend={onSend}
+          pendingAttachments={pendingAttachments}
           sendErrorMessage={sendErrorMessage}
         />
       </KeyboardAvoidingView>

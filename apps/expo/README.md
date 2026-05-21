@@ -67,12 +67,12 @@ Create `apps/expo/.env` from `.env.example` and provide:
 
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `EXPO_PUBLIC_MQTT_URL` for realtime send + reply delivery
+- `EXPO_PUBLIC_MQTT_URL` only when overriding the default native broker
 
 These values are required for the Expo app to start correctly. If either one is
 missing, the current app bootstrap fails instead of falling back to a limited
-onboarding shell. `EXPO_PUBLIC_MQTT_URL` is optional for app boot, but without
-it the session detail composer stays disconnected and message send is disabled.
+onboarding shell. MQTT defaults to `mqtts://ai.ucar.cc:8883` and uses the
+native Android bridge when available.
 
 ## Install
 

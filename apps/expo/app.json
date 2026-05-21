@@ -10,6 +10,10 @@
     "android": {
       "package": "com.bertrand319.teamclawexpo"
     },
+    "plugins": [
+      "./plugins/withTeamClawMqtt",
+      "expo-audio"
+    ],
     "ios": {
       "bundleIdentifier": "com.bertrand319.teamclawexpo"
     }

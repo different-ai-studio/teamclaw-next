@@ -41,6 +41,37 @@ describe("pending-attachments registry", () => {
     expect(peekPendingAttachments("t2", "s1")).toHaveLength(0);
   });
 
+  it("exposes stable snapshots for UI subscribers", async () => {
+    const { appendPendingAttachment, getPendingAttachmentSnapshot } =
+      await import("../features/sessions/pending-attachments");
+
+    const emptyA = getPendingAttachmentSnapshot("t1", "s1");
+    const emptyB = getPendingAttachmentSnapshot("t1", "s1");
+    expect(emptyA).toBe(emptyB);
+
+    appendPendingAttachment("t1", "s1", sample);
+    const filledA = getPendingAttachmentSnapshot("t1", "s1");
+    const filledB = getPendingAttachmentSnapshot("t1", "s1");
+    expect(filledA).toBe(filledB);
+    expect(filledA).toEqual([sample]);
+  });
+
+  it("removes one pending attachment by path", async () => {
+    const {
+      appendPendingAttachment,
+      getPendingAttachmentSnapshot,
+      removePendingAttachment,
+    } = await import("../features/sessions/pending-attachments");
+    appendPendingAttachment("t1", "s1", sample);
+    appendPendingAttachment("t1", "s1", { ...sample, path: "second.png" });
+
+    removePendingAttachment("t1", "s1", sample.path);
+
+    expect(getPendingAttachmentSnapshot("t1", "s1")).toEqual([
+      { ...sample, path: "second.png" },
+    ]);
+  });
+
   it("notifies subscribers on append + take", async () => {
     const {
       appendPendingAttachment,
