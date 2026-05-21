@@ -35,6 +35,8 @@ pub enum TerminalError {
     NotFound(String),
     #[error("spawn failed: {0}")]
     SpawnFailed(String),
+    #[error("bad request: {0}")]
+    BadRequest(String),
 }
 
 pub struct Registry {

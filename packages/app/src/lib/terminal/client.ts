@@ -50,7 +50,11 @@ export async function subscribeTerminal(id: string): Promise<SubscribeResult> {
 }
 
 export async function writeTerminal(id: string, data: Uint8Array): Promise<void> {
-  await invoke("terminal_write", { id, data: Array.from(data) });
+  // Raw-body IPC: Tauri 2 lets us pass the Uint8Array straight through as the
+  // request body, skipping the per-byte JSON encoding that `Array.from()` +
+  // default invoke serialisation would otherwise cost on every keystroke. The
+  // backend reads the terminal id from the request header instead of args.
+  await invoke("terminal_write", data, { headers: { "x-terminal-id": id } });
 }
 
 export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
