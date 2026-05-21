@@ -83,6 +83,8 @@ export type ExpoMqttAdapter = {
 
 export type ExpoMqttAdapterDeps = {
   createClient?: (url: string, options?: ExpoMqttConnectOptions) => ExpoMqttClient;
+  nativeModule?: NativeMqttModule | null;
+  nativeEvents?: NativeEventSource | null;
 };
 
 function toMqttOptions(options?: ExpoMqttConnectOptions): ExpoMqttConnectOptions | undefined {
@@ -93,7 +95,201 @@ function defaultCreateClient(url: string, options?: ExpoMqttConnectOptions): Exp
   return mqtt.connect(url, toMqttOptions(options)) as unknown as ExpoMqttClient;
 }
 
+type NativeSubscription = {
+  remove: () => void;
+};
+
+type NativeEventSource = {
+  addListener: (event: string, handler: (payload: never) => void) => NativeSubscription;
+};
+
+type NativeMqttModule = {
+  connect: (args: {
+    host: string;
+    port: number;
+    useTls: boolean;
+    username?: string;
+    password?: string;
+    clientId?: string;
+    keepalive?: number;
+    connectTimeout?: number;
+  }) => Promise<void>;
+  subscribe: (topic: string) => Promise<void>;
+  publish: (topic: string, payload: number[], retain: boolean) => Promise<void>;
+  disconnect: () => Promise<void>;
+};
+
+type NativeModuleLookup = {
+  NativeModules?: {
+    TeamClawMqtt?: NativeMqttModule;
+  };
+  NativeEventEmitter?: new (module?: unknown) => NativeEventSource;
+};
+
+function getDefaultNativeAdapterDeps():
+  | { nativeModule: NativeMqttModule; nativeEvents: NativeEventSource }
+  | null {
+  try {
+    const reactNative = require("react-native") as NativeModuleLookup;
+    const nativeModule = reactNative.NativeModules?.TeamClawMqtt;
+    const NativeEventEmitter = reactNative.NativeEventEmitter;
+    if (!nativeModule || !NativeEventEmitter) return null;
+    return {
+      nativeModule,
+      nativeEvents: new NativeEventEmitter(nativeModule),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseNativeUrl(url: string): { host: string; port: number; useTls: boolean } {
+  const parsed = new URL(url);
+  const protocol = parsed.protocol.replace(":", "");
+  const useTls = protocol === "mqtts" || protocol === "ssl" || protocol === "tls" || protocol === "wss";
+  const defaultPort = useTls ? 8883 : 1883;
+  const port = parsed.port ? Number(parsed.port) : defaultPort;
+  if (!parsed.hostname || !Number.isFinite(port)) {
+    throw new Error(`Invalid MQTT URL: ${url}`);
+  }
+  return {
+    host: parsed.hostname,
+    port,
+    useTls,
+  };
+}
+
+function toNativeString(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value instanceof Uint8Array) {
+    return new TextDecoder().decode(value);
+  }
+  return undefined;
+}
+
+function createNativeMqttAdapter(
+  nativeModule: NativeMqttModule,
+  nativeEvents: NativeEventSource,
+): ExpoMqttAdapter {
+  const messageHandlers = new Set<(message: ExpoMqttMessage) => void>();
+  const connectionStateHandlers = new Set<
+    (state: "connecting" | "connected" | "disconnected") => void
+  >();
+  let subscriptions: NativeSubscription[] = [];
+  let connected = false;
+
+  function relayConnectionState(state: "connecting" | "connected" | "disconnected") {
+    for (const handler of connectionStateHandlers) {
+      handler(state);
+    }
+  }
+
+  function ensureEventSubscriptions() {
+    if (subscriptions.length > 0) return;
+    subscriptions = [
+      nativeEvents.addListener("TeamClawMqttMessage", (event) => {
+        const payload = event as { topic?: string; payload?: number[] };
+        if (!payload.topic || !Array.isArray(payload.payload)) return;
+        const message = {
+          topic: payload.topic,
+          payload: new Uint8Array(payload.payload),
+        };
+        for (const handler of messageHandlers) {
+          handler(message);
+        }
+      }),
+      nativeEvents.addListener("TeamClawMqttConnectionState", (event) => {
+        const payload = event as {
+          state?: "connecting" | "connected" | "disconnected";
+        };
+        if (
+          payload.state !== "connecting" &&
+          payload.state !== "connected" &&
+          payload.state !== "disconnected"
+        ) {
+          return;
+        }
+        connected = payload.state === "connected";
+        relayConnectionState(payload.state);
+      }),
+    ];
+  }
+
+  function removeEventSubscriptions() {
+    for (const subscription of subscriptions) {
+      subscription.remove();
+    }
+    subscriptions = [];
+  }
+
+  return {
+    async connect(args) {
+      if (connected) {
+        throw new Error("MQTT client is already connected");
+      }
+      ensureEventSubscriptions();
+      relayConnectionState("connecting");
+      const endpoint = parseNativeUrl(args.url);
+      await nativeModule.connect({
+        ...endpoint,
+        username: toNativeString(args.options?.username),
+        password: toNativeString(args.options?.password),
+        clientId: args.options?.clientId,
+        keepalive: args.options?.keepalive,
+        connectTimeout: args.options?.connectTimeout,
+      });
+      connected = true;
+    },
+    async subscribe(topic) {
+      if (!connected) {
+        throw new Error("MQTT client is not connected");
+      }
+      await nativeModule.subscribe(topic);
+    },
+    async publish(topic, payload, retain = false) {
+      if (!connected) {
+        throw new Error("MQTT client is not connected");
+      }
+      await nativeModule.publish(topic, Array.from(payload), retain);
+    },
+    async disconnect() {
+      if (!connected) {
+        removeEventSubscriptions();
+        relayConnectionState("disconnected");
+        return;
+      }
+      connected = false;
+      await nativeModule.disconnect();
+      removeEventSubscriptions();
+      relayConnectionState("disconnected");
+    },
+    onMessage(handler) {
+      messageHandlers.add(handler);
+
+      return () => {
+        messageHandlers.delete(handler);
+      };
+    },
+    onConnectionState(handler) {
+      connectionStateHandlers.add(handler);
+
+      return () => {
+        connectionStateHandlers.delete(handler);
+      };
+    },
+  };
+}
+
 export function createExpoMqttAdapter(deps: ExpoMqttAdapterDeps = {}): ExpoMqttAdapter {
+  if (!deps.createClient) {
+    const defaultNativeDeps = getDefaultNativeAdapterDeps();
+    const nativeModule = deps.nativeModule ?? defaultNativeDeps?.nativeModule ?? null;
+    const nativeEvents = deps.nativeEvents ?? defaultNativeDeps?.nativeEvents ?? null;
+    if (nativeModule && nativeEvents) {
+      return createNativeMqttAdapter(nativeModule, nativeEvents);
+    }
+  }
+
   const createClient = deps.createClient ?? defaultCreateClient;
   let client: ExpoMqttClient | null = null;
   const messageHandlers = new Set<(message: ExpoMqttMessage) => void>();
