@@ -1797,4 +1797,29 @@ mod tests {
         // Second drain returns empty.
         assert!(mgr.drain_evicted().is_empty());
     }
+
+    #[tokio::test]
+    async fn evict_idle_skips_runtimes_with_checked_out_event_rx() {
+        // Mid-turn safety: a runtime whose event_rx has been taken (i.e.
+        // a gateway turn is in flight) must not be evicted even if its
+        // last_active_at is stale.
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-mid-turn");
+        mgr.get_handle_mut("rt-mid-turn").unwrap().last_active_at = 0;
+        // Simulate a checked-out event_rx by taking it directly.
+        let _rx = mgr
+            .get_handle_mut("rt-mid-turn")
+            .unwrap()
+            .event_rx
+            .take()
+            .expect("event_rx present");
+        let evicted = mgr.evict_idle(60).await;
+        assert!(
+            evicted.is_empty(),
+            "runtime mid-turn (event_rx None) must not be evicted"
+        );
+        assert!(
+            mgr.get_handle("rt-mid-turn").is_some(),
+            "handle must remain in map"
+        );
+    }
 }
