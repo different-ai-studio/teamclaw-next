@@ -51,6 +51,17 @@ async function expandPath(path: string): Promise<string> {
   return path;
 }
 
+async function ensureWorkspaceDirectory(path: string): Promise<void> {
+  if (!isTauri()) return
+
+  try {
+    const { mkdir } = await import("@tauri-apps/plugin-fs")
+    await mkdir(path, { recursive: true })
+  } catch (error) {
+    console.warn("[Workspace] Failed to ensure workspace directory:", error)
+  }
+}
+
 export interface FileNode {
   name: string;
   path: string;
@@ -289,6 +300,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // Expand ~ to home directory
     const expandedPath = await expandPath(path);
     console.log("[Workspace] Setting workspace:", path, "->", expandedPath);
+    await ensureWorkspaceDirectory(expandedPath);
 
     // If selecting the same workspace, just refresh the file tree — don't reset agent state
     const currentPath = get().workspacePath;

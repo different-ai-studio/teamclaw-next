@@ -45,6 +45,19 @@ describe('ActorRow', () => {
     expect(h.onSelect).toHaveBeenCalledWith(baseActor)
   })
 
+  it('labels agent actors as Agent', () => {
+    setup({
+      actor: {
+        ...baseActor,
+        actor_type: 'agent',
+        display_name: 'Macmini',
+      },
+    })
+
+    expect(screen.getByText('Agent')).toBeInTheDocument()
+    expect(screen.queryByText('AI')).not.toBeInTheDocument()
+  })
+
   it('right click → View profile → onViewDetail', async () => {
     const h = setup()
     openMenu()

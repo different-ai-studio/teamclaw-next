@@ -14,10 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { isTauri } from '@/lib/utils'
-
-
-// Default workspace for web mode
-const DEFAULT_WEB_WORKSPACE = '~/teamclaw-workspace'
+import { DEFAULT_WORKSPACE_PATH } from '@/lib/build-config'
 
 function BrandPill() {
   return (
@@ -45,7 +42,7 @@ export function WorkspacePrompt() {
   const setWorkspace = useWorkspaceStore(s => s.setWorkspace)
   const isLoadingWorkspace = useWorkspaceStore(s => s.isLoadingWorkspace)
   const [isWebMode, setIsWebMode] = useState(false)
-  const [customPath, setCustomPath] = useState(DEFAULT_WEB_WORKSPACE)
+  const [customPath, setCustomPath] = useState(DEFAULT_WORKSPACE_PATH)
 
   useEffect(() => {
     const webMode = !isTauri()
@@ -55,7 +52,7 @@ export function WorkspacePrompt() {
     if (webMode) {
       // Expand ~ to actual home directory path for the server
       // The server will interpret this path
-      setWorkspace(DEFAULT_WEB_WORKSPACE)
+      setWorkspace(DEFAULT_WORKSPACE_PATH)
     }
   }, [setWorkspace])
 

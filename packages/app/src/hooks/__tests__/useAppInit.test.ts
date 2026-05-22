@@ -196,8 +196,18 @@ describe('useWorkspaceInit', () => {
     const { result } = renderHook(() => useWorkspaceInit())
 
     await waitFor(() => {
-      expect(mockSetWorkspace).not.toHaveBeenCalled()
+      expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
       expect(localStorage.getItem('teamclaw-workspace-path')).toBeNull()
+      expect(result.current.initialWorkspaceResolved).toBe(true)
+    })
+  })
+
+  it('uses the default workspace when no saved workspace exists', async () => {
+    const { useWorkspaceInit } = await import('@/hooks/useAppInit')
+    const { result } = renderHook(() => useWorkspaceInit())
+
+    await waitFor(() => {
+      expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
   })

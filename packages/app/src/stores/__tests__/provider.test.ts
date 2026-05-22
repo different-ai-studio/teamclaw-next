@@ -58,7 +58,7 @@ vi.mock('@/stores/runtime-state-store', () => ({
   },
 }))
 
-vi.mock('@/lib/teamclaw-config', () => ({
+vi.mock('@/lib/opencode/config', () => ({
   addCustomProviderToConfig: vi.fn(),
   updateCustomProviderConfig: vi.fn(),
   getCustomProviderIds: mocks.getCustomProviderIds,
@@ -76,7 +76,7 @@ describe('provider store initAll', () => {
     mocks.getCustomProviderConfig.mockReset()
   })
 
-  it('loads available models and current selection from daemon runtime info', async () => {
+  it('ignores daemon runtime models when initializing OpenCode model settings', async () => {
     mocks.getCustomProviderIds.mockResolvedValue([])
     mocks.runtimeById = {
       'runtime-1': {
@@ -95,22 +95,14 @@ describe('provider store initAll', () => {
     await useProviderStore.getState().initAll()
 
     const state = useProviderStore.getState()
-    expect(state.models).toEqual([
-      {
-        provider: 'claude-code',
-        id: 'claude-sonnet-4-6',
-        name: 'Claude Sonnet 4.6',
-      },
-    ])
-    expect(state.currentModelKey).toBe('claude-code/claude-sonnet-4-6')
-    expect(getSelectedModelOption(state)).toMatchObject({
-      provider: 'claude-code',
-      id: 'claude-sonnet-4-6',
-      name: 'Claude Sonnet 4.6',
-    })
+    expect(state.models).toEqual([])
+    expect(state.configuredProviders).toEqual([])
+    expect(state.providers).toEqual([])
+    expect(state.currentModelKey).toBeNull()
+    expect(getSelectedModelOption(state)).toBeNull()
   })
 
-  it('keeps an explicit selected model when daemon runtime info reports a different current model', async () => {
+  it('keeps an explicit selected OpenCode model when daemon runtime info reports a different current model', async () => {
     mocks.getCustomProviderIds.mockResolvedValue([])
     mocks.runtimeById = {
       'runtime-1': {
@@ -126,11 +118,23 @@ describe('provider store initAll', () => {
     }
 
     const { useProviderStore } = await import('../provider')
-    await useProviderStore.getState().selectModel('claude-code', 'claude-opus-4-7', 'Claude Opus 4.7')
+    useProviderStore.setState({
+      configuredProviders: [
+        {
+          id: 'opencode',
+          name: 'OpenCode',
+          models: [
+            { id: 'opencode/qwen3.6-plus-free', name: 'OpenCode Zen/Qwen3.6 Plus Free' },
+            { id: 'opencode/big-pickle', name: 'Big Pickle' },
+          ],
+        },
+      ],
+      currentModelKey: 'opencode/opencode/big-pickle',
+    })
 
     await useProviderStore.getState().initAll()
 
-    expect(useProviderStore.getState().currentModelKey).toBe('claude-code/claude-opus-4-7')
+    expect(useProviderStore.getState().currentModelKey).toBe('opencode/opencode/big-pickle')
   })
 
   it('does not load the old static model list when daemon has no runtime info', async () => {
@@ -181,7 +185,7 @@ describe('provider store initAll', () => {
     })
   })
 
-  it('does not replace a saved runtime backend model with a custom provider while daemon models are still loading', async () => {
+  it('falls back to a custom provider when a saved daemon runtime model is not in OpenCode settings', async () => {
     mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
     mocks.getCustomProviderConfig.mockResolvedValue({
       name: 'Scnet',
@@ -196,10 +200,10 @@ describe('provider store initAll', () => {
 
     await useProviderStore.getState().initAll()
 
-    expect(useProviderStore.getState().currentModelKey).toBe('opencode/opencode/qwen3.6-plus-free')
+    expect(useProviderStore.getState().currentModelKey).toBe('scnet/minimax-m2.5')
   })
 
-  it('recovers from a custom-provider fallback once daemon runtime info is available', async () => {
+  it('does not recover to daemon runtime info from a custom-provider selection', async () => {
     mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
     mocks.getCustomProviderConfig.mockResolvedValue({
       name: 'Scnet',
@@ -226,7 +230,7 @@ describe('provider store initAll', () => {
 
     await useProviderStore.getState().initAll()
 
-    expect(useProviderStore.getState().currentModelKey).toBe('opencode/opencode/qwen3.6-plus-free')
+    expect(useProviderStore.getState().currentModelKey).toBe('scnet/minimax-m2.5')
   })
 
   it('filters model options to the selected backend during a session', async () => {

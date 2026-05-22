@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
-import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb } from "lucide-react"
+import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb, ChevronDown, Mail, CalendarDays, LogOut, Users } from "lucide-react"
 import { isWorkspaceUIVariant } from "@/lib/ui-variant"
 
 import { useSessionStore } from "@/stores/session"
@@ -9,6 +9,8 @@ import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useCronStore } from "@/stores/cron"
 import { useTeamModeStore } from "@/stores/team-mode"
+import { useAuthStore } from "@/stores/auth-store"
+import { useCurrentTeamStore } from "@/stores/current-team"
 import {
   Sidebar,
   SidebarContent,
@@ -20,7 +22,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { cn, isTauri } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/date-format"
 import { Button } from "@/components/ui/button"
 import { AnimatedClock } from "@/components/ui/animated-clock"
@@ -30,6 +32,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -333,65 +337,92 @@ function DefaultIdeasHeaderControls() {
   )
 }
 
-// Workspace selector button for sidebar footer
-function WorkspaceSelectorButton() {
-  const { t } = useTranslation()
-  const workspaceName = useWorkspaceStore(s => s.workspaceName)
-  const isLoadingWorkspace = useWorkspaceStore(s => s.isLoadingWorkspace)
-  const setWorkspace = useWorkspaceStore(s => s.setWorkspace)
-  const [isSelecting, setIsSelecting] = React.useState(false)
+function SidebarUserAccountMenu() {
+  const { t, i18n } = useTranslation()
+  const authSession = useAuthStore((s) => s.session)
+  const signOut = useAuthStore((s) => s.signOut)
+  const currentTeam = useCurrentTeamStore((s) => s.team)
+  const currentMember = useCurrentTeamStore((s) => s.currentMember)
 
-  const handleOpenFolder = async () => {
-    if (!isTauri()) {
-      console.log('[Web Mode] Folder dialog not available')
-      return
-    }
-    
-    setIsSelecting(true)
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog')
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: t('workspace.selectWorkspace', 'Select Workspace'),
-      })
-      
-      if (selected && typeof selected === 'string') {
-        await setWorkspace(selected)
-      }
-    } catch (error) {
-      console.error('Failed to open folder dialog:', error)
-    } finally {
-      setIsSelecting(false)
-    }
-  }
+  if (!authSession) return null
 
-  const isLoading = isLoadingWorkspace || isSelecting
-
-  const buttonContent = (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 px-2 text-muted-foreground hover:text-foreground max-w-[180px]"
-      disabled={isLoading}
-      onClick={handleOpenFolder}
-    >
-      {isLoading && <Loader2 className="mr-1.5 h-4 w-4 animate-spin shrink-0" />}
-      <span className="truncate text-xs" data-testid="workspace-name">
-        {workspaceName || t('workspace.selectWorkspace', 'Select Workspace')}
-      </span>
-    </Button>
-  )
+  const meta = authSession.user.user_metadata as Record<string, unknown> | undefined
+  const email = authSession.user.email || ""
+  const fallbackName =
+    (typeof meta?.full_name === 'string' && meta.full_name) ||
+    (typeof meta?.name === 'string' && meta.name) ||
+    (email ? email.split("@")[0] : "") ||
+    t("common.user", "User")
+  const userName = currentMember?.displayName || fallbackName
+  const joinedAt = (() => {
+    const value = currentMember?.joinedAt
+    if (!value) return t("common.notAvailable", "Not available")
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return t("common.notAvailable", "Not available")
+    return new Intl.DateTimeFormat(i18n?.language || undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(date)
+  })()
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {buttonContent}
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        <p>{workspaceName ? t('sidebar.currentWorkspace', 'Current: {{path}}', { path: workspaceName }) : t('workspace.selectWorkspace', 'Select Workspace')}</p>
-      </TooltipContent>
-    </Tooltip>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 min-w-0 max-w-[150px] gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+          data-testid="sidebar-user-menu-trigger"
+        >
+          <span className="truncate">{userName}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top" className="w-72 p-2">
+        <DropdownMenuLabel className="px-2 py-1">
+          <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
+          {currentMember?.role && (
+            <div className="mt-0.5 font-mono text-[11px] font-normal text-muted-foreground">
+              {currentMember.role}
+            </div>
+          )}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <div className="space-y-1 px-2 py-1.5 text-[12px]">
+          <div className="flex items-start gap-2">
+            <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-faint">{t("auth.email", "Email")}</div>
+              <div className="truncate font-mono text-[11px] text-foreground">
+                {email || t("common.notAvailable", "Not available")}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-faint">{t("settings.team.teamName", "Team name")}</div>
+              <div className="truncate text-foreground">
+                {currentTeam?.name || t("common.notAvailable", "Not available")}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-faint">{t("settings.team.joinedAt", "Joined")}</div>
+              <div className="font-mono text-[11px] text-foreground">{joinedAt}</div>
+            </div>
+          </div>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => { void signOut() }} variant="destructive">
+          <LogOut className="mr-2 h-4 w-4" />
+          {t('common.signOut', 'Sign out')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -802,7 +833,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <Settings className="h-3.5 w-3.5 shrink-0" />
                 {t('common.settings', 'Settings')}
               </Button>
-              <WorkspaceSelectorButton />
+              <SidebarUserAccountMenu />
             </div>
           )}
 

@@ -10,6 +10,9 @@ import { SkillsSection } from './SkillsSection'
 import { RolesSection } from './RolesSection'
 import { RolesSkillsSection } from './RolesSkillsSection'
 import { ChannelsSection } from './ChannelsSection'
+import { DaemonGeneralSection } from './DaemonGeneralSection'
+import { DaemonWorkspacesSection } from './DaemonWorkspacesSection'
+import { DaemonRuntimesSection } from './DaemonRuntimesSection'
 import { DependenciesSection } from './DependenciesSection'
 import { TeamSection } from './TeamSection'
 import { CronSection } from './CronSection'
@@ -32,6 +35,9 @@ export const SETTINGS_SECTION_COMPONENTS: Record<SettingsSection, React.Componen
   mcp: MCPSection,
   channels: ChannelsSection,
   automation: CronSection,
+  daemonGeneral: DaemonGeneralSection,
+  daemonWorkspaces: DaemonWorkspacesSection,
+  daemonRuntimes: DaemonRuntimesSection,
   team: TeamSection,
   envVars: EnvVarsSection,
   skills: SkillsSection,

@@ -63,7 +63,7 @@ export function ActorRow({
           </div>
           <span className="min-w-0 flex-1 truncate">{actor.display_name}</span>
           {isAgent && (
-            <span className="shrink-0 font-mono text-[9px] font-semibold tracking-wider text-coral">AI</span>
+            <span className="shrink-0 font-mono text-[9px] font-semibold tracking-wider text-coral">Agent</span>
           )}
         </button>
       </ContextMenuTrigger>
