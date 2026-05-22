@@ -6,8 +6,6 @@ import { workspaceScopedKey } from '@/lib/storage'
 import { sessionFlowLog } from '@/lib/session-flow-log'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { getOpenCodeClient } from '@/lib/opencode/sdk-client'
-import { AgentType, type RuntimeInfo } from '@/lib/proto/amux_pb'
-import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import {
   type CustomProviderConfig,
   addCustomProviderToConfig,
@@ -16,25 +14,12 @@ import {
   removeCustomProviderFromConfig,
   getCustomProviderIds,
   providerApiKeyName,
-} from '@/lib/teamclaw-config'
+} from '@/lib/opencode/config'
 
 const SELECTED_MODEL_BASE = `${appShortName}-selected-model`
-const RUNTIME_PROVIDER_IDS = new Set(['claude-code', 'opencode', 'codex'])
 
 function selectedModelStorageKey(): string {
   return workspaceScopedKey(SELECTED_MODEL_BASE, useWorkspaceStore.getState().workspacePath)
-}
-
-function modelKeyProviderId(key: string | null | undefined): string | null {
-  if (!key) return null
-  const idx = key.indexOf('/')
-  if (idx < 0) return null
-  return key.slice(0, idx)
-}
-
-function isRuntimeModelKey(key: string | null | undefined): boolean {
-  const providerId = modelKeyProviderId(key)
-  return !!providerId && RUNTIME_PROVIDER_IDS.has(providerId)
 }
 
 // Read the saved model, preferring the workspace-scoped key but falling back
@@ -135,59 +120,6 @@ function mergeProviders(...groups: ProviderEntry[][]): ProviderEntry[] {
     if (a.configured !== b.configured) return a.configured ? -1 : 1
     return a.name.localeCompare(b.name)
   })
-}
-
-function providerIdForAgentType(agentType: AgentType | number): string | null {
-  switch (agentType) {
-    case AgentType.CLAUDE_CODE:
-      return 'claude-code'
-    case AgentType.OPENCODE:
-      return 'opencode'
-    case AgentType.CODEX:
-      return 'codex'
-    default:
-      return null
-  }
-}
-
-function configuredProvidersFromRuntimeInfo(infos: RuntimeInfo[]): ConfiguredProvider[] {
-  const byProvider = new Map<string, ConfiguredProvider>()
-
-  for (const info of infos) {
-    const providerId = providerIdForAgentType(info.agentType)
-    if (!providerId || info.availableModels.length === 0) continue
-
-    const provider = byProvider.get(providerId) ?? {
-      id: providerId,
-      name: providerId,
-      models: [],
-    }
-    const existingIds = new Set(provider.models.map((model) => model.id))
-    for (const model of info.availableModels) {
-      if (existingIds.has(model.id)) continue
-      provider.models.push({
-        id: model.id,
-        name: model.displayName || model.id,
-      })
-      existingIds.add(model.id)
-    }
-    byProvider.set(providerId, provider)
-  }
-
-  return Array.from(byProvider.values())
-}
-
-function selectedModelFromRuntimeInfo(infos: RuntimeInfo[], models: ModelOption[]): string | null {
-  for (const info of infos) {
-    if (!info.currentModel) continue
-    const providerId = providerIdForAgentType(info.agentType)
-    if (!providerId) continue
-    const key = `${providerId}/${info.currentModel}`
-    if (models.find((model) => `${model.provider}/${model.id}` === key)) {
-      return key
-    }
-  }
-  return null
 }
 
 export interface ProviderState {
@@ -613,8 +545,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Select a model for the chat UI. Runtime config writes are owned by the
-  // OpenCode settings page or, for chat, the amux daemon integration.
+  // Select a model for the OpenCode-backed settings/chat UI.
   selectModel: async (providerId: string, modelId: string, _modelName: string) => {
     const modelKey = `${providerId}/${modelId}`
     set({ currentModelKey: modelKey })
@@ -625,9 +556,6 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Initialize all data at once
   initAll: async () => {
-    const runtimeInfos = Object.values(useRuntimeStateStore.getState().byRuntimeId).map((entry) => entry.info)
-    const daemonConfiguredProviders = configuredProvidersFromRuntimeInfo(runtimeInfos)
-
     const workspacePath = useWorkspaceStore.getState().workspacePath
     const { _disconnectedIds } = get()
     const customProviderIds = workspacePath ? await getCustomProviderIds(workspacePath) : []
@@ -652,17 +580,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       : []
 
     const configuredProviders = mergeConfiguredProviders(
-      daemonConfiguredProviders,
       get().configuredProviders,
       customConfiguredProviders,
     )
     const models = flattenConfiguredProviders(configuredProviders)
     const providers = mergeProviders(
-      daemonConfiguredProviders.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        configured: true,
-      })),
       get().providers,
       customConfiguredProviders.map((provider) => ({
         id: provider.id,
@@ -680,21 +602,12 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       customProviderIds,
     })
 
-    // After loading, resolve selected model. Keep an explicit UI/user choice
-    // when it is still valid; RuntimeInfo is global across runtimes and may
-    // include older sessions, so it cannot safely override the current picker.
+    // After loading, resolve the selected model from OpenCode settings only.
     const { currentModelKey } = get()
     const availableModels = get().models
-    const runtimeKey = selectedModelFromRuntimeInfo(runtimeInfos, availableModels)
 
-    let resolvedKey =
-      currentModelKey && !isRuntimeModelKey(currentModelKey) && runtimeKey
-        ? runtimeKey
-        : currentModelKey
-    let resolvedSource =
-      currentModelKey && !isRuntimeModelKey(currentModelKey) && runtimeKey
-        ? 'runtimeInfoRecoveredFromCustom'
-        : resolvedKey ? 'currentModelKey' : 'none'
+    let resolvedKey = currentModelKey
+    let resolvedSource = resolvedKey ? 'currentModelKey' : 'none'
 
     if (!resolvedKey || !availableModels.find((m) => `${m.provider}/${m.id}` === resolvedKey)) {
       // Try localStorage fallback (workspace-scoped, with legacy fallback)
@@ -702,21 +615,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       if (saved && availableModels.find((m) => `${m.provider}/${m.id}` === saved)) {
         resolvedKey = saved
         resolvedSource = 'localStorage'
-      } else if (!currentModelKey && isRuntimeModelKey(saved)) {
-        resolvedKey = saved
-        resolvedSource = 'pendingRuntimeLocalStorage'
-      } else if (currentModelKey && isRuntimeModelKey(currentModelKey)) {
-        resolvedKey = currentModelKey
-        resolvedSource = 'pendingRuntimeCurrentModelKey'
+      } else if (availableModels.length > 0) {
+        // Last resort: first available OpenCode-configured model.
+        resolvedKey = `${availableModels[0].provider}/${availableModels[0].id}`
+        resolvedSource = 'firstAvailable'
       } else {
-        if (runtimeKey) {
-          resolvedKey = runtimeKey
-          resolvedSource = 'runtimeInfo'
-        } else if (availableModels.length > 0) {
-          // Last resort: first available model
-          resolvedKey = `${availableModels[0].provider}/${availableModels[0].id}`
-          resolvedSource = 'firstAvailable'
-        }
+        resolvedKey = null
+        resolvedSource = 'none'
       }
     }
 
@@ -725,17 +630,14 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       resolvedKey,
       resolvedSource,
       availableModelKeys: availableModels.map((model) => `${model.provider}/${model.id}`),
-      runtimeCurrentModels: runtimeInfos.map((info) => ({
-        agentType: info.agentType,
-        currentModel: info.currentModel,
-        availableModelIds: info.availableModels.map((model) => model.id),
-      })),
     })
 
     if (resolvedKey) {
       set({ currentModelKey: resolvedKey })
       // Sync workspace-scoped localStorage to be consistent
       localStorage.setItem(selectedModelStorageKey(), resolvedKey)
+    } else {
+      set({ currentModelKey: null })
     }
   },
 }))

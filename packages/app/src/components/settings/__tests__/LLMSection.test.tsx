@@ -22,11 +22,15 @@ const mocks = vi.hoisted(() => {
     disconnectProvider: vi.fn(),
     initAll: vi.fn(),
   }
-  const workspaceState = { workspacePath: '/test', openCodeReady: true, setOpenCodeBootstrapped: vi.fn() }
+  const workspaceState = { workspacePath: '/test', openCodeReady: true, setOpenCodeBootstrapped: vi.fn(), setWorkspace: vi.fn() }
+  const teamModeState = { teamMode: false, teamModelConfig: null as null | { model: string; modelName: string; baseUrl: string }, devUnlocked: false, teamModelOptions: [] as Array<{ id: string; name: string }>, switchTeamModel: vi.fn() }
   return {
     providerState,
     workspaceState,
+    teamModeState,
     shellOpen: vi.fn(),
+    dialogOpen: vi.fn(),
+    initOpenCodeClient: vi.fn(),
     restartOpencode: vi.fn(),
   }
 })
@@ -50,13 +54,13 @@ vi.mock('@/stores/workspace', () => ({
 }))
 vi.mock('@/stores/team-mode', () => ({
   useTeamModeStore: vi.fn((sel: (s: any) => any) => {
-    const state = { teamMode: false, teamModelConfig: null, devUnlocked: false, teamModelOptions: [], switchTeamModel: vi.fn() }
-    return sel(state)
+    return sel(mocks.teamModeState)
   }),
 }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: mocks.shellOpen }))
-vi.mock('@/lib/opencode/sdk-client', () => ({ initOpenCodeClient: vi.fn() }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.dialogOpen }))
+vi.mock('@/lib/opencode/sdk-client', () => ({ initOpenCodeClient: mocks.initOpenCodeClient }))
 vi.mock('@/lib/opencode/restart', () => ({ restartOpencode: mocks.restartOpencode }))
 vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' ') }))
 vi.mock('../shared', () => ({
@@ -76,11 +80,49 @@ describe('LLMSection', () => {
     mocks.providerState.authMethods = {}
     mocks.workspaceState.workspacePath = '/test'
     mocks.workspaceState.openCodeReady = true
+    mocks.workspaceState.setWorkspace.mockReset()
+    mocks.teamModeState.teamMode = false
+    mocks.teamModeState.teamModelConfig = null
+    mocks.teamModeState.devUnlocked = false
+    mocks.teamModeState.teamModelOptions = []
   })
 
   it('renders the LLM Model title', () => {
     render(<LLMSection />)
     expect(screen.getByText('LLM Model')).toBeTruthy()
+  })
+
+  it('shows the current workspace path', () => {
+    render(<LLMSection />)
+    expect(screen.getByText('Workspace Path')).toBeTruthy()
+    expect(screen.getByText('/test')).toBeTruthy()
+  })
+
+  it('switches workspace from the workspace path card', async () => {
+    mocks.dialogOpen.mockResolvedValueOnce('/next-workspace')
+
+    render(<LLMSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'Switch Workspace' }))
+
+    await waitFor(() => {
+      expect(mocks.workspaceState.setWorkspace).toHaveBeenCalledWith('/next-workspace')
+    })
+  })
+
+  it('connects directly to the current OpenCode server on port 13141 without waiting for desktop runtime readiness', async () => {
+    mocks.workspaceState.openCodeReady = false
+
+    render(<LLMSection />)
+
+    await waitFor(() => {
+      expect(mocks.initOpenCodeClient).toHaveBeenCalledWith({
+        baseUrl: 'http://127.0.0.1:13141',
+        workspacePath: '/test',
+      })
+    })
+    expect(mocks.providerState.refreshProviders).toHaveBeenCalled()
+    expect(mocks.providerState.refreshConfiguredProviders).toHaveBeenCalled()
+    expect(mocks.providerState.refreshAuthMethods).toHaveBeenCalled()
   })
 
   it('shows no providers message when empty', () => {

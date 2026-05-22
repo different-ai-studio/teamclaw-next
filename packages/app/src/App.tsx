@@ -18,15 +18,11 @@ import {
   ChevronLeft,
   X,
   Loader2,
-  ChevronDown,
   RotateCw,
   MessageSquarePlus,
   AppWindow,
   Users,
   TerminalSquare,
-  LogOut,
-  Mail,
-  CalendarDays,
 } from "lucide-react";
 import { FileContentViewer } from "@/components/FileEditor";
 import {
@@ -138,15 +134,6 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@/components/ui/sidebar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
 // ── Webview UI micro-store (find bar + zoom levels) ────────────────────────
 const useWebviewUIStore = create<{
   showFind: boolean
@@ -557,7 +544,7 @@ function ResizeHandle({
 
 // Inner component to access sidebar context
 function AppContent() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   // Session store - individual selectors. Note: we subscribe to the
   // *result* of getActiveSession() so re-renders fire when currentSessionId
@@ -582,9 +569,6 @@ function AppContent() {
   const currentView = useUIStore((s) => s.currentView);
   const closeSettings = useUIStore((s) => s.closeSettings);
   const authSession = useAuthStore((s) => s.session);
-  const signOut = useAuthStore((s) => s.signOut);
-  const currentTeam = useCurrentTeamStore((s) => s.team);
-  const currentMember = useCurrentTeamStore((s) => s.currentMember);
   const loadCurrentTeam = useCurrentTeamStore((s) => s.load);
   const mainContentLayout = useUIStore((s) => s.mainContentLayout);
   const openSettings = useUIStore((s) => s.openSettings);
@@ -609,17 +593,6 @@ function AppContent() {
   useEffect(() => {
     void loadCurrentTeam();
   }, [authSession?.user.id, loadCurrentTeam]);
-
-  const formatJoinedAt = (value: string | null | undefined) => {
-    if (!value) return t("common.notAvailable", "Not available");
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return t("common.notAvailable", "Not available");
-    return new Intl.DateTimeFormat(i18n.language || undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }).format(date);
-  };
 
   // In workspace mode, SessionListColumn always sits to the left of SidebarInset
   // and renders its own traffic-light + collapse strip when the sidebar is
@@ -1305,75 +1278,6 @@ function AppContent() {
               <MessageSquarePlus className="h-4 w-4" />
               {t('settings.feedback.title', 'Send Feedback')}
             </Button>
-            {authSession && (() => {
-              const meta = authSession.user.user_metadata as Record<string, unknown> | undefined;
-              const email = authSession.user.email || "";
-              const fallbackName =
-                (typeof meta?.full_name === 'string' && meta.full_name) ||
-                (typeof meta?.name === 'string' && meta.name) ||
-                (email ? email.split("@")[0] : "") ||
-                t("common.user", "User");
-              const userName = currentMember?.displayName || fallbackName;
-              return (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-1 gap-1.5 text-muted-foreground hover:text-foreground"
-                    >
-                      <span className="max-w-[140px] truncate">{userName}</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-72 p-2">
-                    <DropdownMenuLabel className="px-2 py-1">
-                      <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
-                      {currentMember?.role && (
-                        <div className="mt-0.5 font-mono text-[11px] font-normal text-muted-foreground">
-                          {currentMember.role}
-                        </div>
-                      )}
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <div className="space-y-1 px-2 py-1.5 text-[12px]">
-                      <div className="flex items-start gap-2">
-                        <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0">
-                          <div className="text-faint">{t("auth.email", "Email")}</div>
-                          <div className="truncate font-mono text-[11px] text-foreground">
-                            {email || t("common.notAvailable", "Not available")}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0">
-                          <div className="text-faint">{t("settings.team.teamName", "Team name")}</div>
-                          <div className="truncate text-foreground">
-                            {currentTeam?.name || t("common.notAvailable", "Not available")}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0">
-                          <div className="text-faint">{t("settings.team.joinedAt", "Joined")}</div>
-                          <div className="font-mono text-[11px] text-foreground">
-                            {formatJoinedAt(currentMember?.joinedAt)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => { void signOut(); }} variant="destructive">
-                      <LogOut className="mr-2 h-4 w-4" />
-                      {t('common.signOut', 'Sign out')}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              );
-            })()}
           </header>
           <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
           <div className="flex-1 overflow-hidden">

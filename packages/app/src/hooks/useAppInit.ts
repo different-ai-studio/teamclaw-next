@@ -32,7 +32,7 @@ import {
   waitForOpenCodeBootstrapped,
 } from "@/lib/opencode/preloader";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
-import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
+import { appShortName, DEFAULT_WORKSPACE_PATH, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
 
 export const SKILLS_CHANGED_EVENT = "skills-files-changed";
 
@@ -82,6 +82,7 @@ export function useWorkspaceInit() {
         } else {
           try {
             const savedPath = localStorage.getItem(`${appShortName}-workspace-path`);
+            let restored = false;
             if (savedPath) {
               let canRestore = true;
 
@@ -97,13 +98,20 @@ export function useWorkspaceInit() {
               if (canRestore) {
                 console.log("[App] Restoring workspace from last session:", savedPath);
                 await setWorkspace(savedPath);
+                restored = true;
               } else {
                 console.log("[App] Saved workspace no longer exists, clearing restore path:", savedPath);
                 localStorage.removeItem(`${appShortName}-workspace-path`);
               }
             }
+
+            if (!restored) {
+              console.log("[App] Using default workspace:", DEFAULT_WORKSPACE_PATH);
+              await setWorkspace(DEFAULT_WORKSPACE_PATH);
+            }
           } catch {
-            /* ignore storage errors */
+            console.log("[App] Falling back to default workspace:", DEFAULT_WORKSPACE_PATH);
+            await setWorkspace(DEFAULT_WORKSPACE_PATH);
           }
         }
       }

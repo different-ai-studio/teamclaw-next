@@ -114,6 +114,7 @@ function deriveShortName(name: string): string {
 }
 
 export const appShortName: string = buildConfig.app.shortName ?? deriveShortName(buildConfig.app.name)
+export const DEFAULT_WORKSPACE_PATH = `~/${buildConfig.app.name}`
 export const TEAMCLAW_DIR = `.${appShortName}`
 export const TEAM_REPO_DIR = `${appShortName}-team`
 export const CONFIG_FILE_NAME = `${appShortName}.json`

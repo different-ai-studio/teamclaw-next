@@ -22,6 +22,9 @@ import {
   Loader2,
   Database,
   Server,
+  FolderOpen,
+  Activity,
+  Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -50,19 +53,26 @@ const primarySections: Section[] = [
   { id: 'general', label: 'General', labelKey: 'settings.nav.general', icon: Settings2 },
   { id: 'server', label: 'Server', labelKey: 'settings.nav.server', icon: Server },
   { id: 'shortcuts', label: 'Shortcuts', labelKey: 'settings.nav.shortcuts', icon: Bookmark },
-  { id: 'channels', label: 'Channels', labelKey: 'settings.nav.channels', icon: MessageSquare },
-  { id: 'automation', label: 'Automation', labelKey: 'settings.nav.automation', icon: Clock },
   { id: 'team', label: 'Team', labelKey: 'settings.nav.team', icon: Users },
   { id: 'tokenUsage', label: 'Token Usage', labelKey: 'settings.nav.tokenUsage', icon: Coins },
   { id: 'voice', label: 'Voice', labelKey: 'settings.nav.voice', icon: Mic },
-  { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
   { id: 'privacy', label: 'Privacy & Telemetry', labelKey: 'settings.nav.privacy', icon: Shield },
   { id: 'cache', label: 'Local Cache', labelKey: 'settings.nav.cache', icon: Database },
 ]
 
-// Advanced sections shown as tabs inside the Advanced view
-const advancedSections: Section[] = [
+// Daemon-owned sections shown under the Daemon group
+const daemonSections: Section[] = [
+  { id: 'daemonGeneral', label: 'General', labelKey: 'settings.nav.daemonGeneral', icon: Bot },
+  { id: 'daemonWorkspaces', label: 'Workspace', labelKey: 'settings.nav.daemonWorkspaces', icon: FolderOpen },
+  { id: 'daemonRuntimes', label: 'Runtimes', labelKey: 'settings.nav.daemonRuntimes', icon: Activity },
+  { id: 'automation', label: 'Automation', labelKey: 'settings.nav.automation', icon: Clock },
+  { id: 'channels', label: 'Channels', labelKey: 'settings.nav.channels', icon: MessageSquare },
+]
+
+// Local Agent sections shown under the Local Agent group
+const localAgentSections: Section[] = [
   { id: 'llm', label: 'LLM Model', labelKey: 'settings.nav.llm', icon: Brain },
+  { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
   { id: 'prompt', label: 'Prompt', labelKey: 'settings.nav.prompt', icon: MessageSquareText },
   { id: 'permissions', label: 'Permissions', labelKey: 'settings.nav.permissions', icon: Shield },
   { id: 'mcp', label: 'MCP', labelKey: 'settings.nav.mcp', icon: Plug },
@@ -126,25 +136,40 @@ export function Settings(_props?: SettingsProps) {
   const { t } = useTranslation()
   const settingsInitialSection = useUIStore(s => s.settingsInitialSection)
   const [activeView, setActiveView] = React.useState<SettingsSection>(settingsInitialSection ?? 'general')
-  const [advancedExpanded, setAdvancedExpanded] = React.useState(false)
+  const [daemonExpanded, setDaemonExpanded] = React.useState(false)
+  const [localAgentExpanded, setLocalAgentExpanded] = React.useState(false)
   const appVersion = useAppVersion()
   const teamMode = useTeamModeStore(s => s.teamMode)
 
   // Filter sections based on build config feature flags
-  const filteredPrimarySections = React.useMemo(() =>
-    primarySections.filter(s => s.id !== 'channels' || hasAnyChannel(buildConfig.features.channels)),
+  const filteredPrimarySections = primarySections
+  const filteredDaemonSections = React.useMemo(() =>
+    daemonSections.filter(s => s.id !== 'channels' || hasAnyChannel(buildConfig.features.channels)),
+    []
+  )
+  const filteredLocalAgentSections = React.useMemo(() =>
+    localAgentSections,
     []
   )
 
-  // Check if current view is an advanced section
-  const isAdvancedSection = advancedSections.some(s => s.id === activeView)
+  // Check if current view is a Daemon section
+  const isDaemonSection = filteredDaemonSections.some(s => s.id === activeView)
+  // Check if current view is a Local Agent section
+  const isLocalAgentSection = filteredLocalAgentSections.some(s => s.id === activeView)
 
-  // Auto-expand advanced when an advanced section is active
+  // Auto-expand Daemon when a nested section is active
   React.useEffect(() => {
-    if (isAdvancedSection) {
-      setAdvancedExpanded(true)
+    if (isDaemonSection) {
+      setDaemonExpanded(true)
     }
-  }, [isAdvancedSection])
+  }, [isDaemonSection])
+
+  // Auto-expand Local Agent when a nested section is active
+  React.useEffect(() => {
+    if (isLocalAgentSection) {
+      setLocalAgentExpanded(true)
+    }
+  }, [isLocalAgentSection])
 
   return (
     <div className="flex h-full bg-background text-foreground">
@@ -160,7 +185,8 @@ export function Settings(_props?: SettingsProps) {
                   key={section.id}
                   onClick={() => {
                     setActiveView(section.id)
-                    setAdvancedExpanded(false)
+                    setDaemonExpanded(false)
+                    setLocalAgentExpanded(false)
                   }}
                   className={cn(
                     'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
@@ -178,31 +204,77 @@ export function Settings(_props?: SettingsProps) {
             {/* Divider */}
             <div className="!my-2 mx-3 border-t border-border-soft" />
 
-            {/* Advanced category */}
+            {/* Daemon category */}
             <button
-              onClick={() => setAdvancedExpanded(!advancedExpanded)}
+              onClick={() => setDaemonExpanded(!daemonExpanded)}
               className={cn(
                 'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
-                (advancedExpanded || isAdvancedSection)
+                (daemonExpanded || isDaemonSection)
+                  ? 'bg-selected text-foreground font-semibold'
+                  : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
+              )}
+            >
+              <Server className={cn(
+                "h-4 w-4 transition-colors",
+                (daemonExpanded || isDaemonSection) ? 'text-foreground' : 'text-muted-foreground'
+              )} />
+              {t('settings.nav.daemon', 'Daemon')}
+              <ChevronDown className={cn(
+                "h-4 w-4 ml-auto transition-transform",
+                daemonExpanded ? "rotate-180" : ""
+              )} />
+            </button>
+
+            {/* Daemon sub-sections */}
+            {daemonExpanded && (
+              <div className="mt-1 space-y-0.5 pl-6" data-testid="daemon-subnav">
+                {filteredDaemonSections.map((section) => {
+                  const Icon = section.icon
+                  const isActive = activeView === section.id
+                  return (
+                    <button
+                      key={section.id}
+                      onClick={() => setActiveView(section.id)}
+                      className={cn(
+                        'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition-colors',
+                        isActive
+                          ? 'bg-selected text-foreground font-semibold'
+                          : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
+                      )}
+                    >
+                      <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
+                      <span>{t(section.labelKey, section.label)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Local Agent category */}
+            <button
+              onClick={() => setLocalAgentExpanded(!localAgentExpanded)}
+              className={cn(
+                'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
+                (localAgentExpanded || isLocalAgentSection)
                   ? 'bg-selected text-foreground font-semibold'
                   : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
               )}
             >
               <SlidersHorizontal className={cn(
                 "h-4 w-4 transition-colors",
-                (advancedExpanded || isAdvancedSection) ? 'text-foreground' : 'text-muted-foreground'
+                (localAgentExpanded || isLocalAgentSection) ? 'text-foreground' : 'text-muted-foreground'
               )} />
               {t('settings.nav.localAgent', 'Local Agent')}
               <ChevronDown className={cn(
                 "h-4 w-4 ml-auto transition-transform",
-                advancedExpanded ? "rotate-180" : ""
+                localAgentExpanded ? "rotate-180" : ""
               )} />
             </button>
 
-            {/* Advanced sub-sections */}
-            {advancedExpanded && (
-              <div className="mt-1 space-y-0.5 pl-6">
-                {advancedSections.map((section) => {
+            {/* Local Agent sub-sections */}
+            {localAgentExpanded && (
+              <div className="mt-1 space-y-0.5 pl-6" data-testid="local-agent-subnav">
+                {filteredLocalAgentSections.map((section) => {
                   const Icon = section.icon
                   const isActive = activeView === section.id
                   return (

@@ -18,11 +18,12 @@ import {
   ExternalLink,
   Copy,
   Check,
+  FolderOpen,
 } from 'lucide-react'
 import { useProviderStore } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTeamModeStore } from '@/stores/team-mode'
-import { restartOpencode } from '@/lib/opencode/restart'
+import { initOpenCodeClient } from '@/lib/opencode/sdk-client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,6 +48,43 @@ const MAINSTREAM_PROVIDER_IDS = new Set([
   'zhipuai',
 ])
 
+const OPENCODE_SETTINGS_URL = 'http://127.0.0.1:13141'
+
+function WorkspacePathCard({
+  path,
+  t,
+  onSwitch,
+  switching,
+}: {
+  path: string | null
+  t: ReturnType<typeof useTranslation>['t']
+  onSwitch: () => void
+  switching: boolean
+}) {
+  return (
+    <SettingCard>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[128px_minmax(0,1fr)] sm:items-start">
+          <span className="text-xs text-muted-foreground">{t('settings.llm.workspacePath', 'Workspace Path')}</span>
+          <code className="min-w-0 break-all font-mono text-xs text-foreground">
+            {path || t('settings.llm.noWorkspace', 'No workspace selected')}
+          </code>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onSwitch}
+          disabled={switching}
+          className="h-8 shrink-0 gap-1.5 text-xs"
+        >
+          {switching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
+          {t('settings.llm.switchWorkspace', 'Switch Workspace')}
+        </Button>
+      </div>
+    </SettingCard>
+  )
+}
+
 export const LLMSection = React.memo(function LLMSection() {
   const { t } = useTranslation()
   const teamMode = useTeamModeStore((s) => s.teamMode)
@@ -70,7 +108,7 @@ export const LLMSection = React.memo(function LLMSection() {
   const removeCustomProvider = useProviderStore((s) => s.removeCustomProvider)
   const disconnectProvider = useProviderStore((s) => s.disconnectProvider)
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
-  const openCodeReady = useWorkspaceStore((s) => s.openCodeReady)
+  const setWorkspace = useWorkspaceStore((s) => s.setWorkspace)
 
   // Dialog state for connecting a provider
   const [connectDialogOpen, setConnectDialogOpen] = React.useState(false)
@@ -115,6 +153,90 @@ export const LLMSection = React.memo(function LLMSection() {
 
   // Collapsible other providers
   const [showAllProviders, setShowAllProviders] = React.useState(false)
+  const [switchingWorkspace, setSwitchingWorkspace] = React.useState(false)
+  const [pendingWorkspacePath, setPendingWorkspacePath] = React.useState<string | null>(null)
+  const [teamSwitchDialogOpen, setTeamSwitchDialogOpen] = React.useState(false)
+
+  const switchWorkspaceTo = React.useCallback(async (nextPath: string) => {
+    setSwitchingWorkspace(true)
+    try {
+      await setWorkspace(nextPath)
+    } finally {
+      setSwitchingWorkspace(false)
+    }
+  }, [setWorkspace])
+
+  const handleSwitchWorkspace = React.useCallback(async () => {
+    setSwitchingWorkspace(true)
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: t('workspace.switchWorkspace', 'Switch Workspace'),
+      })
+
+      if (!selected || typeof selected !== 'string') return
+      if (selected === workspacePath) return
+
+      if (teamMode) {
+        setPendingWorkspacePath(selected)
+        setTeamSwitchDialogOpen(true)
+        return
+      }
+
+      await setWorkspace(selected)
+    } catch (error) {
+      console.error('[LLMSection] Failed to switch workspace:', error)
+    } finally {
+      setSwitchingWorkspace(false)
+    }
+  }, [setWorkspace, t, teamMode, workspacePath])
+
+  const handleConfirmTeamWorkspaceSwitch = React.useCallback(async () => {
+    if (!pendingWorkspacePath) return
+    setTeamSwitchDialogOpen(false)
+    const nextPath = pendingWorkspacePath
+    setPendingWorkspacePath(null)
+    await switchWorkspaceTo(nextPath)
+  }, [pendingWorkspacePath, switchWorkspaceTo])
+
+  const teamWorkspaceSwitchDialog = (
+    <Dialog open={teamSwitchDialogOpen} onOpenChange={setTeamSwitchDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('settings.llm.switchTeamWorkspaceTitle', 'Switch team workspace?')}</DialogTitle>
+          <DialogDescription>
+            {t(
+              'settings.llm.switchTeamWorkspaceDesc',
+              'This team is backed by a shared Git repository. Switching workspace will initialize the team again in the new folder and clone the shared files there.',
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        {pendingWorkspacePath && (
+          <div className="rounded-lg border border-border-soft bg-background/50 p-3">
+            <p className="mb-1 text-xs text-muted-foreground">{t('settings.llm.nextWorkspacePath', 'New workspace path')}</p>
+            <code className="block break-all font-mono text-xs text-foreground">{pendingWorkspacePath}</code>
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setTeamSwitchDialogOpen(false)
+              setPendingWorkspacePath(null)
+            }}
+          >
+            {t('common.cancel', 'Cancel')}
+          </Button>
+          <Button onClick={handleConfirmTeamWorkspaceSwitch} disabled={switchingWorkspace}>
+            {switchingWorkspace && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            {t('settings.llm.confirmSwitchWorkspace', 'Switch and initialize')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 
   const { visibleProviders, hiddenCount } = React.useMemo(() => {
     const connected: typeof providers = []
@@ -142,28 +264,20 @@ export const LLMSection = React.memo(function LLMSection() {
     }
   }, [providers, showAllProviders, customProviderIds])
 
-  // Load providers on mount and when OpenCode becomes ready
+  const connectCurrentOpenCodeAndRefresh = React.useCallback(async () => {
+    if (!workspacePath) return
+    initOpenCodeClient({ baseUrl: OPENCODE_SETTINGS_URL, workspacePath })
+    await Promise.all([refreshProviders(), refreshConfiguredProviders(), refreshAuthMethods()])
+  }, [workspacePath, refreshProviders, refreshConfiguredProviders, refreshAuthMethods])
+
+  // Load providers from the current OpenCode server on mount. This page talks
+  // to the user's OpenCode on 13141 directly, instead of the desktop sidecar.
   React.useEffect(() => {
-    if (!openCodeReady) return
-    refreshProviders()
-    refreshConfiguredProviders()
-    refreshAuthMethods()
+    void connectCurrentOpenCodeAndRefresh()
     if (workspacePath) {
       refreshCustomProviderIds(workspacePath)
     }
-  }, [openCodeReady])
-
-  const restartOpenCodeAndRefresh = async () => {
-    if (!workspacePath) return
-    try {
-      await restartOpencode(workspacePath)
-      await Promise.all([refreshProviders(), refreshConfiguredProviders(), refreshAuthMethods()])
-    } catch (err) {
-      console.error('Failed to restart OpenCode after provider connect:', err)
-      useWorkspaceStore.getState().setOpenCodeBootstrapped(false)
-      await Promise.all([refreshProviders(), refreshConfiguredProviders()])
-    }
-  }
+  }, [connectCurrentOpenCodeAndRefresh, refreshCustomProviderIds, workspacePath])
 
   const getProviderOAuthMethodIndex = (providerId: string): number => {
     const methods = authMethods[providerId] || []
@@ -189,7 +303,7 @@ export const LLMSection = React.memo(function LLMSection() {
     if (success) {
       setConnectDialogOpen(false)
       setApiKeyInput('')
-      await restartOpenCodeAndRefresh()
+      await connectCurrentOpenCodeAndRefresh()
     }
     setIsConnecting(false)
   }
@@ -220,7 +334,7 @@ export const LLMSection = React.memo(function LLMSection() {
           setOAuthPending(false)
           setOAuthMethodType(null)
           setOAuthCodeInput('')
-          restartOpenCodeAndRefresh()
+          void connectCurrentOpenCodeAndRefresh()
         }
       })
     }
@@ -239,7 +353,7 @@ export const LLMSection = React.memo(function LLMSection() {
         setOAuthPending(false)
         setOAuthMethodType(null)
         setOAuthCodeInput('')
-        await restartOpenCodeAndRefresh()
+        await connectCurrentOpenCodeAndRefresh()
       }
     } finally {
       setIsConnecting(false)
@@ -273,7 +387,7 @@ export const LLMSection = React.memo(function LLMSection() {
 
   const handleRefreshProviders = async () => {
     setIsRefreshing(true)
-    await restartOpenCodeAndRefresh()
+    await connectCurrentOpenCodeAndRefresh()
     if (workspacePath) {
       await refreshCustomProviderIds(workspacePath)
     }
@@ -350,7 +464,7 @@ export const LLMSection = React.memo(function LLMSection() {
           setCustomBaseURL('')
           setCustomApiKey('')
           setCustomModels([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
-          await restartOpenCodeAndRefresh()
+          await connectCurrentOpenCodeAndRefresh()
           await refreshCustomProviderIds(workspacePath)
         }
       } else {
@@ -364,8 +478,8 @@ export const LLMSection = React.memo(function LLMSection() {
           setCustomBaseURL('')
           setCustomApiKey('')
           setCustomModels([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
-          await restartOpenCodeAndRefresh()
           await connectProvider(providerId, customApiKey.trim())
+          await connectCurrentOpenCodeAndRefresh()
           await refreshCustomProviderIds(workspacePath)
         }
       }
@@ -397,7 +511,7 @@ export const LLMSection = React.memo(function LLMSection() {
       const success = await removeCustomProvider(workspacePath, providerId)
       if (success) {
         setDeletingProviderId(null)
-        await restartOpenCodeAndRefresh()
+        await connectCurrentOpenCodeAndRefresh()
         await refreshCustomProviderIds(workspacePath)
       }
     } finally {
@@ -433,6 +547,7 @@ export const LLMSection = React.memo(function LLMSection() {
           description={t('settings.llm.description', 'Manage AI providers and connect them to enable model selection')}
           iconColor="text-purple-500"
         />
+        <WorkspacePathCard path={workspacePath} t={t} onSwitch={handleSwitchWorkspace} switching={switchingWorkspace} />
         <SettingCard>
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400">
@@ -473,6 +588,7 @@ export const LLMSection = React.memo(function LLMSection() {
             </div>
           </div>
         </SettingCard>
+        {teamWorkspaceSwitchDialog}
       </div>
     )
   }
@@ -503,13 +619,15 @@ export const LLMSection = React.memo(function LLMSection() {
             onClick={handleRefreshProviders}
             disabled={isRefreshing}
             className="h-8 gap-1.5 text-xs text-muted-foreground"
-            title={t('settings.llm.refreshTooltip', 'Refresh providers (restarts OpenCode engine)')}
+            title={t('settings.llm.refreshTooltip', 'Refresh providers from OpenCode')}
           >
             <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
             {isRefreshing ? t('settings.llm.refreshing', 'Refreshing...') : t('settings.llm.refresh', 'Refresh')}
           </Button>
         </div>
       </div>
+
+      <WorkspacePathCard path={workspacePath} t={t} onSwitch={handleSwitchWorkspace} switching={switchingWorkspace} />
 
       {/* Loading State */}
       {providersLoading && providers.length === 0 && (
@@ -519,6 +637,8 @@ export const LLMSection = React.memo(function LLMSection() {
           </div>
         </SettingCard>
       )}
+
+      {teamWorkspaceSwitchDialog}
 
       {/* Provider List */}
       {!providersLoading || providers.length > 0 ? (
@@ -1053,7 +1173,7 @@ export const LLMSection = React.memo(function LLMSection() {
           <DialogHeader>
             <DialogTitle>{t('settings.llm.removeCustomProvider', 'Remove Custom Provider')}</DialogTitle>
             <DialogDescription>
-              {t('settings.llm.removeCustomProviderDesc', 'This will remove the provider configuration from opencode.json and restart OpenCode. This action cannot be undone.')}
+              {t('settings.llm.removeCustomProviderDesc', 'This will remove the provider configuration from opencode.json. This action cannot be undone.')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

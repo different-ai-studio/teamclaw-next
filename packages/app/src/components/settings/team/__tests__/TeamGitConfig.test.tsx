@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 
 const mockInvoke = vi.hoisted(() => vi.fn())
 
@@ -145,6 +145,10 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
 
     render(<TeamGitConfig />)
+
+    expect(await screen.findByText('Runtime Details')).toBeTruthy()
+    expect(screen.getByText('Workspace Path')).toBeTruthy()
+    expect(screen.getByText('/workspace-a')).toBeTruthy()
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith('init_git_team_secrets', {

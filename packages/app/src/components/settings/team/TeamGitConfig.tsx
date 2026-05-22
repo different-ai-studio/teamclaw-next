@@ -21,7 +21,6 @@ import {
   Settings,
   Save,
   Copy,
-  Link,
 } from 'lucide-react'
 import { cn, isTauri, copyToClipboard } from '@/lib/utils'
 import { ToggleSwitch } from '@/components/settings/shared'
@@ -188,10 +187,6 @@ export function TeamGitConfig() {
   // After creation: deeplink invite to share
   const [createdTeamId, setCreatedTeamId] = React.useState('')
   const [createdInviteDeeplink, setCreatedInviteDeeplink] = React.useState('')
-
-  // Generate additional invite (connected state)
-  const [additionalInviteDeeplink, setAdditionalInviteDeeplink] = React.useState('')
-  const [generatingInvite, setGeneratingInvite] = React.useState(false)
 
   // LLM hosting (create form + connected editing share same state)
   const defaultLlmUrl = buildConfig.team.llm.baseUrl || ''
@@ -384,29 +379,6 @@ export function TeamGitConfig() {
       setState('unconfigured')
     } finally {
       setConnectStep('')
-    }
-  }
-
-  // ─── Generate additional invite ──────────────────────────────────────
-
-  const handleGenerateInvite = async (teamId: string) => {
-    setGeneratingInvite(true)
-    setErrorMessage(null)
-    try {
-      const { data: invite, error: invErr } = await supabase.rpc('create_team_invite', {
-        p_team_id:       teamId,
-        p_kind:          'member',
-        p_display_name:  'New Member',
-        p_team_role:     'admin',
-        p_ttl_seconds:   604800,
-      })
-      if (invErr) throw new Error(invErr.message)
-      const deeplink = ((invite as { deeplink: string }).deeplink).replace(/^amux:/, 'teamclaw:')
-      setAdditionalInviteDeeplink(deeplink)
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : String(err))
-    } finally {
-      setGeneratingInvite(false)
     }
   }
 
@@ -771,53 +743,6 @@ export function TeamGitConfig() {
             </div>
           </SettingCard>
 
-          {/* Invite Link — share with new members */}
-          {teamConfig.teamId && (
-            <SettingCard>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-blue-100 dark:bg-blue-900/30">
-                    <Link className="h-5 w-5 text-blue-700 dark:text-blue-400" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{t('settings.team.inviteLink', 'Invite Link')}</p>
-                    <p className="text-xs text-muted-foreground">{t('settings.team.inviteLinkDesc', 'Share this link with teammates — they open it to join')}</p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="ml-auto gap-1.5 text-xs shrink-0"
-                    onClick={() => handleGenerateInvite(teamConfig.teamId!)}
-                    disabled={generatingInvite}
-                  >
-                    {generatingInvite
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <Link className="h-3 w-3" />}
-                    {t('settings.team.generateInvite', 'Generate Invite')}
-                  </Button>
-                </div>
-                {additionalInviteDeeplink && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 min-w-0 rounded-md bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 px-3 py-2 text-xs font-mono break-all select-all">
-                        {additionalInviteDeeplink}
-                      </code>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0 h-9 w-9 p-0"
-                        onClick={() => copyToClipboard(additionalInviteDeeplink, t('common.copied', 'Copied!'))}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{t('settings.team.inviteLinkExpiry', 'Valid for 7 days. Generate a new one if it expires.')}</p>
-                  </div>
-                )}
-              </div>
-            </SettingCard>
-          )}
-
           {/* LLM Service Config — owner / manager only */}
           {canManageServiceConfig && (
             <SettingCard>
@@ -866,6 +791,13 @@ export function TeamGitConfig() {
               </div>
 
               <div className="space-y-2 rounded-lg border border-border-soft bg-background/50 p-3">
+                <div className="grid gap-1.5 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
+                  <span className="text-xs text-muted-foreground">{t('settings.team.workspacePath', 'Workspace Path')}</span>
+                  <code className="min-w-0 break-all font-mono text-xs text-foreground">
+                    {workspacePath || t('settings.team.noWorkspace', 'No workspace selected')}
+                  </code>
+                </div>
+
                 <div className="grid gap-1.5 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
                   <span className="text-xs text-muted-foreground">{t('settings.team.gitLocalPath', 'Git Path')}</span>
                   <code className="min-w-0 break-all font-mono text-xs text-foreground">

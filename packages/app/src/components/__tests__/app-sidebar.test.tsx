@@ -30,6 +30,27 @@ const teamModeStoreMocks = vi.hoisted(() => ({
   loadTeamGitFileSyncStatus: vi.fn(),
 }))
 
+const authStoreMocks = vi.hoisted(() => ({
+  session: {
+    user: {
+      id: 'user-1',
+      email: 'matt@example.com',
+      user_metadata: { name: 'Fallback User' },
+    },
+  },
+  signOut: vi.fn(() => Promise.resolve()),
+}))
+
+const currentTeamStoreMocks = vi.hoisted(() => ({
+  team: { id: 'team-1', name: 'OpenBeta', slug: 'openbeta' },
+  currentMember: {
+    id: 'member-1',
+    displayName: 'Matt',
+    role: 'owner',
+    joinedAt: '2026-05-01T00:00:00.000Z',
+  },
+}))
+
 const sessionStoreMocks = vi.hoisted(() => ({
   sessions: [
     { id: 's1', title: 'Session One', updatedAt: new Date('2025-01-01'), messages: [] },
@@ -108,6 +129,16 @@ vi.mock('@/stores/team-mode', () => ({
     sel(teamModeStoreMocks as unknown as Record<string, unknown>),
 }))
 
+vi.mock('@/stores/auth-store', () => ({
+  useAuthStore: (sel: (s: Record<string, unknown>) => unknown) =>
+    sel(authStoreMocks as unknown as Record<string, unknown>),
+}))
+
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: (sel: (s: Record<string, unknown>) => unknown) =>
+    sel(currentTeamStoreMocks as unknown as Record<string, unknown>),
+}))
+
 // Mock sidebar UI components
 vi.mock('@/lib/ui-variant', () => ({
   isWorkspaceUIVariant: () => uiVariantMocks.workspaceShell,
@@ -145,6 +176,8 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: any) => <div>{children}</div>,
   DropdownMenuContent: ({ children }: any) => <div>{children}</div>,
   DropdownMenuItem: ({ children, onClick }: any) => <div onClick={onClick}>{children}</div>,
+  DropdownMenuLabel: ({ children }: any) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr />,
   DropdownMenuTrigger: ({ children }: any) => <div>{children}</div>,
 }))
 
@@ -223,6 +256,21 @@ describe('AppSidebar', () => {
     workspaceStoreMocks.openPanel = vi.fn()
     workspaceStoreMocks.closePanel = vi.fn()
     teamModeStoreMocks.teamMode = false
+    authStoreMocks.session = {
+      user: {
+        id: 'user-1',
+        email: 'matt@example.com',
+        user_metadata: { name: 'Fallback User' },
+      },
+    }
+    authStoreMocks.signOut = vi.fn(() => Promise.resolve())
+    currentTeamStoreMocks.team = { id: 'team-1', name: 'OpenBeta', slug: 'openbeta' }
+    currentTeamStoreMocks.currentMember = {
+      id: 'member-1',
+      displayName: 'Matt',
+      role: 'owner',
+      joinedAt: '2026-05-01T00:00:00.000Z',
+    }
   })
 
   it('renders session titles in sidebar', () => {
@@ -490,6 +538,22 @@ describe('AppSidebar', () => {
     uiVariantMocks.workspaceShell = true
     render(<AppSidebar />)
     expect(screen.getByText('Settings')).toBeDefined()
+  })
+
+  it('workspace variant removes the footer workspace selector', () => {
+    uiVariantMocks.workspaceShell = true
+    render(<AppSidebar />)
+
+    expect(screen.queryByTestId('workspace-name')).toBeNull()
+  })
+
+  it('workspace variant renders the user account menu in the footer', () => {
+    uiVariantMocks.workspaceShell = true
+    render(<AppSidebar />)
+
+    expect(screen.getAllByText('Matt').length).toBeGreaterThan(0)
+    expect(screen.getByText('matt@example.com')).toBeDefined()
+    expect(screen.getByText('OpenBeta')).toBeDefined()
   })
 
 })
