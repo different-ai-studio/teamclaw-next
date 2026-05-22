@@ -162,13 +162,13 @@ function InlineTodoList({
       data-testid="todo-list-inline"
       className={cn(
         "relative z-0 mx-auto w-[calc(100%-3.5rem)] max-w-[42rem] px-2",
-        dockCollapsed ? (headerOnlyCollapsed ? "-mb-1" : "-mb-6") : "-mb-10",
+        dockCollapsed ? (headerOnlyCollapsed ? "-mb-1" : "-mb-6") : "-mb-3",
       )}
     >
       <div
         className={cn(
           "overflow-hidden rounded-[24px] border border-[rgba(214,219,228,0.42)] bg-[rgba(255,255,255,0.02)] shadow-[0_1px_2px_rgba(15,23,42,0.018)] backdrop-blur-[9px] supports-[backdrop-filter]:bg-[rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-[rgba(15,23,42,0.08)] dark:supports-[backdrop-filter]:bg-[rgba(15,23,42,0.055)]",
-          dockCollapsed ? "pb-1" : "pb-10",
+          dockCollapsed ? "pb-1" : "pb-3",
           headerOnlyCollapsed && "rounded-b-none pb-0",
         )}
       >

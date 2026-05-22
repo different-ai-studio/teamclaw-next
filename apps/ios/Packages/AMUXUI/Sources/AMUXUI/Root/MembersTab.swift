@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import AMUXCore
 import AMUXSharedUI
 
@@ -16,7 +17,10 @@ public struct MembersTab: View {
     /// after firing so subsequent triggers re-fire cleanly.
     @Binding var externalInviteTrigger: Bool
 
-    @State private var showInvite   = false
+    @State private var showInvite     = false
+    @State private var showTeamStats  = false
+
+    @Query(sort: \CachedActor.displayName) private var actors: [CachedActor]
 
     public init(pairing: PairingManager,
                 mqtt: MQTTService,
@@ -53,6 +57,17 @@ public struct MembersTab: View {
                 .navigationTitle("Actors")
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button { showTeamStats = true } label: {
+                            Image(systemName: "chart.bar.xaxis")
+                                .font(.title3)
+                                .foregroundStyle(Color.amux.onyx)
+                                .accessibilityHidden(true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Team Statistics")
+                        .accessibilityIdentifier("members.teamStatsButton")
+                    }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button { showInvite = true } label: {
                             Image(systemName: "person.badge.plus")
@@ -68,6 +83,9 @@ public struct MembersTab: View {
                 }
                 .sheet(isPresented: $showInvite) {
                     MemberInviteSheet(store: store)
+                }
+                .sheet(isPresented: $showTeamStats) {
+                    TeamStatsSheet(actors: actors)
                 }
                 .onChange(of: externalInviteTrigger) { _, newValue in
                     guard newValue else { return }
