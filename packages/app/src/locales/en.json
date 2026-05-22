@@ -2673,6 +2673,22 @@
       "placeholder": "Idea title",
       "save": "Save"
     },
+    "detail": {
+      "loadFailed": "Failed to load idea: {{msg}}",
+      "saved": "Idea saved",
+      "saveFailed": "Save failed: {{msg}}",
+      "save": "Save",
+      "activityPosted": "Activity posted",
+      "activityFailed": "Activity failed: {{msg}}",
+      "meta": "Updated {{when}}",
+      "metaWithCreator": "{{creator}} · updated {{when}}",
+      "newActivity": "New activity",
+      "activityPlaceholder": "Post progress, decision notes, or next action...",
+      "postActivity": "Post activity",
+      "timeline": "Activity",
+      "noActivity": "No activity yet.",
+      "unknownActor": "Unknown"
+    },
     "archived": "Idea deleted",
     "copiedId": "Copied idea ID",
     "copyFailed": "Copy failed",

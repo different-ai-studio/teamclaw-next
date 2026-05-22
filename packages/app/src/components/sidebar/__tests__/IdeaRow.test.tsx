@@ -19,6 +19,7 @@ const baseIdea: IdeaRowData = {
 function setup(overrides: Partial<React.ComponentProps<typeof IdeaRow>> = {}) {
   const handlers = {
     onSelect: vi.fn(),
+    onView: vi.fn(),
     onChangeStatus: vi.fn(),
     onRequestRename: vi.fn(),
     onCopyId: vi.fn(),
@@ -42,11 +43,11 @@ describe('IdeaRow', () => {
     expect(h.onSelect).toHaveBeenCalledWith(baseIdea)
   })
 
-  it('View → onSelect', async () => {
+  it('View → onView', async () => {
     const h = setup()
     openMenu()
     fireEvent.click(await screen.findByText('View'))
-    expect(h.onSelect).toHaveBeenCalledWith(baseIdea)
+    expect(h.onView).toHaveBeenCalledWith(baseIdea)
   })
 
   it('Rename → onRequestRename', async () => {

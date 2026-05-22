@@ -2673,6 +2673,22 @@
       "placeholder": "想法标题",
       "save": "保存"
     },
+    "detail": {
+      "loadFailed": "加载想法失败: {{msg}}",
+      "saved": "想法已保存",
+      "saveFailed": "保存失败: {{msg}}",
+      "save": "保存",
+      "activityPosted": "动态已发布",
+      "activityFailed": "发布动态失败: {{msg}}",
+      "meta": "{{when}} 更新",
+      "metaWithCreator": "{{creator}} · {{when}} 更新",
+      "newActivity": "新动态",
+      "activityPlaceholder": "发布进展、决策记录或下一步...",
+      "postActivity": "发布动态",
+      "timeline": "动态",
+      "noActivity": "暂无动态。",
+      "unknownActor": "未知"
+    },
     "archived": "想法已删除",
     "copiedId": "已复制 ID",
     "copyFailed": "复制失败",
