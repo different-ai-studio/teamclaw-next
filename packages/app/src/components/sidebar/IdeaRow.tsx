@@ -21,6 +21,7 @@ interface Props {
   idea: IdeaRowData
   active: boolean
   onSelect: (idea: IdeaRowData) => void
+  onView: (idea: IdeaRowData) => void
   onChangeStatus: (idea: IdeaRowData, status: IdeaStatus) => void
   onRequestRename: (idea: IdeaRowData) => void
   onCopyId: (idea: IdeaRowData) => void
@@ -37,6 +38,7 @@ export function IdeaRow({
   idea,
   active,
   onSelect,
+  onView,
   onChangeStatus,
   onRequestRename,
   onCopyId,
@@ -62,7 +64,7 @@ export function IdeaRow({
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onSelect={() => onSelect(idea)}>
+        <ContextMenuItem onSelect={() => onView(idea)}>
           <Eye className="h-4 w-4" />
           {t('ideas.contextMenu.view', 'View')}
         </ContextMenuItem>
