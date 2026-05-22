@@ -3457,23 +3457,7 @@ impl DaemonServer {
             );
         }
 
-        // Update session store to reflect stopped status (mirrors StopAgent side-effect).
-        if let Some(session) = self.sessions.find_by_id_mut(&runtime_id) {
-            session.status = amux::AgentStatus::Stopped as i32;
-            let _ = self.sessions.save(&self.sessions_path);
-        }
-
-        // Publish terminal RuntimeInfo to both retained state topics, then clear.
-        let stopped_info = amux::RuntimeInfo {
-            runtime_id: runtime_id.clone(),
-            state: amux::RuntimeLifecycle::Stopped as i32,
-            ..Default::default()
-        };
-        let publisher = Publisher::new(&self.mqtt);
-        let _ = publisher
-            .publish_runtime_state(&runtime_id, &stopped_info)
-            .await;
-        let _ = publisher.clear_runtime_state(&runtime_id).await;
+        self.publish_runtime_stopped(&runtime_id).await;
 
         RpcResponse {
             request_id: request.request_id.clone(),
@@ -3487,6 +3471,27 @@ impl DaemonServer {
                 rejected_reason: String::new(),
             })),
         }
+    }
+
+    /// Publish terminal `runtime/{id}/state`, clear the retained topic, and
+    /// flip the persisted session row to Stopped. Idempotent — calling
+    /// twice on the same `runtime_id` is safe (the second clear is a no-op
+    /// against an already-empty retain).
+    async fn publish_runtime_stopped(&mut self, runtime_id: &str) {
+        if let Some(session) = self.sessions.find_by_id_mut(runtime_id) {
+            session.status = amux::AgentStatus::Stopped as i32;
+            let _ = self.sessions.save(&self.sessions_path);
+        }
+        let stopped_info = amux::RuntimeInfo {
+            runtime_id: runtime_id.to_string(),
+            state: amux::RuntimeLifecycle::Stopped as i32,
+            ..Default::default()
+        };
+        let publisher = Publisher::new(&self.mqtt);
+        let _ = publisher
+            .publish_runtime_state(runtime_id, &stopped_info)
+            .await;
+        let _ = publisher.clear_runtime_state(runtime_id).await;
     }
 
     async fn handle_start_runtime(
