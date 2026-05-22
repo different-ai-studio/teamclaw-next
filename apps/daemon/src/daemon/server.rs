@@ -1039,9 +1039,10 @@ impl DaemonServer {
                     }
                     _ = tokio::time::sleep(Duration::from_millis(50)) => {
                         // Drain queued runtime events without preempting poll().
-                        let agent_events = self.agents.lock().await.poll_events();
-                        let evicted_runtime_ids: Vec<String> =
-                            self.agents.lock().await.drain_evicted();
+                        let (agent_events, evicted_runtime_ids): (Vec<_>, Vec<String>) = {
+                            let mut mgr = self.agents.lock().await;
+                            (mgr.poll_events(), mgr.drain_evicted())
+                        };
                         for runtime_id in evicted_runtime_ids {
                             self.publish_runtime_stopped(&runtime_id).await;
                         }
