@@ -616,15 +616,19 @@ impl RuntimeManager {
             if let Some(message) = self.send_failures.remove(agent_id) {
                 return Err(crate::error::AmuxError::Agent(message));
             }
+            if let Some(h) = self.agents.get_mut(agent_id) {
+                h.bump_activity();
+            }
             self.last_sent
                 .insert(agent_id.to_string(), text.to_string());
             return Ok(());
         }
         #[cfg(not(test))]
         {
-            let handle = self.agents.get(agent_id).ok_or_else(|| {
+            let handle = self.agents.get_mut(agent_id).ok_or_else(|| {
                 crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
             })?;
+            handle.bump_activity();
             handle.send_prompt(text, attachment_urls).await
         }
     }
@@ -799,10 +803,15 @@ impl RuntimeManager {
     pub fn poll_events(&mut self) -> Vec<(String, amux::AcpEvent)> {
         let mut events = vec![];
         for (agent_id, handle) in &mut self.agents {
+            let mut got_any = false;
             if let Some(rx) = handle.event_rx.as_mut() {
                 while let Ok(event) = rx.try_recv() {
                     events.push((agent_id.clone(), event));
+                    got_any = true;
                 }
+            }
+            if got_any {
+                handle.bump_activity();
             }
         }
         events
@@ -1683,6 +1692,37 @@ mod tests {
         assert_eq!(
             mgr.get_handle("rt1").unwrap().pending_silent[0].message_id,
             "m1"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_prompt_bumps_last_active_at() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        // Reset to a known-old timestamp.
+        mgr.get_handle_mut("rt1").unwrap().last_active_at = 0;
+        let before = mgr.get_handle_mut("rt1").unwrap().last_active_at;
+        mgr.send_prompt("rt1", "hi", vec![]).await.unwrap();
+        let after = mgr.get_handle_mut("rt1").unwrap().last_active_at;
+        assert!(after > before, "send_prompt should bump last_active_at");
+    }
+
+    #[test]
+    fn poll_events_bumps_last_active_at_for_emitting_agents() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        mgr.get_handle_mut("rt1").unwrap().last_active_at = 0;
+        // Push a fake event into the handle's channel from the sender side.
+        let tx = mgr.get_handle_mut("rt1").unwrap().event_tx.clone();
+        let evt = amux::AcpEvent {
+            model: String::new(),
+            event: None,
+        };
+        tx.try_send(evt).expect("event channel ready");
+        let drained = mgr.poll_events();
+        assert_eq!(drained.len(), 1);
+        let after = mgr.get_handle_mut("rt1").unwrap().last_active_at;
+        assert!(
+            after > 0,
+            "poll_events should bump last_active_at for agents that emitted"
         );
     }
 }
