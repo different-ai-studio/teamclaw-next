@@ -100,15 +100,27 @@ public enum ChatTimelineReducer {
             }
 
         case .toolUse(let tu):
-            state.entries.append(makeEntry(
-                sequence: input.envelopeSequence,
-                eventType: "tool_use",
-                text: tu.description_p,
-                toolID: tu.toolID,
-                toolName: tu.toolName,
-                senderActorID: bucket,
-                timestamp: input.timestamp
-            ))
+            if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tu.toolID }) {
+                if !tu.description_p.isEmpty {
+                    state.entries[idx].text = tu.description_p
+                }
+                if !tu.toolName.isEmpty {
+                    state.entries[idx].toolName = tu.toolName
+                }
+                if state.entries[idx].toolID == nil {
+                    state.entries[idx].toolID = tu.toolID
+                }
+            } else {
+                state.entries.append(makeEntry(
+                    sequence: input.envelopeSequence,
+                    eventType: "tool_use",
+                    text: tu.description_p,
+                    toolID: tu.toolID,
+                    toolName: tu.toolName,
+                    senderActorID: bucket,
+                    timestamp: input.timestamp
+                ))
+            }
 
         case .toolResult(let tr):
             if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tr.toolID }) {
@@ -246,7 +258,16 @@ public enum ChatTimelineReducer {
 
     static func applyHistory(_ input: HistoryInput, to state: inout TimelineState) {
         // Identity dedupe by supabaseMessageID.
-        if state.entries.contains(where: { $0.supabaseMessageID == input.supabaseMessageID }) {
+        if let idx = state.entries.firstIndex(where: { $0.supabaseMessageID == input.supabaseMessageID }) {
+            if state.entries[idx].timestamp != input.createdAt {
+                state.entries[idx].timestamp = input.createdAt
+            }
+            if state.entries[idx].model == nil {
+                state.entries[idx].model = input.model
+            }
+            if state.entries[idx].turnID == nil {
+                state.entries[idx].turnID = input.turnID
+            }
             return
         }
         let eventType: String = input.kind == .output ? "output" : "user_prompt"
@@ -299,6 +320,9 @@ public enum ChatTimelineReducer {
             state.entries[idx].supabaseMessageID = input.supabaseMessageID
             if state.entries[idx].model == nil { state.entries[idx].model = input.model }
             if state.entries[idx].turnID == nil { state.entries[idx].turnID = input.turnID }
+            if state.entries[idx].timestamp > input.createdAt {
+                state.entries[idx].timestamp = input.createdAt
+            }
             return
         }
 

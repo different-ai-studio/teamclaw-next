@@ -138,6 +138,31 @@ struct ReducerToolResultPairingTests {
         #expect(state.entries[0].success == true)
     }
 
+    @Test("later toolUse update fills in grep arguments without appending")
+    func laterToolUseUpdateFillsArguments() {
+        var state = TimelineState()
+        var initial = Amux_AcpEvent()
+        initial.event = .toolUse(makeToolUse(toolID: "t-grep", toolName: "grep", description: ""))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          acpEvent: initial)),
+            to: &state
+        )
+        var update = Amux_AcpEvent()
+        update.event = .toolUse(makeToolUse(toolID: "t-grep", toolName: "", description: #"{"pattern":"MQTT","path":"apps/daemon"}"#))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          acpEvent: update)),
+            to: &state
+        )
+
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].toolName == "grep")
+        #expect(state.entries[0].text == #"{"pattern":"MQTT","path":"apps/daemon"}"#)
+    }
+
     @Test("out-of-order toolResult appends a standalone entry")
     func outOfOrderToolResult() {
         var state = TimelineState()
@@ -429,6 +454,71 @@ struct ReducerHistoryCrossDedupeTests {
         ChatTimelineReducer.apply(.historyMessage(input), to: &state)
         ChatTimelineReducer.apply(.historyMessage(input), to: &state)
         #expect(state.entries.count == 1)
+    }
+
+    @Test("re-seeding the same supabase id corrects stale local timestamp")
+    func reSeedCorrectsStaleTimestamp() {
+        var state = TimelineState(entries: [
+            TimelineEntry(
+                eventType: "user_prompt",
+                text: "112121212",
+                isComplete: true,
+                senderActorID: "user-1",
+                timestamp: Date(timeIntervalSince1970: 200),
+                supabaseMessageID: "msg-first"
+            )
+        ])
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "msg-first",
+                kind: .userPrompt,
+                senderActorID: "user-1",
+                content: "112121212",
+                createdAt: Date(timeIntervalSince1970: 100)
+            )),
+            to: &state
+        )
+
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].timestamp == Date(timeIntervalSince1970: 100))
+    }
+
+    @Test("history seed corrects placeholder prompt timestamp")
+    func historyCorrectsPlaceholderPromptTimestamp() {
+        var state = TimelineState(entries: [
+            TimelineEntry(
+                eventType: "user_prompt",
+                text: "112121212",
+                isComplete: true,
+                senderActorID: "user-1",
+                timestamp: Date(timeIntervalSince1970: 200)
+            ),
+            TimelineEntry(
+                eventType: "output",
+                text: "reply",
+                isComplete: true,
+                senderActorID: "agent-1",
+                timestamp: Date(timeIntervalSince1970: 150)
+            )
+        ])
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "msg-first",
+                kind: .userPrompt,
+                senderActorID: "user-1",
+                content: "112121212",
+                createdAt: Date(timeIntervalSince1970: 100)
+            )),
+            to: &state
+        )
+
+        state.entries.sort { $0.timestamp < $1.timestamp }
+        #expect(state.entries.count == 2)
+        #expect(state.entries[0].eventType == "user_prompt")
+        #expect(state.entries[0].timestamp == Date(timeIntervalSince1970: 100))
+        #expect(state.entries[1].eventType == "output")
     }
 }
 

@@ -18,9 +18,56 @@ public struct MarkdownRenderer: View {
     }
 
     public var body: some View {
-        Markdown(content)
+        Markdown(Self.sanitizedContent(content))
             .markdownTheme(Theme.chatBubble)
             .textSelection(.enabled)
+    }
+
+    static func sanitizedContent(_ content: String) -> String {
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var output: [String] = []
+        var index = 0
+
+        while index < lines.count {
+            if index + 1 < lines.count,
+               isTableRow(lines[index]),
+               isTableSeparator(lines[index + 1]) {
+                if output.last?.isEmpty == false {
+                    output.append("")
+                }
+
+                while index < lines.count, isTableRow(lines[index]) || isTableSeparator(lines[index]) {
+                    output.append("    \(lines[index])")
+                    index += 1
+                }
+
+                if index < lines.count, !lines[index].isEmpty {
+                    output.append("")
+                }
+            } else {
+                output.append(lines[index])
+                index += 1
+            }
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    private static func isTableRow(_ line: String) -> Bool {
+        line.contains("|") && !line.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private static func isTableSeparator(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
+        let cells = trimmed.split(separator: "|", omittingEmptySubsequences: false)
+        guard cells.count >= 2 else { return false }
+
+        return cells.allSatisfy { cell in
+            let value = cell.trimmingCharacters(in: .whitespaces)
+            let withoutColons = value.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            return withoutColons.count >= 3 && withoutColons.allSatisfy { $0 == "-" }
+        }
     }
 }
 
