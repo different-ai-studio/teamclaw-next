@@ -1777,13 +1777,15 @@ mod tests {
         mgr.add_test_runtime("rt-fresh", "rt-fresh", "sess-fresh");
         // rt-fresh was just inserted, last_active_at = 0 from test_dummy,
         // so set it to now so it isn't evicted.
-        mgr.get_handle_mut("rt-fresh").unwrap().last_active_at =
-            chrono::Utc::now().timestamp();
+        mgr.get_handle_mut("rt-fresh").unwrap().last_active_at = chrono::Utc::now().timestamp();
 
         let evicted = mgr.evict_idle(1800).await; // 30-minute threshold
         assert_eq!(evicted, vec!["rt-stale".to_string()]);
         assert!(mgr.get_handle("rt-stale").is_none(), "stale handle removed");
-        assert!(mgr.get_handle("rt-fresh").is_some(), "fresh handle retained");
+        assert!(
+            mgr.get_handle("rt-fresh").is_some(),
+            "fresh handle retained"
+        );
     }
 
     #[tokio::test]
@@ -1821,5 +1823,24 @@ mod tests {
             mgr.get_handle("rt-mid-turn").is_some(),
             "handle must remain in map"
         );
+    }
+
+    #[tokio::test]
+    async fn evict_idle_full_cycle_emits_evicted_id_for_publish() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-x");
+        mgr.get_handle_mut("rt-x").unwrap().last_active_at = 0;
+
+        // First sweep: stops the runtime, buffers id.
+        let evicted = mgr.evict_idle(60).await;
+        assert_eq!(evicted, vec!["rt-x".to_string()]);
+        assert!(mgr.get_handle("rt-x").is_none());
+
+        // Main loop drains the buffer.
+        let to_publish = mgr.drain_evicted();
+        assert_eq!(to_publish, vec!["rt-x".to_string()]);
+
+        // Second sweep: nothing left, buffer is empty.
+        assert!(mgr.evict_idle(60).await.is_empty());
+        assert!(mgr.drain_evicted().is_empty());
     }
 }
