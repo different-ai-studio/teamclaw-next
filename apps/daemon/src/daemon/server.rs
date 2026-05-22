@@ -4116,6 +4116,7 @@ mod tests {
             agents: crate::config::AgentsConfig::default(),
             team_id: Some("team-test".to_string()),
             channels: crate::config::ChannelsConfig::default(),
+            idle_runtime_timeout_secs: None,
         }
     }
 
@@ -4791,6 +4792,7 @@ mod runtime_backend_resolution_tests {
             agents: crate::config::AgentsConfig::default(),
             team_id: None,
             channels: crate::config::ChannelsConfig::default(),
+            idle_runtime_timeout_secs: None,
         }
     }
 

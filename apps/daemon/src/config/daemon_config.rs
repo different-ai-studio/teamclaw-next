@@ -11,6 +11,13 @@ pub struct DaemonConfig {
     pub team_id: Option<String>,
     #[serde(default)]
     pub channels: ChannelsConfig,
+    /// Stop ACP runtimes whose `last_active_at` is older than this many
+    /// seconds. `None` (default) disables idle eviction. Manual stops via
+    /// the RuntimeStop RPC are unaffected. Recommend ≥ 1800 (30 min) so
+    /// users don't lose context mid-conversation; very short values will
+    /// kill mid-stream replies that exceed the threshold.
+    #[serde(default)]
+    pub idle_runtime_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
