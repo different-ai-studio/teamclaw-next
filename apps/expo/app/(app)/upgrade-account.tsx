@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -15,20 +17,24 @@ import {
 
 import { useOnboarding } from "../_layout";
 import { supabase } from "../../src/lib/supabase/client";
+import type { OAuthProvider } from "../../src/features/onboarding/onboarding-oauth";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { showToast } from "../../src/ui/Toast";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
+WebBrowser.maybeCompleteAuthSession();
+
 export default function UpgradeAccountRoute() {
   const router = useRouter();
-  const { state } = useOnboarding();
+  const { controller, state } = useOnboarding();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busy = isBusy || state.isBusy;
 
   const canSubmit =
-    !isBusy &&
+    !busy &&
     email.trim().length > 0 &&
     /^\S+@\S+\.\S+$/.test(email.trim()) &&
     password.length >= 6;
@@ -58,6 +64,21 @@ export default function UpgradeAccountRoute() {
     }
   };
 
+  const handleOAuthUpgrade = async (provider: OAuthProvider) => {
+    if (busy) return;
+    setError(null);
+    try {
+      await controller.linkIdentityWithOAuth(provider, {
+        redirectTo: Linking.createURL("auth/callback"),
+        openAuthSession: WebBrowser.openAuthSessionAsync,
+      });
+      showToast("success", "Account connected.");
+      router.back();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't connect account.");
+    }
+  };
+
   return (
     <View style={styles.screen}>
       <View style={styles.headerBar}>
@@ -80,8 +101,8 @@ export default function UpgradeAccountRoute() {
         >
           <Text style={styles.lede}>
             {state.isAnonymous
-              ? "Attach an email and password so you don't lose this workspace next time you launch Teamclaw."
-              : "Change the email or password on this account."}
+              ? "Attach an email, Apple, or Google identity so you don't lose this workspace next time you launch Teamclaw."
+              : "Change this account's email/password or connect another sign-in identity."}
           </Text>
 
           <View style={styles.card}>
@@ -90,7 +111,7 @@ export default function UpgradeAccountRoute() {
               <TextInput
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!isBusy}
+                editable={!busy}
                 keyboardType="email-address"
                 onChangeText={setEmail}
                 placeholder="you@example.com"
@@ -107,7 +128,7 @@ export default function UpgradeAccountRoute() {
               <TextInput
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!isBusy}
+                editable={!busy}
                 onChangeText={setPassword}
                 placeholder="At least 6 characters"
                 placeholderTextColor={colors.slate}
@@ -120,7 +141,9 @@ export default function UpgradeAccountRoute() {
             </View>
           </View>
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {error || state.errorMessage ? (
+            <Text style={styles.errorText}>{error ?? state.errorMessage}</Text>
+          ) : null}
 
           <Pressable
             accessibilityRole="button"
@@ -132,7 +155,7 @@ export default function UpgradeAccountRoute() {
               pressed && canSubmit ? styles.ctaPressed : null,
             ]}
           >
-            {isBusy ? (
+            {busy ? (
               <ActivityIndicator color={hai.paper} />
             ) : (
               <Text
@@ -146,10 +169,53 @@ export default function UpgradeAccountRoute() {
             )}
           </Pressable>
 
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <View style={styles.socialColumn}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void handleOAuthUpgrade("apple");
+              }}
+              style={({ pressed }) => [
+                styles.socialButton,
+                pressed && !busy ? styles.pressed : null,
+                busy ? styles.disabled : null,
+              ]}
+            >
+              <View style={styles.socialIconWrap}>
+                <Ionicons color={colors.onyx} name="logo-apple" size={19} />
+              </View>
+              <Text style={styles.socialLabel}>Upgrade with Apple</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void handleOAuthUpgrade("google");
+              }}
+              style={({ pressed }) => [
+                styles.socialButton,
+                pressed && !busy ? styles.pressed : null,
+                busy ? styles.disabled : null,
+              ]}
+            >
+              <View style={styles.socialIconWrap}>
+                <Ionicons color={colors.onyx} name="globe-outline" size={19} />
+              </View>
+              <Text style={styles.socialLabel}>Upgrade with Google</Text>
+            </Pressable>
+          </View>
+
           <Text style={styles.footnote}>
-            After upgrading, sign in with the same email next time you launch
-            Teamclaw. The existing teams, agents, and sessions on this device
-            stay attached.
+            After upgrading, sign in with the same identity next time you
+            launch Teamclaw. Existing teams, agents, and sessions stay
+            attached.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -196,6 +262,23 @@ const styles = StyleSheet.create({
   ctaTextInactive: {
     color: hai.slate,
   },
+  disabled: {
+    opacity: 0.5,
+  },
+  divider: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 14,
+  },
+  dividerLine: {
+    backgroundColor: colors.hairline,
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  dividerText: {
+    color: colors.slate,
+    ...typography.caption,
+  },
   errorText: {
     color: hai.cinnabarDeep,
     paddingHorizontal: spacing.xs,
@@ -241,8 +324,38 @@ const styles = StyleSheet.create({
     color: colors.basalt,
     ...typography.secondaryBody,
   },
+  pressed: {
+    opacity: 0.8,
+  },
   screen: {
     backgroundColor: colors.mist,
     flex: 1,
+  },
+  socialButton: {
+    alignItems: "center",
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: radii.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 13,
+  },
+  socialColumn: {
+    gap: spacing.sm,
+  },
+  socialIconWrap: {
+    alignItems: "center",
+    backgroundColor: colors.mist,
+    borderRadius: 999,
+    height: 30,
+    justifyContent: "center",
+    width: 30,
+  },
+  socialLabel: {
+    color: colors.onyx,
+    ...typography.body,
+    fontWeight: "600",
   },
 });

@@ -25,12 +25,16 @@ import {
 } from "../components/AgentConfigSheet";
 import { MemberPickerSheet } from "./MemberPickerSheet";
 
-const STUB_WORKSPACES = [{ id: "default", path: "/" }];
-
 const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   claude: "Claude",
   opencode: "OpenCode",
   codex: "Codex",
+};
+
+export type AgentWorkspaceChoice = {
+  id: string;
+  path: string;
+  agentId?: string | null;
 };
 
 export type NewSessionScreenProps = {
@@ -44,9 +48,11 @@ export type NewSessionScreenProps = {
     firstMessage: string;
     collaboratorActorIds: string[];
     primaryAgentActorId: string | null;
+    agentConfig: AgentConfigSelection | null;
     ideaId: string | null;
   }) => Promise<void> | void;
   selectedIdeaId?: string | null;
+  workspaces?: ReadonlyArray<AgentWorkspaceChoice>;
 };
 
 export function NewSessionScreen({
@@ -58,6 +64,7 @@ export function NewSessionScreen({
   onClose,
   onCreate,
   selectedIdeaId = null,
+  workspaces = [],
 }: NewSessionScreenProps) {
   const [firstMessage, setFirstMessage] = useState("");
   const [collaboratorIds, setCollaboratorIds] = useState<string[]>([]);
@@ -94,6 +101,14 @@ export function NewSessionScreen({
     return pickedAgentIds[0];
   }, [pickedAgentIds, primaryAgentId]);
 
+  const workspaceLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const workspace of workspaces) {
+      map.set(workspace.id, workspace.path || workspace.id);
+    }
+    return map;
+  }, [workspaces]);
+
   const excludedFromPicker = useMemo(() => {
     const set = new Set<string>();
     if (currentMemberActorId) set.add(currentMemberActorId);
@@ -118,6 +133,7 @@ export function NewSessionScreen({
       firstMessage: firstMessage.trim(),
       collaboratorActorIds: collaboratorIds,
       primaryAgentActorId: effectivePrimaryAgentId,
+      agentConfig,
       ideaId: pickedIdeaId,
     });
   };
@@ -232,7 +248,10 @@ export function NewSessionScreen({
               <View style={styles.agentValue}>
                 <Text numberOfLines={1} style={styles.cardBody}>
                   {agentConfig
-                    ? `${AGENT_TYPE_LABELS[agentConfig.agentType]} · ${agentConfig.workspaceId}`
+                    ? `${AGENT_TYPE_LABELS[agentConfig.agentType]} · ${
+                        workspaceLabelById.get(agentConfig.workspaceId) ??
+                        agentConfig.workspaceId
+                      }`
                     : "Default"}
                 </Text>
                 <Ionicons color={colors.slate} name="chevron-forward" size={14} />
@@ -344,7 +363,10 @@ export function NewSessionScreen({
             setAgentConfig(selection);
             setAgentConfigOpen(false);
           }}
-          workspaces={STUB_WORKSPACES}
+          workspaces={workspaces.map((workspace) => ({
+            id: workspace.id,
+            path: workspace.path,
+          }))}
         />
       </Modal>
     </View>

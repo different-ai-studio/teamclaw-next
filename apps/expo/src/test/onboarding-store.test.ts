@@ -32,6 +32,9 @@ function createApiMock(overrides: Partial<OnboardingApi> = {}): OnboardingApi {
       pendingEmail: email,
     })),
     verifyOTP: vi.fn().mockResolvedValue({}),
+    createOAuthSignInUrl: vi.fn().mockResolvedValue("https://auth.example.com/oauth"),
+    createOAuthLinkUrl: vi.fn().mockResolvedValue("https://auth.example.com/link"),
+    completeOAuthCallback: vi.fn().mockResolvedValue({}),
     createTeam: vi.fn().mockResolvedValue({
       id: "team-created",
       name: "Created Team",
@@ -171,6 +174,115 @@ describe("createOnboardingController", () => {
     expect(controller.getState()).toMatchObject<Partial<OnboardingState>>({
       route: "createTeam",
       pendingEmailOTPEmail: null,
+    });
+  });
+
+  it("signInWithOAuth opens the browser session, completes the callback, and bootstraps", async () => {
+    const { createOnboardingController } = await loadController();
+    const api = createApiMock({
+      getCurrentSession: vi
+        .fn()
+        .mockResolvedValue({ user: { id: "user-1", is_anonymous: false } }),
+      loadBootstrap: vi.fn().mockResolvedValue({
+        isAnonymous: false,
+        team: {
+          id: "team-1",
+          name: "Team Claw",
+          slug: "team-claw",
+          role: "owner",
+        },
+        memberActorId: "member-1",
+      } satisfies BootstrapResult),
+    });
+    const openAuthSession = vi
+      .fn()
+      .mockResolvedValue({ type: "success", url: "teamclaw://auth/callback?code=abc" });
+    const controller = createOnboardingController(api);
+
+    await controller.signInWithOAuth("google", {
+      redirectTo: "teamclaw://auth/callback",
+      openAuthSession,
+    });
+
+    expect(api.createOAuthSignInUrl).toHaveBeenCalledWith(
+      "google",
+      "teamclaw://auth/callback",
+    );
+    expect(openAuthSession).toHaveBeenCalledWith(
+      "https://auth.example.com/oauth",
+      "teamclaw://auth/callback",
+    );
+    expect(api.completeOAuthCallback).toHaveBeenCalledWith(
+      "teamclaw://auth/callback?code=abc",
+    );
+    expect(controller.getState()).toMatchObject<Partial<OnboardingState>>({
+      route: "ready",
+      currentMemberActorId: "member-1",
+      isBusy: false,
+    });
+  });
+
+  it("signInWithOAuth clears busy state when the browser auth session is cancelled", async () => {
+    const { createOnboardingController } = await loadController();
+    const openAuthSession = vi.fn().mockResolvedValue({ type: "cancel" });
+    const api = createApiMock();
+    const controller = createOnboardingController(api);
+
+    await controller.signInWithOAuth("apple", {
+      redirectTo: "teamclaw://auth/callback",
+      openAuthSession,
+    });
+
+    expect(api.completeOAuthCallback).not.toHaveBeenCalled();
+    expect(api.loadBootstrap).not.toHaveBeenCalled();
+    expect(controller.getState()).toMatchObject<Partial<OnboardingState>>({
+      isBusy: false,
+      errorMessage: null,
+    });
+  });
+
+  it("linkIdentityWithOAuth links an identity, completes callback, and bootstraps", async () => {
+    const { createOnboardingController } = await loadController();
+    const api = createApiMock({
+      getCurrentSession: vi
+        .fn()
+        .mockResolvedValue({ user: { id: "user-1", is_anonymous: false } }),
+      loadBootstrap: vi.fn().mockResolvedValue({
+        isAnonymous: false,
+        team: {
+          id: "team-1",
+          name: "Team Claw",
+          slug: "team-claw",
+          role: "owner",
+        },
+        memberActorId: "member-1",
+      } satisfies BootstrapResult),
+    });
+    const openAuthSession = vi
+      .fn()
+      .mockResolvedValue({ type: "success", url: "teamclaw://auth/callback?code=abc" });
+    const controller = createOnboardingController(api);
+
+    await controller.linkIdentityWithOAuth("apple", {
+      redirectTo: "teamclaw://auth/callback",
+      openAuthSession,
+    });
+
+    expect(api.createOAuthLinkUrl).toHaveBeenCalledWith(
+      "apple",
+      "teamclaw://auth/callback",
+    );
+    expect(openAuthSession).toHaveBeenCalledWith(
+      "https://auth.example.com/link",
+      "teamclaw://auth/callback",
+    );
+    expect(api.completeOAuthCallback).toHaveBeenCalledWith(
+      "teamclaw://auth/callback?code=abc",
+    );
+    expect(controller.getState()).toMatchObject<Partial<OnboardingState>>({
+      route: "ready",
+      isAnonymous: false,
+      isBusy: false,
     });
   });
 

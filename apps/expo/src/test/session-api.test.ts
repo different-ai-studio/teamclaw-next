@@ -519,6 +519,44 @@ describe("createSessionsApi", () => {
     });
   });
 
+  it("loadRuntime maps the daemon runtime_id separately from the database row id", async () => {
+    const { createSessionsApi } = await import("../features/sessions/session-api");
+
+    const runtimeQuery = createQueryMock(Promise.resolve({
+      data: {
+        id: "runtime-row-uuid",
+        runtime_id: "rt-daemon",
+        agent_id: "agent-1",
+        status: "running",
+        current_model: "claude-sonnet-4-6",
+        last_seen_at: "2026-05-22T10:30:00.000Z",
+        backend_type: "claude",
+      },
+      error: null,
+    }));
+    const from = vi.fn((table: string) => {
+      if (table === "agent_runtimes") return runtimeQuery;
+      throw new Error(`unexpected table: ${table}`);
+    });
+
+    const api = createSessionsApi({ from } as any);
+
+    await expect(api.loadRuntime("session-1")).resolves.toEqual({
+      dbRuntimeId: "runtime-row-uuid",
+      runtimeId: "rt-daemon",
+      agentId: "agent-1",
+      status: "running",
+      currentModel: "claude-sonnet-4-6",
+      lastSeenAt: "2026-05-22T10:30:00.000Z",
+      backendType: "claude",
+    });
+    expect(runtimeQuery.select).toHaveBeenCalledWith(
+      "id, runtime_id, agent_id, status, current_model, last_seen_at, backend_type",
+    );
+    expect(runtimeQuery.eq).toHaveBeenCalledWith("session_id", "session-1");
+    expect(runtimeQuery.maybeSingle).toHaveBeenCalled();
+  });
+
   it("getSession returns a mapped session for the requested id", async () => {
     const { createSessionsApi } = await import("../features/sessions/session-api");
 

@@ -1,16 +1,22 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 
-import { useOnboarding } from "../_layout";
+import { useConnectedAgentsStore, useOnboarding, useTeamMqtt } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
-import type { Actor } from "../../src/features/actors/actor-types";
+import { isAgentActor, type Actor } from "../../src/features/actors/actor-types";
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import { isOpenIdea, type Idea } from "../../src/features/ideas/idea-types";
 import { buildFirstMessageWithIdea } from "../../src/features/sessions/idea-preface";
+import { resolveAgentRuntimeStartPlans } from "../../src/features/sessions/runtime-start";
 import { createSessionsApi } from "../../src/features/sessions/session-api";
-import { NewSessionScreen } from "../../src/features/sessions/screens/NewSessionScreen";
+import {
+  NewSessionScreen,
+  type AgentWorkspaceChoice,
+} from "../../src/features/sessions/screens/NewSessionScreen";
+import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { supabase } from "../../src/lib/supabase/client";
 import { uuidV4 } from "../../src/lib/uuid";
+import { showToast } from "../../src/ui/Toast";
 
 function deriveTitle(firstMessage: string): string {
   const trimmed = firstMessage.trim();
@@ -24,10 +30,13 @@ export default function NewSessionRoute() {
   const params = useLocalSearchParams<{ ideaId?: string }>();
   const ideaId = typeof params.ideaId === "string" ? params.ideaId : null;
   const { state } = useOnboarding();
+  const teamMqtt = useTeamMqtt();
+  const connectedAgentsStore = useConnectedAgentsStore();
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actors, setActors] = useState<Actor[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [workspaces, setWorkspaces] = useState<AgentWorkspaceChoice[]>([]);
 
   useEffect(() => {
     const teamId = state.currentTeam?.id;
@@ -36,21 +45,43 @@ export default function NewSessionRoute() {
     void Promise.all([
       createActorsApi(supabase).listActors(teamId),
       createIdeasApi(supabase).listIdeas(teamId),
+      supabase
+        .from("workspaces")
+        .select("id, path, agent_id")
+        .eq("team_id", teamId)
+        .eq("archived", false)
+        .order("name", { ascending: true }),
     ])
-      .then(([actorRows, ideaRows]) => {
+      .then(([actorRows, ideaRows, workspaceResult]) => {
         if (cancelled) return;
         setActors(actorRows);
         setIdeas(ideaRows.filter(isOpenIdea));
+        if (workspaceResult.error) {
+          setWorkspaces([]);
+        } else {
+          setWorkspaces(
+            (workspaceResult.data ?? []).map((row) => ({
+              id: String(row.id),
+              path: row.path ? String(row.path) : "",
+              agentId: row.agent_id ? String(row.agent_id) : null,
+            })),
+          );
+        }
       })
       .catch(() => {
         if (cancelled) return;
         setActors([]);
         setIdeas([]);
+        setWorkspaces([]);
       });
     return () => {
       cancelled = true;
     };
   }, [state.currentTeam?.id]);
+
+  useEffect(() => {
+    void connectedAgentsStore?.reload();
+  }, [connectedAgentsStore]);
 
   const ideaChoices = useMemo(
     () =>
@@ -69,11 +100,13 @@ export default function NewSessionRoute() {
       ideas={ideaChoices}
       isBusy={isBusy}
       selectedIdeaId={ideaId}
+      workspaces={workspaces}
       onClose={() => router.back()}
       onCreate={async ({
         firstMessage,
         collaboratorActorIds,
         primaryAgentActorId,
+        agentConfig,
         ideaId: chosenIdeaId,
       }) => {
         if (!state.currentTeam) {
@@ -90,6 +123,44 @@ export default function NewSessionRoute() {
         setErrorMessage(null);
         try {
           const sessionsApi = createSessionsApi(supabase);
+          const actorById = new Map(actors.map((actor) => [actor.actorId, actor]));
+          const selectedAgents = collaboratorActorIds
+            .map((id) => actorById.get(id))
+            .filter((actor): actor is Actor => Boolean(actor && isAgentActor(actor)));
+          if (selectedAgents.length > 0 && !connectedAgentsStore) {
+            throw new Error("Connected agents are not ready — wait for Teamclaw to reconnect.");
+          }
+          if (selectedAgents.length > 0) {
+            await connectedAgentsStore?.reload();
+          }
+          const runtimePlans =
+            selectedAgents.length > 0
+              ? resolveAgentRuntimeStartPlans({
+                  agents: selectedAgents.map((actor) => ({
+                    actorId: actor.actorId,
+                    displayName: actor.displayName,
+                    agentTypes: actor.agentTypes,
+                    defaultAgentType: actor.defaultAgentType,
+                    defaultWorkspaceId: actor.defaultWorkspaceId ?? null,
+                  })),
+                  connectedAgents:
+                    connectedAgentsStore?.getState().agents.map((agent) => ({
+                      agentId: agent.agentId,
+                      deviceId: agent.deviceId,
+                    })) ?? [],
+                  explicitSelection: agentConfig,
+                  workspaces: workspaces.map((workspace) => ({
+                    id: workspace.id,
+                    path: workspace.path,
+                    agentId: workspace.agentId ?? null,
+                  })),
+                })
+              : [];
+
+          if (runtimePlans.length > 0 && !teamMqtt) {
+            throw new Error("MQTT is not connected — wait for Teamclaw to reconnect.");
+          }
+
           const idea = chosenIdeaId
             ? ideas.find((row) => row.ideaId === chosenIdeaId)
             : undefined;
@@ -120,6 +191,33 @@ export default function NewSessionRoute() {
               content: expandedMessage.trim(),
               metadata: { mention_actor_ids: [] },
             });
+          }
+
+          if (runtimePlans.length > 0 && teamMqtt) {
+            const runtimeRpc = createRuntimeRpcClient({
+              mqtt: teamMqtt,
+              teamId: state.currentTeam.id,
+              requesterActorId: memberActorId,
+            });
+            for (const plan of runtimePlans) {
+              const actorName =
+                actorById.get(plan.agentActorId)?.displayName ?? "Agent";
+              void runtimeRpc.runtimeStart({
+                targetDeviceId: plan.targetDeviceId,
+                workspaceId: plan.workspaceId,
+                worktree: plan.worktree,
+                sessionId,
+                agentType: plan.agentType,
+                initialPrompt: "",
+              }).catch((err) => {
+                showToast(
+                  "error",
+                  err instanceof Error
+                    ? `Couldn't start ${actorName}: ${err.message}`
+                    : `Couldn't start ${actorName}.`,
+                );
+              });
+            }
           }
 
           router.replace(`/(app)/sessions/${sessionId}`);

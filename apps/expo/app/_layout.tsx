@@ -1,7 +1,9 @@
 import "../src/lib/polyfills";
 
+import Constants from "expo-constants";
 import * as Linking from "expo-linking";
-import { Slot } from "expo-router";
+import * as Notifications from "expo-notifications";
+import { router, Slot } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   createContext,
@@ -12,7 +14,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { StyleSheet, View } from "react-native";
+import { AppState, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ToastHost, showToast } from "../src/ui/Toast";
@@ -39,6 +41,15 @@ import {
   type ConnectedAgentsStore,
 } from "../src/features/actors/connected-agents-store";
 import { createConnectedAgentsCache } from "../src/features/actors/connected-agents-cache";
+import { getExpoDeviceId } from "../src/features/notifications/device-id";
+import {
+  notificationResponseDedupeKey,
+  notificationResponseToSessionHref,
+} from "../src/features/notifications/notification-routing";
+import { createPresenceApi } from "../src/features/notifications/presence-api";
+import { createForegroundPresenceHeartbeat } from "../src/features/notifications/presence-heartbeat";
+import { createPushTokenApi } from "../src/features/notifications/push-token-api";
+import { registerNativePushToken } from "../src/features/notifications/push-registration";
 import { getDb } from "../src/lib/db/sqlite";
 import { decodeRuntimeInfo } from "../src/lib/teamclaw/runtime-info";
 
@@ -100,6 +111,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
   const lastClaimedTokenRef = useRef<string | null>(null);
   const teamMqttRef = useRef<TeamMqttClient | null>(null);
   const connectedAgentsStoreRef = useRef<ConnectedAgentsStore | null>(null);
+  const lastNotificationDedupeKeyRef = useRef<string | null>(null);
   const [teamMqtt, setTeamMqtt] = useState<TeamMqttClient | null>(null);
   const [connectedAgentsStore, setConnectedAgentsStore] = useState<ConnectedAgentsStore | null>(null);
 
@@ -175,6 +187,103 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [controller, state.route]);
+
+  useEffect(() => {
+    if (state.route !== "ready") return;
+
+    const openSessionFromResponse = (response: unknown) => {
+      const href = notificationResponseToSessionHref(response);
+      if (!href) return;
+      const dedupeKey = notificationResponseDedupeKey(response) ?? href;
+      if (dedupeKey === lastNotificationDedupeKeyRef.current) return;
+      lastNotificationDedupeKeyRef.current = dedupeKey;
+      router.push(href);
+    };
+
+    const subscription =
+      Notifications.addNotificationResponseReceivedListener(openSessionFromResponse);
+    void Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (response) openSessionFromResponse(response);
+      })
+      .catch(() => {
+        // Notification response replay is best-effort.
+      });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [state.route]);
+
+  useEffect(() => {
+    if (state.route !== "ready") return;
+    let cancelled = false;
+
+    void (async () => {
+      const [{ data }, deviceId] = await Promise.all([
+        supabase.auth.getSession(),
+        getExpoDeviceId(),
+      ]);
+      if (cancelled) return;
+      const userId = data.session?.user.id ?? null;
+      await registerNativePushToken({
+        notifications: Notifications,
+        api: createPushTokenApi(supabase),
+        userId,
+        deviceId,
+        platform: Platform.OS,
+        appVersion: Constants.expoConfig?.version ?? null,
+      });
+    })().catch(() => {
+      // Push registration should not block opening the app.
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.route]);
+
+  useEffect(() => {
+    if (state.route !== "ready") return;
+
+    let disposed = false;
+    let heartbeat: ReturnType<typeof createForegroundPresenceHeartbeat> | null = null;
+    let subscription: { remove: () => void } | null = null;
+
+    void (async () => {
+      const [{ data }, deviceId] = await Promise.all([
+        supabase.auth.getSession(),
+        getExpoDeviceId(),
+      ]);
+      if (disposed) return;
+      const userId = data.session?.user.id ?? null;
+      const presence = createPresenceApi(supabase, () => userId);
+      heartbeat = createForegroundPresenceHeartbeat({
+        deviceId,
+        writeForeground: presence.writeForeground,
+      });
+
+      const applyState = (nextState: string) => {
+        if (nextState === "active") heartbeat?.enterForeground();
+        else heartbeat?.enterBackground();
+      };
+      applyState(AppState.currentState);
+      subscription = AppState.addEventListener("change", applyState);
+
+      if (disposed) {
+        subscription.remove();
+        heartbeat.dispose();
+      }
+    })().catch(() => {
+      // Presence only suppresses duplicate push while foregrounded.
+    });
+
+    return () => {
+      disposed = true;
+      subscription?.remove();
+      heartbeat?.dispose();
+    };
+  }, [state.route]);
 
   // Wire up team-scoped MQTT + ConnectedAgentsStore when the user is ready.
   // Tears down and recreates automatically when the team or actor changes.

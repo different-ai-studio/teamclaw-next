@@ -7,9 +7,10 @@ type Listener = (snapshot: ReadonlyMap<string, OutboxStatus>) => void;
 
 const state = new Map<string, OutboxStatus>();
 const listeners = new Set<Listener>();
+let snapshot: ReadonlyMap<string, OutboxStatus> = new Map(state);
 
 function emit() {
-  const snapshot = new Map(state);
+  snapshot = new Map(state);
   for (const listener of listeners) listener(snapshot);
 }
 
@@ -27,6 +28,7 @@ function toUiStatus(s: OutboxState): OutboxStatus | null {
 
 export function setOutboxStatus(messageId: string, status: OutboxStatus): void {
   if (!messageId) return;
+  if (state.get(messageId) === status) return;
   state.set(messageId, status);
   emit();
 }
@@ -39,7 +41,7 @@ export function clearOutboxStatus(messageId: string): void {
 }
 
 export function getOutboxSnapshot(): ReadonlyMap<string, OutboxStatus> {
-  return new Map(state);
+  return snapshot;
 }
 
 export function subscribeOutbox(listener: Listener): () => void {
@@ -76,6 +78,7 @@ export async function syncOutboxFromDao(
 }
 
 export function resetOutbox(): void {
+  if (state.size === 0) return;
   state.clear();
   emit();
 }

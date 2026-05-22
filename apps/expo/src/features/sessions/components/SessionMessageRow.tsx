@@ -39,8 +39,8 @@ export type SessionMessageRowProps = {
   onRetryOutbox?: (messageId: string) => void;
   /** Outbox lifecycle for this row's user_prompt — mirrors iOS OutboxStatusDot states. */
   outboxStatus?: "sending" | "sent" | "failed";
-  onGrantPermission?: (requestId: string) => void;
-  onDenyPermission?: (requestId: string) => void;
+  onGrantPermission?: (requestId: string, message: SessionMessage) => void;
+  onDenyPermission?: (requestId: string, message: SessionMessage) => void;
   /** When set, marks a permission request row as resolved with the given decision. */
   resolvedPermission?: { granted: boolean } | null;
   replyToMessage?: SessionMessage | null;
@@ -210,8 +210,8 @@ export function SessionMessageRow({
         <PermissionBanner
           description={message.content.trim()}
           isResolved={resolvedPermission !== null && resolvedPermission !== undefined}
-          onDeny={onDenyPermission}
-          onGrant={onGrantPermission}
+          onDeny={onDenyPermission ? (id) => onDenyPermission(id, message) : undefined}
+          onGrant={onGrantPermission ? (id) => onGrantPermission(id, message) : undefined}
           requestId={requestId}
           toolName={toolName}
           wasGranted={resolvedPermission?.granted ?? null}

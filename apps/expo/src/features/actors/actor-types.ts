@@ -12,6 +12,14 @@ export type Actor = {
   agentTypes: string[];
   /** Default backend type for agents. */
   defaultAgentType: string | null;
+  /** Default workspace id for agents, when configured by the native/admin flow. */
+  defaultWorkspaceId?: string | null;
+  /** Member actor that owns this agent, used to gate owner-only management. */
+  ownerMemberId?: string | null;
+  /** Agent visibility in the team directory. */
+  visibility?: "team" | "personal" | null;
+  /** Daemon device id for RPC-backed agent management. */
+  deviceId?: string | null;
   /** Deprecated UI alias: defaultAgentType ?? agentTypes[0]. */
   agentKind: string | null;
 };

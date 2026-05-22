@@ -10,6 +10,10 @@ type QueryResult<T> = {
 type ActorsClient = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   from: (table: string) => any;
+  rpc?: (
+    fn: string,
+    args?: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: SupabaseError }>;
 };
 
 type ActorRow = {
@@ -30,6 +34,16 @@ type AgentRow = {
   id: string;
   agent_types: string[] | null;
   default_agent_type: string | null;
+  default_workspace_id: string | null;
+  owner_member_id: string | null;
+  visibility: string | null;
+  device_id: string | null;
+};
+
+export type ActorInviteResult = {
+  token: string;
+  deeplink: string;
+  expiresAt: string;
 };
 
 function throwIfError(error: SupabaseError): void {
@@ -55,6 +69,10 @@ function toActor(
   role: string | null,
   agentTypes: string[],
   defaultAgentType: string | null,
+  defaultWorkspaceId: string | null,
+  ownerMemberId: string | null,
+  visibility: string | null,
+  deviceId: string | null,
 ): Actor {
   const agentKind = defaultAgentType ?? agentTypes[0] ?? null;
   return {
@@ -67,11 +85,26 @@ function toActor(
     avatarUrl: row.avatar_url ?? null,
     agentTypes,
     defaultAgentType,
+    defaultWorkspaceId,
+    ownerMemberId,
+    visibility: visibility === "personal" ? "personal" : visibility === "team" ? "team" : null,
+    deviceId,
     agentKind,
   };
 }
 
+function buildInviteDeeplink(token: string): string {
+  return `teamclaw://invite/${token}`;
+}
+
 export function createActorsApi(client: ActorsClient) {
+  async function callRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+    if (!client.rpc) throw new Error("Supabase RPC client is unavailable");
+    const result = await client.rpc(name, args);
+    throwIfError(result.error);
+    return result.data;
+  }
+
   return {
     async listActors(teamId: string): Promise<Actor[]> {
       const actorResult = (await client
@@ -108,7 +141,9 @@ export function createActorsApi(client: ActorsClient) {
       if (agentIds.length > 0) {
         const agentResult = (await client
           .from("agents")
-          .select("id, agent_types, default_agent_type")
+          .select(
+            "id, agent_types, default_agent_type, default_workspace_id, owner_member_id, visibility, device_id",
+          )
           .in("id", agentIds)) as QueryResult<AgentRow[] | null>;
         if (!agentResult.error) {
           agentById = new Map((agentResult.data ?? []).map((row) => [row.id, row]));
@@ -123,8 +158,60 @@ export function createActorsApi(client: ActorsClient) {
           rolesByMemberId.get(row.id) ?? null,
           agentById.get(row.id)?.agent_types ?? [],
           agentById.get(row.id)?.default_agent_type ?? null,
+          agentById.get(row.id)?.default_workspace_id ?? null,
+          agentById.get(row.id)?.owner_member_id ?? null,
+          agentById.get(row.id)?.visibility ?? null,
+          agentById.get(row.id)?.device_id ?? null,
         ),
       );
+    },
+
+    async removeActor(actorId: string): Promise<void> {
+      await callRpc("remove_team_actor", { p_actor_id: actorId });
+    },
+
+    async updateAgentDefaults(
+      agentId: string,
+      patch: {
+        defaultWorkspaceId?: string | null;
+        defaultAgentType?: string | null;
+      },
+    ): Promise<void> {
+      await callRpc("update_agent_defaults", {
+        p_agent_id: agentId,
+        p_default_workspace_id: patch.defaultWorkspaceId ?? null,
+        p_agent_kind: null,
+        p_default_agent_type: patch.defaultAgentType ?? null,
+      });
+    },
+
+    async createReinvite({
+      teamId,
+      actor,
+      ttlSeconds = 60 * 60 * 24 * 7,
+    }: {
+      teamId: string;
+      actor: Actor;
+      ttlSeconds?: number;
+    }): Promise<ActorInviteResult> {
+      const kind = actor.actorType === "agent" ? "agent" : "member";
+      const data = await callRpc("create_team_invite", {
+        p_team_id: teamId,
+        p_kind: kind,
+        p_display_name: actor.displayName,
+        p_team_role: kind === "member" ? actor.role ?? "member" : null,
+        p_agent_kind: kind === "agent" ? "daemon" : null,
+        p_ttl_seconds: ttlSeconds,
+        p_target_actor_id: actor.actorId,
+      });
+      const row = Array.isArray(data) ? data[0] : data;
+      const record = row as { token?: string; deeplink?: string; expires_at?: string } | null;
+      if (!record?.token) throw new Error("Invite created but token was missing.");
+      return {
+        token: record.token,
+        deeplink: buildInviteDeeplink(record.token),
+        expiresAt: record.expires_at ?? "",
+      };
     },
   };
 }

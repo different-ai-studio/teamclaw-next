@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -42,7 +42,7 @@ type SessionsListScreenProps = {
   state: SessionsListState;
 };
 
-function SessionGroupSection({
+export function SessionGroupSection({
   actorGlyphById,
   group,
   onLongPressSession,
@@ -72,26 +72,28 @@ function SessionGroupSection({
               key={session.sessionId}
               style={[styles.sessionRowOuter, checked ? styles.sessionRowChecked : null]}
             >
-              {selectionMode ? (
-                <View style={[styles.checkbox, checked ? styles.checkboxOn : null]}>
-                  {checked ? (
-                    <Ionicons color="#F8F6F1" name="checkmark" size={14} />
-                  ) : null}
+              <View style={styles.sessionRowInner}>
+                {selectionMode ? (
+                  <View style={[styles.checkbox, checked ? styles.checkboxOn : null]}>
+                    {checked ? (
+                      <Ionicons color="#F8F6F1" name="checkmark" size={14} />
+                    ) : null}
+                  </View>
+                ) : null}
+                <View style={{ flex: 1 }}>
+                  <SessionRow
+                    actorGlyphById={actorGlyphById}
+                    isActive={selectedSessionId === session.sessionId}
+                    isPinned={pinnedSessionIds?.has(session.sessionId) ?? false}
+                    onLongPress={
+                      onLongPressSession
+                        ? () => onLongPressSession(session.sessionId)
+                        : undefined
+                    }
+                    onPress={(s) => onSelectSession(s.sessionId)}
+                    session={session}
+                  />
                 </View>
-              ) : null}
-              <View style={{ flex: 1 }}>
-                <SessionRow
-                  actorGlyphById={actorGlyphById}
-                  isActive={selectedSessionId === session.sessionId}
-                  isPinned={pinnedSessionIds?.has(session.sessionId) ?? false}
-                  onLongPress={
-                    onLongPressSession
-                      ? () => onLongPressSession(session.sessionId)
-                      : undefined
-                  }
-                  onPress={(s) => onSelectSession(s.sessionId)}
-                  session={session}
-                />
               </View>
               {index < group.sessions.length - 1 ? (
                 <Hairline style={styles.rowDivider} />
@@ -640,6 +642,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(184,75,54,0.06)",
   },
   sessionRowOuter: {
+  },
+  sessionRowInner: {
     alignItems: "center",
     flexDirection: "row",
   },
