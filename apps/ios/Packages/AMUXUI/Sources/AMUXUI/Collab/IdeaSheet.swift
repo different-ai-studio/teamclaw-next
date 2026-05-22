@@ -329,6 +329,7 @@ struct IdeaRow: View {
             description: item.ideaDescription,
             status: item.status,
             archived: item.archived,
+            sortOrder: item.sortOrder,
             createdAt: item.createdAt,
             updatedAt: item.createdAt
         )
@@ -336,35 +337,15 @@ struct IdeaRow: View {
         self.workspaceName = workspaceName
     }
 
-    /// Status pill tones per `ideas-board.jsx`:
-    /// - OPEN earns Cinnabar (call-to-action / unclaimed work — the one
-    ///   place Hai loosens "spare the vermillion" on this screen).
-    /// - IN PROGRESS sits in Basalt on Pebble (quiet in-flight state).
-    /// - DONE finishes in Sage (muted active green).
     private var pillForeground: Color {
         if item.isDone       { return Color.amux.sage }
         if item.isInProgress { return Color.amux.basalt }
         return Color.amux.cinnabar
     }
 
-    private var pillBackground: Color {
-        if item.isDone       { return Color.amux.sage.opacity(0.12) }
-        if item.isInProgress { return Color.amux.pebble }
-        return Color.amux.cinnabar.opacity(0.10)
-    }
-
     private var creatorInitial: String {
         guard let name = creator?.displayName, let first = name.first else { return "·" }
         return String(first).uppercased()
-    }
-
-    /// Deterministic placeholder while a real submissions aggregate lands —
-    /// stable per idea so the UI doesn't reshuffle between rebuilds. The
-    /// distribution leans toward 0/1 so the chip stays sparse.
-    private var mockSubmissionCount: Int {
-        let buckets = [0, 0, 0, 1, 1, 2, 3, 4]
-        let h = abs(item.id.unicodeScalars.reduce(0) { $0 &+ Int($1.value) })
-        return buckets[h % buckets.count]
     }
 
     /// All creator avatars sit in Hai grays — the previous rainbow palette
@@ -378,53 +359,26 @@ struct IdeaRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
-                statusPill
-                if let name = workspaceName, !name.isEmpty {
-                    Text(name)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+        HStack(alignment: .top, spacing: 8) {
+            VStack {
+                statusGlyph
+                    .foregroundStyle(pillForeground)
+                    .frame(width: 14, height: 14)
                 Spacer(minLength: 0)
-                if mockSubmissionCount > 0 {
-                    submissionCountChip
-                }
             }
+            .padding(.top, 4)
 
-            Text(item.displayTitle)
-                .font(.body)
-                .fontWeight(.semibold)
-                .foregroundStyle(item.isDone ? .secondary : .primary)
-                .strikethrough(item.isDone, color: .secondary)
-                .lineLimit(2)
-
-            if !item.description.isEmpty, item.description != item.displayTitle {
-                Text(item.description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(item.displayTitle)
+                    .font(.body)
+                    .foregroundStyle(item.isDone ? .secondary : .primary)
+                    .strikethrough(item.isDone, color: .secondary)
                     .lineLimit(2)
-            }
 
-            if let creator, !creator.displayName.isEmpty {
-                creatorFooter(creator)
+                creatorFooter(creator, updatedAt: item.updatedAt)
             }
         }
         .padding(.vertical, 6)
-    }
-
-    private var statusPill: some View {
-        HStack(spacing: 5) {
-            statusGlyph
-            Text(item.statusLabel.uppercased())
-                .font(.system(size: 10.5, weight: .bold))
-                .tracking(0.3)
-        }
-        .foregroundStyle(pillForeground)
-        .padding(.horizontal, 9)
-        .frame(height: 22)
-        .background(Capsule().fill(pillBackground))
     }
 
     @ViewBuilder
@@ -449,23 +403,9 @@ struct IdeaRow: View {
         }
     }
 
-    private var submissionCountChip: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "tray.full")
-                .font(.system(size: 10, weight: .medium))
-            Text("\(mockSubmissionCount)")
-                .font(.caption)
-                .fontWeight(.medium)
-                .monospacedDigit()
-        }
-        .foregroundStyle(.secondary)
-    }
-
-    private func creatorFooter(_ creator: CachedActor) -> some View {
-        HStack(spacing: 6) {
-            Text("Created by")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func creatorFooter(_ creator: CachedActor?, updatedAt: Date) -> some View {
+        let name = creator?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return HStack(spacing: 6) {
             ZStack {
                 Circle().fill(creatorAvatarColor)
                 Text(creatorInitial)
@@ -473,13 +413,34 @@ struct IdeaRow: View {
                     .foregroundStyle(.white)
             }
             .frame(width: 18, height: 18)
-            Text(creator.displayName)
+            Text(name.isEmpty ? "Unknown" : name)
                 .font(.caption)
-                .fontWeight(.semibold)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(updatedAt.amuxRelativeAbbreviated)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
         .padding(.top, 2)
+    }
+}
+
+private extension Date {
+    var amuxRelativeAbbreviated: String {
+        let seconds = max(0, Int(Date().timeIntervalSince(self)))
+        if seconds < 60 { return "now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h" }
+        let days = hours / 24
+        if days < 7 { return "\(days)d" }
+        let weeks = days / 7
+        if weeks < 8 { return "\(weeks)w" }
+        let months = days / 30
+        if months < 12 { return "\(months)mo" }
+        return "\(days / 365)y"
     }
 }
 #else

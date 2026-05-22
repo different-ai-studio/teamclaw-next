@@ -5,4 +5,7 @@ public protocol IdeaRepository: Sendable {
     func createIdea(teamID: String, input: IdeaCreateInput) async throws -> IdeaRecord
     func updateIdea(ideaID: String, input: IdeaUpdateInput) async throws -> IdeaRecord
     func setArchived(ideaID: String, archived: Bool) async throws -> IdeaRecord
+    func reorderIdeas(teamID: String, ideaIDs: [String]) async throws
+    func listIdeaActivities(ideaID: String) async throws -> [IdeaActivityRecord]
+    func createIdeaActivity(ideaID: String, input: IdeaActivityCreateInput) async throws -> IdeaActivityRecord
 }

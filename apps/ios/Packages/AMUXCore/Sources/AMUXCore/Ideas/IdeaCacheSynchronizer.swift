@@ -24,6 +24,7 @@ public enum IdeaCacheSynchronizer {
             existing.createdBy = idea.createdByActorID
             existing.createdAt = idea.createdAt
             existing.archived = idea.archived
+            existing.sortOrder = idea.sortOrder
         } else {
             modelContext.insert(
                 SessionIdea(
@@ -36,7 +37,8 @@ public enum IdeaCacheSynchronizer {
                     parentIdeaId: "",
                     createdBy: idea.createdByActorID,
                     createdAt: idea.createdAt,
-                    archived: idea.archived
+                    archived: idea.archived,
+                    sortOrder: idea.sortOrder
                 )
             )
         }

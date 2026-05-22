@@ -46,11 +46,13 @@ public actor SupabaseIdeaRepository: IdeaRepository {
                 description,
                 status,
                 archived,
+                sort_order,
                 created_at,
                 updated_at
                 """
             )
             .eq("team_id", value: teamID)
+            .order("sort_order", ascending: true)
             .order("updated_at", ascending: false)
             .execute()
             .value
@@ -81,6 +83,60 @@ public actor SupabaseIdeaRepository: IdeaRepository {
 
         guard let row = rows.first else {
             throw IdeaRepositoryError.emptyResponse("create_idea")
+        }
+
+        return row.record
+    }
+
+    public func reorderIdeas(teamID: String, ideaIDs: [String]) async throws {
+        try await client
+            .rpc(
+                "reorder_ideas",
+                params: ReorderIdeasParams(teamID: teamID, ideaIDs: ideaIDs)
+            )
+            .execute()
+    }
+
+    public func listIdeaActivities(ideaID: String) async throws -> [IdeaActivityRecord] {
+        let rows: [IdeaActivityRow] = try await client
+            .from("idea_activities")
+            .select(
+                """
+                id,
+                team_id,
+                idea_id,
+                actor_id,
+                activity_type,
+                content,
+                metadata,
+                created_at,
+                updated_at
+                """
+            )
+            .eq("idea_id", value: ideaID)
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+
+        return rows.map(\.record)
+    }
+
+    public func createIdeaActivity(ideaID: String, input: IdeaActivityCreateInput) async throws -> IdeaActivityRecord {
+        let rows: [IdeaActivityRow] = try await client
+            .rpc(
+                "create_idea_activity",
+                params: CreateIdeaActivityParams(
+                    ideaID: ideaID,
+                    activityType: input.activityType,
+                    content: input.content,
+                    metadata: input.metadata
+                )
+            )
+            .execute()
+            .value
+
+        guard let row = rows.first else {
+            throw IdeaRepositoryError.emptyResponse("create_idea_activity")
         }
 
         return row.record
@@ -177,6 +233,30 @@ private struct ArchiveIdeaParams: Encodable {
     }
 }
 
+private struct ReorderIdeasParams: Encodable {
+    let teamID: String
+    let ideaIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case teamID = "p_team_id"
+        case ideaIDs = "p_idea_ids"
+    }
+}
+
+private struct CreateIdeaActivityParams: Encodable {
+    let ideaID: String
+    let activityType: String
+    let content: String
+    let metadata: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case ideaID = "p_idea_id"
+        case activityType = "p_activity_type"
+        case content = "p_content"
+        case metadata = "p_metadata"
+    }
+}
+
 private struct IdeaRow: Decodable, Sendable {
     let id: String
     let teamID: String
@@ -186,6 +266,7 @@ private struct IdeaRow: Decodable, Sendable {
     let description: String
     let status: String
     let archived: Bool
+    let sortOrder: Int
     let createdAt: Date
     let updatedAt: Date
 
@@ -198,6 +279,7 @@ private struct IdeaRow: Decodable, Sendable {
         case description
         case status
         case archived
+        case sortOrder = "sort_order"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -212,6 +294,45 @@ private struct IdeaRow: Decodable, Sendable {
             description: description,
             status: status,
             archived: archived,
+            sortOrder: sortOrder,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+}
+
+private struct IdeaActivityRow: Decodable, Sendable {
+    let id: String
+    let teamID: String
+    let ideaID: String
+    let actorID: String
+    let activityType: String
+    let content: String
+    let metadata: [String: String]
+    let createdAt: Date
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case teamID = "team_id"
+        case ideaID = "idea_id"
+        case actorID = "actor_id"
+        case activityType = "activity_type"
+        case content
+        case metadata
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    var record: IdeaActivityRecord {
+        IdeaActivityRecord(
+            id: id,
+            teamID: teamID,
+            ideaID: ideaID,
+            actorID: actorID,
+            activityType: activityType,
+            content: content,
+            metadata: metadata,
             createdAt: createdAt,
             updatedAt: updatedAt
         )

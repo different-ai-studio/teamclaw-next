@@ -13,6 +13,7 @@ public final class SessionIdea {
     public var createdBy: String
     public var createdAt: Date
     public var archived: Bool
+    public var sortOrder: Int
 
     public init(
         ideaId: String,
@@ -24,7 +25,8 @@ public final class SessionIdea {
         parentIdeaId: String = "",
         createdBy: String = "",
         createdAt: Date = .now,
-        archived: Bool = false
+        archived: Bool = false,
+        sortOrder: Int = 0
     ) {
         self.ideaId = ideaId
         self.sessionId = sessionId
@@ -36,6 +38,7 @@ public final class SessionIdea {
         self.createdBy = createdBy
         self.createdAt = createdAt
         self.archived = archived
+        self.sortOrder = sortOrder
     }
 
     public var displayTitle: String {
