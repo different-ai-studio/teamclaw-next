@@ -28,7 +28,8 @@ type MembershipRow = {
 
 type AgentRow = {
   id: string;
-  agent_kind: string | null;
+  agent_types: string[] | null;
+  default_agent_type: string | null;
 };
 
 function throwIfError(error: SupabaseError): void {
@@ -52,8 +53,10 @@ function toActorType(value: string | null): ActorType {
 function toActor(
   row: ActorRow,
   role: string | null,
-  agentKind: string | null,
+  agentTypes: string[],
+  defaultAgentType: string | null,
 ): Actor {
+  const agentKind = defaultAgentType ?? agentTypes[0] ?? null;
   return {
     actorId: row.id,
     teamId: row.team_id ?? "",
@@ -62,6 +65,8 @@ function toActor(
     role,
     lastActiveAt: row.last_active_at ?? null,
     avatarUrl: row.avatar_url ?? null,
+    agentTypes,
+    defaultAgentType,
     agentKind,
   };
 }
@@ -99,18 +104,14 @@ export function createActorsApi(client: ActorsClient) {
         );
       }
 
-      let agentKindById = new Map<string, string>();
+      let agentById = new Map<string, AgentRow>();
       if (agentIds.length > 0) {
         const agentResult = (await client
           .from("agents")
-          .select("id, agent_kind")
+          .select("id, agent_types, default_agent_type")
           .in("id", agentIds)) as QueryResult<AgentRow[] | null>;
         if (!agentResult.error) {
-          agentKindById = new Map(
-            (agentResult.data ?? [])
-              .filter((row): row is AgentRow & { agent_kind: string } => Boolean(row.agent_kind))
-              .map((row) => [row.id, row.agent_kind]),
-          );
+          agentById = new Map((agentResult.data ?? []).map((row) => [row.id, row]));
         }
         // Agents are visibility-filtered (actor_directory hides personal
         // agents); errors are best-effort and shouldn't block the actor list.
@@ -120,7 +121,8 @@ export function createActorsApi(client: ActorsClient) {
         toActor(
           row,
           rolesByMemberId.get(row.id) ?? null,
-          agentKindById.get(row.id) ?? null,
+          agentById.get(row.id)?.agent_types ?? [],
+          agentById.get(row.id)?.default_agent_type ?? null,
         ),
       );
     },

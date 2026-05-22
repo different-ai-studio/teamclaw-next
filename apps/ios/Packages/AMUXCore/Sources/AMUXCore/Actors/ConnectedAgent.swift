@@ -3,6 +3,7 @@ import Foundation
 public struct ConnectedAgent: Identifiable, Hashable, Sendable {
     public let id: String
     public let displayName: String
+    public let agentTypes: [String]
     public let agentKind: String
     /// Preferred LLM backend for this agent. Nil = daemon's compiled-in default.
     public let defaultAgentType: String?
@@ -15,7 +16,7 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
     /// since before the column existed).
     public let deviceID: String?
 
-    public init(id: String, displayName: String, agentKind: String,
+    public init(id: String, displayName: String, agentTypes: [String] = [], agentKind: String = "",
                 defaultAgentType: String? = nil,
                 permissionLevel: String, lastActiveAt: Date?,
                 deviceID: String? = nil,
@@ -23,6 +24,7 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
                 isOwner: Bool = false) {
         self.id = id
         self.displayName = displayName
+        self.agentTypes = agentTypes
         self.agentKind = agentKind
         self.defaultAgentType = defaultAgentType
         self.permissionLevel = permissionLevel

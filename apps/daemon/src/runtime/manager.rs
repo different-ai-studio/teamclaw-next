@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -36,6 +37,47 @@ impl AgentLaunchConfig {
 pub struct CheckedOutTurn {
     pub agent_id: String,
     pub event_rx: mpsc::Receiver<amux::AcpEvent>,
+}
+
+const ACP_STARTUP_METADATA_TIMEOUT: Duration = Duration::from_secs(2);
+
+struct StartupMetadataReceivers {
+    available_models_rx: Option<tokio::sync::oneshot::Receiver<Vec<amux::ModelInfo>>>,
+    initial_model_rx: Option<tokio::sync::oneshot::Receiver<Option<String>>>,
+    acp_session_id_rx: Option<tokio::sync::oneshot::Receiver<String>>,
+    warn_after: Instant,
+    timeout_warning: &'static str,
+    warned: bool,
+}
+
+impl StartupMetadataReceivers {
+    fn new(
+        available_models_rx: tokio::sync::oneshot::Receiver<Vec<amux::ModelInfo>>,
+        initial_model_rx: tokio::sync::oneshot::Receiver<Option<String>>,
+        acp_session_id_rx: tokio::sync::oneshot::Receiver<String>,
+        timeout_warning: &'static str,
+    ) -> Self {
+        Self {
+            available_models_rx: Some(available_models_rx),
+            initial_model_rx: Some(initial_model_rx),
+            acp_session_id_rx: Some(acp_session_id_rx),
+            warn_after: Instant::now() + ACP_STARTUP_METADATA_TIMEOUT,
+            timeout_warning,
+            warned: false,
+        }
+    }
+
+    fn is_done(&self) -> bool {
+        self.available_models_rx.is_none()
+            && self.initial_model_rx.is_none()
+            && self.acp_session_id_rx.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StartupMetadataUpdate {
+    pub agent_id: String,
+    pub acp_session_id: Option<String>,
 }
 
 /// Sanitise an arbitrary logical-session-id string into a filename-safe
@@ -140,6 +182,7 @@ pub struct RuntimeManager {
     /// `runtime/{id}/state` topic sees the same list the agent already
     /// announced earlier on the (non-retained) events topic.
     available_commands_per_agent: HashMap<String, Vec<amux::AcpAvailableCommand>>,
+    startup_metadata: HashMap<String, StartupMetadataReceivers>,
     supabase: Option<SupabaseClient>,
     /// Test-only: records the last body sent per agent_id via send_prompt_raw.
     #[cfg(test)]
@@ -157,6 +200,7 @@ impl RuntimeManager {
             launch_configs,
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
+            startup_metadata: HashMap::new(),
             supabase,
             #[cfg(test)]
             last_sent: HashMap::new(),
@@ -263,6 +307,7 @@ impl RuntimeManager {
         );
         handle.current_prompt = prompt.into();
         handle.session_id = supabase_session_id.unwrap_or_default().to_string();
+        handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         let (initial_model_tx, initial_model_rx) =
             tokio::sync::oneshot::channel::<Option<String>>();
@@ -294,29 +339,15 @@ impl RuntimeManager {
         self.aggregators
             .insert(agent_id.clone(), TurnAggregator::new());
 
-        // Capture the available_models list the agent reported on session/new
-        // (or the hardcoded fallback for agents that don't implement
-        // unstable_session_model). Stored on the handle so retained
-        // runtime/{id}/state reflects what the agent can actually run.
-        if let Ok(models) = available_models_rx.await {
-            if let Some(h) = self.agents.get_mut(&agent_id) {
-                h.available_models = models;
-            }
-        }
-
-        // Wait for the adapter to report the model it applied. None means no
-        // model was applied (no models known for this agent type, or the ACP
-        // call failed); skip recording in that case.
-        if let Ok(Some(model_id)) = initial_model_rx.await {
-            self.set_current_model(&agent_id, &model_id);
-        }
-
-        // Capture ACP session_id
-        if let Ok(acp_sid) = acp_session_id_rx.await {
-            if let Some(h) = self.agents.get_mut(&agent_id) {
-                h.acp_session_id = acp_sid;
-            }
-        }
+        self.startup_metadata.insert(
+            agent_id.clone(),
+            StartupMetadataReceivers::new(
+                available_models_rx,
+                initial_model_rx,
+                acp_session_id_rx,
+                "ACP startup metadata timed out; continuing without blocking MQTT",
+            ),
+        );
 
         // Upsert agent_runtimes with status="starting"; capture the returned
         // row id so catchup_runtime can use update_runtime_cursor later.
@@ -402,33 +433,22 @@ impl RuntimeManager {
         handle.cmd_tx = Some(cmd_tx);
         handle.status = amux::AgentStatus::Active;
         handle.current_prompt = prompt.to_string();
+        handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         info!(agent_id, worktree, "agent resumed via ACP");
         self.agents.insert(agent_id.to_string(), handle);
         self.aggregators
             .insert(agent_id.to_string(), TurnAggregator::new());
 
-        // Capture available_models the agent reported on resume.
-        if let Ok(models) = available_models_rx.await {
-            if let Some(h) = self.agents.get_mut(agent_id) {
-                h.available_models = models;
-            }
-        }
-
-        // Capture initial model
-        if let Ok(Some(model_id)) = initial_model_rx.await {
-            self.set_current_model(agent_id, &model_id);
-        }
-
-        // Capture ACP session_id (may differ from input if resume failed)
-        let new_acp_sid = if let Ok(sid) = acp_session_id_rx.await {
-            if let Some(h) = self.agents.get_mut(agent_id) {
-                h.acp_session_id = sid.clone();
-            }
-            sid
-        } else {
-            acp_session_id.to_string()
-        };
+        self.startup_metadata.insert(
+            agent_id.to_string(),
+            StartupMetadataReceivers::new(
+                available_models_rx,
+                initial_model_rx,
+                acp_session_id_rx,
+                "ACP startup metadata timed out on resume; continuing without blocking MQTT",
+            ),
+        );
 
         // Upsert agent_runtimes with status="starting" on resume
         if let Some(sb) = &self.supabase {
@@ -438,10 +458,10 @@ impl RuntimeManager {
                 session_id: supabase_session_id,
                 workspace_id: supabase_workspace_id,
                 backend_type: launch.backend_type,
-                backend_session_id: if new_acp_sid.is_empty() {
+                backend_session_id: if acp_session_id.is_empty() {
                     None
                 } else {
-                    Some(&new_acp_sid)
+                    Some(acp_session_id)
                 },
                 runtime_id: Some(agent_id),
                 status: "starting",
@@ -465,7 +485,7 @@ impl RuntimeManager {
             }
         }
 
-        Ok(new_acp_sid)
+        Ok(acp_session_id.to_string())
     }
 
     pub async fn stop_agent(&mut self, agent_id: &str) -> Option<RuntimeHandle> {
@@ -702,6 +722,111 @@ impl RuntimeManager {
             }
         }
         events
+    }
+
+    /// Non-blockingly collect ACP startup metadata that may arrive well after
+    /// the start RPC has returned. Returns agent ids whose retained runtime
+    /// state should be re-published.
+    pub fn poll_startup_metadata(&mut self) -> Vec<StartupMetadataUpdate> {
+        let mut updates = Vec::new();
+        let mut finished = Vec::new();
+        let agent_ids: Vec<String> = self.startup_metadata.keys().cloned().collect();
+
+        for agent_id in agent_ids {
+            let mut models = None;
+            let mut initial_model = None;
+            let mut acp_session_id = None;
+            let mut warn_message = None;
+            let mut done = false;
+
+            if let Some(pending) = self.startup_metadata.get_mut(&agent_id) {
+                if !pending.warned && Instant::now() >= pending.warn_after {
+                    pending.warned = true;
+                    warn_message = Some(pending.timeout_warning);
+                }
+
+                if let Some(rx) = pending.available_models_rx.as_mut() {
+                    match rx.try_recv() {
+                        Ok(value) => {
+                            models = Some(value);
+                            pending.available_models_rx = None;
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                            pending.available_models_rx = None;
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                    }
+                }
+
+                if let Some(rx) = pending.initial_model_rx.as_mut() {
+                    match rx.try_recv() {
+                        Ok(value) => {
+                            initial_model = value;
+                            pending.initial_model_rx = None;
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                            pending.initial_model_rx = None;
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                    }
+                }
+
+                if let Some(rx) = pending.acp_session_id_rx.as_mut() {
+                    match rx.try_recv() {
+                        Ok(value) => {
+                            acp_session_id = Some(value);
+                            pending.acp_session_id_rx = None;
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                            pending.acp_session_id_rx = None;
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                    }
+                }
+
+                done = pending.is_done();
+            }
+
+            if let Some(message) = warn_message {
+                warn!(agent_id, "{}", message);
+            }
+
+            let mut changed = false;
+            if let Some(models) = models {
+                if let Some(handle) = self.agents.get_mut(&agent_id) {
+                    handle.available_models = models;
+                    changed = true;
+                }
+            }
+            if let Some(model_id) = initial_model {
+                self.set_current_model(&agent_id, &model_id);
+                changed = true;
+            }
+            if let Some(sid) = acp_session_id {
+                if let Some(handle) = self.agents.get_mut(&agent_id) {
+                    handle.acp_session_id = sid.clone();
+                }
+                updates.push(StartupMetadataUpdate {
+                    agent_id: agent_id.clone(),
+                    acp_session_id: Some(sid),
+                });
+            } else if changed {
+                updates.push(StartupMetadataUpdate {
+                    agent_id: agent_id.clone(),
+                    acp_session_id: None,
+                });
+            }
+
+            if done {
+                finished.push(agent_id);
+            }
+        }
+
+        for agent_id in finished {
+            self.startup_metadata.remove(&agent_id);
+        }
+
+        updates
     }
 
     /// Look up the agent for `acp_session_id`, take its `event_rx` out of
@@ -1107,6 +1232,57 @@ mod tests {
     fn current_model_returns_none_for_unknown_agent() {
         let mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         assert_eq!(mgr.current_model("agent-1"), None);
+    }
+
+    #[test]
+    fn poll_startup_metadata_updates_late_model_state() {
+        let agent_id = "agent-1";
+        let mut mgr = RuntimeManager::test_dummy_with_runtime(agent_id);
+        let (models_tx, models_rx) = tokio::sync::oneshot::channel();
+        let (initial_model_tx, initial_model_rx) = tokio::sync::oneshot::channel();
+        let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel();
+
+        mgr.startup_metadata.insert(
+            agent_id.to_string(),
+            StartupMetadataReceivers::new(
+                models_rx,
+                initial_model_rx,
+                acp_session_id_rx,
+                "test timeout",
+            ),
+        );
+
+        models_tx
+            .send(vec![amux::ModelInfo {
+                id: "default".to_string(),
+                display_name: "Default".to_string(),
+            }])
+            .unwrap();
+        initial_model_tx.send(Some("default".to_string())).unwrap();
+        acp_session_id_tx.send("acp-1".to_string()).unwrap();
+
+        let updates = mgr.poll_startup_metadata();
+
+        assert_eq!(
+            updates,
+            vec![StartupMetadataUpdate {
+                agent_id: agent_id.to_string(),
+                acp_session_id: Some("acp-1".to_string()),
+            }]
+        );
+        assert_eq!(
+            mgr.current_model(agent_id).map(|s| s.as_str()),
+            Some("default")
+        );
+        let info = mgr.to_proto_info(agent_id).expect("runtime info");
+        assert_eq!(info.available_models.len(), 1);
+        assert_eq!(info.available_models[0].id, "default");
+        assert_eq!(
+            mgr.get_handle(agent_id)
+                .map(|handle| handle.acp_session_id.as_str()),
+            Some("acp-1")
+        );
+        assert!(!mgr.startup_metadata.contains_key(agent_id));
     }
 
     #[test]

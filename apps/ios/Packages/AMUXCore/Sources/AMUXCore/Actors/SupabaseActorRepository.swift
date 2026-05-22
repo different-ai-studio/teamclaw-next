@@ -44,7 +44,7 @@ public actor SupabaseActorRepository: ActorRepository {
             .select("""
                 id, team_id, actor_type, user_id, invited_by_actor_id,
                 display_name, avatar_url, last_active_at, created_at, updated_at,
-                member_status, team_role, agent_kind, default_agent_type,
+                member_status, team_role, agent_types, default_agent_type,
                 agent_status, default_workspace_id
             """)
             .eq("team_id", value: teamID)
@@ -249,7 +249,7 @@ private struct ActorDirectoryRow: Decodable, Sendable {
     let displayName: String; let avatarURL: String?; let lastActiveAt: Date?
     let createdAt: Date; let updatedAt: Date
     let memberStatus: String?; let teamRole: String?
-    let agentKind: String?;   let defaultAgentType: String?
+    let agentTypes: [String]; let agentKind: String?; let defaultAgentType: String?
     let agentStatus: String?; let defaultWorkspaceID: String?
 
     enum CodingKeys: String, CodingKey {
@@ -259,7 +259,7 @@ private struct ActorDirectoryRow: Decodable, Sendable {
         case displayName = "display_name", avatarURL = "avatar_url", lastActiveAt = "last_active_at"
         case createdAt = "created_at", updatedAt = "updated_at"
         case memberStatus = "member_status", teamRole = "team_role"
-        case agentKind = "agent_kind", defaultAgentType = "default_agent_type"
+        case agentTypes = "agent_types", agentKind = "agent_kind", defaultAgentType = "default_agent_type"
         case agentStatus = "agent_status", defaultWorkspaceID = "default_workspace_id"
     }
 
@@ -277,6 +277,7 @@ private struct ActorDirectoryRow: Decodable, Sendable {
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         memberStatus = try c.decodeIfPresent(String.self, forKey: .memberStatus)
         teamRole = try c.decodeIfPresent(String.self, forKey: .teamRole)
+        agentTypes = (try? c.decodeIfPresent([String].self, forKey: .agentTypes)) ?? []
         agentKind = try c.decodeIfPresent(String.self, forKey: .agentKind)
         defaultAgentType = try c.decodeIfPresent(String.self, forKey: .defaultAgentType)
         agentStatus = try c.decodeIfPresent(String.self, forKey: .agentStatus)
@@ -290,6 +291,7 @@ private struct ActorDirectoryRow: Decodable, Sendable {
             displayName: displayName, avatarURL: avatarURL, lastActiveAt: lastActiveAt,
             createdAt: createdAt, updatedAt: updatedAt,
             memberStatus: memberStatus, teamRole: teamRole,
+            agentTypes: agentTypes,
             agentKind: agentKind, defaultAgentType: defaultAgentType,
             agentStatus: agentStatus, defaultWorkspaceID: defaultWorkspaceID
         )

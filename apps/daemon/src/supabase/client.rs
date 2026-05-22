@@ -510,6 +510,86 @@ impl SupabaseClient {
         Ok(())
     }
 
+    /// Advertise the backend types this daemon can actually spawn. Existing
+    /// non-empty agent_types are left alone so an operator can narrow support
+    /// from the database/UI without daemon start overwriting it.
+    pub async fn ensure_agent_types(
+        &self,
+        supported_types: &[String],
+        default_agent_type: &str,
+    ) -> SupabaseResult<()> {
+        if supported_types.is_empty() || default_agent_type.is_empty() {
+            return Ok(());
+        }
+
+        #[derive(Deserialize)]
+        struct AgentTypesRow {
+            #[serde(default)]
+            agent_types: Vec<String>,
+            #[serde(default)]
+            default_agent_type: Option<String>,
+        }
+
+        let token = self.access_token().await?;
+        let actor_id = self.cfg.actor_id.clone();
+        let url = format!(
+            "{}/rest/v1/agents?id=eq.{}&select=agent_types,default_agent_type&limit=1",
+            self.cfg.url, actor_id
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("apikey", &self.cfg.anon_key)
+            .bearer_auth(token.clone())
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: text,
+            });
+        }
+
+        let row = resp.json::<Vec<AgentTypesRow>>().await?.into_iter().next();
+        let should_patch = row
+            .as_ref()
+            .map(|r| r.agent_types.is_empty() || r.default_agent_type.is_none())
+            .unwrap_or(true);
+        if !should_patch {
+            return Ok(());
+        }
+
+        #[derive(Serialize)]
+        struct Patch<'a> {
+            agent_types: &'a [String],
+            default_agent_type: &'a str,
+        }
+
+        let patch_url = format!("{}/rest/v1/agents?id=eq.{}", self.cfg.url, actor_id);
+        let resp = self
+            .http
+            .patch(&patch_url)
+            .header("apikey", &self.cfg.anon_key)
+            .bearer_auth(token)
+            .json(&Patch {
+                agent_types: supported_types,
+                default_agent_type,
+            })
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: text,
+            });
+        }
+        Ok(())
+    }
+
     /// Look up `agent_member_access.permission_level` for a caller. Returns
     /// `Some("admin" | "write" | "view")` or `None` when no grant exists.
     pub async fn check_agent_permission(

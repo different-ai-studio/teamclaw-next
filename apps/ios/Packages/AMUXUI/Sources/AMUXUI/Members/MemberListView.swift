@@ -241,7 +241,7 @@ public struct PrimaryAgentSheet: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(agent.displayName).font(.body)
                                     if let agentType = agent.defaultAgentType, !agentType.isEmpty {
-                                        Text(AgentConfigSheet.AgentType(rawValue: agentType)?.label ?? agentType)
+                                        Text(AgentConfigSheet.AgentType.fromStoredValue(agentType).label)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -298,7 +298,7 @@ private struct ActorRow: View {
         if actor.isAgent {
             let kind: String
             switch actor.defaultAgentType {
-            case "claude_code": kind = "Claude"
+            case "claude", "claude_code": kind = "Claude"
             case "opencode":    kind = "OpenCode"
             case "codex":       kind = "Codex"
             default:            kind = "Agent"

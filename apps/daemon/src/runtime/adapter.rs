@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use acp::Agent as _; // bring trait methods into scope
@@ -567,6 +567,15 @@ async fn build_attachment_block(url: &str) -> anyhow::Result<acp::ContentBlock> 
     }
 }
 
+fn should_use_claude_agent_acp_wrapper(binary: &str) -> bool {
+    let binary_name = Path::new(binary)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(binary);
+
+    binary_name == "claude" || binary_name == "claude-agent-acp"
+}
+
 #[cfg(test)]
 mod attachment_ext_tests {
     use super::path_and_ext;
@@ -596,6 +605,30 @@ mod attachment_ext_tests {
         // anyone refactoring the helper from re-introducing the bug.
         assert_ne!(ext, "jpg");
         assert_ne!(ext, "png");
+    }
+}
+
+#[cfg(test)]
+mod command_selection_tests {
+    use super::should_use_claude_agent_acp_wrapper;
+
+    #[test]
+    fn claude_binary_name_uses_acp_wrapper() {
+        assert!(should_use_claude_agent_acp_wrapper("claude"));
+    }
+
+    #[test]
+    fn absolute_claude_path_uses_acp_wrapper() {
+        assert!(should_use_claude_agent_acp_wrapper(
+            "/Users/matt.chow/.local/bin/claude"
+        ));
+    }
+
+    #[test]
+    fn non_claude_binary_does_not_use_acp_wrapper() {
+        assert!(!should_use_claude_agent_acp_wrapper(
+            "/Users/matt.chow/.opencode/bin/opencode"
+        ));
     }
 }
 
@@ -726,8 +759,9 @@ async fn run_acp_session(
 ) -> anyhow::Result<()> {
     // Spawn the ACP agent process
     // Use claude-agent-acp wrapper (Node.js) which speaks ACP JSON-RPC over stdio
-    // Falls back to npx if the binary is "claude" (default)
-    let mut cmd = if binary == "claude" || binary.ends_with("claude-agent-acp") {
+    // Falls back to npx if the binary is a Claude CLI path/name. The user's
+    // daemon.toml may store an absolute path like ~/.local/bin/claude.
+    let mut cmd = if should_use_claude_agent_acp_wrapper(&binary) {
         let mut c = tokio::process::Command::new("npx");
         c.arg("--yes").arg("@zed-industries/claude-agent-acp");
         c

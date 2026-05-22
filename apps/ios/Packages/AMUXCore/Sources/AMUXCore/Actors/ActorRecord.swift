@@ -15,6 +15,7 @@ public struct ActorRecord: Codable, Equatable, Hashable, Identifiable, Sendable 
     public let memberStatus: String?
     public let teamRole: String?
 
+    public let agentTypes: [String]
     public let agentKind: String?
     public let defaultAgentType: String?
     public let agentStatus: String?
@@ -26,7 +27,7 @@ public struct ActorRecord: Codable, Equatable, Hashable, Identifiable, Sendable 
         displayName: String, avatarURL: String? = nil, lastActiveAt: Date?,
         createdAt: Date, updatedAt: Date,
         memberStatus: String?, teamRole: String?,
-        agentKind: String?, defaultAgentType: String? = nil,
+        agentTypes: [String] = [], agentKind: String? = nil, defaultAgentType: String? = nil,
         agentStatus: String?, defaultWorkspaceID: String? = nil
     ) {
         self.id = id; self.teamID = teamID; self.actorType = actorType
@@ -34,7 +35,7 @@ public struct ActorRecord: Codable, Equatable, Hashable, Identifiable, Sendable 
         self.displayName = displayName; self.avatarURL = avatarURL; self.lastActiveAt = lastActiveAt
         self.createdAt = createdAt; self.updatedAt = updatedAt
         self.memberStatus = memberStatus; self.teamRole = teamRole
-        self.agentKind = agentKind; self.defaultAgentType = defaultAgentType
+        self.agentTypes = agentTypes; self.agentKind = agentKind; self.defaultAgentType = defaultAgentType
         self.agentStatus = agentStatus; self.defaultWorkspaceID = defaultWorkspaceID
     }
 

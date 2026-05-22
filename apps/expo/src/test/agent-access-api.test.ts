@@ -12,7 +12,8 @@ describe("createAgentAccessApi", () => {
     const client = fakeClient(async (_name, _args) => ({
       data: [
         {
-          agent_id: "a1", display_name: "Claude", agent_kind: "claude",
+          agent_id: "a1", display_name: "Claude",
+          agent_types: ["claude", "opencode"], default_agent_type: "claude",
           permission_level: "team", visibility: "team", is_owner: true,
           device_id: "dev1", last_active_at: "2026-05-20T10:00:00.000Z",
         },
@@ -24,7 +25,8 @@ describe("createAgentAccessApi", () => {
     expect(rows[0]).toEqual({
       agentId: "a1",
       displayName: "Claude",
-      agentKind: "claude",
+      agentTypes: ["claude", "opencode"],
+      defaultAgentType: "claude",
       permissionLevel: "team",
       visibility: "team",
       isOwner: true,
