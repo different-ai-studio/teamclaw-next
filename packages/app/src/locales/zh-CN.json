@@ -2612,7 +2612,33 @@
   "actors": {
     "loading": "正在加载成员...",
     "empty": "团队暂无成员",
-    "error": "加载成员失败"
+    "error": "加载成员失败",
+    "contextMenu": {
+      "viewProfile": "查看资料",
+      "copyName": "复制名字",
+      "copyId": "复制 ID",
+      "remove": "从团队移除"
+    },
+    "detail": {
+      "title": "成员详情",
+      "member": "成员",
+      "agent": "代理",
+      "online": "在线",
+      "offline": "离线",
+      "lastActive": "最近活跃 {{when}}",
+      "copyId": "复制 ID"
+    },
+    "removeConfirm": {
+      "titleAgent": "移除代理?",
+      "titleMember": "移除成员?",
+      "body": "将 {{name}} 从团队中移除。此操作无法撤销。",
+      "cta": "移除"
+    },
+    "copiedName": "已复制名字",
+    "copiedId": "已复制 ID",
+    "copyFailed": "复制失败",
+    "removed": "已从团队移除",
+    "removeFailed": "移除失败: {{msg}}"
   },
   "ideas": {
     "loading": "正在加载想法...",
@@ -2626,7 +2652,35 @@
     "descriptionPlaceholder": "约束是什么？预期收益是什么？",
     "createButton": "创建",
     "created": "想法已创建",
-    "createFailed": "创建失败：{{msg}}"
+    "createFailed": "创建失败：{{msg}}",
+    "contextMenu": {
+      "view": "查看",
+      "status": "状态",
+      "statusOpen": "Open",
+      "statusInProgress": "进行中",
+      "statusDone": "已完成",
+      "rename": "重命名",
+      "copyId": "复制 ID",
+      "delete": "删除"
+    },
+    "deleteConfirm": {
+      "title": "删除想法?",
+      "body": "删除 \"{{title}}\"。该想法将被归档并从列表中移除。",
+      "cta": "删除"
+    },
+    "renameDialog": {
+      "title": "重命名想法",
+      "placeholder": "想法标题",
+      "save": "保存"
+    },
+    "archived": "想法已删除",
+    "copiedId": "已复制 ID",
+    "copyFailed": "复制失败",
+    "deleteFailed": "删除失败: {{msg}}",
+    "statusUpdated": "状态已更新",
+    "statusFailed": "状态更新失败: {{msg}}",
+    "renamed": "想法已重命名",
+    "renameFailed": "重命名失败: {{msg}}"
   },
   "invite": {
     "title": "邀请加入团队",

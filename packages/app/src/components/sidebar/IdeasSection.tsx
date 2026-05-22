@@ -1,16 +1,24 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
-import { useIdeasForTeam, type IdeaRow } from '@/components/panel/IdeasView'
+import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase-client'
+import { useIdeasForTeam, type IdeaRow as IdeaRowData } from '@/components/panel/IdeasView'
 import { CreateIdeaDialog } from '@/components/sidebar/CreateIdeaDialog'
+import { IdeaRow } from '@/components/sidebar/IdeaRow'
+import { RenameIdeaDialog } from '@/components/sidebar/RenameIdeaDialog'
+import { updateIdeaStatus, type IdeaStatus } from '@/lib/idea-mutations'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useUIStore } from '@/stores/ui'
-import { cn } from '@/lib/utils'
-
-function ideaStatusLabel(status: IdeaRow['status']): { label: string; tone: string } {
-  if (status === 'in_progress') return { label: 'active', tone: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' }
-  if (status === 'done') return { label: 'done', tone: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' }
-  return { label: 'open', tone: 'bg-muted text-muted-foreground' }
-}
 
 export function IdeasSection() {
   const { t } = useTranslation()
@@ -20,14 +28,59 @@ export function IdeasSection() {
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const { ideas, loading, teamId, refetch } = useIdeasForTeam()
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [renameFor, setRenameFor] = React.useState<IdeaRowData | null>(null)
+  const [deleteFor, setDeleteFor] = React.useState<IdeaRowData | null>(null)
+  const [deleting, setDeleting] = React.useState(false)
 
-  const handleClickIdea = (idea: IdeaRow) => {
+  const handleSelect = (idea: IdeaRowData) => {
     setFilter({ kind: 'idea', ideaId: idea.id, title: idea.title })
+  }
+
+  const handleChangeStatus = async (idea: IdeaRowData, status: IdeaStatus) => {
+    try {
+      await updateIdeaStatus(idea.id, status)
+      toast.success(t('ideas.statusUpdated', 'Status updated'))
+      refetch()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(t('ideas.statusFailed', 'Status update failed: {{msg}}', { msg }))
+    }
+  }
+
+  const handleCopyId = async (idea: IdeaRowData) => {
+    try {
+      await navigator.clipboard.writeText(idea.id)
+      toast.success(t('ideas.copiedId', 'Copied idea ID'))
+    } catch {
+      toast.error(t('ideas.copyFailed', 'Copy failed'))
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteFor) return
+    setDeleting(true)
+    try {
+      const { error } = await supabase.rpc('archive_idea', {
+        p_idea_id: deleteFor.id,
+        p_archived: true,
+      })
+      if (error) {
+        toast.error(t('ideas.deleteFailed', 'Delete failed: {{msg}}', { msg: error.message }))
+        return
+      }
+      toast.success(t('ideas.archived', 'Idea deleted'))
+      if (filter.kind === 'idea' && filter.ideaId === deleteFor.id) {
+        setFilter({ kind: 'all' })
+      }
+      setDeleteFor(null)
+      refetch()
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
     <div className="flex flex-col">
-      {/* Group header: 10.5px faint, count suffix `· N`. AGENTS.md §2. */}
       <div className="flex items-center gap-1 pr-1">
         <button
           type="button"
@@ -52,12 +105,30 @@ export function IdeasSection() {
           <Plus className="h-[11px] w-[11px]" />
         </button>
       </div>
-      <CreateIdeaDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        teamId={teamId}
-        onCreated={refetch}
+      <CreateIdeaDialog open={createOpen} onOpenChange={setCreateOpen} teamId={teamId} onCreated={refetch} />
+      <RenameIdeaDialog
+        ideaId={renameFor?.id ?? null}
+        initialTitle={renameFor?.title ?? ''}
+        open={!!renameFor}
+        onOpenChange={(open) => { if (!open) setRenameFor(null) }}
+        onRenamed={refetch}
       />
+      <AlertDialog open={!!deleteFor} onOpenChange={(open) => { if (!open) setDeleteFor(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('ideas.deleteConfirm.title', 'Delete idea?')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('ideas.deleteConfirm.body', 'Delete "{{title}}". This archives the idea and removes it from the list.', { title: deleteFor?.title })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={deleting}>
+              {t('ideas.deleteConfirm.cta', 'Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {!collapsed && (
         <div className="flex flex-col">
           {loading && (
@@ -66,28 +137,18 @@ export function IdeasSection() {
           {!loading && ideas.length === 0 && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('ideas.empty', 'No ideas yet')}</div>
           )}
-          {ideas.map((idea) => {
-            const active = filter.kind === 'idea' && filter.ideaId === idea.id
-            const { label, tone } = ideaStatusLabel(idea.status)
-            return (
-              <button
-                key={idea.id}
-                type="button"
-                onClick={() => handleClickIdea(idea)}
-                className={cn(
-                  // Direction B row: tight 5×9 padding, selected fill on active,
-                  // no left bar (reserved for session list cards). AGENTS.md §2.
-                  'flex w-full items-center gap-2 rounded-md px-[9px] py-[5px] text-left text-[12.5px] transition-colors',
-                  active
-                    ? 'bg-selected font-semibold text-foreground'
-                    : 'text-ink-2 hover:bg-selected/60',
-                )}
-              >
-                <span className="min-w-0 flex-1 truncate">{idea.title}</span>
-                <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium', tone)}>{label}</span>
-              </button>
-            )
-          })}
+          {ideas.map((idea) => (
+            <IdeaRow
+              key={idea.id}
+              idea={idea}
+              active={filter.kind === 'idea' && filter.ideaId === idea.id}
+              onSelect={handleSelect}
+              onChangeStatus={handleChangeStatus}
+              onRequestRename={setRenameFor}
+              onCopyId={handleCopyId}
+              onRequestDelete={setDeleteFor}
+            />
+          ))}
         </div>
       )}
     </div>
