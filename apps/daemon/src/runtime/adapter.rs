@@ -20,7 +20,10 @@ use crate::proto::amux;
 /// Commands the main tokio runtime sends to the ACP thread.
 pub enum AcpCommand {
     /// Send a prompt to the running session.
-    Prompt { text: String, attachment_urls: Vec<String> },
+    Prompt {
+        text: String,
+        attachment_urls: Vec<String>,
+    },
     /// Cancel the current turn.
     Cancel,
     /// Resolve a pending permission request.
@@ -532,11 +535,7 @@ static IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
 /// ResourceLink.
 fn path_and_ext(url: &str) -> (&str, String) {
     let path = url.split('?').next().unwrap_or(url);
-    let ext = path
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
     (path, ext)
 }
 
@@ -558,12 +557,10 @@ async fn build_attachment_block(url: &str) -> anyhow::Result<acp::ContentBlock> 
         };
         Ok(acp::ContentBlock::Image(acp::ImageContent::new(data, mime)))
     } else {
-        let name = path
-            .rsplit('/')
-            .next()
-            .unwrap_or("attachment")
-            .to_string();
-        Ok(acp::ContentBlock::ResourceLink(acp::ResourceLink::new(name, url)))
+        let name = path.rsplit('/').next().unwrap_or("attachment").to_string();
+        Ok(acp::ContentBlock::ResourceLink(acp::ResourceLink::new(
+            name, url,
+        )))
     }
 }
 
@@ -765,8 +762,7 @@ async fn run_acp_session(
         let mut c = tokio::process::Command::new("npx");
         c.arg("--yes").arg("@zed-industries/claude-agent-acp");
         c
-    } else if (agent_type == amux::AgentType::Opencode
-        || agent_type == amux::AgentType::Codex)
+    } else if (agent_type == amux::AgentType::Opencode || agent_type == amux::AgentType::Codex)
         && args.is_empty()
     {
         // Both opencode and codex CLIs expose ACP via an `acp` subcommand.
@@ -1018,7 +1014,7 @@ async fn run_acp_session(
             let result = conn
                 .prompt(acp::PromptRequest::new(
                     session_id.clone(),
-                    vec![text.into()],  // initial_prompt carries no attachments
+                    vec![text.into()], // initial_prompt carries no attachments
                 ))
                 .await;
 
@@ -1044,7 +1040,10 @@ async fn run_acp_session(
     // Command loop: receive commands from the main runtime
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            AcpCommand::Prompt { text, attachment_urls } => {
+            AcpCommand::Prompt {
+                text,
+                attachment_urls,
+            } => {
                 let conn = conn.clone();
                 let session_id = session_id.clone();
                 let event_tx = event_tx.clone();
@@ -1067,7 +1066,9 @@ async fn run_acp_session(
                     for url in &attachment_urls {
                         match build_attachment_block(url).await {
                             Ok(block) => blocks.push(block),
-                            Err(e) => warn!(url = %url, err = %e, "attachment fetch failed; skipping"),
+                            Err(e) => {
+                                warn!(url = %url, err = %e, "attachment fetch failed; skipping")
+                            }
                         }
                     }
 

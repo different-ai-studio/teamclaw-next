@@ -73,10 +73,7 @@ mod tests {
                     "Claude Sonnet 4.6",
                 )
                 .description("balanced"),
-                acp::ModelInfo::new(
-                    acp::ModelId::new("zai/glm-4.6"),
-                    "GLM-4.6",
-                ),
+                acp::ModelInfo::new(acp::ModelId::new("zai/glm-4.6"), "GLM-4.6"),
             ],
         );
         let out = acp_models_to_proto(&state);
