@@ -24,6 +24,7 @@ public struct IdeaDetailView: View {
     @State private var showNewSession = false
     @State private var showArchiveConfirm = false
     @State private var isArchiving = false
+    @State private var isSubmittingProgress = false
     @State private var didSeedLocals = false
     @State private var composerText: String = ""
     @FocusState private var titleFocused: Bool
@@ -65,55 +66,8 @@ public struct IdeaDetailView: View {
         allSessions.filter { $0.ideaId == ideaID }
     }
 
-    /// Deterministic mock agent picked from the team's agents — used to
-    /// populate the "Claimed by" card for `in_progress` ideas while a real
-    /// claim aggregate doesn't exist yet.
-    private var mockClaimedAgent: CachedActor? {
-        let agents = allActors.filter(\.isAgent)
-        guard !agents.isEmpty else { return nil }
-        let hash = abs(ideaID.unicodeScalars.reduce(0) { $0 &+ Int($1.value) })
-        return agents[hash % agents.count]
-    }
-
-    /// Deterministic placeholder submissions until a real submissions feed
-    /// lands. Stable per idea so the list doesn't reshuffle.
-    fileprivate struct MockSubmission: Identifiable {
-        let id: Int
-        let actor: CachedActor
-        let when: Date
-        let content: String
-        let attachment: String?
-    }
-
-    fileprivate var mockSubmissions: [MockSubmission] {
-        guard let item else { return [] }
-        let pool = allActors
-        guard !pool.isEmpty else { return [] }
-        let h = abs(item.id.unicodeScalars.reduce(0) { $0 &+ Int($1.value) })
-        let count = item.isOpen ? 0 : (item.isDone ? 4 : (h % 3 + 1))
-        if count == 0 { return [] }
-
-        let templates: [(String, String?)] = [
-            ("Drafted the initial implementation. Opened a PR for review — feedback welcome.",
-             "PR #214 · daemon/src/cron/sweep.rs"),
-            ("Reviewed the proposal. The unsubscribe path needs to flush retained state before the broker drops the connection.",
-             nil),
-            ("Initial proposal: 24h idle threshold, 6h sweep cadence, configurable via daemon.toml. Will add a regression test.",
-             nil),
-            ("Sketched a quick prototype to validate the approach. Looks promising on the happy path.",
-             nil),
-        ]
-        var out: [MockSubmission] = []
-        for i in 0..<count {
-            let actor = pool[(h &+ i) % pool.count]
-            let template = templates[i % templates.count]
-            let when = item.updatedAt.addingTimeInterval(-Double(i) * 3600)
-            out.append(MockSubmission(
-                id: i, actor: actor, when: when,
-                content: template.0, attachment: template.1
-            ))
-        }
-        return out
+    private var activities: [IdeaActivityRecord] {
+        ideaStore.activities(for: ideaID)
     }
 
     public var body: some View {
@@ -126,16 +80,16 @@ public struct IdeaDetailView: View {
         }
         .onAppear { seedLocals() }
         .onChange(of: ideaID) { _, _ in didSeedLocals = false; seedLocals() }
+        .task(id: ideaID) {
+            await ideaStore.reloadActivities(ideaID: ideaID)
+        }
     }
 
     @ViewBuilder
     private func content(for item: IdeaRecord) -> some View {
         List {
             heroSection(item)
-            if item.isInProgress, let agent = mockClaimedAgent {
-                claimCardSection(agent: agent)
-            }
-            submissionsSection(item)
+            activityTimelineSection(item)
             sessionsSection(item)
             archiveSection(item)
             if let err = ideaStore.errorMessage {
@@ -312,71 +266,35 @@ public struct IdeaDetailView: View {
         .padding(.top, 2)
     }
 
-    // MARK: Claim card
+    // MARK: Activity
 
     @ViewBuilder
-    private func claimCardSection(agent: CachedActor) -> some View {
+    private func activityTimelineSection(_ item: IdeaRecord) -> some View {
         Section {
-            HStack(spacing: 12) {
-                AgentAvatar(actor: agent, size: 36, cornerRadius: 9)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agent.displayName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    Text(agentSubtitle(agent))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            if ideaStore.isLoadingActivities && activities.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.amux.paper)
+            } else if activities.isEmpty {
+                Text("No activity yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .listRowBackground(Color.amux.paper)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
+                        IdeaActivityRow(
+                            activity: activity,
+                            actor: allActors.first { $0.actorId == activity.actorID },
+                            isLast: index == activities.count - 1
+                        )
+                    }
                 }
-                Spacer()
-                Button {
-                    showNewSession = true
-                } label: {
-                    Text("Open session")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 6)
-                        .background(Color.amux.cinnabar.opacity(0.10))
-                        .clipShape(Capsule())
-                        .foregroundStyle(Color.amux.cinnabar)
-                }
-                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                .listRowBackground(Color.amux.paper)
             }
-            .listRowBackground(Color.amux.paper)
         } header: {
-            sectionHeader("Claimed by")
-        }
-    }
-
-    private func agentSubtitle(_ a: CachedActor) -> String {
-        let kind: String
-        switch a.defaultAgentType {
-        case "claude", "claude_code": kind = "Claude"
-        case "opencode":    kind = "OpenCode"
-        case "codex":       kind = "Codex"
-        default:            kind = "Agent"
-        }
-        if let s = a.agentStatus, !s.isEmpty {
-            return "\(kind) · \(s)"
-        }
-        return kind
-    }
-
-    // MARK: Submissions
-
-    @ViewBuilder
-    private func submissionsSection(_ item: IdeaRecord) -> some View {
-        let subs = mockSubmissions
-        if subs.isEmpty {
-            EmptyView()
-        } else {
-            Section {
-                ForEach(subs) { s in
-                    SubmissionRow(submission: s)
-                        .listRowBackground(Color.amux.paper)
-                }
-            } header: {
-                sectionHeader("Submissions · \(subs.count)")
-            }
+            sectionHeader("Activity")
         }
     }
 
@@ -458,17 +376,23 @@ public struct IdeaDetailView: View {
                 .font(.subheadline)
                 .padding(.leading, 14)
             Button {
-                composerText = ""  // wire to a real submissions endpoint when available
+                submitProgress()
             } label: {
-                Text("Submit")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.amux.mist)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.amux.onyx, in: Capsule())
+                if isSubmittingProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 52, height: 30)
+                        .background(Color.amux.onyx.opacity(0.18), in: Capsule())
+                } else {
+                    Text("Submit")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.amux.mist)
+                        .frame(width: 52, height: 30)
+                        .background(Color.amux.onyx, in: Capsule())
+                }
             }
             .buttonStyle(.plain)
-            .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(isSubmittingProgress || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .opacity(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
         }
         .padding(6)
@@ -543,68 +467,117 @@ public struct IdeaDetailView: View {
             }
         }
     }
-}
 
-// MARK: - Submission row
-
-private struct SubmissionRow: View {
-    let submission: IdeaDetailView.MockSubmission
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                AgentAvatar(actor: submission.actor, size: 22, cornerRadius: 6)
-                Text(submission.actor.displayName)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                if submission.actor.isAgent {
-                    Text("AGENT")
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.3)
-                        .foregroundStyle(Color.amux.basalt)
-                        .padding(.horizontal, 5)
-                        .frame(height: 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(Color.amux.pebble)
-                        )
+    private func submitProgress() {
+        let trimmed = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isSubmittingProgress else { return }
+        isSubmittingProgress = true
+        Task {
+            let ok = await ideaStore.createActivity(
+                ideaID: ideaID,
+                activityType: "progress",
+                content: trimmed
+            )
+            if ok {
+                await ideaStore.reloadActivities(ideaID: ideaID)
+                await MainActor.run {
+                    composerText = ""
+                    isSubmittingProgress = false
                 }
-                Spacer()
-                Text(submission.when.relativeShort)
-                    .font(.caption2)
-                    .foregroundStyle(Color.amux.slate)
-            }
-
-            Text(submission.content)
-                .font(.subheadline)
-                .foregroundStyle(Color.amux.onyx.opacity(0.85))
-                .lineLimit(nil)
-
-            if let attach = submission.attachment {
-                // Attachment chip uses Cinnabar so PRs/links read as the
-                // single semantic accent of the design — Hai's "spare the
-                // vermillion" allows it here because attachments are an
-                // intentional, infrequent affordance.
-                HStack(spacing: 6) {
-                    Image(systemName: "link")
-                        .font(.system(size: 10, weight: .medium))
-                    Text(attach)
-                        .font(.system(.caption, design: .monospaced))
+            } else {
+                await MainActor.run {
+                    isSubmittingProgress = false
                 }
-                .foregroundStyle(Color.amux.cinnabar)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.amux.cinnabar.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.amux.cinnabar.opacity(0.2), lineWidth: 0.5)
-                )
             }
         }
-        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Activity row
+
+private struct IdeaActivityRow: View {
+    let activity: IdeaActivityRecord
+    let actor: CachedActor?
+    let isLast: Bool
+
+    private var actorName: String {
+        guard let displayName = actor?.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+              !displayName.isEmpty else {
+            return "Unknown"
+        }
+        return displayName
+    }
+
+    private var iconName: String {
+        if activity.isStatusChange { return "arrow.triangle.2.circlepath" }
+        if activity.isReorder { return "arrow.up.arrow.down" }
+        return "text.line.first.and.arrowtriangle.forward"
+    }
+
+    private var activityLabel: String {
+        if activity.isStatusChange { return "Status changed" }
+        if activity.isReorder { return "Reordered" }
+        return "Progress"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle().fill(Color.amux.pebble)
+                    Image(systemName: iconName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(activity.isStatusChange ? Color.amux.basalt : Color.amux.cinnabar)
+                }
+                .frame(width: 24, height: 24)
+
+                if !isLast {
+                    Rectangle()
+                        .fill(Color.amux.hairline)
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    if let actor {
+                        AgentAvatar(actor: actor, size: 20, cornerRadius: 5)
+                    }
+                    Text(actorName)
+                        .font(.caption)
+                    if let actor, actor.isAgent {
+                        Text("AGENT")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.3)
+                            .foregroundStyle(Color.amux.basalt)
+                            .padding(.horizontal, 5)
+                            .frame(height: 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .fill(Color.amux.pebble)
+                            )
+                    }
+                    Spacer()
+                    Text(activity.createdAt.relativeShort)
+                        .font(.caption2)
+                        .foregroundStyle(Color.amux.slate)
+                }
+
+                Text(activityLabel)
+                    .font(.caption2)
+                    .foregroundStyle(Color.amux.slate)
+
+                Text(activity.content.isEmpty ? activity.activityType : activity.content)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.amux.onyx.opacity(0.85))
+                    .lineLimit(nil)
+            }
+            .padding(.bottom, isLast ? 0 : 14)
+        }
+        .padding(.top, 2)
     }
 }
 

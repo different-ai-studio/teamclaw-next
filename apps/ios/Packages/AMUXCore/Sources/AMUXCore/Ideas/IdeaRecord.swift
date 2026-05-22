@@ -9,6 +9,7 @@ public struct IdeaRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
     public var description: String
     public var status: String
     public var archived: Bool
+    public var sortOrder: Int
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -21,6 +22,7 @@ public struct IdeaRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
         description: String,
         status: String,
         archived: Bool,
+        sortOrder: Int = 0,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -32,6 +34,7 @@ public struct IdeaRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.description = description
         self.status = status
         self.archived = archived
+        self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -94,5 +97,17 @@ public struct IdeaUpdateInput: Equatable, Sendable {
         self.description = description
         self.status = status
         self.workspaceID = workspaceID
+    }
+}
+
+public struct IdeaActivityCreateInput: Equatable, Sendable {
+    public let activityType: String
+    public let content: String
+    public let metadata: [String: String]
+
+    public init(activityType: String, content: String, metadata: [String: String] = [:]) {
+        self.activityType = activityType
+        self.content = content
+        self.metadata = metadata
     }
 }

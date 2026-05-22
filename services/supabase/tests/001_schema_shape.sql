@@ -16,7 +16,7 @@ exception
 end;
 $$;
 
-select plan(61);
+select plan(66);
 
 select has_schema('app');
 select has_table('public', 'teams');
@@ -27,6 +27,7 @@ select has_table('public', 'workspaces');
 select has_table('public', 'agents');
 select has_table('public', 'agent_member_access');
 select has_table('public', 'ideas');
+select has_table('public', 'idea_activities');
 select has_table('public', 'idea_external_refs');
 select has_table('public', 'sessions');
 select has_table('public', 'session_participants');
@@ -38,10 +39,13 @@ select col_type_is('public', 'actors', 'avatar_url', 'text');
 select col_type_is('public', 'members', 'id', 'uuid');
 select col_type_is('public', 'agents', 'id', 'uuid');
 select col_type_is('public', 'workspaces', 'agent_id', 'uuid');
+select col_type_is('public', 'ideas', 'sort_order', 'integer');
+select col_type_is('public', 'idea_activities', 'activity_type', 'text');
 
 select fk_ok('public', 'members', 'id', 'public', 'actors', 'id');
 select fk_ok('public', 'agents', 'id', 'public', 'actors', 'id');
 select fk_ok('public', 'workspaces', 'agent_id', 'public', 'agents', 'id');
+select fk_ok('public', 'idea_activities', 'idea_id', 'public', 'ideas', 'id');
 select fk_ok('public', 'sessions', 'idea_id', 'public', 'ideas', 'id');
 select fk_ok('public', 'messages', 'session_id', 'public', 'sessions', 'id');
 select fk_ok('public', 'agent_runtimes', 'agent_id', 'public', 'agents', 'id');
@@ -54,6 +58,7 @@ select has_trigger('public', 'actors', 'enforce_actors_parent_integrity');
 select has_trigger('public', 'agents', 'enforce_agents_same_team');
 select has_trigger('public', 'agent_member_access', 'enforce_agent_member_access_same_team');
 select has_trigger('public', 'ideas', 'enforce_ideas_same_team');
+select has_trigger('public', 'idea_activities', 'set_idea_activities_updated_at');
 select has_trigger('public', 'workspaces', 'enforce_workspaces_parent_integrity');
 select has_trigger('public', 'idea_external_refs', 'enforce_idea_external_refs_same_team');
 select has_trigger('public', 'sessions', 'enforce_sessions_same_team');

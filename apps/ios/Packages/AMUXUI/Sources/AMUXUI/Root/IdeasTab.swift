@@ -120,7 +120,12 @@ public struct IdeasTab: View {
                 description: Text(ideaSetupError)
             )
         } else if let ideaStore {
-            IdeaListView(ideaStore: ideaStore, showCreate: $showCreate, currentActorID: currentActorID)
+            IdeaListView(
+                ideaStore: ideaStore,
+                showCreate: $showCreate,
+                navigationPath: $navigationPath,
+                currentActorID: currentActorID
+            )
         } else {
             ProgressView("Loading ideas…")
         }

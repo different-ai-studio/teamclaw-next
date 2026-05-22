@@ -119,10 +119,81 @@ struct IdeaStoreTests {
         #expect(created.workspaceID.isEmpty)
         #expect(await repository.recordedCreatedInputs().first?.workspaceID == "")
     }
+
+    @MainActor
+    @Test("create activity appends to the idea timeline")
+    func createActivityAppendsTimeline() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = InMemoryIdeaRepository(ideas: [])
+        let store = IdeaStore(teamID: "team-1", repository: repository, modelContext: context)
+
+        await store.createIdea(
+            title: "Activity idea",
+            description: "",
+            workspaceID: ""
+        )
+        let created = try #require(store.ideas.first)
+
+        await store.createActivity(
+            ideaID: created.id,
+            activityType: "progress",
+            content: "Implemented the first pass."
+        )
+
+        #expect(store.activities(for: created.id).map(\.content) == ["Implemented the first pass."])
+    }
+
+    @MainActor
+    @Test("moving ideas writes a reorder activity for the moved idea")
+    func moveIdeasWritesReorderActivity() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = InMemoryIdeaRepository(
+            ideas: [
+                IdeaRecord(
+                    id: "idea-1",
+                    teamID: "team-1",
+                    workspaceID: "",
+                    createdByActorID: "member-1",
+                    title: "First",
+                    description: "",
+                    status: "open",
+                    archived: false,
+                    sortOrder: 1_000,
+                    createdAt: .distantPast,
+                    updatedAt: .distantPast
+                ),
+                IdeaRecord(
+                    id: "idea-2",
+                    teamID: "team-1",
+                    workspaceID: "",
+                    createdByActorID: "member-1",
+                    title: "Second",
+                    description: "",
+                    status: "open",
+                    archived: false,
+                    sortOrder: 2_000,
+                    createdAt: .now,
+                    updatedAt: .now
+                ),
+            ]
+        )
+        let store = IdeaStore(teamID: "team-1", repository: repository, modelContext: context)
+
+        await store.reload()
+        store.moveIdeas(from: IndexSet(integer: 0), to: 2)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(store.ideas.map(\.id) == ["idea-2", "idea-1"])
+        #expect(store.activities(for: "idea-1").map(\.activityType) == ["reorder"])
+        #expect(store.activities(for: "idea-1").first?.metadata["position"] == "2")
+    }
 }
 
 private actor InMemoryIdeaRepository: IdeaRepository {
     private var ideasByID: [String: IdeaRecord]
+    private var activitiesByIdeaID: [String: [IdeaActivityRecord]] = [:]
     private var createdInputs: [IdeaCreateInput] = []
     private var archiveInputs: [(String, Bool)] = []
 
@@ -181,6 +252,41 @@ private actor InMemoryIdeaRepository: IdeaRepository {
         existing.updatedAt = .now
         ideasByID[ideaID] = existing
         return existing
+    }
+
+    func reorderIdeas(teamID: String, ideaIDs: [String]) async throws {
+        for (index, ideaID) in ideaIDs.enumerated() {
+            guard var existing = ideasByID[ideaID], existing.teamID == teamID else {
+                throw InMemoryError.missingIdea
+            }
+            existing.sortOrder = (index + 1) * 1_000
+            ideasByID[ideaID] = existing
+        }
+    }
+
+    func listIdeaActivities(ideaID: String) async throws -> [IdeaActivityRecord] {
+        activitiesByIdeaID[ideaID] ?? []
+    }
+
+    func createIdeaActivity(ideaID: String, input: IdeaActivityCreateInput) async throws -> IdeaActivityRecord {
+        guard let idea = ideasByID[ideaID] else {
+            throw InMemoryError.missingIdea
+        }
+        let activity = IdeaActivityRecord(
+            id: "activity-\((activitiesByIdeaID[ideaID] ?? []).count + 1)",
+            teamID: idea.teamID,
+            ideaID: ideaID,
+            actorID: idea.createdByActorID,
+            activityType: input.activityType,
+            content: input.content,
+            metadata: input.metadata,
+            createdAt: .now,
+            updatedAt: .now
+        )
+        var activities = activitiesByIdeaID[ideaID] ?? []
+        activities.insert(activity, at: 0)
+        activitiesByIdeaID[ideaID] = activities
+        return activity
     }
 
     func recordedCreatedInputs() -> [IdeaCreateInput] {

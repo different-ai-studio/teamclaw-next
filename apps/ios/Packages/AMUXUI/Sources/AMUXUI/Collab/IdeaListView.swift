@@ -21,8 +21,10 @@ public struct IdeaListView: View {
     }
 
     @Binding var showCreate: Bool
+    @Binding var navigationPath: [String]
     @State private var showArchived = false
     @State private var filter: Filter = .all
+    @State private var editMode: EditMode = .inactive
 
     /// `Mine` compares against `IdeaRecord.createdByActorID`. `nil` hides
     /// the "Mine" chip from the filter bar (the user hasn't been mapped
@@ -33,10 +35,12 @@ public struct IdeaListView: View {
     public init(
         ideaStore: IdeaStore,
         showCreate: Binding<Bool>,
+        navigationPath: Binding<[String]>,
         currentActorID: String? = nil
     ) {
         self.ideaStore = ideaStore
         self._showCreate = showCreate
+        self._navigationPath = navigationPath
         self.currentActorID = currentActorID
     }
 
@@ -112,13 +116,16 @@ public struct IdeaListView: View {
                         emptyFilterRow
                     } else {
                         ForEach(filteredIdeas) { item in
-                            NavigationLink(value: "idea:\(item.id)") {
+                            Button {
+                                navigationPath.append("idea:\(item.id)")
+                            } label: {
                                 IdeaRow(
                                     item: item,
                                     creator: memberById[item.createdByActorID],
                                     workspaceName: workspaceNameById[item.workspaceID]
                                 )
                             }
+                            .buttonStyle(.plain)
                             .listRowBackground(Color.clear)
                             .listRowSeparatorTint(Color.amux.hairline)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -130,10 +137,13 @@ public struct IdeaListView: View {
                                 .tint(.gray)
                             }
                         }
+                        .onMove(perform: ideaStore.moveIdeas)
+                        .moveDisabled(filter != .all)
                     }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .environment(\.editMode, $editMode)
                 .refreshable {
                     await ideaStore.reload()
                 }
@@ -142,6 +152,22 @@ public struct IdeaListView: View {
         .background(Color.amux.mist)
         .navigationTitle(IdeaUIPresentation.pluralTitle)
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            if filter == .all, filteredIdeas.count > 1 {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            editMode = editMode.isEditing ? .inactive : .active
+                        }
+                    } label: {
+                        Image(systemName: editMode.isEditing ? "checkmark" : "arrow.up.arrow.down")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel(editMode.isEditing ? "Done sorting" : "Sort ideas")
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             if !ideaStore.archivedIdeas.isEmpty {
                 Button {
@@ -151,9 +177,6 @@ public struct IdeaListView: View {
                         Image(systemName: "archivebox")
                         Text("Archived (\(ideaStore.archivedIdeas.count))")
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
                     }
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -169,6 +192,11 @@ public struct IdeaListView: View {
         }
         .sheet(isPresented: $showArchived) {
             ArchivedIdeasView(ideaStore: ideaStore)
+        }
+        .onChange(of: filter) { _, newValue in
+            if newValue != .all {
+                editMode = .inactive
+            }
         }
     }
 

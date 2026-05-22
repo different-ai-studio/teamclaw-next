@@ -52,6 +52,8 @@ struct SegmentedFilterBar<Tag: Hashable>: View {
                 Text(segment.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(isActive ? Color.white : Color.amux.basalt)
+                    .lineLimit(1)
+                    .layoutPriority(1)
                 if let count = segment.count {
                     Text("·")
                         .font(.system(size: 13))
@@ -62,8 +64,10 @@ struct SegmentedFilterBar<Tag: Hashable>: View {
                         .monospacedDigit()
                 }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.9)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .background(
                 Capsule().fill(isActive ? Color.amux.onyx : Color.clear)
