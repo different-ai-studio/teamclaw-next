@@ -752,7 +752,8 @@ impl DaemonServer {
         // main event loop draining `mgr.drain_evicted()` per tick (see Task 7).
         if let Some(threshold_secs) = self.config.idle_runtime_timeout_secs {
             let mgr = self.agents.clone();
-            let threshold = threshold_secs as i64;
+            info!(threshold_secs, "idle ACP eviction enabled");
+            let threshold = i64::try_from(threshold_secs).unwrap_or(i64::MAX);
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_secs(60));
                 tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
