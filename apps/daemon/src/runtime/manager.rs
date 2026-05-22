@@ -144,6 +144,12 @@ pub struct RuntimeManager {
     /// announced earlier on the (non-retained) events topic.
     available_commands_per_agent: HashMap<String, Vec<amux::AcpAvailableCommand>>,
     supabase: Option<SupabaseClient>,
+    /// agent_ids that were stopped by the idle sweeper and still need their
+    /// terminal `runtime/{id}/state` publish + retain clear. Drained by the
+    /// main event loop via `drain_evicted`. Manual `stop_agent` calls go
+    /// through the RPC handler which publishes directly, so they do NOT
+    /// enter this buffer.
+    evicted_pending_publish: Vec<String>,
     /// Test-only: records the last body sent per agent_id via send_prompt_raw.
     #[cfg(test)]
     last_sent: HashMap<String, String>,
@@ -163,6 +169,7 @@ impl RuntimeManager {
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
             supabase,
+            evicted_pending_publish: Vec::new(),
             #[cfg(test)]
             last_sent: HashMap::new(),
             #[cfg(test)]
@@ -555,6 +562,42 @@ impl RuntimeManager {
         } else {
             None
         }
+    }
+
+    /// Stop every runtime whose `last_active_at` is older than
+    /// `now - threshold_secs`. Skips runtimes whose `event_rx` is currently
+    /// checked out (a gateway turn is in flight). Returns the list of
+    /// agent_ids that were stopped — and also buffers them on
+    /// `evicted_pending_publish` so the daemon main loop can clear retained
+    /// state. Called by the daemon's idle sweeper task.
+    pub async fn evict_idle(&mut self, threshold_secs: i64) -> Vec<String> {
+        let now = chrono::Utc::now().timestamp();
+        let cutoff = now - threshold_secs;
+        let stale: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, h)| h.event_rx.is_some() && h.last_active_at <= cutoff)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut evicted = Vec::with_capacity(stale.len());
+        for id in stale {
+            if self.stop_agent(&id).await.is_some() {
+                info!(
+                    agent_id = %id,
+                    threshold_secs,
+                    "idle sweeper: evicted runtime"
+                );
+                evicted.push(id);
+            }
+        }
+        self.evicted_pending_publish.extend(evicted.iter().cloned());
+        evicted
+    }
+
+    /// Drain the buffer of idle-evicted agent_ids whose terminal MQTT state
+    /// still needs publishing. Called once per main-loop tick.
+    pub fn drain_evicted(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.evicted_pending_publish)
     }
 
     /// Send a prompt to an existing agent via ACP, draining any pending_silent
@@ -1724,5 +1767,34 @@ mod tests {
             after > 0,
             "poll_events should bump last_active_at for agents that emitted"
         );
+    }
+
+    #[tokio::test]
+    async fn evict_idle_stops_runtimes_past_threshold() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-stale");
+        let stale_ts = chrono::Utc::now().timestamp() - 3600; // 1h ago
+        mgr.get_handle_mut("rt-stale").unwrap().last_active_at = stale_ts;
+        mgr.add_test_runtime("rt-fresh", "rt-fresh", "sess-fresh");
+        // rt-fresh was just inserted, last_active_at = 0 from test_dummy,
+        // so set it to now so it isn't evicted.
+        mgr.get_handle_mut("rt-fresh").unwrap().last_active_at =
+            chrono::Utc::now().timestamp();
+
+        let evicted = mgr.evict_idle(1800).await; // 30-minute threshold
+        assert_eq!(evicted, vec!["rt-stale".to_string()]);
+        assert!(mgr.get_handle("rt-stale").is_none(), "stale handle removed");
+        assert!(mgr.get_handle("rt-fresh").is_some(), "fresh handle retained");
+    }
+
+    #[tokio::test]
+    async fn evict_idle_buffers_ids_for_drain() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-old");
+        mgr.get_handle_mut("rt-old").unwrap().last_active_at = 0;
+        let evicted = mgr.evict_idle(60).await;
+        assert_eq!(evicted, vec!["rt-old".to_string()]);
+        let drained = mgr.drain_evicted();
+        assert_eq!(drained, vec!["rt-old".to_string()]);
+        // Second drain returns empty.
+        assert!(mgr.drain_evicted().is_empty());
     }
 }
