@@ -39,7 +39,7 @@ cd daemon && cargo build
 
 Expected output: `Daemon onboarded. actor_id=<uuid> team_id=<uuid> display_name=<name> config=<path>`
 
-This writes `~/.config/amux/supabase.toml` with the daemon's credentials.
+This writes `~/.amuxd/supabase.toml` with the daemon's credentials.
 
 ## Run
 

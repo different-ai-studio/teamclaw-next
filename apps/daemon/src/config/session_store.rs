@@ -91,7 +91,7 @@ pub struct StoredSession {
 
 impl SessionStore {
     pub fn default_path() -> PathBuf {
-        super::DaemonConfig::config_dir().join("sessions.toml")
+        super::DaemonConfig::migrate_legacy_file("sessions.toml")
     }
 
     pub fn load(path: &Path) -> crate::error::Result<Self> {

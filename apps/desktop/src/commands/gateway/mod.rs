@@ -46,17 +46,28 @@ pub struct ChannelStatus {
 }
 
 pub(crate) fn sock_path() -> PathBuf {
-    dirs::config_dir()
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("amux")
+        .join(".amuxd")
         .join("amuxd.sock")
 }
 
 fn daemon_config_path() -> PathBuf {
-    dirs::config_dir()
+    let path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".amuxd")
+        .join("daemon.toml");
+    let legacy_path = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("amux")
-        .join("daemon.toml")
+        .join("daemon.toml");
+    if !path.exists() && legacy_path.exists() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::copy(&legacy_path, &path);
+    }
+    path
 }
 
 /// List the six known channel platforms with their `enabled` / `connected`

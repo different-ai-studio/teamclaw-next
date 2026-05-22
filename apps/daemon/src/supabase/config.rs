@@ -31,9 +31,21 @@ impl SupabaseConfig {
     }
 
     pub fn default_path() -> SupabaseResult<PathBuf> {
-        let dir =
-            dirs::config_dir().ok_or_else(|| SupabaseError::Config("no config dir".into()))?;
-        Ok(dir.join("amux").join("supabase.toml"))
+        let dir = dirs::home_dir()
+            .ok_or_else(|| SupabaseError::Config("no home dir".into()))?
+            .join(".amuxd");
+        let path = dir.join("supabase.toml");
+        let legacy_path = dirs::config_dir()
+            .unwrap_or_else(|| dir.clone())
+            .join("amux")
+            .join("supabase.toml");
+
+        if !path.exists() && legacy_path.exists() {
+            fs::create_dir_all(&dir)?;
+            fs::copy(&legacy_path, &path)?;
+        }
+
+        Ok(path)
     }
 }
 

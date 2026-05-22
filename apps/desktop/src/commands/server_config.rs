@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use teamclaw_types::services_defaults::services_defaults;
 
-const APP_CONFIG_DIR: &str = "teamclaw";
+const APP_CONFIG_DIR: &str = ".teamclaw";
 const LEGACY_CONFIG_DIR: &str = "amux";
-const SERVER_CONFIG_FILE: &str = "teamclaw.json";
+const SERVER_CONFIG_FILE: &str = "config.json";
+const LEGACY_TEAMCLAW_CONFIG_FILE: &str = "teamclaw.json";
 const LEGACY_SERVER_CONFIG_FILE: &str = "server-config.json";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -24,6 +25,10 @@ pub struct ServerConfig {
 }
 
 fn config_base_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+fn legacy_config_base_dir() -> PathBuf {
     dirs::config_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
@@ -35,16 +40,28 @@ fn legacy_config_path_for(base_dir: PathBuf, app_dir: &str) -> PathBuf {
     base_dir.join(app_dir).join(LEGACY_SERVER_CONFIG_FILE)
 }
 
+fn legacy_named_config_path_for(base_dir: PathBuf, app_dir: &str, file_name: &str) -> PathBuf {
+    base_dir.join(app_dir).join(file_name)
+}
+
 fn config_path() -> PathBuf {
     config_path_for(config_base_dir(), APP_CONFIG_DIR)
 }
 
 fn legacy_config_path() -> PathBuf {
-    legacy_config_path_for(config_base_dir(), LEGACY_CONFIG_DIR)
+    legacy_config_path_for(legacy_config_base_dir(), LEGACY_CONFIG_DIR)
 }
 
 fn legacy_teamclaw_config_path() -> PathBuf {
-    legacy_config_path_for(config_base_dir(), APP_CONFIG_DIR)
+    legacy_config_path_for(legacy_config_base_dir(), "teamclaw")
+}
+
+fn legacy_teamclaw_json_path() -> PathBuf {
+    legacy_named_config_path_for(
+        legacy_config_base_dir(),
+        "teamclaw",
+        LEGACY_TEAMCLAW_CONFIG_FILE,
+    )
 }
 
 fn default_server_config() -> ServerConfig {
@@ -135,7 +152,11 @@ fn load_config_from_paths(
 pub fn server_config_initialization_script() -> String {
     let Some(config) = load_config_from_paths(
         config_path(),
-        vec![legacy_teamclaw_config_path(), legacy_config_path()],
+        vec![
+            legacy_teamclaw_json_path(),
+            legacy_teamclaw_config_path(),
+            legacy_config_path(),
+        ],
     )
     .map_err(|e| eprintln!("[ServerConfig] Failed to load startup config: {e}"))
     .ok()
@@ -164,7 +185,11 @@ pub fn server_config_initialization_script() -> String {
 pub fn get_server_config() -> Result<ServerConfig, String> {
     load_config_from_paths(
         config_path(),
-        vec![legacy_teamclaw_config_path(), legacy_config_path()],
+        vec![
+            legacy_teamclaw_json_path(),
+            legacy_teamclaw_config_path(),
+            legacy_config_path(),
+        ],
     )
     .map(|config| config.unwrap_or_default())
 }
@@ -197,15 +222,15 @@ mod tests {
         assert_eq!(
             path,
             PathBuf::from("/tmp/config")
-                .join("teamclaw")
-                .join("teamclaw.json")
+                .join(".teamclaw")
+                .join("config.json")
         );
     }
 
     #[test]
     fn migrates_legacy_amux_config_when_teamclaw_config_is_missing() {
         let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join("teamclaw").join(SERVER_CONFIG_FILE);
+        let current = temp.path().join(".teamclaw").join(SERVER_CONFIG_FILE);
         let legacy = temp.path().join("amux").join(LEGACY_SERVER_CONFIG_FILE);
         let legacy_config = sample_config();
         write_config_file(&legacy, &legacy_config).unwrap();
@@ -223,7 +248,7 @@ mod tests {
     #[test]
     fn writes_default_config_when_no_user_config_exists() {
         let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join("teamclaw").join(SERVER_CONFIG_FILE);
+        let current = temp.path().join(".teamclaw").join(SERVER_CONFIG_FILE);
 
         let loaded = load_config_from_paths(current.clone(), vec![])
             .unwrap()
@@ -240,7 +265,7 @@ mod tests {
     #[test]
     fn fills_missing_fields_without_overwriting_custom_values() {
         let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join("teamclaw").join(SERVER_CONFIG_FILE);
+        let current = temp.path().join(".teamclaw").join(SERVER_CONFIG_FILE);
         write_config_file(
             &current,
             &ServerConfig {

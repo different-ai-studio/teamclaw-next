@@ -49,7 +49,7 @@ impl PendingInvite {
 
 impl MemberStore {
     pub fn default_path() -> PathBuf {
-        super::DaemonConfig::config_dir().join("members.toml")
+        super::DaemonConfig::migrate_legacy_file("members.toml")
     }
 
     pub fn load(path: &Path) -> crate::error::Result<Self> {
