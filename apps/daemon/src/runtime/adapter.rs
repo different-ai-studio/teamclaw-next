@@ -320,12 +320,7 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                 } else {
                     tc.title.clone()
                 };
-            let description = tc
-                .raw_input
-                .as_ref()
-                .map(|v| v.to_string())
-                .or_else(|| tc.content.first().map(|c| format!("{:?}", c)))
-                .unwrap_or_default();
+            let description = tool_call_description(tc.raw_input.as_ref(), Some(&tc.content));
             vec![amux::AcpEvent {
                 event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
                     tool_id: tc.tool_call_id.to_string(),
@@ -375,22 +370,37 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                     })),
                     model: String::new(),
                 }]
-            } else if let Some(title) = tcu.fields.title {
-                // Title update — emit as a ToolUse with updated name so iOS can refresh
-                let clean_title = title.trim_matches('"').to_string();
-                if !clean_title.is_empty() && clean_title != "undefined" {
+            } else {
+                let clean_title = tcu
+                    .fields
+                    .title
+                    .as_ref()
+                    .map(|title| title.trim_matches('"').to_string())
+                    .filter(|title| !title.is_empty() && title != "undefined")
+                    .unwrap_or_default();
+                let description = tool_call_description(
+                    tcu.fields.raw_input.as_ref(),
+                    tcu.fields.content.as_deref(),
+                );
+                if !description.is_empty() || !clean_title.is_empty() {
                     vec![amux::AcpEvent {
-                        event: Some(amux::acp_event::Event::Raw(amux::AcpRawJson {
-                            method: "tool_title_update".into(),
-                            json_payload: format!("{}|{}", tool_id, clean_title).into_bytes(),
+                        event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
+                            tool_id,
+                            tool_name: clean_title,
+                            description,
+                            params: Default::default(),
+                            tool_kind: tcu
+                                .fields
+                                .kind
+                                .as_ref()
+                                .map(kind_to_snake)
+                                .unwrap_or_default(),
                         })),
                         model: String::new(),
                     }]
                 } else {
                     vec![]
                 }
-            } else {
-                vec![]
             }
         }
         acp::SessionUpdate::SessionInfoUpdate(info) => {
@@ -516,6 +526,16 @@ fn extract_text(content: &acp::ContentBlock) -> String {
         acp::ContentBlock::Resource(_) => "<resource>".into(),
         _ => String::new(),
     }
+}
+
+fn tool_call_description(
+    raw_input: Option<&serde_json::Value>,
+    content: Option<&[acp::ToolCallContent]>,
+) -> String {
+    raw_input
+        .map(|v| v.to_string())
+        .or_else(|| content.and_then(|items| items.first().map(|item| format!("{:?}", item))))
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1173,6 +1193,31 @@ mod tests {
         match events[0].event.as_ref().expect("event") {
             amux::acp_event::Event::AvailableCommands(ac) => {
                 assert_eq!(ac.commands[0].input_hint, "new session name");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_tool_call_update_raw_input_to_tool_use_update() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .title("grep")
+                .raw_input(serde_json::json!({
+                    "pattern": "MQTT",
+                    "path": "apps/daemon/src"
+                })),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolUse(tool) => {
+                assert_eq!(tool.tool_id, "tool-1");
+                assert_eq!(tool.tool_name, "grep");
+                assert!(tool.description.contains("\"pattern\":\"MQTT\""));
+                assert!(tool.description.contains("\"path\":\"apps/daemon/src\""));
             }
             other => panic!("unexpected variant: {:?}", other),
         }

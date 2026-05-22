@@ -27,6 +27,7 @@ public struct SessionDetailView: View {
     @State private var plansPageIndex: Int = 0
     @State private var hasAutoOpenedPlans: Bool = false
     @State private var isInitialFeedVisible: Bool = false
+    @State private var initialAutoScrollSettled: Bool = false
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
@@ -90,42 +91,59 @@ public struct SessionDetailView: View {
                 .padding(.vertical, 4)
             }
 
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    if viewModel.events.isEmpty && viewModel.streamingAgentSet.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(.system(size: 40))
-                                .foregroundStyle(.quaternary)
-                            Text("No messages yet")
-                                .foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if viewModel.events.isEmpty && viewModel.streamingAgentSet.isEmpty {
+                            VStack(spacing: 12) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.quaternary)
+                                Text("No messages yet")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 60)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 60)
-                    }
 
-                    ForEach(viewModel.feedItems) { item in
-                        feedItemRow(item)
-                            .id(item.id)
+                        ForEach(viewModel.feedItems) { item in
+                            feedItemRow(item)
+                                .id(item.id)
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("session-detail-bottom")
                     }
+                    .padding(.top, 8)
                 }
-                .padding(.top, 8)
+                .id(viewModel.hasLoadedInitialFeed)
+                .opacity(isInitialFeedVisible ? 1 : 0)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .task(id: viewModel.hasLoadedInitialFeed) {
+                    guard viewModel.hasLoadedInitialFeed, !isInitialFeedVisible else { return }
+                    initialAutoScrollSettled = false
+                    await Task.yield()
+                    proxy.scrollTo("session-detail-bottom", anchor: .bottom)
+                    await Task.yield()
+                    isInitialFeedVisible = true
+                    try? await Task.sleep(for: .milliseconds(1_200))
+                    proxy.scrollTo("session-detail-bottom", anchor: .bottom)
+                    initialAutoScrollSettled = true
+                }
+                .task(id: initialFeedScrollKey) {
+                    guard viewModel.hasLoadedInitialFeed, !initialAutoScrollSettled else { return }
+                    await Task.yield()
+                    proxy.scrollTo("session-detail-bottom", anchor: .bottom)
+                }
+                // Any scroll on the chat surface dismisses the keyboard.
+                // .interactively (iMessage-style finger-tracks-keyboard)
+                // got swallowed by the composer's nested TextField scroll
+                // and the SafeAreaInset hosting it; .immediately is more
+                // robust and matches the user's expectation that pulling
+                // the chat reveals more chat.
+                .scrollDismissesKeyboard(.immediately)
             }
-            .id(viewModel.hasLoadedInitialFeed)
-            .opacity(isInitialFeedVisible ? 1 : 0)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .task(id: viewModel.hasLoadedInitialFeed) {
-                guard viewModel.hasLoadedInitialFeed, !isInitialFeedVisible else { return }
-                await Task.yield()
-                isInitialFeedVisible = true
-            }
-            // Any scroll on the chat surface dismisses the keyboard.
-            // .interactively (iMessage-style finger-tracks-keyboard)
-            // got swallowed by the composer's nested TextField scroll
-            // and the SafeAreaInset hosting it; .immediately is more
-            // robust and matches the user's expectation that pulling
-            // the chat reveals more chat.
-            .scrollDismissesKeyboard(.immediately)
         }
         // Mist canvas — matches `agent-session.jsx`. Without an explicit
         // background, plain ScrollView falls back to systemBackground (stark
@@ -411,6 +429,10 @@ public struct SessionDetailView: View {
         if let selectedModelId, !selectedModelId.isEmpty { return selectedModelId }
         if let current = viewModel.runtime?.currentModel, !current.isEmpty { return current }
         return nil
+    }
+
+    private var initialFeedScrollKey: String {
+        "\(viewModel.hasLoadedInitialFeed)-\(viewModel.feedItems.count)-\(viewModel.feedItems.last?.id ?? "none")"
     }
 
     private func considerAutoOpeningPlans(count: Int) {
