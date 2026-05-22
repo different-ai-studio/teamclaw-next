@@ -59,6 +59,11 @@ public final class SessionDetailViewModel {
     /// completed-turn bubbles. Source for the main chat list. Detail view
     /// reads `runtimeEvents` off each item to render the full turn.
     public private(set) var feedItems: [FeedItem] = []
+    /// True after `start(modelContext:)` has loaded the initial local event
+    /// snapshot and projected it into `feedItems`. The detail view uses this
+    /// to reveal the scroll view only after the first real layout pass can
+    /// anchor against actual content.
+    public private(set) var hasLoadedInitialFeed: Bool = false
     /// Per-agent streaming output buffer. Keyed by the agent actor id. An
     /// entry exists only between the first delta of an `output` stream and
     /// its `isComplete` event (or an idle status flush). Concurrent agents
@@ -1299,6 +1304,7 @@ public final class SessionDetailViewModel {
         }
 
         recomputeGroups()
+        hasLoadedInitialFeed = true
 
         // Single subscription path: session/{sid}/live. iOS only ever
         // resolves a session-backed detail view — bare-runtime navigation
