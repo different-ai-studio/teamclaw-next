@@ -93,6 +93,23 @@ fn runtime_start_initial_model_override(
     (!model_id.is_empty()).then(|| model_id.to_string())
 }
 
+fn supported_agent_type_names(config: &DaemonConfig) -> Vec<String> {
+    let mut names = Vec::new();
+    if config.agents.claude_code.is_some() {
+        names.push("claude".to_string());
+    }
+    if config.agents.opencode.is_some() {
+        names.push("opencode".to_string());
+    }
+    if config.agents.codex.is_some() {
+        names.push("codex".to_string());
+    }
+    if names.is_empty() {
+        names.push("claude".to_string());
+    }
+    names
+}
+
 pub struct DaemonServer {
     config: DaemonConfig,
     /// Path the daemon's `daemon.toml` was loaded from. Stashed so
@@ -717,9 +734,20 @@ impl DaemonServer {
         {
             let sb = self.supabase.clone();
             let device_id = self.config.device.id.clone();
+            let supported_agent_types = supported_agent_type_names(&self.config);
+            let default_agent_type = supported_agent_types
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "claude".to_string());
             tokio::spawn(async move {
                 if let Err(e) = sb.set_agent_device_id(&device_id).await {
                     warn!("supabase agents.device_id upsert failed: {e}");
+                }
+                if let Err(e) = sb
+                    .ensure_agent_types(&supported_agent_types, &default_agent_type)
+                    .await
+                {
+                    warn!("supabase agents.agent_types advertise failed: {e}");
                 }
             });
         }

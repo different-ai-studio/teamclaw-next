@@ -31,7 +31,7 @@ describe('startAgentRuntimesAsync', () => {
 
   function mockTables(opts: {
     runtimes?: Array<{ agent_id: string; workspace_id: string | null; backend_type: string | null }>
-    actors?: Array<{ id: string; agent_kind: string | null; default_agent_type: string | null }>
+    actors?: Array<{ id: string; agent_types: string[]; default_agent_type: string | null }>
   }) {
     supabaseFrom.mockImplementation((table: string) => {
       if (table === 'agent_runtimes') {
@@ -68,7 +68,7 @@ describe('startAgentRuntimesAsync', () => {
   it('sends opencode runtimeStart requests for prior opencode agent runtimes', async () => {
     mockTables({
       runtimes: [{ agent_id: 'agent-1', workspace_id: 'ws-opencode', backend_type: 'opencode' }],
-      actors: [{ id: 'agent-1', agent_kind: 'daemon', default_agent_type: null }],
+      actors: [{ id: 'agent-1', agent_types: [], default_agent_type: null }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
@@ -90,7 +90,7 @@ describe('startAgentRuntimesAsync', () => {
   it('falls back to claude runtimeStart requests without runtime history', async () => {
     mockTables({
       runtimes: [],
-      actors: [{ id: 'agent-2', agent_kind: null, default_agent_type: null }],
+      actors: [{ id: 'agent-2', agent_types: [], default_agent_type: null }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
@@ -109,10 +109,10 @@ describe('startAgentRuntimesAsync', () => {
     )
   })
 
-  it('starts daemon agents as opencode even without runtime history', async () => {
+  it('uses the first supported agent type without runtime history', async () => {
     mockTables({
       runtimes: [],
-      actors: [{ id: 'agent-daemon', agent_kind: 'daemon', default_agent_type: null }],
+      actors: [{ id: 'agent-daemon', agent_types: ['opencode', 'claude'], default_agent_type: null }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
@@ -136,7 +136,7 @@ describe('startAgentRuntimesAsync', () => {
     // default_agent_type to codex — the next spawn should respect that.
     mockTables({
       runtimes: [{ agent_id: 'agent-3', workspace_id: 'ws-old', backend_type: 'opencode' }],
-      actors: [{ id: 'agent-3', agent_kind: 'daemon', default_agent_type: 'codex' }],
+      actors: [{ id: 'agent-3', agent_types: ['claude', 'codex'], default_agent_type: 'codex' }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
@@ -156,8 +156,8 @@ describe('startAgentRuntimesAsync', () => {
 
   it('passes the selected model to runtimeStart', async () => {
     mockTables({
-      runtimes: [{ agent_id: 'agent-4', workspace_id: 'ws-model', backend_type: 'claude_code' }],
-      actors: [{ id: 'agent-4', agent_kind: 'daemon', default_agent_type: null }],
+      runtimes: [{ agent_id: 'agent-4', workspace_id: 'ws-model', backend_type: 'claude' }],
+      actors: [{ id: 'agent-4', agent_types: [], default_agent_type: null }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
@@ -179,7 +179,7 @@ describe('startAgentRuntimesAsync', () => {
   it('applies the selected model after runtimeStart accepts the runtime', async () => {
     mockTables({
       runtimes: [{ agent_id: 'agent-6', workspace_id: 'ws-model', backend_type: 'opencode' }],
-      actors: [{ id: 'agent-6', agent_kind: 'daemon', default_agent_type: null }],
+      actors: [{ id: 'agent-6', agent_types: [], default_agent_type: null }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
@@ -200,7 +200,7 @@ describe('startAgentRuntimesAsync', () => {
   it('uses the selected backend instead of prior runtime backend_type', async () => {
     mockTables({
       runtimes: [{ agent_id: 'agent-5', workspace_id: 'ws-backend', backend_type: 'opencode' }],
-      actors: [{ id: 'agent-5', agent_kind: 'daemon', default_agent_type: null }],
+      actors: [{ id: 'agent-5', agent_types: [], default_agent_type: null }],
     })
 
     const { startAgentRuntimesAsync } = await import('../session-create')

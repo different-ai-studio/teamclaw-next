@@ -276,7 +276,7 @@ public struct SettingsView: View {
         let dotColor: Color = agent.isOnline ? Color.amux.sage : Color.amux.slate
         let agentTypeLabel: String = {
             switch agent.defaultAgentType {
-            case "claude_code": return "Claude"
+            case "claude", "claude_code": return "Claude"
             case "opencode":    return "OpenCode"
             case "codex":       return "Codex"
             default:            return ""

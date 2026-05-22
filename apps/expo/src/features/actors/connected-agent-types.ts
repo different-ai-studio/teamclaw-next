@@ -1,7 +1,8 @@
 export type ConnectedAgent = {
   agentId: string;
   displayName: string;
-  agentKind: string;
+  agentTypes: string[];
+  defaultAgentType: string | null;
   permissionLevel: string;
   visibility: "team" | "personal";
   isOwner: boolean;

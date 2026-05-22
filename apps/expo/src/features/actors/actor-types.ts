@@ -8,7 +8,11 @@ export type Actor = {
   role: string | null;
   lastActiveAt: string | null;
   avatarUrl: string | null;
-  /** "claude" | "opencode" | "codex" | … — only set when actorType === "agent". */
+  /** Supported backend types for agents, e.g. ["claude", "opencode"]. */
+  agentTypes: string[];
+  /** Default backend type for agents. */
+  defaultAgentType: string | null;
+  /** Deprecated UI alias: defaultAgentType ?? agentTypes[0]. */
   agentKind: string | null;
 };
 

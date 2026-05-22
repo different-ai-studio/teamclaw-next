@@ -8,7 +8,7 @@ public struct AgentConfigSheet: View {
     }
 
     public enum AgentType: String, CaseIterable, Identifiable, Sendable {
-        case claude = "claude_code"
+        case claude = "claude"
         case opencode, codex
         public var id: String { rawValue }
         public var label: String {
@@ -18,10 +18,26 @@ public struct AgentConfigSheet: View {
             case .codex: "Codex"
             }
         }
+
+        public static func fromStoredValue(_ value: String?) -> AgentType {
+            switch value {
+            case "claude", "claude_code", "claude-code": .claude
+            case "opencode": .opencode
+            case "codex": .codex
+            default: .claude
+            }
+        }
+
+        public static func supported(from values: [String]) -> [AgentType] {
+            values.map { fromStoredValue($0) }.reduce(into: []) { result, type in
+                if !result.contains(type) { result.append(type) }
+            }
+        }
     }
 
     let actorDisplayName: String
     let workspaces: [WorkspaceRef]
+    let allowedTypes: [AgentType]
     let onConfirm: (Selection) -> Void
     let onCancel: () -> Void
 
@@ -31,14 +47,17 @@ public struct AgentConfigSheet: View {
     public init(actorDisplayName: String,
                 workspaces: [WorkspaceRef],
                 defaultType: AgentType = .claude,
+                allowedTypes: [AgentType] = AgentType.allCases,
                 onConfirm: @escaping (Selection) -> Void,
                 onCancel: @escaping () -> Void) {
         self.actorDisplayName = actorDisplayName
         self.workspaces = workspaces
+        let usableTypes = allowedTypes.isEmpty ? AgentType.allCases : allowedTypes
+        self.allowedTypes = usableTypes
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         _selectedWorkspaceID = State(initialValue: workspaces.first?.id ?? "")
-        _selectedType = State(initialValue: defaultType)
+        _selectedType = State(initialValue: usableTypes.contains(defaultType) ? defaultType : (usableTypes.first ?? .claude))
     }
 
     public var body: some View {
@@ -55,7 +74,7 @@ public struct AgentConfigSheet: View {
                 }
                 Section("Agent type") {
                     Picker("", selection: $selectedType) {
-                        ForEach(AgentType.allCases) { t in Text(t.label).tag(t) }
+                        ForEach(allowedTypes) { t in Text(t.label).tag(t) }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()

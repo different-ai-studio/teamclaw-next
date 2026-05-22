@@ -15,6 +15,7 @@ public final class CachedActor {
     public var updatedAt: Date
     public var memberStatus: String?
     public var teamRole: String?
+    public var agentTypes: [String]
     public var agentKind: String?
     public var defaultAgentType: String?
     public var agentStatus: String?
@@ -26,7 +27,7 @@ public final class CachedActor {
         displayName: String, avatarURL: String? = nil, lastActiveAt: Date? = nil,
         createdAt: Date = .now, updatedAt: Date = .now,
         memberStatus: String? = nil, teamRole: String? = nil,
-        agentKind: String? = nil, defaultAgentType: String? = nil,
+        agentTypes: [String] = [], agentKind: String? = nil, defaultAgentType: String? = nil,
         agentStatus: String? = nil, defaultWorkspaceId: String? = nil
     ) {
         self.actorId = actorId; self.teamId = teamId; self.actorType = actorType
@@ -34,7 +35,7 @@ public final class CachedActor {
         self.displayName = displayName; self.avatarURL = avatarURL; self.lastActiveAt = lastActiveAt
         self.createdAt = createdAt; self.updatedAt = updatedAt
         self.memberStatus = memberStatus; self.teamRole = teamRole
-        self.agentKind = agentKind; self.defaultAgentType = defaultAgentType
+        self.agentTypes = agentTypes; self.agentKind = agentKind; self.defaultAgentType = defaultAgentType
         self.agentStatus = agentStatus; self.defaultWorkspaceId = defaultWorkspaceId
     }
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
+use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -37,6 +38,8 @@ pub struct CheckedOutTurn {
     pub agent_id: String,
     pub event_rx: mpsc::Receiver<amux::AcpEvent>,
 }
+
+const ACP_STARTUP_METADATA_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Sanitise an arbitrary logical-session-id string into a filename-safe
 /// component. The gateway-minted acp_session_id values that drive the
@@ -263,6 +266,7 @@ impl RuntimeManager {
         );
         handle.current_prompt = prompt.into();
         handle.session_id = supabase_session_id.unwrap_or_default().to_string();
+        handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         let (initial_model_tx, initial_model_rx) =
             tokio::sync::oneshot::channel::<Option<String>>();
@@ -294,27 +298,36 @@ impl RuntimeManager {
         self.aggregators
             .insert(agent_id.clone(), TurnAggregator::new());
 
-        // Capture the available_models list the agent reported on session/new
-        // (or the hardcoded fallback for agents that don't implement
-        // unstable_session_model). Stored on the handle so retained
-        // runtime/{id}/state reflects what the agent can actually run.
-        if let Ok(models) = available_models_rx.await {
-            if let Some(h) = self.agents.get_mut(&agent_id) {
-                h.available_models = models;
+        // Capture startup metadata when ACP responds quickly, but never let
+        // a slow/stuck agent handshake block the daemon's MQTT event loop.
+        match timeout(ACP_STARTUP_METADATA_TIMEOUT, async {
+            let models = available_models_rx.await.ok();
+            let initial_model = initial_model_rx.await.ok().flatten();
+            let acp_session_id = acp_session_id_rx.await.ok();
+            (models, initial_model, acp_session_id)
+        })
+        .await
+        {
+            Ok((models, initial_model, acp_session_id)) => {
+                if let Some(models) = models {
+                    if let Some(h) = self.agents.get_mut(&agent_id) {
+                        h.available_models = models;
+                    }
+                }
+                if let Some(model_id) = initial_model {
+                    self.set_current_model(&agent_id, &model_id);
+                }
+                if let Some(acp_sid) = acp_session_id {
+                    if let Some(h) = self.agents.get_mut(&agent_id) {
+                        h.acp_session_id = acp_sid;
+                    }
+                }
             }
-        }
-
-        // Wait for the adapter to report the model it applied. None means no
-        // model was applied (no models known for this agent type, or the ACP
-        // call failed); skip recording in that case.
-        if let Ok(Some(model_id)) = initial_model_rx.await {
-            self.set_current_model(&agent_id, &model_id);
-        }
-
-        // Capture ACP session_id
-        if let Ok(acp_sid) = acp_session_id_rx.await {
-            if let Some(h) = self.agents.get_mut(&agent_id) {
-                h.acp_session_id = acp_sid;
+            Err(_) => {
+                warn!(
+                    agent_id,
+                    "ACP startup metadata timed out; continuing without blocking MQTT"
+                );
             }
         }
 
@@ -402,33 +415,47 @@ impl RuntimeManager {
         handle.cmd_tx = Some(cmd_tx);
         handle.status = amux::AgentStatus::Active;
         handle.current_prompt = prompt.to_string();
+        handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         info!(agent_id, worktree, "agent resumed via ACP");
         self.agents.insert(agent_id.to_string(), handle);
         self.aggregators
             .insert(agent_id.to_string(), TurnAggregator::new());
 
-        // Capture available_models the agent reported on resume.
-        if let Ok(models) = available_models_rx.await {
-            if let Some(h) = self.agents.get_mut(agent_id) {
-                h.available_models = models;
+        // Capture startup metadata when ACP responds quickly, but never let
+        // a slow/stuck agent handshake block the daemon's MQTT event loop.
+        let mut new_acp_sid = acp_session_id.to_string();
+        match timeout(ACP_STARTUP_METADATA_TIMEOUT, async {
+            let models = available_models_rx.await.ok();
+            let initial_model = initial_model_rx.await.ok().flatten();
+            let acp_session_id = acp_session_id_rx.await.ok();
+            (models, initial_model, acp_session_id)
+        })
+        .await
+        {
+            Ok((models, initial_model, acp_sid)) => {
+                if let Some(models) = models {
+                    if let Some(h) = self.agents.get_mut(agent_id) {
+                        h.available_models = models;
+                    }
+                }
+                if let Some(model_id) = initial_model {
+                    self.set_current_model(agent_id, &model_id);
+                }
+                if let Some(sid) = acp_sid {
+                    if let Some(h) = self.agents.get_mut(agent_id) {
+                        h.acp_session_id = sid.clone();
+                    }
+                    new_acp_sid = sid;
+                }
+            }
+            Err(_) => {
+                warn!(
+                    agent_id,
+                    "ACP startup metadata timed out on resume; continuing without blocking MQTT"
+                );
             }
         }
-
-        // Capture initial model
-        if let Ok(Some(model_id)) = initial_model_rx.await {
-            self.set_current_model(agent_id, &model_id);
-        }
-
-        // Capture ACP session_id (may differ from input if resume failed)
-        let new_acp_sid = if let Ok(sid) = acp_session_id_rx.await {
-            if let Some(h) = self.agents.get_mut(agent_id) {
-                h.acp_session_id = sid.clone();
-            }
-            sid
-        } else {
-            acp_session_id.to_string()
-        };
 
         // Upsert agent_runtimes with status="starting" on resume
         if let Some(sb) = &self.supabase {

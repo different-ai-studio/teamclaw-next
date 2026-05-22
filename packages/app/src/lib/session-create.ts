@@ -322,6 +322,26 @@ export interface StartAgentRuntimesArgs {
   modelId?: string
 }
 
+function normalizeAgentTypes(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((t): t is string => typeof t === 'string' && t.length > 0)
+    : []
+}
+
+function pickAgentBackend(
+  defaultAgentType: string | null | undefined,
+  agentTypes: string[],
+  priorBackendType: string | null | undefined,
+): string | null {
+  const normalizedDefault = defaultAgentType === 'claude_code' || defaultAgentType === 'claude-code'
+    ? 'claude'
+    : defaultAgentType ?? null
+  if (normalizedDefault && (agentTypes.length === 0 || agentTypes.includes(normalizedDefault))) {
+    return normalizedDefault
+  }
+  return agentTypes[0] ?? priorBackendType ?? null
+}
+
 /**
  * Fire-and-forget RPC fanout. Looks up each agent's prior workspace from
  * agent_runtimes history, then calls runtimeStart per agent. Failures are
@@ -357,20 +377,16 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     }
   }
 
-  // Fetch each agent's explicitly-set default_agent_type — it wins over the
-  // prior runtime's backend_type because the operator may have changed the
-  // default after the last spawn (or there is no prior spawn at all).
-  // agent_kind / default_agent_type live on public.agents (actors only carries
-  // the shared identity/display fields). Query agents directly so private
-  // agents that aren't team-visible still resolve their backend defaults.
-  const defaultByAgent = new Map<string, { agent_kind: string | null; default_agent_type: string | null }>()
+  // Fetch each agent's advertised supported types and default. The default
+  // wins over previous runtime history only when it is present in agent_types.
+  const defaultByAgent = new Map<string, { agent_types: string[]; default_agent_type: string | null }>()
   const { data: agentRows } = await supabase
     .from('agents')
-    .select('id, agent_kind, default_agent_type')
+    .select('id, agent_types, default_agent_type')
     .in('id', args.agentActorIds)
   for (const r of agentRows ?? []) {
     defaultByAgent.set(r.id, {
-      agent_kind: r.agent_kind ?? null,
+      agent_types: normalizeAgentTypes(r.agent_types),
       default_agent_type: r.default_agent_type ?? null,
     })
   }
@@ -378,10 +394,12 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
   await Promise.all(args.agentActorIds.map(async (agentActorId) => {
     const prior = priorByAgent.get(agentActorId)
     const agentDefaults = defaultByAgent.get(agentActorId)
-    const agentType = args.agentType ?? resolveAmuxAgentType(
-      agentDefaults?.default_agent_type ?? prior?.backend_type ?? null,
-      agentDefaults?.agent_kind ?? null,
+    const backendType = pickAgentBackend(
+      agentDefaults?.default_agent_type,
+      agentDefaults?.agent_types ?? [],
+      prior?.backend_type,
     )
+    const agentType = args.agentType ?? resolveAmuxAgentType(backendType)
     try {
       sessionFlowLog('runtime_start.request.begin', {
         sessionId: args.sessionId,

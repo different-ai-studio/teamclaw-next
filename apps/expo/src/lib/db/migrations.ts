@@ -38,7 +38,7 @@ export const MIGRATIONS: Migration[] = [
         team_id          TEXT NOT NULL,
         agent_id         TEXT NOT NULL,
         display_name     TEXT NOT NULL,
-        agent_kind       TEXT NOT NULL,
+        agent_kind       TEXT NOT NULL DEFAULT '',
         permission_level TEXT NOT NULL,
         visibility       TEXT NOT NULL,
         is_owner         INTEGER NOT NULL,
@@ -49,6 +49,13 @@ export const MIGRATIONS: Migration[] = [
         updated_at       INTEGER NOT NULL,
         PRIMARY KEY (team_id, agent_id)
       );
+    `,
+  },
+  {
+    version: 2,
+    up: `
+      ALTER TABLE connected_agents ADD COLUMN agent_types TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE connected_agents ADD COLUMN default_agent_type TEXT;
     `,
   },
 ];

@@ -6,10 +6,12 @@ import type {
 } from "./connected-agent-types";
 
 function mapAgent(row: Record<string, unknown>): ConnectedAgent {
+  const rawTypes = row.agent_types;
   return {
     agentId: String(row.agent_id ?? ""),
     displayName: String(row.display_name ?? ""),
-    agentKind: String(row.agent_kind ?? ""),
+    agentTypes: Array.isArray(rawTypes) ? rawTypes.filter((t): t is string => typeof t === "string") : [],
+    defaultAgentType: row.default_agent_type != null ? String(row.default_agent_type) : null,
     permissionLevel: String(row.permission_level ?? "prompt"),
     visibility: (String(row.visibility ?? "team") as "team" | "personal"),
     isOwner: Boolean(row.is_owner),

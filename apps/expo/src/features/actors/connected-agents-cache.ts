@@ -17,7 +17,8 @@ export function createConnectedAgentsCache(db: ConnectedAgentsCacheDb): Connecte
       return rows.map((r) => ({
         agentId: String(r.agent_id),
         displayName: String(r.display_name),
-        agentKind: String(r.agent_kind),
+        agentTypes: typeof r.agent_types === "string" ? JSON.parse(r.agent_types) : [],
+        defaultAgentType: r.default_agent_type != null ? String(r.default_agent_type) : null,
         permissionLevel: String(r.permission_level),
         visibility: r.visibility === "personal" ? "personal" : "team",
         isOwner: r.is_owner === 1 || r.is_owner === true,
@@ -31,10 +32,10 @@ export function createConnectedAgentsCache(db: ConnectedAgentsCacheDb): Connecte
       for (const a of agents) {
         await db.runAsync(
           `INSERT INTO connected_agents (
-             team_id, agent_id, display_name, agent_kind, permission_level,
+             team_id, agent_id, display_name, agent_types, default_agent_type, permission_level,
              visibility, is_owner, device_id, last_active_at, current_model, status, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          teamId, a.agentId, a.displayName, a.agentKind, a.permissionLevel,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          teamId, a.agentId, a.displayName, JSON.stringify(a.agentTypes), a.defaultAgentType, a.permissionLevel,
           a.visibility, a.isOwner ? 1 : 0,
           a.deviceId,
           a.lastActiveAt ? Date.parse(a.lastActiveAt) : null,

@@ -63,7 +63,7 @@ public struct AddAgentSheet: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(agent.displayName).font(.body)
                                     if let agentType = agent.defaultAgentType, !agentType.isEmpty {
-                                        Text(AgentConfigSheet.AgentType(rawValue: agentType)?.label ?? agentType)
+                                        Text(AgentConfigSheet.AgentType.fromStoredValue(agentType).label)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -111,7 +111,8 @@ public struct AddAgentSheet: View {
     private func handleTap(_ agent: ConnectedAgent) {
         let cached = cachedActors.first(where: { $0.actorId == agent.id })
         let defaultWorkspaceID = cached?.defaultWorkspaceId
-        let kindString = cached?.defaultAgentType ?? agent.defaultAgentType ?? "claude_code"
+        let agentTypes = cached?.agentTypes.isEmpty == false ? (cached?.agentTypes ?? []) : agent.agentTypes
+        let kindString = cached?.defaultAgentType ?? agent.defaultAgentType ?? agentTypes.first
 
         let workspaceID: String? = {
             if let id = defaultWorkspaceID,
@@ -129,7 +130,9 @@ public struct AddAgentSheet: View {
             errorMessage = "No workspaces available — add one to this agent first."
             return
         }
-        let agentType = AgentConfigSheet.AgentType(rawValue: kindString) ?? .claude
+        let allowedTypes = AgentConfigSheet.AgentType.supported(from: agentTypes)
+        let defaultType = AgentConfigSheet.AgentType.fromStoredValue(kindString)
+        let agentType = allowedTypes.isEmpty || allowedTypes.contains(defaultType) ? defaultType : (allowedTypes.first ?? .claude)
         onConfirm(agent.id, workspace.id, workspace.path, agentType)
         dismiss()
     }
