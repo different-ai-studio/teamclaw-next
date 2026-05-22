@@ -746,6 +746,26 @@ impl DaemonServer {
             });
         }
 
+        // Idle ACP runtime sweeper. Opt-in via DaemonConfig.idle_runtime_timeout_secs.
+        // The sweeper holds an `Arc<AsyncMutex<RuntimeManager>>` clone and calls
+        // `evict_idle` once a minute. The terminal MQTT publish is done by the
+        // main event loop draining `mgr.drain_evicted()` per tick (see Task 7).
+        if let Some(threshold_secs) = self.config.idle_runtime_timeout_secs {
+            let mgr = self.agents.clone();
+            let threshold = threshold_secs as i64;
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(60));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tick.tick().await;
+                    let _evicted = mgr.lock().await.evict_idle(threshold).await;
+                    // No publish here — main loop drains mgr.evicted_pending_publish.
+                }
+            });
+        } else {
+            info!("idle_runtime_timeout_secs unset; idle ACP eviction disabled");
+        }
+
         // Register device_id in Supabase once (background).
         {
             let sb = self.supabase.clone();
