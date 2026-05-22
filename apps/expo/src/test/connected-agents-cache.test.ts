@@ -14,11 +14,11 @@ function fakeDb() {
       }
       if (/^INSERT INTO connected_agents/i.test(sql)) {
         const [
-          team_id, agent_id, display_name, agent_kind, permission_level,
+          team_id, agent_id, display_name, agent_types, default_agent_type, permission_level,
           visibility, is_owner, device_id, last_active_at, current_model,
           status, updated_at,
         ] = params;
-        rows.push({ team_id, agent_id, display_name, agent_kind, permission_level,
+        rows.push({ team_id, agent_id, display_name, agent_types, default_agent_type, permission_level,
           visibility, is_owner, device_id, last_active_at, current_model, status, updated_at });
         return;
       }
@@ -35,7 +35,8 @@ describe("connected-agents cache", () => {
     const db = fakeDb();
     const cache = createConnectedAgentsCache(db as any);
     await cache.saveCache("t1", [
-      { agentId: "a1", displayName: "Claude", agentKind: "claude",
+      { agentId: "a1", displayName: "Claude", agentTypes: ["claude"],
+        defaultAgentType: "claude",
         permissionLevel: "team", visibility: "team", isOwner: true,
         deviceId: "d1", lastActiveAt: "2026-05-20T10:00:00.000Z" },
     ]);

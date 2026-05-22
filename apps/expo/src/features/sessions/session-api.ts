@@ -321,7 +321,9 @@ export function createSessionsApi(client: SessionsClient) {
 
     async loadRuntime(sessionId: string): Promise<
       | {
+          dbRuntimeId: string;
           runtimeId: string;
+          agentId: string | null;
           status: string;
           currentModel: string | null;
           lastSeenAt: string | null;
@@ -331,12 +333,14 @@ export function createSessionsApi(client: SessionsClient) {
     > {
       const result = (await client
         .from("agent_runtimes")
-        .select("id, status, current_model, last_seen_at, backend_type")
+        .select("id, runtime_id, agent_id, status, current_model, last_seen_at, backend_type")
         .eq("session_id", sessionId)
         .maybeSingle()) as {
         data:
           | {
               id: string;
+              runtime_id: string | null;
+              agent_id: string | null;
               status: string | null;
               current_model: string | null;
               last_seen_at: string | null;
@@ -348,7 +352,9 @@ export function createSessionsApi(client: SessionsClient) {
       throwIfError(result.error);
       if (!result.data) return null;
       return {
-        runtimeId: result.data.id,
+        dbRuntimeId: result.data.id,
+        runtimeId: result.data.runtime_id ?? "",
+        agentId: result.data.agent_id ?? null,
         status: result.data.status ?? "unknown",
         currentModel: result.data.current_model ?? null,
         lastSeenAt: result.data.last_seen_at ?? null,

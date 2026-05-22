@@ -117,8 +117,8 @@ export function SettingsScreen({
             <View style={styles.upgradeBody}>
               <Text style={styles.upgradeTitle}>Upgrade your account</Text>
               <Text style={styles.upgradeHelper}>
-                You're signed in anonymously. Attach an email and password so you
-                don't lose this workspace.
+                You're signed in anonymously. Attach email, Apple, or Google so
+                you don't lose this workspace.
               </Text>
             </View>
             <Ionicons color={colors.slate} name="chevron-forward" size={16} />

@@ -6,6 +6,11 @@ import type {
   OnboardingAction,
   OnboardingState,
 } from "./onboarding-types";
+import {
+  shouldCompleteOAuthResult,
+  type OAuthBrowserResult,
+  type OAuthProvider,
+} from "./onboarding-oauth";
 type OnboardingApi = ReturnType<
   (typeof import("../../lib/supabase/onboarding-api"))["createOnboardingApi"]
 >;
@@ -147,6 +152,98 @@ export function createOnboardingController(api: OnboardingApi) {
     }
   };
 
+  const runOAuthBrowserFlow = async (
+    token: number,
+    authUrl: string,
+    redirectTo: string,
+    openAuthSession: (
+      authUrl: string,
+      redirectTo: string,
+    ) => Promise<OAuthBrowserResult>,
+  ): Promise<boolean> => {
+    const result = await openAuthSession(authUrl, redirectTo);
+    if (!shouldCompleteOAuthResult(result)) {
+      if (isActiveOperation(token)) {
+        setState({
+          ...state,
+          isBusy: false,
+          errorMessage: null,
+        });
+      }
+      return false;
+    }
+    await api.completeOAuthCallback(result.url!);
+    return true;
+  };
+
+  const signInWithOAuth = async (
+    provider: OAuthProvider,
+    {
+      redirectTo,
+      openAuthSession,
+    }: {
+      redirectTo: string;
+      openAuthSession: (
+        authUrl: string,
+        redirectTo: string,
+      ) => Promise<OAuthBrowserResult>;
+    },
+  ) => {
+    const token = beginOperation();
+    dispatchIfCurrent(token, { type: "beginBusy" });
+
+    try {
+      const authUrl = await api.createOAuthSignInUrl(provider, redirectTo);
+      const completed = await runOAuthBrowserFlow(
+        token,
+        authUrl,
+        redirectTo,
+        openAuthSession,
+      );
+      if (!completed) return;
+      await bootstrap(token);
+    } catch (error) {
+      if (!(error instanceof BootstrapFailureError)) {
+        finishWithError(token, toErrorMessage(error));
+      }
+      throw (error instanceof BootstrapFailureError ? error.cause : error);
+    }
+  };
+
+  const linkIdentityWithOAuth = async (
+    provider: OAuthProvider,
+    {
+      redirectTo,
+      openAuthSession,
+    }: {
+      redirectTo: string;
+      openAuthSession: (
+        authUrl: string,
+        redirectTo: string,
+      ) => Promise<OAuthBrowserResult>;
+    },
+  ) => {
+    const token = beginOperation();
+    dispatchIfCurrent(token, { type: "beginBusy" });
+
+    try {
+      const authUrl = await api.createOAuthLinkUrl(provider, redirectTo);
+      const completed = await runOAuthBrowserFlow(
+        token,
+        authUrl,
+        redirectTo,
+        openAuthSession,
+      );
+      if (!completed) return;
+      await bootstrap(token);
+    } catch (error) {
+      if (!(error instanceof BootstrapFailureError)) {
+        finishWithError(token, toErrorMessage(error));
+      }
+      throw (error instanceof BootstrapFailureError ? error.cause : error);
+    }
+  };
+
   const createTeam = async (name: string) => {
     const token = beginOperation();
     dispatchIfCurrent(token, { type: "beginBusy" });
@@ -187,6 +284,8 @@ export function createOnboardingController(api: OnboardingApi) {
     signInAnonymously,
     requestOtp,
     verifyOtp,
+    signInWithOAuth,
+    linkIdentityWithOAuth,
     resetPendingEmail,
     createTeam,
     signOut,

@@ -11,6 +11,7 @@ function fakeApi(agents: ConnectedAgent[]): AgentAccessApi {
     makeAgentPersonal: vi.fn().mockResolvedValue(undefined),
     listAuthorizedHumans: vi.fn().mockResolvedValue([]),
     grantAuthorizedHuman: vi.fn().mockResolvedValue(undefined),
+    revokeAuthorizedHuman: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -27,10 +28,12 @@ function fakeSubscriber() {
 describe("ConnectedAgentsStore", () => {
   it("reload populates agents and watches each device", async () => {
     const agents: ConnectedAgent[] = [
-      { agentId: "a1", displayName: "Claude", agentKind: "claude",
+      { agentId: "a1", displayName: "Claude", agentTypes: ["claude"],
+        defaultAgentType: "claude",
         permissionLevel: "team", visibility: "team", isOwner: true,
         deviceId: "d1", lastActiveAt: null },
-      { agentId: "a2", displayName: "Codex", agentKind: "codex",
+      { agentId: "a2", displayName: "Codex", agentTypes: ["codex"],
+        defaultAgentType: "codex",
         permissionLevel: "team", visibility: "team", isOwner: true,
         deviceId: "d2", lastActiveAt: null },
     ];
@@ -46,7 +49,8 @@ describe("ConnectedAgentsStore", () => {
   it("reload diff: removes watch for dropped device", async () => {
     const sub = fakeSubscriber();
     const initial: ConnectedAgent[] = [
-      { agentId: "a1", displayName: "Claude", agentKind: "claude",
+      { agentId: "a1", displayName: "Claude", agentTypes: ["claude"],
+        defaultAgentType: "claude",
         permissionLevel: "team", visibility: "team", isOwner: true,
         deviceId: "d1", lastActiveAt: null },
     ];
@@ -62,7 +66,8 @@ describe("ConnectedAgentsStore", () => {
   it("runtime info handler updates lastActiveAt and runtimeInfoByAgentId", async () => {
     const sub = fakeSubscriber();
     const agents: ConnectedAgent[] = [
-      { agentId: "a1", displayName: "Claude", agentKind: "claude",
+      { agentId: "a1", displayName: "Claude", agentTypes: ["claude"],
+        defaultAgentType: "claude",
         permissionLevel: "team", visibility: "team", isOwner: true,
         deviceId: "d1", lastActiveAt: null },
     ];

@@ -15,6 +15,7 @@ import { BUILT_IN_SLASH_COMMANDS } from "../../../../src/features/sessions/compo
 import type { RuntimeInfo } from "../../../../src/features/actors/connected-agent-types";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
 import type { Actor } from "../../../../src/features/actors/actor-types";
+import type { SessionMessage } from "../../../../src/features/sessions/session-types";
 import {
   loadComposerDraft,
   saveComposerDraft,
@@ -35,6 +36,10 @@ import { showToast } from "../../../../src/ui/Toast";
 import { supabase } from "../../../../src/lib/supabase/client";
 import { getDb } from "../../../../src/lib/db/sqlite";
 import { getOptionalMqttUrl } from "../../../../src/lib/mqtt/config";
+import {
+  createRuntimeCommandSender,
+  resolvePermissionRuntimeTarget,
+} from "../../../../src/lib/teamclaw/runtime-command";
 import type { TeamMqttClient } from "../../../../src/lib/mqtt/team-mqtt";
 import { uuidV4 } from "../../../../src/lib/uuid";
 import { PrimaryButton } from "../../../../src/ui/button";
@@ -91,6 +96,14 @@ const fallbackDetailState: SessionDetailControllerState = {
   sendErrorMessage: null,
   replyTarget: null,
   streamingByAgent: emptyTimelineState().streamingByAgent,
+};
+
+type RouteRuntimeInfo = {
+  dbRuntimeId: string;
+  runtimeId: string;
+  agentId: string | null;
+  status: string;
+  currentModel: string | null;
 };
 
 function canRenderSessionDetail(
@@ -284,9 +297,7 @@ export default function SessionDetailRoute() {
   }, [detailState.session, agentsState.runtimeInfoByAgentId]);
 
   const [teamActors, setTeamActors] = useState<Actor[]>([]);
-  const [runtimeInfo, setRuntimeInfo] = useState<
-    { runtimeId: string; status: string; currentModel: string | null } | null
-  >(null);
+  const [runtimeInfo, setRuntimeInfo] = useState<RouteRuntimeInfo | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isModelPromptOpen, setIsModelPromptOpen] = useState(false);
   const [editingMessage, setEditingMessage] = useState<
@@ -328,7 +339,9 @@ export default function SessionDetailRoute() {
         setRuntimeInfo(
           row
             ? {
+                dbRuntimeId: row.dbRuntimeId,
                 runtimeId: row.runtimeId,
+                agentId: row.agentId,
                 status: row.status,
                 currentModel: row.currentModel,
               }
@@ -369,6 +382,23 @@ export default function SessionDetailRoute() {
         runtimeState: "ready" as const,
       }));
   }, [detailState.session, teamActors]);
+
+  const agentParticipantIds = useMemo(() => {
+    if (!detailState.session) return [];
+    const participantIds = new Set(detailState.session.participantActorIds);
+    const ids = new Set<string>();
+    for (const actor of teamActors) {
+      if (actor.actorType === "agent" && participantIds.has(actor.actorId)) {
+        ids.add(actor.actorId);
+      }
+    }
+    for (const agent of agentsState.agents) {
+      if (participantIds.has(agent.agentId)) {
+        ids.add(agent.agentId);
+      }
+    }
+    return Array.from(ids);
+  }, [agentsState.agents, detailState.session, teamActors]);
 
   const mentionPool = useMemo(
     () =>
@@ -447,6 +477,67 @@ export default function SessionDetailRoute() {
       });
   }, [detailState.session, teamActors]);
 
+  const permissionCommandSender = useMemo(() => {
+    if (!teamMqtt || !currentTeam?.id || !state.currentMemberActorId) return null;
+    return createRuntimeCommandSender({
+      mqtt: teamMqtt,
+      teamId: currentTeam.id,
+      peerId: `teamclaw-expo-${state.currentMemberActorId.slice(0, 8)}`,
+      senderActorId: state.currentMemberActorId,
+    });
+  }, [currentTeam?.id, state.currentMemberActorId, teamMqtt]);
+
+  const handlePermissionResponse = async (
+    requestId: string,
+    message: SessionMessage,
+    granted: boolean,
+  ) => {
+    if (!permissionCommandSender) {
+      showToast("error", "移动端 MQTT 未连接，重连后再试。");
+      return;
+    }
+
+    const fallbackAgentIds =
+      agentParticipantIds.length > 0
+        ? agentParticipantIds
+        : [message.senderActorId, runtimeInfo?.agentId ?? ""].filter(Boolean);
+    const target = resolvePermissionRuntimeTarget({
+      requestingActorId: message.senderActorId,
+      agentParticipantIds: fallbackAgentIds,
+      connectedAgents: agentsState.agents,
+      runtimeInfoByAgentId: agentsState.runtimeInfoByAgentId,
+      fallbackRuntime: runtimeInfo
+        ? { agentId: runtimeInfo.agentId, runtimeId: runtimeInfo.runtimeId }
+        : null,
+    });
+
+    if (!target) {
+      showToast("error", "还没定位到这个 agent runtime，请等 agent 在线后重试。");
+      return;
+    }
+
+    try {
+      await permissionCommandSender.sendPermissionResponse({
+        targetDeviceId: target.deviceId,
+        runtimeId: target.runtimeId,
+        requestId,
+        granted,
+      });
+      setResolvedPermissions((prev) => {
+        const next = new Map(prev);
+        next.set(requestId, granted);
+        return next;
+      });
+      selectionTick();
+      showToast("success", granted ? "Permission allowed" : "Permission denied");
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Permission response failed",
+      );
+    }
+  };
+
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: "会话详情" }} />
@@ -501,27 +592,11 @@ export default function SessionDetailRoute() {
           onAttach={() => {
             router.push(`/(app)/attach?sessionId=${sessionId}`);
           }}
-          onGrantPermission={(requestId) => {
-            setResolvedPermissions((prev) => {
-              const next = new Map(prev);
-              next.set(requestId, true);
-              return next;
-            });
-            showToast(
-              "success",
-              "Allowed — daemon delivery via mobile isn't wired yet; respond on the desktop app to actually unlock the tool call.",
-            );
+          onGrantPermission={(requestId, message) => {
+            void handlePermissionResponse(requestId, message, true);
           }}
-          onDenyPermission={(requestId) => {
-            setResolvedPermissions((prev) => {
-              const next = new Map(prev);
-              next.set(requestId, false);
-              return next;
-            });
-            showToast(
-              "success",
-              "Denied locally — desktop app remains the source of truth for the daemon-side response.",
-            );
+          onDenyPermission={(requestId, message) => {
+            void handlePermissionResponse(requestId, message, false);
           }}
           resolvedPermissionsByRequestId={resolvedPermissions}
           onBack={handleBackToList}
@@ -652,7 +727,7 @@ export default function SessionDetailRoute() {
           if (!trimmed || !runtimeInfo) return;
           try {
             await createSessionsApi(supabase).updateRuntimeModel(
-              runtimeInfo.runtimeId,
+              runtimeInfo.dbRuntimeId,
               trimmed,
             );
             setRuntimeInfo({ ...runtimeInfo, currentModel: trimmed });

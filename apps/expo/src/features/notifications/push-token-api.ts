@@ -5,9 +5,9 @@ export type PushTokenUpload = {
   deviceId: string;
   /** "ios" | "android" — matches the iOS PushService convention. */
   platform: string;
-  /** "expo" | "apns" | "fcm" — the upstream provider that will deliver. */
+  /** "apns" today; "fcm" can be enabled after the FC dispatcher supports it. */
   provider: string;
-  /** Hex string for APNS, ExponentPushToken[...] for Expo, FCM token otherwise. */
+  /** Native push token returned by Expo Notifications / APNs. */
   token: string;
   appVersion?: string | null;
 };
@@ -26,7 +26,7 @@ export type PushTokenApi = {
 export function createPushTokenApi(client: SupabaseClient): PushTokenApi {
   return {
     async upload(input) {
-      await client.from("device_push_tokens").upsert(
+      const result = await client.from("device_push_tokens").upsert(
         {
           user_id: input.userId,
           device_id: input.deviceId,
@@ -38,14 +38,25 @@ export function createPushTokenApi(client: SupabaseClient): PushTokenApi {
         },
         { onConflict: "user_id,device_id,provider" },
       );
+      throwIfSupabaseError(result.error);
     },
     async remove(userId, deviceId, provider) {
-      await client
+      const result = await client
         .from("device_push_tokens")
         .delete()
         .eq("user_id", userId)
         .eq("device_id", deviceId)
         .eq("provider", provider);
+      throwIfSupabaseError(result.error);
     },
   };
+}
+
+function throwIfSupabaseError(error: unknown) {
+  if (!error) return;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    throw new Error(typeof message === "string" ? message : "Supabase push token error");
+  }
+  throw new Error("Supabase push token error");
 }

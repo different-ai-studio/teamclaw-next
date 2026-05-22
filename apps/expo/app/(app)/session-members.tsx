@@ -2,35 +2,54 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "react-native";
 
-import { useOnboarding } from "../_layout";
+import { useConnectedAgentsStore, useOnboarding, useTeamMqtt } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
 import { isAgentActor, type Actor } from "../../src/features/actors/actor-types";
+import {
+  resolveAgentRuntimeRestartPlan,
+  resolveAgentRuntimeStartPlans,
+} from "../../src/features/sessions/runtime-start";
 import { createSessionsApi } from "../../src/features/sessions/session-api";
 import { MemberPickerSheet } from "../../src/features/sessions/screens/MemberPickerSheet";
 import { SessionMemberSheet } from "../../src/features/sessions/screens/SessionMemberSheet";
 import { supabase } from "../../src/lib/supabase/client";
+import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { showToast } from "../../src/ui/Toast";
 import { TextPromptModal } from "../../src/ui/TextPromptModal";
 
 type AddMode = "all" | "members" | "agents";
 
 type AgentRuntime = {
+  dbRuntimeId: string;
   runtimeId: string;
   agentId: string;
+  workspaceId: string | null;
+  backendType: string | null;
   currentModel: string | null;
   status: string;
 };
 
 type RuntimeRow = {
   id: string | null;
+  runtime_id: string | null;
   agent_id: string | null;
+  workspace_id: string | null;
+  backend_type: string | null;
   current_model: string | null;
   status: string | null;
+};
+
+type WorkspaceRow = {
+  id: string;
+  path: string | null;
+  agent_id: string | null;
 };
 
 export default function SessionMembersRoute() {
   const router = useRouter();
   const { state } = useOnboarding();
+  const teamMqtt = useTeamMqtt();
+  const connectedAgentsStore = useConnectedAgentsStore();
   const params = useLocalSearchParams<{ sessionId?: string }>();
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : null;
   const teamId = state.currentTeam?.id ?? "";
@@ -38,6 +57,7 @@ export default function SessionMembersRoute() {
   const [actors, setActors] = useState<Actor[]>([]);
   const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [addMode, setAddMode] = useState<AddMode | null>(null);
   const [modelPromptAgent, setModelPromptAgent] = useState<AgentRuntime | null>(
@@ -58,10 +78,16 @@ export default function SessionMembersRoute() {
       actorsApi.listActors(teamId),
       supabase
         .from("agent_runtimes")
-        .select("id, agent_id, current_model, status")
+        .select("id, runtime_id, agent_id, workspace_id, backend_type, current_model, status")
         .eq("session_id", sessionId),
+      supabase
+        .from("workspaces")
+        .select("id, path, agent_id")
+        .eq("team_id", teamId)
+        .eq("archived", false)
+        .order("name", { ascending: true }),
     ])
-      .then(([session, allActors, runtimeResult]) => {
+      .then(([session, allActors, runtimeResult, workspaceResult]) => {
         if (cancelled) return;
         setParticipantIds(session?.participantActorIds ?? []);
         setActors(allActors);
@@ -74,18 +100,27 @@ export default function SessionMembersRoute() {
             Boolean(row.id && row.agent_id),
           )
           .map((row) => ({
-            runtimeId: row.id,
+            dbRuntimeId: row.id,
+            runtimeId: row.runtime_id ?? "",
             agentId: row.agent_id,
+            workspaceId: row.workspace_id,
+            backendType: row.backend_type,
             currentModel: row.current_model,
             status: row.status ?? "unknown",
           }));
         setRuntimes(rows);
+        const workspaceRows = workspaceResult as {
+          data: WorkspaceRow[] | null;
+          error: unknown;
+        };
+        setWorkspaces(workspaceRows.error ? [] : workspaceRows.data ?? []);
       })
       .catch(() => {
         if (cancelled) return;
         setActors([]);
         setParticipantIds([]);
         setRuntimes([]);
+        setWorkspaces([]);
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -94,6 +129,10 @@ export default function SessionMembersRoute() {
       cancelled = true;
     };
   }, [sessionId, teamId]);
+
+  useEffect(() => {
+    void connectedAgentsStore?.reload();
+  }, [connectedAgentsStore]);
 
   const participants = useMemo(() => {
     if (participantIds.length === 0) return actors;
@@ -135,7 +174,7 @@ export default function SessionMembersRoute() {
   };
 
   const handleAdd = async (picked: string[]) => {
-    if (!sessionId) {
+    if (!sessionId || !teamId) {
       setAddMode(null);
       return;
     }
@@ -145,8 +184,72 @@ export default function SessionMembersRoute() {
       return;
     }
     try {
+      const actorById = new Map(actors.map((actor) => [actor.actorId, actor]));
+      const freshAgents = fresh
+        .map((id) => actorById.get(id))
+        .filter((actor): actor is Actor => Boolean(actor && isAgentActor(actor)));
+      if (freshAgents.length > 0 && !state.currentMemberActorId) {
+        throw new Error("Couldn't resolve your member identity in this team.");
+      }
+      if (freshAgents.length > 0 && !teamMqtt) {
+        throw new Error("MQTT is not connected — wait for Teamclaw to reconnect.");
+      }
+      if (freshAgents.length > 0 && !connectedAgentsStore) {
+        throw new Error("Connected agents are not ready — wait for Teamclaw to reconnect.");
+      }
+      if (freshAgents.length > 0) {
+        await connectedAgentsStore?.reload();
+      }
+      const runtimePlans =
+        freshAgents.length > 0
+          ? resolveAgentRuntimeStartPlans({
+              agents: freshAgents.map((actor) => ({
+                actorId: actor.actorId,
+                displayName: actor.displayName,
+                agentTypes: actor.agentTypes,
+                defaultAgentType: actor.defaultAgentType,
+                defaultWorkspaceId: actor.defaultWorkspaceId ?? null,
+              })),
+              connectedAgents:
+                connectedAgentsStore?.getState().agents.map((agent) => ({
+                  agentId: agent.agentId,
+                  deviceId: agent.deviceId,
+                })) ?? [],
+              workspaces: workspaces.map((workspace) => ({
+                id: workspace.id,
+                path: workspace.path ?? "",
+                agentId: workspace.agent_id,
+              })),
+            })
+          : [];
       await createSessionsApi(supabase).addParticipants(sessionId, fresh);
       setParticipantIds((prev) => Array.from(new Set([...prev, ...fresh])));
+      if (runtimePlans.length > 0 && teamMqtt && state.currentMemberActorId) {
+        const runtimeRpc = createRuntimeRpcClient({
+          mqtt: teamMqtt,
+          teamId,
+          requesterActorId: state.currentMemberActorId,
+        });
+        for (const plan of runtimePlans) {
+          const actorName =
+            actorById.get(plan.agentActorId)?.displayName ?? "Agent";
+          void runtimeRpc.runtimeStart({
+            targetDeviceId: plan.targetDeviceId,
+            workspaceId: plan.workspaceId,
+            worktree: plan.worktree,
+            sessionId,
+            agentType: plan.agentType,
+            initialPrompt: "",
+          }).catch((err) => {
+            showToast(
+              "error",
+              err instanceof Error
+                ? `Couldn't start ${actorName}: ${err.message}`
+                : `Couldn't start ${actorName}.`,
+            );
+          });
+        }
+      }
       showToast(
         "success",
         fresh.length === 1 ? "Added to session" : `Added ${fresh.length} to session`,
@@ -182,14 +285,91 @@ export default function SessionMembersRoute() {
       );
       return;
     }
-    // Runtime restart in iOS goes through the daemon RPC stack (proto
-    // request/response over MQTT). The Expo client doesn't yet implement
-    // that pipeline, so surface a clear "use the desktop app" message
-    // rather than silently no-op.
-    showToast(
-      "error",
-      "Restart isn't supported from mobile yet — use the desktop app.",
-    );
+    const actor = actors.find((candidate) => candidate.actorId === actorId);
+    if (!actor || !isAgentActor(actor)) {
+      showToast("error", "Couldn't resolve this agent.");
+      return;
+    }
+    const currentMemberActorId = state.currentMemberActorId;
+    if (!sessionId || !teamId || !currentMemberActorId) {
+      showToast("error", "Session or member identity is not ready.");
+      return;
+    }
+    if (!teamMqtt) {
+      showToast("error", "MQTT is not connected — wait for Teamclaw to reconnect.");
+      return;
+    }
+
+    void (async () => {
+      try {
+        await connectedAgentsStore?.reload();
+        const plan = resolveAgentRuntimeRestartPlan({
+          agent: {
+            actorId: actor.actorId,
+            displayName: actor.displayName,
+            agentTypes: actor.agentTypes,
+            defaultAgentType: actor.defaultAgentType,
+            defaultWorkspaceId: actor.defaultWorkspaceId ?? null,
+          },
+          runtime: {
+            agentId: runtime.agentId,
+            runtimeId: runtime.runtimeId,
+            workspaceId: runtime.workspaceId,
+            backendType: runtime.backendType,
+          },
+          connectedAgents:
+            connectedAgentsStore?.getState().agents.map((agent) => ({
+              agentId: agent.agentId,
+              deviceId: agent.deviceId,
+            })) ?? [],
+          workspaces: workspaces.map((workspace) => ({
+            id: workspace.id,
+            path: workspace.path ?? "",
+            agentId: workspace.agent_id,
+          })),
+        });
+        const runtimeRpc = createRuntimeRpcClient({
+          mqtt: teamMqtt,
+          teamId,
+          requesterActorId: currentMemberActorId,
+        });
+
+        if (plan.runtimeIdToStop) {
+          await runtimeRpc.runtimeStop({
+            targetDeviceId: plan.targetDeviceId,
+            runtimeId: plan.runtimeIdToStop,
+          }).catch(() => {
+            // Stop is best-effort; a stale runtime id should not block the fresh start.
+          });
+        }
+
+        const result = await runtimeRpc.runtimeStart({
+          targetDeviceId: plan.targetDeviceId,
+          workspaceId: plan.workspaceId,
+          worktree: plan.worktree,
+          sessionId,
+          agentType: plan.agentType,
+          initialPrompt: "",
+        });
+        setRuntimes((prev) =>
+          prev.map((row) =>
+            row.agentId === actorId
+              ? {
+                  ...row,
+                  runtimeId: result.runtimeId || row.runtimeId,
+                  status: "starting",
+                }
+              : row,
+          ),
+        );
+        showToast("success", "Runtime restart requested");
+      } catch (err) {
+        showToast(
+          "error",
+          err instanceof Error ? err.message : "Couldn't restart runtime",
+        );
+      }
+    })();
   };
 
   return (
@@ -232,12 +412,12 @@ export default function SessionMembersRoute() {
           if (!target || !trimmed) return;
           try {
             await createSessionsApi(supabase).updateRuntimeModel(
-              target.runtimeId,
+              target.dbRuntimeId,
               trimmed,
             );
             setRuntimes((prev) =>
               prev.map((row) =>
-                row.runtimeId === target.runtimeId
+                row.dbRuntimeId === target.dbRuntimeId
                   ? { ...row, currentModel: trimmed }
                   : row,
               ),

@@ -84,8 +84,8 @@ type SessionDetailScreenProps = {
   onClearReply?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string, currentContent: string) => void;
-  onGrantPermission?: (requestId: string) => void;
-  onDenyPermission?: (requestId: string) => void;
+  onGrantPermission?: (requestId: string, message: SessionMessage) => void;
+  onDenyPermission?: (requestId: string, message: SessionMessage) => void;
   resolvedPermissionsByRequestId?: ReadonlyMap<string, boolean>;
   onReconnect?: () => void;
   onRefresh?: () => void;

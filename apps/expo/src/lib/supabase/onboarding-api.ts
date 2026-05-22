@@ -1,4 +1,8 @@
 import type { BootstrapResult, TeamSummary } from "../../features/onboarding/onboarding-types";
+import {
+  parseOAuthCallbackUrl,
+  type OAuthProvider,
+} from "../../features/onboarding/onboarding-oauth";
 
 type QueryResult<T> = PromiseLike<{ data: T; error: { message?: string } | null }>;
 
@@ -35,6 +39,27 @@ type OnboardingClient = {
       token: string;
       type: "email";
     }) => PromiseLike<{ data: { session?: any | null } | null; error: { message?: string } | null }>;
+    signInWithOAuth: (args: {
+      provider: OAuthProvider;
+      options: {
+        redirectTo: string;
+        skipBrowserRedirect: boolean;
+      };
+    }) => PromiseLike<{ data: { url?: string | null } | null; error: { message?: string } | null }>;
+    linkIdentity: (args: {
+      provider: OAuthProvider;
+      options: {
+        redirectTo: string;
+        skipBrowserRedirect: boolean;
+      };
+    }) => PromiseLike<{ data: { url?: string | null } | null; error: { message?: string } | null }>;
+    exchangeCodeForSession: (
+      code: string,
+    ) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+    setSession: (session: {
+      access_token: string;
+      refresh_token: string;
+    }) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
     signOut: () => PromiseLike<{ error: { message?: string } | null }>;
   };
   from: (table: string) => {
@@ -142,6 +167,52 @@ export function createOnboardingApi(client: OnboardingClient) {
         email,
         token,
         type: "email",
+      });
+      throwIfError(error);
+      return data;
+    },
+
+    async createOAuthSignInUrl(provider: OAuthProvider, redirectTo: string) {
+      const { data, error } = await client.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
+      });
+      throwIfError(error);
+      if (!data?.url) {
+        throw new Error("Supabase did not return an OAuth URL");
+      }
+      return data.url;
+    },
+
+    async createOAuthLinkUrl(provider: OAuthProvider, redirectTo: string) {
+      const { data, error } = await client.auth.linkIdentity({
+        provider,
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
+      });
+      throwIfError(error);
+      if (!data?.url) {
+        throw new Error("Supabase did not return an OAuth link URL");
+      }
+      return data.url;
+    },
+
+    async completeOAuthCallback(callbackUrl: string) {
+      const callback = parseOAuthCallbackUrl(callbackUrl);
+      if (callback.type === "code") {
+        const { data, error } = await client.auth.exchangeCodeForSession(callback.code);
+        throwIfError(error);
+        return data;
+      }
+
+      const { data, error } = await client.auth.setSession({
+        access_token: callback.accessToken,
+        refresh_token: callback.refreshToken,
       });
       throwIfError(error);
       return data;

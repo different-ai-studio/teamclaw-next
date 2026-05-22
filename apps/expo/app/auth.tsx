@@ -1,8 +1,12 @@
+import * as Linking from "expo-linking";
 import { Redirect, useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 
 import { AuthScreen } from "../src/features/onboarding/screens/AuthScreen";
 
 import { routeToHref, useOnboarding } from "./_layout";
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function AuthRoute() {
   const router = useRouter();
@@ -27,6 +31,18 @@ export default function AuthRoute() {
       }}
       onRequestOtp={controller.requestOtp}
       onResetPendingEmail={controller.resetPendingEmail}
+      onSignInWithApple={() =>
+        controller.signInWithOAuth("apple", {
+          redirectTo: Linking.createURL("auth/callback"),
+          openAuthSession: WebBrowser.openAuthSessionAsync,
+        })
+      }
+      onSignInWithGoogle={() =>
+        controller.signInWithOAuth("google", {
+          redirectTo: Linking.createURL("auth/callback"),
+          openAuthSession: WebBrowser.openAuthSessionAsync,
+        })
+      }
       onVerifyOtp={controller.verifyOtp}
     />
   );

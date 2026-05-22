@@ -178,6 +178,97 @@ describe("createOnboardingApi", () => {
     });
   });
 
+  it("createOAuthSignInUrl starts Supabase OAuth without browser redirect", async () => {
+    const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
+
+    const signInWithOAuth = vi.fn().mockResolvedValue({
+      data: { url: "https://auth.example.com/oauth" },
+      error: null,
+    });
+    const client = {
+      auth: {
+        signInWithOAuth,
+      },
+    } as any;
+
+    const api = createOnboardingApi(client);
+
+    await expect(
+      api.createOAuthSignInUrl("google", "teamclaw://auth/callback"),
+    ).resolves.toBe("https://auth.example.com/oauth");
+    expect(signInWithOAuth).toHaveBeenCalledWith({
+      provider: "google",
+      options: {
+        redirectTo: "teamclaw://auth/callback",
+        skipBrowserRedirect: true,
+      },
+    });
+  });
+
+  it("createOAuthLinkUrl starts Supabase identity linking without browser redirect", async () => {
+    const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
+
+    const linkIdentity = vi.fn().mockResolvedValue({
+      data: { url: "https://auth.example.com/link" },
+      error: null,
+    });
+    const client = {
+      auth: {
+        linkIdentity,
+      },
+    } as any;
+
+    const api = createOnboardingApi(client);
+
+    await expect(
+      api.createOAuthLinkUrl("apple", "teamclaw://auth/callback"),
+    ).resolves.toBe("https://auth.example.com/link");
+    expect(linkIdentity).toHaveBeenCalledWith({
+      provider: "apple",
+      options: {
+        redirectTo: "teamclaw://auth/callback",
+        skipBrowserRedirect: true,
+      },
+    });
+  });
+
+  it("completeOAuthCallback exchanges PKCE code callbacks", async () => {
+    const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
+
+    const exchangeCodeForSession = vi.fn().mockResolvedValue({ data: {}, error: null });
+    const client = {
+      auth: {
+        exchangeCodeForSession,
+      },
+    } as any;
+
+    const api = createOnboardingApi(client);
+
+    await api.completeOAuthCallback("teamclaw://auth/callback?code=abc");
+    expect(exchangeCodeForSession).toHaveBeenCalledWith("abc");
+  });
+
+  it("completeOAuthCallback stores implicit token callbacks", async () => {
+    const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
+
+    const setSession = vi.fn().mockResolvedValue({ data: {}, error: null });
+    const client = {
+      auth: {
+        setSession,
+      },
+    } as any;
+
+    const api = createOnboardingApi(client);
+
+    await api.completeOAuthCallback(
+      "teamclaw://auth/callback#access_token=access&refresh_token=refresh",
+    );
+    expect(setSession).toHaveBeenCalledWith({
+      access_token: "access",
+      refresh_token: "refresh",
+    });
+  });
+
   it("createTeam uses the create_team RPC and returns TeamSummary", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
 

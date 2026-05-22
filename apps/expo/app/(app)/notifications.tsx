@@ -253,10 +253,9 @@ export default function NotificationsRoute() {
         </View>
 
         <Text style={styles.footnote}>
-          Per-event preferences live on this device until APNs/FCM
-          registration lands — the toggle state is honored locally by future
-          notification scheduling. The Push section syncs with Supabase and
-          the FC fan-out.
+          Per-event preferences live on this device. iOS APNs registration,
+          foreground presence, and notification tap routing sync with Supabase
+          and the FC fan-out; Android FCM delivery still needs backend support.
         </Text>
       </ScrollView>
     </View>
