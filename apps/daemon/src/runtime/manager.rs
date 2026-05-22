@@ -331,6 +331,9 @@ impl RuntimeManager {
             }
         }
 
+        self.seed_cursor_from_prior_runtime(&agent_id, supabase_session_id)
+            .await;
+
         // Upsert agent_runtimes with status="starting"; capture the returned
         // row id so catchup_runtime can use update_runtime_cursor later.
         if let Some(sb) = &self.supabase {
@@ -370,6 +373,56 @@ impl RuntimeManager {
         }
 
         Ok(agent_id)
+    }
+
+    /// Carry forward the `last_processed_message_id` cursor from a prior
+    /// runtime row for the same `(agent_id, session_id)` pair. Without
+    /// this, a fresh ACP backend session always lands on a brand-new
+    /// `agent_runtimes` row (the upsert conflict key is
+    /// `(agent_id, backend_session_id)`), so `catchup_runtime` would
+    /// replay the entire session history on every daemon restart. We pull
+    /// the latest row and seed the in-memory handle so catchup only
+    /// replays truly-new messages.
+    ///
+    /// No-op when there is no Supabase client, no session id, no prior
+    /// row, or the prior row's cursor is empty. Errors are logged and
+    /// swallowed — the worst case on failure is a redundant replay, not a
+    /// missed message.
+    pub(crate) async fn seed_cursor_from_prior_runtime(
+        &mut self,
+        agent_id: &str,
+        supabase_session_id: Option<&str>,
+    ) {
+        let Some(sb) = self.supabase.as_ref() else {
+            return;
+        };
+        let Some(session_id) = supabase_session_id else {
+            return;
+        };
+        match sb
+            .fetch_latest_runtime_for_session(&sb.config().actor_id, session_id)
+            .await
+        {
+            Ok(Some(prior)) => {
+                let cursor = prior.last_processed_message_id.filter(|s| !s.is_empty());
+                if let Some(cursor) = cursor {
+                    if let Some(h) = self.agents.get_mut(agent_id) {
+                        info!(
+                            agent_id,
+                            session_id,
+                            cursor = %cursor,
+                            "seeded last_processed_message_id from prior runtime row",
+                        );
+                        h.last_processed_message_id = Some(cursor);
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => warn!(
+                agent_id,
+                session_id, "fetch_latest_runtime_for_session failed: {e}"
+            ),
+        }
     }
 
     pub async fn resume_agent(
@@ -1149,6 +1202,169 @@ mod tests {
             mgr.launch_config_for(amux::AgentType::Opencode),
             AgentLaunchConfig::new("opencode", vec!["acp".to_string()], "opencode")
         );
+    }
+
+    // ── seed_cursor_from_prior_runtime ─────────────────────────────────────
+    //
+    // The spawn path calls into this helper to carry `last_processed_message_id`
+    // forward from a prior agent_runtimes row. We can't easily exercise the
+    // full spawn (it boots a real ACP subprocess), but we can verify the helper
+    // populates the handle when (a) Supabase has a prior row and (b) does not
+    // when the row is missing or its cursor is empty.
+
+    use crate::supabase::config::SupabaseConfig;
+    use crate::supabase::SupabaseClient;
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_supabase_with_url(url: String) -> SupabaseClient {
+        SupabaseClient::new_without_persistence(SupabaseConfig {
+            url,
+            anon_key: "anon".into(),
+            refresh_token: "rt".into(),
+            team_id: "t".into(),
+            actor_id: "agent-actor".into(),
+        })
+        .unwrap()
+    }
+
+    async fn auth_mock(srv: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+            })))
+            .mount(srv)
+            .await;
+    }
+
+    fn dummy_handle(agent_id: &str, session_id: &str) -> RuntimeHandle {
+        let mut h = RuntimeHandle::test_dummy();
+        h.agent_id = agent_id.into();
+        h.session_id = session_id.into();
+        h
+    }
+
+    #[tokio::test]
+    async fn seed_cursor_from_prior_runtime_populates_handle() {
+        let srv = MockServer::start().await;
+        auth_mock(&srv).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "row-1",
+                    "workspace_id": null,
+                    "backend_type": "claude",
+                    "backend_session_id": "acp-1",
+                    "status": "stopped",
+                    "last_processed_message_id": "msg-42",
+                    "last_seen_at": "2025-05-22T01:00:00Z"
+                }
+            ])))
+            .mount(&srv)
+            .await;
+
+        let mut mgr = RuntimeManager::new(
+            RuntimeManager::test_launch_configs(),
+            Some(test_supabase_with_url(srv.uri())),
+        );
+        mgr.agents
+            .insert("rt-X".into(), dummy_handle("rt-X", "sess-1"));
+
+        mgr.seed_cursor_from_prior_runtime("rt-X", Some("sess-1"))
+            .await;
+
+        assert_eq!(
+            mgr.agents
+                .get("rt-X")
+                .unwrap()
+                .last_processed_message_id
+                .as_deref(),
+            Some("msg-42")
+        );
+    }
+
+    #[tokio::test]
+    async fn seed_cursor_from_prior_runtime_noop_when_no_session_id() {
+        // Without a session id we shouldn't touch Supabase. We deliberately
+        // give the client a bogus URL so any HTTP call would explode.
+        let mut mgr = RuntimeManager::new(
+            RuntimeManager::test_launch_configs(),
+            Some(test_supabase_with_url("http://127.0.0.1:1".into())),
+        );
+        mgr.agents.insert("rt-X".into(), dummy_handle("rt-X", ""));
+        mgr.seed_cursor_from_prior_runtime("rt-X", None).await;
+        assert!(mgr
+            .agents
+            .get("rt-X")
+            .unwrap()
+            .last_processed_message_id
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn seed_cursor_from_prior_runtime_noop_when_no_prior_row() {
+        let srv = MockServer::start().await;
+        auth_mock(&srv).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&srv)
+            .await;
+
+        let mut mgr = RuntimeManager::new(
+            RuntimeManager::test_launch_configs(),
+            Some(test_supabase_with_url(srv.uri())),
+        );
+        mgr.agents
+            .insert("rt-X".into(), dummy_handle("rt-X", "sess-1"));
+        mgr.seed_cursor_from_prior_runtime("rt-X", Some("sess-1"))
+            .await;
+        assert!(mgr
+            .agents
+            .get("rt-X")
+            .unwrap()
+            .last_processed_message_id
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn seed_cursor_from_prior_runtime_noop_when_cursor_empty_string() {
+        // An older daemon may have written an empty string instead of NULL.
+        // Treat that as "no cursor".
+        let srv = MockServer::start().await;
+        auth_mock(&srv).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "row-1",
+                    "workspace_id": null,
+                    "backend_type": "claude",
+                    "backend_session_id": "acp-1",
+                    "status": "stopped",
+                    "last_processed_message_id": "",
+                    "last_seen_at": "2025-05-22T01:00:00Z"
+                }
+            ])))
+            .mount(&srv)
+            .await;
+
+        let mut mgr = RuntimeManager::new(
+            RuntimeManager::test_launch_configs(),
+            Some(test_supabase_with_url(srv.uri())),
+        );
+        mgr.agents
+            .insert("rt-X".into(), dummy_handle("rt-X", "sess-1"));
+        mgr.seed_cursor_from_prior_runtime("rt-X", Some("sess-1"))
+            .await;
+        assert!(mgr
+            .agents
+            .get("rt-X")
+            .unwrap()
+            .last_processed_message_id
+            .is_none());
     }
 
     #[test]

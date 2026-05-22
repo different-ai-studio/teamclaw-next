@@ -36,6 +36,18 @@ struct StartRuntimeError {
     failed_stage: String,
 }
 
+/// Per-session plan emitted by
+/// [`DaemonServer::plan_auto_restart_offline_sessions`]. Sessions that pass
+/// every filter (have a prior runtime, have unread from someone other than
+/// this daemon, no live runtime currently serving them) end up in the
+/// returned `Vec`.
+pub(crate) struct OfflineRestartPlan {
+    pub session_id: String,
+    pub backend: amux::AgentType,
+    pub local_workspace_id: String,
+    pub unread_count: usize,
+}
+
 fn resolve_requested_agent_type(
     config: &DaemonConfig,
     requested: amux::AgentType,
@@ -851,6 +863,13 @@ impl DaemonServer {
 
             if first_connect {
                 self.register_startup_workspace().await;
+                // Drain messages that landed in Supabase while the daemon
+                // process was down. MQTT lives are dropped by the broker
+                // when clean_session=true clients are offline, so anything
+                // posted by desktop/iOS/expo between daemon stop and start
+                // exists only in the `messages` table and would otherwise
+                // never reach any agent.
+                self.auto_restart_offline_sessions().await;
                 first_connect = false;
             }
 
@@ -1056,6 +1075,192 @@ impl DaemonServer {
                 warn!(path = %startup_path, "workspace auto-registration failed: {}", e);
             }
         }
+    }
+
+    /// Re-engage with sessions that had a runtime before the daemon was
+    /// last shut down so we can replay messages that landed in Supabase
+    /// while the daemon was offline.
+    ///
+    /// Daemon-owned runtimes are subprocesses; they die when the daemon
+    /// process exits. MQTT live publishes against those sessions are
+    /// dropped by the broker (clean_session=true), so the only record of
+    /// those messages is the `messages` table. The user-facing symptom is
+    /// "messages I sent while the daemon was off never get a reply"
+    /// (mentions go unanswered, silent messages never enter the runtime's
+    /// pending_silent queue).
+    ///
+    /// Strategy: for each session this daemon is a member of, look up the
+    /// most recent `agent_runtimes` row owned by this daemon. If the row
+    /// has unread messages strictly after the row's
+    /// `last_processed_message_id` cursor, spawn the runtime (reusing the
+    /// row's `workspace_id` + `backend_type`). The existing
+    /// `catchup_runtime` path then routes those messages through
+    /// `route_session_message`, which sends `[Context]` prefixes for
+    /// un-mentioned rows and a real prompt for mentions.
+    ///
+    /// Self-authored rows are filtered out — they are the daemon's own
+    /// prior agent replies, not user input that needs processing.
+    async fn auto_restart_offline_sessions(&mut self) {
+        let plan = self.plan_auto_restart_offline_sessions().await;
+        if plan.is_empty() {
+            return;
+        }
+        info!(
+            count = plan.len(),
+            "auto_restart_offline_sessions: spawning {} runtime(s) for sessions with offline messages",
+            plan.len()
+        );
+        for entry in plan {
+            info!(
+                session_id = %entry.session_id,
+                workspace_id = %entry.local_workspace_id,
+                backend = ?entry.backend,
+                unread = entry.unread_count,
+                "auto_restart_offline_sessions: spawning runtime to drain offline messages"
+            );
+            match self
+                .apply_start_runtime(
+                    entry.backend,
+                    &entry.local_workspace_id,
+                    "",
+                    &entry.session_id,
+                    "",
+                    None,
+                )
+                .await
+            {
+                Ok(outcome) => {
+                    info!(
+                        session_id = %entry.session_id,
+                        runtime_id = %outcome.runtime_id,
+                        "auto_restart_offline_sessions: runtime spawned, catchup_runtime engaged"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        session_id = %entry.session_id,
+                        error = %err.error_message,
+                        stage = %err.failed_stage,
+                        "auto_restart_offline_sessions: apply_start_runtime failed"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Pure-decision half of [`auto_restart_offline_sessions`]: walks
+    /// membership sessions, queries Supabase, and returns the subset that
+    /// should be re-spawned. Extracted so unit tests can drive the
+    /// branching logic (no prior row → skip, only self-authored unread →
+    /// skip, already-running runtime → skip, etc.) without booting a real
+    /// ACP backend.
+    pub(crate) async fn plan_auto_restart_offline_sessions(&self) -> Vec<OfflineRestartPlan> {
+        let session_ids: Vec<String> = match self.teamclaw.as_ref() {
+            Some(tc) => tc.membership_session_ids(),
+            None => return Vec::new(),
+        };
+        if session_ids.is_empty() {
+            return Vec::new();
+        }
+        info!(
+            count = session_ids.len(),
+            "plan_auto_restart_offline_sessions: scanning membership sessions for offline messages"
+        );
+
+        let mut plan = Vec::new();
+        let my_actor = self.actor_id.clone();
+        for session_id in session_ids {
+            let prior = match self
+                .supabase
+                .fetch_latest_runtime_for_session(&my_actor, &session_id)
+                .await
+            {
+                Ok(Some(row)) => row,
+                Ok(None) => continue,
+                Err(e) => {
+                    warn!(
+                        ?e,
+                        session_id = %session_id,
+                        "plan_auto_restart_offline_sessions: fetch_latest_runtime_for_session failed"
+                    );
+                    continue;
+                }
+            };
+
+            // If a live runtime is already serving this session (e.g. a
+            // network blip rather than a full daemon restart), skip — the
+            // live MQTT path will deliver the messages directly.
+            let already_running = !self
+                .agents
+                .lock()
+                .await
+                .runtime_ids_for_session(&session_id)
+                .is_empty();
+            if already_running {
+                continue;
+            }
+
+            let cursor = prior
+                .last_processed_message_id
+                .as_deref()
+                .filter(|s| !s.is_empty());
+            let messages = match self
+                .supabase
+                .messages_after_cursor(&session_id, cursor)
+                .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!(
+                        ?e,
+                        session_id = %session_id,
+                        "plan_auto_restart_offline_sessions: messages_after_cursor failed"
+                    );
+                    continue;
+                }
+            };
+
+            let unread_count = messages
+                .iter()
+                .filter(|m| m.sender_actor_id != my_actor)
+                .count();
+            if unread_count == 0 {
+                continue;
+            }
+
+            let backend_requested = match prior.backend_type.as_str() {
+                "claude" | "claude_code" => amux::AgentType::ClaudeCode,
+                "opencode" => amux::AgentType::Opencode,
+                "codex" => amux::AgentType::Codex,
+                _ => amux::AgentType::Unknown,
+            };
+            let backend = resolve_requested_agent_type(&self.config, backend_requested);
+
+            // Translate the Supabase workspace id into a local workspace id
+            // by matching on `supabase_workspace_id`. If we can't find a
+            // local mapping (workspace was archived locally, daemon
+            // reinstalled, etc.) leave it empty so apply_start_runtime
+            // falls back to the registered workspace lookup or current dir.
+            let local_workspace_id = prior
+                .workspace_id
+                .as_ref()
+                .and_then(|sb_ws| {
+                    self.workspaces
+                        .workspaces
+                        .iter()
+                        .find(|w| w.supabase_workspace_id.as_str() == sb_ws.as_str())
+                        .map(|w| w.workspace_id.clone())
+                })
+                .unwrap_or_default();
+
+            plan.push(OfflineRestartPlan {
+                session_id,
+                backend,
+                local_workspace_id,
+                unread_count,
+            });
+        }
+        plan
     }
 
     async fn sync_workspace_to_supabase(
@@ -1726,9 +1931,15 @@ impl DaemonServer {
     /// Replay any session messages that arrived before this runtime was spawned.
     ///
     /// Fetches all messages after the runtime's `last_processed_message_id`
-    /// cursor (None → fetch all) and routes each through the no-resume message router
-    /// so live and catchup share identical semantics (mentioned → real prompt,
-    /// un-mentioned → pending_silent queue).
+    /// cursor (None → fetch all) and routes each through the no-resume message
+    /// router so live and catchup share identical semantics (mentioned → real
+    /// prompt, un-mentioned → pending_silent queue).
+    ///
+    /// **Stale-mention compaction** (offline-replay-specific): when the
+    /// daemon comes back online after missing N messages, only the *last*
+    /// `@daemon` mention in the replay slice triggers a fresh turn — earlier
+    /// `@daemon` rows are compacted into `pending_silent` even though they
+    /// nominally mention us.
     pub async fn catchup_runtime(&mut self, runtime_id: &str) -> bool {
         let (session_id, last_processed_message_id) = {
             let agents = self.agents.lock().await;
@@ -1756,9 +1967,27 @@ impl DaemonServer {
             return false;
         }
 
-        info!(runtime_id, count = messages.len(), "catching up runtime");
+        let my_actor = self.actor_id.clone();
+        // Find the last index in the replay slice where someone other than
+        // us @-mentioned us. Earlier @-mentions get demoted to silent
+        // context; the message at this index triggers a real prompt via
+        // route_session_message's mention path. None means no @-mentions
+        // in the entire replay slice (the whole batch is silent context).
+        let last_mention_idx = messages.iter().rposition(|m| {
+            m.sender_actor_id != my_actor
+                && parse_mention_actor_ids(&m.metadata_json)
+                    .iter()
+                    .any(|a| a == &my_actor)
+        });
 
-        for m in messages {
+        info!(
+            runtime_id,
+            count = messages.len(),
+            last_mention_idx,
+            "catching up runtime"
+        );
+
+        for (idx, m) in messages.iter().enumerate() {
             if self.agents.lock().await.get_handle(runtime_id).is_none() {
                 warn!(
                     runtime_id,
@@ -1776,10 +2005,17 @@ impl DaemonServer {
                 created_at: m.created_at,
                 ..Default::default()
             };
+            // Pass empty mentions for stale rows so the silent-queue branch
+            // runs even when the row originally @-mentioned us.
+            let effective_mentions: &[String] = if Some(idx) == last_mention_idx {
+                &mention_ids
+            } else {
+                &[]
+            };
             self.route_session_message_to_runtimes(
                 &session_id,
                 &proto,
-                &mention_ids,
+                effective_mentions,
                 vec![runtime_id.to_string()],
             )
             .await;
@@ -3808,8 +4044,12 @@ mod tests {
     }
 
     fn test_supabase() -> SupabaseClient {
+        test_supabase_with_url("http://localhost".to_string())
+    }
+
+    fn test_supabase_with_url(url: String) -> SupabaseClient {
         SupabaseClient::new_without_persistence(SupabaseConfig {
-            url: "http://localhost".to_string(),
+            url,
             anon_key: "anon".to_string(),
             refresh_token: "refresh".to_string(),
             team_id: "team-test".to_string(),
@@ -3830,9 +4070,12 @@ mod tests {
     }
 
     fn test_server() -> TestServer {
+        test_server_with_supabase(test_supabase())
+    }
+
+    fn test_server_with_supabase(supabase: SupabaseClient) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
-        let supabase = test_supabase();
         let mqtt = test_mqtt(&config.device.id);
         let teamclaw = crate::teamclaw::SessionManager::new(
             mqtt.client.clone(),
@@ -3930,6 +4173,408 @@ mod tests {
     #[test]
     fn parse_mention_actor_ids_handles_empty_array() {
         assert!(parse_mention_actor_ids(r#"{"mention_actor_ids":[]}"#).is_empty());
+    }
+
+    #[tokio::test]
+    async fn auto_restart_offline_sessions_is_noop_without_membership() {
+        // The default test fixture has no teamclaw memberships (no
+        // sessions.toml entries the actor is a participant in), so the
+        // method must return early before touching Supabase. A real
+        // Supabase call would fail because `test_supabase()` points at
+        // http://localhost with no server running, so a successful return
+        // here implies the early-exit guard fired.
+        let mut fixture = test_server();
+        fixture.server.auto_restart_offline_sessions().await;
+        // No runtimes added beyond the fixture's seeded "rt1".
+        let agents = fixture.server.agents.lock().await;
+        assert!(
+            agents.get_handle("rt1").is_some(),
+            "fixture runtime should be untouched"
+        );
+    }
+
+    // ── plan_auto_restart_offline_sessions branch coverage ─────────────────
+    //
+    // The pure-decision half of `auto_restart_offline_sessions` is exposed
+    // as `plan_auto_restart_offline_sessions` so we can verify every
+    // skip/keep branch without actually booting an ACP backend. The tests
+    // below cover:
+    //
+    //   - membership session has no prior agent_runtimes row → skip
+    //   - prior row exists, but no messages newer than cursor → skip
+    //   - prior row exists, unread messages are all self-authored → skip
+    //   - prior row exists, unread from someone else, no live runtime →
+    //     keep with backend/workspace_id resolved from the prior row
+    //   - prior row exists, but a live runtime is already serving → skip
+    use wiremock::matchers::{method, path_regex, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn auth_token_mock(srv: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+            })))
+            .mount(srv)
+            .await;
+    }
+
+    async fn mock_agent_runtime_row(
+        srv: &MockServer,
+        session_id: &str,
+        last_processed_message_id: Option<&str>,
+        workspace_id: Option<&str>,
+        backend_type: &str,
+    ) {
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .and(query_param("session_id", format!("eq.{}", session_id)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": format!("row-{}", session_id),
+                    "workspace_id": workspace_id,
+                    "backend_type": backend_type,
+                    "backend_session_id": format!("acp-{}", session_id),
+                    "status": "stopped",
+                    "last_processed_message_id": last_processed_message_id,
+                    "last_seen_at": "2025-05-22T01:00:00Z"
+                }
+            ])))
+            .mount(srv)
+            .await;
+    }
+
+    async fn mock_messages_response(srv: &MockServer, session_id: &str, rows: serde_json::Value) {
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/messages"))
+            .and(query_param("session_id", format!("eq.{}", session_id)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rows))
+            .mount(srv)
+            .await;
+    }
+
+    async fn add_membership(fixture: &mut TestServer, session_id: &str) {
+        let tc = fixture.server.teamclaw.as_mut().expect("teamclaw set");
+        tc.insert_session_from_supabase_for_test(
+            session_id,
+            "team-test",
+            None,
+            &[("agent-actor", "owner")],
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plan_skips_session_with_no_prior_runtime_row() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        // Empty agent_runtimes response — no prior row.
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&srv)
+            .await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        add_membership(&mut fixture, "sess-no-row").await;
+
+        let plan = fixture.server.plan_auto_restart_offline_sessions().await;
+        assert!(plan.is_empty(), "no prior row should produce empty plan");
+    }
+
+    #[tokio::test]
+    async fn plan_skips_when_no_unread_messages_after_cursor() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_agent_runtime_row(&srv, "sess-empty", Some("msg-9"), None, "claude").await;
+        // Supabase honours `messages_after_cursor` by returning an empty
+        // list (the drain-through-cursor logic happens client-side, but
+        // here we simulate "no messages newer than the cursor").
+        mock_messages_response(&srv, "sess-empty", serde_json::json!([])).await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        add_membership(&mut fixture, "sess-empty").await;
+
+        let plan = fixture.server.plan_auto_restart_offline_sessions().await;
+        assert!(
+            plan.is_empty(),
+            "no unread messages should produce empty plan"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_skips_when_unread_messages_are_all_self_authored() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_agent_runtime_row(&srv, "sess-self", None, None, "claude").await;
+        // Two messages, both sent by the daemon's own actor (e.g. prior
+        // agent replies we already emitted). Auto-restart must NOT fire
+        // for these — there is no user input to process.
+        mock_messages_response(
+            &srv,
+            "sess-self",
+            serde_json::json!([
+                {
+                    "id": "msg-1",
+                    "session_id": "sess-self",
+                    "sender_actor_id": "agent-actor",
+                    "kind": "agent_reply",
+                    "content": "ok",
+                    "metadata": {},
+                    "created_at": "2025-05-22T01:00:00Z"
+                }
+            ]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        add_membership(&mut fixture, "sess-self").await;
+
+        let plan = fixture.server.plan_auto_restart_offline_sessions().await;
+        assert!(
+            plan.is_empty(),
+            "self-authored unread should not trigger restart"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_keeps_session_with_unread_from_someone_else() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_agent_runtime_row(
+            &srv,
+            "sess-mention",
+            Some("msg-9"),
+            Some("ws-supabase-uuid"),
+            "claude_code",
+        )
+        .await;
+        // One self-authored row (filtered out) plus one human row (kept).
+        mock_messages_response(
+            &srv,
+            "sess-mention",
+            serde_json::json!([
+                {
+                    "id": "msg-10",
+                    "session_id": "sess-mention",
+                    "sender_actor_id": "agent-actor",
+                    "kind": "agent_reply",
+                    "content": "prior reply",
+                    "metadata": {},
+                    "created_at": "2025-05-22T00:30:00Z"
+                },
+                {
+                    "id": "msg-11",
+                    "session_id": "sess-mention",
+                    "sender_actor_id": "human-actor",
+                    "kind": "text",
+                    "content": "are you there?",
+                    "metadata": { "mention_actor_ids": ["agent-actor"] },
+                    "created_at": "2025-05-22T01:00:00Z"
+                }
+            ]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        add_membership(&mut fixture, "sess-mention").await;
+
+        let plan = fixture.server.plan_auto_restart_offline_sessions().await;
+        assert_eq!(plan.len(), 1, "one session should need restart");
+        assert_eq!(plan[0].session_id, "sess-mention");
+        assert_eq!(plan[0].unread_count, 1, "self-authored msg-10 was filtered");
+        // No local workspace is registered for "ws-supabase-uuid", so the
+        // helper falls back to empty (apply_start_runtime will then
+        // resolve via the registered workspace lookup or current dir).
+        assert!(plan[0].local_workspace_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn plan_skips_session_with_live_runtime_already_running() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        // The fixture seeds a runtime "rt1" bound to session_id
+        // "session-1" via add_test_runtime. Make that the membership
+        // session and confirm the planner refuses to schedule a second
+        // spawn for the same session.
+        mock_agent_runtime_row(&srv, "session-1", None, None, "claude").await;
+        mock_messages_response(
+            &srv,
+            "session-1",
+            serde_json::json!([
+                {
+                    "id": "msg-50",
+                    "session_id": "session-1",
+                    "sender_actor_id": "human-actor",
+                    "kind": "text",
+                    "content": "hi",
+                    "metadata": {},
+                    "created_at": "2025-05-22T01:00:00Z"
+                }
+            ]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        add_membership(&mut fixture, "session-1").await;
+
+        let plan = fixture.server.plan_auto_restart_offline_sessions().await;
+        assert!(
+            plan.is_empty(),
+            "existing live runtime should suppress auto-restart for the same session"
+        );
+    }
+
+    // ── catchup_runtime stale-mention compaction ──────────────────────────
+    //
+    // When the daemon comes back online and replays the cursor → now slice
+    // through catchup_runtime, only the most recent `@daemon` mention should
+    // trigger a real ACP prompt. Earlier @-mentions are demoted to silent
+    // context (pending_silent prefix on the eventual prompt) because the
+    // conversation already moved past them — firing a fresh turn on those
+    // stale mentions would emit out-of-date replies.
+
+    fn make_message_row(
+        id: &str,
+        session_id: &str,
+        sender_actor_id: &str,
+        mentions: &[&str],
+        content: &str,
+        created_at: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "session_id": session_id,
+            "sender_actor_id": sender_actor_id,
+            "kind": "text",
+            "content": content,
+            "metadata": { "mention_actor_ids": mentions },
+            "created_at": created_at,
+        })
+    }
+
+    #[tokio::test]
+    async fn catchup_runtime_prompts_only_on_last_mention_compacting_stale_ones() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        // 3-message replay: @daemon, @daemon, plain. The latest @daemon is
+        // msg-b; msg-a is stale (a later @daemon came in). msg-c is a
+        // non-mention follow-up and should also land as silent context.
+        // Expected outcome:
+        //   - send_prompt fires exactly once, carrying "ask B" (the last
+        //     @-mention's content)
+        //   - the silent queue holds msg-a only (msg-b is consumed by the
+        //     real prompt; msg-c never @-mentions us, hence silent)
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                make_message_row(
+                    "msg-a",
+                    "session-1",
+                    "human-1",
+                    &["agent-actor"],
+                    "ask A",
+                    "2025-05-22T01:00:01Z",
+                ),
+                make_message_row(
+                    "msg-b",
+                    "session-1",
+                    "human-1",
+                    &["agent-actor"],
+                    "ask B",
+                    "2025-05-22T01:00:02Z",
+                ),
+                make_message_row(
+                    "msg-c",
+                    "session-1",
+                    "human-2",
+                    &[],
+                    "drive-by chatter",
+                    "2025-05-22T01:00:03Z",
+                ),
+            ])))
+            .mount(&srv)
+            .await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        fixture.server.catchup_runtime("rt1").await;
+
+        // `send_prompt` (not raw) auto-drains the silent queue via
+        // `flush_pending_silent`, so by the time msg-b's prompt fires the
+        // stale msg-a is woven into a `[Context — …]` prefix. msg-c is
+        // routed AFTER msg-b, so it stays in the silent queue waiting for
+        // the next real prompt.
+        let agents = fixture.server.agents.lock().await;
+        let last = agents
+            .last_sent_to("rt1")
+            .expect("the last @-mention should trigger send_prompt");
+        assert!(
+            last.contains("ask B"),
+            "send_prompt body should carry the latest @-mention content; got: {last}"
+        );
+        assert!(
+            last.contains("ask A"),
+            "the stale @-mention should be folded into the [Context …] prefix; got: {last}"
+        );
+        assert!(
+            !last.contains("drive-by chatter"),
+            "msg-c (routed after msg-b) must stay queued for the next turn; got: {last}"
+        );
+
+        // After the prompt fires, msg-c sits alone in the silent queue —
+        // msg-a was already drained into the prefix above.
+        let pending = &agents.get_handle("rt1").unwrap().pending_silent;
+        assert_eq!(
+            pending
+                .iter()
+                .map(|p| p.message_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["msg-c"],
+            "only msg-c (post-prompt drive-by) should remain silent"
+        );
+    }
+
+    #[tokio::test]
+    async fn catchup_runtime_with_no_mentions_routes_everything_silent() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                make_message_row(
+                    "msg-a",
+                    "session-1",
+                    "human-1",
+                    &[],
+                    "first chatter",
+                    "2025-05-22T01:00:01Z",
+                ),
+                make_message_row(
+                    "msg-b",
+                    "session-1",
+                    "human-2",
+                    &[],
+                    "second chatter",
+                    "2025-05-22T01:00:02Z",
+                ),
+            ])))
+            .mount(&srv)
+            .await;
+
+        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        fixture.server.catchup_runtime("rt1").await;
+
+        let agents = fixture.server.agents.lock().await;
+        assert!(
+            agents.last_sent_to("rt1").is_none(),
+            "no @-mention → no send_prompt"
+        );
+        assert_eq!(
+            agents.get_handle("rt1").unwrap().pending_silent.len(),
+            2,
+            "both messages should land in silent context"
+        );
     }
 
     #[tokio::test]

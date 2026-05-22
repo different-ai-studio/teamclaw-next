@@ -145,7 +145,11 @@ impl RuntimeHandle {
     }
 
     /// Send a prompt to the ACP agent via the command channel.
-    pub async fn send_prompt(&self, text: &str, attachment_urls: Vec<String>) -> crate::error::Result<()> {
+    pub async fn send_prompt(
+        &self,
+        text: &str,
+        attachment_urls: Vec<String>,
+    ) -> crate::error::Result<()> {
         if let Some(ref tx) = self.cmd_tx {
             tx.send(AcpCommand::Prompt {
                 text: text.to_string(),

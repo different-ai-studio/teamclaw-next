@@ -1406,7 +1406,7 @@ impl SessionManager {
         self.topics.session_live(session_id)
     }
 
-    fn membership_session_ids(&self) -> Vec<String> {
+    pub fn membership_session_ids(&self) -> Vec<String> {
         let local_actor_id = self.actor_id.as_deref();
         self.sessions
             .sessions

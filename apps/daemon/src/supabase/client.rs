@@ -288,13 +288,6 @@ pub struct AgentRuntimeUpsert<'a> {
     pub last_seen_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct AgentRuntimeRow {
-    pub id: String,
-    #[serde(default)]
-    pub last_processed_message_id: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 pub struct WorkspaceUpsert<'a> {
     pub team_id: &'a str,
@@ -302,6 +295,31 @@ pub struct WorkspaceUpsert<'a> {
     pub name: &'a str,
     pub path: Option<&'a str>,
     pub archived: bool,
+}
+
+/// Subset of `agent_runtimes` columns read by
+/// `fetch_latest_runtime_for_session`. The daemon uses this when it has to
+/// rebuild a runtime that the previous daemon process used to own (cursor
+/// carry-forward + offline-message catch-up).
+///
+/// `id`, `backend_session_id`, `status` are deserialised but not yet
+/// consumed by callers. Kept so future code (e.g. resuming a specific ACP
+/// backend session id, filtering by status) doesn't have to re-add them and
+/// re-bump the `select=` projection.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct AgentRuntimeRow {
+    pub id: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub backend_type: String,
+    #[serde(default)]
+    pub backend_session_id: Option<String>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub last_processed_message_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -478,6 +496,51 @@ impl SupabaseClient {
 
         let rows: Vec<AgentRuntimeRow> = resp.json().await?;
         Ok(rows.into_iter().next())
+    }
+
+    /// Look up the most recent `agent_runtimes` row for `(agent_id, session_id)`,
+    /// ordered by `last_seen_at desc`. Used by the daemon on startup to:
+    ///
+    ///   1. Restore the per-session `last_processed_message_id` cursor onto a
+    ///      freshly spawned `RuntimeHandle` so `catchup_runtime` only replays
+    ///      messages this daemon hasn't yet processed (rather than the entire
+    ///      session history). The `upsert_agent_runtime` conflict key is
+    ///      `(agent_id, backend_session_id)`, so a brand-new ACP session always
+    ///      lands on a fresh row with a NULL cursor — we explicitly carry the
+    ///      cursor forward via this lookup.
+    ///   2. Decide whether to auto-respawn a runtime for an "offline" session
+    ///      (`auto_restart_offline_sessions`) when the daemon comes back
+    ///      online; the row tells us which workspace + backend to spawn.
+    ///
+    /// Returns `Ok(None)` when no row exists (this daemon has never had a
+    /// runtime in this session).
+    pub async fn fetch_latest_runtime_for_session(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+    ) -> SupabaseResult<Option<AgentRuntimeRow>> {
+        let token = self.access_token().await?;
+        let url = format!(
+            "{}/rest/v1/agent_runtimes?agent_id=eq.{}&session_id=eq.{}&select=id,workspace_id,backend_type,backend_session_id,status,last_processed_message_id,last_seen_at&order=last_seen_at.desc&limit=1",
+            self.cfg.url, agent_id, session_id
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("apikey", &self.cfg.anon_key)
+            .bearer_auth(&token)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: format!("fetch_latest_runtime_for_session: {text}"),
+            });
+        }
+        let mut rows: Vec<AgentRuntimeRow> = resp.json().await?;
+        Ok(rows.pop())
     }
 
     /// Record this daemon's MQTT device identifier on its `agents` row so
@@ -1513,6 +1576,68 @@ mod tests {
             row_id.as_deref(),
             Some("aaaaaaaa-0000-0000-0000-000000000000")
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_latest_runtime_for_session_returns_cursor() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+            })))
+            .mount(&srv)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "row-uuid",
+                    "workspace_id": "ws-uuid",
+                    "backend_type": "claude",
+                    "backend_session_id": "acp-uuid",
+                    "status": "stopped",
+                    "last_processed_message_id": "msg-12",
+                    "last_seen_at": "2025-05-22T01:00:00Z"
+                }
+            ])))
+            .mount(&srv)
+            .await;
+
+        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let row = client
+            .fetch_latest_runtime_for_session("agent-uuid", "session-uuid")
+            .await
+            .unwrap()
+            .expect("row should be present");
+        assert_eq!(row.id, "row-uuid");
+        assert_eq!(row.last_processed_message_id.as_deref(), Some("msg-12"));
+        assert_eq!(row.workspace_id.as_deref(), Some("ws-uuid"));
+        assert_eq!(row.backend_type, "claude");
+    }
+
+    #[tokio::test]
+    async fn fetch_latest_runtime_for_session_returns_none_when_empty() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+            })))
+            .mount(&srv)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&srv)
+            .await;
+
+        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let row = client
+            .fetch_latest_runtime_for_session("agent-uuid", "session-uuid")
+            .await
+            .unwrap();
+        assert!(row.is_none());
     }
 
     #[tokio::test]
