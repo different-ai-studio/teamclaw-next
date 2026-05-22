@@ -26,7 +26,7 @@ pub struct AddWorkspaceOutcome {
 
 impl WorkspaceStore {
     pub fn default_path() -> PathBuf {
-        super::DaemonConfig::config_dir().join("workspaces.toml")
+        super::DaemonConfig::migrate_legacy_file("workspaces.toml")
     }
 
     pub fn load(path: &Path) -> crate::error::Result<Self> {

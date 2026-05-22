@@ -117,13 +117,31 @@ pub struct EmailChannel {
 
 impl DaemonConfig {
     pub fn config_dir() -> PathBuf {
-        dirs::config_dir()
+        dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join(".amuxd")
+    }
+
+    pub fn legacy_config_dir() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| Self::config_dir())
             .join("amux")
     }
 
     pub fn default_path() -> PathBuf {
-        Self::config_dir().join("daemon.toml")
+        Self::migrate_legacy_file("daemon.toml")
+    }
+
+    pub fn migrate_legacy_file(file_name: &str) -> PathBuf {
+        let path = Self::config_dir().join(file_name);
+        let legacy_path = Self::legacy_config_dir().join(file_name);
+        if !path.exists() && legacy_path.exists() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::copy(&legacy_path, &path);
+        }
+        path
     }
 
     pub fn load(path: &Path) -> crate::error::Result<Self> {

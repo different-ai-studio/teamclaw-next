@@ -16,7 +16,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Start the daemon (writes ~/.config/amux/amuxd.pid while running).
+    /// Start the daemon (writes ~/.amuxd/amuxd.pid while running).
     Start {
         #[arg(short, long)]
         daemonize: bool,
@@ -80,7 +80,7 @@ pub struct McpServerArgs {
     #[arg(long)]
     pub binding: String,
     /// Override path to `amuxd.sock`. Defaults to
-    /// `DaemonConfig::sock_path()` (`~/.config/amux/amuxd.sock`).
+    /// `DaemonConfig::sock_path()` (`~/.amuxd/amuxd.sock`).
     #[arg(long)]
     pub sock: Option<std::path::PathBuf>,
 }
