@@ -620,9 +620,13 @@ impl DaemonServer {
         // Drive the turn through the ACP runtime.
         let text = {
             let mut mgr = self.agents.lock().await;
-            mgr.send_prompt_and_await_reply(&acp_sid, parsed.message)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?
+            mgr.send_prompt_and_await_reply(
+                &acp_sid,
+                parsed.message,
+                Duration::from_secs(parsed.timeout_secs),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?
         };
 
         Ok(serde_json::json!({
@@ -1414,6 +1418,33 @@ impl DaemonServer {
         // Register permission requests for later resolution
         if let Some(amux::acp_event::Event::PermissionRequest(ref pr)) = acp_event.event {
             self.permissions.register_pending(&pr.request_id);
+        }
+
+        if let Some(amux::acp_event::Event::Error(ref err)) = acp_event.event {
+            let message = if err.message.is_empty() {
+                "ACP runtime error".to_string()
+            } else {
+                err.message.clone()
+            };
+            let details = if err.details.is_empty() {
+                message.clone()
+            } else {
+                err.details.clone()
+            };
+            {
+                let mut agents = self.agents.lock().await;
+                if let Some(handle) = agents.get_handle_mut(agent_id) {
+                    handle.status = amux::AgentStatus::Error;
+                }
+            }
+            if let Some(session) = self.sessions.find_by_id_mut(agent_id) {
+                session.status = amux::AgentStatus::Error as i32;
+                let _ = self.sessions.save(&self.sessions_path);
+            }
+            let publisher = Publisher::new(&self.mqtt);
+            let _ = publisher
+                .publish_runtime_failed(agent_id, "ACP_ERROR", &details, "acp")
+                .await;
         }
 
         // Handle internal RawJson events (session_title, tool_title_update)
@@ -2626,6 +2657,18 @@ impl DaemonServer {
                     }
                     Err(e) => {
                         warn!(agent_id, "failed to send prompt: {}", e);
+                        self.publish_session_event(
+                            agent_id,
+                            amux::SessionEvent {
+                                event: Some(amux::session_event::Event::PromptRejected(
+                                    amux::PromptRejected {
+                                        command_id,
+                                        reason: format!("failed to send prompt: {}", e),
+                                    },
+                                )),
+                            },
+                        )
+                        .await;
                     }
                 }
             }
@@ -3242,16 +3285,31 @@ impl DaemonServer {
                             .insert_session_from_supabase(&snap.session, &snap.participants)
                             .await
                         {
-                            warn!(session_id, "insert_session_from_supabase failed: {}", e);
+                            return Err(StartRuntimeError {
+                                error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
+                                error_message: format!(
+                                    "insert_session_from_supabase failed: {}",
+                                    e
+                                ),
+                                failed_stage: "session_subscribe".to_string(),
+                            });
                         }
+                    } else {
+                        return Err(StartRuntimeError {
+                            error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
+                            error_message:
+                                "teamclaw session manager is not available for session runtime"
+                                    .to_string(),
+                            failed_stage: "session_subscribe".to_string(),
+                        });
                     }
                 }
                 Err(e) => {
-                    warn!(
-                        session_id,
-                        "fetch_session_with_participants failed; inbound session/live messages will be dropped: {}",
-                        e
-                    );
+                    return Err(StartRuntimeError {
+                        error_code: "SESSION_LOOKUP_FAILED".to_string(),
+                        error_message: format!("fetch_session_with_participants failed: {}", e),
+                        failed_stage: "session_lookup".to_string(),
+                    });
                 }
             }
         }
@@ -4191,6 +4249,31 @@ mod tests {
             agents.get_handle("rt1").is_some(),
             "fixture runtime should be untouched"
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_start_with_session_id_fails_when_supabase_lookup_fails() {
+        let mut fixture =
+            test_server_with_supabase(test_supabase_with_url("http://127.0.0.1:1".into()));
+
+        let result = fixture
+            .server
+            .apply_start_runtime(
+                amux::AgentType::ClaudeCode,
+                "",
+                ".",
+                "session-missing",
+                "",
+                None,
+            )
+            .await;
+        let err = match result {
+            Ok(_) => panic!("session-bound RuntimeStart must fail before spawning"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.error_code, "SESSION_LOOKUP_FAILED");
+        assert_eq!(err.failed_stage, "session_lookup");
     }
 
     // ── plan_auto_restart_offline_sessions branch coverage ─────────────────

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use acp::Agent as _; // bring trait methods into scope
 use agent_client_protocol as acp;
@@ -32,6 +33,37 @@ pub enum AcpCommand {
     SetModel { model_id: String },
     /// Shut down the agent.
     Shutdown,
+}
+
+#[derive(Debug, Clone)]
+pub struct AcpStartupMetadata {
+    pub available_models: Vec<amux::ModelInfo>,
+    pub initial_model: Option<String>,
+    pub acp_session_id: String,
+}
+
+type StartupReporter = Arc<Mutex<Option<oneshot::Sender<Result<AcpStartupMetadata, String>>>>>;
+
+fn report_startup(reporter: &StartupReporter, result: Result<AcpStartupMetadata, String>) {
+    if let Some(tx) = reporter.lock().ok().and_then(|mut guard| guard.take()) {
+        let _ = tx.send(result);
+    }
+}
+
+async fn emit_acp_error(
+    event_tx: &mpsc::Sender<amux::AcpEvent>,
+    message: impl Into<String>,
+    details: impl Into<String>,
+) {
+    let _ = event_tx
+        .send(amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Error(amux::AcpError {
+                message: message.into(),
+                details: details.into(),
+            })),
+            model: String::new(),
+        })
+        .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -660,17 +692,10 @@ mod command_selection_tests {
 ///
 /// Events from the agent flow through `event_tx`.
 ///
-/// `available_models_tx` receives the list the agent reported in its
-/// `session/new` (or `session/load`) response via
-/// `SessionModelState.available_models`. Agents that don't implement the
-/// `unstable_session_model` ACP capability cause the hardcoded fallback
-/// table `crate::runtime::models::available_models_for(agent_type)` to be
-/// sent instead.
-///
-/// `initial_model_tx` receives `Some(model_id)` once the session is on a
-/// known model (either the agent's own default, or the explicit override
-/// after a successful `session/set_model`), or `None` if no model could be
-/// applied.
+/// `startup_tx` is fulfilled once the child process has spawned, ACP has
+/// initialized, and a session has been created/resumed. Startup failures are
+/// sent through it so callers do not publish a successful RuntimeStart for a
+/// process that never became usable.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_acp_agent(
     binary: String,
@@ -679,10 +704,8 @@ pub fn spawn_acp_agent(
     initial_prompt: String,
     agent_type: amux::AgentType,
     event_tx: mpsc::Sender<amux::AcpEvent>,
-    initial_model_tx: oneshot::Sender<Option<String>>,
     resume_acp_session_id: Option<String>,
-    acp_session_id_tx: oneshot::Sender<String>,
-    available_models_tx: oneshot::Sender<Vec<amux::ModelInfo>>,
+    startup_tx: oneshot::Sender<Result<AcpStartupMetadata, String>>,
     // When `Some`, the ACP session is initialised on this model id instead of
     // the agent's reported default. Used by the gateway adapter to honour
     // per-session `set_model` overrides on first spawn. Pass a full model
@@ -696,11 +719,13 @@ pub fn spawn_acp_agent(
     mcp_config_path: Option<PathBuf>,
 ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
+    let startup_reporter: StartupReporter = Arc::new(Mutex::new(Some(startup_tx)));
 
     // Clone event_tx so we can push an AcpError after run_acp_session
     // fails — without this, the ACP thread would log the failure and
     // silently exit, leaving iOS staring at a runtime that never replies.
     let error_tx = event_tx.clone();
+    let startup_error_reporter = startup_reporter.clone();
 
     // Spawn a dedicated thread with its own single-threaded tokio runtime + LocalSet
     // because ACP futures are !Send.
@@ -722,10 +747,8 @@ pub fn spawn_acp_agent(
                     agent_type,
                     event_tx,
                     cmd_rx,
-                    initial_model_tx,
                     resume_acp_session_id,
-                    acp_session_id_tx,
-                    available_models_tx,
+                    startup_reporter,
                     initial_model_override,
                     mcp_config_path,
                 )
@@ -734,19 +757,12 @@ pub fn spawn_acp_agent(
                     let summary = format!("{}", e);
                     let details = format!("{:#}", e);
                     error!(error = %details, "ACP agent session failed");
+                    report_startup(&startup_error_reporter, Err(details.clone()));
                     // Best-effort fanout to iOS. The receiver may already
                     // be gone (RuntimeManager teardown raced ahead) — in
                     // that case the send is a no-op and the log line
                     // above is the only record.
-                    let _ = error_tx
-                        .send(amux::AcpEvent {
-                            event: Some(amux::acp_event::Event::Error(amux::AcpError {
-                                message: summary,
-                                details,
-                            })),
-                            model: String::new(),
-                        })
-                        .await;
+                    emit_acp_error(&error_tx, summary, details).await;
                 }
             }));
         })
@@ -767,10 +783,8 @@ async fn run_acp_session(
     agent_type: amux::AgentType,
     event_tx: mpsc::Sender<amux::AcpEvent>,
     mut cmd_rx: mpsc::Receiver<AcpCommand>,
-    initial_model_tx: oneshot::Sender<Option<String>>,
     resume_acp_session_id: Option<String>,
-    acp_session_id_tx: oneshot::Sender<String>,
-    available_models_tx: oneshot::Sender<Vec<amux::ModelInfo>>,
+    startup_reporter: StartupReporter,
     initial_model_override: Option<String>,
     mcp_config_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
@@ -853,11 +867,15 @@ async fn run_acp_session(
             tokio::task::spawn_local(fut);
         });
 
-    // Spawn the IO handler
+    let (fatal_tx, mut fatal_rx) = mpsc::channel::<String>(4);
+    let io_fatal_tx = fatal_tx.clone();
     tokio::task::spawn_local(async move {
-        if let Err(e) = handle_io.await {
-            warn!("ACP IO task ended: {}", e);
-        }
+        let message = match handle_io.await {
+            Ok(()) => "ACP IO task ended".to_string(),
+            Err(e) => format!("ACP IO task ended: {e}"),
+        };
+        warn!("{}", message);
+        let _ = io_fatal_tx.send(message).await;
     });
 
     // Initialize the connection
@@ -939,9 +957,6 @@ async fn run_acp_session(
             (sid, resp.models)
         };
 
-    // Report the ACP session_id back to the caller
-    let _ = acp_session_id_tx.send(session_id.to_string());
-
     // Translate the agent-reported model list to amux's wire type, or fall
     // back to the hardcoded table for agents (claude-agent-acp today) that
     // don't implement `unstable_session_model`.
@@ -958,8 +973,6 @@ async fn run_acp_session(
         count = available_models.len(),
         "available models resolved",
     );
-    let _ = available_models_tx.send(available_models.clone());
-
     // Apply the initial model before any prompt runs. Precedence:
     //   1. `initial_model_override` (gateway `set_model` chose this on spawn)
     //   2. agent-reported `current_model_id` (no set_model needed; the
@@ -999,153 +1012,142 @@ async fn run_acp_session(
             None => None,
         }
     };
-    // Notify the caller (manager) of the chosen model. None means no model
-    // could be applied (no models known for this agent type, or the ACP call
-    // failed); the manager decides what to record.
-    let _ = initial_model_tx.send(initial_model);
+    report_startup(
+        &startup_reporter,
+        Ok(AcpStartupMetadata {
+            available_models: available_models.clone(),
+            initial_model: initial_model.clone(),
+            acp_session_id: session_id.to_string(),
+        }),
+    );
 
     // Use Rc to share conn across spawn_local tasks
     let conn = Rc::new(conn);
+    let (prompt_tx, mut prompt_rx) = mpsc::channel::<(String, Vec<String>)>(64);
+    {
+        let conn = conn.clone();
+        let session_id = session_id.clone();
+        let event_tx = event_tx.clone();
+        tokio::task::spawn_local(async move {
+            while let Some((text, attachment_urls)) = prompt_rx.recv().await {
+                let _ = event_tx
+                    .send(amux::AcpEvent {
+                        event: Some(amux::acp_event::Event::StatusChange(
+                            amux::AcpStatusChange {
+                                old_status: amux::AgentStatus::Idle as i32,
+                                new_status: amux::AgentStatus::Active as i32,
+                            },
+                        )),
+                        model: String::new(),
+                    })
+                    .await;
+
+                let mut blocks: Vec<acp::ContentBlock> = vec![text.into()];
+                for url in &attachment_urls {
+                    match build_attachment_block(url).await {
+                        Ok(block) => blocks.push(block),
+                        Err(e) => warn!(url = %url, err = %e, "attachment fetch failed; skipping"),
+                    }
+                }
+
+                let result = conn
+                    .prompt(acp::PromptRequest::new(session_id.clone(), blocks))
+                    .await;
+
+                match result {
+                    Ok(_) => {
+                        let _ = event_tx
+                            .send(amux::AcpEvent {
+                                event: Some(amux::acp_event::Event::StatusChange(
+                                    amux::AcpStatusChange {
+                                        old_status: amux::AgentStatus::Active as i32,
+                                        new_status: amux::AgentStatus::Idle as i32,
+                                    },
+                                )),
+                                model: String::new(),
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        let details = format!("ACP prompt failed: {e}");
+                        error!("{}", details);
+                        emit_acp_error(&event_tx, "ACP prompt failed", details).await;
+                    }
+                }
+            }
+        });
+    }
 
     // Send the initial prompt (skipped when empty — iOS new-session flow
     // now passes empty initial_prompt and delivers the user's first
     // message via session/live instead, so the runtime sees only one
     // copy of the prompt instead of two).
     if !initial_prompt.is_empty() {
-        let conn = conn.clone();
-        let session_id = session_id.clone();
-        let event_tx = event_tx.clone();
-        let text = initial_prompt;
-
-        tokio::task::spawn_local(async move {
-            // Emit active status
-            let _ = event_tx
-                .send(amux::AcpEvent {
-                    event: Some(amux::acp_event::Event::StatusChange(
-                        amux::AcpStatusChange {
-                            old_status: amux::AgentStatus::Idle as i32,
-                            new_status: amux::AgentStatus::Active as i32,
-                        },
-                    )),
-                    model: String::new(),
-                })
-                .await;
-
-            let result = conn
-                .prompt(acp::PromptRequest::new(
-                    session_id.clone(),
-                    vec![text.into()], // initial_prompt carries no attachments
-                ))
-                .await;
-
-            if let Err(e) = result {
-                error!("ACP prompt failed: {}", e);
-            }
-
-            // Emit idle status when prompt completes
-            let _ = event_tx
-                .send(amux::AcpEvent {
-                    event: Some(amux::acp_event::Event::StatusChange(
-                        amux::AcpStatusChange {
-                            old_status: amux::AgentStatus::Active as i32,
-                            new_status: amux::AgentStatus::Idle as i32,
-                        },
-                    )),
-                    model: String::new(),
-                })
-                .await;
-        });
+        let _ = prompt_tx.send((initial_prompt, Vec::new())).await;
     }
 
     // Command loop: receive commands from the main runtime
-    while let Some(cmd) = cmd_rx.recv().await {
-        match cmd {
-            AcpCommand::Prompt {
-                text,
-                attachment_urls,
-            } => {
-                let conn = conn.clone();
-                let session_id = session_id.clone();
-                let event_tx = event_tx.clone();
-
-                tokio::task::spawn_local(async move {
-                    // Emit active status
-                    let _ = event_tx
-                        .send(amux::AcpEvent {
-                            event: Some(amux::acp_event::Event::StatusChange(
-                                amux::AcpStatusChange {
-                                    old_status: amux::AgentStatus::Idle as i32,
-                                    new_status: amux::AgentStatus::Active as i32,
-                                },
-                            )),
-                            model: String::new(),
-                        })
-                        .await;
-
-                    let mut blocks: Vec<acp::ContentBlock> = vec![text.into()];
-                    for url in &attachment_urls {
-                        match build_attachment_block(url).await {
-                            Ok(block) => blocks.push(block),
-                            Err(e) => {
-                                warn!(url = %url, err = %e, "attachment fetch failed; skipping")
+    {
+        let child_wait = child.wait();
+        tokio::pin!(child_wait);
+        loop {
+            tokio::select! {
+                maybe_cmd = cmd_rx.recv() => {
+                    let Some(cmd) = maybe_cmd else {
+                        break;
+                    };
+                    match cmd {
+                        AcpCommand::Prompt { text, attachment_urls } => {
+                            if prompt_tx.send((text, attachment_urls)).await.is_err() {
+                                emit_acp_error(
+                                    &event_tx,
+                                    "ACP prompt failed",
+                                    "ACP prompt worker stopped",
+                                ).await;
                             }
                         }
+                        AcpCommand::Cancel => {
+                            if let Err(e) = conn
+                                .cancel(acp::CancelNotification::new(session_id.clone()))
+                                .await
+                            {
+                                warn!("ACP cancel failed: {}", e);
+                            }
+                        }
+                        AcpCommand::ResolvePermission { request_id, granted } => {
+                            if let Some(tx) = pending_permissions.borrow_mut().remove(&request_id) {
+                                let _ = tx.send(granted);
+                            } else {
+                                warn!(request_id, "no pending permission request found");
+                            }
+                        }
+                        AcpCommand::SetModel { model_id } => {
+                            let req = acp::SetSessionModelRequest::new(
+                                session_id.clone(),
+                                acp::ModelId::new(model_id.clone()),
+                            );
+                            if let Err(e) = conn.set_session_model(req).await {
+                                warn!(error = %e, model_id = %model_id, "set_session_model failed");
+                            } else {
+                                info!(model_id = %model_id, "set_session_model applied");
+                            }
+                        }
+                        AcpCommand::Shutdown => {
+                            info!("ACP agent shutting down");
+                            break;
+                        }
                     }
-
-                    let result = conn
-                        .prompt(acp::PromptRequest::new(session_id.clone(), blocks))
-                        .await;
-
-                    if let Err(e) = result {
-                        error!("ACP prompt failed: {}", e);
-                    }
-
-                    // Emit idle status
-                    let _ = event_tx
-                        .send(amux::AcpEvent {
-                            event: Some(amux::acp_event::Event::StatusChange(
-                                amux::AcpStatusChange {
-                                    old_status: amux::AgentStatus::Active as i32,
-                                    new_status: amux::AgentStatus::Idle as i32,
-                                },
-                            )),
-                            model: String::new(),
-                        })
-                        .await;
-                });
-            }
-            AcpCommand::Cancel => {
-                if let Err(e) = conn
-                    .cancel(acp::CancelNotification::new(session_id.clone()))
-                    .await
-                {
-                    warn!("ACP cancel failed: {}", e);
                 }
-            }
-            AcpCommand::ResolvePermission {
-                request_id,
-                granted,
-            } => {
-                if let Some(tx) = pending_permissions.borrow_mut().remove(&request_id) {
-                    let _ = tx.send(granted);
-                } else {
-                    warn!(request_id, "no pending permission request found");
+                Some(message) = fatal_rx.recv() => {
+                    return Err(anyhow::anyhow!(message));
                 }
-            }
-            AcpCommand::SetModel { model_id } => {
-                let req = acp::SetSessionModelRequest::new(
-                    session_id.clone(),
-                    acp::ModelId::new(model_id.clone()),
-                );
-                if let Err(e) = conn.set_session_model(req).await {
-                    warn!(error = %e, model_id = %model_id, "set_session_model failed");
-                } else {
-                    info!(model_id = %model_id, "set_session_model applied");
+                status = &mut child_wait => {
+                    let message = match status {
+                        Ok(status) => format!("ACP agent process exited: {status}"),
+                        Err(e) => format!("ACP agent process wait failed: {e}"),
+                    };
+                    return Err(anyhow::anyhow!(message));
                 }
-            }
-            AcpCommand::Shutdown => {
-                info!("ACP agent shutting down");
-                break;
             }
         }
     }

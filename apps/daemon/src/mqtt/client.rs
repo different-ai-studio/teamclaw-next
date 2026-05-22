@@ -1,8 +1,8 @@
-use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS, TlsConfiguration, Transport};
+use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 use teamclaw_transport::MqttBroker;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::DaemonConfig;
 use crate::proto::amux::DeviceState;
@@ -76,7 +76,8 @@ impl MqttClient {
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(true);
 
-        if broker.use_tls {
+        if broker.use_tls && std::env::var("AMUXD_MQTT_INSECURE_TLS").as_deref() == Ok("1") {
+            warn!("AMUXD_MQTT_INSECURE_TLS=1: MQTT TLS certificate verification is disabled");
             let mut tls_config = rustls::ClientConfig::builder()
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(client_danger::NoCertVerifier))
@@ -86,6 +87,8 @@ impl MqttClient {
             opts.set_transport(Transport::tls_with_config(
                 rumqttc::TlsConfiguration::Rustls(Arc::new(tls_config)),
             ));
+        } else if broker.use_tls {
+            opts.set_transport(Transport::tls_with_default_config());
         }
 
         // LWT: publish offline status if daemon disconnects unexpectedly
