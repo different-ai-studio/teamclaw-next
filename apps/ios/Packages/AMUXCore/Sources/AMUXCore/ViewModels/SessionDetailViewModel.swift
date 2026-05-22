@@ -358,7 +358,7 @@ public final class SessionDetailViewModel {
                 runtimeState: runtimeStates[$0.actorID] ?? .spawning
             )
         }
-        self.agentChipSelection = []
+        self.agentChipSelection = agents.count == 1 ? Set([agents[0].actorID]) : []
     }
 
     /// Toggle the selected state of one chip. Called from the chip-bar tap handler.

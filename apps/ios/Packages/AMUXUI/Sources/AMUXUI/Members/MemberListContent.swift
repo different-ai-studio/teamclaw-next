@@ -245,7 +245,7 @@ private struct ActorRow: View {
         if actor.isAgent {
             let fg: Color
             switch actor.defaultAgentType {
-            case "claude_code": fg = Color.amux.cinnabar
+            case "claude", "claude_code": fg = Color.amux.cinnabar
             case "opencode":    fg = Color.amux.sage
             case "codex":       fg = Color.amux.basalt
             default:            fg = Color.amux.basalt
@@ -277,7 +277,7 @@ private struct ActorRow: View {
         if actor.isMember { return actor.roleLabel }
         let kind: String
         switch actor.defaultAgentType {
-        case "claude_code": kind = "Claude"
+        case "claude", "claude_code": kind = "Claude"
         case "opencode":    kind = "OpenCode"
         case "codex":       kind = "Codex"
         default:            kind = "Agent"
@@ -524,7 +524,7 @@ private struct ActorDetailView: View {
                         LabeledContent("Role",   value: actor.roleLabel)
                         LabeledContent("Status", value: actor.memberStatus?.capitalized ?? "—")
                     } else {
-                        LabeledContent("Agent type", value: actor.defaultAgentType ?? actor.agentKind ?? "—")
+                        LabeledContent("Agent type", value: actor.defaultAgentType ?? actor.agentTypes.first ?? "—")
                         LabeledContent("Status",     value: actor.agentStatus?.capitalized ?? "—")
                     }
                     LabeledContent("Joined",
@@ -798,7 +798,7 @@ private struct ActorDetailView: View {
                 input = InviteCreateInput(
                     kind: .agent,
                     displayName: actor.displayName,
-                    agentKind: actor.agentKind ?? "daemon",
+                    agentKind: "daemon",
                     targetActorID: actor.actorId
                 )
             } else {
@@ -1154,10 +1154,18 @@ private struct ActorDetailView: View {
     // `agents.default_workspace_id` and `agents.default_agent_type`.
 
     private static let agentKindOptions: [(String, String)] = [
-        ("claude_code", "Claude"),
+        ("claude", "Claude"),
         ("opencode",    "OpenCode"),
         ("codex",       "Codex"),
     ]
+
+    private var supportedAgentKindOptions: [(String, String)] {
+        let supported = Set(actor.agentTypes.map {
+            $0 == "claude_code" || $0 == "claude-code" ? "claude" : $0
+        })
+        guard !supported.isEmpty else { return Self.agentKindOptions }
+        return Self.agentKindOptions.filter { supported.contains($0.0) }
+    }
 
     @ViewBuilder
     private var defaultsSection: some View {
@@ -1175,7 +1183,7 @@ private struct ActorDetailView: View {
                 .disabled(isSavingDefaults || (workspaceStore?.workspaces.isEmpty ?? true))
 
                 Picker("Agent type", selection: agentKindBinding) {
-                    ForEach(Self.agentKindOptions, id: \.0) { kind, label in
+                    ForEach(supportedAgentKindOptions, id: \.0) { kind, label in
                         Text(label).tag(kind)
                     }
                 }
@@ -1216,8 +1224,9 @@ private struct ActorDetailView: View {
     private var agentKindBinding: Binding<String> {
         Binding(
             get: {
-                let raw = actor.defaultAgentType ?? "claude_code"
-                return Self.agentKindOptions.contains(where: { $0.0 == raw }) ? raw : "claude_code"
+                let raw = actor.defaultAgentType ?? actor.agentTypes.first ?? "claude"
+                if raw == "claude_code" { return "claude" }
+                return supportedAgentKindOptions.contains(where: { $0.0 == raw }) ? raw : (supportedAgentKindOptions.first?.0 ?? "claude")
             },
             set: { newValue in saveDefaults(workspaceID: nil, defaultAgentType: newValue) }
         )

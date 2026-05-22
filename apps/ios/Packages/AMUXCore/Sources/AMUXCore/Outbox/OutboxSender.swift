@@ -4,6 +4,22 @@ import os
 
 private let outboxLogger = Logger(subsystem: "tech.teamclaw.mobile", category: "Outbox")
 
+private actor OutboxAttemptLeases {
+    static let shared = OutboxAttemptLeases()
+
+    private var activeMessageIDs = Set<String>()
+
+    func acquire(_ messageID: String) -> Bool {
+        guard !activeMessageIDs.contains(messageID) else { return false }
+        activeMessageIDs.insert(messageID)
+        return true
+    }
+
+    func release(_ messageID: String) {
+        activeMessageIDs.remove(messageID)
+    }
+}
+
 /// Background sender that drains `OutboxMessage` rows from SwiftData,
 /// attempting MQTT publish + Supabase persist via `TeamclawService.sendMessage`
 /// and bumping `attemptCount` + `nextAttemptAt` on each failure.
@@ -171,6 +187,14 @@ public actor OutboxSender {
     }
 
     private func attempt(rowID: PersistentIdentifier, messageID: String) async {
+        guard await OutboxAttemptLeases.shared.acquire(messageID) else {
+            outboxLogger.notice("outbox attempt skipped msgId=\(String(messageID.prefix(8)), privacy: .public) already leased")
+            return
+        }
+        defer {
+            Task { await OutboxAttemptLeases.shared.release(messageID) }
+        }
+
         guard let teamclaw else { return }
         let ctx = ModelContext(modelContainer)
         guard let row = ctx.model(for: rowID) as? OutboxMessage else { return }

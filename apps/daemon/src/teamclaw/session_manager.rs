@@ -73,6 +73,11 @@ impl SessionManager {
         for topic in self.base_subscription_topics() {
             self.client.subscribe(topic, QoS::AtLeastOnce).await?;
         }
+        // MQTT uses clean sessions, so a reconnect drops broker-side
+        // session/live subscriptions even though this in-memory set still
+        // contains them. Force `refresh_membership_subscriptions` to reissue
+        // every live SUBSCRIBE after `DaemonServer` calls `subscribe_all()`.
+        self.subscribed_live_sessions.clear();
         self.refresh_membership_subscriptions().await?;
 
         Ok(())

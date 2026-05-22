@@ -359,7 +359,9 @@ public struct NewSessionSheet: View {
             return workspaces.first?.id
         }()
         guard let workspaceID else { return nil }
-        let type = AgentConfigSheet.AgentType(rawValue: actor.defaultAgentType ?? "claude_code") ?? .claude
+        let allowedTypes = AgentConfigSheet.AgentType.supported(from: actor.agentTypes)
+        let defaultType = AgentConfigSheet.AgentType.fromStoredValue(actor.defaultAgentType ?? actor.agentTypes.first)
+        let type = allowedTypes.isEmpty || allowedTypes.contains(defaultType) ? defaultType : (allowedTypes.first ?? .claude)
         return AgentConfigSheet.Selection(workspaceID: workspaceID, agentType: type)
     }
 

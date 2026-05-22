@@ -31,7 +31,7 @@ type Row = {
   display_name: string
   member_status: string | null
   agent_status: string | null
-  agent_kind: string | null
+  agent_types: string[]
   default_agent_type: string | null
   last_active_at: string | null
 }
@@ -39,7 +39,7 @@ type Row = {
 type CandidateAgent = {
   id: string
   display_name: string
-  agent_kind: string | null
+  agent_types: string[]
   default_agent_type: string | null
 }
 
@@ -50,6 +50,26 @@ function isOnline(lastActiveAt: string | null): boolean {
   const t = Date.parse(lastActiveAt)
   if (Number.isNaN(t)) return false
   return Date.now() - t < 5 * 60 * 1000
+}
+
+function normalizeAgentTypes(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((t): t is string => typeof t === 'string' && t.length > 0)
+    : []
+}
+
+function pickAgentBackend(
+  defaultAgentType: string | null | undefined,
+  agentTypes: string[],
+  priorBackendType: string | null | undefined,
+): string | null {
+  const normalizedDefault = defaultAgentType === 'claude_code' || defaultAgentType === 'claude-code'
+    ? 'claude'
+    : defaultAgentType ?? null
+  if (normalizedDefault && (agentTypes.length === 0 || agentTypes.includes(normalizedDefault))) {
+    return normalizedDefault
+  }
+  return agentTypes[0] ?? priorBackendType ?? null
 }
 
 function computeDotStateAndAnimation(
@@ -108,7 +128,7 @@ function mapCachedActor(a: {
     display_name: a.displayName,
     member_status: a.memberStatus ?? null,
     agent_status: a.agentStatus ?? null,
-    agent_kind: null,
+    agent_types: [],
     default_agent_type: null,
     last_active_at: null,
   }
@@ -126,7 +146,7 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
 
   const { data: actors, error: actorsError } = await supabase
     .from('actor_directory')
-    .select('id, actor_type, display_name, member_status, agent_status, agent_kind, default_agent_type, last_active_at')
+    .select('id, actor_type, display_name, member_status, agent_status, agent_types, default_agent_type, last_active_at')
     .in('id', ids)
   if (actorsError) throw actorsError
 
@@ -142,7 +162,7 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
         display_name: a.display_name,
         member_status: a.member_status ?? null,
         agent_status: a.agent_status ?? null,
-        agent_kind: a.agent_kind ?? null,
+        agent_types: normalizeAgentTypes(a.agent_types),
         default_agent_type: a.default_agent_type ?? null,
         last_active_at: a.last_active_at ?? null,
       })),
@@ -150,24 +170,24 @@ async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: 
 }
 
 // Rows built from the local libsql cache only mirror columns on public.actors,
-// so agent_kind / default_agent_type (which live on public.agents) come back
+// so agent_types / default_agent_type (which live on public.agents) come back
 // null. Patch them in via a single actor_directory lookup so the subline can
-// render "<agent_kind> · <model>" for cached agent rows too.
-async function enrichAgentMetadata<T extends { id: string; agent_kind: string | null; default_agent_type: string | null }>(
+// render "<backend> · <model>" for cached agent rows too.
+async function enrichAgentMetadata<T extends { id: string; agent_types: string[]; default_agent_type: string | null }>(
   rows: T[],
   isAgent: (row: T) => boolean,
 ): Promise<T[]> {
   const missingIds = rows
-    .filter((r) => isAgent(r) && (r.agent_kind == null || r.default_agent_type == null))
+    .filter((r) => isAgent(r) && (r.agent_types.length === 0 || r.default_agent_type == null))
     .map((r) => r.id)
   if (missingIds.length === 0) return rows
   const { data, error } = await supabase
     .from('actor_directory')
-    .select('id, agent_kind, default_agent_type')
+    .select('id, agent_types, default_agent_type')
     .in('id', missingIds)
   if (error || !data) return rows
   const byId = new Map(
-    (data as Array<{ id: string; agent_kind: string | null; default_agent_type: string | null }>)
+    (data as Array<{ id: string; agent_types: unknown; default_agent_type: string | null }>)
       .map((d) => [d.id, d] as const),
   )
   return rows.map((r) => {
@@ -175,18 +195,18 @@ async function enrichAgentMetadata<T extends { id: string; agent_kind: string | 
     if (!extra) return r
     return {
       ...r,
-      agent_kind: r.agent_kind ?? extra.agent_kind ?? null,
+      agent_types: r.agent_types.length > 0 ? r.agent_types : normalizeAgentTypes(extra.agent_types),
       default_agent_type: r.default_agent_type ?? extra.default_agent_type ?? null,
     }
   })
 }
 
 async function fetchCandidateAgentsFromSupabase(teamId: string, presentIds: Set<string>): Promise<CandidateAgent[]> {
-  // agent_kind / default_agent_type live on public.agents; actor_directory
+  // agent_types / default_agent_type live on public.agents; actor_directory
   // joins them through and applies the visibility=team filter for us.
   const { data, error } = await supabase
     .from('actor_directory')
-    .select('id, display_name, actor_type, agent_kind, default_agent_type')
+    .select('id, display_name, actor_type, agent_types, default_agent_type')
     .eq('team_id', teamId)
     .eq('actor_type', 'agent')
   if (error) throw error
@@ -194,14 +214,14 @@ async function fetchCandidateAgentsFromSupabase(teamId: string, presentIds: Set<
     id: string
     display_name: string
     actor_type: string
-    agent_kind: string | null
+    agent_types: unknown
     default_agent_type: string | null
   }>)
     .filter((a) => a.actor_type === 'agent' && !presentIds.has(a.id))
     .map((a) => ({
       id: a.id,
       display_name: a.display_name,
-      agent_kind: a.agent_kind ?? null,
+      agent_types: normalizeAgentTypes(a.agent_types),
       default_agent_type: a.default_agent_type ?? null,
     }))
 }
@@ -229,15 +249,15 @@ function ActorRowView({
     isAgent ? s.byDeviceId[actor.id]?.online : undefined,
   )
   const { color: dotColor, breathing } = computeDotStateAndAnimation(actor, runtimeInfo, agentDeviceOnline)
-  // For agents, show "<backend type> · <model>" — e.g. "claude_code · claude-opus-4-7".
-  // backend type = default_agent_type (claude_code | opencode | codex).
+  // For agents, show "<backend type> · <model>" — e.g. "claude · claude-opus-4-7".
+  // backend type = default_agent_type (claude | opencode | codex).
   // model = runtimeInfo.currentModel when a runtime is live; otherwise omitted.
-  // agent_kind (daemon | cli) is the runner kind, not user-facing here.
   const modelName = isAgent ? (runtimeInfo?.currentModel || null) : null
   let subline: string
   if (isAgent) {
     const parts: string[] = []
-    if (actor.default_agent_type) parts.push(actor.default_agent_type)
+    const backend = pickAgentBackend(actor.default_agent_type, actor.agent_types, null)
+    if (backend) parts.push(backend)
     if (modelName) parts.push(modelName)
     subline = parts.join(' · ')
   } else {
@@ -344,7 +364,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
               .map(a => ({
                 id: a.id,
                 display_name: a.displayName,
-                agent_kind: null,
+                agent_types: [],
                 default_agent_type: null,
               })),
           )
@@ -401,10 +421,10 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         .map(a => ({
           id: a.id,
           display_name: a.displayName,
-          // ActorRow cache lacks agent_kind / default_agent_type today; the
+          // ActorRow cache lacks agent_types / default_agent_type today; the
           // supabase fallback (`fetchCandidateAgentsFromSupabase`) supplies
           // them when no cached row matches.
-          agent_kind: null,
+          agent_types: [],
           default_agent_type: null,
         }))
 
@@ -468,10 +488,10 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           .map(a => ({
           id: a.id,
           display_name: a.displayName,
-          // ActorRow cache lacks agent_kind / default_agent_type today; the
+          // ActorRow cache lacks agent_types / default_agent_type today; the
           // supabase fallback (`fetchCandidateAgentsFromSupabase`) supplies
           // them when no cached row matches.
-          agent_kind: null,
+          agent_types: [],
           default_agent_type: null,
         }))
 
@@ -591,7 +611,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       display_name: candidate.display_name,
       member_status: null,
       agent_status: 'starting',
-      agent_kind: null,
+      agent_types: candidate.agent_types,
       default_agent_type: null,
       last_active_at: null,
     }
@@ -623,10 +643,12 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       // Prefer the agent's explicit default_agent_type (set via UI) over the
       // backend_type recorded from the agent's prior runtime — the prior value
       // can lag if the operator changed the default after the last spawn.
-      const agentType = resolveAmuxAgentType(
-        candidate.default_agent_type ?? priorRows?.[0]?.backend_type ?? null,
-        candidate.agent_kind,
+      const backendType = pickAgentBackend(
+        candidate.default_agent_type,
+        candidate.agent_types,
+        priorRows?.[0]?.backend_type ?? null,
       )
+      const agentType = resolveAmuxAgentType(backendType)
 
       // 3. Call runtimeStart RPC. Daemon may reject if it already has a
       //    runtime for this (session, agent) — treat that as success since
