@@ -150,6 +150,7 @@ const REDESIGN_ON = import.meta.env.VITE_MENTION_REDESIGN !== 'false';
 // ─── Main input area ────────────────────────────────────────────────────────
 
 interface ChatInputAreaProps {
+  activeSessionId: string | null;
   compact: boolean;
   inputValue: string;
   onInputChange: (v: string) => void;
@@ -177,6 +178,7 @@ function isImagePath(path: string): boolean {
 }
 
 export function ChatInputArea({
+  activeSessionId,
   compact,
   inputValue,
   onInputChange,
@@ -225,7 +227,6 @@ export function ChatInputArea({
 
   // Model selector
   const [modelSelectorOpen, setModelSelectorOpen] = React.useState(false);
-  const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const providerModels = useProviderStore((s) => s.models);
   const currentModelKey = useProviderStore((s) => s.currentModelKey);
   const configuredProvidersLoading = useProviderStore(s => s.configuredProvidersLoading);
@@ -541,6 +542,7 @@ export function ChatInputArea({
               {teamMode ? (
                 /* v2 team-mode: replace legacy team ModelSelector with AgentSelectorDock */
                 <AgentSelectorDock
+                  activeSessionId={activeSessionId}
                   engagedAgents={engagedAgents}
                   onRemoveAgent={onRemoveAgent}
                 />

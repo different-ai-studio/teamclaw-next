@@ -1738,6 +1738,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           />
         ) : (
           <ChatInputArea
+            activeSessionId={activeSessionId}
             compact={compact}
             inputValue={inputValue}
             onInputChange={handleInputChange}
