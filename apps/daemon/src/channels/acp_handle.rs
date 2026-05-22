@@ -291,6 +291,14 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
                 }
                 Err(_) => break Err(AcpError::Timeout),
             };
+            if let Some(crate::proto::amux::acp_event::Event::Error(err)) = &event.event {
+                let details = if err.details.is_empty() {
+                    err.message.clone()
+                } else {
+                    err.details.clone()
+                };
+                break Err(AcpError::Send(format!("ACP turn failed: {details}")));
+            }
             let emitted = {
                 let mut mgr = self.manager.lock().await;
                 mgr.aggregator_mut(&agent_id)

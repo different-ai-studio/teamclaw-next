@@ -88,12 +88,9 @@ fn main() -> anyhow::Result<()> {
                     binary, prompt, worktree
                 );
 
-                let (initial_model_tx, _initial_model_rx) =
-                    tokio::sync::oneshot::channel::<Option<String>>();
-                let (acp_session_id_tx, _acp_session_id_rx) =
-                    tokio::sync::oneshot::channel::<String>();
-                let (available_models_tx, _available_models_rx) =
-                    tokio::sync::oneshot::channel::<Vec<proto::amux::ModelInfo>>();
+                let (startup_tx, _startup_rx) = tokio::sync::oneshot::channel::<
+                    Result<runtime::adapter::AcpStartupMetadata, String>,
+                >();
                 let _cmd_tx = runtime::adapter::spawn_acp_agent(
                     binary,
                     Vec::new(),
@@ -101,10 +98,8 @@ fn main() -> anyhow::Result<()> {
                     prompt.clone(),
                     proto::amux::AgentType::ClaudeCode,
                     tx,
-                    initial_model_tx,
                     None,
-                    acp_session_id_tx,
-                    available_models_tx,
+                    startup_tx,
                     None,
                     None,
                 )?;

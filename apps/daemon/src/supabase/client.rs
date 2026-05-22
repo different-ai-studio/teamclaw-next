@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
+use tracing::warn;
 
 // chrono re-exported for callers constructing AgentRuntimeUpsert
 pub use chrono;
@@ -131,7 +132,13 @@ impl SupabaseClient {
         if let Some(path) = &self.persist_path {
             let mut persisted = self.cfg.clone();
             persisted.refresh_token = new_refresh;
-            let _ = persisted.save(path);
+            if let Err(err) = persisted.save(path) {
+                warn!(
+                    ?err,
+                    path = %path.display(),
+                    "failed to persist rotated Supabase refresh token; next daemon restart may need re-auth"
+                );
+            }
         }
         Ok(body.access_token)
     }

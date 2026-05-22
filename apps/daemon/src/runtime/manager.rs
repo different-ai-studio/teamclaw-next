@@ -39,7 +39,7 @@ pub struct CheckedOutTurn {
     pub event_rx: mpsc::Receiver<amux::AcpEvent>,
 }
 
-const ACP_STARTUP_METADATA_TIMEOUT: Duration = Duration::from_secs(2);
+const ACP_STARTUP_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Sanitise an arbitrary logical-session-id string into a filename-safe
 /// component. The gateway-minted acp_session_id values that drive the
@@ -147,6 +147,8 @@ pub struct RuntimeManager {
     /// Test-only: records the last body sent per agent_id via send_prompt_raw.
     #[cfg(test)]
     last_sent: HashMap<String, String>,
+    #[cfg(test)]
+    send_failures: HashMap<String, String>,
 }
 
 impl RuntimeManager {
@@ -163,6 +165,8 @@ impl RuntimeManager {
             supabase,
             #[cfg(test)]
             last_sent: HashMap::new(),
+            #[cfg(test)]
+            send_failures: HashMap::new(),
         }
     }
 
@@ -268,11 +272,8 @@ impl RuntimeManager {
         handle.session_id = supabase_session_id.unwrap_or_default().to_string();
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
-        let (initial_model_tx, initial_model_rx) =
-            tokio::sync::oneshot::channel::<Option<String>>();
-        let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel::<String>();
-        let (available_models_tx, available_models_rx) =
-            tokio::sync::oneshot::channel::<Vec<amux::ModelInfo>>();
+        let (startup_tx, startup_rx) =
+            tokio::sync::oneshot::channel::<Result<adapter::AcpStartupMetadata, String>>();
 
         let launch = self.launch_config_for(agent_type);
         let cmd_tx = adapter::spawn_acp_agent(
@@ -282,53 +283,50 @@ impl RuntimeManager {
             prompt.to_string(),
             agent_type,
             handle.event_tx.clone(),
-            initial_model_tx,
             None,
-            acp_session_id_tx,
-            available_models_tx,
+            startup_tx,
             initial_model_override.clone(),
             mcp_config_path,
         )?;
 
         handle.cmd_tx = Some(cmd_tx);
-        handle.status = amux::AgentStatus::Active;
 
         info!(agent_id, worktree, "agent spawned via ACP");
         self.agents.insert(agent_id.clone(), handle);
         self.aggregators
             .insert(agent_id.clone(), TurnAggregator::new());
 
-        // Capture startup metadata when ACP responds quickly, but never let
-        // a slow/stuck agent handshake block the daemon's MQTT event loop.
-        match timeout(ACP_STARTUP_METADATA_TIMEOUT, async {
-            let models = available_models_rx.await.ok();
-            let initial_model = initial_model_rx.await.ok().flatten();
-            let acp_session_id = acp_session_id_rx.await.ok();
-            (models, initial_model, acp_session_id)
-        })
-        .await
-        {
-            Ok((models, initial_model, acp_session_id)) => {
-                if let Some(models) = models {
-                    if let Some(h) = self.agents.get_mut(&agent_id) {
-                        h.available_models = models;
-                    }
-                }
-                if let Some(model_id) = initial_model {
-                    self.set_current_model(&agent_id, &model_id);
-                }
-                if let Some(acp_sid) = acp_session_id {
-                    if let Some(h) = self.agents.get_mut(&agent_id) {
-                        h.acp_session_id = acp_sid;
-                    }
-                }
+        let startup = match timeout(ACP_STARTUP_READY_TIMEOUT, startup_rx).await {
+            Ok(Ok(Ok(meta))) => meta,
+            Ok(Ok(Err(details))) => {
+                self.agents.remove(&agent_id);
+                self.aggregators.remove(&agent_id);
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "ACP startup failed: {details}"
+                )));
+            }
+            Ok(Err(_)) => {
+                self.agents.remove(&agent_id);
+                self.aggregators.remove(&agent_id);
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP startup channel closed before ready".into(),
+                ));
             }
             Err(_) => {
-                warn!(
-                    agent_id,
-                    "ACP startup metadata timed out; continuing without blocking MQTT"
-                );
+                self.agents.remove(&agent_id);
+                self.aggregators.remove(&agent_id);
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP startup timed out before ready".into(),
+                ));
             }
+        };
+        if let Some(h) = self.agents.get_mut(&agent_id) {
+            h.available_models = startup.available_models;
+            h.acp_session_id = startup.acp_session_id;
+            h.status = amux::AgentStatus::Active;
+        }
+        if let Some(model_id) = startup.initial_model {
+            self.set_current_model(&agent_id, &model_id);
         }
 
         self.seed_cursor_from_prior_runtime(&agent_id, supabase_session_id)
@@ -444,11 +442,8 @@ impl RuntimeManager {
         );
         handle.session_id = supabase_session_id.unwrap_or_default().to_string();
 
-        let (initial_model_tx, initial_model_rx) =
-            tokio::sync::oneshot::channel::<Option<String>>();
-        let (acp_session_id_tx, acp_session_id_rx) = tokio::sync::oneshot::channel::<String>();
-        let (available_models_tx, available_models_rx) =
-            tokio::sync::oneshot::channel::<Vec<amux::ModelInfo>>();
+        let (startup_tx, startup_rx) =
+            tokio::sync::oneshot::channel::<Result<adapter::AcpStartupMetadata, String>>();
 
         let launch = self.launch_config_for(agent_type);
         let cmd_tx = adapter::spawn_acp_agent(
@@ -458,15 +453,12 @@ impl RuntimeManager {
             prompt.to_string(),
             agent_type,
             handle.event_tx.clone(),
-            initial_model_tx,
             Some(acp_session_id.to_string()),
-            acp_session_id_tx,
-            available_models_tx,
+            startup_tx,
             None,
             None,
         )?;
         handle.cmd_tx = Some(cmd_tx);
-        handle.status = amux::AgentStatus::Active;
         handle.current_prompt = prompt.to_string();
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
@@ -475,39 +467,38 @@ impl RuntimeManager {
         self.aggregators
             .insert(agent_id.to_string(), TurnAggregator::new());
 
-        // Capture startup metadata when ACP responds quickly, but never let
-        // a slow/stuck agent handshake block the daemon's MQTT event loop.
-        let mut new_acp_sid = acp_session_id.to_string();
-        match timeout(ACP_STARTUP_METADATA_TIMEOUT, async {
-            let models = available_models_rx.await.ok();
-            let initial_model = initial_model_rx.await.ok().flatten();
-            let acp_session_id = acp_session_id_rx.await.ok();
-            (models, initial_model, acp_session_id)
-        })
-        .await
-        {
-            Ok((models, initial_model, acp_sid)) => {
-                if let Some(models) = models {
-                    if let Some(h) = self.agents.get_mut(agent_id) {
-                        h.available_models = models;
-                    }
-                }
-                if let Some(model_id) = initial_model {
-                    self.set_current_model(agent_id, &model_id);
-                }
-                if let Some(sid) = acp_sid {
-                    if let Some(h) = self.agents.get_mut(agent_id) {
-                        h.acp_session_id = sid.clone();
-                    }
-                    new_acp_sid = sid;
-                }
+        let startup = match timeout(ACP_STARTUP_READY_TIMEOUT, startup_rx).await {
+            Ok(Ok(Ok(meta))) => meta,
+            Ok(Ok(Err(details))) => {
+                self.agents.remove(agent_id);
+                self.aggregators.remove(agent_id);
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "ACP startup failed: {details}"
+                )));
+            }
+            Ok(Err(_)) => {
+                self.agents.remove(agent_id);
+                self.aggregators.remove(agent_id);
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP startup channel closed before ready".into(),
+                ));
             }
             Err(_) => {
-                warn!(
-                    agent_id,
-                    "ACP startup metadata timed out on resume; continuing without blocking MQTT"
-                );
+                self.agents.remove(agent_id);
+                self.aggregators.remove(agent_id);
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP startup timed out before ready".into(),
+                ));
             }
+        };
+        let new_acp_sid = startup.acp_session_id.clone();
+        if let Some(h) = self.agents.get_mut(agent_id) {
+            h.available_models = startup.available_models;
+            h.acp_session_id = startup.acp_session_id;
+            h.status = amux::AgentStatus::Active;
+        }
+        if let Some(model_id) = startup.initial_model {
+            self.set_current_model(agent_id, &model_id);
         }
 
         // Upsert agent_runtimes with status="starting" on resume
@@ -569,23 +560,40 @@ impl RuntimeManager {
         text: &str,
         attachment_urls: Vec<String>,
     ) -> crate::error::Result<Vec<String>> {
-        let (final_text, drained_ids) = if let Some(handle) = self.agents.get_mut(agent_id) {
-            let (prefix, drained) = handle.flush_pending_silent();
-            let final_text = if prefix.is_empty() {
-                text.to_string()
+        let (final_text, drained_ids, drained_messages) =
+            if let Some(handle) = self.agents.get_mut(agent_id) {
+                let drained_messages = handle.pending_silent.clone();
+                let (prefix, drained) = handle.flush_pending_silent();
+                let final_text = if prefix.is_empty() {
+                    text.to_string()
+                } else {
+                    format!("{prefix}{text}")
+                };
+                (final_text, drained, drained_messages)
             } else {
-                format!("{prefix}{text}")
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "agent {} not found",
+                    agent_id
+                )));
             };
-            (final_text, drained)
-        } else {
-            return Err(crate::error::AmuxError::Agent(format!(
-                "agent {} not found",
-                agent_id
-            )));
-        };
 
-        self.send_prompt_raw(agent_id, &final_text, attachment_urls)
-            .await?;
+        if let Err(err) = self
+            .send_prompt_raw(agent_id, &final_text, attachment_urls)
+            .await
+        {
+            if !drained_messages.is_empty() {
+                if let Some(handle) = self.agents.get_mut(agent_id) {
+                    let mut restored = drained_messages;
+                    restored.append(&mut handle.pending_silent);
+                    handle.pending_silent = restored;
+                }
+            }
+            return Err(err);
+        }
+        if let Some(handle) = self.agents.get_mut(agent_id) {
+            handle.status = amux::AgentStatus::Active;
+            handle.current_prompt = text.to_string();
+        }
         Ok(drained_ids)
     }
 
@@ -598,6 +606,10 @@ impl RuntimeManager {
     ) -> crate::error::Result<()> {
         #[cfg(test)]
         {
+            let _ = &attachment_urls;
+            if let Some(message) = self.send_failures.remove(agent_id) {
+                return Err(crate::error::AmuxError::Agent(message));
+            }
             self.last_sent
                 .insert(agent_id.to_string(), text.to_string());
             return Ok(());
@@ -758,6 +770,12 @@ impl RuntimeManager {
                 h.session_id == session_id
                     && h.agent_type == agent_type
                     && h.workspace_id == workspace_id
+                    && matches!(
+                        h.status,
+                        amux::AgentStatus::Starting
+                            | amux::AgentStatus::Active
+                            | amux::AgentStatus::Idle
+                    )
             })
             .map(|(id, _)| id.clone())
     }
@@ -1052,6 +1070,7 @@ impl RuntimeManager {
         &mut self,
         acp_session_id: &str,
         prompt: &str,
+        timeout_duration: Duration,
     ) -> crate::error::Result<String> {
         let agent_id = self
             .agent_id_by_acp_session(acp_session_id)
@@ -1069,7 +1088,7 @@ impl RuntimeManager {
         // Drive the per-runtime aggregator off the agent's event channel
         // until an `AgentReply` is emitted at Active→Idle. Hard cap so a
         // wedged backend can't pin a gateway worker forever.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        let deadline = std::time::Instant::now() + timeout_duration;
 
         loop {
             if std::time::Instant::now() >= deadline {
@@ -1108,6 +1127,17 @@ impl RuntimeManager {
                     return Err(crate::error::AmuxError::Agent("ACP turn timed out".into()));
                 }
             };
+
+            if let Some(amux::acp_event::Event::Error(err)) = &event.event {
+                let details = if err.details.is_empty() {
+                    err.message.clone()
+                } else {
+                    err.details.clone()
+                };
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "ACP turn failed: {details}"
+                )));
+            }
 
             // Feed the event into the aggregator and check whether an
             // AgentReply has been finalised (i.e. Active→Idle).
@@ -1165,6 +1195,11 @@ impl RuntimeManager {
     /// Return the last body sent to the given runtime via send_prompt_raw.
     pub fn last_sent_to(&self, runtime_id: &str) -> Option<String> {
         self.last_sent.get(runtime_id).cloned()
+    }
+
+    pub fn fail_next_send_for(&mut self, runtime_id: &str, message: &str) {
+        self.send_failures
+            .insert(runtime_id.to_string(), message.to_string());
     }
 }
 
@@ -1450,6 +1485,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn find_active_runtime_for_skips_error_agents() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        let mut h = RuntimeHandle::new(
+            "rt-error".to_string(),
+            amux::AgentType::ClaudeCode,
+            ".".to_string(),
+            "workspace-1".to_string(),
+        );
+        h.session_id = "session-1".to_string();
+        h.status = amux::AgentStatus::Error;
+        mgr.agents.insert(h.agent_id.clone(), h);
+
+        assert_eq!(
+            mgr.find_active_runtime_for("session-1", amux::AgentType::ClaudeCode, "workspace-1"),
+            None
+        );
+    }
+
     #[tokio::test]
     async fn send_prompt_drains_pending_silent_into_prefix() {
         let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
@@ -1485,6 +1539,61 @@ mod tests {
         let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         let result = mgr.send_prompt("nonexistent", "hello", vec![]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn send_prompt_restores_pending_silent_when_send_fails() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        {
+            let h = mgr.get_handle_mut("rt1").unwrap();
+            h.pending_silent.push(PendingMessage {
+                message_id: "m1".into(),
+                sender_display: "Ann".into(),
+                content: "earlier note".into(),
+                created_at: 100,
+            });
+        }
+        mgr.fail_next_send_for("rt1", "boom");
+
+        let result = mgr.send_prompt("rt1", "real question", vec![]).await;
+
+        assert!(result.is_err());
+        let pending = &mgr.get_handle("rt1").unwrap().pending_silent;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].message_id, "m1");
+        assert!(mgr.last_sent_to("rt1").is_none());
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_errors_when_acp_process_cannot_spawn() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            amux::AgentType::ClaudeCode,
+            AgentLaunchConfig::new(
+                "/definitely/not/a/teamclaw-agent-binary",
+                Vec::new(),
+                "claude",
+            ),
+        );
+        let mut mgr = RuntimeManager::new(configs, None);
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let result = mgr
+            .spawn_agent_with_model(
+                amux::AgentType::ClaudeCode,
+                tmp.path().to_str().unwrap(),
+                "",
+                "workspace-1",
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+
+        let err = result.expect_err("missing ACP binary should fail startup");
+        assert!(err.to_string().contains("ACP startup failed"), "got: {err}");
+        assert_eq!(mgr.agent_count(), 0);
     }
 
     // ── mention-routing accessors ─────────────────────────────────────────────
