@@ -1,9 +1,22 @@
 use crate::config::DaemonConfig;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+pub struct DaemonLockGuard {
+    file: File,
+}
+
+impl Drop for DaemonLockGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
 
 /// Send a single-line control command to a running amuxd via its Unix socket.
 /// The real handler (reading acknowledgement, etc.) is wired in G2.
@@ -11,6 +24,39 @@ pub fn send_control(sock_path: &Path, cmd: &str) -> anyhow::Result<()> {
     let mut s = UnixStream::connect(sock_path)?;
     s.write_all(format!("{cmd}\n").as_bytes())?;
     Ok(())
+}
+
+pub fn acquire_daemon_lock() -> anyhow::Result<DaemonLockGuard> {
+    acquire_daemon_lock_at(&DaemonConfig::lock_path())
+}
+
+fn acquire_daemon_lock_at(path: &Path) -> anyhow::Result<DaemonLockGuard> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)?;
+
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        if matches!(
+            err.raw_os_error(),
+            Some(code) if code == libc::EWOULDBLOCK || code == libc::EAGAIN
+        ) {
+            anyhow::bail!(
+                "amuxd is already running (lock held at {}). Use `amuxd status` or `amuxd stop`.",
+                path.display()
+            );
+        }
+        return Err(err).map_err(Into::into);
+    }
+
+    Ok(DaemonLockGuard { file })
 }
 
 /// Write `std::process::id()` to `DaemonConfig::pid_path()`. Called from
@@ -106,4 +152,23 @@ pub fn run_stop() -> anyhow::Result<()> {
     }
     let _ = fs::remove_file(&path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn daemon_lock_is_exclusive_until_guard_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("amuxd.lock");
+
+        let first = acquire_daemon_lock_at(&lock_path).expect("first lock should succeed");
+        let second = acquire_daemon_lock_at(&lock_path);
+        assert!(second.is_err(), "second lock should be rejected");
+
+        drop(first);
+
+        acquire_daemon_lock_at(&lock_path).expect("lock should be available after guard drop");
+    }
 }

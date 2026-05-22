@@ -149,6 +149,10 @@ impl DaemonConfig {
         Self::config_dir().join("amuxd.pid")
     }
 
+    pub fn lock_path() -> PathBuf {
+        Self::config_dir().join("amuxd.lock")
+    }
+
     pub fn sock_path() -> PathBuf {
         Self::config_dir().join("amuxd.sock")
     }

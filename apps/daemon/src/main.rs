@@ -51,6 +51,7 @@ fn main() -> anyhow::Result<()> {
             let config_path = config.unwrap_or_else(config::DaemonConfig::default_path);
             let daemon_config = config::DaemonConfig::load(&config_path)?;
 
+            let _daemon_lock = cli::process::acquire_daemon_lock()?;
             cli::process::write_pidfile()?;
             let _pid_guard = PidfileGuard;
 
