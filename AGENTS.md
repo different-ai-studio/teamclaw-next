@@ -15,10 +15,15 @@ It came from the Claude Design handoff at
 `https://api.anthropic.com/v1/design/h/OLWqffBkDMYRHp_p7cFRNg` (Direction B).
 The local prototype copy lives in `/tmp/design-OLWqff/` when fetched.
 
-> **Git note:** Do not auto-create branches without approval. If a new git
-> branch is needed, stop and ask the user before running `git checkout -b`,
-> `git switch -c`, or `git branch <name>`. Creating a worktree is fine; see
-> `CLAUDE.md` → Git Workflow for the full rule.
+> **Git note:** All AI-made changes must happen in a project-local
+> `.worktrees/<task-slug>` worktree. Do not edit the stable repo checkout
+> directly, and do not switch branches in an existing checkout to start work.
+> Create the worktree with `scripts/create-agent-worktree.sh <task-slug>
+> <base-ref>` so local env files are copied for preview/self-test, then work
+> only there. For multi-agent preview, keep a single
+> `.worktrees/preview-integration` hot-reload worktree and apply selected
+> candidate diffs into it as WIP commits. See `CLAUDE.md` → Git Workflow for
+> the full rule.
 
 ---
 
