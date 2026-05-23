@@ -1,5 +1,6 @@
 pub mod channel;
 pub mod clear;
+pub mod config_cmd;
 pub mod mcp_server;
 pub mod process;
 pub mod test_client;
@@ -60,12 +61,38 @@ pub enum Commands {
     },
     /// Manage channel bindings (discord, wecom, feishu, kook, wechat, email).
     Channel(ChannelArgs),
+    /// Read and edit daemon.toml values by dotted key.
+    Config(ConfigArgs),
     /// Run the MCP (Model Context Protocol) server on stdio. Spawned by
     /// claude-code via `--mcp-config`; bridges tool calls to amuxd over
     /// `amuxd.sock`. Exposes a single `send` tool that lets the agent
     /// proactively send messages/files to the gateway chat its session is
     /// bound to.
     McpServer(McpServerArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ConfigArgs {
+    /// Config file path. Defaults to `~/.amuxd/daemon.toml`.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    #[command(subcommand)]
+    pub action: ConfigAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigAction {
+    /// Print the config file path that would be used.
+    Path,
+    /// List all scalar config values as dotted keys.
+    List,
+    /// Print one config value by dotted key.
+    Get { key: String },
+    /// Set one config value by dotted key. Values are parsed as TOML literals;
+    /// invalid literals are written as strings.
+    Set { key: String, value: String },
+    /// Remove one config value by dotted key.
+    Unset { key: String },
 }
 
 #[derive(Args, Debug)]
