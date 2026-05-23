@@ -1053,6 +1053,7 @@ function AppContent() {
   // TODO(cleanup): remove agent_runtime_event table once all clients have
   // upgraded past this version.
   const currentSessionId = useSessionSelectionStore((s) => s.currentSessionId);
+  const hasCurrentSession = Boolean(currentSessionId);
   const messageRefreshTrigger = useSessionMessageStore((s) => s.messageRefreshTrigger);
   const prevRefreshTriggerRef = useRef(0);
   useEffect(() => {
@@ -1406,25 +1407,29 @@ function AppContent() {
               {workspacePath && (
                 <TerminalToggleButton workspacePath={workspacePath} />
               )}
-              <HeaderPanelTab
-                icon={Users}
-                label={t("chat.actorSheet.title", "Actors")}
-                isActive={isPanelOpen && activeTab === "actors"}
-                onClick={() => isPanelOpen && activeTab === "actors" ? closePanel() : openPanel("actors")}
-              />
+              {hasCurrentSession && (
+                <HeaderPanelTab
+                  icon={Users}
+                  label={t("chat.actorSheet.title", "Actors")}
+                  isActive={isPanelOpen && activeTab === "actors"}
+                  onClick={() => isPanelOpen && activeTab === "actors" ? closePanel() : openPanel("actors")}
+                />
+              )}
               <HeaderPanelTab
                 icon={BookOpen}
                 label={t("navigation.knowledge", "Knowledge")}
                 isActive={isPanelOpen && activeTab === "knowledge"}
                 onClick={() => isPanelOpen && activeTab === "knowledge" ? closePanel() : openPanel("knowledge")}
               />
-              <HeaderPanelTab
-                icon={FolderGit}
-                label={t("navigation.changes", "Changes")}
-                count={sessionDiff.length}
-                isActive={isPanelOpen && activeTab === "diff"}
-                onClick={() => isPanelOpen && activeTab === "diff" ? closePanel() : openPanel("diff")}
-              />
+              {hasCurrentSession && (
+                <HeaderPanelTab
+                  icon={FolderGit}
+                  label={t("navigation.changes", "Changes")}
+                  count={sessionDiff.length}
+                  isActive={isPanelOpen && activeTab === "diff"}
+                  onClick={() => isPanelOpen && activeTab === "diff" ? closePanel() : openPanel("diff")}
+                />
+              )}
               {showRightWorkspacePanel && (
                 <button
                   className="ml-1 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
