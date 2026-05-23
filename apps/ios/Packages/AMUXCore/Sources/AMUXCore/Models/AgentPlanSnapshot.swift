@@ -36,7 +36,7 @@ public struct AgentPlanSnapshot: Identifiable, Equatable, Sendable {
         var latestByAgent: [String: AgentEvent] = [:]
         var firstSeen: [String: Int] = [:]
         for (idx, event) in events.enumerated() where event.eventType == "plan_update" {
-            let agentID = event.senderActorID ?? event.agentId
+            let agentID = event.planAgentID
             latestByAgent[agentID] = event
             if firstSeen[agentID] == nil {
                 firstSeen[agentID] = idx
@@ -57,5 +57,14 @@ public struct AgentPlanSnapshot: Identifiable, Equatable, Sendable {
             )
             return snapshot.hasUnfinished ? snapshot : nil
         }
+    }
+}
+
+private extension AgentEvent {
+    var planAgentID: String {
+        if let senderActorID, !senderActorID.isEmpty {
+            return senderActorID
+        }
+        return agentId
     }
 }
