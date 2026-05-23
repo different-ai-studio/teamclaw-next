@@ -1200,6 +1200,7 @@ impl SessionManager {
         metadata_json: &str,
         model: &str,
         turn_id: &str,
+        sequence: u64,
         persist_supabase: bool,
         supabase: Option<&crate::supabase::SupabaseClient>,
     ) {
@@ -1267,6 +1268,7 @@ impl SessionManager {
                             &meta_owned,
                             &model_owned,
                             &turn_owned,
+                            sequence,
                         )
                         .await
                     {

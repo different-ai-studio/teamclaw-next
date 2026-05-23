@@ -1322,6 +1322,7 @@ impl SupabaseClient {
         metadata_json: &str,
         model: &str,
         turn_id: &str,
+        sequence: u64,
     ) -> SupabaseResult<()> {
         let token = self.access_token().await?;
         let url = format!("{}/rest/v1/messages", self.cfg.url);
@@ -1338,6 +1339,7 @@ impl SupabaseClient {
             "kind": kind,
             "content": content,
             "metadata": metadata,
+            "sequence": sequence,
         });
         // Only set `model` when the caller has one — historical rows and
         // non-agent kinds (user_message, system, idea_event) leave the
