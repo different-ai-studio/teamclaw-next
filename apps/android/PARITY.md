@@ -169,7 +169,7 @@ This file is the running gap list and phased plan. Update it as work lands.
 | ----------------------------- | ------------------------------------------- | :-----: | --- |
 | Onboarding coordinator tests  | `AppOnboardingCoordinatorTests.swift`       |    ✅   | matched |
 | ActorStore / WorkspaceStore   | `ActorStoreTests.swift` etc.                |    ✅   | matched |
-| Chat timeline reducer         | `ChatTimelineReducerTests.swift`            |   🟥    | not implemented |
+| Chat timeline reducer         | `ChatTimelineReducerTests.swift`            |   🟥    | not implemented; **must mirror the `(bucket, turnID)` dedupe for `output isComplete=true`** added in `ChatTimelineReducer.applyAcp` — see `Envelope.turn_id` (proto field 6). Without it, daemon-restart replays will duplicate completed bubbles. Tests in iOS `ReducerAcpTurnIDDedupeTests` are the spec. |
 | Session detail VM             | `SessionDetailViewModelTests.swift`         |   🟥    | not implemented |
 | Push service                  | `PushServiceTests.swift`                    |   🟥    | not implemented |
 | File upload integration       | `FileUploadIntegrationTests.swift`          |   🟥    | not implemented |

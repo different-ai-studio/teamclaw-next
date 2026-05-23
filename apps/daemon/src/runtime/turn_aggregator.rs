@@ -158,6 +158,14 @@ impl TurnAggregator {
     pub fn supabase_persistent(msg: &EmittedMessage) -> bool {
         matches!(msg.kind, MessageKind::AgentReply)
     }
+
+    /// Current per-turn correlation id, or `None` between turns. Read by the
+    /// publish path so outgoing `Envelope`s carry `turn_id`, letting clients
+    /// dedupe `output isComplete=true` events by `(runtime_id, turn_id)`
+    /// across daemon-restart-renumbered sequence space.
+    pub fn current_turn_id(&self) -> Option<&str> {
+        self.current_turn_id.as_deref()
+    }
 }
 
 #[cfg(test)]

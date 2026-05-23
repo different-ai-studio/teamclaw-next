@@ -56,8 +56,10 @@ public enum TimelineInput: Sendable {
 /// `runtimeID` → owning agent actor id when known, otherwise the
 /// runtime id itself). Reducer never re-runs the resolution.
 public struct AcpInput: Sendable {
-    /// Monotonic per-runtime sequence stamped by the daemon. Primary
-    /// dedupe + ordering key for this variant.
+    /// Monotonic per-runtime sequence stamped by the daemon. Fallback
+    /// dedupe / ordering key. Not stable across daemon restarts — see
+    /// `turnID` for the cross-restart identity used to dedupe completion
+    /// outputs.
     public let envelopeSequence: UInt64
     /// Daemon-side runtime id; may be empty for legacy session-event
     /// paths that pre-date per-runtime stamping.
@@ -70,6 +72,13 @@ public struct AcpInput: Sendable {
     /// tiebreaker for ordering when sequence numbers don't apply
     /// (e.g. envelope sequence is 0 in some legacy paths).
     public let timestamp: Date
+    /// Daemon-assigned per-turn correlation id (from TurnAggregator).
+    /// Stable across daemon restarts and history replays, so it's the
+    /// primary identity used to dedupe `output isComplete=true` events.
+    /// Nil when the envelope was emitted outside an active turn
+    /// (rare — some session-control envelopes), in which case the
+    /// reducer falls back to `(envelopeSequence, agentBucketKey)`.
+    public let turnID: String?
     /// The wrapped ACP event. The reducer matches on `event` and may
     /// produce in-place mutations (streaming-output append,
     /// tool-result pair, todo-update replace, status-change idle flush).
@@ -79,11 +88,13 @@ public struct AcpInput: Sendable {
                 runtimeID: String,
                 agentBucketKey: String,
                 timestamp: Date,
+                turnID: String? = nil,
                 acpEvent: Amux_AcpEvent) {
         self.envelopeSequence = envelopeSequence
         self.runtimeID = runtimeID
         self.agentBucketKey = agentBucketKey
         self.timestamp = timestamp
+        self.turnID = turnID
         self.acpEvent = acpEvent
     }
 }

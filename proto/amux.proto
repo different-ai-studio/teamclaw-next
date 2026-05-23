@@ -12,6 +12,13 @@ message Envelope {
   string source_peer_id = 3;      // Who triggered (empty if agent-initiated)
   int64 timestamp = 4;
   uint64 sequence = 5;            // Monotonic per agent, for ordering
+  // Daemon-assigned per-turn correlation id. Stamped from the TurnAggregator
+  // on every envelope emitted within one ACP turn (Idle→Active→…→Idle).
+  // Clients dedupe `output isComplete=true` events by `(runtime_id, turn_id)`
+  // so a daemon replay with renumbered `sequence` doesn't produce a second
+  // bubble for the same logical turn. Empty when no active turn (rare; some
+  // session-control envelopes outside a turn).
+  string turn_id = 6;
 
   oneof payload {
     AcpEvent acp_event = 10;      // Agent event (ACP passthrough)

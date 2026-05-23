@@ -69,6 +69,7 @@ public struct TimelineInputBuilder: Sendable {
             runtimeID: runtimeID,
             agentBucketKey: bucket,
             timestamp: Date(),
+            turnID: amuxEnvelope.turnID.isEmpty ? nil : amuxEnvelope.turnID,
             acpEvent: acp
         ))
     }

@@ -218,6 +218,14 @@ public struct Amux_Envelope: Sendable {
   /// Monotonic per agent, for ordering
   public var sequence: UInt64 = 0
 
+  /// Daemon-assigned per-turn correlation id. Stamped from the TurnAggregator
+  /// on every envelope emitted within one ACP turn (Idle→Active→…→Idle).
+  /// Clients dedupe `output isComplete=true` events by `(runtime_id, turn_id)`
+  /// so a daemon replay with renumbered `sequence` doesn't produce a second
+  /// bubble for the same logical turn. Empty when no active turn (rare; some
+  /// session-control envelopes outside a turn).
+  public var turnID: String = String()
+
   public var payload: Amux_Envelope.OneOf_Payload? = nil
 
   /// Agent event (ACP passthrough)
@@ -710,6 +718,8 @@ public struct Amux_AcpSendPrompt: Sendable {
 
   public var modelID: String = String()
 
+  /// Supabase Storage URLs for attachments (legacy bare-runtime path).
+  /// Session-backed chats carry these in Teamclaw_Message.attachment_urls instead.
   public var attachmentUrls: [String] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1245,7 +1255,7 @@ extension Amux_MemberRole: SwiftProtobuf._ProtoNameProviding {
 
 extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Envelope"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}runtime_id\0\u{3}device_id\0\u{3}source_peer_id\0\u{1}timestamp\0\u{1}sequence\0\u{4}\u{5}acp_event\0\u{3}session_event\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}runtime_id\0\u{3}device_id\0\u{3}source_peer_id\0\u{1}timestamp\0\u{1}sequence\0\u{3}turn_id\0\u{4}\u{4}acp_event\0\u{3}session_event\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1258,6 +1268,7 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       case 3: try { try decoder.decodeSingularStringField(value: &self.sourcePeerID) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.timestamp) }()
       case 5: try { try decoder.decodeSingularUInt64Field(value: &self.sequence) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.turnID) }()
       case 10: try {
         var v: Amux_AcpEvent?
         var hadOneofValue = false
@@ -1309,6 +1320,9 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     if self.sequence != 0 {
       try visitor.visitSingularUInt64Field(value: self.sequence, fieldNumber: 5)
     }
+    if !self.turnID.isEmpty {
+      try visitor.visitSingularStringField(value: self.turnID, fieldNumber: 6)
+    }
     switch self.payload {
     case .acpEvent?: try {
       guard case .acpEvent(let v)? = self.payload else { preconditionFailure() }
@@ -1329,6 +1343,7 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     if lhs.sourcePeerID != rhs.sourcePeerID {return false}
     if lhs.timestamp != rhs.timestamp {return false}
     if lhs.sequence != rhs.sequence {return false}
+    if lhs.turnID != rhs.turnID {return false}
     if lhs.payload != rhs.payload {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
