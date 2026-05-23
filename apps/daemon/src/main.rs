@@ -156,6 +156,10 @@ fn main() -> anyhow::Result<()> {
             let path = config::DaemonConfig::default_path();
             cli::channel::run(args, &path)?;
         }
+        Commands::Config(args) => {
+            let path = config::DaemonConfig::default_path();
+            cli::config_cmd::run(args, &path)?;
+        }
         Commands::McpServer(args) => {
             let sock = args
                 .sock

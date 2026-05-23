@@ -47,6 +47,26 @@ This writes `~/.amuxd/supabase.toml` with the daemon's credentials.
 ./target/release/amuxd start
 ```
 
+## Config
+
+`amuxd config` edits `~/.amuxd/daemon.toml` by default. Use
+`--config <path>` to target another file.
+
+```bash
+amuxd config path
+amuxd config list
+amuxd config get mqtt.broker_url
+amuxd config set mqtt.broker_url mqtts://broker.example.com:8883
+amuxd config set idle_runtime_timeout_secs 1800
+amuxd config set agents.codex.binary codex
+amuxd config set agents.codex.default_flags '["--foo", "bar"]'
+amuxd config unset idle_runtime_timeout_secs
+```
+
+Values are parsed as TOML literals. If a value is not valid TOML, it is written
+as a string. Edits are validated against `DaemonConfig` before the file is
+overwritten.
+
 ## Test
 
 ```bash
