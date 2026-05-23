@@ -14,17 +14,88 @@ For **UI / visual design** work, source-of-truth depends on the platform:
 
 **Never push directly to `main`.** All changes must go through a Pull Request:
 
-1. Create a feature branch before making any changes
-2. Commit work to the feature branch
-3. Push and open a PR via `gh pr create`
+1. Create or reuse a project-local worktree under `.worktrees/` before making
+   changes
+2. Do all file edits, verification, and commits inside that worktree
+3. Push the worktree branch and open a PR via `gh pr create`
 4. Do not merge or push to `main` directly, even for small fixes
 
-**Do not auto-create branches without approval.** If you (the AI) decide a new
-git branch is needed (`git checkout -b`, `git switch -c`, `git branch <name>`,
-etc.), you must stop and ask the user for explicit approval before creating it.
-Creating a worktree is acceptable without prior approval, but spinning up a
-fresh branch is not. When already on an appropriate feature branch, keep
-working on it instead of branching again.
+**All AI-made changes must happen in a project-local worktree.** Do not edit the
+stable repo checkout directly. If the user asks for a change and you are not
+already inside the right worktree, create one under `.worktrees/<task-slug>` and
+work there. Creating the branch needed for that worktree is part of the normal
+workflow and does not require a separate approval when the user has requested
+the change.
+
+Do not switch branches in an existing checkout to start work. Use
+`scripts/create-agent-worktree.sh <task-slug> <base-ref>` instead of raw
+`git worktree add` so the new checkout gets the local env/config files needed
+for preview and self-test. Keep branches task-scoped and short-lived, then
+remove the worktree after the PR is merged or the task is abandoned.
+
+Local files copied into new worktrees when present:
+
+- `.env` and `.env.local` — root secrets for deploy, backend, Supabase, push,
+  MQTT, and other live/self-test workflows.
+- `packages/app/.env.development.local` — required for the web/desktop Vite
+  preview to get `VITE_SUPABASE_*` and MQTT settings.
+- `apps/daemon/.env` — required by daemon onboarding/init fallback when
+  `SUPABASE_URL` and `SUPABASE_ANON_KEY` are not exported in the shell.
+- `apps/expo/.env` — required for Expo when doing mobile work; the tracked
+  `.env.example` is only a template.
+- `apps/android/local.properties` — required for Android builds to find the
+  local SDK.
+
+Tracked config such as `build.config.local.json`, `build.config.production.json`,
+`apps/daemon/.env.example`, `apps/expo/.env.example`, and
+`apps/android/secrets.defaults.properties` comes from git automatically and
+does not need manual copying.
+
+### Single-preview multi-agent workflow
+
+When several agents work in parallel but the user wants only one live
+hot-reload preview, use a dedicated integration worktree. Do not run one dev
+server per agent branch.
+
+Layout:
+
+```text
+teamclaw-v2/                         # stable repo checkout, not edited by agents
+teamclaw-v2/.worktrees/
+  preview-integration/               # the only hot-reload preview worktree
+  agent-<name>-candidate/            # one isolated candidate worktree per agent
+```
+
+Rules:
+
+- Run the single preview instance from `.worktrees/preview-integration` only
+  (`pnpm dev` for frontend preview; use `pnpm tauri:dev` only when native
+  desktop behavior must be checked).
+- Each agent works in its own `agent-<name>-candidate` worktree and does not
+  start a dev server.
+- Candidate worktrees produce diffs. Apply selected diffs into
+  `preview-integration` automatically when the user wants to inspect them.
+- After applying a selected diff to `preview-integration`, commit it
+  immediately as a local WIP commit. Do not leave accepted preview changes as a
+  long-lived unstaged diff.
+- If the user rejects the last applied candidate, revert the corresponding WIP
+  commit from `preview-integration`.
+- If the user wants to continue forward, apply the next candidate diff on top
+  of the existing accepted WIP commits.
+- When all accepted changes look good, open the PR from the
+  `preview-integration` branch. The accepted diffs are the PR contents.
+- After the PR is merged and no local work needs to be preserved, remove the
+  preview and candidate worktrees.
+
+Keep the integration branch fresh:
+
+- Rebase `preview-integration` onto `origin/main` before starting a new round of
+  agent candidates.
+- Rebase again after every few accepted WIP commits if other people are landing
+  related changes.
+- Rebase immediately before opening the PR.
+- If rebase conflicts appear, stop applying new candidate diffs until the
+  integration worktree is reconciled with `origin/main`.
 
 ## Project Overview
 
