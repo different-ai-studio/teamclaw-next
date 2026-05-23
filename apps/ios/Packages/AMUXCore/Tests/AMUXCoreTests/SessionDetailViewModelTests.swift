@@ -224,4 +224,75 @@ final class SessionDetailViewModelTests: XCTestCase {
             XCTFail("expected grantPermission ACP command")
         }
     }
+
+    func testInterruptAgentInSessionModePublishesCancelToThatAgentsRuntime() async throws {
+        let published = PublishedMessages()
+        let mqtt = MQTTService(
+            subscribeHook: { _ in },
+            unsubscribeHook: { _ in },
+            publishHook: { topic, payload, retain in
+                await published.append((topic, payload, retain))
+            }
+        )
+        let teamclawService = TeamclawService()
+        let container = try ModelContainer(
+            for: Session.self, Runtime.self, AgentEvent.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        teamclawService.configureRuntimeForTesting(
+            mqtt: mqtt,
+            teamId: "team-1",
+            peerId: "peer-1",
+            modelContainer: container
+        )
+        teamclawService.setLocalMemberIdForTesting("human-1")
+
+        let context = container.mainContext
+        let session = Session(sessionId: "session-1", teamId: "team-1")
+        session.primaryAgentId = "agent-actor-1"
+        context.insert(session)
+        let agentRuntime = Runtime(runtimeId: "rt-mini-1")
+        agentRuntime.daemonDeviceId = "daemon-device-1"
+        context.insert(agentRuntime)
+        try context.save()
+
+        let viewModel = SessionDetailViewModel(
+            runtime: nil,
+            mqtt: mqtt,
+            hub: MQTTMessageHub(mqtt: mqtt),
+            teamID: "team-1",
+            peerId: "peer-1",
+            session: session,
+            teamclawService: teamclawService
+        )
+        viewModel._test_setMemberSheetAgentsAndRelabel([
+            makeAgent(actorID: "agent-actor-1", runtimeID: "rt-mini-1")
+        ])
+        viewModel.start(modelContext: context)
+        defer { viewModel.stop() }
+
+        viewModel.interruptAgent("agent-actor-1")
+        try await Task.sleep(for: .milliseconds(50))
+
+        let snapshot = await published.value
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertEqual(
+            snapshot.first?.0,
+            MQTTTopics.runtimeCommands(
+                teamID: "team-1",
+                deviceID: "daemon-device-1",
+                runtimeID: "rt-mini-1"
+            )
+        )
+        XCTAssertFalse(snapshot.first?.2 ?? true)
+
+        let payload = try XCTUnwrap(snapshot.first?.1)
+        let envelope = try Amux_RuntimeCommandEnvelope(serializedBytes: payload)
+        XCTAssertEqual(envelope.runtimeID, "rt-mini-1")
+        XCTAssertEqual(envelope.deviceID, "daemon-device-1")
+        XCTAssertEqual(envelope.senderActorID, "human-1")
+        guard case .cancel = envelope.acpCommand.command else {
+            return XCTFail("expected AcpCancel command")
+        }
+    }
 }
