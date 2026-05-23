@@ -109,6 +109,7 @@ public actor SupabaseIdeaRepository: IdeaRepository {
                 activity_type,
                 content,
                 metadata,
+                attachment_urls,
                 created_at,
                 updated_at
                 """
@@ -129,7 +130,8 @@ public actor SupabaseIdeaRepository: IdeaRepository {
                     ideaID: ideaID,
                     activityType: input.activityType,
                     content: input.content,
-                    metadata: input.metadata
+                    metadata: input.metadata,
+                    attachmentURLs: input.attachmentURLs.map(\.absoluteString)
                 )
             )
             .execute()
@@ -248,12 +250,14 @@ private struct CreateIdeaActivityParams: Encodable {
     let activityType: String
     let content: String
     let metadata: [String: String]
+    let attachmentURLs: [String]
 
     enum CodingKeys: String, CodingKey {
         case ideaID = "p_idea_id"
         case activityType = "p_activity_type"
         case content = "p_content"
         case metadata = "p_metadata"
+        case attachmentURLs = "p_attachment_urls"
     }
 }
 
@@ -309,6 +313,7 @@ private struct IdeaActivityRow: Decodable, Sendable {
     let activityType: String
     let content: String
     let metadata: [String: String]
+    let attachmentURLs: [String]
     let createdAt: Date
     let updatedAt: Date
 
@@ -320,6 +325,7 @@ private struct IdeaActivityRow: Decodable, Sendable {
         case activityType = "activity_type"
         case content
         case metadata
+        case attachmentURLs = "attachment_urls"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -333,6 +339,7 @@ private struct IdeaActivityRow: Decodable, Sendable {
             activityType: activityType,
             content: content,
             metadata: metadata,
+            attachmentURLs: attachmentURLs.compactMap(URL.init(string:)),
             createdAt: createdAt,
             updatedAt: updatedAt
         )

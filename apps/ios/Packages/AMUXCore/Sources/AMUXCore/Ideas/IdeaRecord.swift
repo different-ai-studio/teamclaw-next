@@ -104,10 +104,17 @@ public struct IdeaActivityCreateInput: Equatable, Sendable {
     public let activityType: String
     public let content: String
     public let metadata: [String: String]
+    public let attachmentURLs: [URL]
 
-    public init(activityType: String, content: String, metadata: [String: String] = [:]) {
+    public init(
+        activityType: String,
+        content: String,
+        metadata: [String: String] = [:],
+        attachmentURLs: [URL] = []
+    ) {
         self.activityType = activityType
         self.content = content
         self.metadata = metadata
+        self.attachmentURLs = attachmentURLs
     }
 }

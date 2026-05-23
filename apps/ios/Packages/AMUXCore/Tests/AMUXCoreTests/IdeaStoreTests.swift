@@ -145,7 +145,7 @@ struct IdeaStoreTests {
     }
 
     @MainActor
-    @Test("create activity records attachment URLs in stable metadata")
+    @Test("create activity records attachment URLs")
     func createActivityRecordsAttachmentURLs() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -174,27 +174,7 @@ struct IdeaStoreTests {
             "https://storage.example.com/one.jpg",
             "https://storage.example.com/two.png",
         ])
-        #expect(await repository.recordedActivityInputs().first?.metadata[IdeaActivityRecord.attachmentURLsMetadataKey] == "https://storage.example.com/one.jpg\nhttps://storage.example.com/two.png")
-    }
-
-    @Test("activity attachment URLs ignore malformed metadata entries")
-    func activityAttachmentURLsIgnoreMalformedEntries() {
-        let activity = IdeaActivityRecord(
-            id: "activity-1",
-            teamID: "team-1",
-            ideaID: "idea-1",
-            actorID: "member-1",
-            activityType: "progress",
-            content: "Attached screenshots.",
-            metadata: [
-                IdeaActivityRecord.attachmentURLsMetadataKey:
-                    "https://storage.example.com/one.jpg\nnot a url\n\nhttps://storage.example.com/two.png",
-            ],
-            createdAt: .now,
-            updatedAt: .now
-        )
-
-        #expect(activity.attachmentURLs.map(\.absoluteString) == [
+        #expect(await repository.recordedActivityInputs().first?.attachmentURLs.map(\.absoluteString) == [
             "https://storage.example.com/one.jpg",
             "https://storage.example.com/two.png",
         ])
@@ -336,6 +316,7 @@ private actor InMemoryIdeaRepository: IdeaRepository {
             activityType: input.activityType,
             content: input.content,
             metadata: input.metadata,
+            attachmentURLs: input.attachmentURLs,
             createdAt: .now,
             updatedAt: .now
         )
@@ -359,7 +340,8 @@ private actor InMemoryIdeaRepository: IdeaRepository {
                 IdeaActivityCreateInput(
                     activityType: activity.activityType,
                     content: activity.content,
-                    metadata: activity.metadata
+                    metadata: activity.metadata,
+                    attachmentURLs: activity.attachmentURLs
                 )
             }
         }
