@@ -23,11 +23,18 @@ public struct SessionPlansPanelView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: snapshots.count > 1 ? .always : .never))
-        .frame(height: 280)
-        .liquidGlass(in: RoundedRectangle(cornerRadius: 22), interactive: false)
+        .frame(height: 205)
+        .background {
+            RoundedRectangle(cornerRadius: 22)
+                .fill(Color.amux.paper.opacity(0.94))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22)
+                        .stroke(Color.amux.hairline, lineWidth: 0.5)
+                }
+        }
         .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
         .transition(.move(edge: .top).combined(with: .opacity))
         .onChange(of: snapshots.count) { _, newCount in
             // Keep the page binding in range when an agent's plan
@@ -47,7 +54,7 @@ private struct SessionPlansPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text("\(snapshot.agentName) — Plans")
                     .font(.subheadline.weight(.semibold))
@@ -59,7 +66,7 @@ private struct SessionPlansPage: View {
                     .foregroundStyle(.secondary)
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(snapshot.items.enumerated()), id: \.offset) { index, item in
                         HStack(alignment: .top, spacing: 8) {
                             Text("\(index + 1).")
@@ -72,6 +79,7 @@ private struct SessionPlansPage: View {
                                 .padding(.top, 3)
                             Text(item.content)
                                 .font(.subheadline)
+                                .lineLimit(2)
                                 .strikethrough(item.status == .completed)
                                 .foregroundStyle(
                                     item.status == .completed
@@ -82,11 +90,11 @@ private struct SessionPlansPage: View {
                         }
                     }
                 }
-                .padding(.bottom, 24) // leave room for the page dots
+                .padding(.bottom, 18) // leave room for the page dots
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
     }
 
 }

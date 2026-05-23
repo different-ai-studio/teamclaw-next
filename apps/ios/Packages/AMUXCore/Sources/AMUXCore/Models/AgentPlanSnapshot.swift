@@ -36,9 +36,10 @@ public struct AgentPlanSnapshot: Identifiable, Equatable, Sendable {
         var latestByAgent: [String: AgentEvent] = [:]
         var firstSeen: [String: Int] = [:]
         for (idx, event) in events.enumerated() where event.eventType == "plan_update" {
-            latestByAgent[event.agentId] = event
-            if firstSeen[event.agentId] == nil {
-                firstSeen[event.agentId] = idx
+            let agentID = event.senderActorID ?? event.agentId
+            latestByAgent[agentID] = event
+            if firstSeen[agentID] == nil {
+                firstSeen[agentID] = idx
             }
         }
         let ordered = latestByAgent.keys.sorted { lhs, rhs in

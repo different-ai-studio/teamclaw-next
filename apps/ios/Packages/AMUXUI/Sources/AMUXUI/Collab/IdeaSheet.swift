@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 import AMUXCore
 import AMUXSharedUI
 
@@ -50,6 +51,7 @@ enum CreateIdeaSheetToolbarPresentation {
 
 struct CreateIdeaSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Environment(AppOnboardingCoordinator.self) private var coordinator: AppOnboardingCoordinator?
 
     @Bindable var ideaStore: IdeaStore
@@ -61,11 +63,19 @@ struct CreateIdeaSheet: View {
     @State private var description = ""
     @State private var workspaceID: String = ""
     @State private var isSaving = false
+    @State private var imageAttachments: [URL] = []
+    @State private var imageUploads: [String: AttachmentUpload] = [:]
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showCamera = false
+    @State private var uploadManager: AttachmentUploadManager?
+    @State private var draftAttachmentContextID = "idea-draft-\(UUID().uuidString)"
     @FocusState private var titleFocused: Bool
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !isSaving
+            && !hasUploadingImageAttachments
+            && !hasFailedImageAttachments
     }
 
     private var workspaceLabel: String {
@@ -77,11 +87,30 @@ struct CreateIdeaSheet: View {
         coordinator?.currentContext?.team.name ?? "this team"
     }
 
+    private var teamID: String {
+        coordinator?.currentContext?.team.id ?? ""
+    }
+
+    private var hasUploadingImageAttachments: Bool {
+        imageUploads.values.contains { $0.uploadState == .pending || $0.uploadState == .uploading }
+    }
+
+    private var hasFailedImageAttachments: Bool {
+        imageUploads.values.contains { $0.uploadState == .failed }
+    }
+
+    private var uploadedImageURLs: [URL] {
+        imageAttachments.compactMap { localURL in
+            imageUploads[localURL.absoluteString]?.storageURL.flatMap(URL.init(string:))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     composerCard
+                    imageSection
                     workspaceSection
                     if let errorMessage = ideaStore.errorMessage {
                         Text(errorMessage)
@@ -129,6 +158,31 @@ struct CreateIdeaSheet: View {
         }
         .presentationDragIndicator(.visible)
         .onAppear { titleFocused = true }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraImagePicker(
+                onCapture: { url in
+                    Task {
+                        await addImageAttachment(url)
+                        showCamera = false
+                    }
+                },
+                onCancel: { showCamera = false }
+            )
+            .ignoresSafeArea()
+        }
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                for item in items {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("idea-photo-\(UUID().uuidString).jpg")
+                    try? data.write(to: url)
+                    await addImageAttachment(url)
+                }
+                photoItems = []
+            }
+        }
     }
 
     private var composerCard: some View {
@@ -155,6 +209,51 @@ struct CreateIdeaSheet: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.amux.paper)
         )
         .padding(.horizontal, 16)
+    }
+
+    private var imageSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HaiSectionLabel("Images")
+            HaiPaperCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) {
+                            Label("Photos", systemImage: "photo.on.rectangle")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.amux.onyx)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            showCamera = true
+                        } label: {
+                            Label("Camera", systemImage: "camera")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.amux.onyx)
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer(minLength: 0)
+
+                        if hasUploadingImageAttachments {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+
+                    IdeaImageAttachmentStrip(
+                        urls: imageAttachments,
+                        uploads: imageUploads,
+                        onRemove: removeImageAttachment
+                    )
+
+                    if hasFailedImageAttachments {
+                        Text("One image failed to upload. Remove it and try again.")
+                            .font(.caption)
+                            .foregroundStyle(Color.amux.cinnabarDeep)
+                    }
+                }
+            }
+        }
     }
 
     private var workspaceSection: some View {
@@ -197,17 +296,64 @@ struct CreateIdeaSheet: View {
         guard !isSaving, canSave else { return }
         isSaving = true
         Task {
+            let knownIdeaIDs = Set((ideaStore.ideas + ideaStore.archivedIdeas).map(\.id))
             let ok = await ideaStore.createIdea(
                 title: title,
                 description: description,
                 workspaceID: workspaceID
             )
+            if ok, !uploadedImageURLs.isEmpty {
+                let created = ideaStore.ideas.first { !knownIdeaIDs.contains($0.id) } ?? ideaStore.ideas.first
+                if let created {
+                    _ = await ideaStore.createActivity(
+                        ideaID: created.id,
+                        activityType: "progress",
+                        content: "Attached \(uploadedImageURLs.count) image\(uploadedImageURLs.count == 1 ? "" : "s").",
+                        attachmentURLs: uploadedImageURLs
+                    )
+                }
+            }
             isSaving = false
             if ok {
                 onCreated()
                 dismiss()
             }
         }
+    }
+
+    private func addImageAttachment(_ url: URL) async {
+        guard !imageAttachments.contains(url) else { return }
+        guard let manager = ensureUploadManager() else {
+            ideaStore.errorMessage = "Image upload is unavailable for this team."
+            return
+        }
+        imageAttachments.append(url)
+        do {
+            let upload = try await manager.startUpload(
+                filePath: url,
+                messageID: draftAttachmentContextID,
+                sessionID: "ideas/\(draftAttachmentContextID)",
+                teamID: teamID
+            )
+            imageUploads[url.absoluteString] = upload
+        } catch {
+            ideaStore.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeImageAttachment(_ url: URL) {
+        imageAttachments.removeAll { $0 == url }
+        imageUploads.removeValue(forKey: url.absoluteString)
+    }
+
+    private func ensureUploadManager() -> AttachmentUploadManager? {
+        guard !teamID.isEmpty else { return nil }
+        if let uploadManager { return uploadManager }
+        guard let manager = try? AttachmentUploadManager.fromMainBundle(modelContext: modelContext) else {
+            return nil
+        }
+        uploadManager = manager
+        return manager
     }
 }
 

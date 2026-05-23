@@ -319,6 +319,31 @@ public final class SessionDetailViewModel {
             }
         }
 
+        for (index, event) in events.enumerated() {
+            guard event.eventType == "output",
+                  event.supabaseMessageId == nil,
+                  event.turnID == nil,
+                  let text = event.text,
+                  !text.isEmpty
+            else { continue }
+
+            let hasFullPersistedReply = events.contains { other in
+                guard other.id != event.id,
+                      other.eventType == "output",
+                      other.supabaseMessageId != nil,
+                      (other.senderActorID ?? "") == (event.senderActorID ?? ""),
+                      let fullText = other.text,
+                      text.count < fullText.count,
+                      fullText.hasPrefix(text),
+                      event.timestamp >= other.timestamp
+                else { return false }
+                return true
+            }
+            if hasFullPersistedReply {
+                duplicateIndexes.insert(index)
+            }
+        }
+
         guard !duplicateIndexes.isEmpty else { return }
         for index in duplicateIndexes.sorted(by: >) {
             modelContext.delete(events[index])

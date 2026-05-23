@@ -369,6 +369,33 @@ public enum ChatTimelineReducer {
             return
         }
 
+        // Prefix upgrade: a live/status flush can persist a completed
+        // output fragment before the Supabase history seed returns the
+        // authoritative full reply. The fragment has no Supabase id or
+        // turn id, and its local timestamp is later than the persisted
+        // message timestamp. Replace it in place instead of rendering both.
+        if eventType == "output",
+           let idx = state.entries.firstIndex(where: {
+               guard $0.eventType == "output",
+                     $0.supabaseMessageID == nil,
+                     $0.turnID == nil,
+                     ($0.senderActorID ?? "") == (input.senderActorID ?? ""),
+                     let text = $0.text,
+                     !text.isEmpty,
+                     text.count < input.content.count,
+                     input.content.hasPrefix(text),
+                     $0.timestamp >= input.createdAt
+               else { return false }
+               return true
+           }) {
+            state.entries[idx].text = input.content
+            state.entries[idx].timestamp = input.createdAt
+            state.entries[idx].supabaseMessageID = input.supabaseMessageID
+            if state.entries[idx].model == nil { state.entries[idx].model = input.model }
+            state.entries[idx].turnID = input.turnID
+            return
+        }
+
         // Conservative prompt dedupe: if the same content already exists
         // without a Supabase id (live stream finalised before the history
         // seed ran), backfill the id rather than append a duplicate.

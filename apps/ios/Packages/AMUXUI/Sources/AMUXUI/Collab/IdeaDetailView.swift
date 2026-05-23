@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 import AMUXCore
 import AMUXSharedUI
 
@@ -14,6 +15,7 @@ public struct IdeaDetailView: View {
     @Binding var navigationPath: [String]
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \CachedActor.displayName) private var allActors: [CachedActor]
     @Query(sort: \Session.lastMessageAt, order: .reverse)
     private var allSessions: [Session]
@@ -27,6 +29,11 @@ public struct IdeaDetailView: View {
     @State private var isSubmittingProgress = false
     @State private var didSeedLocals = false
     @State private var composerText: String = ""
+    @State private var progressImageAttachments: [URL] = []
+    @State private var progressImageUploads: [String: AttachmentUpload] = [:]
+    @State private var progressPhotoItems: [PhotosPickerItem] = []
+    @State private var showProgressCamera = false
+    @State private var progressUploadManager: AttachmentUploadManager?
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
 
@@ -108,7 +115,7 @@ public struct IdeaDetailView: View {
         .toolbarBackground(Color.amux.mist.opacity(0.85), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerCapsule
+            composerArea
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
         }
@@ -142,6 +149,31 @@ public struct IdeaDetailView: View {
                     navigationPath.append(sessionKey)
                 }
             )
+        }
+        .fullScreenCover(isPresented: $showProgressCamera) {
+            CameraImagePicker(
+                onCapture: { url in
+                    Task {
+                        await addProgressImageAttachment(url, ideaID: item.id, teamID: item.teamID)
+                        showProgressCamera = false
+                    }
+                },
+                onCancel: { showProgressCamera = false }
+            )
+            .ignoresSafeArea()
+        }
+        .onChange(of: progressPhotoItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                for item in items {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("idea-progress-\(UUID().uuidString).jpg")
+                    try? data.write(to: url)
+                    await addProgressImageAttachment(url, ideaID: self.ideaID, teamID: self.item?.teamID ?? "")
+                }
+                progressPhotoItems = []
+            }
         }
     }
 
@@ -369,12 +401,47 @@ public struct IdeaDetailView: View {
 
     // MARK: Composer
 
+    private var composerArea: some View {
+        VStack(spacing: 8) {
+            IdeaImageAttachmentStrip(
+                urls: progressImageAttachments,
+                uploads: progressImageUploads,
+                onRemove: removeProgressImageAttachment
+            )
+            .padding(.horizontal, 2)
+
+            composerCapsule
+        }
+    }
+
     private var composerCapsule: some View {
         HStack(spacing: 8) {
+            PhotosPicker(selection: $progressPhotoItems, maxSelectionCount: 5, matching: .images) {
+                Image(systemName: "photo")
+                    .font(.body)
+                    .foregroundStyle(Color.amux.basalt)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSubmittingProgress)
+
+            Button {
+                showProgressCamera = true
+            } label: {
+                Image(systemName: "camera")
+                    .font(.body)
+                    .foregroundStyle(Color.amux.basalt)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSubmittingProgress)
+
             TextField("Submit progress, or @mention an agent…", text: $composerText, axis: .vertical)
                 .lineLimit(1...3)
                 .font(.subheadline)
-                .padding(.leading, 14)
+                .padding(.leading, 2)
             Button {
                 submitProgress()
             } label: {
@@ -392,8 +459,8 @@ public struct IdeaDetailView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(isSubmittingProgress || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .opacity(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
+            .disabled(!canSubmitProgress)
+            .opacity(canSubmitProgress ? 1 : 0.4)
         }
         .padding(6)
         .background(
@@ -404,6 +471,26 @@ public struct IdeaDetailView: View {
             Capsule().strokeBorder(Color.amux.hairline, lineWidth: 0.5)
         )
         .shadow(color: Color.amux.onyx.opacity(0.08), radius: 18, y: 6)
+    }
+
+    private var hasUploadingProgressImages: Bool {
+        progressImageUploads.values.contains { $0.uploadState == .pending || $0.uploadState == .uploading }
+    }
+
+    private var hasFailedProgressImages: Bool {
+        progressImageUploads.values.contains { $0.uploadState == .failed }
+    }
+
+    private var uploadedProgressImageURLs: [URL] {
+        progressImageAttachments.compactMap { localURL in
+            progressImageUploads[localURL.absoluteString]?.storageURL.flatMap(URL.init(string:))
+        }
+    }
+
+    private var canSubmitProgress: Bool {
+        guard !isSubmittingProgress, !hasUploadingProgressImages, !hasFailedProgressImages else { return false }
+        return !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !uploadedProgressImageURLs.isEmpty
     }
 
     // MARK: Helpers
@@ -470,18 +557,25 @@ public struct IdeaDetailView: View {
 
     private func submitProgress() {
         let trimmed = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSubmittingProgress else { return }
+        guard canSubmitProgress else { return }
+        let attachments = uploadedProgressImageURLs
+        let content = trimmed.isEmpty
+            ? "Attached \(attachments.count) image\(attachments.count == 1 ? "" : "s")."
+            : trimmed
         isSubmittingProgress = true
         Task {
             let ok = await ideaStore.createActivity(
                 ideaID: ideaID,
                 activityType: "progress",
-                content: trimmed
+                content: content,
+                attachmentURLs: attachments
             )
             if ok {
                 await ideaStore.reloadActivities(ideaID: ideaID)
                 await MainActor.run {
                     composerText = ""
+                    progressImageAttachments = []
+                    progressImageUploads = [:]
                     isSubmittingProgress = false
                 }
             } else {
@@ -490,6 +584,41 @@ public struct IdeaDetailView: View {
                 }
             }
         }
+    }
+
+    private func addProgressImageAttachment(_ url: URL, ideaID: String, teamID: String) async {
+        guard !progressImageAttachments.contains(url) else { return }
+        guard let manager = ensureProgressUploadManager(teamID: teamID) else {
+            ideaStore.errorMessage = "Image upload is unavailable for this team."
+            return
+        }
+        progressImageAttachments.append(url)
+        do {
+            let upload = try await manager.startUpload(
+                filePath: url,
+                messageID: "idea-progress-\(ideaID)-\(UUID().uuidString)",
+                sessionID: "ideas/\(ideaID)",
+                teamID: teamID
+            )
+            progressImageUploads[url.absoluteString] = upload
+        } catch {
+            ideaStore.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeProgressImageAttachment(_ url: URL) {
+        progressImageAttachments.removeAll { $0 == url }
+        progressImageUploads.removeValue(forKey: url.absoluteString)
+    }
+
+    private func ensureProgressUploadManager(teamID: String) -> AttachmentUploadManager? {
+        guard !teamID.isEmpty else { return nil }
+        if let progressUploadManager { return progressUploadManager }
+        guard let manager = try? AttachmentUploadManager.fromMainBundle(modelContext: modelContext) else {
+            return nil
+        }
+        progressUploadManager = manager
+        return manager
     }
 }
 
@@ -574,6 +703,11 @@ private struct IdeaActivityRow: View {
                     .font(.subheadline)
                     .foregroundStyle(Color.amux.onyx.opacity(0.85))
                     .lineLimit(nil)
+
+                if !activity.attachmentURLs.isEmpty {
+                    IdeaActivityImageGrid(urls: activity.attachmentURLs)
+                        .padding(.top, 2)
+                }
             }
             .padding(.bottom, isLast ? 0 : 14)
         }
