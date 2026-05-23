@@ -9,6 +9,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
+use crate::backend::Backend;
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
 use crate::collab::{AuthManager, AuthResult, PeerState, PeerTracker, PermissionManager};
 use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
@@ -16,7 +17,10 @@ use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
-use crate::supabase::{SupabaseClient, SupabaseConfig};
+use crate::supabase::{SupabaseBackend, SupabaseConfig};
+// SupabaseConfig + SupabaseBackend stay imported: the daemon boot path constructs
+// the concrete impl from `supabase.toml`, then hands out `Arc<dyn Backend>` to
+// the rest of the daemon.
 use std::path::PathBuf;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
@@ -139,7 +143,7 @@ pub struct DaemonServer {
     sessions_path: PathBuf,
     history: EventHistory,
     teamclaw: Option<crate::teamclaw::SessionManager>,
-    supabase: SupabaseClient,
+    supabase: Arc<dyn Backend>,
     actor_id: String,
     /// Channel manager (Discord/WeCom/Feishu/Kook/WeChat/Email gateways).
     /// `None` until `start_channels()` runs; held as `Option` so `shutdown(self)`
@@ -201,12 +205,15 @@ impl DaemonServer {
         config_path: &std::path::Path,
     ) -> crate::error::Result<Self> {
         // Supabase is required — fail fast with a clear message if absent.
-        let supabase = match SupabaseConfig::default_path() {
-            Ok(path) if path.exists() => SupabaseConfig::load(&path)
-                .and_then(SupabaseClient::new)
-                .map_err(|e| {
-                    crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
-                })?,
+        let supabase: Arc<dyn Backend> = match SupabaseConfig::default_path() {
+            Ok(path) if path.exists() => {
+                let concrete = SupabaseConfig::load(&path)
+                    .and_then(SupabaseBackend::new)
+                    .map_err(|e| {
+                        crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
+                    })?;
+                Arc::new(concrete)
+            }
             _ => {
                 return Err(crate::error::AmuxError::Config(
                     "supabase.toml not found — run `amuxd init` to configure".into(),
@@ -215,16 +222,16 @@ impl DaemonServer {
         };
 
         info!(
-            actor_id = %supabase.config().actor_id,
-            team_id  = %supabase.config().team_id,
+            actor_id = %supabase.actor_id(),
+            team_id  = %supabase.team_id(),
             "Supabase client initialised"
         );
 
-        let actor_id = supabase.config().actor_id.clone();
+        let actor_id = supabase.actor_id().to_string();
 
         // Fetch first token — fails fast if Supabase is unreachable at startup.
         // Idea 5's outer loop handles retries on every subsequent reconnect.
-        let token = supabase.access_token().await.map_err(|e| {
+        let token = supabase.auth_token().await.map_err(|e| {
             crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
         })?;
 
@@ -365,10 +372,10 @@ impl DaemonServer {
             logical_to_acp: Arc::new(AsyncMutex::new(HashMap::new())),
             team_id: team_id.clone(),
             model_override: Arc::new(AsyncMutex::new(HashMap::new())),
-            supabase: Arc::new(self.supabase.clone()),
+            supabase: self.supabase.clone(),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
-            client: Arc::new(self.supabase.clone()),
+            client: self.supabase.clone(),
         });
 
         let mgr = ChannelManager::new(
@@ -794,7 +801,7 @@ impl DaemonServer {
         'outer: loop {
             // ── 1. Get fresh access_token (retry indefinitely on Supabase errors) ──
             let token = loop {
-                match self.supabase.access_token().await {
+                match self.supabase.auth_token().await {
                     Ok(t) => break t,
                     Err(e) => {
                         warn!("token fetch failed: {e}, retrying in 30s");
@@ -910,7 +917,7 @@ impl DaemonServer {
             // fallback if expiry isn't cached yet.
             let proactive_reconnect_in: Duration = {
                 let buffer = Duration::from_secs(5 * 60);
-                match self.supabase.cached_token_expiry() {
+                match self.supabase.cached_credential_expiry() {
                     Some(t) => t
                         .checked_duration_since(Instant::now())
                         .and_then(|d| d.checked_sub(buffer))
@@ -1018,7 +1025,7 @@ impl DaemonServer {
                     }
                     _ = &mut proactive_sleep => {
                         info!(
-                            expiry = ?self.supabase.cached_token_expiry(),
+                            expiry = ?self.supabase.cached_credential_expiry(),
                             "JWT nearing expiry, proactively reconnecting MQTT before broker silently denies ACL"
                         );
                         // Queue a graceful DISCONNECT so the broker sees an
@@ -1301,8 +1308,8 @@ impl DaemonServer {
         let sb = &self.supabase;
 
         let row = crate::supabase::WorkspaceUpsert {
-            team_id: &sb.config().team_id,
-            agent_id: &sb.config().actor_id,
+            team_id: sb.team_id(),
+            agent_id: sb.actor_id(),
             name: &workspace.display_name,
             path: if workspace.path.is_empty() {
                 None
@@ -1574,8 +1581,8 @@ impl DaemonServer {
                 let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
                     (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
                 });
-                let team_id = sb.config().team_id.clone();
-                let actor_id = sb.config().actor_id.clone();
+                let team_id = sb.team_id().to_string();
+                let actor_id = sb.actor_id().to_string();
                 let runtime_id_owned = agent_id.to_string();
                 let sb_clone = sb.clone();
                 let now = chrono::Utc::now();
@@ -2147,7 +2154,7 @@ impl DaemonServer {
         if agents.get_handle(agent_actor_id).is_some() {
             return Some(agent_actor_id.to_string());
         }
-        if agent_actor_id == self.supabase.config().actor_id {
+        if agent_actor_id == self.supabase.actor_id() {
             return agents.running_agent_id_for_collab_session(session_id);
         }
         None
@@ -2398,7 +2405,7 @@ impl DaemonServer {
             return amux::MemberRole::Member;
         }
         let sb = &self.supabase;
-        let my_agent_id = sb.config().actor_id.clone();
+        let my_agent_id = sb.actor_id().to_string();
         match sb
             .check_agent_permission(&my_agent_id, sender_actor_id)
             .await
@@ -3700,8 +3707,8 @@ impl DaemonServer {
             let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
                 (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
             });
-            let team_id = sb.config().team_id.clone();
-            let actor_id = sb.config().actor_id.clone();
+            let team_id = sb.team_id().to_string();
+            let actor_id = sb.actor_id().to_string();
             let sb_clone = sb.clone();
             let runtime_id_owned = runtime_id.clone();
             let model_id_owned = model_id.clone();
@@ -4205,19 +4212,21 @@ mod tests {
         }
     }
 
-    fn test_supabase() -> SupabaseClient {
+    fn test_supabase() -> Arc<dyn Backend> {
         test_supabase_with_url("http://localhost".to_string())
     }
 
-    fn test_supabase_with_url(url: String) -> SupabaseClient {
-        SupabaseClient::new_without_persistence(SupabaseConfig {
-            url,
-            anon_key: "anon".to_string(),
-            refresh_token: "refresh".to_string(),
-            team_id: "team-test".to_string(),
-            actor_id: "agent-actor".to_string(),
-        })
-        .unwrap()
+    fn test_supabase_with_url(url: String) -> Arc<dyn Backend> {
+        Arc::new(
+            SupabaseBackend::new_without_persistence(SupabaseConfig {
+                url,
+                anon_key: "anon".to_string(),
+                refresh_token: "refresh".to_string(),
+                team_id: "team-test".to_string(),
+                actor_id: "agent-actor".to_string(),
+            })
+            .unwrap(),
+        )
     }
 
     fn test_mqtt(device_id: &str) -> MqttClient {
@@ -4235,7 +4244,7 @@ mod tests {
         test_server_with_supabase(test_supabase())
     }
 
-    fn test_server_with_supabase(supabase: SupabaseClient) -> TestServer {
+    fn test_server_with_supabase(supabase: Arc<dyn Backend>) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
         let mqtt = test_mqtt(&config.device.id);

@@ -24,8 +24,8 @@ use tokio::sync::Mutex;
 
 use teamclaw_gateway::{AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo};
 
+use crate::backend::Backend;
 use crate::runtime::RuntimeManager;
-use crate::supabase::SupabaseClient;
 
 /// Cached per-session state that lets `send_prompt` decide whether the
 /// incoming prompt is the FIRST one for a freshly-spawned runtime (and
@@ -58,7 +58,7 @@ pub struct AmuxdAcpHandle {
     /// SQL-minted `acp_session_id` when lazy-spawning a runtime. The
     /// binding is required to write the per-session MCP config file
     /// that mounts the `send` tool.
-    pub supabase: Arc<SupabaseClient>,
+    pub supabase: Arc<dyn Backend>,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was

@@ -7,10 +7,13 @@ use uuid::Uuid;
 
 use super::adapter;
 use super::handle::RuntimeHandle;
+use std::sync::Arc;
+
+use crate::backend::Backend;
 use crate::config::DaemonConfig;
 use crate::proto::amux;
 use crate::runtime::turn_aggregator::TurnAggregator;
-use crate::supabase::{AgentRuntimeUpsert, SupabaseClient};
+use crate::supabase::AgentRuntimeUpsert;
 use chrono::Utc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +146,7 @@ pub struct RuntimeManager {
     /// `runtime/{id}/state` topic sees the same list the agent already
     /// announced earlier on the (non-retained) events topic.
     available_commands_per_agent: HashMap<String, Vec<amux::AcpAvailableCommand>>,
-    supabase: Option<SupabaseClient>,
+    supabase: Option<Arc<dyn Backend>>,
     /// agent_ids that were stopped by the idle sweeper and still need their
     /// terminal `runtime/{id}/state` publish + retain clear. Drained by the
     /// main event loop via `drain_evicted`. Manual `stop_agent` calls go
@@ -160,7 +163,7 @@ pub struct RuntimeManager {
 impl RuntimeManager {
     pub fn new(
         launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
-        supabase: Option<SupabaseClient>,
+        supabase: Option<Arc<dyn Backend>>,
     ) -> Self {
         Self {
             agents: HashMap::new(),
@@ -354,8 +357,8 @@ impl RuntimeManager {
                 .map(|h| h.acp_session_id.clone())
                 .unwrap_or_default();
             let row = AgentRuntimeUpsert {
-                team_id: &sb.config().team_id,
-                agent_id: &sb.config().actor_id,
+                team_id: sb.team_id(),
+                agent_id: sb.actor_id(),
                 session_id: supabase_session_id,
                 workspace_id: supabase_workspace_id,
                 backend_type: launch.backend_type,
@@ -411,7 +414,7 @@ impl RuntimeManager {
             return;
         };
         match sb
-            .fetch_latest_runtime_for_session(&sb.config().actor_id, session_id)
+            .fetch_latest_runtime_for_session(sb.actor_id(), session_id)
             .await
         {
             Ok(Some(prior)) => {
@@ -517,8 +520,8 @@ impl RuntimeManager {
         // Upsert agent_runtimes with status="starting" on resume
         if let Some(sb) = &self.supabase {
             let row = AgentRuntimeUpsert {
-                team_id: &sb.config().team_id,
-                agent_id: &sb.config().actor_id,
+                team_id: sb.team_id(),
+                agent_id: sb.actor_id(),
                 session_id: supabase_session_id,
                 workspace_id: supabase_workspace_id,
                 backend_type: launch.backend_type,
@@ -1306,19 +1309,19 @@ mod tests {
     // when the row is missing or its cursor is empty.
 
     use crate::supabase::config::SupabaseConfig;
-    use crate::supabase::SupabaseClient;
+    use crate::supabase::SupabaseBackend;
     use wiremock::matchers::{method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn test_supabase_with_url(url: String) -> SupabaseClient {
-        SupabaseClient::new_without_persistence(SupabaseConfig {
+    fn test_supabase_with_url(url: String) -> Arc<dyn Backend> {
+        Arc::new(SupabaseBackend::new_without_persistence(SupabaseConfig {
             url,
             anon_key: "anon".into(),
             refresh_token: "rt".into(),
             team_id: "t".into(),
             actor_id: "agent-actor".into(),
         })
-        .unwrap()
+        .unwrap())
     }
 
     async fn auth_mock(srv: &MockServer) {

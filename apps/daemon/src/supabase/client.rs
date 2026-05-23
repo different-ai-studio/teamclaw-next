@@ -11,7 +11,7 @@ use tracing::warn;
 pub use chrono;
 
 #[derive(Debug, Clone)]
-pub struct SupabaseClient {
+pub struct SupabaseBackend {
     http: Client,
     cfg: SupabaseConfig,
     persist_path: Option<std::path::PathBuf>,
@@ -46,7 +46,7 @@ struct RefreshRequest<'a> {
 // slow call won't expire mid-flight.
 const REFRESH_SKEW: Duration = Duration::from_secs(10 * 60);
 
-impl SupabaseClient {
+impl SupabaseBackend {
     pub fn new(cfg: SupabaseConfig) -> SupabaseResult<Self> {
         let persist_path = SupabaseConfig::default_path().ok();
         Self::new_with_persistence(cfg, persist_path)
@@ -250,24 +250,11 @@ impl SupabaseClient {
         }
         Ok(resp.json().await?)
     }
-
-    /// Anonymous claim for agents (daemon path). Calls `claim_team_invite` RPC.
-    /// Supabase's PostgREST always returns a set-returning function as an array,
-    /// so we deserialize into `Vec<ClaimResult>` and pick the first row.
-    pub async fn claim_team_invite(&self, token: &str) -> SupabaseResult<ClaimResult> {
-        #[derive(Serialize)]
-        struct Req<'a> {
-            p_token: &'a str,
-        }
-        let payload = Req { p_token: token };
-        let rows: Vec<ClaimResult> = self.rpc_anon("claim_team_invite", &payload).await?;
-        rows.into_iter().next().ok_or(SupabaseError::InviteInvalid)
-    }
 }
 
 /// Returned by `public.claim_team_invite` — both member and agent branches.
 /// `refresh_token` is `None` for member claims.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ClaimResult {
     pub actor_id: String,
     pub team_id: String,
@@ -329,7 +316,7 @@ pub struct AgentRuntimeRow {
     pub last_processed_message_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct WorkspaceRow {
     pub id: String,
 }
@@ -419,14 +406,44 @@ fn drain_through_cursor(messages: &mut Vec<StoredMessage>, after_id: Option<&str
     }
 }
 
-impl SupabaseClient {
+#[async_trait::async_trait]
+impl crate::backend::Backend for SupabaseBackend {
+    fn team_id(&self) -> &str {
+        &self.cfg.team_id
+    }
+
+    fn actor_id(&self) -> &str {
+        &self.cfg.actor_id
+    }
+
+    async fn auth_token(&self) -> SupabaseResult<String> {
+        self.access_token().await
+    }
+
+    fn cached_credential_expiry(&self) -> Option<Instant> {
+        self.cached_token_expiry()
+    }
+
+    /// Anonymous claim for agents (daemon path). Calls `claim_team_invite` RPC.
+    /// Supabase's PostgREST always returns a set-returning function as an array,
+    /// so we deserialize into `Vec<ClaimResult>` and pick the first row.
+    async fn claim_team_invite(&self, token: &str) -> SupabaseResult<ClaimResult> {
+        #[derive(Serialize)]
+        struct Req<'a> {
+            p_token: &'a str,
+        }
+        let payload = Req { p_token: token };
+        let rows: Vec<ClaimResult> = self.rpc_anon("claim_team_invite", &payload).await?;
+        rows.into_iter().next().ok_or(SupabaseError::InviteInvalid)
+    }
+
     /// Upsert an agent_runtimes row keyed on (agent_id, backend_session_id).
     ///
     /// Returns `Ok(Some(row_id))` where `row_id` is the UUID of the upserted
     /// row (from `agent_runtimes.id`). Returns `Ok(None)` if the response body
     /// was empty or unparseable — defensive only; PostgREST with
     /// `return=representation` should always include the row.
-    pub async fn upsert_agent_runtime(
+    async fn upsert_agent_runtime(
         &self,
         row: &AgentRuntimeUpsert<'_>,
     ) -> SupabaseResult<Option<String>> {
@@ -465,7 +482,7 @@ impl SupabaseClient {
         Ok(row_id)
     }
 
-    pub async fn fetch_agent_runtime_for_session(
+    async fn fetch_agent_runtime_for_session(
         &self,
         session_id: &str,
         runtime_id: &str,
@@ -521,7 +538,7 @@ impl SupabaseClient {
     ///
     /// Returns `Ok(None)` when no row exists (this daemon has never had a
     /// runtime in this session).
-    pub async fn fetch_latest_runtime_for_session(
+    async fn fetch_latest_runtime_for_session(
         &self,
         agent_id: &str,
         session_id: &str,
@@ -553,7 +570,7 @@ impl SupabaseClient {
     /// Record this daemon's MQTT device identifier on its `agents` row so
     /// iOS clients can route publishes to `amux/{device_id}/…` without having
     /// the user hand-type the UUID.
-    pub async fn set_agent_device_id(&self, device_id: &str) -> SupabaseResult<()> {
+    async fn set_agent_device_id(&self, device_id: &str) -> SupabaseResult<()> {
         let token = self.access_token().await?;
         let actor_id = self.cfg.actor_id.clone();
         let url = format!("{}/rest/v1/agents?id=eq.{}", self.cfg.url, actor_id);
@@ -583,7 +600,7 @@ impl SupabaseClient {
     /// Advertise the backend types this daemon can actually spawn. Existing
     /// non-empty agent_types are left alone so an operator can narrow support
     /// from the database/UI without daemon start overwriting it.
-    pub async fn ensure_agent_types(
+    async fn ensure_agent_types(
         &self,
         supported_types: &[String],
         default_agent_type: &str,
@@ -662,7 +679,7 @@ impl SupabaseClient {
 
     /// Look up `agent_member_access.permission_level` for a caller. Returns
     /// `Some("admin" | "write" | "view")` or `None` when no grant exists.
-    pub async fn check_agent_permission(
+    async fn check_agent_permission(
         &self,
         agent_id: &str,
         actor_id: &str,
@@ -686,7 +703,7 @@ impl SupabaseClient {
 
     /// Heartbeat: POST /rest/v1/rpc/update_actor_last_active.
     /// The RPC returns void (empty body), so we can't decode the response as JSON.
-    pub async fn heartbeat(&self) -> SupabaseResult<()> {
+    async fn heartbeat(&self) -> SupabaseResult<()> {
         let token = self.access_token().await?;
         let url = format!("{}/rest/v1/rpc/update_actor_last_active", self.cfg.url);
         let resp = self
@@ -708,10 +725,7 @@ impl SupabaseClient {
         Ok(())
     }
 
-    pub async fn upsert_workspace(
-        &self,
-        row: &WorkspaceUpsert<'_>,
-    ) -> SupabaseResult<WorkspaceRow> {
+    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> SupabaseResult<WorkspaceRow> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/workspaces?on_conflict=team_id,agent_id,name",
@@ -749,7 +763,7 @@ impl SupabaseClient {
     /// the daemon receives a `runtimeStart` for an iOS-created collab session
     /// and needs to learn the session's identity + roster before subscribing
     /// to `session/{sid}/live`.
-    pub async fn fetch_session_with_participants(
+    async fn fetch_session_with_participants(
         &self,
         session_id: &str,
     ) -> SupabaseResult<SessionAndParticipants> {
@@ -810,7 +824,7 @@ impl SupabaseClient {
     /// Returns messages for `session_id` ordered by `created_at` ascending.
     /// When `after_id` is `Some`, the message with that id and all earlier
     /// messages are dropped from the result (exclusive cursor).
-    pub async fn messages_after_cursor(
+    async fn messages_after_cursor(
         &self,
         session_id: &str,
         after_id: Option<&str>,
@@ -843,7 +857,7 @@ impl SupabaseClient {
     }
 
     /// Persist the per-runtime read cursor by PATCHing `agent_runtimes`.
-    pub async fn update_runtime_cursor(
+    async fn update_runtime_cursor(
         &self,
         runtime_row_id: &str,
         last_processed_message_id: &str,
@@ -886,7 +900,7 @@ impl SupabaseClient {
 
     /// Upsert an `actors` row of type `external` keyed on
     /// `(team_id, source, source_id)`. Returns the actor's UUID.
-    pub async fn rpc_upsert_external_actor(
+    async fn rpc_upsert_external_actor(
         &self,
         team_id: &str,
         source: &str,
@@ -944,7 +958,7 @@ impl SupabaseClient {
     /// supabase session UUID (so envelope routing has a target) and the
     /// binding URI (so the per-session MCP config knows the default chat
     /// for `send`) from the only id the channel layer carries.
-    pub async fn get_gateway_session_by_acp_id(
+    async fn get_gateway_session_by_acp_id(
         &self,
         acp_session_id: &str,
     ) -> SupabaseResult<Option<(String, Option<String>)>> {
@@ -980,7 +994,7 @@ impl SupabaseClient {
     /// Resolve (or create) the `sessions` row for a gateway binding.
     /// Returns `(session_id, acp_session_id, created)`.
     #[allow(clippy::too_many_arguments)]
-    pub async fn rpc_ensure_gateway_session(
+    async fn rpc_ensure_gateway_session(
         &self,
         team_id: &str,
         binding: &str,
@@ -1027,7 +1041,7 @@ impl SupabaseClient {
     /// Insert one row into `public.messages` from a gateway message. Returns
     /// the new row's UUID. Idempotent on `(session_id, external_id)` — a
     /// re-delivery of the same provider message returns the existing id.
-    pub async fn insert_gateway_message(
+    async fn insert_gateway_message(
         &self,
         session_id: &str,
         sender_actor_id: &str,
@@ -1046,7 +1060,7 @@ impl SupabaseClient {
 
     /// Same as `insert_gateway_message` but carries an `attachments` JSON
     /// array stored in `messages.attachments`.
-    pub async fn insert_gateway_message_with_attachments(
+    async fn insert_gateway_message_with_attachments(
         &self,
         session_id: &str,
         sender_actor_id: &str,
@@ -1125,7 +1139,7 @@ impl SupabaseClient {
     /// Upload bytes to the attachments bucket. `path` is the object path
     /// (e.g., "<team_id>/<session_id>/<uuid>-<filename>"). `mime` is the
     /// content-type. Returns the stored object path on success.
-    pub async fn upload_attachment_bytes(
+    async fn upload_attachment_bytes(
         &self,
         path: &str,
         bytes: Vec<u8>,
@@ -1163,7 +1177,7 @@ impl SupabaseClient {
     /// that gateway-originated sessions (Discord/WeCom/Feishu DMs) include the
     /// agent's human admin owners as `session_participants`, making the session
     /// visible to Tauri desktop clients via RLS.
-    pub async fn list_agent_admin_member_actor_ids(
+    async fn list_agent_admin_member_actor_ids(
         &self,
         agent_actor_id: &str,
     ) -> SupabaseResult<Vec<String>> {
@@ -1189,7 +1203,7 @@ impl SupabaseClient {
     /// Add (or ignore-if-present) a participant on `session_participants`.
     /// Idempotent — the unique `(session_id, actor_id)` index makes the
     /// `on_conflict` UPSERT a no-op when the row already exists.
-    pub async fn upsert_session_participant(
+    async fn upsert_session_participant(
         &self,
         session_id: &str,
         actor_id: &str,
@@ -1235,7 +1249,7 @@ impl SupabaseClient {
     /// Mode is `'solo'` — cron is a single-agent automated task.
     /// `idea_id` is left null. `primary_agent_id` is set so the agent row
     ///    surfaces in the UI's session badge.
-    pub async fn create_cron_session(
+    async fn create_cron_session(
         &self,
         team_id: &str,
         primary_agent_actor_id: &str,
@@ -1312,7 +1326,7 @@ impl SupabaseClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn insert_message(
+    async fn insert_message(
         &self,
         team_id: &str,
         session_id: &str,
@@ -1377,6 +1391,7 @@ impl SupabaseClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use std::fs;
     use wiremock::matchers::{method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1404,7 +1419,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let tok = client.access_token().await.unwrap();
         assert_eq!(tok, "at-new");
 
@@ -1428,7 +1443,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let _ = client.access_token().await.unwrap();
 
         let persisted = fs::read(&path).ok();
@@ -1444,7 +1459,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         match client.access_token().await {
             Err(SupabaseError::Auth(_)) => {}
             other => panic!("expected auth error, got {:?}", other),
@@ -1469,7 +1484,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let body: serde_json::Value = client
             .rpc("echo", &serde_json::json!({"x": 1}))
             .await
@@ -1489,7 +1504,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let body: serde_json::Value = client
             .rpc_anon("claim", &serde_json::json!({"p_token": "abc"}))
             .await
@@ -1511,7 +1526,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new(test_cfg(srv.uri())).unwrap();
         let r = client
             .claim_team_invite("opaque-token-abc123")
             .await
@@ -1533,7 +1548,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let mut client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let mut client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let tok = client
             .login_with_password("daemon+x@amux.local", "secret")
             .await
@@ -1567,7 +1582,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let row = AgentRuntimeUpsert {
             team_id: "t",
             agent_id: "a",
@@ -1613,7 +1628,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let row = client
             .fetch_latest_runtime_for_session("agent-uuid", "session-uuid")
             .await
@@ -1641,7 +1656,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let row = client
             .fetch_latest_runtime_for_session("agent-uuid", "session-uuid")
             .await
@@ -1667,7 +1682,7 @@ mod tests {
             .mount(&srv)
             .await;
 
-        let client = SupabaseClient::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let row = WorkspaceUpsert {
             team_id: "team-1",
             agent_id: "agent-1",
@@ -1689,7 +1704,7 @@ mod tests {
             team_id: "team".into(),
             actor_id: "actor".into(),
         };
-        let client = SupabaseClient::new_without_persistence(cfg).unwrap();
+        let client = SupabaseBackend::new_without_persistence(cfg).unwrap();
         assert!(client.cached_token_expiry().is_none());
     }
 
@@ -1702,7 +1717,7 @@ mod tests {
             team_id: "team".into(),
             actor_id: "actor".into(),
         };
-        let client = SupabaseClient::new_without_persistence(cfg).unwrap();
+        let client = SupabaseBackend::new_without_persistence(cfg).unwrap();
         {
             let mut st = client.state.lock().unwrap();
             st.expires_at = Some(Instant::now() + Duration::from_secs(3600));
@@ -1719,7 +1734,7 @@ mod tests {
             team_id: "team".into(),
             actor_id: "actor".into(),
         };
-        let client = SupabaseClient::new_without_persistence(cfg).unwrap();
+        let client = SupabaseBackend::new_without_persistence(cfg).unwrap();
         {
             let mut st = client.state.lock().unwrap();
             st.expires_at = Some(Instant::now() - Duration::from_secs(1));
@@ -1809,11 +1824,496 @@ mod tests {
             return;
         }
         let cfg = SupabaseConfig::load(&SupabaseConfig::default_path().unwrap()).unwrap();
-        let c = SupabaseClient::new_without_persistence(cfg).unwrap();
+        let c = SupabaseBackend::new_without_persistence(cfg).unwrap();
         let rows = c
             .messages_after_cursor("00000000-0000-0000-0000-000000000000", None)
             .await
             .unwrap();
         assert!(rows.is_empty());
+    }
+
+    // ── Backend trait coverage (wiremock) ──────────────────────────────────────
+    //
+    // One test per trait method that previously had no unit coverage. Each
+    // boots its own `MockServer`, mocks the precise PostgREST or storage
+    // endpoint the implementation hits, then exercises the trait method
+    // through `SupabaseBackend`. Auth refresh is registered via the shared
+    // `mock_auth` helper so the access_token() call inside each method has
+    // somewhere to land.
+
+    async fn mock_auth(srv: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at",
+                "expires_in": 3600,
+                "refresh_token": "rt"
+            })))
+            .mount(srv)
+            .await;
+    }
+
+    async fn make_client(srv: &MockServer) -> SupabaseBackend {
+        mock_auth(srv).await;
+        SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap()
+    }
+
+    #[tokio::test]
+    async fn set_agent_device_id_patches_agents_row() {
+        let srv = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path_regex(r"^/rest/v1/agents$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        client.set_agent_device_id("device-xyz").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn check_agent_permission_returns_role_when_present() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/rpc/check_agent_permission$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("admin")))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let perm = client
+            .check_agent_permission("agent-1", "actor-1")
+            .await
+            .unwrap();
+        assert_eq!(perm.as_deref(), Some("admin"));
+    }
+
+    #[tokio::test]
+    async fn check_agent_permission_returns_none_when_null() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/rpc/check_agent_permission$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::Value::Null))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let perm = client
+            .check_agent_permission("agent-1", "actor-1")
+            .await
+            .unwrap();
+        assert_eq!(perm, None);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_posts_update_actor_last_active() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/rpc/update_actor_last_active$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        client.heartbeat().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_session_with_participants_returns_session_and_roster() {
+        let srv = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/sessions$"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "s-1",
+                    "team_id": "t-1",
+                    "created_by_actor_id": "a-1",
+                    "primary_agent_id": "ag-1",
+                    "mode": "solo",
+                    "title": "Hello",
+                    "summary": "",
+                    "idea_id": null,
+                    "created_at": "2025-01-01T00:00:00Z"
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/session_participants$"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "session_id": "s-1",
+                    "actor_id": "a-1",
+                    "role": "owner",
+                    "joined_at": "2025-01-01T00:00:00Z"
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let result = client.fetch_session_with_participants("s-1").await.unwrap();
+        assert_eq!(result.session.id, "s-1");
+        assert_eq!(result.session.title, "Hello");
+        assert_eq!(result.participants.len(), 1);
+        assert_eq!(result.participants[0].actor_id, "a-1");
+    }
+
+    #[tokio::test]
+    async fn fetch_session_with_participants_errors_when_missing() {
+        let srv = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/sessions$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let err = client
+            .fetch_session_with_participants("missing")
+            .await
+            .unwrap_err();
+        match err {
+            SupabaseError::Rpc { code, .. } => assert_eq!(code.as_deref(), Some("404")),
+            other => panic!("expected Rpc error with 404, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn messages_after_cursor_drains_through_seed() {
+        let srv = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/messages$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id":"m-1","session_id":"s-1","sender_actor_id":"a-1","kind":"text",
+                 "content":"hi","metadata":{},"created_at":"2025-01-01T00:00:01Z"},
+                {"id":"m-2","session_id":"s-1","sender_actor_id":"a-1","kind":"text",
+                 "content":"there","metadata":{},"created_at":"2025-01-01T00:00:02Z"}
+            ])))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let msgs = client
+            .messages_after_cursor("s-1", Some("m-1"))
+            .await
+            .unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].id, "m-2");
+    }
+
+    #[tokio::test]
+    async fn update_runtime_cursor_patches_runtime_row() {
+        let srv = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path_regex(r"^/rest/v1/agent_runtimes$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        client
+            .update_runtime_cursor("runtime-1", "msg-99")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rpc_upsert_external_actor_decodes_string_response() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/rpc/upsert_external_actor$"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!("actor-uuid-1")),
+            )
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let id = client
+            .rpc_upsert_external_actor("t", "discord", "user-1", "Alice")
+            .await
+            .unwrap();
+        assert_eq!(id, "actor-uuid-1");
+    }
+
+    #[tokio::test]
+    async fn rpc_upsert_external_actor_tolerates_array_response() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/rpc/upsert_external_actor$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"actor_id": "actor-uuid-2"}
+            ])))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let id = client
+            .rpc_upsert_external_actor("t", "discord", "user-2", "Bob")
+            .await
+            .unwrap();
+        assert_eq!(id, "actor-uuid-2");
+    }
+
+    #[tokio::test]
+    async fn get_gateway_session_by_acp_id_returns_some_when_found() {
+        let srv = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/sessions$"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "session-uuid",
+                    "binding": "discord://channel/123"
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let row = client.get_gateway_session_by_acp_id("acp-1").await.unwrap();
+        assert_eq!(
+            row,
+            Some((
+                "session-uuid".to_string(),
+                Some("discord://channel/123".to_string())
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_gateway_session_by_acp_id_returns_none_when_empty() {
+        let srv = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/rest/v1/sessions$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let row = client
+            .get_gateway_session_by_acp_id("acp-missing")
+            .await
+            .unwrap();
+        assert_eq!(row, None);
+    }
+
+    #[tokio::test]
+    async fn rpc_ensure_gateway_session_returns_tuple() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/rpc/ensure_gateway_session$"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "session_id": "sess-1",
+                    "acp_session_id": "acp-1",
+                    "created": true
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let (sid, acp, created) = client
+            .rpc_ensure_gateway_session(
+                "t",
+                "discord://chan/1",
+                "title",
+                "agent-1",
+                &["owner-1".into()],
+                &["part-1".into()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(sid, "sess-1");
+        assert_eq!(acp, "acp-1");
+        assert!(created);
+    }
+
+    #[tokio::test]
+    async fn insert_gateway_message_returns_id_without_external_id() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/messages$"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(serde_json::json!([{
+                    "id": "msg-uuid-1"
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let id = client
+            .insert_gateway_message("sess-1", "actor-1", "hi", None)
+            .await
+            .unwrap();
+        assert_eq!(id, "msg-uuid-1");
+    }
+
+    #[tokio::test]
+    async fn insert_gateway_message_with_attachments_returns_id_with_external_id() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/messages$"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(serde_json::json!([{
+                    "id": "msg-uuid-att"
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let id = client
+            .insert_gateway_message_with_attachments(
+                "sess-1",
+                "actor-1",
+                "with file",
+                Some("ext-1"),
+                serde_json::json!([{"url":"https://x/y","mime":"image/png"}]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(id, "msg-uuid-att");
+    }
+
+    #[tokio::test]
+    async fn upload_attachment_bytes_returns_path() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/storage/v1/object/attachments/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let p = client
+            .upload_attachment_bytes("t/sess/1/file.png", vec![1, 2, 3], "image/png")
+            .await
+            .unwrap();
+        assert_eq!(p, "t/sess/1/file.png");
+    }
+
+    #[tokio::test]
+    async fn list_agent_admin_member_actor_ids_returns_vec() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(
+                r"^/rest/v1/rpc/list_agent_admin_member_actor_ids$",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"member_actor_id": "m-1"},
+                {"member_actor_id": "m-2"}
+            ])))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let ids = client
+            .list_agent_admin_member_actor_ids("agent-1")
+            .await
+            .unwrap();
+        assert_eq!(ids, vec!["m-1".to_string(), "m-2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn upsert_session_participant_returns_ok() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/session_participants$"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        client
+            .upsert_session_participant("sess-1", "actor-1")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_cron_session_returns_session_id() {
+        let srv = MockServer::start().await;
+        // Primary session insert.
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/sessions$"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(serde_json::json!([{
+                    "id": "cron-sess-1"
+                }])),
+            )
+            .mount(&srv)
+            .await;
+        // Participant upserts (primary agent + any admin members).
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/session_participants$"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&srv)
+            .await;
+        // No admin members in this case keeps the test focused on the
+        // session-id return value. The follow-on admin enrichment is
+        // best-effort and covered by `list_agent_admin_member_actor_ids`.
+        Mock::given(method("POST"))
+            .and(path_regex(
+                r"^/rest/v1/rpc/list_agent_admin_member_actor_ids$",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        let sid = client
+            .create_cron_session("team-1", "agent-1", "title")
+            .await
+            .unwrap();
+        assert_eq!(sid, "cron-sess-1");
+    }
+
+    #[tokio::test]
+    async fn insert_message_includes_model_and_turn_when_set() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/messages$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        client
+            .insert_message(
+                "t-1",
+                "s-1",
+                "a-1",
+                "text",
+                "hello",
+                "{}",
+                "claude-opus",
+                "turn-1",
+                42,
+            )
+            .await
+            .unwrap();
+
+        let requests = srv.received_requests().await.unwrap();
+        let body = requests
+            .iter()
+            .find(|r| r.url.path() == "/rest/v1/messages")
+            .expect("/rest/v1/messages was not called");
+        let body_json: serde_json::Value = serde_json::from_slice(&body.body).unwrap();
+        assert_eq!(body_json["model"], serde_json::json!("claude-opus"));
+        assert_eq!(body_json["turn_id"], serde_json::json!("turn-1"));
+    }
+
+    #[tokio::test]
+    async fn insert_message_omits_model_and_turn_when_empty() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/messages$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&srv)
+            .await;
+        let client = make_client(&srv).await;
+        client
+            .insert_message("t-1", "s-1", "a-1", "text", "hello", "", "", "", 42)
+            .await
+            .unwrap();
+
+        let requests = srv.received_requests().await.unwrap();
+        let body = requests
+            .iter()
+            .find(|r| r.url.path() == "/rest/v1/messages")
+            .expect("/rest/v1/messages was not called");
+        let body_json: serde_json::Value = serde_json::from_slice(&body.body).unwrap();
+        let obj = body_json.as_object().expect("body should be JSON object");
+        assert!(
+            !obj.contains_key("model"),
+            "model should be omitted when empty"
+        );
+        assert!(
+            !obj.contains_key("turn_id"),
+            "turn_id should be omitted when empty"
+        );
     }
 }
