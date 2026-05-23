@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase-client'
 import { useActorsForTeam, type ActorRow as ActorRowData } from '@/components/panel/ActorsView'
@@ -18,6 +18,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useUIStore } from '@/stores/ui'
+import { cn } from '@/lib/utils'
+import { getRecentContactActors } from '@/components/sidebar/sidebar-list-helpers'
 
 export function ActorsSection() {
   const { t } = useTranslation()
@@ -30,6 +32,7 @@ export function ActorsSection() {
   const [detailFor, setDetailFor] = React.useState<ActorRowData | null>(null)
   const [removeFor, setRemoveFor] = React.useState<ActorRowData | null>(null)
   const [removing, setRemoving] = React.useState(false)
+  const recentActors = React.useMemo(() => getRecentContactActors(actors), [actors])
 
   const handleSelect = (actor: ActorRowData) => {
     setFilter({
@@ -86,12 +89,24 @@ export function ActorsSection() {
           className="group flex flex-1 items-center gap-1.5 rounded-md px-[9px] py-1 text-left text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint hover:text-foreground"
         >
           {collapsed ? <ChevronRight className="h-[10px] w-[10px]" /> : <ChevronDown className="h-[10px] w-[10px]" />}
-          <span>{t('sidebar.actorsSection', 'Actors')}</span>
-          {actors.length > 0 && (
+          <span>{t('sidebar.actorsSection', 'Recent Contacts')}</span>
+          {recentActors.length > 0 && (
             <span className="font-mono font-normal normal-case tracking-normal text-faint/80">
-              · {actors.length}
+              · {recentActors.length}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setFilter({ kind: 'actors' }) }}
+          className={cn(
+            'rounded-md p-0.5 text-faint hover:bg-selected/60 hover:text-foreground',
+            filter.kind === 'actors' && 'bg-selected text-foreground',
+          )}
+          title={t('actors.viewAll', 'View all actors')}
+          aria-label={t('actors.viewAll', 'View all actors')}
+        >
+          <Users className="h-[11px] w-[11px]" />
         </button>
         <button
           type="button"
@@ -130,10 +145,10 @@ export function ActorsSection() {
           {loading && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.loading', 'Loading actors...')}</div>
           )}
-          {!loading && actors.length === 0 && (
-            <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.empty', 'No actors in this team yet')}</div>
+          {!loading && recentActors.length === 0 && (
+            <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.noRecentContacts', 'No recent contacts')}</div>
           )}
-          {actors.map((actor) => (
+          {recentActors.map((actor) => (
             <ActorRow
               key={actor.id}
               actor={actor}

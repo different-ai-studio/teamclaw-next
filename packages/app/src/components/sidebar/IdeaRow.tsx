@@ -28,10 +28,10 @@ interface Props {
   onRequestDelete: (idea: IdeaRowData) => void
 }
 
-function statusBadge(status: IdeaRowData['status']): { label: string; tone: string } {
-  if (status === 'in_progress') return { label: 'active', tone: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' }
-  if (status === 'done') return { label: 'done', tone: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' }
-  return { label: 'open', tone: 'bg-muted text-muted-foreground' }
+function statusDot(status: IdeaRowData['status']): { label: string; tone: string } {
+  if (status === 'in_progress') return { label: 'in progress', tone: 'bg-amber-500' }
+  if (status === 'done') return { label: 'done', tone: 'bg-emerald-500' }
+  return { label: 'open', tone: 'bg-faint' }
 }
 
 export function IdeaRow({
@@ -45,7 +45,7 @@ export function IdeaRow({
   onRequestDelete,
 }: Props) {
   const { t } = useTranslation()
-  const { label, tone } = statusBadge(idea.status)
+  const { label, tone } = statusDot(idea.status)
   const radioValue: IdeaStatus = (idea.status as IdeaStatus | null) ?? 'open'
 
   return (
@@ -60,7 +60,10 @@ export function IdeaRow({
           )}
         >
           <span className="min-w-0 flex-1 truncate">{idea.title}</span>
-          <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium', tone)}>{label}</span>
+          <span
+            className={cn('h-1.5 w-1.5 shrink-0 rounded-full', tone)}
+            aria-label={label}
+          />
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">

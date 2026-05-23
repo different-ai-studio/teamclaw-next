@@ -28,7 +28,9 @@ function mockActorsRows(rows: any[]) {
       return {
         select: () => ({
           eq: () => ({
-            order: () => Promise.resolve({ data: rows, error: null }),
+            order: () => ({
+              order: () => Promise.resolve({ data: rows, error: null }),
+            }),
           }),
         }),
       }
@@ -42,7 +44,7 @@ function mockActorsRows(rows: any[]) {
 }
 
 describe('ActorsView', () => {
-  it('renders members and agents grouped', async () => {
+  it('renders the actor list surface with team and agent rows', async () => {
     mockActorsRows([
       {
         id: 'a-1',
@@ -62,10 +64,14 @@ describe('ActorsView', () => {
       },
     ])
     render(<ActorsView />)
+    await waitFor(() => expect(screen.getByText('All actors')).toBeInTheDocument())
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
     expect(screen.getByText('Reviewer')).toBeInTheDocument()
-    expect(screen.getByText(/members/i)).toBeInTheDocument()
-    expect(screen.getByText(/agents/i)).toBeInTheDocument()
+    expect(screen.getByText('Team')).toBeInTheDocument()
+    expect(screen.getAllByText('Agent').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Search')).toBeInTheDocument()
+    expect(screen.getByLabelText('Filter by type')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Alice/ })).toHaveClass('hover:bg-selected')
   })
 
   it('renders empty state when no actors', async () => {

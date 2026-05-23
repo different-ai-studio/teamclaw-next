@@ -22,12 +22,13 @@ interface ActorDirectoryRow {
   display_name: string;
   member_status?: string | null;
   agent_status?: string | null;
+  last_active_at?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 const COLUMNS =
-  "id, team_id, actor_type, display_name, member_status, agent_status, created_at, updated_at";
+  "id, team_id, actor_type, display_name, member_status, agent_status, last_active_at, created_at, updated_at";
 
 function mapRow(r: ActorDirectoryRow): cache.ActorRow {
   return {
@@ -38,6 +39,7 @@ function mapRow(r: ActorDirectoryRow): cache.ActorRow {
     avatarUrl: null,
     memberStatus: r.member_status ?? null,
     agentStatus: r.agent_status ?? null,
+    lastActiveAt: r.last_active_at ?? null,
     metadataJson: null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,

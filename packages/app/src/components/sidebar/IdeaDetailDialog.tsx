@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Circle, Loader2, MessageSquarePlus, Save } from 'lucide-react'
+import { ChevronRight, Circle, ListChecks, Loader2, MessageSquarePlus, MoreHorizontal, Save } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -158,6 +158,7 @@ export function IdeaDetailDialog({ idea, onOpenChange, onChanged }: Props) {
   const canSave = !!detail && !!title.trim() && changed && !saving
   const canSubmitActivity = !!detail && !!activityText.trim() && !submittingActivity
   const creator = detail ? actors.get(detail.created_by_actor_id) : null
+  const lastUpdatedAt = (detail ?? fallbackIdea).updated_at
 
   const save = async () => {
     if (!detail || !canSave) return
@@ -202,31 +203,24 @@ export function IdeaDetailDialog({ idea, onOpenChange, onChanged }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[86vh] w-[min(680px,calc(100vw-3rem))] max-w-none flex-col overflow-hidden border-border bg-background p-0 shadow-xl">
-        <DialogHeader className="border-b border-border-soft bg-paper px-6 py-4">
-          <div className="flex items-start gap-3 pr-8">
-            <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-panel text-coral">
-              <Circle className="h-3.5 w-3.5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <DialogTitle className="truncate text-[16px] font-bold text-foreground">
-                {title || fallbackIdea.title}
-              </DialogTitle>
-              <DialogDescription className="mt-1 text-[12px] text-muted-foreground">
-                {creator?.display_name
-                  ? t('ideas.detail.metaWithCreator', '{{creator}} · updated {{when}}', {
-                    creator: creator.display_name,
-                    when: formatRelativeTime(new Date((detail ?? fallbackIdea).updated_at)),
-                  })
-                  : t('ideas.detail.meta', 'Updated {{when}}', {
-                    when: formatRelativeTime(new Date((detail ?? fallbackIdea).updated_at)),
-                  })}
-              </DialogDescription>
-            </div>
+      <DialogContent className="flex max-h-[86vh] w-[min(860px,calc(100vw-3rem))] max-w-none flex-col overflow-hidden border-border bg-background p-0 shadow-xl">
+        <DialogHeader className="border-b border-border-soft bg-paper px-5 py-4">
+          <div className="flex items-center gap-3 pr-8">
+            <span className="inline-flex h-7 items-center gap-1.5 rounded-[7px] border border-coral-soft bg-coral/5 px-2.5 text-[12.5px] font-semibold text-coral">
+              <Circle className="h-2.5 w-2.5 fill-current" />
+              Idea
+            </span>
+            <ChevronRight className="h-4 w-4 text-faint" />
+            <DialogTitle className="truncate text-[15px] font-bold text-foreground">
+              #{Math.max(1, Math.round(((detail ?? fallbackIdea).sort_order ?? 1000) / 1000))} · {t('ideas.detail.edit', 'Edit')}
+            </DialogTitle>
           </div>
+          <DialogDescription className="sr-only">
+            {t('ideas.detail.description', 'Edit idea details and activity.')}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
           <div>
             {loading && !detail ? (
               <div className="flex h-44 items-center justify-center text-[12px] text-faint">
@@ -241,14 +235,26 @@ export function IdeaDetailDialog({ idea, onOpenChange, onChanged }: Props) {
                   className="h-auto border-0 bg-transparent px-0 py-0 text-[24px] font-bold leading-tight shadow-none outline-none placeholder:text-faint focus-visible:ring-0"
                   placeholder={t('ideas.titlePlaceholder', 'Idea title')}
                 />
+                <p className="mt-3 text-[13px] leading-6 text-ink-2">
+                  {creator?.display_name
+                    ? t('ideas.detail.summaryWithCreator', '{{creator}} · {{count}} activities · updated {{when}}', {
+                      creator: creator.display_name,
+                      count: activities.length,
+                      when: formatRelativeTime(new Date(lastUpdatedAt)),
+                    })
+                    : t('ideas.detail.summary', '{{count}} activities · updated {{when}}', {
+                      count: activities.length,
+                      when: formatRelativeTime(new Date(lastUpdatedAt)),
+                    })}
+                </p>
                 <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={4}
-                  className="mt-4 min-h-[112px] resize-none border-0 bg-transparent px-0 py-0 text-[15px] leading-7 text-ink-2 shadow-none outline-none placeholder:text-faint focus-visible:ring-0"
+                  className="mt-5 min-h-[136px] resize-none border-0 bg-transparent px-0 py-0 text-[15px] leading-7 text-ink-2 shadow-none outline-none placeholder:text-faint focus-visible:ring-0"
                   placeholder={t('ideas.descriptionPlaceholder', "What's the constraint, what's the win?")}
                 />
-                <div className="mt-5 flex flex-wrap items-center gap-2">
+                <div className="mt-6 flex flex-wrap items-center gap-2">
                   <Select value={status} onValueChange={(v) => setStatus(v as IdeaStatus)}>
                     <SelectTrigger className="h-8 w-auto min-w-[132px] rounded-full border-border-soft bg-paper px-3 text-[12.5px] shadow-none">
                       <SelectValue />
@@ -259,14 +265,24 @@ export function IdeaDetailDialog({ idea, onOpenChange, onChanged }: Props) {
                       <SelectItem value="done">{t('ideas.contextMenu.statusDone', 'Done')}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <span className="rounded-full bg-paper px-3 py-1.5 text-[12.5px] text-muted-foreground">
+                  <span className="rounded-full border border-border-soft bg-paper px-3 py-1.5 text-[12.5px] text-muted-foreground">
+                    {t('ideas.detail.priorityPlaceholder', '--- Priority')}
+                  </span>
+                  <span className="rounded-full border border-border-soft bg-paper px-3 py-1.5 text-[12.5px] font-semibold text-ink-2">
                     {creator?.display_name ?? t('ideas.detail.unknownActor', 'Unknown')}
                   </span>
-                  <span className="rounded-full bg-paper px-3 py-1.5 font-mono text-[11px] text-faint">
-                    {formatRelativeTime(new Date((detail ?? fallbackIdea).updated_at))}
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border-soft bg-paper px-3 py-1.5 text-[12.5px] text-muted-foreground">
+                    <ListChecks className="h-3.5 w-3.5" />
+                    {t('ideas.detail.tags', 'Tags')}
+                  </span>
+                  <span className="rounded-full border border-border-soft bg-paper px-3 py-1.5 font-mono text-[11px] text-faint">
+                    {formatRelativeTime(new Date(lastUpdatedAt))}
+                  </span>
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-paper text-muted-foreground">
+                    <MoreHorizontal className="h-4 w-4" />
                   </span>
                   <div className="ml-auto">
-                    <Button size="sm" onClick={() => void save()} disabled={!canSave} className="h-8 rounded-[8px]">
+                    <Button size="sm" onClick={() => void save()} disabled={!canSave} className="h-8 rounded-[8px] bg-coral text-white hover:bg-coral/90">
                       {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                       {t('ideas.detail.save', 'Save')}
                     </Button>

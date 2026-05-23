@@ -13,6 +13,7 @@ const baseIdea: IdeaRowData = {
   title: 'Ship it',
   status: 'open',
   created_by_actor_id: 'a-1',
+  sort_order: 1000,
   updated_at: new Date().toISOString(),
 }
 
@@ -41,6 +42,13 @@ describe('IdeaRow', () => {
     const h = setup()
     fireEvent.click(screen.getByText('Ship it'))
     expect(h.onSelect).toHaveBeenCalledWith(baseIdea)
+  })
+
+  it('renders status as a compact dot only', () => {
+    setup({ idea: { ...baseIdea, status: 'in_progress' } })
+    expect(screen.getByLabelText('in progress')).toBeInTheDocument()
+    expect(screen.queryByText('active')).not.toBeInTheDocument()
+    expect(screen.queryByText(/in progress/i)).not.toBeInTheDocument()
   })
 
   it('View → onView', async () => {

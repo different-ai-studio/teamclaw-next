@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, List, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase-client'
 import { useIdeasForTeam, type IdeaRow as IdeaRowData } from '@/components/panel/IdeasView'
@@ -9,6 +9,8 @@ import { IdeaDetailDialog } from '@/components/sidebar/IdeaDetailDialog'
 import { IdeaRow } from '@/components/sidebar/IdeaRow'
 import { RenameIdeaDialog } from '@/components/sidebar/RenameIdeaDialog'
 import { updateIdeaStatus, type IdeaStatus } from '@/lib/idea-mutations'
+import { getTopIdeas } from '@/components/sidebar/sidebar-list-helpers'
+import { cn } from '@/lib/utils'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +35,7 @@ export function IdeasSection() {
   const [renameFor, setRenameFor] = React.useState<IdeaRowData | null>(null)
   const [deleteFor, setDeleteFor] = React.useState<IdeaRowData | null>(null)
   const [deleting, setDeleting] = React.useState(false)
+  const topIdeas = React.useMemo(() => getTopIdeas(ideas), [ideas])
 
   const handleSelect = (idea: IdeaRowData) => {
     setFilter({ kind: 'idea', ideaId: idea.id, title: idea.title })
@@ -90,12 +93,24 @@ export function IdeasSection() {
           className="group flex flex-1 items-center gap-1.5 rounded-md px-[9px] py-1 text-left text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint hover:text-foreground"
         >
           {collapsed ? <ChevronRight className="h-[10px] w-[10px]" /> : <ChevronDown className="h-[10px] w-[10px]" />}
-          <span>{t('sidebar.ideasSection', 'Ideas')}</span>
+          <span>{t('sidebar.ideasSection', 'Top Ideas')}</span>
           {ideas.length > 0 && (
             <span className="font-mono font-normal normal-case tracking-normal text-faint/80">
               · {ideas.length}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setFilter({ kind: 'ideas' }) }}
+          className={cn(
+            'rounded-md p-0.5 text-faint hover:bg-selected/60 hover:text-foreground',
+            filter.kind === 'ideas' && 'bg-selected text-foreground',
+          )}
+          title={t('ideas.viewAll', 'View all ideas')}
+          aria-label={t('ideas.viewAll', 'View all ideas')}
+        >
+          <List className="h-[11px] w-[11px]" />
         </button>
         <button
           type="button"
@@ -144,7 +159,7 @@ export function IdeasSection() {
           {!loading && ideas.length === 0 && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('ideas.empty', 'No ideas yet')}</div>
           )}
-          {ideas.map((idea) => (
+          {topIdeas.map((idea) => (
             <IdeaRow
               key={idea.id}
               idea={idea}

@@ -8,6 +8,11 @@ vi.mock('../SessionListColumn', () => ({
   SessionListColumn: () => <div data-testid="session-list-column" />,
 }))
 
+vi.mock('@/components/panel', () => ({
+  IdeasView: () => <div data-testid="ideas-list-column" />,
+  ActorsView: () => <div data-testid="actors-list-column" />,
+}))
+
 vi.mock('@/stores/tabs', () => ({
   selectActiveTab: () => null,
   useTabsStore: Object.assign(
@@ -81,6 +86,20 @@ describe('SidebarSecondColumn', () => {
     render(<SidebarSecondColumn />)
     expect(screen.getByText('Shortcuts')).toBeInTheDocument()
     expect(screen.getByText('Docs')).toBeInTheDocument()
+    expect(screen.queryByTestId('session-list-column')).not.toBeInTheDocument()
+  })
+
+  it('renders the full ideas list when the ideas filter is active', () => {
+    useUIStore.setState({ sidebarFilter: { kind: 'ideas' } })
+    render(<SidebarSecondColumn />)
+    expect(screen.getByTestId('ideas-list-column')).toBeInTheDocument()
+    expect(screen.queryByTestId('session-list-column')).not.toBeInTheDocument()
+  })
+
+  it('renders the full actor list when the actors filter is active', () => {
+    useUIStore.setState({ sidebarFilter: { kind: 'actors' } })
+    render(<SidebarSecondColumn />)
+    expect(screen.getByTestId('actors-list-column')).toBeInTheDocument()
     expect(screen.queryByTestId('session-list-column')).not.toBeInTheDocument()
   })
 })

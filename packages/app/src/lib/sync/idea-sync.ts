@@ -10,7 +10,7 @@ import * as cache from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
 
 // Supabase `ideas` columns: id, team_id, workspace_id, parent_idea_id,
-// created_by_actor_id, title, description, status, archived, created_at, updated_at.
+// created_by_actor_id, title, description, status, archived, sort_order, created_at, updated_at.
 interface SupabaseIdeaRow {
   id: string;
   team_id: string;
@@ -21,12 +21,13 @@ interface SupabaseIdeaRow {
   status?: string | null;
   created_by_actor_id?: string | null;
   archived?: boolean | number | null;
+  sort_order?: number | null;
   created_at: string;
   updated_at: string;
 }
 
 const COLUMNS =
-  "id, team_id, workspace_id, parent_idea_id, title, description, status, created_by_actor_id, archived, created_at, updated_at";
+  "id, team_id, workspace_id, parent_idea_id, title, description, status, created_by_actor_id, archived, sort_order, created_at, updated_at";
 
 function mapRow(r: SupabaseIdeaRow): cache.IdeaRow {
   return {
@@ -40,6 +41,7 @@ function mapRow(r: SupabaseIdeaRow): cache.IdeaRow {
     createdBy: r.created_by_actor_id ?? null,
     // Supabase returns boolean; local cache stores 0/1
     archived: r.archived ? 1 : 0,
+    sortOrder: r.sort_order ?? 0,
     metadataJson: null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
