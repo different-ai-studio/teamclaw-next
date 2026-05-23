@@ -309,6 +309,9 @@ public struct Teamclaw_Message: Sendable {
   /// messages and for non-agent kinds — renderers fall back to message_id.
   public var turnID: String = String()
 
+  /// Supabase Storage URLs for file/image attachments. Sent separately from
+  /// content so the daemon can build ACP ContentBlock::Image / ResourceLink
+  /// instead of embedding raw URLs in the text body.
   public var attachmentUrls: [String] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()

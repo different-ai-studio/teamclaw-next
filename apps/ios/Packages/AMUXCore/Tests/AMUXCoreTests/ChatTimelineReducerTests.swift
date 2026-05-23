@@ -610,6 +610,170 @@ struct ReducerHistoryTurnMergeTests {
     }
 }
 
+// MARK: - ACP turn-id dedupe (Bug 2 regression guard)
+
+@Suite("ChatTimelineReducer — ACP turn-id dedupe")
+struct ReducerAcpTurnIDDedupeTests {
+    /// Daemon restart renumbers `sequence` while keeping `turn_id` stable.
+    /// Without the turnID dedupe path, the second arrival appends a second
+    /// completed bubble — the multi-arrival 7× duplication the user
+    /// reported on iOS session detail.
+    @Test("same (bucket, turnID) complete output dedupes across renumbered sequences")
+    func sameTurnIDDedupesAcrossSequences() {
+        var state = TimelineState()
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "BUILD SUCCEEDED", isComplete: true))
+
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 42,
+                          runtimeID: "rt-1",
+                          agentBucketKey: "agent-1",
+                          timestamp: .now,
+                          turnID: "turn-abc",
+                          acpEvent: acp)),
+            to: &state
+        )
+        // Daemon restart → same logical event replays with new sequence.
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 9,
+                          runtimeID: "rt-1",
+                          agentBucketKey: "agent-1",
+                          timestamp: .now,
+                          turnID: "turn-abc",
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 1,
+                "turn-id replay must not produce a second bubble")
+        #expect(state.entries.first?.text == "BUILD SUCCEEDED")
+        #expect(state.entries.first?.turnID == "turn-abc")
+    }
+
+    /// The same agent legitimately repeating the same text in two
+    /// different turns (e.g. "好的" or "BUILD SUCCEEDED" on two builds)
+    /// must remain two separate bubbles. This is exactly the scenario
+    /// content-based dedupe would have wrongly collapsed.
+    @Test("different turnIDs with identical content stay as two entries")
+    func differentTurnIDsWithSameContentStayDistinct() {
+        var state = TimelineState()
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "好的", isComplete: true))
+
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-1", acpEvent: acp)),
+            to: &state
+        )
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-2", acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 2,
+                "legitimate same-content replies in different turns must coexist")
+    }
+
+    /// Same bucket+content but DIFFERENT bucket (different agent) — still
+    /// two entries, since bucket identity also separates.
+    @Test("same turnID but different buckets stay distinct")
+    func sameTurnIDDifferentBuckets() {
+        var state = TimelineState()
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "done", isComplete: true))
+
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-a",
+                          agentBucketKey: "agent-a", timestamp: .now,
+                          turnID: "turn-1", acpEvent: acp)),
+            to: &state
+        )
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt-b",
+                          agentBucketKey: "agent-b", timestamp: .now,
+                          turnID: "turn-1", acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 2)
+    }
+
+    /// Nil/empty turnID falls back to sequence dedupe — backwards-compatible
+    /// for envelopes from a pre-turn_id daemon.
+    @Test("nil turnID falls back to sequence-based dedupe")
+    func nilTurnIDFallsBackToSequenceDedupe() {
+        var state = TimelineState()
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "legacy", isComplete: true))
+
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 5, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: nil, acpEvent: acp)),
+            to: &state
+        )
+        // Same sequence — sequence dedupe still catches it.
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 5, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: nil, acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 1)
+        // Different sequence + nil turnID — fallback can't dedupe, expected
+        // duplicate. Documenting the regression boundary: only daemons that
+        // stamp turn_id get the cross-restart guarantee.
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 6, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: nil, acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 2)
+    }
+
+    /// `stop()`-saved synthetic incomplete output gets the turnID
+    /// backfilled when the live completion arrives, so subsequent replays
+    /// with the same turnID dedupe correctly.
+    @Test("incomplete-output completion backfills turnID for future replays")
+    func incompleteCompletionBackfillsTurnID() {
+        var state = TimelineState()
+        // Seed: existing incomplete entry without a turnID (pre-stop saved row).
+        state.entries.append(TimelineEntry(
+            id: "synthetic-1",
+            sequence: 0,
+            eventType: "output",
+            text: "partial",
+            isComplete: false,
+            senderActorID: "agent-1",
+            timestamp: .now
+        ))
+
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "partial+final", isComplete: true))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 10, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-z", acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].isComplete)
+        #expect(state.entries[0].turnID == "turn-z",
+                "completion must stamp turnID on the prior incomplete row")
+
+        // Now replay the same logical event with renumbered sequence — the
+        // turnID guard catches it.
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 3, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-z", acpEvent: acp)),
+            to: &state
+        )
+        #expect(state.entries.count == 1, "replay must dedupe via backfilled turnID")
+    }
+}
+
 // MARK: - Helpers building Amux_AcpEvent sub-payloads
 
 private func makeOutput(text: String, isComplete: Bool) -> Amux_AcpOutput {

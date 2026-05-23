@@ -220,6 +220,12 @@ impl RuntimeManager {
         self.aggregators.get_mut(agent_id)
     }
 
+    /// Read-only access for the publish path to read `current_turn_id`
+    /// without needing a mutable borrow.
+    pub fn aggregator(&self, agent_id: &str) -> Option<&TurnAggregator> {
+        self.aggregators.get(agent_id)
+    }
+
     pub async fn spawn_agent(
         &mut self,
         agent_type: amux::AgentType,

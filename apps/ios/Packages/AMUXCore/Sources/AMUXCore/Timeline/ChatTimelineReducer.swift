@@ -33,15 +33,41 @@ public enum ChatTimelineReducer {
     // MARK: - .acp
 
     static func applyAcp(_ input: AcpInput, to state: inout TimelineState) {
-        // Replay dedupe: same (runtimeID, envelopeSequence) ≥ existing
-        // sequence with matching runtime tag → no-op.
+        let bucket = input.agentBucketKey
+
+        // Turn-id dedupe (primary): same (bucket, turnID, output, isComplete)
+        // → idempotent merge regardless of sequence. This is what catches the
+        // "same logical completion arrives via MQTT live + daemon history
+        // replay + Supabase seed" duplication, since the daemon stamps
+        // turn_id on every envelope but renumbers sequence across restarts.
+        // Only the completion event needs this guard; deltas and other
+        // event types either don't dedupe by identity (deltas → streaming
+        // buffer) or arrive at most once per (sequence, bucket).
+        if case .output(let outComplete) = input.acpEvent.event,
+           outComplete.isComplete,
+           let turnID = input.turnID,
+           !turnID.isEmpty,
+           let idx = outputCompleteIndex(for: bucket, turnID: turnID, in: state) {
+            state.entries[idx].text = outComplete.text
+            if !input.acpEvent.model.isEmpty {
+                state.entries[idx].model = input.acpEvent.model
+            }
+            state.streamingAgentSet.remove(bucket)
+            state.streamingTextByAgent[bucket] = nil
+            state.streamingModelByAgent[bucket] = nil
+            return
+        }
+
+        // Sequence dedupe (fallback): same (sequence, bucket) → no-op.
+        // Holds across re-applications in a single daemon lifetime; does
+        // NOT survive daemon restarts (sequences renumber) — that's why
+        // the turn-id guard above is the primary path.
         if input.envelopeSequence > 0,
            state.entries.contains(where: { $0.sequence == input.envelopeSequence
                                             && ($0.senderActorID ?? "") == input.agentBucketKey }) {
             return
         }
 
-        let bucket = input.agentBucketKey
         switch input.acpEvent.event {
         case .output(let o):
             if o.isComplete {
@@ -49,6 +75,13 @@ public enum ChatTimelineReducer {
                 if let idx = incompleteOutputIndex(for: bucket, in: state) {
                     state.entries[idx].text = o.text
                     state.entries[idx].isComplete = true
+                    // Backfill turnID so future replays for this turn match
+                    // by (bucket, turnID) and don't fall through to append.
+                    if let turnID = input.turnID,
+                       !turnID.isEmpty,
+                       state.entries[idx].turnID == nil {
+                        state.entries[idx].turnID = turnID
+                    }
                     if !input.acpEvent.model.isEmpty {
                         state.entries[idx].model = input.acpEvent.model
                     }
@@ -60,7 +93,8 @@ public enum ChatTimelineReducer {
                         senderActorID: bucket,
                         timestamp: input.timestamp,
                         model: input.acpEvent.model.isEmpty ? nil : input.acpEvent.model,
-                        isComplete: true
+                        isComplete: true,
+                        turnID: input.turnID
                     ))
                 }
                 state.streamingTextByAgent[bucket] = nil
@@ -421,7 +455,8 @@ public enum ChatTimelineReducer {
         timestamp: Date,
         model: String? = nil,
         isComplete: Bool = false,
-        success: Bool? = nil
+        success: Bool? = nil,
+        turnID: String? = nil
     ) -> TimelineEntry {
         TimelineEntry(
             id: UUID().uuidString,
@@ -434,7 +469,8 @@ public enum ChatTimelineReducer {
             success: success,
             senderActorID: senderActorID,
             timestamp: timestamp,
-            model: model
+            model: model,
+            turnID: turnID
         )
     }
 
@@ -447,6 +483,26 @@ public enum ChatTimelineReducer {
             let e = state.entries[i]
             if e.eventType == "output",
                !e.isComplete,
+               (e.senderActorID ?? "") == bucket {
+                return i
+            }
+            i -= 1
+        }
+        return nil
+    }
+
+    private static func outputCompleteIndex(for bucket: String,
+                                            turnID: String,
+                                            in state: TimelineState) -> Int? {
+        // Walk newest-first — completed outputs land at the tail of the
+        // turn's event group, and history replays target the most recent
+        // turns first when the user reopens a stale session detail.
+        var i = state.entries.count - 1
+        while i >= 0 {
+            let e = state.entries[i]
+            if e.eventType == "output",
+               e.isComplete,
+               e.turnID == turnID,
                (e.senderActorID ?? "") == bucket {
                 return i
             }

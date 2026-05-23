@@ -1492,6 +1492,7 @@ public final class SessionDetailViewModel {
             if handleAcpEvent(acp,
                               sequence: Int(env.sequence),
                               runtimeID: env.runtimeID,
+                              turnID: env.turnID.isEmpty ? nil : env.turnID,
                               modelContext: modelContext) {
                 try? modelContext.save()
                 recomputeGroups()
@@ -1672,6 +1673,7 @@ public final class SessionDetailViewModel {
     private func handleAcpEvent(_ acp: Amux_AcpEvent,
                                 sequence: Int,
                                 runtimeID: String? = nil,
+                                turnID: String? = nil,
                                 modelContext: ModelContext) -> Bool {
         // Heartbeat: any ACP event arrival means the runtime is busy.
         // Drives the chip stop icon / streamingAgentIDs across the
@@ -1689,6 +1691,7 @@ public final class SessionDetailViewModel {
                 runtimeID: runtimeID ?? "",
                 agentBucketKey: bucketKey(forRuntimeID: runtimeID) ?? eventScopeKey,
                 timestamp: .now,
+                turnID: turnID,
                 acpEvent: acp
             )),
             modelContext: modelContext
@@ -1770,6 +1773,7 @@ public final class SessionDetailViewModel {
                 if handleAcpEvent(acp,
                                   sequence: seq,
                                   runtimeID: envelope.runtimeID,
+                                  turnID: envelope.turnID.isEmpty ? nil : envelope.turnID,
                                   modelContext: modelContext) {
                     anyDirty = true
                 }

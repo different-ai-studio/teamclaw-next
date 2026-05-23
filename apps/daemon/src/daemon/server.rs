@@ -1477,19 +1477,26 @@ impl DaemonServer {
                         })),
                         model: String::new(),
                     };
-                    let seq = self
-                        .agents
-                        .lock()
-                        .await
-                        .get_handle_mut(agent_id)
-                        .map(|h| h.next_sequence())
-                        .unwrap_or(0);
+                    let (seq, turn_id) = {
+                        let mut agents = self.agents.lock().await;
+                        let seq = agents
+                            .get_handle_mut(agent_id)
+                            .map(|h| h.next_sequence())
+                            .unwrap_or(0);
+                        let turn_id = agents
+                            .aggregator(agent_id)
+                            .and_then(|a| a.current_turn_id())
+                            .unwrap_or("")
+                            .to_string();
+                        (seq, turn_id)
+                    };
                     let envelope = amux::Envelope {
                         runtime_id: agent_id.into(),
                         device_id: self.config.device.id.clone(),
                         source_peer_id: String::new(),
                         timestamp: chrono::Utc::now().timestamp(),
                         sequence: seq,
+                        turn_id,
                         payload: Some(amux::envelope::Payload::AcpEvent(update_event)),
                     };
                     self.history.append(agent_id, &envelope);
@@ -1589,17 +1596,24 @@ impl DaemonServer {
         // Supabase `messages`. ACP `acp.event` envelopes still flow through
         // the unchanged publish path below for streaming UI.
         let collab_sessions = self.target_sessions(agent_id).await;
-        if !collab_sessions.is_empty() {
-            let emitted = {
-                let mut agents = self.agents.lock().await;
-                agents
-                    .aggregator_mut(agent_id)
-                    .map(|agg| agg.ingest(&acp_event))
-                    .unwrap_or_default()
-            };
-
-            if !emitted.is_empty() {
-                if let Some(tc) = self.teamclaw.as_ref() {
+        let (emitted, turn_id) = {
+            let mut agents = self.agents.lock().await;
+            match agents.aggregator_mut(agent_id) {
+                Some(agg) => {
+                    // ingest may transition Active→Idle, which clears
+                    // current_turn_id. Read AFTER ingest so the envelope for
+                    // the final status-change carries an empty turn_id (the
+                    // turn just ended); deltas / completions within an active
+                    // turn capture the still-Some id.
+                    let emitted = agg.ingest(&acp_event);
+                    let turn_id = agg.current_turn_id().unwrap_or("").to_string();
+                    (emitted, turn_id)
+                }
+                None => (Vec::new(), String::new()),
+            }
+        };
+        if !collab_sessions.is_empty() && !emitted.is_empty() {
+            if let Some(tc) = self.teamclaw.as_ref() {
                     let actor_id = self.actor_id.clone();
                     let model = self
                         .agents
@@ -1645,7 +1659,6 @@ impl DaemonServer {
                         }
                     }
                 }
-            }
         }
 
         let seq = self
@@ -1692,6 +1705,7 @@ impl DaemonServer {
             source_peer_id: String::new(), // agent-initiated
             timestamp: chrono::Utc::now().timestamp(),
             sequence: seq,
+            turn_id,
             payload: Some(amux::envelope::Payload::AcpEvent(acp_event)),
         };
 
@@ -2813,12 +2827,16 @@ impl DaemonServer {
     /// `session/{sid}/live` next to the streaming output that triggered
     /// them — iOS subscribes there exclusively.
     async fn publish_session_event(&self, agent_id: &str, event: amux::SessionEvent) {
+        // Session-level events (HistoryBatch reply, etc.) are not part of an
+        // ACP turn; leave turn_id empty. iOS does not dedupe session events
+        // by turn anyway.
         let envelope = amux::Envelope {
             runtime_id: agent_id.into(),
             device_id: self.config.device.id.clone(),
             source_peer_id: String::new(),
             timestamp: chrono::Utc::now().timestamp(),
             sequence: 0,
+            turn_id: String::new(),
             payload: Some(amux::envelope::Payload::SessionEvent(event)),
         };
         self.publish_envelope_to_sessions(agent_id, &envelope).await;
