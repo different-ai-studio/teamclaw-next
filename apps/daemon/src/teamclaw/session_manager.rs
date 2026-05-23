@@ -1,3 +1,4 @@
+use crate::backend::Backend;
 use crate::mqtt::Topics;
 use crate::proto::teamclaw::{self, RpcRequest, RpcResponse};
 use crate::teamclaw::{
@@ -1202,7 +1203,7 @@ impl SessionManager {
         turn_id: &str,
         sequence: u64,
         persist_supabase: bool,
-        supabase: Option<&crate::supabase::SupabaseClient>,
+        supabase: Option<&std::sync::Arc<dyn Backend>>,
     ) {
         let message_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let now = chrono::Utc::now();

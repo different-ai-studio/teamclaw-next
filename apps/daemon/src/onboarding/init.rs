@@ -1,7 +1,8 @@
+use crate::backend::Backend;
 use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
 use crate::onboarding::invite_url::{self, ParsedInvite};
 use crate::supabase::error::{SupabaseError, SupabaseResult};
-use crate::supabase::{SupabaseClient, SupabaseConfig};
+use crate::supabase::{SupabaseBackend, SupabaseConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use teamclaw_types::services_defaults::services_defaults;
@@ -28,7 +29,7 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
     let invite = invite_url::parse(raw_url)?;
 
     let base_cfg = supabase_build_env_config_from_process()?;
-    let claim_client = SupabaseClient::new(base_cfg.clone())?;
+    let claim_client = SupabaseBackend::new(base_cfg.clone())?;
     let claim = claim_client.claim_team_invite(&invite.token).await?;
 
     let refresh_token =
@@ -48,7 +49,7 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         actor_id: claim.actor_id.clone(),
     };
 
-    let verify_client = SupabaseClient::new(cfg.clone())?;
+    let verify_client = SupabaseBackend::new(cfg.clone())?;
     verify_client.access_token().await?;
 
     let path = match config_path {
