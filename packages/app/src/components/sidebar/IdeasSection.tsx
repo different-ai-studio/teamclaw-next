@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase-client'
 import { useIdeasForTeam, type IdeaRow as IdeaRowData } from '@/components/panel/IdeasView'
 import { CreateIdeaDialog } from '@/components/sidebar/CreateIdeaDialog'
+import { IdeaDetailDialog } from '@/components/sidebar/IdeaDetailDialog'
 import { IdeaRow } from '@/components/sidebar/IdeaRow'
 import { RenameIdeaDialog } from '@/components/sidebar/RenameIdeaDialog'
 import { updateIdeaStatus, type IdeaStatus } from '@/lib/idea-mutations'
@@ -28,6 +29,7 @@ export function IdeasSection() {
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const { ideas, loading, teamId, refetch } = useIdeasForTeam()
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [detailFor, setDetailFor] = React.useState<IdeaRowData | null>(null)
   const [renameFor, setRenameFor] = React.useState<IdeaRowData | null>(null)
   const [deleteFor, setDeleteFor] = React.useState<IdeaRowData | null>(null)
   const [deleting, setDeleting] = React.useState(false)
@@ -106,6 +108,11 @@ export function IdeasSection() {
         </button>
       </div>
       <CreateIdeaDialog open={createOpen} onOpenChange={setCreateOpen} teamId={teamId} onCreated={refetch} />
+      <IdeaDetailDialog
+        idea={detailFor}
+        onOpenChange={(open) => { if (!open) setDetailFor(null) }}
+        onChanged={refetch}
+      />
       <RenameIdeaDialog
         ideaId={renameFor?.id ?? null}
         initialTitle={renameFor?.title ?? ''}
@@ -143,6 +150,7 @@ export function IdeasSection() {
               idea={idea}
               active={filter.kind === 'idea' && filter.ideaId === idea.id}
               onSelect={handleSelect}
+              onView={setDetailFor}
               onChangeStatus={handleChangeStatus}
               onRequestRename={setRenameFor}
               onCopyId={handleCopyId}

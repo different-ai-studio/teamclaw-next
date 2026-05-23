@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { updateIdeaStatus, renameIdea } from '../idea-mutations'
+import { createIdeaActivity, updateIdea, updateIdeaStatus, renameIdea } from '../idea-mutations'
 
 const rpcMock = vi.fn()
 const singleMock = vi.fn()
@@ -78,5 +78,40 @@ describe('renameIdea', () => {
   it('rejects empty / whitespace title', async () => {
     await expect(renameIdea('idea-1', '   ')).rejects.toThrow('title is required')
     expect(singleMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateIdea', () => {
+  it('calls update_idea with explicit editable fields', async () => {
+    await updateIdea('idea-1', {
+      workspaceId: null,
+      title: ' Edited ',
+      description: 'Details',
+      status: 'done',
+    })
+
+    expect(rpcMock).toHaveBeenCalledWith('update_idea', {
+      p_idea_id: 'idea-1',
+      p_workspace_id: null,
+      p_title: 'Edited',
+      p_description: 'Details',
+      p_status: 'done',
+    })
+  })
+})
+
+describe('createIdeaActivity', () => {
+  it('calls create_idea_activity with progress content', async () => {
+    await createIdeaActivity('idea-1', {
+      activityType: 'progress',
+      content: 'shipped first pass',
+    })
+
+    expect(rpcMock).toHaveBeenCalledWith('create_idea_activity', {
+      p_idea_id: 'idea-1',
+      p_activity_type: 'progress',
+      p_content: 'shipped first pass',
+      p_metadata: {},
+    })
   })
 })
