@@ -4,7 +4,9 @@ This file is the source-of-truth for the **web / desktop** visual language
 (`packages/app/`). For the **iOS client** (`apps/ios/`) the source-of-truth is
 `apps/ios/DESIGN.md` (the Hai 灰 / wabi-sabi system) — don't apply the rules
 below to iOS work. For repo conventions (architecture, commands, release
-process) see `CLAUDE.md`.
+process) see `CLAUDE.md`. If `docs/SDLC.md` exists in this checkout, read it
+before starting changes; it is a local, git-ignored SDLC override for this
+workspace.
 
 The web/desktop design direction is **"Editorial Calm"** — paper-feel
 neutrals, brand coral used only as small accents, Chinese-first typography,

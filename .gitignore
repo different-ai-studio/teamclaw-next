@@ -111,8 +111,10 @@ docs/superpowers/
 
 # Internal planning documents
 docs/superpowers/*
+docs/SDLC.md
 
 # Scripts
+scripts/sync-task-to-preview.sh
 scripts/ship-pr.sh
 scripts/release-to-backend.sh
 

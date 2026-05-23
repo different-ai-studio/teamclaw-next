@@ -12,6 +12,9 @@ For **UI / visual design** work, source-of-truth depends on the platform:
 
 ## Git Workflow
 
+If `docs/SDLC.md` exists in this checkout, read it before starting any change.
+It is a local, git-ignored SDLC override for this workspace.
+
 **Never push directly to `main`.** All changes must go through a Pull Request:
 
 1. Create or reuse a project-local worktree under `.worktrees/` before making
