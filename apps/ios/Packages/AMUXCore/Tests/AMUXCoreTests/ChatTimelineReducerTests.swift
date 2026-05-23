@@ -443,6 +443,38 @@ struct ReducerHistoryCrossDedupeTests {
                 "same agent output content must stay one bubble even if Supabase returns another row id")
     }
 
+    @Test("history seed replaces same-agent local output prefix with full persisted reply")
+    func historySeedReplacesSameAgentLocalOutputPrefix() {
+        var state = TimelineState(entries: [
+            TimelineEntry(
+                eventType: "output",
+                text: "I found the existing iOS pieces:",
+                isComplete: true,
+                senderActorID: "agent",
+                timestamp: Date(timeIntervalSince1970: 2)
+            )
+        ])
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "sb-full",
+                kind: .output,
+                senderActorID: "agent",
+                content: "I found the existing iOS pieces:\n- CreateIdeaSheet\n- AttachmentUploadManager",
+                createdAt: Date(timeIntervalSince1970: 1),
+                model: "codex",
+                turnID: "turn-1"
+            )),
+            to: &state
+        )
+
+        #expect(state.entries.count == 1,
+                "Supabase full reply must replace the shorter live/local prefix instead of rendering twice")
+        #expect(state.entries[0].text == "I found the existing iOS pieces:\n- CreateIdeaSheet\n- AttachmentUploadManager")
+        #expect(state.entries[0].supabaseMessageID == "sb-full")
+        #expect(state.entries[0].turnID == "turn-1")
+    }
+
     @Test("history seed merges local prompt by outbox id before content")
     func historyMergesLocalPromptByOutboxId() {
         var state = TimelineState(entries: [

@@ -13,6 +13,12 @@ use crate::backend::Backend;
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
 use crate::collab::{AuthManager, AuthResult, PeerState, PeerTracker, PermissionManager};
 use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
+use crate::daemon::binding_target::parse_binding_to_target;
+use crate::daemon::prompt_await::parse_prompt_await_payload;
+use crate::daemon::runtime_resolution::{
+    resolve_requested_agent_type, runtime_start_initial_model_override, supported_agent_type_names,
+};
+use crate::daemon::session_events::{format_idea_prompt, parse_mention_actor_ids};
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
@@ -50,80 +56,6 @@ pub(crate) struct OfflineRestartPlan {
     pub backend: amux::AgentType,
     pub local_workspace_id: String,
     pub unread_count: usize,
-}
-
-fn resolve_requested_agent_type(
-    config: &DaemonConfig,
-    requested: amux::AgentType,
-) -> amux::AgentType {
-    let has_claude = config.agents.claude_code.is_some();
-    let has_opencode = config.agents.opencode.is_some();
-    let has_codex = config.agents.codex.is_some();
-
-    // When the explicitly-requested backend isn't configured, fall back to
-    // whatever IS configured (preferring opencode, then claude_code, then
-    // codex) instead of silently spawning the hard-coded "claude" default —
-    // that path would pair a wrong binary with the wrong ACP adapter.
-    let fallback = || {
-        if has_opencode {
-            amux::AgentType::Opencode
-        } else if has_claude {
-            amux::AgentType::ClaudeCode
-        } else if has_codex {
-            amux::AgentType::Codex
-        } else {
-            amux::AgentType::ClaudeCode
-        }
-    };
-
-    match requested {
-        amux::AgentType::Unknown => fallback(),
-        amux::AgentType::ClaudeCode => {
-            if has_claude {
-                amux::AgentType::ClaudeCode
-            } else {
-                fallback()
-            }
-        }
-        amux::AgentType::Opencode => {
-            if has_opencode {
-                amux::AgentType::Opencode
-            } else {
-                fallback()
-            }
-        }
-        amux::AgentType::Codex => {
-            if has_codex {
-                amux::AgentType::Codex
-            } else {
-                fallback()
-            }
-        }
-    }
-}
-
-fn runtime_start_initial_model_override(
-    start: &crate::proto::teamclaw::RuntimeStartRequest,
-) -> Option<String> {
-    let model_id = start.model_id.trim();
-    (!model_id.is_empty()).then(|| model_id.to_string())
-}
-
-fn supported_agent_type_names(config: &DaemonConfig) -> Vec<String> {
-    let mut names = Vec::new();
-    if config.agents.claude_code.is_some() {
-        names.push("claude".to_string());
-    }
-    if config.agents.opencode.is_some() {
-        names.push("opencode".to_string());
-    }
-    if config.agents.codex.is_some() {
-        names.push("codex".to_string());
-    }
-    if names.is_empty() {
-        names.push("claude".to_string());
-    }
-    names
 }
 
 pub struct DaemonServer {
@@ -1656,52 +1588,50 @@ impl DaemonServer {
         };
         if !collab_sessions.is_empty() && !emitted.is_empty() {
             if let Some(tc) = self.teamclaw.as_ref() {
-                    let actor_id = self.actor_id.clone();
-                    let model = self
-                        .agents
-                        .lock()
-                        .await
-                        .current_model(agent_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    for msg in emitted {
-                        let persist =
-                            crate::runtime::turn_aggregator::TurnAggregator::supabase_persistent(
-                                &msg,
-                            );
-                        // Non-persistent kinds (AgentThinking / AgentToolCall /
-                        // AgentToolResult) are already fully covered by the
-                        // acp.event stream below — re-publishing them as
-                        // message.created on session/live just makes iOS
-                        // render the same content twice (folded thinking card
-                        // + plain bubble via handleIncomingChatMessage). Only
-                        // AgentReply needs message.created, since that is the
-                        // turn-finalized form persisted to Supabase and used
-                        // by historical replay / other collaborators.
-                        if !persist {
-                            continue;
-                        }
-                        let kind = msg.kind;
-                        let content = msg.content;
-                        let metadata_json = msg.metadata_json;
-                        let turn_id = msg.turn_id;
-                        for sid in &collab_sessions {
-                            tc.emit_agent_message(
-                                sid,
-                                &actor_id,
-                                kind,
-                                &content,
-                                &metadata_json,
-                                &model,
-                                &turn_id,
-                                seq,
-                                persist,
-                                Some(&self.supabase),
-                            )
-                            .await;
-                        }
+                let actor_id = self.actor_id.clone();
+                let model = self
+                    .agents
+                    .lock()
+                    .await
+                    .current_model(agent_id)
+                    .cloned()
+                    .unwrap_or_default();
+                for msg in emitted {
+                    let persist =
+                        crate::runtime::turn_aggregator::TurnAggregator::supabase_persistent(&msg);
+                    // Non-persistent kinds (AgentThinking / AgentToolCall /
+                    // AgentToolResult) are already fully covered by the
+                    // acp.event stream below — re-publishing them as
+                    // message.created on session/live just makes iOS
+                    // render the same content twice (folded thinking card
+                    // + plain bubble via handleIncomingChatMessage). Only
+                    // AgentReply needs message.created, since that is the
+                    // turn-finalized form persisted to Supabase and used
+                    // by historical replay / other collaborators.
+                    if !persist {
+                        continue;
+                    }
+                    let kind = msg.kind;
+                    let content = msg.content;
+                    let metadata_json = msg.metadata_json;
+                    let turn_id = msg.turn_id;
+                    for sid in &collab_sessions {
+                        tc.emit_agent_message(
+                            sid,
+                            &actor_id,
+                            kind,
+                            &content,
+                            &metadata_json,
+                            &model,
+                            &turn_id,
+                            seq,
+                            persist,
+                            Some(&self.supabase),
+                        )
+                        .await;
                     }
                 }
+            }
         }
 
         // Ambient state variants (replaced wholesale on each push) should not
@@ -3820,150 +3750,6 @@ fn fit_available_commands_in_budget(ac: &mut crate::proto::amux::AcpAvailableCom
     }
 }
 
-fn format_idea_prompt(session_id: &str, event: &crate::proto::teamclaw::IdeaEvent) -> String {
-    use crate::proto::teamclaw::idea_event::Event;
-    match &event.event {
-        Some(Event::Created(item)) => format!(
-            "[Collab session: {}] New idea: {} - {}",
-            session_id, item.title, item.description
-        ),
-        Some(Event::Updated(item)) => format!(
-            "[Collab session: {}] Idea updated: {}",
-            session_id, item.title
-        ),
-        Some(Event::Claimed(claim)) => format!(
-            "[Collab session: {}] Idea {} claimed by {}",
-            session_id, claim.idea_id, claim.actor_id
-        ),
-        Some(Event::Submitted(sub)) => format!(
-            "[Collab session: {}] Submission for {}: {}",
-            session_id, sub.idea_id, sub.content
-        ),
-        None => String::new(),
-    }
-}
-
-/// Extract the `mention_actor_ids` array from a Supabase `messages.metadata`
-/// JSON string. Returns an empty Vec when the field is absent or malformed.
-///
-/// Extracted as a free function so it can be unit-tested without any I/O.
-pub fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
-    serde_json::from_str::<serde_json::Value>(metadata_json)
-        .ok()
-        .and_then(|v| v.get("mention_actor_ids").cloned())
-        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
-        .unwrap_or_default()
-}
-
-/// Map a session binding URI to a `(channel, default_target)` pair. The
-/// channel scheme determines the platform; the rest of the URI determines
-/// the per-platform target shape used by `ChannelManager::dispatch_send`
-/// (`user:<id>` or `chat:<id>`).
-///
-/// Binding shapes (from `crates/teamclaw-gateway/src/binding.rs`):
-///   wecom://{corp_id}/{agent_id}/single/{userid}
-///   wecom://{corp_id}/{agent_id}/external-single/{ext_userid}
-///   wecom://{corp_id}/{agent_id}/group/{chat_id}
-///   feishu://{app_id}/{chat_id}
-///   discord://{application_id}/{channel_id}
-///   kook://{scope}/{channel_id}
-///   wechat://{ilink_account}/single/{from_user_id}
-///   email://{account_key}/thread/{thread_key}
-///
-/// Only WeCom defaults are wired in this commit (M1 scope); other channels
-/// return `Ok((channel, None))` so the agent can still send by providing an
-/// explicit `target` override even before per-channel dispatch lands.
-#[derive(Debug)]
-pub(crate) struct PromptAwaitPayload<'a> {
-    pub session_key: &'a str,
-    pub message: &'a str,
-    /// Human-readable name of the cron job. Used to construct the Supabase
-    /// session title ("Cron: <job_name>"). Optional — when absent the daemon
-    /// falls back to "Cron job".
-    pub job_name: Option<&'a str>,
-    pub working_directory: Option<&'a str>,
-    pub model_override: Option<(String, String)>,
-    pub timeout_secs: u64,
-}
-
-pub(crate) fn parse_prompt_await_payload(
-    payload: &serde_json::Value,
-) -> anyhow::Result<PromptAwaitPayload<'_>> {
-    let session_key = payload
-        .get("session_key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("prompt-await: missing 'session_key'"))?;
-    if !session_key.starts_with("cron/") {
-        anyhow::bail!("prompt-await: session_key must start with 'cron/' (got {session_key:?})");
-    }
-    let message = payload
-        .get("message")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("prompt-await: missing 'message'"))?;
-    if message.is_empty() {
-        anyhow::bail!("prompt-await: 'message' must not be empty");
-    }
-    let job_name = payload
-        .get("job_name")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    let working_directory = payload
-        .get("working_directory")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    let model_override = payload
-        .get("model_override")
-        .and_then(|v| v.as_object())
-        .and_then(|m| {
-            let p = m.get("provider").and_then(|v| v.as_str())?;
-            let mo = m.get("model").and_then(|v| v.as_str())?;
-            Some((p.to_string(), mo.to_string()))
-        });
-    let timeout_secs = payload
-        .get("timeout_secs")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(300)
-        .clamp(1, 600);
-
-    Ok(PromptAwaitPayload {
-        session_key,
-        message,
-        job_name,
-        working_directory,
-        model_override,
-        timeout_secs,
-    })
-}
-
-fn parse_binding_to_target(binding: &str) -> anyhow::Result<(&'static str, Option<String>)> {
-    let (scheme, rest) = binding
-        .split_once("://")
-        .ok_or_else(|| anyhow::anyhow!("binding missing scheme: {binding}"))?;
-    let parts: Vec<&str> = rest.split('/').collect();
-    match scheme {
-        "wecom" => {
-            // wecom://{corp_id}/{agent_id}/{single|external-single|group}/{id}
-            if parts.len() < 4 {
-                anyhow::bail!("wecom binding malformed: {binding}");
-            }
-            let kind = parts[2];
-            let id = parts[3];
-            let target = match kind {
-                "single" | "external-single" => format!("user:{id}"),
-                "group" => format!("chat:{id}"),
-                other => anyhow::bail!("unknown wecom binding kind: {other}"),
-            };
-            Ok(("wecom", Some(target)))
-        }
-        "feishu" => Ok(("feishu", None)),
-        "discord" => Ok(("discord", None)),
-        "kook" => Ok(("kook", None)),
-        "wechat" => Ok(("wechat", None)),
-        "email" => Ok(("email", None)),
-        other => anyhow::bail!("unknown binding scheme: {other}"),
-    }
-}
-
 /// Bind `amuxd.sock` and spawn a task that accepts connections, reads a
 /// single newline-terminated control command per connection, and forwards
 /// the parsed `SockCommand` to the daemon's main loop via `tx`. Stale
@@ -4315,35 +4101,6 @@ mod tests {
             session_id: session_id.to_string(),
             payload: live.encode_to_vec(),
         }
-    }
-
-    #[test]
-    fn parse_mention_actor_ids_returns_empty_for_empty_object() {
-        assert!(parse_mention_actor_ids("{}").is_empty());
-    }
-
-    #[test]
-    fn parse_mention_actor_ids_extracts_ids() {
-        let json = r#"{"mention_actor_ids":["agent_X","agent_Y"]}"#;
-        assert_eq!(
-            parse_mention_actor_ids(json),
-            vec!["agent_X".to_string(), "agent_Y".to_string()]
-        );
-    }
-
-    #[test]
-    fn parse_mention_actor_ids_returns_empty_for_invalid_json() {
-        assert!(parse_mention_actor_ids("not json").is_empty());
-    }
-
-    #[test]
-    fn parse_mention_actor_ids_returns_empty_when_field_absent() {
-        assert!(parse_mention_actor_ids(r#"{"other":"value"}"#).is_empty());
-    }
-
-    #[test]
-    fn parse_mention_actor_ids_handles_empty_array() {
-        assert!(parse_mention_actor_ids(r#"{"mention_actor_ids":[]}"#).is_empty());
     }
 
     #[tokio::test]
@@ -4788,266 +4545,5 @@ mod tests {
 
         let agents = fixture.server.agents.lock().await;
         assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("first"));
-    }
-}
-
-#[cfg(test)]
-mod prompt_await_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn parse_rejects_missing_session_key() {
-        let p = json!({ "message": "hi" });
-        let err = parse_prompt_await_payload(&p).unwrap_err();
-        assert!(err.to_string().contains("session_key"), "got: {err}");
-    }
-
-    #[test]
-    fn parse_rejects_non_cron_session_key() {
-        let p = json!({ "session_key": "wecom/x/y", "message": "hi" });
-        let err = parse_prompt_await_payload(&p).unwrap_err();
-        assert!(
-            err.to_string().contains("must start with 'cron/'"),
-            "got: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_rejects_empty_message() {
-        let p = json!({ "session_key": "cron/j1/r1", "message": "" });
-        let err = parse_prompt_await_payload(&p).unwrap_err();
-        assert!(err.to_string().contains("message"), "got: {err}");
-    }
-
-    #[test]
-    fn parse_accepts_minimal_valid_payload() {
-        let p = json!({ "session_key": "cron/j1/r1", "message": "hello" });
-        let parsed = parse_prompt_await_payload(&p).unwrap();
-        assert_eq!(parsed.session_key, "cron/j1/r1");
-        assert_eq!(parsed.message, "hello");
-        assert!(parsed.job_name.is_none());
-        assert!(parsed.working_directory.is_none());
-        assert!(parsed.model_override.is_none());
-        assert_eq!(parsed.timeout_secs, 300);
-    }
-
-    #[test]
-    fn parse_accepts_full_payload() {
-        let p = json!({
-            "session_key": "cron/j1/r1",
-            "message": "hello",
-            "job_name": "Nightly digest",
-            "working_directory": "/tmp/wt",
-            "model_override": { "provider": "anthropic", "model": "sonnet" },
-            "timeout_secs": 120
-        });
-        let parsed = parse_prompt_await_payload(&p).unwrap();
-        assert_eq!(parsed.job_name, Some("Nightly digest"));
-        assert_eq!(parsed.working_directory.as_deref(), Some("/tmp/wt"));
-        assert_eq!(
-            parsed.model_override.as_ref().map(|m| m.0.as_str()),
-            Some("anthropic")
-        );
-        assert_eq!(
-            parsed.model_override.as_ref().map(|m| m.1.as_str()),
-            Some("sonnet")
-        );
-        assert_eq!(parsed.timeout_secs, 120);
-    }
-
-    #[test]
-    fn parse_accepts_optional_job_name() {
-        // Empty string is treated as absent (consistent with working_directory).
-        let p = json!({ "session_key": "cron/j1/r1", "message": "hi", "job_name": "" });
-        let parsed = parse_prompt_await_payload(&p).unwrap();
-        assert!(parsed.job_name.is_none());
-
-        // Non-empty string is preserved.
-        let p = json!({ "session_key": "cron/j1/r1", "message": "hi", "job_name": "My Job" });
-        let parsed = parse_prompt_await_payload(&p).unwrap();
-        assert_eq!(parsed.job_name, Some("My Job"));
-    }
-}
-
-#[cfg(test)]
-mod runtime_backend_resolution_tests {
-    use super::*;
-
-    fn base_config() -> DaemonConfig {
-        DaemonConfig {
-            device: crate::config::DeviceConfig {
-                id: "dev-1".to_string(),
-                name: "Mac".to_string(),
-            },
-            mqtt: crate::config::MqttConfig {
-                broker_url: "tcp://localhost:1883".to_string(),
-            },
-            agents: crate::config::AgentsConfig::default(),
-            team_id: None,
-            channels: crate::config::ChannelsConfig::default(),
-            idle_runtime_timeout_secs: None,
-        }
-    }
-
-    #[test]
-    fn resolves_claude_request_to_opencode_when_only_opencode_is_configured() {
-        let mut cfg = base_config();
-        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
-            binary: "opencode".to_string(),
-            default_flags: vec!["acp".to_string()],
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
-            amux::AgentType::Opencode
-        );
-    }
-
-    #[test]
-    fn preserves_explicit_non_claude_request() {
-        let mut cfg = base_config();
-        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
-            binary: "opencode".to_string(),
-            default_flags: vec!["acp".to_string()],
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
-            amux::AgentType::Opencode
-        );
-    }
-
-    #[test]
-    fn resolves_unknown_request_to_opencode_when_only_opencode_is_configured() {
-        let mut cfg = base_config();
-        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
-            binary: "opencode".to_string(),
-            default_flags: vec!["acp".to_string()],
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
-            amux::AgentType::Opencode
-        );
-    }
-
-    #[test]
-    fn resolves_unknown_to_opencode_when_both_configured() {
-        let mut cfg = base_config();
-        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
-            binary: "claude".to_string(),
-            default_flags: Vec::new(),
-        });
-        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
-            binary: "opencode".to_string(),
-            default_flags: vec!["acp".to_string()],
-        });
-
-        // opencode is the preferred default; Unknown resolves to it even when
-        // claude_code is also configured.
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
-            amux::AgentType::Opencode
-        );
-    }
-
-    #[test]
-    fn explicit_claude_code_request_honoured_when_both_configured() {
-        let mut cfg = base_config();
-        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
-            binary: "claude".to_string(),
-            default_flags: Vec::new(),
-        });
-        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
-            binary: "opencode".to_string(),
-            default_flags: vec!["acp".to_string()],
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
-            amux::AgentType::ClaudeCode
-        );
-    }
-
-    #[test]
-    fn explicit_codex_request_honoured_when_codex_configured() {
-        let mut cfg = base_config();
-        cfg.agents.codex = Some(crate::config::AgentBackendConfig {
-            binary: "codex".to_string(),
-            default_flags: Vec::new(),
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Codex),
-            amux::AgentType::Codex
-        );
-    }
-
-    #[test]
-    fn codex_request_reroutes_to_opencode_when_codex_absent() {
-        // Codex requested but only opencode is configured — reroute instead of
-        // silently spawning the wrong adapter via the hard-coded fallback.
-        let mut cfg = base_config();
-        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
-            binary: "opencode".to_string(),
-            default_flags: vec!["acp".to_string()],
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Codex),
-            amux::AgentType::Opencode
-        );
-    }
-
-    #[test]
-    fn opencode_request_reroutes_to_claude_when_opencode_absent() {
-        let mut cfg = base_config();
-        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
-            binary: "claude".to_string(),
-            default_flags: Vec::new(),
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
-            amux::AgentType::ClaudeCode
-        );
-    }
-
-    #[test]
-    fn runtime_start_model_id_becomes_initial_spawn_override() {
-        let start = crate::proto::teamclaw::RuntimeStartRequest {
-            model_id: "opencode/deepseek-v4-flash-free".to_string(),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            runtime_start_initial_model_override(&start).as_deref(),
-            Some("opencode/deepseek-v4-flash-free")
-        );
-    }
-
-    #[test]
-    fn runtime_start_empty_model_id_has_no_initial_spawn_override() {
-        let start = crate::proto::teamclaw::RuntimeStartRequest {
-            model_id: "   ".to_string(),
-            ..Default::default()
-        };
-
-        assert_eq!(runtime_start_initial_model_override(&start), None);
-    }
-
-    #[test]
-    fn unknown_request_resolves_to_codex_when_only_codex_configured() {
-        let mut cfg = base_config();
-        cfg.agents.codex = Some(crate::config::AgentBackendConfig {
-            binary: "codex".to_string(),
-            default_flags: Vec::new(),
-        });
-
-        assert_eq!(
-            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
-            amux::AgentType::Codex
-        );
     }
 }

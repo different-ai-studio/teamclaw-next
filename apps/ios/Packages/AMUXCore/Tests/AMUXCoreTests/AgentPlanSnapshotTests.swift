@@ -122,6 +122,23 @@ struct AgentPlanSnapshotTests {
         #expect(result[0].agentName == "Display(xyz)")
     }
 
+    @Test("session-scoped plan_update uses sender actor id for display name")
+    func senderActorIDPreferredOverSessionScope() {
+        let events = [
+            makeEvent(
+                agentId: "session-e68a8382",
+                sequence: 1,
+                type: "plan_update",
+                text: "[wip] thing",
+                senderActorID: "agent-codex"
+            )
+        ]
+        let result = AgentPlanSnapshot.derive(events: events, agentNameFor: nameProvider)
+        #expect(result.count == 1)
+        #expect(result[0].agentID == "agent-codex")
+        #expect(result[0].agentName == "agent-age")
+    }
+
     @Test("plan_update with empty text → snapshot filtered out")
     func emptyText() {
         let events = [
