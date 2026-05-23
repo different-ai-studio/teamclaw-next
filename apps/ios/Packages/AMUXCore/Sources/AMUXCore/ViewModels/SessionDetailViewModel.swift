@@ -1355,7 +1355,12 @@ public final class SessionDetailViewModel {
                 // Supabase rows AND daemon history; acceptable trade-off
                 // until we add cross-source content dedupe.
                 await self?.seedFromSupabaseMessages(modelContext: modelContext)
-                try? await self?.requestIncrementalSync(modelContext: modelContext)
+                // No cold-start full-sync — Supabase rows are the timeline
+                // source of truth for completed turns. Intermediate ACP
+                // events (thinking / tool calls / partial outputs) live in
+                // the daemon's per-runtime EventHistory and are fetched
+                // on-demand by `requestTurnHistory` when the user opens a
+                // turn-detail view.
 
                 for await msg in stream {
                     guard let self else { return }
@@ -1784,19 +1789,15 @@ public final class SessionDetailViewModel {
             try? modelContext.save()
         }
 
-        if batch.hasMore_p {
-            // Mid-sync: rebuild groups so the user sees progress, but defer
-            // the O(n log n) sort to the final page.
-            if anyDirty { recomputeGroups() }
-            Task {
-                try? await requestHistoryPage(afterSequence: batch.nextAfterSequence)
-            }
-        } else {
-            sortEventsForDisplay()
-            recomputeGroups()
-            syncGeneration &+= 1
-            isSyncing = false
-        }
+        // Turn-history responses arrive as a single batch — the daemon
+        // sets has_more=true only when the trim-to-budget loop dropped
+        // events. We don't paginate (no cursor for turn-scope queries)
+        // so the local streaming cache + live MQTT deltas fill the gap
+        // for huge turns. Always finalize after one batch.
+        sortEventsForDisplay()
+        recomputeGroups()
+        syncGeneration &+= 1
+        isSyncing = false
     }
 
     /// Fetch events newer than our local max sequence from the daemon.
@@ -1843,7 +1844,8 @@ public final class SessionDetailViewModel {
                     content: record.content,
                     createdAt: record.createdAt,
                     model: record.model,
-                    turnID: record.turnID
+                    turnID: record.turnID,
+                    sequence: record.sequence
                 )),
                 modelContext: modelContext
             )
@@ -1852,26 +1854,27 @@ public final class SessionDetailViewModel {
         if anyChange { recomputeGroups() }
     }
 
-    /// Also clears any stale streaming UI state: if the app was backgrounded
-    /// mid-stream and missed the `isComplete=true` or `status_change=idle`
-    /// event, `isStreaming` could be stuck showing a typing indicator. The
-    /// history batch will restore the correct state (and if the runtime is
-    /// actually still streaming, incoming deltas will flip `isStreaming` back).
-    public func requestIncrementalSync(modelContext: ModelContext) async throws {
-        guard runtime != nil else { return }
+    /// Fetch every envelope the daemon has for a specific turn from a
+    /// specific runtime's EventHistory log. Used by `StreamingDetailView`
+    /// (turn-detail drill-down from the bubble's top-right entry) to show
+    /// thinking / tool calls / partial outputs the session timeline
+    /// intentionally omits. Repeat calls are cheap — daemon scans the
+    /// runtime's index in memory and reducer dedupe handles overlap.
+    ///
+    /// `agentID` defaults to the current runtime; pass an explicit value
+    /// when the turn was produced by a different runtime in the same
+    /// session (multi-runtime fanouts).
+    public func requestTurnHistory(modelContext: ModelContext,
+                                   turnID: String,
+                                   agentID: String? = nil) async throws {
+        let targetAgent = agentID ?? runtime?.runtimeId ?? ""
+        guard !targetAgent.isEmpty, !turnID.isEmpty else { return }
         self.syncModelContext = modelContext
         isSyncing = true
-        // Clear stale streaming state — will be re-established by the batch
-        // (if runtime is idle now) or by fresh deltas (if it's still active).
-        streamingAgentSet.removeAll()
-        streamingTextByAgent.removeAll()
-        streamingModelByAgent.removeAll()
-        let maxSeq = events.compactMap({ $0.sequence != 0 ? $0.sequence : nil }).max() ?? 0
 
-        // Watchdog: if no history batch arrives (daemon offline, runtime gone,
-        // etc.) the response handler in handleHistoryBatch never fires and the
-        // button would spin forever. Bumping a generation token makes back-to-back
-        // syncs safe — only the watchdog matching the active generation resets state.
+        // Watchdog — if the daemon never replies, `isSyncing` must reset
+        // so a follow-up tap can re-issue cleanly. Same generation-token
+        // trick the old sequence-based sync used.
         syncGeneration &+= 1
         let myGeneration = syncGeneration
         Task { [weak self] in
@@ -1882,15 +1885,18 @@ public final class SessionDetailViewModel {
             }
         }
 
-        try await requestHistoryPage(afterSequence: UInt64(maxSeq))
-    }
-
-    private func requestHistoryPage(afterSequence: UInt64) async throws {
-        var req = Amux_AcpRequestHistory()
-        req.afterSequence = afterSequence
-        req.pageSize = 50
+        var req = Amux_AcpRequestTurnHistory()
+        req.turnID = turnID
         req.requestID = UUID().uuidString
-        try await sendCommand { $0.command = .requestHistory(req) }
+
+        let deviceID = resolveDaemonDeviceId()
+        let sender = RuntimeCommandSender(mqtt: mqtt, teamID: teamID, peerID: peerId)
+        try await sender.send(
+            runtimeID: targetAgent,
+            deviceID: deviceID,
+            currentHumanActorID: teamclawService?.currentHumanActorId,
+            makeCommand: { $0.command = .requestTurnHistory(req) }
+        )
     }
 
     private func sendCommand(_ makeCommand: (inout Amux_AcpCommand) -> Void) async throws {

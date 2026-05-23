@@ -673,6 +673,14 @@ public struct Amux_AcpCommand: Sendable {
     set {command = .requestHistory(newValue)}
   }
 
+  public var requestTurnHistory: Amux_AcpRequestTurnHistory {
+    get {
+      if case .requestTurnHistory(let v)? = command {return v}
+      return Amux_AcpRequestTurnHistory()
+    }
+    set {command = .requestTurnHistory(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Command: Equatable, Sendable {
@@ -683,6 +691,7 @@ public struct Amux_AcpCommand: Sendable {
     case startAgent(Amux_AcpStartAgent)
     case stopAgent(Amux_AcpStopAgent)
     case requestHistory(Amux_AcpRequestHistory)
+    case requestTurnHistory(Amux_AcpRequestTurnHistory)
 
   }
 
@@ -702,6 +711,25 @@ public struct Amux_AcpRequestHistory: Sendable {
   public var pageSize: UInt32 = 0
 
   /// For correlation
+  public var requestID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Request all envelopes for a specific turn from a specific runtime's
+/// EventHistory. Used by iOS to lazy-load thinking/tool events when the
+/// user opens a turn detail, and to resume mid-turn streaming after a
+/// reconnect. Scoped to one runtime (turn_id is uuid v4 globally unique,
+/// but kept per-runtime so callers don't conflate runtimes).
+public struct Amux_AcpRequestTurnHistory: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var turnID: String = String()
+
   public var requestID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -2074,7 +2102,7 @@ extension Amux_AcpPlanEntry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
 
 extension Amux_AcpCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AcpCommand"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}send_prompt\0\u{1}cancel\0\u{3}grant_permission\0\u{3}deny_permission\0\u{3}start_agent\0\u{3}stop_agent\0\u{3}request_history\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}send_prompt\0\u{1}cancel\0\u{3}grant_permission\0\u{3}deny_permission\0\u{3}start_agent\0\u{3}stop_agent\0\u{3}request_history\0\u{3}request_turn_history\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2173,6 +2201,19 @@ extension Amux_AcpCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
           self.command = .requestHistory(v)
         }
       }()
+      case 8: try {
+        var v: Amux_AcpRequestTurnHistory?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .requestTurnHistory(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .requestTurnHistory(v)
+        }
+      }()
       default: break
       }
     }
@@ -2211,6 +2252,10 @@ extension Amux_AcpCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     case .requestHistory?: try {
       guard case .requestHistory(let v)? = self.command else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .requestTurnHistory?: try {
+      guard case .requestTurnHistory(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     }()
     case nil: break
     }
@@ -2258,6 +2303,41 @@ extension Amux_AcpRequestHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   public static func ==(lhs: Amux_AcpRequestHistory, rhs: Amux_AcpRequestHistory) -> Bool {
     if lhs.afterSequence != rhs.afterSequence {return false}
     if lhs.pageSize != rhs.pageSize {return false}
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Amux_AcpRequestTurnHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AcpRequestTurnHistory"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}turn_id\0\u{3}request_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.turnID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.requestID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.turnID.isEmpty {
+      try visitor.visitSingularStringField(value: self.turnID, fieldNumber: 1)
+    }
+    if !self.requestID.isEmpty {
+      try visitor.visitSingularStringField(value: self.requestID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Amux_AcpRequestTurnHistory, rhs: Amux_AcpRequestTurnHistory) -> Bool {
+    if lhs.turnID != rhs.turnID {return false}
     if lhs.requestID != rhs.requestID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

@@ -22,7 +22,7 @@ import SwiftData
 ///
 /// Returns nil only when the session is missing or has no primary agent
 /// (human-only sessions never spawn a runtime; building a placeholder
-/// there causes downstream paths like `requestIncrementalSync` and
+/// there causes downstream paths like `requestTurnHistory` and
 /// `sendCommand` to surface "Runtime id missing" errors for chats where
 /// there's legitimately no agent to talk to).
 @MainActor

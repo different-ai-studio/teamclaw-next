@@ -3,6 +3,29 @@ import SwiftData
 import AMUXCore
 import AMUXSharedUI
 
+@MainActor
+private struct TurnHistoryFetcher: ViewModifier {
+    let viewModel: SessionDetailViewModel
+    let route: TurnRoute
+    @Environment(\.modelContext) private var modelContext
+
+    func body(content: Content) -> some View {
+        content.task(id: route.frozenTurnID) {
+            // Fetch the daemon's recorded thinking / tool-call / partial-output
+            // events for the pinned turn. Active streams already receive live
+            // deltas via MQTT; the daemon scan is fast and the reducer dedupes
+            // overlap, so we don't gate on "do we already have events for this
+            // turn" — a redundant call is cheaper than missing thinking events.
+            guard let turnID = route.frozenTurnID, !turnID.isEmpty else { return }
+            try? await viewModel.requestTurnHistory(
+                modelContext: modelContext,
+                turnID: turnID,
+                agentID: route.agentID
+            )
+        }
+    }
+}
+
 /// Hashable handle for `.navigationDestination(for:)`. The active vs.
 /// completed distinction is implicit — the destination view inspects the
 /// view-model's current `feedItems` and renders whichever turn matches:
@@ -200,5 +223,6 @@ public struct StreamingDetailView: View {
                 }
             }
         }
+        .modifier(TurnHistoryFetcher(viewModel: viewModel, route: route))
     }
 }

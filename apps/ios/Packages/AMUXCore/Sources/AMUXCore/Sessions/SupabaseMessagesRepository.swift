@@ -23,6 +23,11 @@ public struct MessageRecord: Equatable, Sendable {
     /// to merge those rows into a single bubble. nil for pre-turn_id
     /// rows or non-agent kinds.
     public let turnID: String?
+    /// Daemon-assigned per-runtime envelope sequence, stamped on every
+    /// emit by `emit_agent_message`. Stable order across multi-runtime
+    /// fanouts where `created_at` would collide. 0 means "legacy row
+    /// before the column existed" — fall back to created_at ordering.
+    public let sequence: Int64
 }
 
 /// Input shape for inserting a chat message into Supabase. iOS writes
@@ -116,9 +121,10 @@ public actor SupabaseMessagesRepository: MessagesRepository {
     public func listForSession(sessionID: String) async throws -> [MessageRecord] {
         let rows: [MessageRow] = try await client
             .from("messages")
-            .select("id, session_id, sender_actor_id, kind, content, created_at, model, turn_id")
+            .select("id, session_id, sender_actor_id, kind, content, created_at, model, turn_id, sequence")
             .eq("session_id", value: sessionID)
             .order("created_at", ascending: true)
+            .order("sequence", ascending: true)
             .execute()
             .value
 
@@ -131,7 +137,8 @@ public actor SupabaseMessagesRepository: MessagesRepository {
                 content: row.content,
                 createdAt: row.createdAt,
                 model: row.model,
-                turnID: row.turnID
+                turnID: row.turnID,
+                sequence: row.sequence ?? 0
             )
         }
     }
@@ -168,6 +175,7 @@ private struct MessageRow: Decodable, Sendable {
     let createdAt: Date
     let model: String?
     let turnID: String?
+    let sequence: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -178,5 +186,6 @@ private struct MessageRow: Decodable, Sendable {
         case createdAt = "created_at"
         case model
         case turnID = "turn_id"
+        case sequence
     }
 }
