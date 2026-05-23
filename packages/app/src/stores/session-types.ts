@@ -202,6 +202,7 @@ export interface SessionState {
   pinnedSessionIds: string[];
   currentWorkspacePath: string | null;
   activeSessionId: string | null;
+  currentSessionId: string | null;
   isLoading: boolean;
   isLoadingMore: boolean; // Loading more sessions (UI pagination)
   hasMoreSessions: boolean; // Whether there are more sessions to show

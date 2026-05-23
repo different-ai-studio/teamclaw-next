@@ -1030,7 +1030,7 @@ impl KookGateway {
                 &session_title,
                 &self.primary_agent_actor_id,
                 &self.agent_owner_actor_ids,
-                &[external_actor_id.clone()],
+                std::slice::from_ref(&external_actor_id),
             )
             .await
         {

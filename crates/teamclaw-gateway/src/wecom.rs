@@ -103,6 +103,7 @@ async fn download_and_decrypt_wecom_media(
 }
 
 /// Compress an image to fit within max_bytes by resizing and re-encoding as JPEG.
+#[allow(dead_code)]
 fn compress_image(bytes: &[u8], max_bytes: usize) -> Result<Vec<u8>, String> {
     use image::ImageReader;
     use std::io::Cursor;
@@ -270,6 +271,7 @@ fn detect_ooxml_from_zip(bytes: &[u8]) -> Option<String> {
 ///
 /// Handles both `filename="name.ext"` and `filename*=UTF-8''encoded` forms.
 /// Returns `None` if no filename can be extracted.
+#[allow(dead_code)]
 fn extract_filename_from_content_disposition(header: &str) -> Option<String> {
     let lower = header.to_ascii_lowercase();
 
@@ -358,6 +360,7 @@ fn mime_to_ext(mime: &str) -> &'static str {
 
 /// Extract the lowercase extension from a filename, rejecting dotfiles
 /// (`.hidden`), trailing dots (`name.`), and non-alphanumeric extensions.
+#[allow(dead_code)]
 fn ext_from_filename(filename: &str) -> Option<String> {
     let (stem, ext) = filename.rsplit_once('.')?;
     if stem.is_empty() || ext.is_empty() {
@@ -1351,7 +1354,7 @@ impl WeComGateway {
                 &session_title,
                 &self.primary_agent_actor_id,
                 &self.agent_owner_actor_ids,
-                &[external_actor_id.clone()],
+                std::slice::from_ref(&external_actor_id),
             )
             .await
         {
@@ -1912,6 +1915,7 @@ impl WeComGateway {
     }
 
     /// Static version of send_stream_chunk for use in spawned tasks (no &self needed)
+    #[allow(dead_code)]
     async fn send_stream_chunk_static(
         req_id: &str,
         stream_id: &str,
@@ -2135,6 +2139,7 @@ impl WeComGateway {
     }
 
     /// Send a media message as a reply (image/voice/video/file).
+    #[allow(dead_code)]
     async fn send_media_reply(
         &self,
         req_id: &str,
@@ -2164,6 +2169,7 @@ impl WeComGateway {
     }
 
     /// Upload file bytes and send as a reply. Convenience wrapper.
+    #[allow(dead_code)]
     async fn upload_and_send_media_reply(
         &self,
         req_id: &str,

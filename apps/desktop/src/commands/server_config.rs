@@ -255,7 +255,10 @@ mod tests {
             .unwrap();
 
         let d = services_defaults();
-        assert_eq!(loaded.supabase_url.as_deref(), Some(d.supabase_url.as_str()));
+        assert_eq!(
+            loaded.supabase_url.as_deref(),
+            Some(d.supabase_url.as_str())
+        );
         assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
         assert_eq!(loaded.mqtt_port, Some(d.mqtt_port));
         assert_eq!(loaded.mqtt_use_tls, Some(d.mqtt_use_tls));

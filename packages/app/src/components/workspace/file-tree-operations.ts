@@ -48,7 +48,7 @@ export async function renameItem(oldPath: string, newPath: string): Promise<bool
 export async function deleteItem(
   path: string,
   isDirectory: boolean,
-  workspacePath?: string,
+  _workspacePath?: string,
 ): Promise<boolean> {
   if (!isTauri()) return false;
   try {

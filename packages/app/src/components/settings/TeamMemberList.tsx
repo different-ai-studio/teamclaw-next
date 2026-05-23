@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { useTranslation } from 'react-i18next'
 import { UserMinus, Shield, Pencil, Eye, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTeamMembersStore } from '../../stores/team-members'
@@ -61,7 +60,6 @@ function LocalDeviceBadge() {
 }
 
 export function TeamMemberList() {
-  const { t } = useTranslation()
   const {
     members,
     myRole,

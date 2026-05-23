@@ -113,6 +113,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   todos: [],
   sessionDiff: [],
 
+  // Re-enable the legacy chat/session pipeline on top of the v2 compat shim.
+  ...createLoaderActions(set as never, get as never),
+  ...createMessageActions(set as never, get as never),
+
   // ── Phase 1E compat: methods with light wiring ───────────────────
   getActiveSession: () => {
     const sid = get().currentSessionId ?? get().activeSessionId;
@@ -150,10 +154,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   setConnected: (v: boolean) => set({ isConnected: v }),
   setInactivityWarning: (v: Compat) => set({ inactivityWarning: v }),
-
-  // Re-enable the legacy chat/session pipeline on top of the v2 compat shim.
-  ...createLoaderActions(set as never, get as never),
-  ...createMessageActions(set as never, get as never),
 
   // ── Phase 1E compat: pure stubs (no v2 implementation yet) ───────
   pollPermissions: stubAsync("pollPermissions"),

@@ -96,25 +96,29 @@ export function XtermInstance({ tabId, active }: Props) {
     }
 
     // Intercept Cmd/Ctrl+F before xterm consumes it.
-    term.attachCustomKeyEventHandler(e => {
-      if (e.type !== "keydown") return true;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
-        setSearchOpen(true);
-        return false;
-      }
-      return true;
-    });
+    if (typeof term.attachCustomKeyEventHandler === "function") {
+      term.attachCustomKeyEventHandler(e => {
+        if (e.type !== "keydown") return true;
+        const mod = e.metaKey || e.ctrlKey;
+        if (mod && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+          setSearchOpen(true);
+          return false;
+        }
+        return true;
+      });
+    }
 
     // OSC 633 — VS Code shell integration. Parses cwd / command start / command exit.
-    oscDisposer = term.parser.registerOscHandler(633, data => {
-      handleOsc633(data, {
-        onCwd: cwd => updateCwd(tabId, cwd),
-        onCommandStart: cmd => recordCommandStart(tabId, cmd),
-        onCommandFinish: exit => recordCommandFinish(tabId, exit),
+    if (term.parser?.registerOscHandler) {
+      oscDisposer = term.parser.registerOscHandler(633, data => {
+        handleOsc633(data, {
+          onCwd: cwd => updateCwd(tabId, cwd),
+          onCommandStart: cmd => recordCommandStart(tabId, cmd),
+          onCommandFinish: exit => recordCommandFinish(tabId, exit),
+        });
+        return true;
       });
-      return true;
-    });
+    }
 
     (async () => {
       try {
@@ -203,7 +207,9 @@ export function XtermInstance({ tabId, active }: Props) {
       // Force a repaint when becoming active. Inactive tabs are hidden via
       // the parent's `visibility: hidden`, so their xterm container always
       // has a real size — but WebGL still skips frames while not visible.
-      termRef.current.refresh(0, termRef.current.rows - 1);
+      if (typeof termRef.current.refresh === "function") {
+        termRef.current.refresh(0, termRef.current.rows - 1);
+      }
     }
   }, [active]);
 
