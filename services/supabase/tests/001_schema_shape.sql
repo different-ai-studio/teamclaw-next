@@ -16,7 +16,7 @@ exception
 end;
 $$;
 
-select plan(66);
+select plan(67);
 
 select has_schema('app');
 select has_table('public', 'teams');
@@ -41,6 +41,7 @@ select col_type_is('public', 'agents', 'id', 'uuid');
 select col_type_is('public', 'workspaces', 'agent_id', 'uuid');
 select col_type_is('public', 'ideas', 'sort_order', 'integer');
 select col_type_is('public', 'idea_activities', 'activity_type', 'text');
+select col_type_is('public', 'idea_activities', 'attachment_urls', 'text[]');
 
 select fk_ok('public', 'members', 'id', 'public', 'actors', 'id');
 select fk_ok('public', 'agents', 'id', 'public', 'actors', 'id');
