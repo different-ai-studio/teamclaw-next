@@ -774,6 +774,121 @@ struct ReducerAcpTurnIDDedupeTests {
     }
 }
 
+// MARK: - History-seed streaming cleanup (Bug 1 regression guard)
+
+@Suite("ChatTimelineReducer — history seed clears stale streaming state")
+struct ReducerHistorySeedClearsStreamingTests {
+    /// User left a session mid-stream; `stop()` saved a synthetic incomplete
+    /// output. On reopen, `start()` restored `streamingAgentSet[bucket]` +
+    /// `streamingTextByAgent[bucket]` from that sentinel. By then the daemon
+    /// had actually completed the turn and persisted it to Supabase. The
+    /// history seed must remove the stale typing indicator so the user
+    /// sees the completed bubble instead of a perpetual loading state.
+    @Test("complete output history clears matching streaming buckets")
+    func completeOutputClearsStreaming() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        state.streamingTextByAgent["agent-1"] = "Hello par"
+        state.streamingModelByAgent["agent-1"] = "claude-sonnet-4-6"
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "sb-1",
+                kind: .output,
+                senderActorID: "agent-1",
+                content: "Hello partial then the rest of the message",
+                createdAt: .now,
+                model: "claude-sonnet-4-6",
+                turnID: "turn-x"
+            )),
+            to: &state
+        )
+
+        #expect(!state.streamingAgentSet.contains("agent-1"),
+                "completed turn must remove the typing indicator")
+        #expect(state.streamingTextByAgent["agent-1"] == nil)
+        #expect(state.streamingModelByAgent["agent-1"] == nil)
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].isComplete)
+    }
+
+    /// Edge case: agent finished one turn AND is now actively streaming a
+    /// brand-new, unrelated turn. The history seed for the OLD turn must
+    /// not stomp the active stream's typing indicator. We distinguish by
+    /// checking whether the streaming partial is a prefix of the seeded
+    /// completed text.
+    @Test("history seed leaves unrelated active stream alone")
+    func unrelatedActiveStreamSurvives() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        // Partial is from a DIFFERENT, brand-new turn — does NOT prefix
+        // the historical completion below.
+        state.streamingTextByAgent["agent-1"] = "Different new turn so far"
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "sb-old",
+                kind: .output,
+                senderActorID: "agent-1",
+                content: "Old completed message content",
+                createdAt: .now,
+                turnID: "turn-old"
+            )),
+            to: &state
+        )
+
+        #expect(state.streamingAgentSet.contains("agent-1"),
+                "active stream must survive history seed of an unrelated old turn")
+        #expect(state.streamingTextByAgent["agent-1"] == "Different new turn so far")
+    }
+
+    /// User-prompt history rows never touch streaming state, because the
+    /// indicator belongs to the agent side.
+    @Test("history user_prompt does not touch streaming state")
+    func userPromptDoesNotTouchStreaming() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        state.streamingTextByAgent["agent-1"] = "agent partial"
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "sb-prompt",
+                kind: .userPrompt,
+                senderActorID: "human-1",
+                content: "Hi",
+                createdAt: .now
+            )),
+            to: &state
+        )
+
+        #expect(state.streamingAgentSet.contains("agent-1"))
+        #expect(state.streamingTextByAgent["agent-1"] == "agent partial")
+    }
+
+    /// Empty streaming partial (e.g., `stop()` saved an empty buffer) still
+    /// clears — empty is trivially a prefix of any completed text and a
+    /// streaming-set entry with no partial is a stuck indicator we want gone.
+    @Test("empty streaming partial still clears")
+    func emptyPartialClears() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        // No streamingTextByAgent entry at all.
+
+        ChatTimelineReducer.apply(
+            .historyMessage(HistoryInput(
+                supabaseMessageID: "sb-1",
+                kind: .output,
+                senderActorID: "agent-1",
+                content: "anything",
+                createdAt: .now
+            )),
+            to: &state
+        )
+
+        #expect(!state.streamingAgentSet.contains("agent-1"))
+    }
+}
+
 // MARK: - Helpers building Amux_AcpEvent sub-payloads
 
 private func makeOutput(text: String, isComplete: Bool) -> Amux_AcpOutput {
