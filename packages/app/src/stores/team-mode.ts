@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import {
-  getCustomProviderConfig,
   removeCustomProviderFromConfig,
 } from '@/lib/teamclaw-config'
 import { loadTeamProviderFile, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'

@@ -267,6 +267,8 @@ function normalizeSession(input: SeedSession, teamId: string): SessionListEntry 
     id,
     title: input.title ?? id,
     team_id: input.teamId ?? input.team_id ?? teamId,
+    created_at: input.createdAt ?? input.created_at ?? null,
+    updated_at: input.updatedAt ?? input.updated_at ?? null,
     last_message_at: input.lastMessageAt ?? input.last_message_at ?? null,
     last_message_preview: input.lastMessagePreview ?? input.last_message_preview ?? null,
     mode: normalizeMode(input.mode),

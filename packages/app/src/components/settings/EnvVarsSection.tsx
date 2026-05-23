@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { KeyRound, Plus, Eye, EyeOff, Pencil, Trash2, ShieldCheck, AlertCircle, RefreshCw, Loader2, Users, User, Lock, Copy, Check } from 'lucide-react'
+import { KeyRound, Plus, Eye, EyeOff, Pencil, Trash2, ShieldCheck, AlertCircle, Users, User, Lock, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -18,7 +18,6 @@ import { useSharedSecretsStore } from '@/stores/shared-secrets'
 import { useTeamMembersStore } from '@/stores/team-members'
 // `myRole` is null until the user joins a team; gate team-shared UI on it so
 // users without a team don't hit the backend's `secrets not initialized` error.
-import { useWorkspaceStore } from '@/stores/workspace'
 import { listen } from '@tauri-apps/api/event'
 
 // ─── Unified type for the combined list ─────────────────────────────────
@@ -460,7 +459,7 @@ function EnvVarRow({ entry, canDelete, onEdit, onDelete }: EnvVarRowProps) {
 
 export const EnvVarsSection = React.memo(function EnvVarsSection() {
   const { t } = useTranslation()
-  const { envVars, isLoading: envLoading, loadEnvVars, setEnvVar, deleteEnvVar, hasChanges, setHasChanges } = useEnvVarsStore()
+  const { envVars, isLoading: envLoading, loadEnvVars, setEnvVar, deleteEnvVar } = useEnvVarsStore()
   const { secrets, isLoading: secretsLoading, loadSecrets, setSecret, deleteSecret, listenForChanges } = useSharedSecretsStore()
   const currentNodeId = useTeamMembersStore((s) => s.currentNodeId)
   const myRole = useTeamMembersStore((s) => s.myRole)
@@ -470,7 +469,6 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
   // gate stays closed for users who are actually in a team.
   const loadMyRole = useTeamMembersStore((s) => s.loadMyRole)
   const loadCurrentNodeId = useTeamMembersStore((s) => s.loadCurrentNodeId)
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const [addDialogOpen, setAddDialogOpen] = React.useState(false)
   const [editingEntry, setEditingEntry] = React.useState<UnifiedEntry | null>(null)

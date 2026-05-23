@@ -203,7 +203,7 @@ function InlineTodoList({
                     <div
                       key={todo.id}
                       className={cn(
-                        "grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 py-0.5",
+                        "grid grid-cols-[16px_minmax(0,1fr)] items-center gap-2 py-0.5",
                         todo.status === "completed" && "opacity-65",
                       )}
                     >

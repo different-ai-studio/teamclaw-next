@@ -16,7 +16,6 @@ import { useProviderStore, type ModelOption } from "@/stores/provider";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { useTeamModeStore } from "@/stores/team-mode";
 import { useSuggestionsStore } from "@/stores/suggestions";
-import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-config";
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
@@ -24,13 +23,10 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
 import { useUIStore } from "@/stores/ui";
-import { mqttPublish } from "@/lib/mqtt-bridge";
 import { supabase } from "@/lib/supabase-client";
-import { create as createMessage, toBinary } from "@bufbuild/protobuf";
+import { create as createMessage } from "@bufbuild/protobuf";
 import {
   MessageSchema,
-  SessionMessageEnvelopeSchema,
-  LiveEventEnvelopeSchema,
   MessageKind,
 } from "@/lib/proto/teamclaw_pb";
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
@@ -308,7 +304,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // Actions — accessed via getState() to avoid creating subscriptions.
   // Zustand actions are stable references; subscribing to them wastes equality checks.
   const acts = useSessionStore.getState();
-  const sendMessage = acts.sendMessage;
   const abortSession = acts.abortSession;
   const removeFromQueue = acts.removeFromQueue;
   const loadSessions = acts.loadSessions;
@@ -335,7 +330,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     s => currentWorkspaceId ? s.panelHeightByWorkspace[currentWorkspaceId] ?? 240 : 240,
   );
   const terminalBottomOffset = terminalOpen && workspacePath ? terminalPanelHeight : 0;
-  const setWorkspaceBootstrapped = React.useCallback((_v: boolean) => {}, []);
 
   // ── Local state ───────────────────────────────────────────────────────
   const inputValue = draftInput;

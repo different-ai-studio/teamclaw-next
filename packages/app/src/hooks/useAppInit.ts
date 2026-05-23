@@ -20,7 +20,6 @@ import { useGitReposStore } from "@/stores/git-repos";
 import { useUIStore } from "@/stores/ui";
 import { useDepsStore, getSetupDecision, markSetupCompleted } from "@/stores/deps";
 import { useTelemetryStore } from "@/stores/telemetry";
-import { useTeamModeStore } from "@/stores/team-mode";
 import { useTeamMembersStore } from "@/stores/team-members";
 import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";

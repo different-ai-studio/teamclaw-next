@@ -8,7 +8,6 @@ import { useStreamingStore } from "@/stores/streaming"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useCronStore } from "@/stores/cron"
-import { useTeamModeStore } from "@/stores/team-mode"
 import { useAuthStore } from "@/stores/auth-store"
 import { useCurrentTeamStore } from "@/stores/current-team"
 import {
@@ -36,11 +35,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { TrafficLights } from "@/components/ui/traffic-lights"
 import { buildSessionListActivityMap, type SessionListActivity } from "@/lib/session-list-activity"
 import { SessionSearchDialog } from "@/components/sidebar/session-search-dialog"

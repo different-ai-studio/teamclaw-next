@@ -11,8 +11,6 @@ import { Toaster } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
 import {
-  AlertTriangle,
-  Terminal,
   BookOpen,
   FolderGit,
   ChevronLeft,
@@ -51,8 +49,6 @@ import { useMCPFileWatcher } from "@/hooks/useMCPFileWatcher";
 import {
   AppSidebar,
   SidebarIconGroup,
-  SidebarCollapseToggle,
-  SidebarSecondarySessionActions,
 } from "@/components/app-sidebar";
 import { SidebarSecondColumn } from "@/components/sidebar/SidebarSecondColumn";
 import { isWorkspaceUIVariant } from "@/lib/ui-variant";
@@ -60,7 +56,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { NewSessionDialog } from "@/components/chat/NewSessionDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { UpdateDialogContainer } from "@/components/updater/UpdateDialog";
-import { RightPanel, ShortcutsPanel } from "@/components/panel";
+import { RightPanel } from "@/components/panel";
 import { Settings } from "@/components/settings";
 import { FeedbackDialog } from "@/components/settings/FeedbackDialog";
 import {
@@ -80,7 +76,7 @@ import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useSessionParticipantStore } from "@/stores/session-participant-store";
 import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useAuthStore } from "@/stores/auth-store";
-import { mqttConnect, listenForEnvelopes } from "@/lib/mqtt-bridge";
+import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridge";
 import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import { decodeLiveEvent, sessionIdFromTopic } from "@/lib/teamclaw-events";
@@ -105,15 +101,12 @@ import { FindInPageBar } from "@/components/tab-bar/FindInPageBar";
 import { urlToLabel } from "@/lib/webview-utils";
 import { create } from "zustand";
 import {
-  insertAgentRuntimeEvent,
-  loadAgentRuntimeEvents,
   upsertMessagesBatch,
   type MessageRow,
 } from "@/lib/local-cache";
 import { syncActorsForTeam } from "@/lib/sync/actor-sync";
 import { syncIdeasForTeam } from "@/lib/sync/idea-sync";
 import { syncMessagesForSession } from "@/lib/sync/message-sync";
-import { syncParticipantsForSession } from "@/lib/sync/session-participant-sync";
 import { syncSessionsForTeam } from "@/lib/sync/session-sync";
 import { Button } from "@/components/ui/button";
 import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
@@ -559,7 +552,6 @@ function AppContent() {
   // re-renders since the ref is stable.
   const activeSession = useSessionStore((s) => s.getActiveSession());
   const sessionDiff = useSessionStore((s) => s.sessionDiff);
-  const sessions = useSessionStore((s) => s.sessions);
   const reloadActiveSessionMessages = useSessionStore(
     (s) => s.reloadActiveSessionMessages,
   );
@@ -570,7 +562,6 @@ function AppContent() {
   const activeTab = useWorkspaceStore((s) => s.activeTab);
   const openPanel = useWorkspaceStore((s) => s.openPanel);
   const closePanel = useWorkspaceStore((s) => s.closePanel);
-  const clearWorkspace = useWorkspaceStore((s) => s.clearWorkspace);
 
   // UI store - individual selectors
   const currentView = useUIStore((s) => s.currentView);
@@ -619,57 +610,6 @@ function AppContent() {
   const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
   // Resolved by the MQTT-connect effect; passed to the notification dispatcher.
   const [myActorId, setMyActorId] = useState<string | null>(null);
-  const mainWorkspaceOnboardingSteps: OnboardingStep[] = [
-    {
-      target: '[data-onboarding-id="main-sidebar"]',
-      title: t("onboarding.main.sidebarTitle", "Session sidebar"),
-      description: t(
-        "onboarding.main.sidebarBody",
-        "Use the left sidebar to create a new chat, switch tasks, and find earlier conversations.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="main-chat-area"]',
-      title: t("onboarding.main.chatTitle", "Work from the chat center"),
-      description: t(
-        "onboarding.main.chatBody",
-        "Describe what you want in plain language here. Most tasks can start with a sentence instead of a command.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="workspace-panel-tabs"]',
-      title: t("onboarding.main.panelTitle", "Open the helper panels"),
-      description: t(
-        "onboarding.main.panelBody",
-        "This area opens tasks and helper panels. If advanced mode is enabled, file and change views will also appear here.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="chat-input-root"]',
-      title: t("onboarding.chatInput.inputTitle", "Describe the task here"),
-      description: t(
-        "onboarding.chatInput.inputBody",
-        "You can start with a plain sentence like asking for analysis, code changes, or a summary of the current project.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="chat-input-files"]',
-      title: t("onboarding.chatInput.filesTitle", "Attach files when useful"),
-      description: t(
-        "onboarding.chatInput.filesBody",
-        "Use this button to add files or screenshots so the assistant can work with concrete context.",
-      ),
-    },
-    {
-      target: '[data-onboarding-id="chat-input-submit"]',
-      title: t("onboarding.chatInput.submitTitle", "Send or stop here"),
-      description: t(
-        "onboarding.chatInput.submitBody",
-        "Send your request from here. If the assistant is already working, the same area lets you stop and retry.",
-      ),
-    },
-  ];
-
   // Extracted hooks — initialization, panel state, keyboard shortcuts
   const { initialWorkspaceResolved } = useWorkspaceInit();
   useDesktopNotifications(myActorId);
@@ -680,7 +620,6 @@ function AppContent() {
   useExternalLinkHandler();
   usePanelAutoOpen();
   useFileTabSync();
-  const { rightPanelWidth, handleRightPanelResize } = useResizablePanels();
 
   // v2 Phase 1: load session list from Supabase once AppContent mounts
   // (i.e. after auth is verified). Phase 2 will replace with realtime sub.
@@ -965,7 +904,11 @@ function AppContent() {
               });
             } else if (event?.case === "planUpdate") {
               const pu = event.value as { entries?: Array<{ content?: string; priority?: string; status?: string }> };
-              const entries = (pu.entries ?? []).map((e) => ({
+              const entries: Array<{
+                content: string;
+                priority: "high" | "medium" | "low";
+                status: "pending" | "completed" | "in_progress";
+              }> = (pu.entries ?? []).map((e) => ({
                 content: e.content ?? "",
                 priority: (e.priority === "high" || e.priority === "medium" || e.priority === "low"
                   ? e.priority

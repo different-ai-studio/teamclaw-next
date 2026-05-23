@@ -1157,7 +1157,7 @@ async fn handle_message_event(event: &serde_json::Value, ctx: &HandlerContext) {
             &session_title,
             &ctx.primary_agent_actor_id,
             &ctx.agent_owner_actor_ids,
-            &[external_actor_id.clone()],
+            std::slice::from_ref(&external_actor_id),
         )
         .await
     {

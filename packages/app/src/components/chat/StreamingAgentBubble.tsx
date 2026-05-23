@@ -1,6 +1,5 @@
 import { AlertCircle } from "lucide-react";
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
-import { cn } from "@/lib/utils";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";

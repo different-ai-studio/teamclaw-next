@@ -1708,7 +1708,7 @@ fn process_and_reply_sync(
                 &subject_as_title,
                 &primary_agent_actor_id,
                 &agent_owner_actor_ids,
-                &[external_actor_id.clone()],
+                std::slice::from_ref(&external_actor_id),
             )
             .await
             .map_err(|e| format!("ensure_session: {e}"))?;

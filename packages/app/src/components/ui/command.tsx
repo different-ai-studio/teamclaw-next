@@ -13,10 +13,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+type CommandProps = Omit<
+  React.ComponentProps<typeof CommandPrimitive>,
+  "children"
+> & {
+  children?: React.ReactNode
+}
+
 function Command({
   className,
+  children,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive>) {
+}: CommandProps) {
   return (
     <CommandPrimitive
       data-slot="command"
@@ -25,7 +33,9 @@ function Command({
         className
       )}
       {...props}
-    />
+    >
+      {children as never}
+    </CommandPrimitive>
   )
 }
 
@@ -110,10 +120,19 @@ function CommandEmpty({
   )
 }
 
+type CommandGroupProps = Omit<
+  React.ComponentProps<typeof CommandPrimitive.Group>,
+  "children" | "heading"
+> & {
+  heading?: string
+  children?: React.ReactNode
+}
+
 function CommandGroup({
   className,
+  children,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Group>) {
+}: CommandGroupProps) {
   return (
     <CommandPrimitive.Group
       data-slot="command-group"
@@ -122,7 +141,9 @@ function CommandGroup({
         className
       )}
       {...props}
-    />
+    >
+      {children as never}
+    </CommandPrimitive.Group>
   )
 }
 

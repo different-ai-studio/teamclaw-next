@@ -40,7 +40,6 @@ import {
   ModelSelectorLogo,
   ModelSelectorName,
 } from "@/packages/ai/model-selector";
-import { Button } from "@/components/ui/button";
 import { FileInputButton } from "./FileInputButton";
 import { ContextUsageBadge } from "./ContextUsageBadge";
 import { type QueuedMessage, useSessionStore } from "@/stores/session";
@@ -48,7 +47,6 @@ import { applySessionRuntimeModel } from "@/lib/session-runtime-model";
 import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
 import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useUIStore } from "@/stores/ui";
 import { getFileName, getFileDisplayPath } from "./utils/fileUtils";
 import { LocalImage } from "@/packages/ai/message";
 
@@ -218,12 +216,6 @@ export function ChatInputArea({
 
   // Team mode
   const teamMode = useTeamModeStore(s => s.teamMode);
-  const teamModelConfig = useTeamModeStore(s => s.teamModelConfig);
-  const teamModelOptions = useTeamModeStore(s => s.teamModelOptions);
-  const switchTeamModel = useTeamModeStore(s => s.switchTeamModel);
-  const devUnlocked = useTeamModeStore(s => s.devUnlocked);
-  const advancedMode = useUIStore((s) => s.advancedMode);
-  const canShowPlanToggle = advancedMode && devUnlocked;
 
   // Model selector
   const [modelSelectorOpen, setModelSelectorOpen] = React.useState(false);
