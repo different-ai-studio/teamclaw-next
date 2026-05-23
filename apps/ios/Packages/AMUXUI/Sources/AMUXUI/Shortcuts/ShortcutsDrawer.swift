@@ -58,7 +58,6 @@ public struct ShortcutsDrawer: View {
         VStack(spacing: 0) {
             profileHeader
             shortcutList
-            settingsFooter
         }
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -109,6 +108,8 @@ public struct ShortcutsDrawer: View {
                 }
 
                 Spacer(minLength: 6)
+
+                settingsHeaderButton
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -119,6 +120,37 @@ public struct ShortcutsDrawer: View {
                 .frame(height: 0.5)
                 .padding(.horizontal, 20)
         }
+    }
+
+    private var appVersion: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        return "v\(short)"
+    }
+
+    private var settingsHeaderButton: some View {
+        Button(action: handleSettingsTap) {
+            HStack(spacing: 6) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .regular))
+
+                Text(appVersion)
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Color.amux.slate)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(Color.amux.pebble.opacity(0.55))
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(SettingsRowButtonStyle())
+        .accessibilityIdentifier("shortcuts.settingsButton")
+        .accessibilityLabel("Settings")
     }
 
     // MARK: - List content
@@ -189,58 +221,6 @@ public struct ShortcutsDrawer: View {
             .foregroundStyle(Color.amux.slate)
             .padding(.horizontal, 20)
             .padding(.bottom, 2)
-    }
-
-    // MARK: - Settings footer
-
-    private var appVersion: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
-        return "v\(short)"
-    }
-
-    private var settingsFooter: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.amux.hairline)
-                .frame(height: 0.5)
-                .padding(.horizontal, 20)
-
-            Button(action: handleSettingsTap) {
-                HStack(spacing: ShortcutRowMetrics.chevronToIconSpacing) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(Color.amux.basalt)
-                        .frame(
-                            width: ShortcutRowMetrics.chevronWidth
-                                + ShortcutRowMetrics.chevronToIconSpacing
-                                + ShortcutRowMetrics.iconWidth,
-                            alignment: .center
-                        )
-
-                    Text("Settings")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.amux.onyx)
-
-                    Spacer(minLength: 6)
-
-                    Text(appVersion)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(Color.amux.slate)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.amux.slate)
-                }
-                .padding(.leading, ShortcutRowMetrics.leadingPadding)
-                .padding(.trailing, ShortcutRowMetrics.trailingPadding)
-                .padding(.vertical, 14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(SettingsRowButtonStyle())
-            .accessibilityIdentifier("shortcuts.settingsButton")
-            .accessibilityLabel("Settings")
-        }
-        .background(Color.amux.mist)
     }
 
     // MARK: - Empty / loading state
