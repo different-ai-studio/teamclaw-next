@@ -1,0 +1,255 @@
+use crate::config::DaemonConfig;
+use crate::proto::amux;
+
+pub(crate) fn resolve_requested_agent_type(
+    config: &DaemonConfig,
+    requested: amux::AgentType,
+) -> amux::AgentType {
+    let has_claude = config.agents.claude_code.is_some();
+    let has_opencode = config.agents.opencode.is_some();
+    let has_codex = config.agents.codex.is_some();
+
+    // When the explicitly-requested backend isn't configured, fall back to
+    // whatever IS configured (preferring opencode, then claude_code, then
+    // codex) instead of silently spawning the hard-coded "claude" default.
+    let fallback = || {
+        if has_opencode {
+            amux::AgentType::Opencode
+        } else if has_claude {
+            amux::AgentType::ClaudeCode
+        } else if has_codex {
+            amux::AgentType::Codex
+        } else {
+            amux::AgentType::ClaudeCode
+        }
+    };
+
+    match requested {
+        amux::AgentType::Unknown => fallback(),
+        amux::AgentType::ClaudeCode => {
+            if has_claude {
+                amux::AgentType::ClaudeCode
+            } else {
+                fallback()
+            }
+        }
+        amux::AgentType::Opencode => {
+            if has_opencode {
+                amux::AgentType::Opencode
+            } else {
+                fallback()
+            }
+        }
+        amux::AgentType::Codex => {
+            if has_codex {
+                amux::AgentType::Codex
+            } else {
+                fallback()
+            }
+        }
+    }
+}
+
+pub(crate) fn runtime_start_initial_model_override(
+    start: &crate::proto::teamclaw::RuntimeStartRequest,
+) -> Option<String> {
+    let model_id = start.model_id.trim();
+    (!model_id.is_empty()).then(|| model_id.to_string())
+}
+
+pub(crate) fn supported_agent_type_names(config: &DaemonConfig) -> Vec<String> {
+    let mut names = Vec::new();
+    if config.agents.claude_code.is_some() {
+        names.push("claude".to_string());
+    }
+    if config.agents.opencode.is_some() {
+        names.push("opencode".to_string());
+    }
+    if config.agents.codex.is_some() {
+        names.push("codex".to_string());
+    }
+    if names.is_empty() {
+        names.push("claude".to_string());
+    }
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> DaemonConfig {
+        DaemonConfig {
+            device: crate::config::DeviceConfig {
+                id: "dev-1".to_string(),
+                name: "Mac".to_string(),
+            },
+            mqtt: crate::config::MqttConfig {
+                broker_url: "tcp://localhost:1883".to_string(),
+            },
+            agents: crate::config::AgentsConfig::default(),
+            team_id: None,
+            channels: crate::config::ChannelsConfig::default(),
+            idle_runtime_timeout_secs: None,
+        }
+    }
+
+    #[test]
+    fn resolves_claude_request_to_opencode_when_only_opencode_is_configured() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_non_claude_request() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn resolves_unknown_request_to_opencode_when_only_opencode_is_configured() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn resolves_unknown_to_opencode_when_both_configured() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        // opencode is the preferred default; Unknown resolves to it even when
+        // claude_code is also configured.
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn explicit_claude_code_request_honoured_when_both_configured() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::ClaudeCode),
+            amux::AgentType::ClaudeCode
+        );
+    }
+
+    #[test]
+    fn explicit_codex_request_honoured_when_codex_configured() {
+        let mut cfg = base_config();
+        cfg.agents.codex = Some(crate::config::AgentBackendConfig {
+            binary: "codex".to_string(),
+            default_flags: Vec::new(),
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Codex),
+            amux::AgentType::Codex
+        );
+    }
+
+    #[test]
+    fn codex_request_reroutes_to_opencode_when_codex_absent() {
+        let mut cfg = base_config();
+        cfg.agents.opencode = Some(crate::config::AgentBackendConfig {
+            binary: "opencode".to_string(),
+            default_flags: vec!["acp".to_string()],
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Codex),
+            amux::AgentType::Opencode
+        );
+    }
+
+    #[test]
+    fn opencode_request_reroutes_to_claude_when_opencode_absent() {
+        let mut cfg = base_config();
+        cfg.agents.claude_code = Some(crate::config::AgentBackendConfig {
+            binary: "claude".to_string(),
+            default_flags: Vec::new(),
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Opencode),
+            amux::AgentType::ClaudeCode
+        );
+    }
+
+    #[test]
+    fn runtime_start_model_id_becomes_initial_spawn_override() {
+        let start = crate::proto::teamclaw::RuntimeStartRequest {
+            model_id: "opencode/deepseek-v4-flash-free".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            runtime_start_initial_model_override(&start).as_deref(),
+            Some("opencode/deepseek-v4-flash-free")
+        );
+    }
+
+    #[test]
+    fn runtime_start_empty_model_id_has_no_initial_spawn_override() {
+        let start = crate::proto::teamclaw::RuntimeStartRequest {
+            model_id: "   ".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(runtime_start_initial_model_override(&start), None);
+    }
+
+    #[test]
+    fn unknown_request_resolves_to_codex_when_only_codex_configured() {
+        let mut cfg = base_config();
+        cfg.agents.codex = Some(crate::config::AgentBackendConfig {
+            binary: "codex".to_string(),
+            default_flags: Vec::new(),
+        });
+
+        assert_eq!(
+            resolve_requested_agent_type(&cfg, amux::AgentType::Unknown),
+            amux::AgentType::Codex
+        );
+    }
+}
