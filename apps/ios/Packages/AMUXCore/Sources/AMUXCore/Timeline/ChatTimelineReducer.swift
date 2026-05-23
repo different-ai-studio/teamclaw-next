@@ -423,6 +423,7 @@ public enum ChatTimelineReducer {
 
         state.entries.append(TimelineEntry(
             id: UUID().uuidString,
+            sequence: UInt64(max(0, input.sequence)),
             eventType: eventType,
             text: input.content,
             isComplete: true,

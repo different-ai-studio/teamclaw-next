@@ -152,6 +152,7 @@ message AcpCommand {
     AcpStartAgent start_agent = 5;
     AcpStopAgent stop_agent = 6;
     AcpRequestHistory request_history = 7;
+    AcpRequestTurnHistory request_turn_history = 8;
   }
 }
 
@@ -160,6 +161,16 @@ message AcpRequestHistory {
   uint64 after_sequence = 1;   // Send events with sequence > this (0 = from beginning)
   uint32 page_size = 2;        // Max events per batch (default 50)
   string request_id = 3;       // For correlation
+}
+
+// Request all envelopes for a specific turn from a specific runtime's
+// EventHistory. Used by iOS to lazy-load thinking/tool events when the
+// user opens a turn detail, and to resume mid-turn streaming after a
+// reconnect. Scoped to one runtime (turn_id is uuid v4 globally unique,
+// but kept per-runtime so callers don't conflate runtimes).
+message AcpRequestTurnHistory {
+  string turn_id = 1;
+  string request_id = 2;
 }
 
 message AcpSendPrompt {

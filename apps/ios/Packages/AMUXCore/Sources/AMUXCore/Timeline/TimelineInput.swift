@@ -163,6 +163,11 @@ public struct HistoryInput: Sendable {
     /// them into one entry instead of producing two separate bubbles.
     /// nil for pre-turn_id Supabase rows.
     public let turnID: String?
+    /// Daemon's per-runtime envelope sequence stamped on this row. Used
+    /// by the reducer to set `AgentEvent.sequence` so cross-source ordering
+    /// (Supabase seed vs. live MQTT deltas) is stable. 0 = legacy row
+    /// without sequence; reducer falls back to (createdAt, supabaseMessageID).
+    public let sequence: Int64
 
     public init(supabaseMessageID: String,
                 kind: HistoryKind,
@@ -170,7 +175,8 @@ public struct HistoryInput: Sendable {
                 content: String,
                 createdAt: Date,
                 model: String? = nil,
-                turnID: String? = nil) {
+                turnID: String? = nil,
+                sequence: Int64 = 0) {
         self.supabaseMessageID = supabaseMessageID
         self.kind = kind
         self.senderActorID = senderActorID
@@ -178,6 +184,7 @@ public struct HistoryInput: Sendable {
         self.createdAt = createdAt
         self.model = model
         self.turnID = turnID
+        self.sequence = sequence
     }
 }
 

@@ -106,6 +106,48 @@ impl EventHistory {
         (events, has_more)
     }
 
+    /// Read all envelopes for a specific turn from one agent's history.
+    /// Used by `AcpRequestTurnHistory` — iOS opens a turn detail or resumes
+    /// mid-turn streaming and wants every Thinking / ToolCall / Output /
+    /// StatusChange event tagged with `turn_id`. Linear scan of the agent's
+    /// index — turns are short (tens to low hundreds of events) so we don't
+    /// keep a secondary turn_id → offsets index.
+    pub fn read_turn(&mut self, agent_id: &str, turn_id: &str) -> Vec<Envelope> {
+        if turn_id.is_empty() {
+            return vec![];
+        }
+        if !self.index.contains_key(agent_id) {
+            self.load_index(agent_id);
+        }
+        let idx = match self.index.get(agent_id) {
+            Some(idx) => idx.clone(),
+            None => return vec![],
+        };
+        let path = self.agent_path(agent_id);
+        let data = match std::fs::read(&path) {
+            Ok(d) => d,
+            Err(_) => return vec![],
+        };
+        let mut out = Vec::new();
+        for &(_, offset) in &idx {
+            let off = offset as usize;
+            if off + 4 > data.len() {
+                break;
+            }
+            let len = u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+                as usize;
+            if off + 4 + len > data.len() {
+                break;
+            }
+            if let Ok(env) = Envelope::decode(&data[off + 4..off + 4 + len]) {
+                if env.turn_id == turn_id {
+                    out.push(env);
+                }
+            }
+        }
+        out
+    }
+
     /// Load index from disk by scanning the file.
     fn load_index(&mut self, agent_id: &str) {
         let path = self.agent_path(agent_id);
@@ -129,5 +171,58 @@ impl EventHistory {
         }
 
         self.index.insert(agent_id.to_string(), idx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::amux::Envelope;
+
+    fn env(seq: u64, turn_id: &str) -> Envelope {
+        Envelope {
+            runtime_id: "agent".into(),
+            device_id: "dev".into(),
+            source_peer_id: String::new(),
+            timestamp: 0,
+            sequence: seq,
+            turn_id: turn_id.into(),
+            payload: None,
+        }
+    }
+
+    #[test]
+    fn read_turn_returns_only_matching_turn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = EventHistory::new(tmp.path());
+
+        let turn_a = "00000000-0000-0000-0000-00000000000a";
+        let turn_b = "00000000-0000-0000-0000-00000000000b";
+
+        store.append("agent", &env(1, turn_a));
+        store.append("agent", &env(2, turn_a));
+        store.append("agent", &env(3, turn_b));
+        store.append("agent", &env(4, turn_a));
+        store.append("agent", &env(5, "")); // empty turn (status_change at idle)
+
+        let got = store.read_turn("agent", turn_a);
+        let seqs: Vec<u64> = got.iter().map(|e| e.sequence).collect();
+        assert_eq!(seqs, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn read_turn_empty_turn_id_returns_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = EventHistory::new(tmp.path());
+        store.append("agent", &env(1, "abc"));
+        assert!(store.read_turn("agent", "").is_empty());
+    }
+
+    #[test]
+    fn read_turn_unknown_agent_returns_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = EventHistory::new(tmp.path());
+        store.append("agent", &env(1, "abc"));
+        assert!(store.read_turn("other-agent", "abc").is_empty());
     }
 }

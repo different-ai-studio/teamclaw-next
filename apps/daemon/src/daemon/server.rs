@@ -1623,8 +1623,16 @@ impl DaemonServer {
         // Supabase `messages`. ACP `acp.event` envelopes still flow through
         // the unchanged publish path below for streaming UI.
         let collab_sessions = self.target_sessions(agent_id).await;
-        let (emitted, turn_id) = {
+        // Allocate the envelope sequence up front so it can also stamp
+        // emitted messages (Supabase `messages.sequence`). The envelope
+        // append below uses the same value, keeping a 1:1 link between an
+        // ACP event boundary and the messages that flowed from it.
+        let (emitted, turn_id, seq) = {
             let mut agents = self.agents.lock().await;
+            let seq = agents
+                .get_handle_mut(agent_id)
+                .map(|h| h.next_sequence())
+                .unwrap_or(0);
             match agents.aggregator_mut(agent_id) {
                 Some(agg) => {
                     // ingest may transition Active→Idle, which clears
@@ -1634,9 +1642,9 @@ impl DaemonServer {
                     // turn capture the still-Some id.
                     let emitted = agg.ingest(&acp_event);
                     let turn_id = agg.current_turn_id().unwrap_or("").to_string();
-                    (emitted, turn_id)
+                    (emitted, turn_id, seq)
                 }
-                None => (Vec::new(), String::new()),
+                None => (Vec::new(), String::new(), seq),
             }
         };
         if !collab_sessions.is_empty() && !emitted.is_empty() {
@@ -1679,6 +1687,7 @@ impl DaemonServer {
                                 &metadata_json,
                                 &model,
                                 &turn_id,
+                                seq,
                                 persist,
                                 Some(&self.supabase),
                             )
@@ -1687,14 +1696,6 @@ impl DaemonServer {
                     }
                 }
         }
-
-        let seq = self
-            .agents
-            .lock()
-            .await
-            .get_handle_mut(agent_id)
-            .map(|h| h.next_sequence())
-            .unwrap_or(0);
 
         // Ambient state variants (replaced wholesale on each push) should not
         // be persisted into the history buffer — replaying stale lists on
@@ -2836,6 +2837,58 @@ impl DaemonServer {
                     events,
                     has_more,
                     next_after_sequence: next_seq,
+                };
+                self.publish_session_event(
+                    agent_id,
+                    amux::SessionEvent {
+                        event: Some(amux::session_event::Event::HistoryBatch(batch)),
+                    },
+                )
+                .await;
+            }
+
+            amux::acp_command::Command::RequestTurnHistory(req) => {
+                use prost::Message;
+                let mut events = self.history.read_turn(agent_id, &req.turn_id);
+                let mut has_more = false;
+
+                // Same 10 KB publish budget as RequestHistory. Turns are
+                // usually small (tens of events) so a single batch covers
+                // them. If a turn ever grows past the budget, trim the tail
+                // and set has_more — iOS sees a partial turn and the local
+                // streaming cache fills the gap until we add per-turn
+                // pagination.
+                const HISTORY_BATCH_BUDGET: usize = 9500;
+                while events.len() > 1 {
+                    let estimate: usize = events
+                        .iter()
+                        .map(|e| {
+                            let n = e.encoded_len();
+                            1 + prost::encoding::encoded_len_varint(n as u64) + n
+                        })
+                        .sum::<usize>()
+                        + req.request_id.len()
+                        + 32;
+                    if estimate < HISTORY_BATCH_BUDGET {
+                        break;
+                    }
+                    events.pop();
+                    has_more = true;
+                }
+
+                info!(
+                    agent_id,
+                    peer_id,
+                    turn_id = %req.turn_id,
+                    count = events.len(),
+                    has_more,
+                    "turn history requested"
+                );
+                let batch = amux::HistoryBatch {
+                    request_id: req.request_id,
+                    events,
+                    has_more,
+                    next_after_sequence: 0,
                 };
                 self.publish_session_event(
                     agent_id,
