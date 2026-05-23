@@ -1263,7 +1263,7 @@ function AppContent() {
     >
       <DialogContent
         aria-label={t("common.settings", "Settings")}
-        className="flex h-[min(780px,calc(100vh-5rem))] w-[min(1180px,calc(100vw-4rem))] max-w-none grid-cols-none flex-col gap-0 overflow-hidden rounded-[14px] border-border bg-paper p-0 shadow-2xl sm:max-w-none"
+        className="flex h-[min(780px,calc(100vh-5rem))] w-[min(960px,calc(100vw-4rem))] max-w-none grid-cols-none flex-col gap-0 overflow-hidden rounded-[14px] border-border bg-paper p-0 shadow-2xl sm:max-w-none"
         showCloseButton={false}
       >
         <DialogHeader className="flex h-12 shrink-0 flex-row items-center gap-2 border-b border-border bg-paper px-5 py-0 text-left">

@@ -247,8 +247,10 @@ describe('App', () => {
 
     render(<App />)
 
+    const dialog = screen.getByRole('dialog', { name: 'Settings' })
     expect(screen.getByTestId('chat-panel')).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    expect(dialog).toBeInTheDocument()
+    expect(dialog.className).toContain('w-[min(960px,calc(100vw-4rem))]')
     expect(screen.getByText('settings')).toBeInTheDocument()
   })
 
