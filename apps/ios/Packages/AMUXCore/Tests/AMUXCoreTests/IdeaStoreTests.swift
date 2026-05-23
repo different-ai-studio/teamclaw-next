@@ -145,6 +145,62 @@ struct IdeaStoreTests {
     }
 
     @MainActor
+    @Test("create activity records attachment URLs in stable metadata")
+    func createActivityRecordsAttachmentURLs() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = InMemoryIdeaRepository(ideas: [])
+        let store = IdeaStore(teamID: "team-1", repository: repository, modelContext: context)
+
+        await store.createIdea(
+            title: "Activity idea",
+            description: "",
+            workspaceID: ""
+        )
+        let created = try #require(store.ideas.first)
+
+        await store.createActivity(
+            ideaID: created.id,
+            activityType: "progress",
+            content: "Attached screenshots.",
+            attachmentURLs: [
+                URL(string: "https://storage.example.com/one.jpg")!,
+                URL(string: "https://storage.example.com/two.png")!,
+            ]
+        )
+
+        let activity = try #require(store.activities(for: created.id).first)
+        #expect(activity.attachmentURLs.map(\.absoluteString) == [
+            "https://storage.example.com/one.jpg",
+            "https://storage.example.com/two.png",
+        ])
+        #expect(await repository.recordedActivityInputs().first?.metadata[IdeaActivityRecord.attachmentURLsMetadataKey] == "https://storage.example.com/one.jpg\nhttps://storage.example.com/two.png")
+    }
+
+    @Test("activity attachment URLs ignore malformed metadata entries")
+    func activityAttachmentURLsIgnoreMalformedEntries() {
+        let activity = IdeaActivityRecord(
+            id: "activity-1",
+            teamID: "team-1",
+            ideaID: "idea-1",
+            actorID: "member-1",
+            activityType: "progress",
+            content: "Attached screenshots.",
+            metadata: [
+                IdeaActivityRecord.attachmentURLsMetadataKey:
+                    "https://storage.example.com/one.jpg\nnot a url\n\nhttps://storage.example.com/two.png",
+            ],
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        #expect(activity.attachmentURLs.map(\.absoluteString) == [
+            "https://storage.example.com/one.jpg",
+            "https://storage.example.com/two.png",
+        ])
+    }
+
+    @MainActor
     @Test("moving ideas writes a reorder activity for the moved idea")
     func moveIdeasWritesReorderActivity() async throws {
         let container = try makeInMemoryContainer()
@@ -295,6 +351,18 @@ private actor InMemoryIdeaRepository: IdeaRepository {
 
     func recordedArchiveInputs() -> [(String, Bool)] {
         archiveInputs
+    }
+
+    func recordedActivityInputs() -> [IdeaActivityCreateInput] {
+        activitiesByIdeaID.values.flatMap { activities in
+            activities.map { activity in
+                IdeaActivityCreateInput(
+                    activityType: activity.activityType,
+                    content: activity.content,
+                    metadata: activity.metadata
+                )
+            }
+        }
     }
 
     enum InMemoryError: Error {

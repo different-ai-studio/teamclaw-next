@@ -12,10 +12,12 @@ struct AgentPlanSnapshotTests {
         agentId: String,
         sequence: Int,
         type: String,
-        text: String? = nil
+        text: String? = nil,
+        senderActorID: String? = nil
     ) -> AgentEvent {
         let event = AgentEvent(agentId: agentId, sequence: sequence, eventType: type)
         event.text = text
+        event.senderActorID = senderActorID
         return event
     }
 
@@ -92,6 +94,23 @@ struct AgentPlanSnapshotTests {
         let customProvider: (String) -> String = { id in "Display(\(id))" }
         let result = AgentPlanSnapshot.derive(events: events, agentNameFor: customProvider)
         #expect(result[0].agentName == "Display(xyz)")
+    }
+
+    @Test("session-scoped plan_update uses sender actor id for display name")
+    func senderActorIDPreferredOverSessionScope() {
+        let events = [
+            makeEvent(
+                agentId: "session-e68a8382",
+                sequence: 1,
+                type: "plan_update",
+                text: "[wip] thing",
+                senderActorID: "agent-codex"
+            )
+        ]
+        let result = AgentPlanSnapshot.derive(events: events, agentNameFor: nameProvider)
+        #expect(result.count == 1)
+        #expect(result[0].agentID == "agent-codex")
+        #expect(result[0].agentName == "agent-age")
     }
 
     @Test("plan_update with empty text → snapshot filtered out")

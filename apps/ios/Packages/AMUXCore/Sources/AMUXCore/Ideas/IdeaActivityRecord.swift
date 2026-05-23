@@ -36,4 +36,23 @@ public struct IdeaActivityRecord: Codable, Equatable, Hashable, Identifiable, Se
     public var isProgress: Bool { activityType == "progress" }
     public var isStatusChange: Bool { activityType == "status_change" }
     public var isReorder: Bool { activityType == "reorder" }
+
+    public static let attachmentURLsMetadataKey = "attachment_urls"
+
+    public var attachmentURLs: [URL] {
+        guard let raw = metadata[Self.attachmentURLsMetadataKey] else { return [] }
+        return raw
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .compactMap { value in
+                guard let url = URL(string: value),
+                      let scheme = url.scheme?.lowercased(),
+                      ["http", "https"].contains(scheme),
+                      url.host != nil else {
+                    return nil
+                }
+                return url
+            }
+    }
 }

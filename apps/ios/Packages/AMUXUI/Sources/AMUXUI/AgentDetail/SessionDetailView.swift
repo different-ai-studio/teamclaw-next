@@ -220,12 +220,10 @@ public struct SessionDetailView: View {
                 CurrentSessionFocus.sessionID = nil
             }
         }
-        // Tab-bar visibility is hoisted to the parent NavigationStack
-        // (SessionsTab / IdeasTab), driven by `navigationPath.isEmpty`.
-        // Keeping it here meant the modifier was alive until this view
-        // fully unmounted on pop, so the bar only animated back after
-        // the pop transition finished — a multi-beat lag.
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // Keep Plans as an overlay, not a top safe-area inset. Changing the
+        // inset resizes ScrollView's viewport and makes the message list jump
+        // when the toolbar button toggles the panel.
+        .overlay(alignment: .top) {
             if isPlansPanelPresented {
                 let snapshots = viewModel.activePlanSnapshots
                 if !snapshots.isEmpty {
