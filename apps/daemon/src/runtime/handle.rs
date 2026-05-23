@@ -28,6 +28,13 @@ pub struct RuntimeHandle {
     pub last_output_summary: String,
     pub tool_use_count: i32,
     pub started_at: i64,
+    /// Wall-clock epoch (seconds) of the last user-driven or agent-driven
+    /// activity on this runtime. Set on spawn/resume, bumped on send_prompt
+    /// and on every drained ACP event. The idle sweeper (see
+    /// `RuntimeManager::evict_idle`) reads this to decide whether to stop
+    /// the runtime. Stored as a plain `i64` because the field lives behind
+    /// the manager's `AsyncMutex` — no separate locking needed.
+    pub last_active_at: i64,
     pub sequence: u64,
     /// Receiver half of the per-agent event channel. Wrapped in `Option` so
     /// the gateway turn-await loop can `.take()` it for the duration of a
@@ -75,6 +82,7 @@ impl RuntimeHandle {
         workspace_id: String,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::channel(256);
+        let now = chrono::Utc::now().timestamp();
         Self {
             agent_id,
             acp_session_id: String::new(),
@@ -88,7 +96,8 @@ impl RuntimeHandle {
             session_title: String::new(),
             last_output_summary: String::new(),
             tool_use_count: 0,
-            started_at: chrono::Utc::now().timestamp(),
+            started_at: now,
+            last_active_at: now,
             sequence: 0,
             event_rx: Some(event_rx),
             event_tx,
@@ -104,6 +113,12 @@ impl RuntimeHandle {
     pub fn next_sequence(&mut self) -> u64 {
         self.sequence += 1;
         self.sequence
+    }
+
+    /// Stamp `last_active_at` to now. Called by `RuntimeManager` on every
+    /// send_prompt and on each drained ACP event.
+    pub fn bump_activity(&mut self) {
+        self.last_active_at = chrono::Utc::now().timestamp();
     }
 
     /// Build a `RuntimeInfo` for this agent.
@@ -244,6 +259,7 @@ impl RuntimeHandle {
             last_output_summary: String::new(),
             tool_use_count: 0,
             started_at: 0,
+            last_active_at: 0,
             sequence: 0,
             event_rx: Some(event_rx),
             event_tx,

@@ -746,6 +746,27 @@ impl DaemonServer {
             });
         }
 
+        // Idle ACP runtime sweeper. Opt-in via DaemonConfig.idle_runtime_timeout_secs.
+        // The sweeper holds an `Arc<AsyncMutex<RuntimeManager>>` clone and calls
+        // `evict_idle` once a minute. The terminal MQTT publish is done by the
+        // main event loop draining `mgr.drain_evicted()` per tick (see Task 7).
+        if let Some(threshold_secs) = self.config.idle_runtime_timeout_secs {
+            let mgr = self.agents.clone();
+            info!(threshold_secs, "idle ACP eviction enabled");
+            let threshold = i64::try_from(threshold_secs).unwrap_or(i64::MAX);
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(60));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tick.tick().await;
+                    let _evicted = mgr.lock().await.evict_idle(threshold).await;
+                    // No publish here — main loop drains mgr.evicted_pending_publish.
+                }
+            });
+        } else {
+            info!("idle_runtime_timeout_secs unset; idle ACP eviction disabled");
+        }
+
         // Register device_id in Supabase once (background).
         {
             let sb = self.supabase.clone();
@@ -1018,7 +1039,13 @@ impl DaemonServer {
                     }
                     _ = tokio::time::sleep(Duration::from_millis(50)) => {
                         // Drain queued runtime events without preempting poll().
-                        let agent_events = self.agents.lock().await.poll_events();
+                        let (agent_events, evicted_runtime_ids): (Vec<_>, Vec<String>) = {
+                            let mut mgr = self.agents.lock().await;
+                            (mgr.poll_events(), mgr.drain_evicted())
+                        };
+                        for runtime_id in evicted_runtime_ids {
+                            self.publish_runtime_stopped(&runtime_id).await;
+                        }
                         for (agent_id, acp_event) in agent_events {
                             self.forward_agent_event(&agent_id, acp_event).await;
                         }
@@ -3457,23 +3484,7 @@ impl DaemonServer {
             );
         }
 
-        // Update session store to reflect stopped status (mirrors StopAgent side-effect).
-        if let Some(session) = self.sessions.find_by_id_mut(&runtime_id) {
-            session.status = amux::AgentStatus::Stopped as i32;
-            let _ = self.sessions.save(&self.sessions_path);
-        }
-
-        // Publish terminal RuntimeInfo to both retained state topics, then clear.
-        let stopped_info = amux::RuntimeInfo {
-            runtime_id: runtime_id.clone(),
-            state: amux::RuntimeLifecycle::Stopped as i32,
-            ..Default::default()
-        };
-        let publisher = Publisher::new(&self.mqtt);
-        let _ = publisher
-            .publish_runtime_state(&runtime_id, &stopped_info)
-            .await;
-        let _ = publisher.clear_runtime_state(&runtime_id).await;
+        self.publish_runtime_stopped(&runtime_id).await;
 
         RpcResponse {
             request_id: request.request_id.clone(),
@@ -3487,6 +3498,27 @@ impl DaemonServer {
                 rejected_reason: String::new(),
             })),
         }
+    }
+
+    /// Publish terminal `runtime/{id}/state`, clear the retained topic, and
+    /// flip the persisted session row to Stopped. Idempotent — calling
+    /// twice on the same `runtime_id` is safe (the second clear is a no-op
+    /// against an already-empty retain).
+    async fn publish_runtime_stopped(&mut self, runtime_id: &str) {
+        if let Some(session) = self.sessions.find_by_id_mut(runtime_id) {
+            session.status = amux::AgentStatus::Stopped as i32;
+            let _ = self.sessions.save(&self.sessions_path);
+        }
+        let stopped_info = amux::RuntimeInfo {
+            runtime_id: runtime_id.to_string(),
+            state: amux::RuntimeLifecycle::Stopped as i32,
+            ..Default::default()
+        };
+        let publisher = Publisher::new(&self.mqtt);
+        let _ = publisher
+            .publish_runtime_state(runtime_id, &stopped_info)
+            .await;
+        let _ = publisher.clear_runtime_state(runtime_id).await;
     }
 
     async fn handle_start_runtime(
@@ -4116,6 +4148,7 @@ mod tests {
             agents: crate::config::AgentsConfig::default(),
             team_id: Some("team-test".to_string()),
             channels: crate::config::ChannelsConfig::default(),
+            idle_runtime_timeout_secs: None,
         }
     }
 
@@ -4791,6 +4824,7 @@ mod runtime_backend_resolution_tests {
             agents: crate::config::AgentsConfig::default(),
             team_id: None,
             channels: crate::config::ChannelsConfig::default(),
+            idle_runtime_timeout_secs: None,
         }
     }
 

@@ -144,6 +144,12 @@ pub struct RuntimeManager {
     /// announced earlier on the (non-retained) events topic.
     available_commands_per_agent: HashMap<String, Vec<amux::AcpAvailableCommand>>,
     supabase: Option<SupabaseClient>,
+    /// agent_ids that were stopped by the idle sweeper and still need their
+    /// terminal `runtime/{id}/state` publish + retain clear. Drained by the
+    /// main event loop via `drain_evicted`. Manual `stop_agent` calls go
+    /// through the RPC handler which publishes directly, so they do NOT
+    /// enter this buffer.
+    evicted_pending_publish: Vec<String>,
     /// Test-only: records the last body sent per agent_id via send_prompt_raw.
     #[cfg(test)]
     last_sent: HashMap<String, String>,
@@ -163,6 +169,7 @@ impl RuntimeManager {
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
             supabase,
+            evicted_pending_publish: Vec::new(),
             #[cfg(test)]
             last_sent: HashMap::new(),
             #[cfg(test)]
@@ -557,6 +564,42 @@ impl RuntimeManager {
         }
     }
 
+    /// Stop every runtime whose `last_active_at` is older than
+    /// `now - threshold_secs`. Skips runtimes whose `event_rx` is currently
+    /// checked out (a gateway turn is in flight). Returns the list of
+    /// agent_ids that were stopped — and also buffers them on
+    /// `evicted_pending_publish` so the daemon main loop can clear retained
+    /// state. Called by the daemon's idle sweeper task.
+    pub async fn evict_idle(&mut self, threshold_secs: i64) -> Vec<String> {
+        let now = chrono::Utc::now().timestamp();
+        let cutoff = now - threshold_secs;
+        let stale: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, h)| h.event_rx.is_some() && h.last_active_at <= cutoff)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut evicted = Vec::with_capacity(stale.len());
+        for id in stale {
+            if self.stop_agent(&id).await.is_some() {
+                info!(
+                    agent_id = %id,
+                    threshold_secs,
+                    "idle sweeper: evicted runtime"
+                );
+                evicted.push(id);
+            }
+        }
+        self.evicted_pending_publish.extend(evicted.iter().cloned());
+        evicted
+    }
+
+    /// Drain the buffer of idle-evicted agent_ids whose terminal MQTT state
+    /// still needs publishing. Called once per main-loop tick.
+    pub fn drain_evicted(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.evicted_pending_publish)
+    }
+
     /// Send a prompt to an existing agent via ACP, draining any pending_silent
     /// messages as a `[Context …]` prefix first.
     /// Returns the drained message IDs (empty when no pending context existed).
@@ -616,15 +659,19 @@ impl RuntimeManager {
             if let Some(message) = self.send_failures.remove(agent_id) {
                 return Err(crate::error::AmuxError::Agent(message));
             }
+            if let Some(h) = self.agents.get_mut(agent_id) {
+                h.bump_activity();
+            }
             self.last_sent
                 .insert(agent_id.to_string(), text.to_string());
             return Ok(());
         }
         #[cfg(not(test))]
         {
-            let handle = self.agents.get(agent_id).ok_or_else(|| {
+            let handle = self.agents.get_mut(agent_id).ok_or_else(|| {
                 crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
             })?;
+            handle.bump_activity();
             handle.send_prompt(text, attachment_urls).await
         }
     }
@@ -799,10 +846,15 @@ impl RuntimeManager {
     pub fn poll_events(&mut self) -> Vec<(String, amux::AcpEvent)> {
         let mut events = vec![];
         for (agent_id, handle) in &mut self.agents {
+            let mut got_any = false;
             if let Some(rx) = handle.event_rx.as_mut() {
                 while let Ok(event) = rx.try_recv() {
                     events.push((agent_id.clone(), event));
+                    got_any = true;
                 }
+            }
+            if got_any {
+                handle.bump_activity();
             }
         }
         events
@@ -1684,5 +1736,111 @@ mod tests {
             mgr.get_handle("rt1").unwrap().pending_silent[0].message_id,
             "m1"
         );
+    }
+
+    #[tokio::test]
+    async fn send_prompt_bumps_last_active_at() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        // Reset to a known-old timestamp.
+        mgr.get_handle_mut("rt1").unwrap().last_active_at = 0;
+        let before = mgr.get_handle_mut("rt1").unwrap().last_active_at;
+        mgr.send_prompt("rt1", "hi", vec![]).await.unwrap();
+        let after = mgr.get_handle_mut("rt1").unwrap().last_active_at;
+        assert!(after > before, "send_prompt should bump last_active_at");
+    }
+
+    #[test]
+    fn poll_events_bumps_last_active_at_for_emitting_agents() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        mgr.get_handle_mut("rt1").unwrap().last_active_at = 0;
+        // Push a fake event into the handle's channel from the sender side.
+        let tx = mgr.get_handle_mut("rt1").unwrap().event_tx.clone();
+        let evt = amux::AcpEvent {
+            model: String::new(),
+            event: None,
+        };
+        tx.try_send(evt).expect("event channel ready");
+        let drained = mgr.poll_events();
+        assert_eq!(drained.len(), 1);
+        let after = mgr.get_handle_mut("rt1").unwrap().last_active_at;
+        assert!(
+            after > 0,
+            "poll_events should bump last_active_at for agents that emitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn evict_idle_stops_runtimes_past_threshold() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-stale");
+        let stale_ts = chrono::Utc::now().timestamp() - 3600; // 1h ago
+        mgr.get_handle_mut("rt-stale").unwrap().last_active_at = stale_ts;
+        mgr.add_test_runtime("rt-fresh", "rt-fresh", "sess-fresh");
+        // rt-fresh was just inserted, last_active_at = 0 from test_dummy,
+        // so set it to now so it isn't evicted.
+        mgr.get_handle_mut("rt-fresh").unwrap().last_active_at = chrono::Utc::now().timestamp();
+
+        let evicted = mgr.evict_idle(1800).await; // 30-minute threshold
+        assert_eq!(evicted, vec!["rt-stale".to_string()]);
+        assert!(mgr.get_handle("rt-stale").is_none(), "stale handle removed");
+        assert!(
+            mgr.get_handle("rt-fresh").is_some(),
+            "fresh handle retained"
+        );
+    }
+
+    #[tokio::test]
+    async fn evict_idle_buffers_ids_for_drain() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-old");
+        mgr.get_handle_mut("rt-old").unwrap().last_active_at = 0;
+        let evicted = mgr.evict_idle(60).await;
+        assert_eq!(evicted, vec!["rt-old".to_string()]);
+        let drained = mgr.drain_evicted();
+        assert_eq!(drained, vec!["rt-old".to_string()]);
+        // Second drain returns empty.
+        assert!(mgr.drain_evicted().is_empty());
+    }
+
+    #[tokio::test]
+    async fn evict_idle_skips_runtimes_with_checked_out_event_rx() {
+        // Mid-turn safety: a runtime whose event_rx has been taken (i.e.
+        // a gateway turn is in flight) must not be evicted even if its
+        // last_active_at is stale.
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-mid-turn");
+        mgr.get_handle_mut("rt-mid-turn").unwrap().last_active_at = 0;
+        // Simulate a checked-out event_rx by taking it directly.
+        let _rx = mgr
+            .get_handle_mut("rt-mid-turn")
+            .unwrap()
+            .event_rx
+            .take()
+            .expect("event_rx present");
+        let evicted = mgr.evict_idle(60).await;
+        assert!(
+            evicted.is_empty(),
+            "runtime mid-turn (event_rx None) must not be evicted"
+        );
+        assert!(
+            mgr.get_handle("rt-mid-turn").is_some(),
+            "handle must remain in map"
+        );
+    }
+
+    #[tokio::test]
+    async fn evict_idle_full_cycle_emits_evicted_id_for_publish() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-x");
+        mgr.get_handle_mut("rt-x").unwrap().last_active_at = 0;
+
+        // First sweep: stops the runtime, buffers id.
+        let evicted = mgr.evict_idle(60).await;
+        assert_eq!(evicted, vec!["rt-x".to_string()]);
+        assert!(mgr.get_handle("rt-x").is_none());
+
+        // Main loop drains the buffer.
+        let to_publish = mgr.drain_evicted();
+        assert_eq!(to_publish, vec!["rt-x".to_string()]);
+
+        // Second sweep: nothing left, buffer is empty.
+        assert!(mgr.evict_idle(60).await.is_empty());
+        assert!(mgr.drain_evicted().is_empty());
     }
 }
