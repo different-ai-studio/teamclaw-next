@@ -291,6 +291,32 @@ public enum ChatTimelineReducer {
     // MARK: - .historyMessage
 
     static func applyHistory(_ input: HistoryInput, to state: inout TimelineState) {
+        // Residual-streaming cleanup. Cold-start `start()` may have restored
+        // `streamingAgentSet[bucket]` from a `stop()`-saved synthetic
+        // incomplete output — but if Supabase shows the turn already
+        // completed (because the daemon finished while iOS was disconnected),
+        // the typing indicator is stale and must come down. Clear when the
+        // incoming history row is a complete `output` for this bucket AND
+        // the streaming partial we saved is a prefix of the finalized text
+        // (so we don't wipe an unrelated, genuinely-active stream for the
+        // same agent that just happened to land mid-seed).
+        defer {
+            if input.kind == .output,
+               let bucket = input.senderActorID,
+               !bucket.isEmpty {
+                let partial = state.streamingTextByAgent[bucket] ?? ""
+                // Only clear when our saved partial is consistent with the
+                // finalized text — empty partial (no active stream) or a
+                // prefix of the completed content. Otherwise leave streaming
+                // state alone; it belongs to an unrelated active turn.
+                if partial.isEmpty || input.content.hasPrefix(partial) {
+                    state.streamingAgentSet.remove(bucket)
+                    state.streamingTextByAgent[bucket] = nil
+                    state.streamingModelByAgent[bucket] = nil
+                }
+            }
+        }
+
         // Identity dedupe by supabaseMessageID.
         if let idx = state.entries.firstIndex(where: { $0.supabaseMessageID == input.supabaseMessageID }) {
             if state.entries[idx].timestamp != input.createdAt {
