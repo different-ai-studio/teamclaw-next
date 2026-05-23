@@ -8,6 +8,7 @@
     "yes": "是",
     "no": "否",
     "ok": "确定",
+    "all": "全部",
     "search": "搜索",
     "comingSoon": "即将上线",
     "loading": "加载中...",
@@ -550,8 +551,8 @@
     "mentions": "@提及",
     "waitingOnMe": "等待我",
     "pinned": "已置顶",
-    "ideasSection": "想法",
-    "actorsSection": "成员",
+    "ideasSection": "Top Ideas",
+    "actorsSection": "最近联系",
     "countActiveRecent": "{{count}} 个 · 按最近活动排序",
     "dateToday": "今天",
     "dateYesterday": "昨天",
@@ -2722,9 +2723,21 @@
     "viewerReadOnly": "只读模式 - 你没有编辑权限"
   },
   "actors": {
+    "allTitle": "所有成员",
     "loading": "正在加载成员...",
     "empty": "团队暂无成员",
+    "noRecentContacts": "暂无最近联系",
     "error": "加载成员失败",
+    "viewAll": "查看全部成员",
+    "filterType": "按类型筛选",
+    "typeFilterLabel": "类型",
+    "searchPlaceholder": "搜索成员",
+    "noMatches": "没有匹配的成员",
+    "invite": "邀请成员",
+    "type": {
+      "agent": "Agent",
+      "member": "团队"
+    },
     "contextMenu": {
       "viewProfile": "查看资料",
       "copyName": "复制名字",
@@ -2733,11 +2746,21 @@
     },
     "detail": {
       "title": "成员详情",
+      "memberTitle": "成员详情",
+      "agentTitle": "Agent 详情",
+      "description": "查看成员资料和在线状态。",
       "member": "成员",
-      "agent": "代理",
+      "agent": "Agent",
       "online": "在线",
       "offline": "离线",
       "lastActive": "最近活跃 {{when}}",
+      "details": "详情",
+      "role": "角色",
+      "type": "类型",
+      "lastActiveLabel": "最近活跃",
+      "never": "从未",
+      "actorId": "Actor ID",
+      "startSession": "开始会话",
       "copyId": "复制 ID"
     },
     "removeConfirm": {
@@ -2753,9 +2776,21 @@
     "removeFailed": "移除失败: {{msg}}"
   },
   "ideas": {
+    "allTitle": "Ideas",
     "loading": "正在加载想法...",
     "empty": "暂无想法",
     "error": "加载想法失败",
+    "viewAll": "查看全部想法",
+    "filterStatus": "按状态筛选",
+    "statusFilterLabel": "状态",
+    "searchPlaceholder": "搜索 Ideas",
+    "noMatches": "没有匹配的 Idea",
+    "create": "创建 Idea",
+    "status": {
+      "open": "暂搁置",
+      "inProgress": "进行中",
+      "done": "已落地"
+    },
     "newIdea": "新想法",
     "newIdeaDescription": "记录一个想法、问题或提案。",
     "titleLabel": "标题",

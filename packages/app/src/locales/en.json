@@ -8,6 +8,7 @@
     "yes": "Yes",
     "no": "No",
     "ok": "OK",
+    "all": "All",
     "search": "Search",
     "comingSoon": "Coming soon",
     "loading": "Loading...",
@@ -550,8 +551,8 @@
     "mentions": "@Mentions",
     "waitingOnMe": "Waiting on me",
     "pinned": "Pinned",
-    "ideasSection": "Ideas",
-    "actorsSection": "Actors",
+    "ideasSection": "Top Ideas",
+    "actorsSection": "Recent Contacts",
     "countActiveRecent": "{{count}} active · recent first",
     "dateToday": "Today",
     "dateYesterday": "Yesterday",
@@ -2722,9 +2723,21 @@
     "viewerReadOnly": "Read-only mode — you don't have edit permissions"
   },
   "actors": {
+    "allTitle": "All actors",
     "loading": "Loading actors...",
     "empty": "No actors in this team yet",
+    "noRecentContacts": "No recent contacts",
     "error": "Failed to load actors",
+    "viewAll": "View all actors",
+    "filterType": "Filter by type",
+    "typeFilterLabel": "Type",
+    "searchPlaceholder": "Search actors",
+    "noMatches": "No matching actors",
+    "invite": "Invite actor",
+    "type": {
+      "agent": "Agent",
+      "member": "Team"
+    },
     "contextMenu": {
       "viewProfile": "View profile",
       "copyName": "Copy name",
@@ -2733,11 +2746,21 @@
     },
     "detail": {
       "title": "Actor details",
+      "memberTitle": "Member details",
+      "agentTitle": "Agent details",
+      "description": "View actor profile and presence.",
       "member": "Member",
       "agent": "Agent",
       "online": "Online",
       "offline": "Offline",
       "lastActive": "Last active {{when}}",
+      "details": "Details",
+      "role": "Role",
+      "type": "Type",
+      "lastActiveLabel": "Last active",
+      "never": "Never",
+      "actorId": "Actor ID",
+      "startSession": "Start session",
       "copyId": "Copy ID"
     },
     "removeConfirm": {
@@ -2753,9 +2776,21 @@
     "removeFailed": "Remove failed: {{msg}}"
   },
   "ideas": {
+    "allTitle": "Ideas",
     "loading": "Loading ideas...",
     "empty": "No ideas yet",
     "error": "Failed to load ideas",
+    "viewAll": "View all ideas",
+    "filterStatus": "Filter by status",
+    "statusFilterLabel": "Status",
+    "searchPlaceholder": "Search ideas",
+    "noMatches": "No matching ideas",
+    "create": "Create idea",
+    "status": {
+      "open": "Open",
+      "inProgress": "In progress",
+      "done": "Done"
+    },
     "newIdea": "New idea",
     "newIdeaDescription": "Capture an idea, problem, or proposal for the team.",
     "titleLabel": "Title",

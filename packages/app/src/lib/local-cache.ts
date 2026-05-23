@@ -11,6 +11,7 @@ export type ActorRow = {
   avatarUrl?: string | null;
   memberStatus?: string | null;
   agentStatus?: string | null;
+  lastActiveAt?: string | null;
   metadataJson?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -102,6 +103,7 @@ export type IdeaRow = {
   description?: string | null;
   status?: string | null;
   createdBy?: string | null;
+  sortOrder?: number | null;
   archived: number;
   metadataJson?: string | null;
   createdAt: string;

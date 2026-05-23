@@ -25,6 +25,8 @@ export type SidebarFilter =
   | { kind: 'all' }
   | { kind: 'pinned' }
   | { kind: 'shortcuts' }
+  | { kind: 'ideas' }
+  | { kind: 'actors' }
   | { kind: 'actor'; actorId: string; displayName: string; actorType: 'member' | 'agent' }
   | { kind: 'idea'; ideaId: string; title: string }
 

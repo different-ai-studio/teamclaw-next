@@ -26,6 +26,7 @@ pub struct ActorRow {
     pub avatar_url: Option<String>,
     pub member_status: Option<String>,
     pub agent_status: Option<String>,
+    pub last_active_at: Option<String>,
     pub metadata_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -127,6 +128,7 @@ pub struct IdeaRow {
     pub status: Option<String>,
     pub created_by: Option<String>,
     pub archived: i64,
+    pub sort_order: Option<i64>,
     pub metadata_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -229,6 +231,7 @@ impl LocalCacheStore {
                 avatar_url    TEXT,
                 member_status TEXT,
                 agent_status  TEXT,
+                last_active_at TEXT,
                 metadata_json TEXT,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
@@ -239,6 +242,9 @@ impl LocalCacheStore {
         )
         .await
         .map_err(|e| format!("Failed to create actor table: {}", e))?;
+        conn.execute("ALTER TABLE actor ADD COLUMN last_active_at TEXT", ())
+            .await
+            .ok();
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_actor_team ON actor(team_id)",
@@ -391,6 +397,7 @@ impl LocalCacheStore {
                 status        TEXT,
                 created_by    TEXT,
                 archived      INTEGER NOT NULL DEFAULT 0,
+                sort_order    INTEGER NOT NULL DEFAULT 0,
                 metadata_json TEXT,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
@@ -401,6 +408,12 @@ impl LocalCacheStore {
         )
         .await
         .map_err(|e| format!("Failed to create idea table: {}", e))?;
+        conn.execute(
+            "ALTER TABLE idea ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            (),
+        )
+        .await
+        .ok();
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_idea_team ON idea(team_id)",
@@ -507,8 +520,8 @@ impl LocalCacheStore {
             conn.execute(
                 "INSERT INTO actor
                     (id, team_id, actor_type, display_name, avatar_url, member_status,
-                     agent_status, metadata_json, created_at, updated_at, deleted_at, synced_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                     agent_status, last_active_at, metadata_json, created_at, updated_at, deleted_at, synced_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
                  ON CONFLICT(id) DO UPDATE SET
                     team_id       = excluded.team_id,
                     actor_type    = excluded.actor_type,
@@ -516,6 +529,7 @@ impl LocalCacheStore {
                     avatar_url    = excluded.avatar_url,
                     member_status = excluded.member_status,
                     agent_status  = excluded.agent_status,
+                    last_active_at = excluded.last_active_at,
                     metadata_json = excluded.metadata_json,
                     created_at    = excluded.created_at,
                     updated_at    = excluded.updated_at,
@@ -530,6 +544,7 @@ impl LocalCacheStore {
                     opt_val(&r.avatar_url),
                     opt_val(&r.member_status),
                     opt_val(&r.agent_status),
+                    opt_val(&r.last_active_at),
                     opt_val(&r.metadata_json),
                     r.created_at.clone(),
                     r.updated_at.clone(),
@@ -551,11 +566,11 @@ impl LocalCacheStore {
         let conn = self.conn.lock().await;
         let sql = if include_deleted {
             "SELECT id, team_id, actor_type, display_name, avatar_url, member_status,
-                    agent_status, metadata_json, created_at, updated_at, deleted_at, synced_at
+                    agent_status, last_active_at, metadata_json, created_at, updated_at, deleted_at, synced_at
              FROM actor WHERE team_id = ?1"
         } else {
             "SELECT id, team_id, actor_type, display_name, avatar_url, member_status,
-                    agent_status, metadata_json, created_at, updated_at, deleted_at, synced_at
+                    agent_status, last_active_at, metadata_json, created_at, updated_at, deleted_at, synced_at
              FROM actor WHERE team_id = ?1 AND deleted_at IS NULL"
         };
         let mut rows = conn
@@ -576,11 +591,12 @@ impl LocalCacheStore {
                 avatar_url: row.get::<String>(4).ok().filter(|s| !s.is_empty()),
                 member_status: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
                 agent_status: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
-                metadata_json: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
-                created_at: row.get::<String>(8).unwrap_or_default(),
-                updated_at: row.get::<String>(9).unwrap_or_default(),
-                deleted_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
-                synced_at: row.get::<String>(11).unwrap_or_default(),
+                last_active_at: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
+                metadata_json: row.get::<String>(8).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(9).unwrap_or_default(),
+                updated_at: row.get::<String>(10).unwrap_or_default(),
+                deleted_at: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
+                synced_at: row.get::<String>(12).unwrap_or_default(),
             });
         }
         Ok(result)
@@ -602,7 +618,7 @@ impl LocalCacheStore {
             .join(",");
         let sql = format!(
             "SELECT id, team_id, actor_type, display_name, avatar_url, member_status,
-                    agent_status, metadata_json, created_at, updated_at, deleted_at, synced_at
+                    agent_status, last_active_at, metadata_json, created_at, updated_at, deleted_at, synced_at
              FROM actor WHERE id IN ({}) AND deleted_at IS NULL",
             placeholders
         );
@@ -625,11 +641,12 @@ impl LocalCacheStore {
                 avatar_url: row.get::<String>(4).ok().filter(|s| !s.is_empty()),
                 member_status: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
                 agent_status: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
-                metadata_json: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
-                created_at: row.get::<String>(8).unwrap_or_default(),
-                updated_at: row.get::<String>(9).unwrap_or_default(),
-                deleted_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
-                synced_at: row.get::<String>(11).unwrap_or_default(),
+                last_active_at: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
+                metadata_json: row.get::<String>(8).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(9).unwrap_or_default(),
+                updated_at: row.get::<String>(10).unwrap_or_default(),
+                deleted_at: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
+                synced_at: row.get::<String>(12).unwrap_or_default(),
             });
         }
         Ok(result)
@@ -996,8 +1013,8 @@ impl LocalCacheStore {
             conn.execute(
                 "INSERT INTO idea
                     (id, team_id, workspace_id, parent_id, title, description, status,
-                     created_by, archived, metadata_json, created_at, updated_at, deleted_at, synced_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+                     created_by, archived, sort_order, metadata_json, created_at, updated_at, deleted_at, synced_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
                  ON CONFLICT(id) DO UPDATE SET
                     team_id       = excluded.team_id,
                     workspace_id  = excluded.workspace_id,
@@ -1007,6 +1024,7 @@ impl LocalCacheStore {
                     status        = excluded.status,
                     created_by    = excluded.created_by,
                     archived      = excluded.archived,
+                    sort_order    = excluded.sort_order,
                     metadata_json = excluded.metadata_json,
                     created_at    = excluded.created_at,
                     updated_at    = excluded.updated_at,
@@ -1023,6 +1041,7 @@ impl LocalCacheStore {
                     opt_val(&r.status),
                     opt_val(&r.created_by),
                     r.archived,
+                    r.sort_order.unwrap_or(0),
                     opt_val(&r.metadata_json),
                     r.created_at.clone(),
                     r.updated_at.clone(),
@@ -1044,11 +1063,11 @@ impl LocalCacheStore {
         let conn = self.conn.lock().await;
         let sql = if include_deleted {
             "SELECT id, team_id, workspace_id, parent_id, title, description, status,
-                    created_by, archived, metadata_json, created_at, updated_at, deleted_at, synced_at
+                    created_by, archived, sort_order, metadata_json, created_at, updated_at, deleted_at, synced_at
              FROM idea WHERE team_id = ?1"
         } else {
             "SELECT id, team_id, workspace_id, parent_id, title, description, status,
-                    created_by, archived, metadata_json, created_at, updated_at, deleted_at, synced_at
+                    created_by, archived, sort_order, metadata_json, created_at, updated_at, deleted_at, synced_at
              FROM idea WHERE team_id = ?1 AND deleted_at IS NULL"
         };
         let mut rows = conn
@@ -1071,11 +1090,12 @@ impl LocalCacheStore {
                 status: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
                 created_by: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
                 archived: row.get::<i64>(8).unwrap_or(0),
-                metadata_json: row.get::<String>(9).ok().filter(|s| !s.is_empty()),
-                created_at: row.get::<String>(10).unwrap_or_default(),
-                updated_at: row.get::<String>(11).unwrap_or_default(),
-                deleted_at: row.get::<String>(12).ok().filter(|s| !s.is_empty()),
-                synced_at: row.get::<String>(13).unwrap_or_default(),
+                sort_order: Some(row.get::<i64>(9).unwrap_or(0)),
+                metadata_json: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(11).unwrap_or_default(),
+                updated_at: row.get::<String>(12).unwrap_or_default(),
+                deleted_at: row.get::<String>(13).ok().filter(|s| !s.is_empty()),
+                synced_at: row.get::<String>(14).unwrap_or_default(),
             });
         }
         Ok(result)
@@ -1592,6 +1612,7 @@ mod tests {
             avatar_url: None,
             member_status: None,
             agent_status: None,
+            last_active_at: None,
             metadata_json: None,
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: updated_at.to_string(),
