@@ -36,9 +36,10 @@ public struct AgentPlanSnapshot: Identifiable, Equatable, Sendable {
         var latestByAgent: [String: AgentEvent] = [:]
         var firstSeen: [String: Int] = [:]
         for (idx, event) in events.enumerated() where event.eventType == "plan_update" {
-            latestByAgent[event.agentId] = event
-            if firstSeen[event.agentId] == nil {
-                firstSeen[event.agentId] = idx
+            let agentID = event.planAgentID
+            latestByAgent[agentID] = event
+            if firstSeen[agentID] == nil {
+                firstSeen[agentID] = idx
             }
         }
         let ordered = latestByAgent.keys.sorted { lhs, rhs in
@@ -56,5 +57,14 @@ public struct AgentPlanSnapshot: Identifiable, Equatable, Sendable {
             )
             return snapshot.hasUnfinished ? snapshot : nil
         }
+    }
+}
+
+private extension AgentEvent {
+    var planAgentID: String {
+        if let senderActorID, !senderActorID.isEmpty {
+            return senderActorID
+        }
+        return agentId
     }
 }

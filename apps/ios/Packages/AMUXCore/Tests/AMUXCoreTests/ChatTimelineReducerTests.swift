@@ -206,6 +206,41 @@ struct ReducerPlanReplaceTests {
         #expect(state.entries[0].text?.contains("[done] plan") == true)
         #expect(state.entries[0].text?.contains("[wip] ship") == true)
     }
+
+    @Test("plan_update replacement is scoped to the emitting agent")
+    func replacesPerAgent() {
+        var state = TimelineState()
+        var agentA = Amux_AcpEvent()
+        agentA.event = .planUpdate(makePlanUpdate([("a-old", "in_progress")]))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-a",
+                          agentBucketKey: "agent-a", timestamp: .now,
+                          acpEvent: agentA)),
+            to: &state
+        )
+
+        var agentB = Amux_AcpEvent()
+        agentB.event = .planUpdate(makePlanUpdate([("b-task", "in_progress")]))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-b",
+                          agentBucketKey: "agent-b", timestamp: .now,
+                          acpEvent: agentB)),
+            to: &state
+        )
+
+        var agentANext = Amux_AcpEvent()
+        agentANext.event = .planUpdate(makePlanUpdate([("a-done", "completed")]))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt-a",
+                          agentBucketKey: "agent-a", timestamp: .now,
+                          acpEvent: agentANext)),
+            to: &state
+        )
+
+        #expect(state.entries.count == 2)
+        #expect(state.entries.first(where: { $0.senderActorID == "agent-a" })?.text == "[done] a-done")
+        #expect(state.entries.first(where: { $0.senderActorID == "agent-b" })?.text == "[wip] b-task")
+    }
 }
 
 @Suite("ChatTimelineReducer — permission resolve (case 4)")

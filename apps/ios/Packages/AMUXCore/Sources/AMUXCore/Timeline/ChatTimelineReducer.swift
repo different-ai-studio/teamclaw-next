@@ -201,15 +201,20 @@ public enum ChatTimelineReducer {
                          : "todo"
                 return "[\(icon)] \(entry.content)"
             }.joined(separator: "\n")
-            if let idx = state.entries.lastIndex(where: { $0.eventType == "plan_update" }) {
+            if let idx = state.entries.lastIndex(where: {
+                $0.eventType == "plan_update"
+                    && ($0.senderActorID ?? "") == bucket
+            }) {
                 state.entries[idx].text = text
+                if state.entries[idx].turnID == nil { state.entries[idx].turnID = input.turnID }
             } else {
                 state.entries.append(makeEntry(
                     sequence: input.envelopeSequence,
                     eventType: "plan_update",
                     text: text,
                     senderActorID: bucket,
-                    timestamp: input.timestamp
+                    timestamp: input.timestamp,
+                    turnID: input.turnID
                 ))
             }
 

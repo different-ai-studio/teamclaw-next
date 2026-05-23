@@ -62,12 +62,7 @@ public struct StreamingDetailView: View {
     }
 
     private var planUpdateText: String? {
-        for item in viewModel.feedItems.reversed() {
-            if case .todo(let event) = item, let text = event.text, !text.isEmpty {
-                return text
-            }
-        }
-        return nil
+        viewModel.activePlanSnapshots.first(where: { $0.agentID == route.agentID })?.text
     }
 
     /// Resolved turn data. We re-derive on every render from the

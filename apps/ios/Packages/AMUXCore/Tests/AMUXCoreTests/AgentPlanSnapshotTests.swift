@@ -12,10 +12,12 @@ struct AgentPlanSnapshotTests {
         agentId: String,
         sequence: Int,
         type: String,
-        text: String? = nil
+        text: String? = nil,
+        senderActorID: String? = nil
     ) -> AgentEvent {
         let event = AgentEvent(agentId: agentId, sequence: sequence, eventType: type)
         event.text = text
+        event.senderActorID = senderActorID
         return event
     }
 
@@ -69,6 +71,32 @@ struct AgentPlanSnapshotTests {
         // bbb2 appeared first → page 0
         #expect(result[0].agentID == "bbb2")
         #expect(result[1].agentID == "aaa1")
+    }
+
+    @Test("plan snapshots group by senderActorID when persisted agentId is session-scoped")
+    func senderActorIDWinsOverSessionScopedAgentID() {
+        let events = [
+            makeEvent(
+                agentId: "session-scope",
+                sequence: 1,
+                type: "plan_update",
+                text: "[wip] b-task",
+                senderActorID: "bbb2"
+            ),
+            makeEvent(
+                agentId: "session-scope",
+                sequence: 2,
+                type: "plan_update",
+                text: "[wip] a-task",
+                senderActorID: "aaa1"
+            ),
+        ]
+        let result = AgentPlanSnapshot.derive(events: events, agentNameFor: nameProvider)
+        #expect(result.count == 2)
+        if result.count == 2 {
+            #expect(result[0].agentID == "bbb2")
+            #expect(result[1].agentID == "aaa1")
+        }
     }
 
     @Test("same agent emits two plan_updates → latest text wins")
