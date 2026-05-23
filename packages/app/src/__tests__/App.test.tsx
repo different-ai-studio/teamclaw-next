@@ -193,6 +193,13 @@ vi.mock('@/components/ui/separator', () => ({
   Separator: () => <hr />,
 }))
 vi.mock('@/components/ui/traffic-lights', () => ({ TrafficLights: () => null }))
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => open ? <>{children}</> : null,
+  DialogContent: ({ children, showCloseButton: _showCloseButton, ...props }: any) => <div role="dialog" {...props}>{children}</div>,
+  DialogDescription: ({ children, ...props }: any) => <p {...props}>{children}</p>,
+  DialogHeader: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+  DialogTitle: ({ children, ...props }: any) => <h2 {...props}>{children}</h2>,
+}))
 vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: any) => <>{children}</>,
   DropdownMenuContent: ({ children }: any) => <>{children}</>,
@@ -232,6 +239,17 @@ describe('App', () => {
     render(<App />)
     // The WorkspacePrompt mock renders 'workspace-prompt'
     expect(document.body.textContent).toContain('workspace-prompt')
+  })
+
+  it('opens settings as a modal panel over the current workspace', () => {
+    uiStoreState.currentView = 'settings'
+    workspaceStoreState.workspacePath = '/workspace'
+
+    render(<App />)
+
+    expect(screen.getByTestId('chat-panel')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.getByText('settings')).toBeInTheDocument()
   })
 
   it('opens knowledge in the right panel (not the left dock) in default layout', () => {
