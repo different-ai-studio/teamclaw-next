@@ -130,15 +130,25 @@ public final class IdeaStore {
         ideaID: String,
         activityType: String,
         content: String,
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        attachmentURLs: [URL] = []
     ) async -> Bool {
         do {
+            var mergedMetadata = metadata
+            let attachmentValue = attachmentURLs
+                .map(\.absoluteString)
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            if !attachmentValue.isEmpty {
+                mergedMetadata[IdeaActivityRecord.attachmentURLsMetadataKey] = attachmentValue
+            }
+
             let activity = try await repository.createIdeaActivity(
                 ideaID: ideaID,
                 input: IdeaActivityCreateInput(
                     activityType: activityType,
                     content: content.trimmingCharacters(in: .whitespacesAndNewlines),
-                    metadata: metadata
+                    metadata: mergedMetadata
                 )
             )
             var activities = activitiesByIdeaID[ideaID] ?? []
