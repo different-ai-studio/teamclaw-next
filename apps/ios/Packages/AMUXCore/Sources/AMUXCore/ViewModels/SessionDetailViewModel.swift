@@ -435,14 +435,18 @@ public final class SessionDetailViewModel {
         return []
     }
 
-    /// Cancel a specific agent's currently-running ACP turn. Today the
-    /// app surfaces only the bound runtime in detail view, so this is a
-    /// thin wrapper over the existing cancelTask. When the chip bar
-    /// drives interrupts for non-bound runtimes we'll route via a
-    /// per-runtime ACP cancel (and the routing rewrite arrives with
-    /// that work).
+    /// Cancel a specific agent's currently-running ACP turn.
     public func interruptAgent(_ agentActorID: String) {
-        Task { try? await self.cancelTask() }
+        Task {
+            do {
+                try await sendCommand(agentActorID: agentActorID) {
+                    $0.command = .cancel(Amux_AcpCancel())
+                }
+                markAgentDone()
+            } catch {
+                // sendCommand / cancelTask already surfaced the user-facing error.
+            }
+        }
     }
 
     /// Prepend `@<displayName> ` for every lit chip whose token isn't
@@ -1945,10 +1949,10 @@ public final class SessionDetailViewModel {
             if case .daemonDeviceIdUnresolved = error {
                 print("[RuntimeDetailVM] dropping command — daemon device-id not resolved (primaryAgentId=\(session?.primaryAgentId ?? "nil") runtimeId=\(route.runtimeID) agentActorID=\(agentActorID ?? "nil"))")
             }
-            await surfaceSendError(error)
+            surfaceSendError(error)
             throw error
         } catch {
-            await surfaceSendError(error)
+            surfaceSendError(error)
             throw error
         }
     }
