@@ -8,8 +8,8 @@ import AMUXSharedUI
 public struct EventBubbleView: View {
     let event: AgentEvent
     let runtime: Runtime?
-    let onGrant: ((String) -> Void)?
-    let onDeny: ((String) -> Void)?
+    let onGrant: ((String, String?) -> Void)?
+    let onDeny: ((String, String?) -> Void)?
     /// Tap handler invoked when the user taps a `.failed` outbox dot on
     /// their own bubble. Hooked to `OutboxSender.retry` by the parent.
     let onRetryOutbox: ((String) -> Void)?
@@ -29,8 +29,8 @@ public struct EventBubbleView: View {
     @State private var fullscreenImageContext: FullscreenImageContext?
 
     public init(event: AgentEvent, runtime: Runtime? = nil,
-                onGrant: ((String) -> Void)? = nil,
-                onDeny: ((String) -> Void)? = nil,
+                onGrant: ((String, String?) -> Void)? = nil,
+                onDeny: ((String, String?) -> Void)? = nil,
                 onRetryOutbox: ((String) -> Void)? = nil,
                 showsAssistantHeader: Bool = true) {
         self.event = event
@@ -116,8 +116,8 @@ public struct EventBubbleView: View {
                     requestId: event.toolId ?? "",
                     isResolved: event.isComplete == true,
                     wasGranted: event.success,
-                    onGrant: event.isComplete == true ? nil : onGrant,
-                    onDeny: event.isComplete == true ? nil : onDeny
+                    onGrant: event.isComplete == true ? nil : { id in onGrant?(id, event.senderActorID) },
+                    onDeny: event.isComplete == true ? nil : { id in onDeny?(id, event.senderActorID) }
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 4)

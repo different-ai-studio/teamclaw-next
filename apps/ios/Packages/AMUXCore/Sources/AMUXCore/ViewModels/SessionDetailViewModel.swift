@@ -1924,23 +1924,26 @@ public final class SessionDetailViewModel {
         )
     }
 
-    private func sendCommand(_ makeCommand: (inout Amux_AcpCommand) -> Void) async throws {
-        guard let runtime else {
-            await surfaceSendError(SendCommandError.noRuntime)
-            throw SendCommandError.noRuntime
+    private func sendCommand(agentActorID: String? = nil,
+                             makeCommand: (inout Amux_AcpCommand) -> Void) async throws {
+        let route = commandRoute(forAgentActorID: agentActorID, fallbackRuntime: runtime)
+        guard !route.runtimeID.isEmpty else {
+            let key = agentActorID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let error: SendCommandError = key.isEmpty ? .noRuntime : .runtimeIdEmpty
+            await surfaceSendError(error)
+            throw error
         }
-        let deviceID = resolveDaemonDeviceId()
         let sender = RuntimeCommandSender(mqtt: mqtt, teamID: teamID, peerID: peerId)
         do {
             try await sender.send(
-                runtimeID: runtime.runtimeId,
-                deviceID: deviceID,
+                runtimeID: route.runtimeID,
+                deviceID: route.deviceID,
                 currentHumanActorID: teamclawService?.currentHumanActorId,
                 makeCommand: makeCommand
             )
         } catch let error as SendCommandError {
             if case .daemonDeviceIdUnresolved = error {
-                print("[RuntimeDetailVM] dropping command — daemon device-id not resolved (primaryAgentId=\(session?.primaryAgentId ?? "nil") runtimeId=\(runtime.runtimeId))")
+                print("[RuntimeDetailVM] dropping command — daemon device-id not resolved (primaryAgentId=\(session?.primaryAgentId ?? "nil") runtimeId=\(route.runtimeID) agentActorID=\(agentActorID ?? "nil"))")
             }
             await surfaceSendError(error)
             throw error
@@ -1948,6 +1951,35 @@ public final class SessionDetailViewModel {
             await surfaceSendError(error)
             throw error
         }
+    }
+
+    private func commandRoute(forAgentActorID agentActorID: String?,
+                              fallbackRuntime: Runtime?) -> (runtimeID: String, deviceID: String) {
+        let key = agentActorID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let targetRuntimeID: String = {
+            guard !key.isEmpty else { return fallbackRuntime?.runtimeId ?? "" }
+            if let mapped = runtimeID(forAgentActorID: key), !mapped.isEmpty { return mapped }
+            if fallbackRuntime?.runtimeId == key { return key }
+            if memberSheetAgents.contains(where: { $0.id == key }) { return "" }
+            return key
+        }()
+
+        let deviceID: String = {
+            if !key.isEmpty, let id = routeDeviceID(forAgentActorID: key), !id.isEmpty { return id }
+            if fallbackRuntime?.runtimeId == targetRuntimeID,
+               let id = fallbackRuntime?.daemonDeviceId,
+               !id.isEmpty {
+                return id
+            }
+            if let ctx = startModelContext, !targetRuntimeID.isEmpty {
+                let rid = targetRuntimeID
+                let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
+                if let id = (try? ctx.fetch(desc).first?.daemonDeviceId), !id.isEmpty { return id }
+            }
+            return resolveDaemonDeviceId()
+        }()
+
+        return (targetRuntimeID, deviceID)
     }
 
     public func sendPrompt(_ text: String, modelId: String? = nil, attachmentURLs: [URL] = [], modelContext: ModelContext? = nil) async throws {
@@ -2153,13 +2185,13 @@ public final class SessionDetailViewModel {
         timelineState.streamingModelByAgent = [:]
         timelineState.streamingAgentSet = []
     }
-    public func grantPermission(requestId: String) async throws {
+    public func grantPermission(requestId: String, agentActorID: String? = nil) async throws {
         var g = Amux_AcpGrantPermission(); g.requestID = requestId
-        try await sendCommand { $0.command = .grantPermission(g) }
+        try await sendCommand(agentActorID: agentActorID) { $0.command = .grantPermission(g) }
     }
-    public func denyPermission(requestId: String) async throws {
+    public func denyPermission(requestId: String, agentActorID: String? = nil) async throws {
         var d = Amux_AcpDenyPermission(); d.requestID = requestId
-        try await sendCommand { $0.command = .denyPermission(d) }
+        try await sendCommand(agentActorID: agentActorID) { $0.command = .denyPermission(d) }
     }
 }
 

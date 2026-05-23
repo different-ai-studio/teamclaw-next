@@ -479,8 +479,8 @@ public struct SessionDetailView: View {
             EventBubbleView(
                 event: event,
                 runtime: viewModel.runtime,
-                onGrant: { id in Task { try? await viewModel.grantPermission(requestId: id) } },
-                onDeny: { id in Task { try? await viewModel.denyPermission(requestId: id) } },
+                onGrant: { id, agentID in Task { try? await viewModel.grantPermission(requestId: id, agentActorID: agentID) } },
+                onDeny: { id, agentID in Task { try? await viewModel.denyPermission(requestId: id, agentActorID: agentID) } },
                 onRetryOutbox: { msgID in
                     if let sender = viewModel.outboxSender {
                         Task { await sender.retry(messageID: msgID) }

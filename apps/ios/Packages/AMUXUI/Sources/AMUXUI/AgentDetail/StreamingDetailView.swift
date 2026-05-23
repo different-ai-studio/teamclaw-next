@@ -144,8 +144,8 @@ public struct StreamingDetailView: View {
                         EventBubbleView(
                             event: event,
                             runtime: viewModel.runtime,
-                            onGrant: { id in Task { try? await viewModel.grantPermission(requestId: id) } },
-                            onDeny: { id in Task { try? await viewModel.denyPermission(requestId: id) } },
+                            onGrant: { id, agentID in Task { try? await viewModel.grantPermission(requestId: id, agentActorID: agentID ?? route.agentID) } },
+                            onDeny: { id, agentID in Task { try? await viewModel.denyPermission(requestId: id, agentActorID: agentID ?? route.agentID) } },
                             // The nav-bar title already shows
                             // "{agent} · {model}" for the whole turn;
                             // suppressing the per-bubble caption keeps
