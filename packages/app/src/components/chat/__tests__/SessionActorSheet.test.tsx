@@ -180,7 +180,6 @@ function mockSheetData(
           }),
         }),
         insert: () => Promise.resolve({ error: null }),
-        upsert: () => Promise.resolve({ error: null }),
       }
     }
     if (table === 'actor_directory') {
@@ -225,8 +224,8 @@ describe('SessionActorSheet', () => {
     render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
     expect(screen.getByText('Reviewer')).toBeInTheDocument()
-    expect(screen.getByText(/members/i)).toBeInTheDocument()
-    expect(screen.getByText(/agents/i)).toBeInTheDocument()
+    expect(screen.getByText('团队')).toBeInTheDocument()
+    expect(screen.getByText('AGENT')).toBeInTheDocument()
   })
 
   it('shows empty state when session has no participants', async () => {
@@ -320,7 +319,7 @@ describe('SessionActorSheet', () => {
     render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
 
-    const addAgentButton = screen.getByRole('button', { name: /add agent/i })
+    const addAgentButton = screen.getByRole('button', { name: /\+ 加入/ })
     await user.click(addAgentButton)
 
     await waitFor(() => {
@@ -378,10 +377,37 @@ describe('SessionActorSheet', () => {
     render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
 
-    // The Agents heading and + button should appear since there's a candidate
-    expect(screen.getByText(/agents/i)).toBeInTheDocument()
-    const addBtn = screen.getByRole('button', { name: /add agent/i })
+    // The invite heading and + button should appear since there's a candidate
+    expect(screen.getByText('邀请加入')).toBeInTheDocument()
+    const addBtn = screen.getByRole('button', { name: /\+ 加入/ })
     expect(addBtn).toBeInTheDocument()
+  })
+
+  it('renders the editorial participants panel with invite candidates', async () => {
+    mockSheetData(
+      ['m-1', 'a-1'],
+      [
+        { id: 'm-1', actor_type: 'member', display_name: 'You', member_status: '你', agent_status: null, agent_kind: null, last_active_at: null },
+        { id: 'a-1', actor_type: 'agent', display_name: 'ClawBot', member_status: null, agent_status: '默认助手', agent_kind: 'claude', last_active_at: null },
+      ],
+      [],
+      [
+        { id: 'a-2', display_name: 'ShipReview', actor_type: 'agent', agent_status: '代码评审', agent_types: ['claude'], default_agent_type: 'claude' },
+        { id: 'm-2', display_name: 'Jinliang', actor_type: 'member', member_status: '产品' },
+      ],
+    )
+
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
+    await waitFor(() => expect(screen.getByText('参与者')).toBeInTheDocument())
+
+    expect(screen.getByText('AGENT')).toBeInTheDocument()
+    expect(screen.getByText('团队')).toBeInTheDocument()
+    expect(screen.getByText('邀请加入')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('搜索成员或 Agent...')).toBeInTheDocument()
+    expect(screen.getByText('ShipReview')).toBeInTheDocument()
+    expect(screen.getByText('Jinliang')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /\+ 加入/ })).toHaveLength(2)
+    expect(screen.getByText('加入后将看到完整历史')).toBeInTheDocument()
   })
 
   it('clicking + button calls runtimeStart and adds agent row', async () => {
@@ -398,9 +424,9 @@ describe('SessionActorSheet', () => {
     )
 
     render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
-    await waitFor(() => expect(screen.getByRole('button', { name: /add agent/i })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: /\+ 加入/ })).toBeInTheDocument())
 
-    const addBtn = screen.getByRole('button', { name: /add agent/i })
+    const addBtn = screen.getByRole('button', { name: /\+ 加入/ })
     await user.click(addBtn)
 
     // After click, the agent row should appear optimistically
