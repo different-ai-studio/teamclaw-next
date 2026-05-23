@@ -63,6 +63,13 @@ import { UpdateDialogContainer } from "@/components/updater/UpdateDialog";
 import { RightPanel, ShortcutsPanel } from "@/components/panel";
 import { Settings } from "@/components/settings";
 import { FeedbackDialog } from "@/components/settings/FeedbackDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SetupGuide } from "@/components/SetupGuide";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
 import { WorkspacePrompt } from "@/components/workspace";
@@ -587,8 +594,8 @@ function AppContent() {
   const showRightWorkspacePanel = isPanelOpen && !leftDockActive;
   const isCollapsed = state === "collapsed";
   /** Native traffic lights sit over the left column; spare inset header when left dock owns that strip. */
-  const hideInsetChromeForLeftDock =
-    leftDockActive && currentView !== "settings";
+  const hideInsetChromeForLeftDock = leftDockActive;
+  const settingsOpen = currentView === "settings";
 
   useEffect(() => {
     void loadCurrentTeam();
@@ -1245,48 +1252,55 @@ function AppContent() {
     }
   }, [leftDockActive, workspaceUIVariant, sidebarOpen, setSidebarOpen, closePanel]);
 
-  // If settings is open, show settings page (check first so it works regardless of workspace state)
-  if (currentView === "settings") {
-    return (
-      <>
-        <AppSidebar />
-        <SidebarInset className="flex h-svh flex-col overflow-hidden">
-          {/* Header for settings - with traffic light space when collapsed */}
-          <header
-            className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background px-4"
-            data-tauri-drag-region
-          >
-            {collapsedInsetLeading}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-lg"
-              onClick={closeSettings}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="font-medium">
+  const settingsModal = (
+    <Dialog
+      open={settingsOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          closeSettings();
+        }
+      }}
+    >
+      <DialogContent
+        aria-label={t("common.settings", "Settings")}
+        className="flex h-[min(780px,calc(100vh-5rem))] w-[min(1180px,calc(100vw-4rem))] max-w-none grid-cols-none flex-col gap-0 overflow-hidden rounded-[14px] border-border bg-paper p-0 shadow-2xl sm:max-w-none"
+        showCloseButton={false}
+      >
+        <DialogHeader className="flex h-12 shrink-0 flex-row items-center gap-2 border-b border-border bg-paper px-5 py-0 text-left">
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="truncate text-[15px] font-bold leading-none text-foreground">
               {t("common.settings", "Settings")}
-            </span>
-            <div className="flex-1" />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2 text-muted-foreground hover:text-foreground"
-              onClick={() => setFeedbackOpen(true)}
-            >
-              <MessageSquarePlus className="h-4 w-4" />
-              {t('settings.feedback.title', 'Send Feedback')}
-            </Button>
-          </header>
-          <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
-          <div className="flex-1 overflow-hidden">
-            <Settings />
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              {t("settings.description", "Configure TeamClaw settings.")}
+            </DialogDescription>
           </div>
-        </SidebarInset>
-      </>
-    );
-  }
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-selected hover:text-foreground"
+            onClick={() => setFeedbackOpen(true)}
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            {t('settings.feedback.title', 'Send Feedback')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-selected hover:text-foreground"
+            onClick={closeSettings}
+            aria-label={t("common.close", "Close")}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </DialogHeader>
+        <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <Settings />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 
   if (!initialWorkspaceResolved) {
     return (
@@ -1304,6 +1318,7 @@ function AppContent() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         </SidebarInset>
+        {settingsModal}
       </>
     );
   }
@@ -1325,6 +1340,7 @@ function AppContent() {
             <WorkspacePrompt />
           </div>
         </SidebarInset>
+        {settingsModal}
       </>
     );
   }
@@ -1507,6 +1523,7 @@ function AppContent() {
           openSettings('team');
         }}
       />
+      {settingsModal}
     </>
   );
 }
