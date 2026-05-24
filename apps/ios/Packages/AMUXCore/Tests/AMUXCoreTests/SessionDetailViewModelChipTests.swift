@@ -119,4 +119,40 @@ final class SessionDetailViewModelChipTests: XCTestCase {
         XCTAssertEqual(vm.agentChipParticipants.count, 1)
         XCTAssertEqual(vm.agentChipParticipants.first?.id, "new_a")
     }
+
+    @MainActor
+    func test_bind_hydratesAgentChipSelectionFromSession() {
+        let s = Session(sessionId: "s1")
+        s.selectedAgentIds = ["a1", "a2"]
+        let vm = SessionDetailViewModel.testInstance(session: s)
+        XCTAssertEqual(vm.agentChipSelection, Set(["a1", "a2"]))
+    }
+
+    @MainActor
+    func test_toggleAgentChip_persistsToSession() throws {
+        let s = Session(sessionId: "s1")
+        let vm = SessionDetailViewModel.testInstance(session: s)
+        vm.toggleAgentChip("a1")
+        XCTAssertEqual(Set(s.selectedAgentIds), Set(["a1"]))
+        vm.toggleAgentChip("a2")
+        XCTAssertEqual(Set(s.selectedAgentIds), Set(["a1", "a2"]))
+        vm.toggleAgentChip("a1")
+        XCTAssertEqual(Set(s.selectedAgentIds), Set(["a2"]))
+    }
+
+    @MainActor
+    func test_lightAgentChip_persistsToSession() {
+        let s = Session(sessionId: "s1")
+        let vm = SessionDetailViewModel.testInstance(session: s)
+        vm.lightAgentChip("a1")
+        XCTAssertEqual(s.selectedAgentIds, ["a1"])
+    }
+
+    @MainActor
+    func test_setAgentChipSelection_persistsToSession() {
+        let s = Session(sessionId: "s1")
+        let vm = SessionDetailViewModel.testInstance(session: s)
+        vm.setAgentChipSelection(Set(["a1", "a2"]))
+        XCTAssertEqual(Set(s.selectedAgentIds), Set(["a1", "a2"]))
+    }
 }

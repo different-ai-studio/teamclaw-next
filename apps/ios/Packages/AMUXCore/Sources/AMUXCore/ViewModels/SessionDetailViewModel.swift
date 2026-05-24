@@ -138,6 +138,10 @@ public final class SessionDetailViewModel {
     /// refreshes must preserve that choice. Otherwise the single-agent
     /// auto-light rule reselects the agent immediately after the user clears it.
     private var userEditedAgentChipSelection = false
+    /// Session and context bound via `bind(session:modelContext:)`. When set,
+    /// chip-bar mutations are persisted to `session.selectedAgentIds`.
+    private var boundSession: Session?
+    private var boundModelContext: ModelContext?
     /// Ordered list of agent participants shown in the chip bar. Populated
     /// by bootstrapChips from the session's participant list + runtime states.
     public private(set) var agentChipParticipants: [AgentChipParticipant] = []
@@ -391,6 +395,7 @@ public final class SessionDetailViewModel {
         userEditedAgentChipSelection = true
         if agentChipSelection.contains(agentID) { agentChipSelection.remove(agentID) }
         else { agentChipSelection.insert(agentID) }
+        persistAgentChipSelection()
     }
 
     /// Ensure an agent's chip is lit. Idempotent — never unlights. Used by
@@ -400,6 +405,7 @@ public final class SessionDetailViewModel {
     public func lightAgentChip(_ agentID: String) {
         userEditedAgentChipSelection = true
         agentChipSelection.insert(agentID)
+        persistAgentChipSelection()
     }
 
     /// Agent actor ids whose runtime is currently streaming a reply. Used
@@ -471,6 +477,26 @@ public final class SessionDetailViewModel {
     public func setAgentChipSelection(_ selection: Set<String>) {
         userEditedAgentChipSelection = true
         self.agentChipSelection = selection
+        persistAgentChipSelection()
+    }
+
+    // MARK: - Session binding (chip persistence)
+
+    /// Bind a `Session` model and its `ModelContext` so that chip-bar
+    /// mutations are persisted to `session.selectedAgentIds`. Also
+    /// hydrates `agentChipSelection` from the stored value.
+    /// Call this once when the session and model context are both available.
+    @MainActor
+    public func bind(session: Session, modelContext: ModelContext) {
+        self.boundSession = session
+        self.boundModelContext = modelContext
+        self.agentChipSelection = Set(session.selectedAgentIds)
+    }
+
+    private func persistAgentChipSelection() {
+        guard let s = boundSession else { return }
+        s.selectedAgentIds = Array(agentChipSelection).sorted()
+        try? boundModelContext?.save()
     }
 
     // MARK: - Member sheet state
@@ -1236,6 +1262,13 @@ public final class SessionDetailViewModel {
         // replay in via incremental sync.)
         if task != nil { return }
         startModelContext = modelContext
+
+        // Bind session persistence for chip-bar selection (idempotent —
+        // bind() is a no-op after the first start() returns since `task`
+        // guards re-entry above).
+        if let s = session {
+            bind(session: s, modelContext: modelContext)
+        }
 
         // resolveRuntime may return a placeholder for session-with-pending-
         // primary-agent or nil for collab-only sessions with no agent yet.
@@ -2214,6 +2247,29 @@ extension SessionDetailViewModel {
             teamID: "test-team",
             peerId: "test-peer"
         )
+    }
+
+    /// Builds a VM with a `Session` inserted into an in-memory SwiftData
+    /// container and calls `bind(session:modelContext:)` so that chip-bar
+    /// mutations are persisted to `session.selectedAgentIds`.
+    @MainActor
+    public static func testInstance(session: Session) -> SessionDetailViewModel {
+        let mqtt = MQTTService()
+        let container = try! ModelContainer(
+            for: Session.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let ctx = ModelContext(container)
+        ctx.insert(session)
+        let vm = SessionDetailViewModel(
+            runtime: nil,
+            mqtt: mqtt,
+            hub: MQTTMessageHub(mqtt: mqtt),
+            teamID: "test-team",
+            peerId: "test-peer"
+        )
+        vm.bind(session: session, modelContext: ctx)
+        return vm
     }
 
     // NSMapTable with weak keys: the container lives as long as the VM does,
