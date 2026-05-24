@@ -496,6 +496,17 @@ public final class SessionDetailViewModel {
         try? binding.modelContext.save()
     }
 
+    /// Drops any agent IDs from `agentChipSelection` that are no longer
+    /// present in `memberSheetAgents` (i.e. ghost selections left over from
+    /// a removed agent). Persists the pruned set when any IDs were removed.
+    private func pruneGhostAgentSelection() {
+        let valid = Set(memberSheetAgents.map(\.id))
+        let pruned = agentChipSelection.intersection(valid)
+        guard pruned.count != agentChipSelection.count else { return }
+        agentChipSelection = pruned
+        persistAgentChipSelection()
+    }
+
     // MARK: - Member sheet state
     //
     // Snapshot models (MemberSheetHuman / MemberSheetAgent) and the
@@ -547,6 +558,7 @@ public final class SessionDetailViewModel {
 
         memberSheetHumans = snapshot.humans
         memberSheetAgents = snapshot.agents
+        pruneGhostAgentSelection()
 
         // memberSheet now provides runtime_id → actor_id mappings. Live
         // events that arrived before this load may have been stamped with
@@ -649,6 +661,7 @@ public final class SessionDetailViewModel {
             }
             return agent
         }
+        pruneGhostAgentSelection()
     }
 
     private func chipStateFromRuntime(_ r: Runtime) -> AgentRuntimeChipState {
@@ -2338,6 +2351,36 @@ extension SessionDetailViewModel {
 extension SessionParticipant {
     public static func testFixture(actorID: String, role: String, displayName: String) -> SessionParticipant {
         SessionParticipant(actorID: actorID, role: role, displayName: displayName)
+    }
+}
+
+extension MemberSheetAgent {
+    public static func testFixture(
+        id: String,
+        displayName: String? = nil
+    ) -> MemberSheetAgent {
+        MemberSheetAgent(
+            id: id,
+            displayName: displayName ?? id,
+            workspacePath: "",
+            agentType: "claude",
+            runtimeState: .idle,
+            availableModels: [],
+            currentModel: nil,
+            runtimeID: nil,
+            workspaceID: nil,
+            backendType: nil
+        )
+    }
+}
+
+extension SessionDetailViewModel {
+    /// Sets `memberSheetAgents` to the given snapshot and prunes any ghost
+    /// agent IDs from `agentChipSelection`. For use in unit tests only.
+    @MainActor
+    public func applyMemberSheetSnapshotForTests(agents: [MemberSheetAgent]) {
+        memberSheetAgents = agents
+        pruneGhostAgentSelection()
     }
 }
 #endif

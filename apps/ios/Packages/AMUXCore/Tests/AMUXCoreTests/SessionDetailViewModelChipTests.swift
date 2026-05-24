@@ -178,4 +178,20 @@ final class SessionDetailViewModelChipTests: XCTestCase {
         )
         XCTAssertEqual(vm.agentChipSelection, ["a1"])
     }
+
+    @MainActor
+    func test_memberSheetRefresh_prunesGhostAgentsFromSelection() {
+        let s = Session(sessionId: "s1")
+        s.selectedAgentIds = ["a1", "a2", "ghost"]
+        let vm = SessionDetailViewModel.testInstance(session: s)
+        XCTAssertEqual(vm.agentChipSelection, Set(["a1", "a2", "ghost"]))
+
+        vm.applyMemberSheetSnapshotForTests(agents: [
+            MemberSheetAgent.testFixture(id: "a1"),
+            MemberSheetAgent.testFixture(id: "a2"),
+        ])
+
+        XCTAssertEqual(vm.agentChipSelection, Set(["a1", "a2"]))
+        XCTAssertEqual(Set(s.selectedAgentIds), Set(["a1", "a2"]))
+    }
 }
