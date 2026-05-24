@@ -2,6 +2,7 @@ import XCTest
 import SwiftData
 @testable import AMUXCore
 
+@MainActor
 final class SessionModelTests: XCTestCase {
     func test_session_defaultSelectedAgentIdsIsEmpty() {
         let s = Session(sessionId: "s1")
