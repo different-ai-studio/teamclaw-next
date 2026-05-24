@@ -16,9 +16,9 @@ struct SessionComposer: View {
     let sessionID: String
     let teamID: String
 
-    /// Agent chips for the unified pre-send tray (chips share a horizontal
-    /// scroll with attachment thumbnails). Pass an empty array when no
-    /// chip-based agent routing is wired up — the tray simply omits them.
+    /// Ordered list of session agents. Used only as the source of truth for
+    /// the order in which selected display names appear on the Row-2 `[@]`
+    /// button label; the chip-bar itself is no longer rendered inline.
     let agentChips: [AgentChipBar.AgentChip]
     @Binding var agentChipSelection: Set<String>
     let streamingAgentIDs: Set<String>
