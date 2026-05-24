@@ -32,6 +32,11 @@ public final class Session {
     /// Distinct from `Runtime.hasUnread`, which tracks local agent output
     /// rather than peer messages — the UI ORs the two signals together.
     public var hasUnread: Bool = false
+    /// Agent actorIDs the user has selected via the composer's `[@]` button or
+    /// inline `@` mention. Persisted so reopening the session restores
+    /// selection. Empty array preserves broadcast semantics on send (mention
+    /// all agents on the daemon side).
+    public var selectedAgentIds: [String] = []
 
     public init(
         sessionId: String,
