@@ -204,7 +204,7 @@ struct SessionComposer: View {
             }
             .padding(.horizontal, 14)
             .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.bottom, 4)
 
             // Divider between rows
             Divider()
@@ -247,8 +247,8 @@ struct SessionComposer: View {
                 }
             }
             .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 44, minHeight: 44)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -258,10 +258,7 @@ struct SessionComposer: View {
 
     /// Text shown after the `@` glyph in the agent button. Nil → icon only.
     private var agentButtonLabelText: String? {
-        AgentButtonLabel.text(
-            selectedDisplayNamesInOrder: orderedSelectedAgentDisplayNames(),
-            totalSelected: agentChipSelection.count
-        )
+        AgentButtonLabel.text(selectedDisplayNamesInOrder: orderedSelectedAgentDisplayNames())
     }
 
     /// Returns display names of selected agents in a stable order

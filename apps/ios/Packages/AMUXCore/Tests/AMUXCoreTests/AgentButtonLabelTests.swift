@@ -3,22 +3,27 @@ import XCTest
 
 final class AgentButtonLabelTests: XCTestCase {
     func test_zeroSelected_returnsNil() {
-        let label = AgentButtonLabel.text(selectedDisplayNamesInOrder: [], totalSelected: 0)
-        XCTAssertNil(label)
+        XCTAssertNil(AgentButtonLabel.text(selectedDisplayNamesInOrder: []))
     }
 
     func test_oneSelected_returnsName() {
-        let label = AgentButtonLabel.text(selectedDisplayNamesInOrder: ["alice"], totalSelected: 1)
-        XCTAssertEqual(label, "alice")
+        XCTAssertEqual(
+            AgentButtonLabel.text(selectedDisplayNamesInOrder: ["alice"]),
+            "alice"
+        )
     }
 
     func test_multipleSelected_returnsFirstWithMultiplier() {
-        let label = AgentButtonLabel.text(selectedDisplayNamesInOrder: ["alice", "bob"], totalSelected: 2)
-        XCTAssertEqual(label, "alice ×2")
+        XCTAssertEqual(
+            AgentButtonLabel.text(selectedDisplayNamesInOrder: ["alice", "bob"]),
+            "alice ×2"
+        )
     }
 
     func test_multipleSelected_threeShowsCountThree() {
-        let label = AgentButtonLabel.text(selectedDisplayNamesInOrder: ["alice", "bob", "carol"], totalSelected: 3)
-        XCTAssertEqual(label, "alice ×3")
+        XCTAssertEqual(
+            AgentButtonLabel.text(selectedDisplayNamesInOrder: ["alice", "bob", "carol"]),
+            "alice ×3"
+        )
     }
 }
