@@ -138,10 +138,8 @@ public final class SessionDetailViewModel {
     /// refreshes must preserve that choice. Otherwise the single-agent
     /// auto-light rule reselects the agent immediately after the user clears it.
     private var userEditedAgentChipSelection = false
-    /// Session and context bound via `bind(session:modelContext:)`. When set,
-    /// chip-bar mutations are persisted to `session.selectedAgentIds`.
-    private var boundSession: Session?
-    private var boundModelContext: ModelContext?
+    /// Session + context bound together; both are always set or neither is.
+    private var sessionBinding: (session: Session, modelContext: ModelContext)?
     /// Ordered list of agent participants shown in the chip bar. Populated
     /// by bootstrapChips from the session's participant list + runtime states.
     public private(set) var agentChipParticipants: [AgentChipParticipant] = []
@@ -486,17 +484,15 @@ public final class SessionDetailViewModel {
     /// mutations are persisted to `session.selectedAgentIds`. Also
     /// hydrates `agentChipSelection` from the stored value.
     /// Call this once when the session and model context are both available.
-    @MainActor
     public func bind(session: Session, modelContext: ModelContext) {
-        self.boundSession = session
-        self.boundModelContext = modelContext
+        self.sessionBinding = (session, modelContext)
         self.agentChipSelection = Set(session.selectedAgentIds)
     }
 
     private func persistAgentChipSelection() {
-        guard let s = boundSession else { return }
-        s.selectedAgentIds = Array(agentChipSelection).sorted()
-        try? boundModelContext?.save()
+        guard let binding = sessionBinding else { return }
+        binding.session.selectedAgentIds = Array(agentChipSelection).sorted()
+        try? binding.modelContext.save()
     }
 
     // MARK: - Member sheet state

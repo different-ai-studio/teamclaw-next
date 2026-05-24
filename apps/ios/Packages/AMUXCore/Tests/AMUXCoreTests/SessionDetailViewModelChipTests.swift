@@ -145,7 +145,7 @@ final class SessionDetailViewModelChipTests: XCTestCase {
         let s = Session(sessionId: "s1")
         let vm = SessionDetailViewModel.testInstance(session: s)
         vm.lightAgentChip("a1")
-        XCTAssertEqual(s.selectedAgentIds, ["a1"])
+        XCTAssertEqual(Set(s.selectedAgentIds), Set(["a1"]))
     }
 
     @MainActor
