@@ -261,6 +261,13 @@ public struct SessionDetailView: View {
                     onAgentInterrupt: { agentID in
                         viewModel.interruptAgent(agentID)
                     },
+                    memberSheetAgents: viewModel.memberSheetAgents,
+                    runtimeForAgent: { agent in
+                        viewModel.runtime(for: agent)
+                    },
+                    onApplyModelForAgent: { agent, modelID in
+                        viewModel.setModel(forAgent: agent.id, model: modelID)
+                    },
                     onSend: { attachmentURLs in
                         let text = promptText
                         let modelId = resolvedModelId

@@ -980,6 +980,22 @@ public final class SessionDetailViewModel {
         return ""
     }
 
+    /// Returns the live SwiftData `Runtime` row for the given agent, or nil
+    /// when no runtime row has been loaded yet (e.g. agent still spawning or
+    /// the primary bound runtime's runtimeId doesn't match the agent's).
+    /// Used by AgentsSheet to drive the model picker without the sheet itself
+    /// holding a SwiftData query or accessing internal VM state.
+    @MainActor
+    public func runtime(for agent: MemberSheetAgent) -> Runtime? {
+        // Fast path: the bound primary runtime matches this agent's runtimeID.
+        if let r = runtime, let rid = agent.runtimeID, r.runtimeId == rid { return r }
+        // Slow path: fetch from the persistent store by runtimeID.
+        guard let rid = agent.runtimeID, !rid.isEmpty,
+              let ctx = startModelContext else { return nil }
+        let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
+        return (try? ctx.fetch(desc))?.first
+    }
+
     /// Switches the model for an agent's runtime. The daemon's SetModel RPC
     /// updates `current_model_per_agent` and re-publishes the runtime's
     /// retained state, so the member sheet refreshes via the normal state

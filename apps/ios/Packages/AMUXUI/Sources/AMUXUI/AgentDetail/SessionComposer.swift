@@ -26,6 +26,15 @@ struct SessionComposer: View {
     let streamingAgentIDs: Set<String>
     let onAgentInterrupt: (String) -> Void
 
+    /// Full agent list for the AgentsSheet (the modal opened by the [@] button).
+    let memberSheetAgents: [MemberSheetAgent]
+    /// Resolves the live Runtime for a given agent; nil when no runtime row
+    /// exists yet (e.g. agent still spawning). Kept as a closure so the
+    /// composer doesn't hold a SwiftData query.
+    let runtimeForAgent: (MemberSheetAgent) -> Runtime?
+    /// Called when the user selects a different model for an agent in AgentsSheet.
+    let onApplyModelForAgent: (MemberSheetAgent, String) -> Void
+
     let onSend: ([URL]) -> Void
     let onAgentMention: (MentionTarget) -> Void
 
@@ -176,7 +185,18 @@ struct SessionComposer: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAgentsSheet) {
-            EmptyView()
+            AgentsSheet(
+                agents: memberSheetAgents,
+                selection: $agentChipSelection,
+                streamingAgentIDs: streamingAgentIDs,
+                runtimeForAgent: runtimeForAgent,
+                onApplyModel: { agent, modelID in
+                    onApplyModelForAgent(agent, modelID)
+                },
+                onInterrupt: { agent in
+                    onAgentInterrupt(agent.id)
+                }
+            )
         }
     }
 
