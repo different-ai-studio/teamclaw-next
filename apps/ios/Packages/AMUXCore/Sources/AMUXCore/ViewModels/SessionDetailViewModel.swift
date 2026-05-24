@@ -134,10 +134,6 @@ public final class SessionDetailViewModel {
     /// mention; all agents will receive the message (broadcast semantics on
     /// the daemon side). Populated by bootstrapChips / toggleAgentChip.
     public private(set) var agentChipSelection: Set<String> = []
-    /// Once the user explicitly changes the chip bar or picks an @ mention,
-    /// refreshes must preserve that choice. Otherwise the single-agent
-    /// auto-light rule reselects the agent immediately after the user clears it.
-    private var userEditedAgentChipSelection = false
     /// Session + context bound together; both are always set or neither is.
     private var sessionBinding: (session: Session, modelContext: ModelContext)?
     /// Ordered list of agent participants shown in the chip bar. Populated
@@ -385,12 +381,19 @@ public final class SessionDetailViewModel {
                 runtimeState: runtimeStates[$0.actorID] ?? .spawning
             )
         }
+
+        // Bound session: persistence is the source of truth (already hydrated
+        // in `bind`). Leave selection alone — even an empty value is the user's
+        // explicit choice.
+        guard sessionBinding == nil else { return }
+
+        // Unbound (new session before persistence is wired up): apply the legacy
+        // single-agent default.
         self.agentChipSelection = agents.count == 1 ? Set([agents[0].actorID]) : []
     }
 
     /// Toggle the selected state of one chip. Called from the chip-bar tap handler.
     public func toggleAgentChip(_ agentID: String) {
-        userEditedAgentChipSelection = true
         if agentChipSelection.contains(agentID) { agentChipSelection.remove(agentID) }
         else { agentChipSelection.insert(agentID) }
         persistAgentChipSelection()
@@ -401,7 +404,6 @@ public final class SessionDetailViewModel {
     /// chip-bar toolbar above the composer remains the surface for turning
     /// agents off.
     public func lightAgentChip(_ agentID: String) {
-        userEditedAgentChipSelection = true
         agentChipSelection.insert(agentID)
         persistAgentChipSelection()
     }
@@ -473,7 +475,6 @@ public final class SessionDetailViewModel {
 
     /// Replace the entire chip selection. Used by Task 16 view integration.
     public func setAgentChipSelection(_ selection: Set<String>) {
-        userEditedAgentChipSelection = true
         self.agentChipSelection = selection
         persistAgentChipSelection()
     }

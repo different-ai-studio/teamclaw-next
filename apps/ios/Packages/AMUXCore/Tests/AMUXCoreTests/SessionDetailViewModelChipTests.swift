@@ -155,4 +155,27 @@ final class SessionDetailViewModelChipTests: XCTestCase {
         vm.setAgentChipSelection(Set(["a1", "a2"]))
         XCTAssertEqual(Set(s.selectedAgentIds), Set(["a1", "a2"]))
     }
+
+    @MainActor
+    func test_bootstrapChips_skipsSingleAgentDefault_whenSessionAlreadyHasPersistedSelection() {
+        let s = Session(sessionId: "s1")
+        s.selectedAgentIds = []                          // user explicitly cleared
+        let vm = SessionDetailViewModel.testInstance(session: s)
+        // User-cleared empty state must survive bootstrap (no auto-relight).
+        vm.bootstrapChips(
+            participants: [SessionParticipant.testFixture(actorID: "a1", role: "agent", displayName: "miniA")],
+            runtimeStates: ["a1": .ready]
+        )
+        XCTAssertEqual(vm.agentChipSelection, [])
+    }
+
+    @MainActor
+    func test_bootstrapChips_appliesSingleAgentDefault_whenNoBoundSession() {
+        let vm = SessionDetailViewModel.testInstance() // no session bound = new session
+        vm.bootstrapChips(
+            participants: [SessionParticipant.testFixture(actorID: "a1", role: "agent", displayName: "miniA")],
+            runtimeStates: ["a1": .ready]
+        )
+        XCTAssertEqual(vm.agentChipSelection, ["a1"])
+    }
 }
