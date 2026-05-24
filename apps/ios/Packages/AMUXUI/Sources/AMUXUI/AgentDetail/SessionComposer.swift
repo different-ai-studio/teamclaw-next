@@ -30,6 +30,7 @@ struct SessionComposer: View {
     let onAgentMention: (MentionTarget) -> Void
 
     @State private var showDrawer = false
+    @State private var showAgentsSheet = false
     @State private var slashCandidates: [SlashCommand] = []
     @State private var hasPendingSlashCommand = false
     @State private var mentionCandidates: [MentionTarget] = []
@@ -122,21 +123,11 @@ struct SessionComposer: View {
                 .animation(AMUXAnimation.fast, value: mentionCandidates)
             }
 
-            // Unified pre-send tray: agent chips + attachment thumbnails
-            // share one horizontal scroll. Both are "context being added to
-            // the next send", so they belong in the same visual group.
-            if !agentChipSelection.isEmpty || !attachments.isEmpty {
+            // Attachment thumbnails pre-send tray (agent chips have moved
+            // into the Row-2 agent button label — no longer shown here).
+            if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        if !agentChipSelection.isEmpty {
-                            AgentChipBar(
-                                chips: agentChips,
-                                selection: $agentChipSelection,
-                                streamingAgentIDs: streamingAgentIDs,
-                                onInterrupt: onAgentInterrupt,
-                                wrappedInScrollView: false
-                            )
-                        }
                         ForEach(attachments, id: \.self) { url in
                             AttachmentThumbnailTile(
                                 url: url,
@@ -161,7 +152,7 @@ struct SessionComposer: View {
                 .liquidGlass(in: Circle())
                 .accessibilityIdentifier("composer.plusButton")
 
-                pill
+                twoRowComposer
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -196,16 +187,25 @@ struct SessionComposer: View {
             .presentationDetents([.fraction(0.4), .medium])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showAgentsSheet) {
+            EmptyView()
+        }
     }
 
+    // MARK: - Two-row capsule
+
+    /// The LiquidGlass capsule containing:
+    ///   Row 1 — text field (or waveform when recording)
+    ///   Row 2 — [+] attachment · [@ …] agent button · Spacer · right-button
     @ViewBuilder
-    private var pill: some View {
-        HStack(spacing: 6) {
+    private var twoRowComposer: some View {
+        VStack(spacing: 0) {
+            // Row 1: input area
             Group {
                 switch inputMode {
                 case .textField:
                     TextField("Send a message…", text: $promptText, axis: .vertical)
-                        .lineLimit(1...6)
+                        .lineLimit(2...6)
                         .focused($inputFocused)
                         .submitLabel(.return)
                         .accessibilityIdentifier("composer.textField")
@@ -214,13 +214,64 @@ struct SessionComposer: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.leading, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
 
-            rightButtonView
-                .padding(.trailing, 6)
+            // Divider between rows
+            Divider()
+                .padding(.horizontal, 10)
+
+            // Row 2: [@ agent] + Spacer + right-button
+            HStack(spacing: 8) {
+                agentButton
+                Spacer()
+                rightButtonView
+                    .padding(.trailing, 4)
+            }
+            .padding(.leading, 10)
+            .padding(.vertical, 6)
         }
         .liquidGlass(in: Capsule())
+    }
+
+    /// The agent selection button. Shows "@ name ×N" when agents are selected,
+    /// or just "@ " icon-only when none are selected.
+    @ViewBuilder
+    private var agentButton: some View {
+        Button { showAgentsSheet = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "at")
+                    .font(.body)
+                if let labelText = agentButtonLabelText {
+                    Text(labelText)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("composer.agentButton")
+    }
+
+    /// Text shown after the `@` glyph in the agent button. Nil → icon only.
+    private var agentButtonLabelText: String? {
+        AgentButtonLabel.text(
+            selectedDisplayNamesInOrder: orderedSelectedAgentDisplayNames(),
+            totalSelected: agentChipSelection.count
+        )
+    }
+
+    /// Returns display names of selected agents in a stable order
+    /// (preserving the order they appear in `agentChips`).
+    private func orderedSelectedAgentDisplayNames() -> [String] {
+        agentChips
+            .filter { agentChipSelection.contains($0.id) }
+            .map { $0.displayName }
     }
 
     @ViewBuilder
