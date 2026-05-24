@@ -141,21 +141,9 @@ struct SessionComposer: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Button { showDrawer = true } label: {
-                    Image(systemName: "plus")
-                        .font(.title3)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .liquidGlass(in: Circle())
-                .accessibilityIdentifier("composer.plusButton")
-
-                twoRowComposer
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            twoRowComposer
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
         }
         .onChange(of: promptText) { _, _ in
             recomputeSlashCandidates()
@@ -222,15 +210,24 @@ struct SessionComposer: View {
             Divider()
                 .padding(.horizontal, 10)
 
-            // Row 2: [@ agent] + Spacer + right-button
+            // Row 2: [+] attachment · [@ agent] + Spacer + right-button
             HStack(spacing: 8) {
+                Button { showDrawer = true } label: {
+                    Image(systemName: "plus")
+                        .font(.body)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("composer.plusButton")
+
                 agentButton
                 Spacer()
                 rightButtonView
                     .padding(.trailing, 4)
             }
-            .padding(.leading, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
         }
         .liquidGlass(in: Capsule())
     }
@@ -256,6 +253,7 @@ struct SessionComposer: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("composer.agentButton")
+        .accessibilityLabel("Agents, \(agentChipSelection.count) selected")
     }
 
     /// Text shown after the `@` glyph in the agent button. Nil → icon only.
