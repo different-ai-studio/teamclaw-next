@@ -6,8 +6,6 @@ struct AttachmentDrawerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Binding var attachments: [URL]
-    @Binding var selectedModelId: String?
-    let runtime: Runtime?
     let uploadManager: AttachmentUploadManager?
     let sessionID: String
     let teamID: String
@@ -32,25 +30,6 @@ struct AttachmentDrawerSheet: View {
                     }
                 }
 
-                if let runtime, !runtime.availableModels.isEmpty {
-                    Section("Model") {
-                        ForEach(runtime.availableModels) { model in
-                            Button {
-                                selectedModelId = model.id
-                            } label: {
-                                HStack {
-                                    Text(model.displayName)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    if model.id == resolvedSelection(runtime: runtime) {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.tint)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
             .navigationTitle("Attachments")
             .navigationBarTitleDisplayMode(.inline)
@@ -157,9 +136,4 @@ struct AttachmentDrawerSheet: View {
         }
     }
 
-    private func resolvedSelection(runtime: Runtime) -> String? {
-        if let selectedModelId, !selectedModelId.isEmpty { return selectedModelId }
-        if let current = runtime.currentModel, !current.isEmpty { return current }
-        return nil
-    }
 }

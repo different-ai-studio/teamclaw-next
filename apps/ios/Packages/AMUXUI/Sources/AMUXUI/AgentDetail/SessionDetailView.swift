@@ -238,10 +238,8 @@ public struct SessionDetailView: View {
             VStack(spacing: 0) {
                 SessionComposer(
                     promptText: $promptText,
-                    selectedModelId: $selectedModelId,
                     attachments: $attachments,
                     voiceRecorder: voiceRecorder,
-                    runtime: viewModel.runtime,
                     availableCommands: viewModel.availableCommands,
                     availableMentions: mentionTargets(),
                     sessionID: viewModel.session?.sessionId ?? "",

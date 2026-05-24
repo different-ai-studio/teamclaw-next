@@ -4,11 +4,9 @@ import AMUXSharedUI
 
 struct SessionComposer: View {
     @Binding var promptText: String
-    @Binding var selectedModelId: String?
     @Binding var attachments: [URL]
 
     let voiceRecorder: VoiceRecorder
-    let runtime: Runtime?
     let availableCommands: [SlashCommand]
     let availableMentions: [MentionTarget]
     /// Resolved session id (from `SessionDetailViewModel.session?.sessionId`)
@@ -172,8 +170,6 @@ struct SessionComposer: View {
         .sheet(isPresented: $showDrawer) {
             AttachmentDrawerSheet(
                 attachments: $attachments,
-                selectedModelId: $selectedModelId,
-                runtime: runtime,
                 uploadManager: ensureUploadManager(),
                 sessionID: sessionID,
                 teamID: teamID,
