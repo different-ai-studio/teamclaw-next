@@ -318,11 +318,13 @@ struct SessionComposer: View {
             mentionCandidates = []
             return
         }
-        let lower = query.lowercased()
         mentionCandidates = Array(
-            availableMentions
-                .filter { lower.isEmpty || $0.displayName.lowercased().contains(lower) }
-                .prefix(5)
+            MentionCandidateFilter.filter(
+                all: availableMentions,
+                query: query,
+                selectedAgentIDs: agentChipSelection
+            )
+            .prefix(5)
         )
     }
 
