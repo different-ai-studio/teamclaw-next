@@ -151,7 +151,7 @@ struct AgentsSheet: View {
                     pendingTerminate = agent
                 } label: {
                     Image(systemName: "stop.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.amux.cinnabarDeep)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Stop \(agent.displayName)")
