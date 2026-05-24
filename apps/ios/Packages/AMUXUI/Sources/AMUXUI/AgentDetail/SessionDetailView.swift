@@ -262,9 +262,7 @@ public struct SessionDetailView: View {
                         viewModel.interruptAgent(agentID)
                     },
                     memberSheetAgents: viewModel.memberSheetAgents,
-                    runtimeForAgent: { agent in
-                        viewModel.runtime(for: agent)
-                    },
+                    runtimeForAgent: viewModel.runtime(for:),
                     onApplyModelForAgent: { agent, modelID in
                         viewModel.setModel(forAgent: agent.id, model: modelID)
                     },

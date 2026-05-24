@@ -190,9 +190,7 @@ struct SessionComposer: View {
                 selection: $agentChipSelection,
                 streamingAgentIDs: streamingAgentIDs,
                 runtimeForAgent: runtimeForAgent,
-                onApplyModel: { agent, modelID in
-                    onApplyModelForAgent(agent, modelID)
-                },
+                onApplyModel: onApplyModelForAgent,
                 onInterrupt: { agent in
                     onAgentInterrupt(agent.id)
                 }

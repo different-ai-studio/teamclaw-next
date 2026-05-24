@@ -985,9 +985,10 @@ public final class SessionDetailViewModel {
     /// the primary bound runtime's runtimeId doesn't match the agent's).
     /// Used by AgentsSheet to drive the model picker without the sheet itself
     /// holding a SwiftData query or accessing internal VM state.
-    @MainActor
     public func runtime(for agent: MemberSheetAgent) -> Runtime? {
-        // Fast path: the bound primary runtime matches this agent's runtimeID.
+        // Fast path: bound primary runtime's `runtimeId` (UUID) matches this
+        // agent's `runtimeID`. UUID collisions across distinct agents are not
+        // a practical concern, so id equality implies identity here.
         if let r = runtime, let rid = agent.runtimeID, r.runtimeId == rid { return r }
         // Slow path: fetch from the persistent store by runtimeID.
         guard let rid = agent.runtimeID, !rid.isEmpty,
