@@ -537,28 +537,30 @@ public struct SessionDetailView: View {
                 )
             }
             .buttonStyle(.plain)
-        case .completedTurn(let id, let agentID, let final, let runtimeEvents):
+        case .completedTurn(let id, let agentID, let final, _):
             CompletedTurnBubbleView(
                 finalEvent: final,
                 runtime: viewModel.runtime,
                 agentName: agentDisplayName(for: agentID),
                 detailIcon: {
-                    if !runtimeEvents.isEmpty {
-                        NavigationLink(
-                            destination: StreamingDetailView(
-                                route: TurnRoute(agentID: agentID, frozenTurnID: id),
-                                viewModel: viewModel
-                            )
-                        ) {
-                            Image(systemName: "text.bubble")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.secondary)
-                                .padding(8)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Show streaming detail")
+                    // Always offer the detail entry point — even text-only
+                    // turns benefit from giving the user access to the
+                    // turn's daemon-recorded trace (model, timing, future
+                    // tool calls if requestTurnHistory finds them).
+                    NavigationLink(
+                        destination: StreamingDetailView(
+                            route: TurnRoute(agentID: agentID, frozenTurnID: id),
+                            viewModel: viewModel
+                        )
+                    ) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .padding(8)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show streaming detail")
                 }
             )
         }
