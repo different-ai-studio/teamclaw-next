@@ -44,6 +44,15 @@ public final class AgentEvent {
     /// pre-turn_id rows and for kinds that don't have a turn
     /// (user prompts, system notices, permission requests).
     public var turnID: String?
+    /// Mirror of `TimelineEntry.resultSummary` — set by the sync layer
+    /// when the matching `ToolResult` envelope landed. Nil while the tool
+    /// is running or for non-tool_use rows.
+    public var resultSummary: String?
+    /// Mirror of `TimelineEntry.turnEnded` — true on the single
+    /// highest-`sequence` row of a closed turn so `FeedItem.buildFeedItems`
+    /// can decide when to flush the open accumulator. False on streaming
+    /// or non-terminal segment rows.
+    public var turnEnded: Bool
 
     public init(agentId: String, sequence: Int, eventType: String) {
         self.id = UUID().uuidString
@@ -52,6 +61,7 @@ public final class AgentEvent {
         self.timestamp = .now
         self.eventType = eventType
         self.isComplete = false
+        self.turnEnded = false
     }
 }
 
