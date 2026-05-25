@@ -1005,3 +1005,68 @@ private func makePlanUpdate(_ items: [(String, String)]) -> Amux_AcpPlanUpdate {
     }
     return u
 }
+
+@Suite("ChatTimelineReducer — segmented turn detail")
+struct ReducerSegmentedTurnTests {
+    private func acpOutput(_ text: String, isComplete: Bool) -> Amux_AcpEvent {
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: text, isComplete: isComplete))
+        return acp
+    }
+
+    private func acpToolUse(id: String, name: String, desc: String) -> Amux_AcpEvent {
+        var acp = Amux_AcpEvent()
+        var tu = Amux_AcpToolUse()
+        tu.toolID = id
+        tu.toolName = name
+        tu.description_p = desc
+        acp.event = .toolUse(tu)
+        return acp
+    }
+
+    private func acpToolResult(id: String, success: Bool, summary: String) -> Amux_AcpEvent {
+        var acp = Amux_AcpEvent()
+        var tr = Amux_AcpToolResult()
+        tr.toolID = id
+        tr.success = success
+        tr.summary = summary
+        acp.event = .toolResult(tr)
+        return acp
+    }
+
+    private func acpIdle() -> Amux_AcpEvent {
+        var acp = Amux_AcpEvent()
+        acp.event = .statusChange(makeStatusChange(.idle))
+        return acp
+    }
+
+    private func feed(_ state: inout TimelineState,
+                     _ acp: Amux_AcpEvent,
+                     seq: UInt64,
+                     turn: String = "turn-1",
+                     bucket: String = "agent-1") {
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: seq, runtimeID: "rt-1",
+                          agentBucketKey: bucket, timestamp: .now,
+                          turnID: turn, acpEvent: acp)),
+            to: &state
+        )
+    }
+
+    @Test("single segment: three partial chunks + idle merge into one complete entry")
+    func singleSegmentNoTool() {
+        var state = TimelineState()
+        feed(&state, acpOutput("Hel", isComplete: false), seq: 1)
+        feed(&state, acpOutput("lo, ", isComplete: false), seq: 2)
+        feed(&state, acpOutput("world", isComplete: false), seq: 3)
+        feed(&state, acpIdle(), seq: 4)
+
+        let outputs = state.entries.filter { $0.eventType == "output" }
+        #expect(outputs.count == 1)
+        #expect(outputs.first?.text == "Hello, world")
+        #expect(outputs.first?.isComplete == true)
+        #expect(outputs.first?.turnEnded == true)
+        #expect(state.openSegmentByTurn.isEmpty)
+        #expect(state.streamingAgentSet.isEmpty)
+    }
+}
