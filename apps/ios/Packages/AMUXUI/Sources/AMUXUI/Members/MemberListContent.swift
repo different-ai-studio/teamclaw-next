@@ -149,17 +149,7 @@ public struct MemberListContent: View {
 
     @ViewBuilder
     private func detailLink(_ a: CachedActor) -> some View {
-        NavigationLink {
-            ActorDetailView(
-                actor: a,
-                pairing: pairing,
-                mqtt: mqtt,
-                sessionViewModel: sessionViewModel,
-                store: store,
-                teamclawService: teamclawService,
-                connectedAgentsStore: connectedAgentsStore
-            )
-        } label: {
+        NavigationLink(value: a.actorId) {
             ActorRow(actor: a, isMe: a.actorId == currentActorID)
         }
         // Plain-list rows would otherwise pick up systemBackground (white)
@@ -438,7 +428,7 @@ private struct ActorRow: View {
     }
 }
 
-private struct ActorDetailView: View {
+struct ActorDetailView: View {
     @Query(sort: \CachedActor.displayName) private var cachedActors: [CachedActor]
     @Query(sort: \Session.lastMessageAt, order: .reverse) private var allSessions: [Session]
     @Query private var allMessages: [SessionMessage]
@@ -738,7 +728,6 @@ private struct ActorDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.amux.mist.opacity(0.85), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarVisibility(.hidden, for: .tabBar)
         .task {
             guard !actor.isMember, authorizedHumansStore == nil else { return }
             if let repo = try? SupabaseAgentAccessRepository() {

@@ -3,6 +3,12 @@ import SwiftData
 import AMUXCore
 import AMUXSharedUI
 
+enum MembersTabPresentation {
+    static func isTabBarVisible(navigationPath: [String]) -> Bool {
+        navigationPath.isEmpty
+    }
+}
+
 public struct MembersTab: View {
     let pairing: PairingManager
     let mqtt: MQTTService
@@ -19,6 +25,7 @@ public struct MembersTab: View {
 
     @State private var showInvite     = false
     @State private var showTeamStats  = false
+    @State private var navigationPath: [String] = []
 
     @Query(sort: \CachedActor.displayName) private var actors: [CachedActor]
 
@@ -43,7 +50,7 @@ public struct MembersTab: View {
     }
 
     public var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             MemberListContent(
                 store: store,
                 pairing: pairing,
@@ -92,6 +99,32 @@ public struct MembersTab: View {
                     showInvite = true
                     externalInviteTrigger = false
                 }
+                .navigationDestination(for: String.self) { actorId in
+                    if let actor = actors.first(where: { $0.actorId == actorId }) {
+                        ActorDetailView(
+                            actor: actor,
+                            pairing: pairing,
+                            mqtt: mqtt,
+                            sessionViewModel: sessionViewModel,
+                            store: store,
+                            teamclawService: teamclawService,
+                            connectedAgentsStore: connectedAgentsStore
+                        )
+                    } else {
+                        ContentUnavailableView(
+                            "Actor Not Found",
+                            systemImage: "person.crop.circle.badge.questionmark",
+                            description: Text("This actor may have been removed.")
+                        )
+                    }
+                }
         }
+        // Keep tab-bar visibility tied to the root stack state, matching
+        // SessionsTab and IdeasTab. If the modifier lives on ActorDetailView,
+        // the bar waits for the destination to unmount before it appears.
+        .toolbarVisibility(
+            MembersTabPresentation.isTabBarVisible(navigationPath: navigationPath) ? .visible : .hidden,
+            for: .tabBar
+        )
     }
 }
