@@ -1074,4 +1074,36 @@ struct ReducerSegmentedTurnTests {
         #expect(state.openSegmentByTurn.isEmpty)
         #expect(state.streamingAgentSet.isEmpty)
     }
+
+    @Test("tool interrupts reply: AB|Tool|Result|C|idle → output(AB), tool(success+summary), output(C)")
+    func toolInterruptsReply() {
+        var state = TimelineState()
+        feed(&state, acpOutput("A", isComplete: false), seq: 1)
+        feed(&state, acpOutput("B", isComplete: false), seq: 2)
+        feed(&state, acpToolUse(id: "t1", name: "Read", desc: "foo.swift"), seq: 3)
+        feed(&state, acpToolResult(id: "t1", success: true, summary: "12 lines"), seq: 4)
+        feed(&state, acpOutput("C", isComplete: false), seq: 5)
+        feed(&state, acpIdle(), seq: 6)
+
+        let ordered = state.entries.sorted { $0.sequence < $1.sequence }
+        #expect(ordered.count == 3)
+
+        #expect(ordered[0].eventType == "output")
+        #expect(ordered[0].text == "AB")
+        #expect(ordered[0].isComplete == true)
+        #expect(ordered[0].turnEnded == false)
+
+        #expect(ordered[1].eventType == "tool_use")
+        #expect(ordered[1].toolID == "t1")
+        #expect(ordered[1].toolName == "Read")
+        #expect(ordered[1].success == true)
+        #expect(ordered[1].resultSummary == "12 lines")
+        #expect(ordered[1].isComplete == true)
+        #expect(ordered[1].turnEnded == false)
+
+        #expect(ordered[2].eventType == "output")
+        #expect(ordered[2].text == "C")
+        #expect(ordered[2].isComplete == true)
+        #expect(ordered[2].turnEnded == true)
+    }
 }
