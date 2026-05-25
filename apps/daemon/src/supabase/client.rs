@@ -250,6 +250,19 @@ impl SupabaseBackend {
         }
         Ok(resp.json().await?)
     }
+
+    /// Anonymous claim for agents (daemon path). Calls `claim_team_invite` RPC.
+    /// Supabase's PostgREST returns set-returning functions as arrays, so we
+    /// deserialize into `Vec<ClaimResult>` and pick the first row.
+    pub async fn claim_team_invite(&self, token: &str) -> SupabaseResult<ClaimResult> {
+        #[derive(Serialize)]
+        struct Req<'a> {
+            p_token: &'a str,
+        }
+        let payload = Req { p_token: token };
+        let rows: Vec<ClaimResult> = self.rpc_anon("claim_team_invite", &payload).await?;
+        rows.into_iter().next().ok_or(SupabaseError::InviteInvalid)
+    }
 }
 
 /// Returned by `public.claim_team_invite` — both member and agent branches.
@@ -416,25 +429,16 @@ impl crate::backend::Backend for SupabaseBackend {
         &self.cfg.actor_id
     }
 
-    async fn auth_token(&self) -> SupabaseResult<String> {
-        self.access_token().await
+    async fn auth_token(&self) -> crate::backend::BackendResult<String> {
+        Ok(self.access_token().await?)
     }
 
     fn cached_credential_expiry(&self) -> Option<Instant> {
         self.cached_token_expiry()
     }
 
-    /// Anonymous claim for agents (daemon path). Calls `claim_team_invite` RPC.
-    /// Supabase's PostgREST always returns a set-returning function as an array,
-    /// so we deserialize into `Vec<ClaimResult>` and pick the first row.
-    async fn claim_team_invite(&self, token: &str) -> SupabaseResult<ClaimResult> {
-        #[derive(Serialize)]
-        struct Req<'a> {
-            p_token: &'a str,
-        }
-        let payload = Req { p_token: token };
-        let rows: Vec<ClaimResult> = self.rpc_anon("claim_team_invite", &payload).await?;
-        rows.into_iter().next().ok_or(SupabaseError::InviteInvalid)
+    async fn claim_team_invite(&self, token: &str) -> crate::backend::BackendResult<ClaimResult> {
+        Ok(SupabaseBackend::claim_team_invite(self, token).await?)
     }
 
     /// Upsert an agent_runtimes row keyed on (agent_id, backend_session_id).
@@ -446,7 +450,7 @@ impl crate::backend::Backend for SupabaseBackend {
     async fn upsert_agent_runtime(
         &self,
         row: &AgentRuntimeUpsert<'_>,
-    ) -> SupabaseResult<Option<String>> {
+    ) -> crate::backend::BackendResult<Option<String>> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/agent_runtimes?on_conflict=agent_id,backend_session_id",
@@ -463,14 +467,16 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(token)
             .json(&[row])
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
         // Parse the returned row(s) to extract the generated id.
         let rows: Vec<serde_json::Value> = resp.json().await.unwrap_or_default();
@@ -487,7 +493,7 @@ impl crate::backend::Backend for SupabaseBackend {
         session_id: &str,
         runtime_id: &str,
         backend_session_id: &str,
-    ) -> SupabaseResult<Option<AgentRuntimeRow>> {
+    ) -> crate::backend::BackendResult<Option<AgentRuntimeRow>> {
         let token = self.access_token().await?;
         let mut url = format!(
             "{}/rest/v1/agent_runtimes?agent_id=eq.{}&session_id=eq.{}&select=id,last_processed_message_id",
@@ -508,17 +514,19 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(token)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
 
-        let rows: Vec<AgentRuntimeRow> = resp.json().await?;
+        let rows: Vec<AgentRuntimeRow> = resp.json().await.map_err(SupabaseError::from)?;
         Ok(rows.into_iter().next())
     }
 
@@ -542,7 +550,7 @@ impl crate::backend::Backend for SupabaseBackend {
         &self,
         agent_id: &str,
         session_id: &str,
-    ) -> SupabaseResult<Option<AgentRuntimeRow>> {
+    ) -> crate::backend::BackendResult<Option<AgentRuntimeRow>> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/agent_runtimes?agent_id=eq.{}&session_id=eq.{}&select=id,workspace_id,backend_type,backend_session_id,status,last_processed_message_id,last_seen_at&order=last_seen_at.desc&limit=1",
@@ -554,23 +562,25 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(&token)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("fetch_latest_runtime_for_session: {text}"),
-            });
+            }
+            .into());
         }
-        let mut rows: Vec<AgentRuntimeRow> = resp.json().await?;
+        let mut rows: Vec<AgentRuntimeRow> = resp.json().await.map_err(SupabaseError::from)?;
         Ok(rows.pop())
     }
 
     /// Record this daemon's MQTT device identifier on its `agents` row so
     /// iOS clients can route publishes to `amux/{device_id}/…` without having
     /// the user hand-type the UUID.
-    async fn set_agent_device_id(&self, device_id: &str) -> SupabaseResult<()> {
+    async fn set_agent_device_id(&self, device_id: &str) -> crate::backend::BackendResult<()> {
         let token = self.access_token().await?;
         let actor_id = self.cfg.actor_id.clone();
         let url = format!("{}/rest/v1/agents?id=eq.{}", self.cfg.url, actor_id);
@@ -585,14 +595,16 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(token)
             .json(&Patch { device_id })
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -604,7 +616,7 @@ impl crate::backend::Backend for SupabaseBackend {
         &self,
         supported_types: &[String],
         default_agent_type: &str,
-    ) -> SupabaseResult<()> {
+    ) -> crate::backend::BackendResult<()> {
         if supported_types.is_empty() || default_agent_type.is_empty() {
             return Ok(());
         }
@@ -629,17 +641,24 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(token.clone())
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
 
-        let row = resp.json::<Vec<AgentTypesRow>>().await?.into_iter().next();
+        let row = resp
+            .json::<Vec<AgentTypesRow>>()
+            .await
+            .map_err(SupabaseError::from)?
+            .into_iter()
+            .next();
         let should_patch = row
             .as_ref()
             .map(|r| r.agent_types.is_empty() || r.default_agent_type.is_none())
@@ -665,14 +684,16 @@ impl crate::backend::Backend for SupabaseBackend {
                 default_agent_type,
             })
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -683,7 +704,7 @@ impl crate::backend::Backend for SupabaseBackend {
         &self,
         agent_id: &str,
         actor_id: &str,
-    ) -> SupabaseResult<Option<String>> {
+    ) -> crate::backend::BackendResult<Option<String>> {
         #[derive(Serialize)]
         struct Req<'a> {
             p_agent_id: &'a str,
@@ -703,7 +724,7 @@ impl crate::backend::Backend for SupabaseBackend {
 
     /// Heartbeat: POST /rest/v1/rpc/update_actor_last_active.
     /// The RPC returns void (empty body), so we can't decode the response as JSON.
-    async fn heartbeat(&self) -> SupabaseResult<()> {
+    async fn heartbeat(&self) -> crate::backend::BackendResult<()> {
         let token = self.access_token().await?;
         let url = format!("{}/rest/v1/rpc/update_actor_last_active", self.cfg.url);
         let resp = self
@@ -713,19 +734,24 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(token)
             .json(&serde_json::Value::Null)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
         Ok(())
     }
 
-    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> SupabaseResult<WorkspaceRow> {
+    async fn upsert_workspace(
+        &self,
+        row: &WorkspaceUpsert<'_>,
+    ) -> crate::backend::BackendResult<WorkspaceRow> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/workspaces?on_conflict=team_id,agent_id,name",
@@ -742,21 +768,23 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(token)
             .json(&[row])
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: text,
-            });
+            }
+            .into());
         }
 
-        let mut rows: Vec<WorkspaceRow> = resp.json().await?;
-        rows.pop().ok_or(SupabaseError::Rpc {
+        let mut rows: Vec<WorkspaceRow> = resp.json().await.map_err(SupabaseError::from)?;
+        Ok(rows.pop().ok_or(SupabaseError::Rpc {
             code: None,
             message: "workspace upsert returned no rows".into(),
-        })
+        })?)
     }
 
     /// Fetch a `sessions` row alongside its `session_participants`. Used when
@@ -766,7 +794,7 @@ impl crate::backend::Backend for SupabaseBackend {
     async fn fetch_session_with_participants(
         &self,
         session_id: &str,
-    ) -> SupabaseResult<SessionAndParticipants> {
+    ) -> crate::backend::BackendResult<SessionAndParticipants> {
         let token = self.access_token().await?;
 
         let session_url = format!(
@@ -779,16 +807,18 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(&token)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("fetch_session: {text}"),
-            });
+            }
+            .into());
         }
-        let mut rows: Vec<SupabaseSessionRow> = resp.json().await?;
+        let mut rows: Vec<SupabaseSessionRow> = resp.json().await.map_err(SupabaseError::from)?;
         let session = rows.pop().ok_or_else(|| SupabaseError::Rpc {
             code: Some("404".into()),
             message: format!("session {session_id} not found"),
@@ -804,16 +834,19 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(&token)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("fetch_participants: {text}"),
-            });
+            }
+            .into());
         }
-        let participants: Vec<SupabaseParticipantRow> = resp.json().await?;
+        let participants: Vec<SupabaseParticipantRow> =
+            resp.json().await.map_err(SupabaseError::from)?;
 
         Ok(SessionAndParticipants {
             session,
@@ -828,7 +861,7 @@ impl crate::backend::Backend for SupabaseBackend {
         &self,
         session_id: &str,
         after_id: Option<&str>,
-    ) -> SupabaseResult<Vec<StoredMessage>> {
+    ) -> crate::backend::BackendResult<Vec<StoredMessage>> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/messages?session_id=eq.{}&select=id,session_id,sender_actor_id,kind,content,metadata,created_at&order=created_at.asc",
@@ -840,16 +873,18 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(&token)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("messages_after_cursor: {text}"),
-            });
+            }
+            .into());
         }
-        let rows: Vec<serde_json::Value> = resp.json().await?;
+        let rows: Vec<serde_json::Value> = resp.json().await.map_err(SupabaseError::from)?;
         let mut out = parse_stored_messages(rows);
         out.sort_by_key(|m| m.created_at);
         drain_through_cursor(&mut out, after_id);
@@ -861,7 +896,7 @@ impl crate::backend::Backend for SupabaseBackend {
         &self,
         runtime_row_id: &str,
         last_processed_message_id: &str,
-    ) -> SupabaseResult<()> {
+    ) -> crate::backend::BackendResult<()> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/agent_runtimes?id=eq.{}",
@@ -880,14 +915,16 @@ impl crate::backend::Backend for SupabaseBackend {
                 last_processed_message_id,
             })
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("update_runtime_cursor: {text}"),
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -906,7 +943,7 @@ impl crate::backend::Backend for SupabaseBackend {
         source: &str,
         source_id: &str,
         display_name: &str,
-    ) -> SupabaseResult<String> {
+    ) -> crate::backend::BackendResult<String> {
         #[derive(Serialize)]
         struct Req<'a> {
             p_team_id: &'a str,
@@ -946,7 +983,8 @@ impl crate::backend::Backend for SupabaseBackend {
         Err(SupabaseError::Rpc {
             code: None,
             message: format!("upsert_external_actor: unexpected response {body}"),
-        })
+        }
+        .into())
     }
 
     /// Look up the `sessions.id` and `binding` URI of a gateway session by
@@ -961,7 +999,7 @@ impl crate::backend::Backend for SupabaseBackend {
     async fn get_gateway_session_by_acp_id(
         &self,
         acp_session_id: &str,
-    ) -> SupabaseResult<Option<(String, Option<String>)>> {
+    ) -> crate::backend::BackendResult<Option<(String, Option<String>)>> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/sessions?acp_session_id=eq.{}&select=id,binding",
@@ -973,21 +1011,23 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("apikey", &self.cfg.anon_key)
             .bearer_auth(&token)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("get_gateway_session_by_acp_id: {text}"),
-            });
+            }
+            .into());
         }
         #[derive(Deserialize)]
         struct Row {
             id: String,
             binding: Option<String>,
         }
-        let rows: Vec<Row> = resp.json().await?;
+        let rows: Vec<Row> = resp.json().await.map_err(SupabaseError::from)?;
         Ok(rows.into_iter().next().map(|r| (r.id, r.binding)))
     }
 
@@ -1002,7 +1042,7 @@ impl crate::backend::Backend for SupabaseBackend {
         primary_agent_actor_id: &str,
         owner_member_actor_ids: &[String],
         participant_actor_ids: &[String],
-    ) -> SupabaseResult<(String, String, bool)> {
+    ) -> crate::backend::BackendResult<(String, String, bool)> {
         #[derive(Serialize)]
         struct Req<'a> {
             p_team_id: &'a str,
@@ -1047,7 +1087,7 @@ impl crate::backend::Backend for SupabaseBackend {
         sender_actor_id: &str,
         content: &str,
         external_message_id: Option<&str>,
-    ) -> SupabaseResult<String> {
+    ) -> crate::backend::BackendResult<String> {
         self.insert_gateway_message_with_attachments(
             session_id,
             sender_actor_id,
@@ -1067,7 +1107,7 @@ impl crate::backend::Backend for SupabaseBackend {
         content: &str,
         external_message_id: Option<&str>,
         attachments: serde_json::Value,
-    ) -> SupabaseResult<String> {
+    ) -> crate::backend::BackendResult<String> {
         let token = self.access_token().await?;
         // `team_id` is required on `messages` and enforced by the
         // `enforce_core_team_integrity` trigger. The daemon's session is in
@@ -1114,14 +1154,16 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(&token)
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("insert_gateway_message: {text}"),
-            });
+            }
+            .into());
         }
         let rows: Vec<serde_json::Value> = resp.json().await.unwrap_or_default();
         let id = rows
@@ -1144,7 +1186,7 @@ impl crate::backend::Backend for SupabaseBackend {
         path: &str,
         bytes: Vec<u8>,
         mime: &str,
-    ) -> SupabaseResult<String> {
+    ) -> crate::backend::BackendResult<String> {
         let token = self.access_token().await?;
         let url = format!("{}/storage/v1/object/attachments/{}", self.cfg.url, path);
         let resp = self
@@ -1155,14 +1197,16 @@ impl crate::backend::Backend for SupabaseBackend {
             .header("Content-Type", mime)
             .body(bytes)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("upload_attachment_bytes: {text}"),
-            });
+            }
+            .into());
         }
         Ok(path.to_string())
     }
@@ -1180,7 +1224,7 @@ impl crate::backend::Backend for SupabaseBackend {
     async fn list_agent_admin_member_actor_ids(
         &self,
         agent_actor_id: &str,
-    ) -> SupabaseResult<Vec<String>> {
+    ) -> crate::backend::BackendResult<Vec<String>> {
         #[derive(Serialize)]
         struct Req<'a> {
             p_agent_actor_id: &'a str,
@@ -1207,7 +1251,7 @@ impl crate::backend::Backend for SupabaseBackend {
         &self,
         session_id: &str,
         actor_id: &str,
-    ) -> SupabaseResult<()> {
+    ) -> crate::backend::BackendResult<()> {
         let token = self.access_token().await?;
         let url = format!(
             "{}/rest/v1/session_participants?on_conflict=session_id,actor_id",
@@ -1225,14 +1269,16 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(&token)
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("upsert_session_participant: {text}"),
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -1254,7 +1300,7 @@ impl crate::backend::Backend for SupabaseBackend {
         team_id: &str,
         primary_agent_actor_id: &str,
         title: &str,
-    ) -> SupabaseResult<String> {
+    ) -> crate::backend::BackendResult<String> {
         let token = self.access_token().await?;
         let url = format!("{}/rest/v1/sessions", self.cfg.url);
         let body = serde_json::json!({
@@ -1272,20 +1318,22 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(&token)
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("create_cron_session: {text}"),
-            });
+            }
+            .into());
         }
         #[derive(Deserialize)]
         struct Row {
             id: String,
         }
-        let rows: Vec<Row> = resp.json().await?;
+        let rows: Vec<Row> = resp.json().await.map_err(SupabaseError::from)?;
         let row = rows.into_iter().next().ok_or_else(|| SupabaseError::Rpc {
             code: None,
             message: "create_cron_session: empty response".into(),
@@ -1338,7 +1386,7 @@ impl crate::backend::Backend for SupabaseBackend {
         model: &str,
         turn_id: &str,
         sequence: u64,
-    ) -> SupabaseResult<()> {
+    ) -> crate::backend::BackendResult<()> {
         let token = self.access_token().await?;
         let url = format!("{}/rest/v1/messages", self.cfg.url);
 
@@ -1377,14 +1425,16 @@ impl crate::backend::Backend for SupabaseBackend {
             .bearer_auth(&token)
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(SupabaseError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             return Err(SupabaseError::Rpc {
                 code: Some(status.as_u16().to_string()),
                 message: format!("insert_message: {text}"),
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -1393,7 +1443,7 @@ impl crate::backend::Backend for SupabaseBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+    use crate::backend::{Backend, BackendError};
     use std::fs;
     use wiremock::matchers::{body_partial_json, method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -2006,8 +2056,8 @@ mod tests {
             .await
             .unwrap_err();
         match err {
-            SupabaseError::Rpc { code, .. } => assert_eq!(code.as_deref(), Some("404")),
-            other => panic!("expected Rpc error with 404, got {:?}", other),
+            BackendError::Provider { code, .. } => assert_eq!(code.as_deref(), Some("404")),
+            other => panic!("expected provider error with 404, got {:?}", other),
         }
     }
 

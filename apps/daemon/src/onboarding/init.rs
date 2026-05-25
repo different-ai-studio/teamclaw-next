@@ -1,4 +1,3 @@
-use crate::backend::Backend;
 use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
 use crate::onboarding::invite_url::{self, ParsedInvite};
 use crate::supabase::error::{SupabaseError, SupabaseResult};
