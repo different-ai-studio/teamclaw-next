@@ -215,6 +215,44 @@ describe("v2-streaming-store", () => {
     expect(stream.parts[0].toolCall?.status).toBe("completed");
   });
 
+  it("replaceParts updates the live tool result without waiting for session reload", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "Print working directory",
+      params: { command: "pwd" },
+      toolKind: "execute",
+    });
+    store.completeToolUse("s1", "a1", {
+      toolId: "tool-1",
+      success: true,
+      summary: "Print working directory",
+    });
+
+    store.replaceParts("s1", "a1", [
+      {
+        id: "stream:tool:tool-1",
+        type: "tool-call",
+        toolCallId: "tool-1",
+        toolCall: {
+          id: "tool-1",
+          name: "bash",
+          toolKind: "execute",
+          status: "completed",
+          arguments: { command: "pwd", description: "Print working directory" },
+          result: "/Users/haigang.ye/project/external/teamclaw-next\n",
+          startTime: "2026-05-25T00:00:00.000Z" as unknown as Date,
+        },
+      },
+    ]);
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.toolCalls[0].result).toContain("teamclaw-next");
+    expect(stream.parts[0].toolCall?.result).toContain("teamclaw-next");
+    expect(stream.parts[0].toolCall?.startTime).toBeInstanceOf(Date);
+  });
+
   it("adds a completed placeholder when a result references an unseen tool in an existing stream", () => {
     const store = useV2StreamingStore.getState();
     store.appendOutput("s1", "a1", "Before.");

@@ -85,7 +85,10 @@ import {
   streamActorIdFromLiveEvent,
 } from "@/lib/teamclaw-events";
 import { handleInboxEnvelope } from "@/lib/inbox-handler";
-import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
+import {
+  persistStreamingPartsForReply,
+  syncStreamingToolOutputsFromLocalCache,
+} from "@/lib/streaming-persist";
 import { useOutboxStore } from "@/stores/outbox-store";
 import { startOutboxSender } from "@/services/outbox-sender";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
@@ -674,6 +677,22 @@ function AppContent() {
     }
   }
 
+  function appendStreamReplyAfterPartsPersist(
+    sessionId: string,
+    actorId: string,
+    reply: TeamclawMessage,
+  ) {
+    void (async () => {
+      const enrichedReply = await persistStreamingPartsForReply(
+        sessionId,
+        actorId,
+        reply,
+      );
+      useSessionMessageStore.getState().appendMessage(sessionId, enrichedReply);
+      useV2StreamingStore.getState().clearActor(sessionId, actorId);
+    })();
+  }
+
   function flushPendingStreamReply(sessionId: string, actorId: string): boolean {
     const streamKey = agentStreamKey(sessionId, actorId);
     const pendingReply = pendingStreamRepliesRef.current[streamKey];
@@ -681,11 +700,9 @@ function AppContent() {
 
     clearPendingStreamReplyTimer(streamKey);
     delete pendingStreamReplySinceRef.current[streamKey];
-    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId);
-    void persistStreamingPartsForReply(sessionId, actorId, pendingReply);
-    useSessionMessageStore.getState().appendMessage(sessionId, pendingReply);
-    useV2StreamingStore.getState().clearActor(sessionId, actorId);
     delete pendingStreamRepliesRef.current[streamKey];
+    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId);
+    appendStreamReplyAfterPartsPersist(sessionId, actorId, pendingReply);
     return true;
   }
 
@@ -847,15 +864,11 @@ function AppContent() {
                   decoded.message,
                 );
               } else {
-                void persistStreamingPartsForReply(
+                appendStreamReplyAfterPartsPersist(
                   sid,
                   senderActorId,
                   decoded.message,
                 );
-                useSessionMessageStore
-                  .getState()
-                  .appendMessage(sid, decoded.message);
-                streamingStore.clearActor(sid, senderActorId);
                 clearPendingStreamReplyTimer(streamKey);
                 delete pendingStreamRepliesRef.current[streamKey];
                 delete pendingStreamReplySinceRef.current[streamKey];
@@ -971,6 +984,10 @@ function AppContent() {
                 success: tr.success,
                 summary: tr.summary,
               });
+              void syncStreamingToolOutputsFromLocalCache(sid, actorId);
+              window.setTimeout(() => {
+                void syncStreamingToolOutputsFromLocalCache(sid, actorId);
+              }, 500);
             } else if (event?.case === "statusChange") {
               const sc = event.value as { newStatus?: number };
               if (isTerminalAgentStatus(sc.newStatus)) {
@@ -1207,7 +1224,11 @@ function AppContent() {
       if (isTauri()) {
         // ── Phase 1: instant render from local cache ──────────────────
         const { loadMessagesForSession } = await import("@/lib/local-cache");
-        const localMsgs = await loadMessagesForSession(currentSessionId);
+        const localMsgs = await loadMessagesForSession(
+          currentSessionId,
+          false,
+          workspacePath,
+        );
         if (cancelled) return;
         if (localMsgs.length > 0) {
           useSessionMessageStore.getState().setMessages(
@@ -1238,7 +1259,11 @@ function AppContent() {
         if (cancelled) return;
         if (synced > 0) {
           // Re-read from local cache to surface the newly-synced rows
-          const fresh = await loadMessagesForSession(currentSessionId);
+          const fresh = await loadMessagesForSession(
+            currentSessionId,
+            false,
+            workspacePath,
+          );
           if (!cancelled) {
             useSessionMessageStore.getState().setMessages(
               currentSessionId,
@@ -1277,7 +1302,7 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [currentSessionId, messageRefreshTrigger]);
+  }, [currentSessionId, messageRefreshTrigger, workspacePath]);
 
   /** When left dock opens, hide the main sidebar; restore prior expansion when it closes. */
   const restoreSidebarAfterLeftDockRef = useRef<boolean | null>(null);

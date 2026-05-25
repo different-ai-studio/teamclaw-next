@@ -386,6 +386,7 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
 
             if is_completed {
                 let success = matches!(status, Some(acp::ToolCallStatus::Completed));
+                let has_raw_output = tcu.fields.raw_output.is_some();
                 let fallback_summary = || {
                     tcu.fields.title.clone().unwrap_or_else(|| {
                         if success {
@@ -398,7 +399,13 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                 let summary = truncate_tool_summary(
                     tool_output_summary(tcu.fields.raw_output.as_ref())
                         .or_else(|| tool_content_summary(tcu.fields.content.as_deref()))
-                        .unwrap_or_else(fallback_summary),
+                        .unwrap_or_else(|| {
+                            if has_raw_output {
+                                String::new()
+                            } else {
+                                fallback_summary()
+                            }
+                        }),
                 );
                 vec![amux::AcpEvent {
                     event: Some(amux::acp_event::Event::ToolResult(amux::AcpToolResult {
@@ -598,12 +605,27 @@ fn tool_call_params(raw_input: Option<&serde_json::Value>) -> HashMap<String, St
 
 fn tool_output_summary(raw_output: Option<&serde_json::Value>) -> Option<String> {
     let value = raw_output?;
-    json_tool_output_text(value).or_else(|| {
-        let text = json_value_to_string(value);
-        if text.is_empty() {
-            None
-        } else {
-            Some(text)
+    json_tool_output_text(value).or_else(|| match value {
+        serde_json::Value::Object(map) => {
+            if map.contains_key("metadata") || map.contains_key("content") {
+                None
+            } else {
+                let text = json_value_to_string(value);
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(text)
+                }
+            }
+        }
+        serde_json::Value::Array(_) => None,
+        _ => {
+            let text = json_value_to_string(value);
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
         }
     })
 }
@@ -633,6 +655,10 @@ fn json_tool_output_text(value: &serde_json::Value) -> Option<String> {
                 return Some(stdio.join("\n"));
             }
 
+            if let Some(summary) = map.get("metadata").and_then(json_tool_output_text) {
+                return Some(summary);
+            }
+
             map.get("content").and_then(json_content_summary)
         }
         serde_json::Value::Array(_) => json_content_summary(value),
@@ -660,6 +686,10 @@ fn json_content_summary(value: &serde_json::Value) -> Option<String> {
                 if let Some(serde_json::Value::String(text)) = map.get("text") {
                     if !text.trim().is_empty() {
                         parts.push(text.clone());
+                    }
+                } else if let Some(text) = map.get("content").and_then(json_tool_output_text) {
+                    if !text.trim().is_empty() {
+                        parts.push(text);
                     }
                 }
             }
@@ -1390,6 +1420,95 @@ mod tests {
     }
 
     #[test]
+    fn translates_completed_tool_call_metadata_output_to_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("List top processes")
+                .raw_output(serde_json::json!({
+                    "metadata": {
+                        "output": "TC_STDOUT_MARKER_20260525\n",
+                        "exit": 0,
+                        "description": "List top processes",
+                        "truncated": false
+                    }
+                })),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.summary, "TC_STDOUT_MARKER_20260525\n");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_opencode_completed_tool_call_output_to_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "call_00_c8LarilfiBvzfOzS2oLQ3075",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("Top 10 processes by CPU")
+                .content(vec!["PID %CPU COMM\n50369 opencode\n".into()])
+                .raw_output(serde_json::json!({
+                    "output": "PID %CPU COMM\n50369 opencode\n",
+                    "metadata": {
+                        "output": "PID %CPU COMM\n50369 opencode\n",
+                        "exit": 0,
+                        "description": "Top 10 processes by CPU",
+                        "truncated": false
+                    }
+                })),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "call_00_c8LarilfiBvzfOzS2oLQ3075");
+                assert!(result.success);
+                assert_eq!(result.summary, "PID %CPU COMM\n50369 opencode\n");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn completed_tool_call_empty_metadata_output_has_empty_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("List top processes")
+                .raw_output(serde_json::json!({
+                    "metadata": {
+                        "output": "",
+                        "exit": 0,
+                        "description": "List top processes",
+                        "truncated": false
+                    }
+                })),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.summary, "");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
     fn translates_completed_tool_call_content_to_result_summary() {
         let update = acp::ToolCallUpdate::new(
             "tool-1",
@@ -1397,6 +1516,38 @@ mod tests {
                 .status(acp::ToolCallStatus::Completed)
                 .title("Execute ps command")
                 .content(vec!["pid command\n1 launchd".into()]),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.summary, "pid command\n1 launchd");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_completed_tool_call_nested_raw_content_to_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("Execute ps command")
+                .raw_output(serde_json::json!({
+                    "content": [
+                        {
+                            "type": "content",
+                            "content": {
+                                "type": "text",
+                                "text": "pid command\n1 launchd"
+                            }
+                        }
+                    ]
+                })),
         );
         let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
 

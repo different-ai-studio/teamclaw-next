@@ -61,6 +61,7 @@ interface State {
     req: StreamingPermissionRequest,
   ) => void;
   clearPermissionRequest: (sessionId: string, actorId: string) => void;
+  replaceParts: (sessionId: string, actorId: string, parts: MessagePart[]) => void;
   ingestReplyPreview: (sessionId: string, actorId: string, text: string) => void;
   finalize: (sessionId: string, actorId: string, finalText: string) => void;
   finishSessionActor: (sessionId: string, actorId: string) => void;
@@ -213,6 +214,27 @@ function syncToolParts(parts: MessagePart[], toolCalls: ToolCall[]): MessagePart
     const toolCall = byId.get(part.toolCallId);
     return toolCall ? { ...part, toolCall } : part;
   });
+}
+
+function reviveToolCall(toolCall: ToolCall): ToolCall {
+  const rawStartTime = toolCall.startTime as unknown;
+  return {
+    ...toolCall,
+    startTime:
+      rawStartTime instanceof Date
+        ? rawStartTime
+        : typeof rawStartTime === "string" || typeof rawStartTime === "number"
+          ? new Date(rawStartTime)
+          : new Date(),
+  };
+}
+
+function reviveToolCallPart(part: MessagePart): MessagePart {
+  if (part.type !== "tool-call" || !part.toolCall) return part;
+  return {
+    ...part,
+    toolCall: reviveToolCall(part.toolCall),
+  };
 }
 
 function finishUnresolvedTools(toolCalls: ToolCall[]): ToolCall[] {
@@ -526,6 +548,34 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       byKey: {
         ...get().byKey,
         [key]: { ...existing, pendingPermission: null, lastUpdate: Date.now() },
+      },
+    });
+  },
+
+  replaceParts: (sessionId, actorId, parts) => {
+    const key = k(sessionId, actorId);
+    const existing = get().byKey[key];
+    if (!existing) return;
+    const revivedParts = parts.map(reviveToolCallPart);
+    const enrichedToolCalls = revivedParts
+      .filter((part) => part.type === "tool-call" && part.toolCall)
+      .map((part) => part.toolCall!);
+    const enrichedById = new Map(enrichedToolCalls.map((tc) => [tc.id, tc]));
+    const mergedToolCalls = [
+      ...existing.toolCalls.map((tc) => enrichedById.get(tc.id) ?? tc),
+      ...enrichedToolCalls.filter(
+        (tc) => !existing.toolCalls.some((existingTc) => existingTc.id === tc.id),
+      ),
+    ];
+    set({
+      byKey: {
+        ...get().byKey,
+        [key]: {
+          ...existing,
+          parts: revivedParts,
+          toolCalls: mergedToolCalls,
+          lastUpdate: Date.now(),
+        },
       },
     });
   },

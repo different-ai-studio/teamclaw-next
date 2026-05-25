@@ -214,11 +214,20 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
   // different id for the same reply. Collapse those exact same-turn echoes.
   const uniqueReplies: TeamclawMessage[] = [];
   const uniqueReplyIds = new Set<string>();
-  const seenReplyKeys = new Set<string>();
+  const replyIndexByKey = new Map<string, number>();
   for (const reply of replies) {
     const key = `${reply.content}\u0000${reply.model}`;
-    if (seenReplyKeys.has(key)) continue;
-    seenReplyKeys.add(key);
+    const existingIndex = replyIndexByKey.get(key);
+    if (existingIndex !== undefined) {
+      const existing = uniqueReplies[existingIndex];
+      if (!partsJson(existing) && partsJson(reply)) {
+        uniqueReplyIds.delete(existing.messageId);
+        uniqueReplies[existingIndex] = reply;
+        uniqueReplyIds.add(reply.messageId);
+      }
+      continue;
+    }
+    replyIndexByKey.set(key, uniqueReplies.length);
     uniqueReplies.push(reply);
     uniqueReplyIds.add(reply.messageId);
   }

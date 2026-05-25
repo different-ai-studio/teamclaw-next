@@ -237,11 +237,13 @@ export async function upsertMessagesBatch(rows: MessageRow[]): Promise<void> {
 export async function loadMessagesForSession(
   sessionId: string,
   includeDeleted = false,
+  workspacePath?: string | null,
 ): Promise<MessageRow[]> {
   if (!isTauri()) return [];
   return invoke("local_cache_message_load_session", {
     sessionId,
     includeDeleted,
+    workspacePath: workspacePath ?? null,
   });
 }
 
@@ -259,9 +261,25 @@ export async function softDeleteMessage(
 export async function setMessageParts(
   messageId: string,
   partsJson: string,
-): Promise<void> {
-  if (!isTauri()) return;
-  await invoke("local_cache_message_set_parts", { messageId, partsJson });
+  workspacePath?: string | null,
+): Promise<string> {
+  if (!isTauri()) return partsJson;
+  return invoke<string>("local_cache_message_set_parts", {
+    messageId,
+    partsJson,
+    workspacePath: workspacePath ?? null,
+  });
+}
+
+export async function enrichMessageParts(
+  partsJson: string,
+  workspacePath?: string | null,
+): Promise<string> {
+  if (!isTauri()) return partsJson;
+  return invoke<string>("local_cache_message_enrich_parts", {
+    partsJson,
+    workspacePath: workspacePath ?? null,
+  });
 }
 
 // ── outbox ─────────────────────────────────────────────────────────────────

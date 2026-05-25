@@ -329,6 +329,79 @@ describe("adaptTeamclawMessages", () => {
     expect(result[0].toolCalls?.[0].startTime).toEqual(new Date("2026-05-25T00:00:00.000Z"));
   });
 
+  it("prefers a duplicate reply that carries persisted parts_json", () => {
+    const toolId = "tool-with-output";
+    const parts = [
+      {
+        id: "tool-part",
+        type: "tool-call",
+        toolCallId: toolId,
+        toolCall: {
+          id: toolId,
+          name: "bash",
+          toolKind: "execute",
+          status: "completed",
+          arguments: {
+            command: "ps -o pid,%cpu,%mem,comm -r | head -10",
+            description: "Top 10 processes by CPU",
+          },
+          startTime: "2026-05-25T00:00:00.000Z",
+          result: "PID  %CPU %MEM COMM\n50369 22.6 1.5 opencode",
+        },
+      },
+      {
+        id: "reply-text",
+        type: "text",
+        text: "已执行 `ps`。",
+        content: "已执行 `ps`。",
+      },
+    ];
+    const msgs = [
+      tmsg({
+        id: "tool-call",
+        kind: MessageKind.AGENT_TOOL_CALL,
+        metadataJson: JSON.stringify({
+          tool_id: toolId,
+          tool_name: "bash",
+          description: "Top 10 processes by CPU",
+          params: { command: "ps -o pid,%cpu,%mem,comm -r | head -10" },
+        }),
+        turnId: "duplicate-parts-json-turn",
+        t: 10,
+      }),
+      tmsg({
+        id: "tool-result",
+        kind: MessageKind.AGENT_TOOL_RESULT,
+        content: "Top 10 processes by CPU",
+        metadataJson: JSON.stringify({ tool_id: toolId, success: true }),
+        turnId: "duplicate-parts-json-turn",
+        t: 11,
+      }),
+      tmsg({
+        id: "remote-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "已执行 `ps`。",
+        turnId: "duplicate-parts-json-turn",
+        t: 12,
+      }),
+      tmsg({
+        id: "local-reply-with-parts",
+        kind: MessageKind.AGENT_REPLY,
+        content: "已执行 `ps`。",
+        turnId: "duplicate-parts-json-turn",
+        t: 13,
+        partsJson: JSON.stringify(parts),
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("local-reply-with-parts");
+    expect(result[0].toolCalls?.[0].result).toContain("50369");
+    expect(result[0].parts[0].toolCall?.result).toContain("opencode");
+  });
+
   it("preserves interleaved reply/tool/reply order inside one turn", () => {
     const toolId = "tool-between-text";
     const msgs = [

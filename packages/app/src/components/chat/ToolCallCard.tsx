@@ -55,7 +55,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
   const StatusIcon = config.icon;
   const isCommand = isCommandTool(toolCall.name);
   const commandText = getCommandText(toolCall.arguments);
-  const commandOutput = getToolCallOutputText(toolCall.result).trim();
+  const commandOutput = getToolCallOutputText(toolCall.result, toolCall.arguments).trim();
   const commandDescription = (() => {
     const args = toolCall.arguments as Record<string, unknown> | undefined;
     if (!args) return t("chat.toolCall.command.defaultDescription", "Execute command");

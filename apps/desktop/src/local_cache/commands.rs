@@ -1,6 +1,6 @@
 use super::store::{
-    ActorRow, AgentRuntimeEventRow, ClaimRow, IdeaRow, LocalCacheStore, MessageRow, OutboxRow,
-    SessionParticipantRow, SessionRow, SubmissionRow,
+    enrich_parts_json_from_opencode, ActorRow, AgentRuntimeEventRow, ClaimRow, IdeaRow,
+    LocalCacheStore, MessageRow, OutboxRow, SessionParticipantRow, SessionRow, SubmissionRow,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -173,10 +173,15 @@ pub async fn local_cache_message_load_session(
     state: tauri::State<'_, LocalCacheState>,
     session_id: String,
     include_deleted: Option<bool>,
+    workspace_path: Option<String>,
 ) -> Result<Vec<MessageRow>, String> {
     let db = get_db(&state).await?;
-    db.message_load_session(&session_id, include_deleted.unwrap_or(false))
-        .await
+    db.message_load_session(
+        &session_id,
+        include_deleted.unwrap_or(false),
+        workspace_path.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -194,9 +199,19 @@ pub async fn local_cache_message_set_parts(
     state: tauri::State<'_, LocalCacheState>,
     message_id: String,
     parts_json: String,
-) -> Result<(), String> {
+    workspace_path: Option<String>,
+) -> Result<String, String> {
     let db = get_db(&state).await?;
-    db.message_set_parts(&message_id, &parts_json).await
+    db.message_set_parts(&message_id, &parts_json, workspace_path.as_deref())
+        .await
+}
+
+#[tauri::command]
+pub async fn local_cache_message_enrich_parts(
+    parts_json: String,
+    workspace_path: Option<String>,
+) -> Result<String, String> {
+    Ok(enrich_parts_json_from_opencode(&parts_json, workspace_path.as_deref()).await)
 }
 
 // ─── outbox commands ──────────────────────────────────────────────────────
