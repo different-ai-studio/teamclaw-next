@@ -83,7 +83,7 @@ private struct MentionRow: View {
                 .foregroundStyle(Color.amux.slate)
         case .agent:
             Circle()
-                .fill(Color.amux.cinnabar)
+                .fill(Color.amux.slate)
                 .frame(width: 6, height: 6)
         }
     }
