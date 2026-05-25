@@ -1205,3 +1205,172 @@ private func makePlanUpdate(_ items: [(String, String)]) -> Amux_AcpPlanUpdate {
     }
     return u
 }
+
+// MARK: - TimelineReducerEffect return value tests
+
+@Suite("ChatTimelineReducer — TimelineReducerEffect return value")
+struct ReducerEffectReturnTests {
+    @Test("subsequent streaming delta returns .streamingBufferOnly")
+    func subsequentDeltaReturnsBufferOnly() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        state.streamingTextByAgent["agent-1"] = "Hel"
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "lo", isComplete: false))
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .streamingBufferOnly)
+        #expect(state.streamingTextByAgent["agent-1"] == "Hello")
+    }
+
+    @Test("first delta with synthetic entry returns .entriesChanged")
+    func firstDeltaWithSyntheticReturnsEntriesChanged() {
+        var state = TimelineState()
+        state.entries = [
+            TimelineEntry(id: "syn-1", eventType: "output", text: "partial",
+                          isComplete: false, senderActorID: "agent-1", timestamp: .now)
+        ]
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "more", isComplete: false))
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .entriesChanged)
+        #expect(state.entries.isEmpty)
+    }
+
+    @Test("first delta without synthetic returns .streamingBufferOnly")
+    func firstDeltaWithoutSyntheticReturnsBufferOnly() {
+        var state = TimelineState()
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "Hello", isComplete: false))
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .streamingBufferOnly)
+        #expect(state.streamingTextByAgent["agent-1"] == "Hello")
+    }
+
+    @Test("complete output returns .entriesChanged")
+    func completeOutputReturnsEntriesChanged() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        state.streamingTextByAgent["agent-1"] = "Hello"
+        var acp = Amux_AcpEvent()
+        acp.event = .output(makeOutput(text: "Hello, world", isComplete: true))
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 3, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .entriesChanged)
+    }
+
+    @Test("sequence-dedupe returns .noop")
+    func seqDedupeReturnsNoop() {
+        var state = TimelineState()
+        state.entries = [
+            TimelineEntry(id: "x", sequence: 7, eventType: "thinking",
+                          text: "t", isComplete: false,
+                          senderActorID: "agent-1", timestamp: .now)
+        ]
+        var acp = Amux_AcpEvent()
+        var t1 = Amux_AcpThinking(); t1.text = "t"
+        acp.event = .thinking(t1)
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 7, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .noop)
+    }
+
+    @Test("thinking appends returns .entriesChanged")
+    func thinkingAppendsReturnsEntriesChanged() {
+        var state = TimelineState()
+        var acp = Amux_AcpEvent()
+        var t2 = Amux_AcpThinking(); t2.text = "thought"
+        acp.event = .thinking(t2)
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .entriesChanged)
+    }
+
+    @Test("statusChange idle with pending text returns .entriesChanged")
+    func idleWithTextReturnsEntriesChanged() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        state.streamingTextByAgent["agent-1"] = "partial reply"
+        state.streamingTurnIDByAgent["agent-1"] = "turn-x"
+        var acp = Amux_AcpEvent()
+        acp.event = .statusChange(makeStatusChange(.idle))
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 5, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: "turn-x",
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .entriesChanged)
+        #expect(state.streamingAgentSet.isEmpty)
+        #expect(state.entries.count == 1)
+    }
+
+    @Test("statusChange idle with no pending text returns .streamingBufferOnly")
+    func idleWithNoTextReturnsBufferOnly() {
+        var state = TimelineState()
+        state.streamingAgentSet.insert("agent-1")
+        // No text in buffer
+        var acp = Amux_AcpEvent()
+        acp.event = .statusChange(makeStatusChange(.idle))
+        let effect = ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 5, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now, turnID: nil,
+                          acpEvent: acp)),
+            to: &state
+        )
+        #expect(effect == .streamingBufferOnly)
+        #expect(state.streamingAgentSet.isEmpty)
+    }
+
+    @Test("permissionResolution match returns .entriesChanged")
+    func permissionResolutionReturnsEntriesChanged() {
+        var state = TimelineState()
+        state.entries = [
+            TimelineEntry(id: "perm-1", eventType: "permission_request",
+                          toolID: "req-1", isComplete: false,
+                          senderActorID: "agent-1", timestamp: .now)
+        ]
+        let effect = ChatTimelineReducer.apply(
+            .permissionResolution(PermissionResolutionInput(requestID: "req-1", granted: true)),
+            to: &state
+        )
+        #expect(effect == .entriesChanged)
+        #expect(state.entries[0].isComplete == true)
+    }
+
+    @Test("permissionResolution no-match returns .noop")
+    func permissionResolutionNoMatchReturnsNoop() {
+        var state = TimelineState()
+        let effect = ChatTimelineReducer.apply(
+            .permissionResolution(PermissionResolutionInput(requestID: "req-missing", granted: true)),
+            to: &state
+        )
+        #expect(effect == .noop)
+    }
+}

@@ -19,20 +19,26 @@ public enum ChatTimelineReducer {
     /// same `(.acp envelopeSequence)` / `.liveMessage messageID` /
     /// `.historyMessage supabaseMessageID` / `.localPrompt clientID` /
     /// `.permissionResolution requestID` is a no-op.
+    ///
+    /// Returns a `TimelineReducerEffect` describing what changed, letting
+    /// callers skip expensive sort + SwiftData projection on hot paths
+    /// where only streaming buffers were touched.
+    @discardableResult
     public static func apply(_ input: TimelineInput,
-                             to state: inout TimelineState) {
+                             to state: inout TimelineState) -> TimelineReducerEffect {
         switch input {
-        case .acp(let a): applyAcp(a, to: &state)
-        case .liveMessage(let m): applyLive(m, to: &state)
-        case .historyMessage(let h): applyHistory(h, to: &state)
-        case .localPrompt(let p): applyLocal(p, to: &state)
-        case .permissionResolution(let r): applyPermission(r, to: &state)
+        case .acp(let a): return applyAcp(a, to: &state)
+        case .liveMessage(let m): return applyLive(m, to: &state)
+        case .historyMessage(let h): return applyHistory(h, to: &state)
+        case .localPrompt(let p): return applyLocal(p, to: &state)
+        case .permissionResolution(let r): return applyPermission(r, to: &state)
         }
     }
 
     // MARK: - .acp
 
-    static func applyAcp(_ input: AcpInput, to state: inout TimelineState) {
+    @discardableResult
+    static func applyAcp(_ input: AcpInput, to state: inout TimelineState) -> TimelineReducerEffect {
         let bucket = input.agentBucketKey
 
         // Turn-id dedupe (primary): same (bucket, turnID, output, isComplete)
@@ -56,7 +62,7 @@ public enum ChatTimelineReducer {
             state.streamingTextByAgent[bucket] = nil
             state.streamingModelByAgent[bucket] = nil
             state.streamingTurnIDByAgent[bucket] = nil
-            return
+            return .entriesChanged
         }
 
         // Sequence dedupe (fallback): same (sequence, bucket) → no-op.
@@ -66,7 +72,7 @@ public enum ChatTimelineReducer {
         if input.envelopeSequence > 0,
            state.entries.contains(where: { $0.sequence == input.envelopeSequence
                                             && ($0.senderActorID ?? "") == input.agentBucketKey }) {
-            return
+            return .noop
         }
 
         switch input.acpEvent.event {
@@ -101,13 +107,16 @@ public enum ChatTimelineReducer {
                 state.streamingTextByAgent[bucket] = nil
                 state.streamingModelByAgent[bucket] = nil
                 state.streamingTurnIDByAgent[bucket] = nil
+                return .entriesChanged
             } else {
                 let firstDelta = !state.streamingAgentSet.contains(bucket)
+                var absorbedSynthetic = false
                 if firstDelta, let idx = incompleteOutputIndex(for: bucket, in: state) {
                     // Drop the synthetic stop()-saved entry: its text
                     // seeds the streaming buffer, then it goes away.
                     state.streamingTextByAgent[bucket] = state.entries[idx].text ?? ""
                     state.entries.remove(at: idx)
+                    absorbedSynthetic = true
                 }
                 state.streamingAgentSet.insert(bucket)
                 state.streamingTextByAgent[bucket, default: ""] += o.text
@@ -121,6 +130,9 @@ public enum ChatTimelineReducer {
                 if let turnID = input.turnID, !turnID.isEmpty {
                     state.streamingTurnIDByAgent[bucket] = turnID
                 }
+                // Return entriesChanged only if we removed a synthetic entry.
+                // All subsequent deltas are buffer-only — the hot path.
+                return absorbedSynthetic ? .entriesChanged : .streamingBufferOnly
             }
 
         case .thinking(let t):
@@ -142,6 +154,7 @@ public enum ChatTimelineReducer {
                     turnID: input.turnID
                 ))
             }
+            return .entriesChanged
 
         case .toolUse(let tu):
             // Mid-turn text flush: if the streaming buffer holds reply
@@ -209,6 +222,7 @@ public enum ChatTimelineReducer {
                     turnID: input.turnID
                 ))
             }
+            return .entriesChanged
 
         case .toolResult(let tr):
             if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tr.toolID }) {
@@ -229,6 +243,7 @@ public enum ChatTimelineReducer {
                     turnID: input.turnID
                 ))
             }
+            return .entriesChanged
 
         case .error(let e):
             state.entries.append(makeEntry(
@@ -238,6 +253,7 @@ public enum ChatTimelineReducer {
                 senderActorID: bucket,
                 timestamp: input.timestamp
             ))
+            return .entriesChanged
 
         case .permissionRequest(let pr):
             state.entries.append(makeEntry(
@@ -249,6 +265,7 @@ public enum ChatTimelineReducer {
                 senderActorID: bucket,
                 timestamp: input.timestamp
             ))
+            return .entriesChanged
 
         case .planUpdate(let pu):
             let text = pu.entries.map { entry -> String in
@@ -273,8 +290,10 @@ public enum ChatTimelineReducer {
                     turnID: input.turnID
                 ))
             }
+            return .entriesChanged
 
         case .statusChange(let sc):
+            var didMutateEntries = false
             if sc.newStatus == .idle, state.streamingAgentSet.contains(bucket),
                let text = state.streamingTextByAgent[bucket], !text.isEmpty {
                 // Stamp the turnID we tracked across deltas so this final
@@ -299,6 +318,7 @@ public enum ChatTimelineReducer {
                         isComplete: true,
                         turnID: segmentTurnID
                     ))
+                    didMutateEntries = true
                 }
             }
             if sc.newStatus == .idle {
@@ -312,8 +332,11 @@ public enum ChatTimelineReducer {
                     && (state.entries[i].senderActorID ?? "") == bucket {
                     state.entries[i].isComplete = true
                     if state.entries[i].success == nil { state.entries[i].success = true }
+                    didMutateEntries = true
                 }
+                return didMutateEntries ? .entriesChanged : .streamingBufferOnly
             }
+            return .noop
 
         case .availableCommands(let upd):
             var seen = Set<String>()
@@ -324,7 +347,9 @@ public enum ChatTimelineReducer {
                                     inputHint: $0.inputHint) }
             if next != state.availableCommands {
                 state.availableCommands = next
+                return .streamingBufferOnly
             }
+            return .noop
 
         case .raw, .none:
             // Raw tool_title_update + future event types: leave the
@@ -332,15 +357,16 @@ public enum ChatTimelineReducer {
             // parser for `tool_title_update`; that's intentionally
             // outside the reducer's MVP scope. Other `raw` payloads
             // are ignored.
-            break
+            return .noop
         }
     }
 
     // MARK: - .liveMessage
 
-    static func applyLive(_ input: LiveMessageInput, to state: inout TimelineState) {
+    @discardableResult
+    static func applyLive(_ input: LiveMessageInput, to state: inout TimelineState) -> TimelineReducerEffect {
         // Identity dedupe: messageID already present → no-op.
-        if state.entries.contains(where: { $0.id == input.messageID }) { return }
+        if state.entries.contains(where: { $0.id == input.messageID }) { return .noop }
 
         // Local prompt merge: same clientID round-tripped from a prior
         // .localPrompt → replace that entry in place. We swap the id
@@ -351,7 +377,7 @@ public enum ChatTimelineReducer {
             state.entries[idx].id = input.messageID
             state.entries[idx].clientID = nil
             state.entries[idx].timestamp = input.createdAt
-            return
+            return .entriesChanged
         }
 
         state.entries.append(TimelineEntry(
@@ -362,11 +388,13 @@ public enum ChatTimelineReducer {
             senderActorID: input.senderActorID,
             timestamp: input.createdAt
         ))
+        return .entriesChanged
     }
 
     // MARK: - .historyMessage
 
-    static func applyHistory(_ input: HistoryInput, to state: inout TimelineState) {
+    @discardableResult
+    static func applyHistory(_ input: HistoryInput, to state: inout TimelineState) -> TimelineReducerEffect {
         // Residual-streaming cleanup. Cold-start `start()` may have restored
         // `streamingAgentSet[bucket]` from a `stop()`-saved synthetic
         // incomplete output — but if Supabase shows the turn already
@@ -405,7 +433,7 @@ public enum ChatTimelineReducer {
             if state.entries[idx].turnID == nil {
                 state.entries[idx].turnID = input.turnID
             }
-            return
+            return .entriesChanged
         }
         let eventType: String = input.kind == .output ? "output" : "user_prompt"
 
@@ -423,7 +451,7 @@ public enum ChatTimelineReducer {
             if state.entries[idx].timestamp > input.createdAt {
                 state.entries[idx].timestamp = input.createdAt
             }
-            return
+            return .entriesChanged
         }
 
         // Cross-source dedupe: if the same output content already exists
@@ -443,7 +471,7 @@ public enum ChatTimelineReducer {
             }
             if state.entries[idx].model == nil { state.entries[idx].model = input.model }
             if state.entries[idx].turnID == nil { state.entries[idx].turnID = input.turnID }
-            return
+            return .entriesChanged
         }
 
         // Prefix upgrade: a live/status flush can persist a completed
@@ -470,7 +498,7 @@ public enum ChatTimelineReducer {
             state.entries[idx].supabaseMessageID = input.supabaseMessageID
             if state.entries[idx].model == nil { state.entries[idx].model = input.model }
             state.entries[idx].turnID = input.turnID
-            return
+            return .entriesChanged
         }
 
         // Conservative prompt dedupe: if the same content already exists
@@ -487,7 +515,7 @@ public enum ChatTimelineReducer {
             if state.entries[idx].timestamp > input.createdAt {
                 state.entries[idx].timestamp = input.createdAt
             }
-            return
+            return .entriesChanged
         }
 
         // Multi-segment turns stay separate. The daemon's turn_aggregator
@@ -515,13 +543,15 @@ public enum ChatTimelineReducer {
         // History entries land sorted by createdAt; keep the array
         // ordered so feed-rendering downstream stays consistent.
         state.entries.sort { $0.timestamp < $1.timestamp }
+        return .entriesChanged
     }
 
     // MARK: - .localPrompt
 
-    static func applyLocal(_ input: LocalPromptInput, to state: inout TimelineState) {
+    @discardableResult
+    static func applyLocal(_ input: LocalPromptInput, to state: inout TimelineState) -> TimelineReducerEffect {
         // Re-feeding the same clientID is a no-op.
-        if state.entries.contains(where: { $0.clientID == input.clientID }) { return }
+        if state.entries.contains(where: { $0.clientID == input.clientID }) { return .noop }
         state.entries.append(TimelineEntry(
             id: UUID().uuidString,
             eventType: "user_prompt",
@@ -535,18 +565,21 @@ public enum ChatTimelineReducer {
             // reducer takes over from the inline handler.
             outboxMessageID: input.clientID
         ))
+        return .entriesChanged
     }
 
     // MARK: - .permissionResolution
 
-    static func applyPermission(_ input: PermissionResolutionInput, to state: inout TimelineState) {
+    @discardableResult
+    static func applyPermission(_ input: PermissionResolutionInput, to state: inout TimelineState) -> TimelineReducerEffect {
         // Find the matching permission_request entry; drop silently
         // if there's no match (out-of-order arrival).
         guard let idx = state.entries.firstIndex(where: {
             $0.eventType == "permission_request" && $0.toolID == input.requestID
-        }) else { return }
+        }) else { return .noop }
         state.entries[idx].isComplete = true
         state.entries[idx].success = input.granted
+        return .entriesChanged
     }
 
     // MARK: - Helpers
