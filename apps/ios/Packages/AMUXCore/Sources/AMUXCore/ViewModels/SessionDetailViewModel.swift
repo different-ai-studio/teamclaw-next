@@ -134,10 +134,8 @@ public final class SessionDetailViewModel {
     /// mention; all agents will receive the message (broadcast semantics on
     /// the daemon side). Populated by bootstrapChips / toggleAgentChip.
     public private(set) var agentChipSelection: Set<String> = []
-    /// Once the user explicitly changes the chip bar or picks an @ mention,
-    /// refreshes must preserve that choice. Otherwise the single-agent
-    /// auto-light rule reselects the agent immediately after the user clears it.
-    private var userEditedAgentChipSelection = false
+    /// Session + context bound together; both are always set or neither is.
+    private var sessionBinding: (session: Session, modelContext: ModelContext)?
     /// Ordered list of agent participants shown in the chip bar. Populated
     /// by bootstrapChips from the session's participant list + runtime states.
     public private(set) var agentChipParticipants: [AgentChipParticipant] = []
@@ -383,14 +381,22 @@ public final class SessionDetailViewModel {
                 runtimeState: runtimeStates[$0.actorID] ?? .spawning
             )
         }
+
+        // Bound session: persistence is the source of truth (already hydrated
+        // in `bind`). Leave selection alone — even an empty value is the user's
+        // explicit choice.
+        guard sessionBinding == nil else { return }
+
+        // Unbound (new session before persistence is wired up): apply the legacy
+        // single-agent default.
         self.agentChipSelection = agents.count == 1 ? Set([agents[0].actorID]) : []
     }
 
     /// Toggle the selected state of one chip. Called from the chip-bar tap handler.
     public func toggleAgentChip(_ agentID: String) {
-        userEditedAgentChipSelection = true
         if agentChipSelection.contains(agentID) { agentChipSelection.remove(agentID) }
         else { agentChipSelection.insert(agentID) }
+        persistAgentChipSelection()
     }
 
     /// Ensure an agent's chip is lit. Idempotent — never unlights. Used by
@@ -398,8 +404,8 @@ public final class SessionDetailViewModel {
     /// chip-bar toolbar above the composer remains the surface for turning
     /// agents off.
     public func lightAgentChip(_ agentID: String) {
-        userEditedAgentChipSelection = true
         agentChipSelection.insert(agentID)
+        persistAgentChipSelection()
     }
 
     /// Agent actor ids whose runtime is currently streaming a reply. Used
@@ -469,8 +475,36 @@ public final class SessionDetailViewModel {
 
     /// Replace the entire chip selection. Used by Task 16 view integration.
     public func setAgentChipSelection(_ selection: Set<String>) {
-        userEditedAgentChipSelection = true
         self.agentChipSelection = selection
+        persistAgentChipSelection()
+    }
+
+    // MARK: - Session binding (chip persistence)
+
+    /// Bind a `Session` model and its `ModelContext` so that chip-bar
+    /// mutations are persisted to `session.selectedAgentIds`. Also
+    /// hydrates `agentChipSelection` from the stored value.
+    /// Call this once when the session and model context are both available.
+    public func bind(session: Session, modelContext: ModelContext) {
+        self.sessionBinding = (session, modelContext)
+        self.agentChipSelection = Set(session.selectedAgentIds)
+    }
+
+    private func persistAgentChipSelection() {
+        guard let binding = sessionBinding else { return }
+        binding.session.selectedAgentIds = Array(agentChipSelection).sorted()
+        try? binding.modelContext.save()
+    }
+
+    /// Drops any agent IDs from `agentChipSelection` that are no longer
+    /// present in `memberSheetAgents` (i.e. ghost selections left over from
+    /// a removed agent). Persists the pruned set when any IDs were removed.
+    private func pruneGhostAgentSelection() {
+        let valid = Set(memberSheetAgents.map(\.id))
+        let pruned = agentChipSelection.intersection(valid)
+        guard pruned.count != agentChipSelection.count else { return }
+        agentChipSelection = pruned
+        persistAgentChipSelection()
     }
 
     // MARK: - Member sheet state
@@ -524,6 +558,7 @@ public final class SessionDetailViewModel {
 
         memberSheetHumans = snapshot.humans
         memberSheetAgents = snapshot.agents
+        pruneGhostAgentSelection()
 
         // memberSheet now provides runtime_id → actor_id mappings. Live
         // events that arrived before this load may have been stamped with
@@ -626,6 +661,7 @@ public final class SessionDetailViewModel {
             }
             return agent
         }
+        pruneGhostAgentSelection()
     }
 
     private func chipStateFromRuntime(_ r: Runtime) -> AgentRuntimeChipState {
@@ -944,6 +980,23 @@ public final class SessionDetailViewModel {
         return ""
     }
 
+    /// Returns the live SwiftData `Runtime` row for the given agent, or nil
+    /// when no runtime row has been loaded yet (e.g. agent still spawning or
+    /// the primary bound runtime's runtimeId doesn't match the agent's).
+    /// Used by AgentsSheet to drive the model picker without the sheet itself
+    /// holding a SwiftData query or accessing internal VM state.
+    public func runtime(for agent: MemberSheetAgent) -> Runtime? {
+        // Fast path: bound primary runtime's `runtimeId` (UUID) matches this
+        // agent's `runtimeID`. UUID collisions across distinct agents are not
+        // a practical concern, so id equality implies identity here.
+        if let r = runtime, let rid = agent.runtimeID, r.runtimeId == rid { return r }
+        // Slow path: fetch from the persistent store by runtimeID.
+        guard let rid = agent.runtimeID, !rid.isEmpty,
+              let ctx = startModelContext else { return nil }
+        let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
+        return (try? ctx.fetch(desc))?.first
+    }
+
     /// Switches the model for an agent's runtime. The daemon's SetModel RPC
     /// updates `current_model_per_agent` and re-publishes the runtime's
     /// retained state, so the member sheet refreshes via the normal state
@@ -1236,6 +1289,13 @@ public final class SessionDetailViewModel {
         // replay in via incremental sync.)
         if task != nil { return }
         startModelContext = modelContext
+
+        // Bind session persistence for chip-bar selection (idempotent —
+        // bind() is a no-op after the first start() returns since `task`
+        // guards re-entry above).
+        if let s = session {
+            bind(session: s, modelContext: modelContext)
+        }
 
         // resolveRuntime may return a placeholder for session-with-pending-
         // primary-agent or nil for collab-only sessions with no agent yet.
@@ -2216,6 +2276,29 @@ extension SessionDetailViewModel {
         )
     }
 
+    /// Builds a VM with a `Session` inserted into an in-memory SwiftData
+    /// container and calls `bind(session:modelContext:)` so that chip-bar
+    /// mutations are persisted to `session.selectedAgentIds`.
+    @MainActor
+    public static func testInstance(session: Session) -> SessionDetailViewModel {
+        let mqtt = MQTTService()
+        let container = try! ModelContainer(
+            for: Session.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let ctx = ModelContext(container)
+        ctx.insert(session)
+        let vm = SessionDetailViewModel(
+            runtime: nil,
+            mqtt: mqtt,
+            hub: MQTTMessageHub(mqtt: mqtt),
+            teamID: "test-team",
+            peerId: "test-peer"
+        )
+        vm.bind(session: session, modelContext: ctx)
+        return vm
+    }
+
     // NSMapTable with weak keys: the container lives as long as the VM does,
     // then both are released together when the test runner deallocates the VM.
     private static let _testStorage = NSMapTable<SessionDetailViewModel, ModelContainer>(
@@ -2285,6 +2368,36 @@ extension SessionDetailViewModel {
 extension SessionParticipant {
     public static func testFixture(actorID: String, role: String, displayName: String) -> SessionParticipant {
         SessionParticipant(actorID: actorID, role: role, displayName: displayName)
+    }
+}
+
+extension MemberSheetAgent {
+    public static func testFixture(
+        id: String,
+        displayName: String? = nil
+    ) -> MemberSheetAgent {
+        MemberSheetAgent(
+            id: id,
+            displayName: displayName ?? id,
+            workspacePath: "",
+            agentType: "claude",
+            runtimeState: .idle,
+            availableModels: [],
+            currentModel: nil,
+            runtimeID: nil,
+            workspaceID: nil,
+            backendType: nil
+        )
+    }
+}
+
+extension SessionDetailViewModel {
+    /// Sets `memberSheetAgents` to the given snapshot and prunes any ghost
+    /// agent IDs from `agentChipSelection`. For use in unit tests only.
+    @MainActor
+    public func applyMemberSheetSnapshotForTests(agents: [MemberSheetAgent]) {
+        memberSheetAgents = agents
+        pruneGhostAgentSelection()
     }
 }
 #endif

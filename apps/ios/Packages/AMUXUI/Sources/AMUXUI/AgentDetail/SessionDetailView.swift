@@ -10,7 +10,6 @@ public struct SessionDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: SessionDetailViewModel
     @State private var promptText = ""
-    @State private var selectedModelId: String?
     @State private var attachments: [URL] = []
     @State private var voiceRecorder = VoiceRecorder(contextualStrings: [
         "Claude", "Claude Code", "Sonnet", "Opus", "Haiku",
@@ -238,10 +237,8 @@ public struct SessionDetailView: View {
             VStack(spacing: 0) {
                 SessionComposer(
                     promptText: $promptText,
-                    selectedModelId: $selectedModelId,
                     attachments: $attachments,
                     voiceRecorder: voiceRecorder,
-                    runtime: viewModel.runtime,
                     availableCommands: viewModel.availableCommands,
                     availableMentions: mentionTargets(),
                     sessionID: viewModel.session?.sessionId ?? "",
@@ -260,6 +257,11 @@ public struct SessionDetailView: View {
                     streamingAgentIDs: viewModel.streamingAgentIDs,
                     onAgentInterrupt: { agentID in
                         viewModel.interruptAgent(agentID)
+                    },
+                    memberSheetAgents: viewModel.memberSheetAgents,
+                    runtimeForAgent: viewModel.runtime(for:),
+                    onApplyModelForAgent: { agent, modelID in
+                        viewModel.setModel(forAgent: agent.id, model: modelID)
                     },
                     onSend: { attachmentURLs in
                         let text = promptText
@@ -424,9 +426,12 @@ public struct SessionDetailView: View {
     }
 
     private var resolvedModelId: String? {
-        if let selectedModelId, !selectedModelId.isEmpty { return selectedModelId }
-        if let current = viewModel.runtime?.currentModel, !current.isEmpty { return current }
-        return nil
+        // Per-agent model selection is owned by AgentsSheet via
+        // viewModel.setModel(forAgent:model:), so there's no longer a
+        // session-level override stored on the view. Fall back to the bound
+        // primary runtime's current model for the legacy single-agent path.
+        guard let current = viewModel.runtime?.currentModel, !current.isEmpty else { return nil }
+        return current
     }
 
     private var initialFeedScrollKey: String {

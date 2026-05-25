@@ -4,11 +4,9 @@ import AMUXSharedUI
 
 struct SessionComposer: View {
     @Binding var promptText: String
-    @Binding var selectedModelId: String?
     @Binding var attachments: [URL]
 
     let voiceRecorder: VoiceRecorder
-    let runtime: Runtime?
     let availableCommands: [SlashCommand]
     let availableMentions: [MentionTarget]
     /// Resolved session id (from `SessionDetailViewModel.session?.sessionId`)
@@ -18,18 +16,28 @@ struct SessionComposer: View {
     let sessionID: String
     let teamID: String
 
-    /// Agent chips for the unified pre-send tray (chips share a horizontal
-    /// scroll with attachment thumbnails). Pass an empty array when no
-    /// chip-based agent routing is wired up — the tray simply omits them.
+    /// Ordered list of session agents. Used only as the source of truth for
+    /// the order in which selected display names appear on the Row-2 `[@]`
+    /// button label; the chip-bar itself is no longer rendered inline.
     let agentChips: [AgentChipBar.AgentChip]
     @Binding var agentChipSelection: Set<String>
     let streamingAgentIDs: Set<String>
     let onAgentInterrupt: (String) -> Void
 
+    /// Full agent list for the AgentsSheet (the modal opened by the [@] button).
+    let memberSheetAgents: [MemberSheetAgent]
+    /// Resolves the live Runtime for a given agent; nil when no runtime row
+    /// exists yet (e.g. agent still spawning). Kept as a closure so the
+    /// composer doesn't hold a SwiftData query.
+    let runtimeForAgent: (MemberSheetAgent) -> Runtime?
+    /// Called when the user selects a different model for an agent in AgentsSheet.
+    let onApplyModelForAgent: (MemberSheetAgent, String) -> Void
+
     let onSend: ([URL]) -> Void
     let onAgentMention: (MentionTarget) -> Void
 
     @State private var showDrawer = false
+    @State private var showAgentsSheet = false
     @State private var slashCandidates: [SlashCommand] = []
     @State private var hasPendingSlashCommand = false
     @State private var mentionCandidates: [MentionTarget] = []
@@ -122,21 +130,11 @@ struct SessionComposer: View {
                 .animation(AMUXAnimation.fast, value: mentionCandidates)
             }
 
-            // Unified pre-send tray: agent chips + attachment thumbnails
-            // share one horizontal scroll. Both are "context being added to
-            // the next send", so they belong in the same visual group.
-            if !agentChipSelection.isEmpty || !attachments.isEmpty {
+            // Attachment thumbnails pre-send tray (agent chips have moved
+            // into the Row-2 agent button label — no longer shown here).
+            if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        if !agentChipSelection.isEmpty {
-                            AgentChipBar(
-                                chips: agentChips,
-                                selection: $agentChipSelection,
-                                streamingAgentIDs: streamingAgentIDs,
-                                onInterrupt: onAgentInterrupt,
-                                wrappedInScrollView: false
-                            )
-                        }
                         ForEach(attachments, id: \.self) { url in
                             AttachmentThumbnailTile(
                                 url: url,
@@ -150,21 +148,9 @@ struct SessionComposer: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Button { showDrawer = true } label: {
-                    Image(systemName: "plus")
-                        .font(.title3)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .liquidGlass(in: Circle())
-                .accessibilityIdentifier("composer.plusButton")
-
-                pill
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            twoRowComposer
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
         }
         .onChange(of: promptText) { _, _ in
             recomputeSlashCandidates()
@@ -184,8 +170,6 @@ struct SessionComposer: View {
         .sheet(isPresented: $showDrawer) {
             AttachmentDrawerSheet(
                 attachments: $attachments,
-                selectedModelId: $selectedModelId,
-                runtime: runtime,
                 uploadManager: ensureUploadManager(),
                 sessionID: sessionID,
                 teamID: teamID,
@@ -196,16 +180,40 @@ struct SessionComposer: View {
             .presentationDetents([.fraction(0.4), .medium])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showAgentsSheet) {
+            AgentsSheet(
+                agents: memberSheetAgents,
+                selection: $agentChipSelection,
+                streamingAgentIDs: streamingAgentIDs,
+                runtimeForAgent: runtimeForAgent,
+                onApplyModel: onApplyModelForAgent,
+                onInterrupt: { agent in
+                    onAgentInterrupt(agent.id)
+                }
+            )
+        }
     }
 
+    // MARK: - Two-row capsule
+
+    private static let composerCornerRadius: CGFloat = 28
+    private static let composerInputFontSize: CGFloat = 15
+    private static let composerAgentLabelFontSize: CGFloat = 14
+    private static let composerAgentIconFontSize: CGFloat = 16
+
+    /// The LiquidGlass composer containing:
+    ///   Row 1 — text field (or waveform when recording)
+    ///   Row 2 — [+] attachment · [@ …] agent button · Spacer · right-button
     @ViewBuilder
-    private var pill: some View {
-        HStack(spacing: 6) {
+    private var twoRowComposer: some View {
+        VStack(spacing: 0) {
+            // Row 1: input area
             Group {
                 switch inputMode {
                 case .textField:
                     TextField("Send a message…", text: $promptText, axis: .vertical)
-                        .lineLimit(1...6)
+                        .font(.system(size: Self.composerInputFontSize))
+                        .lineLimit(2...6)
                         .focused($inputFocused)
                         .submitLabel(.return)
                         .accessibilityIdentifier("composer.textField")
@@ -214,13 +222,71 @@ struct SessionComposer: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.leading, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
 
-            rightButtonView
-                .padding(.trailing, 6)
+            // Divider between rows
+            Divider()
+                .padding(.horizontal, 10)
+
+            // Row 2: [+] attachment · [@ agent] + Spacer + right-button
+            HStack(spacing: 8) {
+                Button { showDrawer = true } label: {
+                    Image(systemName: "plus")
+                        .font(.body)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("composer.plusButton")
+
+                agentButton
+                Spacer()
+                rightButtonView
+                    .padding(.trailing, 4)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
         }
-        .liquidGlass(in: Capsule())
+        .liquidGlass(in: RoundedRectangle(cornerRadius: Self.composerCornerRadius, style: .continuous))
+    }
+
+    /// The agent selection button. Shows "@ name ×N" when agents are selected,
+    /// or just "@ " icon-only when none are selected.
+    @ViewBuilder
+    private var agentButton: some View {
+        Button { showAgentsSheet = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "at")
+                    .font(.system(size: Self.composerAgentIconFontSize))
+                if let labelText = agentButtonLabelText {
+                    Text(labelText)
+                        .font(.system(size: Self.composerAgentLabelFontSize, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("composer.agentButton")
+        .accessibilityLabel("Agents, \(agentChipSelection.count) selected")
+    }
+
+    /// Text shown after the `@` glyph in the agent button. Nil → icon only.
+    private var agentButtonLabelText: String? {
+        AgentButtonLabel.text(selectedDisplayNamesInOrder: orderedSelectedAgentDisplayNames())
+    }
+
+    /// Returns display names of selected agents in a stable order
+    /// (preserving the order they appear in `agentChips`).
+    private func orderedSelectedAgentDisplayNames() -> [String] {
+        agentChips
+            .filter { agentChipSelection.contains($0.id) }
+            .map { $0.displayName }
     }
 
     @ViewBuilder
@@ -318,11 +384,13 @@ struct SessionComposer: View {
             mentionCandidates = []
             return
         }
-        let lower = query.lowercased()
         mentionCandidates = Array(
-            availableMentions
-                .filter { lower.isEmpty || $0.displayName.lowercased().contains(lower) }
-                .prefix(5)
+            MentionCandidateFilter.filter(
+                all: availableMentions,
+                query: query,
+                selectedAgentIDs: agentChipSelection
+            )
+            .prefix(5)
         )
     }
 
