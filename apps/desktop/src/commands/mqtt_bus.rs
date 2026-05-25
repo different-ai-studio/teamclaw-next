@@ -31,16 +31,24 @@ pub async fn mqtt_connect(
         use_tls,
     };
     let client = MqttClient::connect(cfg).map_err(|e| e.to_string())?;
+    let generation = bus.bump_generation();
     // Reset to false until the event loop observes a CONNACK. Without this,
     // a stale `true` from a previous session could leak into the UI between
     // `mqtt_connect` returning and the broker's CONNACK arriving.
     bus.set_connected(false);
-    *bus.client.lock().await = Some(client);
+    let previous_client = {
+        let mut client_guard = bus.client.lock().await;
+        client_guard.replace(client)
+    };
+    bus.subscribed.lock().await.clear();
+    if let Some(previous_client) = previous_client {
+        let _ = previous_client.client.disconnect().await;
+    }
 
     let bus_arc = (*bus).clone();
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        crate::mqtt::client::run_event_loop(bus_arc, app_clone).await;
+        crate::mqtt::client::run_event_loop(bus_arc, app_clone, generation).await;
     });
     Ok(())
 }

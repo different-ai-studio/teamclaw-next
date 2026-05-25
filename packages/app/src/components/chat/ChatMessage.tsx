@@ -113,6 +113,16 @@ export const ChatMessage = React.memo(function ChatMessage({
   }, [childStreamingState?.reasoning, isChildSessionStreaming, latestMessage.parts]);
 
   const hasToolCalls = latestMessage.toolCalls && latestMessage.toolCalls.length > 0;
+  const orderedRenderableParts = React.useMemo(
+    () =>
+      latestMessage.parts.filter(
+        (p) =>
+          (p.type === "text" && Boolean(p.text || p.content)) ||
+          (p.type === "tool-call" && Boolean(p.toolCall)),
+      ),
+    [latestMessage.parts],
+  );
+  const hasOrderedToolParts = orderedRenderableParts.some((p) => p.type === "tool-call");
 
   const hasActiveToolCalls =
     latestMessage.toolCalls?.some(
@@ -291,7 +301,33 @@ export const ChatMessage = React.memo(function ChatMessage({
       )}
 
       {/* Assistant message - either dynamic UI or text */}
-      {!isUser && textContent && (
+      {!isUser && hasOrderedToolParts && (
+        <div className="mt-2 space-y-1">
+          {orderedRenderableParts.map((part) => {
+            if (part.type === "tool-call" && part.toolCall) {
+              return <ToolCallCard key={part.id} toolCall={part.toolCall} />;
+            }
+            const partText = part.text || part.content || "";
+            if (!partText) return null;
+            return (
+              <Message key={part.id} from="assistant" basePath={basePath}>
+                <MessageContent>
+                  <MessageResponse>{partText}</MessageResponse>
+                </MessageContent>
+              </Message>
+            );
+          })}
+          {latestMessage.isStreaming && textContent && (
+            <span className="inline-flex items-center gap-0.5 ml-1.5 align-middle">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-[bounce_1s_ease-in-out_infinite]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-[bounce_1s_ease-in-out_0.2s_infinite]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-[bounce_1s_ease-in-out_0.4s_infinite]" />
+            </span>
+          )}
+        </div>
+      )}
+
+      {!isUser && !hasOrderedToolParts && textContent && (
         <>
           {uiTree ? (
             <div className="mt-2">
@@ -338,7 +374,7 @@ export const ChatMessage = React.memo(function ChatMessage({
       )}
 
       {/* Tool calls */}
-      {!isUser && hasToolCalls && (
+      {!isUser && hasToolCalls && !hasOrderedToolParts && (
         <div className="mt-1 space-y-0.5 pl-1">
           {latestMessage.toolCalls!.map((toolCall) => (
             <ToolCallCard key={toolCall.id} toolCall={toolCall} />

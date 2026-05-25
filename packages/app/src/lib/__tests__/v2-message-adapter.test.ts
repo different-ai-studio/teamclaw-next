@@ -19,8 +19,10 @@ function tmsg(o: {
   turnId?: string;
   t?: number;
   sessionId?: string;
+  sequence?: number;
+  partsJson?: string;
 }) {
-  return create(MessageSchema, {
+  const msg = create(MessageSchema, {
     messageId: o.id ?? nextId(),
     sessionId: o.sessionId ?? "s1",
     senderActorId: o.senderActorId ?? "actor-a",
@@ -31,6 +33,13 @@ function tmsg(o: {
     turnId: o.turnId ?? "",
     createdAt: BigInt(o.t ?? 0),
   });
+  if (o.sequence !== undefined) {
+    Object.assign(msg, { sequence: BigInt(o.sequence) });
+  }
+  if (o.partsJson !== undefined) {
+    Object.assign(msg, { partsJson: o.partsJson });
+  }
+  return msg;
 }
 
 describe("adaptTeamclawMessages", () => {
@@ -102,6 +111,31 @@ describe("adaptTeamclawMessages", () => {
     expect(msg.timestamp).toEqual(new Date(1 * 1000));
   });
 
+  it("dedupes repeated same-turn AGENT_REPLY rows from live cache plus Supabase replay", () => {
+    const msgs = [
+      tmsg({
+        id: "live-short-id",
+        kind: MessageKind.AGENT_REPLY,
+        content: "你好，Ye。",
+        turnId: "turn-dup",
+        t: 100,
+      }),
+      tmsg({
+        id: "11111111-1111-1111-1111-111111111111",
+        kind: MessageKind.AGENT_REPLY,
+        content: "你好，Ye。",
+        turnId: "turn-dup",
+        t: 101,
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("你好，Ye。");
+    expect(result[0].parts.find((p) => p.type === "text")?.text).toBe("你好，Ye。");
+  });
+
   it("tool_call + tool_result + reply same turnId → one SdkMessage with completed toolCall", () => {
     const toolId = "tool-xyz";
     const msgs = [
@@ -142,6 +176,234 @@ describe("adaptTeamclawMessages", () => {
 
     // No reasoning part
     expect(msg.parts.find((p) => p.type === "reasoning")).toBeUndefined();
+  });
+
+  it("restores JSON tool descriptions as structured arguments", () => {
+    const toolId = "tool-json-description";
+    const msgs = [
+      tmsg({
+        kind: MessageKind.AGENT_TOOL_CALL,
+        content: "",
+        metadataJson: JSON.stringify({
+          tool_id: toolId,
+          tool_name: "bash",
+          description: '{"command":"ps aux"}',
+        }),
+        turnId: "json-description",
+        t: 1,
+      }),
+      tmsg({
+        kind: MessageKind.AGENT_TOOL_RESULT,
+        content: "pid command",
+        metadataJson: JSON.stringify({ tool_id: toolId, success: true }),
+        turnId: "json-description",
+        t: 2,
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result[0].toolCalls?.[0].arguments).toMatchObject({
+      command: "ps aux",
+    });
+    expect(result[0].parts[0].toolCall?.arguments).toMatchObject({
+      command: "ps aux",
+    });
+  });
+
+  it("restores persisted tool params alongside descriptions", () => {
+    const toolId = "tool-params";
+    const msgs = [
+      tmsg({
+        kind: MessageKind.AGENT_TOOL_CALL,
+        content: "",
+        metadataJson: JSON.stringify({
+          tool_id: toolId,
+          tool_name: "bash",
+          description: "Execute ps command",
+          params: { command: "ps aux" },
+        }),
+        turnId: "params-turn",
+        t: 1,
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result[0].toolCalls?.[0].arguments).toMatchObject({
+      _description: "Execute ps command",
+      command: "ps aux",
+    });
+  });
+
+  it("orders persisted tool calls before the final reply when they happened first", () => {
+    const toolId = "tool-before-text";
+    const msgs = [
+      tmsg({
+        id: "a-call",
+        kind: MessageKind.AGENT_TOOL_CALL,
+        metadataJson: JSON.stringify({ tool_id: toolId, tool_name: "grep", description: "search text" }),
+        turnId: "ordered-realistic",
+        t: 10,
+      }),
+      tmsg({
+        id: "b-result",
+        kind: MessageKind.AGENT_TOOL_RESULT,
+        content: "match",
+        metadataJson: JSON.stringify({ tool_id: toolId, success: true }),
+        turnId: "ordered-realistic",
+        t: 11,
+      }),
+      tmsg({
+        id: "c-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "I found one match.",
+        turnId: "ordered-realistic",
+        t: 12,
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("I found one match.");
+    expect(result[0].parts.map((p) => p.type)).toEqual(["tool-call", "text"]);
+    expect(result[0].parts[0].toolCall?.id).toBe(toolId);
+    expect(result[0].parts[1].text).toBe("I found one match.");
+  });
+
+  it("uses persisted canonical parts_json for reload parity", () => {
+    const parts = [
+      {
+        id: "p1",
+        type: "text",
+        text: "Before tool.",
+        content: "Before tool.",
+      },
+      {
+        id: "tool-part",
+        type: "tool-call",
+        toolCallId: "tool-1",
+        toolCall: {
+          id: "tool-1",
+          name: "bash",
+          toolKind: "execute",
+          status: "completed",
+          arguments: { command: "ps aux" },
+          startTime: "2026-05-25T00:00:00.000Z",
+          result: "ok",
+        },
+      },
+      {
+        id: "p2",
+        type: "text",
+        text: "After tool.",
+        content: "After tool.",
+      },
+    ];
+    const msgs = [
+      tmsg({
+        id: "first-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "Before tool.",
+        turnId: "parts-json-turn",
+        t: 10,
+      }),
+      tmsg({
+        id: "final-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "After tool.",
+        turnId: "parts-json-turn",
+        t: 12,
+        partsJson: JSON.stringify(parts),
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("final-reply");
+    expect(result[0].content).toBe("Before tool.\n\nAfter tool.");
+    expect(result[0].parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(result[0].toolCalls?.[0].status).toBe("completed");
+    expect(result[0].toolCalls?.[0].startTime).toEqual(new Date("2026-05-25T00:00:00.000Z"));
+  });
+
+  it("preserves interleaved reply/tool/reply order inside one turn", () => {
+    const toolId = "tool-between-text";
+    const msgs = [
+      tmsg({
+        id: "a-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "I will check the file.",
+        turnId: "ordered-interleaved",
+        t: 10,
+      }),
+      tmsg({
+        id: "b-call",
+        kind: MessageKind.AGENT_TOOL_CALL,
+        metadataJson: JSON.stringify({ tool_id: toolId, tool_name: "read", description: "read file" }),
+        turnId: "ordered-interleaved",
+        t: 11,
+      }),
+      tmsg({
+        id: "c-result",
+        kind: MessageKind.AGENT_TOOL_RESULT,
+        content: "file contents",
+        metadataJson: JSON.stringify({ tool_id: toolId, success: true }),
+        turnId: "ordered-interleaved",
+        t: 12,
+      }),
+      tmsg({
+        id: "d-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "The file says hello.",
+        turnId: "ordered-interleaved",
+        t: 13,
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("I will check the file.\n\nThe file says hello.");
+    expect(result[0].parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(result[0].parts[0].text).toBe("I will check the file.");
+    expect(result[0].parts[1].toolCall?.id).toBe(toolId);
+    expect(result[0].parts[2].text).toBe("The file says hello.");
+  });
+
+  it("uses a stable tie-breaker when rows share the same timestamp", () => {
+    const toolId = "tool-same-time";
+    const msgs = [
+      tmsg({
+        id: "c-reply",
+        kind: MessageKind.AGENT_REPLY,
+        content: "Done.",
+        turnId: "ordered-tie",
+        t: 10,
+      }),
+      tmsg({
+        id: "a-call",
+        kind: MessageKind.AGENT_TOOL_CALL,
+        metadataJson: JSON.stringify({ tool_id: toolId, tool_name: "search", description: "search" }),
+        turnId: "ordered-tie",
+        t: 10,
+      }),
+      tmsg({
+        id: "b-result",
+        kind: MessageKind.AGENT_TOOL_RESULT,
+        content: "ok",
+        metadataJson: JSON.stringify({ tool_id: toolId, success: true }),
+        turnId: "ordered-tie",
+        t: 10,
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result[0].parts.map((p) => p.type)).toEqual(["tool-call", "text"]);
+    expect(result[0].parts[0].toolCall?.id).toBe(toolId);
   });
 
   it("tool_call without matching result → ToolCall with status 'calling'", () => {

@@ -79,7 +79,11 @@ import { useAuthStore } from "@/stores/auth-store";
 import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridge";
 import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
-import { decodeLiveEvent, sessionIdFromTopic } from "@/lib/teamclaw-events";
+import {
+  decodeLiveEvent,
+  sessionIdFromLiveEvent,
+  streamActorIdFromLiveEvent,
+} from "@/lib/teamclaw-events";
 import { handleInboxEnvelope } from "@/lib/inbox-handler";
 import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
 import { useOutboxStore } from "@/stores/outbox-store";
@@ -89,7 +93,15 @@ import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtim
 import { initDevicePresenceStore, disposeDevicePresenceStore } from "@/stores/device-presence-store";
 import { supabase } from "@/lib/supabase-client";
 import { create as createMessage } from "@bufbuild/protobuf";
-import { MessageSchema, MessageKind } from "@/lib/proto/teamclaw_pb";
+import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
+import {
+  PENDING_AGENT_REPLY_FALLBACK_MS,
+  agentStreamKey,
+  isTerminalAgentStatus,
+  normalizeToolResultEvent,
+  normalizeToolUseEvent,
+  shouldFlushPendingAgentReplyFallback,
+} from "@/lib/live-agent-stream";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTabsStore, selectActiveTab, selectHasHiddenTabs } from "@/stores/tabs";
@@ -118,15 +130,8 @@ import {
   ensureSessionLiveSubscribed,
   ensureTeamSessionLiveSubscribed,
   hasTeamSessionLiveSubscription,
+  resetSessionLiveSubscriptionState,
 } from "@/lib/session-live-subscriptions";
-
-export { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
-
-/** How many most-recent sessions get auto-subscribed on boot / list reload.
- * Older sessions subscribe lazily when the user opens them (see the
- * activeSessionId effect in AppContent). */
-const RECENT_SESSION_SUBSCRIBE_CAP = 10;
-
 import { Separator } from "@/components/ui/separator";
 import { TrafficLights } from "@/components/ui/traffic-lights";
 import {
@@ -134,6 +139,13 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@/components/ui/sidebar";
+
+export { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
+
+/** How many most-recent sessions get auto-subscribed on boot / list reload.
+ * Older sessions subscribe lazily when the user opens them (see the
+ * activeSessionId effect in AppContent). */
+const RECENT_SESSION_SUBSCRIBE_CAP = 10;
 // ── Webview UI micro-store (find bar + zoom levels) ────────────────────────
 const useWebviewUIStore = create<{
   showFind: boolean
@@ -648,6 +660,65 @@ function AppContent() {
   // Wait for session list to populate so we have a real team_id for LWT —
   // the broker's ACL is keyed on team_id and rejects placeholders.
   const firstTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null);
+  const pendingStreamRepliesRef = useRef<Record<string, TeamclawMessage>>({});
+  const pendingStreamReplyTimersRef = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
+  const pendingStreamReplySinceRef = useRef<Record<string, number>>({});
+
+  function clearPendingStreamReplyTimer(streamKey: string) {
+    const timer = pendingStreamReplyTimersRef.current[streamKey];
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      delete pendingStreamReplyTimersRef.current[streamKey];
+    }
+  }
+
+  function flushPendingStreamReply(sessionId: string, actorId: string): boolean {
+    const streamKey = agentStreamKey(sessionId, actorId);
+    const pendingReply = pendingStreamRepliesRef.current[streamKey];
+    if (!pendingReply) return false;
+
+    clearPendingStreamReplyTimer(streamKey);
+    delete pendingStreamReplySinceRef.current[streamKey];
+    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId);
+    void persistStreamingPartsForReply(sessionId, actorId, pendingReply);
+    useSessionMessageStore.getState().appendMessage(sessionId, pendingReply);
+    useV2StreamingStore.getState().clearActor(sessionId, actorId);
+    delete pendingStreamRepliesRef.current[streamKey];
+    return true;
+  }
+
+  function schedulePendingStreamReplyFallback(
+    sessionId: string,
+    actorId: string,
+    reply: TeamclawMessage,
+  ) {
+    const streamKey = agentStreamKey(sessionId, actorId);
+    clearPendingStreamReplyTimer(streamKey);
+    pendingStreamReplySinceRef.current[streamKey] ??= Date.now();
+    pendingStreamReplyTimersRef.current[streamKey] = setTimeout(() => {
+      const pendingReply = pendingStreamRepliesRef.current[streamKey];
+      if (!pendingReply || pendingReply.messageId !== reply.messageId) return;
+
+      const streamEntry = useV2StreamingStore.getState().byKey[streamKey];
+      const pendingSince =
+        pendingStreamReplySinceRef.current[streamKey] ?? Date.now();
+      if (
+        shouldFlushPendingAgentReplyFallback(
+          streamEntry,
+          Date.now(),
+          pendingSince,
+        )
+      ) {
+        flushPendingStreamReply(sessionId, actorId);
+        return;
+      }
+
+      schedulePendingStreamReplyFallback(sessionId, actorId, pendingReply);
+    }, PENDING_AGENT_REPLY_FALLBACK_MS);
+  }
+
   useEffect(() => {
     if (!userId || !firstTeamId) return;
     const accessToken = useAuthStore.getState().session?.access_token ?? null;
@@ -695,6 +766,7 @@ function AppContent() {
           teamId: firstTeamId,
           useTls,
         });
+        resetSessionLiveSubscriptionState();
         if (cancelled) return;
 
         // Per-user inbox topic for unread red-dot pings fan'd out by FC after
@@ -712,10 +784,10 @@ function AppContent() {
             handleInboxEnvelope(env, actorId, useSessionListStore.getState());
             return;
           }
-          const sid = sessionIdFromTopic(env.topic);
-          if (!sid) return;
           const decoded = decodeLiveEvent(new Uint8Array(env.bytes));
           if (!decoded) return;
+          const sid = sessionIdFromLiveEvent(decoded, env.topic);
+          if (!sid) return;
 
           if (
             decoded.envelope.eventType === "session_participant.created" ||
@@ -743,33 +815,55 @@ function AppContent() {
           if (decoded.message) {
             const senderActorId = decoded.message.senderActorId;
             const streamingStore = useV2StreamingStore.getState();
-            const streamKey = senderActorId
-              ? streamingStore.byKey[`${sid}::${senderActorId}`]
+            const streamKey = senderActorId ? agentStreamKey(sid, senderActorId) : "";
+            const streamEntry = streamKey
+              ? streamingStore.byKey[streamKey]
               : undefined;
             if (
-              streamKey &&
+              streamEntry &&
               senderActorId &&
               decoded.message.kind === MessageKind.AGENT_REPLY
             ) {
-              // Agent reply for an in-flight stream: synthesize proto rows
-              // for the streaming entry's thinking + tool_calls (sharing the
-              // reply's turn_id), append them so v2-message-adapter groups
-              // everything into one unified bubble, persist to libsql so
-              // reload restores the full conversation, then clear the
-              // streaming entry so the bubble doesn't double-render.
-              void persistStreamingPartsForReply(
-                sid,
-                senderActorId,
-                decoded.message,
-              );
-              useSessionMessageStore
-                .getState()
-                .appendMessage(sid, decoded.message);
-              streamingStore.clearActor(sid, senderActorId);
-            } else if (streamKey) {
+              // AGENT_REPLY rows can be emitted for intermediate output
+              // chunks before later tool calls arrive. Keep the newest reply
+              // parked until the ACP status event marks the turn terminal;
+              // otherwise live rendering diverges from reload rendering.
+              if (streamEntry.active) {
+                streamingStore.ingestReplyPreview(
+                  sid,
+                  senderActorId,
+                  decoded.message.content,
+                );
+                if (
+                  pendingStreamRepliesRef.current[streamKey]?.messageId !==
+                  decoded.message.messageId
+                ) {
+                  delete pendingStreamReplySinceRef.current[streamKey];
+                }
+                pendingStreamRepliesRef.current[streamKey] = decoded.message;
+                schedulePendingStreamReplyFallback(
+                  sid,
+                  senderActorId,
+                  decoded.message,
+                );
+              } else {
+                void persistStreamingPartsForReply(
+                  sid,
+                  senderActorId,
+                  decoded.message,
+                );
+                useSessionMessageStore
+                  .getState()
+                  .appendMessage(sid, decoded.message);
+                streamingStore.clearActor(sid, senderActorId);
+                clearPendingStreamReplyTimer(streamKey);
+                delete pendingStreamRepliesRef.current[streamKey];
+                delete pendingStreamReplySinceRef.current[streamKey];
+              }
+            } else if (streamEntry && senderActorId) {
               streamingStore.finalize(
                 sid,
-                senderActorId!,
+                senderActorId,
                 decoded.message.content,
               );
               useSessionMessageStore.getState().appendMessage(sid, decoded.message);
@@ -812,7 +906,7 @@ function AppContent() {
                 replyToMessageId: null,
                 kind: kindStr,
                 content: m.content,
-                metadataJson: null,
+                metadataJson: m.metadataJson || null,
                 model: m.model || null,
                 mentionsJson: null,
                 origin: "mqtt-live",
@@ -820,6 +914,7 @@ function AppContent() {
                 updatedAt: now,
                 deletedAt: null,
                 syncedAt: now,
+                partsJson: (m as unknown as { partsJson?: string | null }).partsJson ?? null,
               };
               upsertMessagesBatch([msgRow]).catch((e) => {
                 console.warn("[cache] message upsert failed:", e);
@@ -850,8 +945,9 @@ function AppContent() {
           }
 
           // Case 2: streaming acp.event
-          if (decoded.acpEvent && decoded.envelope.actorId) {
-            const actorId = decoded.envelope.actorId;
+          if (decoded.acpEvent) {
+            const actorId = streamActorIdFromLiveEvent(decoded);
+            if (!actorId) return;
             const event = decoded.acpEvent.event;
             if (event?.case === "output") {
               const text = (event.value as { text?: string })?.text ?? "";
@@ -860,27 +956,28 @@ function AppContent() {
               const text = (event.value as { text?: string })?.text ?? "";
               useV2StreamingStore.getState().appendThinking(sid, actorId, text);
             } else if (event?.case === "toolUse") {
-              const tu = event.value as {
-                toolId?: string;
-                toolName?: string;
-                description?: string;
-                params?: Record<string, string>;
-                toolKind?: string;
-              };
+              const tu = normalizeToolUseEvent(event.value);
               useV2StreamingStore.getState().pushToolUse(sid, actorId, {
-                toolId: tu.toolId ?? "",
-                toolName: tu.toolName ?? "",
-                description: tu.description ?? "",
-                params: tu.params ?? {},
+                toolId: tu.toolId,
+                toolName: tu.toolName,
+                description: tu.description,
+                params: tu.params,
                 toolKind: tu.toolKind,
               });
             } else if (event?.case === "toolResult") {
-              const tr = event.value as { toolId?: string; success?: boolean; summary?: string };
+              const tr = normalizeToolResultEvent(event.value);
               useV2StreamingStore.getState().completeToolUse(sid, actorId, {
-                toolId: tr.toolId ?? "",
-                success: !!tr.success,
-                summary: tr.summary ?? "",
+                toolId: tr.toolId,
+                success: tr.success,
+                summary: tr.summary,
               });
+            } else if (event?.case === "statusChange") {
+              const sc = event.value as { newStatus?: number };
+              if (isTerminalAgentStatus(sc.newStatus)) {
+                if (!flushPendingStreamReply(sid, actorId)) {
+                  useV2StreamingStore.getState().finishSessionActor(sid, actorId);
+                }
+              }
             } else if (event?.case === "error") {
               const er = event.value as { message?: string; details?: string };
               useV2StreamingStore.getState().setError(
@@ -992,6 +1089,9 @@ function AppContent() {
     return () => {
       cancelled = true;
       unlisten?.();
+      for (const streamKey of Object.keys(pendingStreamReplyTimersRef.current)) {
+        clearPendingStreamReplyTimer(streamKey);
+      }
       disposeTeamclawRpc();
       disposeRuntimeStateStore();
       disposeDevicePresenceStore();
@@ -1084,8 +1184,9 @@ function AppContent() {
       createdAt: string;
       turnId?: string | null;
       metadataJson?: string | null;
+      partsJson?: string | null;
     }) {
-      return createMessage(MessageSchema, {
+      const proto = createMessage(MessageSchema, {
         messageId: r.id,
         sessionId: r.sessionId,
         senderActorId: r.senderActorId ?? "",
@@ -1096,6 +1197,10 @@ function AppContent() {
         metadataJson: r.metadataJson ?? "",
         createdAt: BigInt(Math.floor(new Date(r.createdAt).getTime() / 1000)),
       });
+      if (r.partsJson) {
+        Object.assign(proto, { partsJson: r.partsJson });
+      }
+      return proto;
     }
 
     void (async () => {

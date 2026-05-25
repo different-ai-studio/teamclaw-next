@@ -12,7 +12,12 @@ import {
   AcpOutputSchema,
   AcpThinkingSchema,
 } from "@/lib/proto/amux_pb";
-import { decodeLiveEvent, sessionIdFromTopic } from "./teamclaw-events";
+import {
+  decodeLiveEvent,
+  sessionIdFromLiveEvent,
+  sessionIdFromTopic,
+  streamActorIdFromLiveEvent,
+} from "./teamclaw-events";
 
 describe("decodeLiveEvent", () => {
   it("decodes a message.created event", () => {
@@ -55,6 +60,9 @@ describe("sessionIdFromTopic", () => {
   it("extracts session id", () => {
     expect(sessionIdFromTopic("amux/team1/session/sess42/live")).toBe("sess42");
   });
+  it("does not treat a wildcard subscription token as a session id", () => {
+    expect(sessionIdFromTopic("amux/team1/session/+/live")).toBeNull();
+  });
   it("returns null for non-session topics", () => {
     expect(sessionIdFromTopic("amux/team1/device/d1/state")).toBeNull();
   });
@@ -79,10 +87,36 @@ describe("decodeLiveEvent – acp.event", () => {
     const decoded = decodeLiveEvent(toBinary(LiveEventEnvelopeSchema, live));
     expect(decoded).toBeTruthy();
     expect(decoded!.acpEvent).toBeDefined();
+    expect(decoded!.amuxEnvelope?.runtimeId).toBe("");
+    expect(streamActorIdFromLiveEvent(decoded!)).toBe("a1");
+    expect(sessionIdFromLiveEvent(decoded!, "amux/team1/session/+/live")).toBe("s1");
     expect(decoded!.acpEvent!.event.case).toBe("output");
     if (decoded!.acpEvent && decoded!.acpEvent.event.case === "output") {
       expect(decoded!.acpEvent.event.value.text).toBe("hello");
     }
+  });
+
+  it("keeps the inner amux envelope so streams can fall back to runtime id", () => {
+    const output = create(AcpOutputSchema, { text: "hello" });
+    const acpEvent = create(AcpEventSchema, {
+      event: { case: "output", value: output },
+    });
+    const amuxEnv = create(AmuxEnvelopeSchema, {
+      runtimeId: "runtime-1",
+      payload: { case: "acpEvent", value: acpEvent },
+    });
+    const live = create(LiveEventEnvelopeSchema, {
+      eventType: "acp.event",
+      sessionId: "s1",
+      actorId: "",
+      body: toBinary(AmuxEnvelopeSchema, amuxEnv),
+    });
+
+    const decoded = decodeLiveEvent(toBinary(LiveEventEnvelopeSchema, live));
+    expect(decoded).toBeTruthy();
+    expect(decoded!.acpEvent?.event.case).toBe("output");
+    expect(decoded!.amuxEnvelope?.runtimeId).toBe("runtime-1");
+    expect(streamActorIdFromLiveEvent(decoded!)).toBe("runtime-1");
   });
 
   it("decodes acp.event with thinking variant", () => {

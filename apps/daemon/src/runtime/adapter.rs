@@ -356,12 +356,13 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                     tc.title.clone()
                 };
             let description = tool_call_description(tc.raw_input.as_ref(), Some(&tc.content));
+            let params = tool_call_params(tc.raw_input.as_ref());
             vec![amux::AcpEvent {
                 event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
                     tool_id: tc.tool_call_id.to_string(),
                     tool_name,
                     description,
-                    params: Default::default(),
+                    params,
                     tool_kind: kind_to_snake(&tc.kind),
                 })),
                 model: String::new(),
@@ -385,18 +386,20 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
 
             if is_completed {
                 let success = matches!(status, Some(acp::ToolCallStatus::Completed));
-                let summary = tcu.fields.title.unwrap_or_else(|| {
-                    if success {
-                        "completed".into()
-                    } else {
-                        "failed".into()
-                    }
-                });
-                let summary = if summary.len() > 500 {
-                    format!("{}...", &summary[..500])
-                } else {
-                    summary
+                let fallback_summary = || {
+                    tcu.fields.title.clone().unwrap_or_else(|| {
+                        if success {
+                            "completed".into()
+                        } else {
+                            "failed".into()
+                        }
+                    })
                 };
+                let summary = truncate_tool_summary(
+                    tool_output_summary(tcu.fields.raw_output.as_ref())
+                        .or_else(|| tool_content_summary(tcu.fields.content.as_deref()))
+                        .unwrap_or_else(fallback_summary),
+                );
                 vec![amux::AcpEvent {
                     event: Some(amux::acp_event::Event::ToolResult(amux::AcpToolResult {
                         tool_id,
@@ -417,13 +420,14 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                     tcu.fields.raw_input.as_ref(),
                     tcu.fields.content.as_deref(),
                 );
+                let params = tool_call_params(tcu.fields.raw_input.as_ref());
                 if !description.is_empty() || !clean_title.is_empty() {
                     vec![amux::AcpEvent {
                         event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
                             tool_id,
                             tool_name: clean_title,
                             description,
-                            params: Default::default(),
+                            params,
                             tool_kind: tcu
                                 .fields
                                 .kind
@@ -571,6 +575,136 @@ fn tool_call_description(
         .map(|v| v.to_string())
         .or_else(|| content.and_then(|items| items.first().map(|item| format!("{:?}", item))))
         .unwrap_or_default()
+}
+
+fn json_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        _ => value.to_string(),
+    }
+}
+
+fn tool_call_params(raw_input: Option<&serde_json::Value>) -> HashMap<String, String> {
+    match raw_input {
+        Some(serde_json::Value::Object(map)) => map
+            .iter()
+            .map(|(key, value)| (key.clone(), json_value_to_string(value)))
+            .collect(),
+        Some(value) => HashMap::from([("input".to_string(), json_value_to_string(value))]),
+        None => HashMap::new(),
+    }
+}
+
+fn tool_output_summary(raw_output: Option<&serde_json::Value>) -> Option<String> {
+    let value = raw_output?;
+    json_tool_output_text(value).or_else(|| {
+        let text = json_value_to_string(value);
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    })
+}
+
+fn json_tool_output_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => {
+            if text.is_empty() {
+                None
+            } else {
+                Some(text.clone())
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in ["raw", "output", "result", "text"] {
+                if let Some(summary) = map.get(key).and_then(json_tool_output_text) {
+                    return Some(summary);
+                }
+            }
+
+            let stdio = ["stdout", "stderr"]
+                .into_iter()
+                .filter_map(|key| map.get(key).and_then(json_tool_output_text))
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>();
+            if !stdio.is_empty() {
+                return Some(stdio.join("\n"));
+            }
+
+            map.get("content").and_then(json_content_summary)
+        }
+        serde_json::Value::Array(_) => json_content_summary(value),
+        serde_json::Value::Null => None,
+        _ => {
+            let text = value.to_string();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        }
+    }
+}
+
+fn json_content_summary(value: &serde_json::Value) -> Option<String> {
+    let items = value.as_array()?;
+    let mut parts = Vec::new();
+    for item in items {
+        match item {
+            serde_json::Value::String(text) if !text.trim().is_empty() => {
+                parts.push(text.clone());
+            }
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(text)) = map.get("text") {
+                    if !text.trim().is_empty() {
+                        parts.push(text.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let text = parts.join("\n\n");
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn tool_content_summary(content: Option<&[acp::ToolCallContent]>) -> Option<String> {
+    let content = content?;
+    let mut parts = Vec::new();
+    for item in content {
+        match item {
+            acp::ToolCallContent::Content(content) => {
+                let text = extract_text(&content.content);
+                if !text.trim().is_empty() {
+                    parts.push(text);
+                }
+            }
+            acp::ToolCallContent::Diff(_) => {}
+            acp::ToolCallContent::Terminal(_) => {}
+            _ => {}
+        }
+    }
+    let text = parts.join("\n\n");
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn truncate_tool_summary(summary: String) -> String {
+    const LIMIT: usize = 20_000;
+    if summary.chars().count() > LIMIT {
+        format!("{}...", summary.chars().take(LIMIT).collect::<String>())
+    } else {
+        summary
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,8 +1353,106 @@ mod tests {
             amux::acp_event::Event::ToolUse(tool) => {
                 assert_eq!(tool.tool_id, "tool-1");
                 assert_eq!(tool.tool_name, "grep");
+                assert_eq!(tool.params.get("pattern"), Some(&"MQTT".to_string()));
+                assert_eq!(
+                    tool.params.get("path"),
+                    Some(&"apps/daemon/src".to_string())
+                );
                 assert!(tool.description.contains("\"pattern\":\"MQTT\""));
                 assert!(tool.description.contains("\"path\":\"apps/daemon/src\""));
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_completed_tool_call_raw_output_to_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("Execute ps command")
+                .raw_output(serde_json::json!({
+                    "output": "pid command\n1 launchd"
+                })),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.summary, "pid command\n1 launchd");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_completed_tool_call_content_to_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("Execute ps command")
+                .content(vec!["pid command\n1 launchd".into()]),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.summary, "pid command\n1 launchd");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_completed_tool_call_stdout_stderr_to_result_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Failed)
+                .title("Execute failing command")
+                .raw_output(serde_json::json!({
+                    "stdout": "before failure",
+                    "stderr": "permission denied"
+                })),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(!result.success);
+                assert_eq!(result.summary, "before failure\npermission denied");
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn completed_tool_call_diff_content_does_not_use_full_replacement_as_summary() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("Edit src/main.rs")
+                .content(vec![acp::Diff::new("src/main.rs", "fn main() {}\n").into()]),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.summary, "Edit src/main.rs");
             }
             other => panic!("unexpected variant: {:?}", other),
         }

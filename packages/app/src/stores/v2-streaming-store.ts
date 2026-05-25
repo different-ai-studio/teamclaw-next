@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ToolCall } from "@/stores/session-types";
+import type { MessagePart, ToolCall } from "@/stores/session-types";
 
 export interface StreamingPlanEntry {
   content: string;
@@ -19,6 +19,7 @@ export interface AgentStreamEntry {
   actorId: string;
   outputText: string;           // accumulated output deltas, or final content after finalize
   thinkingText: string;         // accumulated thinking deltas
+  parts: MessagePart[];         // ordered live render parts: text/tool-call as ACP events arrive
   toolCalls: ToolCall[];        // pushed on AcpToolUse, completed on AcpToolResult
   planEntries: StreamingPlanEntry[]; // replaced wholesale on AcpPlanUpdate
   pendingPermission: StreamingPermissionRequest | null; // set on AcpPermissionRequest
@@ -60,7 +61,9 @@ interface State {
     req: StreamingPermissionRequest,
   ) => void;
   clearPermissionRequest: (sessionId: string, actorId: string) => void;
+  ingestReplyPreview: (sessionId: string, actorId: string, text: string) => void;
   finalize: (sessionId: string, actorId: string, finalText: string) => void;
+  finishSessionActor: (sessionId: string, actorId: string) => void;
   clearActor: (sessionId: string, actorId: string) => void;
   clearSession: (sessionId: string) => void;
 }
@@ -75,6 +78,7 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
     actorId,
     outputText: "",
     thinkingText: "",
+    parts: [],
     toolCalls: [],
     planEntries: [],
     pendingPermission: null,
@@ -86,6 +90,220 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
 }
 
 let archiveCounter = 0;
+
+function entryParts(entry: AgentStreamEntry): MessagePart[] {
+  return Array.isArray(entry.parts) ? entry.parts : [];
+}
+
+function appendTextPart(parts: MessagePart[], delta: string): MessagePart[] {
+  const last = parts[parts.length - 1];
+  if (last?.type === "text") {
+    const text = `${last.text || last.content || ""}${delta}`;
+    return [
+      ...parts.slice(0, -1),
+      {
+        ...last,
+        text,
+        content: text,
+      },
+    ];
+  }
+  return [
+    ...parts,
+    {
+      id: `stream:text:${Date.now()}:${parts.length}`,
+      type: "text",
+      text: delta,
+      content: delta,
+    },
+  ];
+}
+
+function replacePartText(part: MessagePart, text: string): MessagePart {
+  return {
+    ...part,
+    text,
+    content: text,
+  };
+}
+
+function lastIndexWhere<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index])) return index;
+  }
+  return -1;
+}
+
+function placePostToolTextPart(parts: MessagePart[], text: string): MessagePart[] {
+  const lastToolIndex = lastIndexWhere(parts, (part) => part.type === "tool-call");
+  if (lastToolIndex === -1) return appendTextPart(parts, text);
+
+  const existingTextIndex = parts.findIndex(
+    (part, index) => index > lastToolIndex && part.type === "text",
+  );
+  if (existingTextIndex !== -1) {
+    const existing = parts[existingTextIndex];
+    const existingText = existing.text || existing.content || "";
+    if (existingText === text || existingText.includes(text)) return parts;
+    return parts.map((part, index) =>
+      index === existingTextIndex ? replacePartText(part, text) : part,
+    );
+  }
+
+  const toolPart = parts[lastToolIndex];
+  const previewId = `stream:text:reply-preview:${toolPart.toolCallId || toolPart.id}`;
+  return [
+    ...parts,
+    {
+      id: previewId,
+      type: "text",
+      text,
+      content: text,
+    },
+  ];
+}
+
+function withCompletedTool(
+  toolCalls: ToolCall[],
+  toolId: string,
+  success: boolean,
+  summary: string,
+): ToolCall[] {
+  return toolCalls.map((tc) =>
+    tc.id === toolId
+      ? {
+          ...tc,
+          status: success ? ("completed" as const) : ("failed" as const),
+          result: summary,
+          duration: Date.now() - tc.startTime.getTime(),
+        }
+      : tc,
+  );
+}
+
+function completedToolPlaceholder(
+  toolId: string,
+  success: boolean,
+  summary: string,
+): ToolCall {
+  return {
+    id: toolId,
+    name: "unknown",
+    status: success ? "completed" : "failed",
+    arguments: {},
+    result: summary,
+    duration: 0,
+    startTime: new Date(),
+  };
+}
+
+function toolCallPart(toolCall: ToolCall): MessagePart {
+  return {
+    id: `stream:tool:${toolCall.id}`,
+    type: "tool-call",
+    toolCallId: toolCall.id,
+    toolCall,
+  };
+}
+
+function syncToolParts(parts: MessagePart[], toolCalls: ToolCall[]): MessagePart[] {
+  const byId = new Map(toolCalls.map((tc) => [tc.id, tc]));
+  return parts.map((part) => {
+    if (part.type !== "tool-call" || !part.toolCallId) return part;
+    const toolCall = byId.get(part.toolCallId);
+    return toolCall ? { ...part, toolCall } : part;
+  });
+}
+
+function finishUnresolvedTools(toolCalls: ToolCall[]): ToolCall[] {
+  return toolCalls.map((tc) => {
+    if (tc.status !== "calling" && tc.status !== "waiting") return tc;
+    return {
+      ...tc,
+      status: "failed" as const,
+      result: "Stream ended before this tool returned a result.",
+      duration: Date.now() - tc.startTime.getTime(),
+    };
+  });
+}
+
+function toolUseArguments(
+  params: Record<string, string>,
+  description: string,
+): Record<string, unknown> {
+  return {
+    ...(params ?? {}),
+    ...(description ? { _description: description } : {}),
+  };
+}
+
+function mergeToolUse(
+  existing: ToolCall,
+  args: {
+    toolName: string;
+    description: string;
+    params: Record<string, string>;
+    toolKind?: string;
+  },
+): ToolCall {
+  const nextArgs = toolUseArguments(args.params, args.description);
+  const name =
+    args.toolName && args.toolName !== "unknown" ? args.toolName : existing.name;
+  return {
+    ...existing,
+    name,
+    toolKind: args.toolKind || existing.toolKind,
+    arguments: {
+      ...(existing.arguments ?? {}),
+      ...nextArgs,
+    },
+  };
+}
+
+function previewTextUpdate(
+  entry: AgentStreamEntry,
+  text: string,
+): { outputText: string; parts: MessagePart[] } {
+  const current = entry.outputText || "";
+  const parts = entryParts(entry);
+
+  if (!text) {
+    return { outputText: current, parts };
+  }
+  if (text === current || current.includes(text)) {
+    return { outputText: current || text, parts };
+  }
+  if (text.startsWith(current)) {
+    const suffix = text.slice(current.length);
+    return {
+      outputText: text,
+      parts: suffix ? appendTextPart(parts, suffix) : parts,
+    };
+  }
+  if (current.length === 0) {
+    return {
+      outputText: text,
+      parts: appendTextPart(parts, text),
+    };
+  }
+
+  // Last-resort mismatch: keep the visible preview current without trying
+  // to diff unrelated partial strings. With tool parts present, ChatMessage
+  // renders ordered `parts` instead of `content`, so the preview text must
+  // be placed after the latest tool call to remain visible.
+  return {
+    outputText: text,
+    parts: parts.some((part) => part.type === "tool-call")
+      ? placePostToolTextPart(parts, text)
+      : parts.some((part) => part.type === "text")
+        ? parts.map((part, index) =>
+            index === lastIndexWhere(parts, (p) => p.type === "text")
+              ? replacePartText(part, text)
+              : part,
+          )
+        : appendTextPart(parts, text),
+  };
+}
 
 /** Returned by mutation prep: the entry to mutate AND any prior-turn entry
  * that should be archived in the same set() call. */
@@ -124,6 +342,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         [k(sessionId, actorId)]: {
           ...entry,
           outputText: entry.outputText + delta,
+          parts: appendTextPart(entryParts(entry), delta),
           lastUpdate: Date.now(),
           active: true,
         },
@@ -154,13 +373,33 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     if (!toolId) return;
     const state = get();
     const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
-    if (entry.toolCalls.some((tc) => tc.id === toolId)) return;
+    if (entry.toolCalls.some((tc) => tc.id === toolId)) {
+      const toolCalls = entry.toolCalls.map((tc) =>
+        tc.id === toolId
+          ? mergeToolUse(tc, { toolName, description, params, toolKind })
+          : tc,
+      );
+      set({
+        byKey: {
+          ...state.byKey,
+          [k(sessionId, actorId)]: {
+            ...entry,
+            toolCalls,
+            parts: syncToolParts(entryParts(entry), toolCalls),
+            lastUpdate: Date.now(),
+            active: true,
+          },
+        },
+        archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      });
+      return;
+    }
     const newToolCall: ToolCall = {
       id: toolId,
       name: toolName || "unknown",
       toolKind: toolKind || undefined,
       status: "calling",
-      arguments: { ...(params ?? {}), ...(description ? { _description: description } : {}) },
+      arguments: toolUseArguments(params, description),
       startTime: new Date(),
     };
     set({
@@ -169,6 +408,15 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         [k(sessionId, actorId)]: {
           ...entry,
           toolCalls: [...entry.toolCalls, newToolCall],
+          parts: [
+            ...entryParts(entry),
+            {
+              id: `stream:tool:${toolId}`,
+              type: "tool-call",
+              toolCallId: toolId,
+              toolCall: newToolCall,
+            },
+          ],
           lastUpdate: Date.now(),
           active: true,
         },
@@ -180,24 +428,38 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   completeToolUse: (sessionId, actorId, { toolId, success, summary }) => {
     if (!toolId) return;
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
-    if (!existing) return;
-    const updated = existing.toolCalls.map((tc) =>
-      tc.id === toolId
-        ? {
-            ...tc,
-            status: success ? ("completed" as const) : ("failed" as const),
-            result: summary,
-            duration: Date.now() - tc.startTime.getTime(),
-          }
-        : tc,
-    );
+    const state = get();
+    const existing = state.byKey[key];
+    const fallbackToolCall = completedToolPlaceholder(toolId, success, summary);
+    if (!existing) {
+      set({
+        byKey: {
+          ...state.byKey,
+          [key]: {
+            ...emptyEntry(sessionId, actorId),
+            toolCalls: [fallbackToolCall],
+            parts: [toolCallPart(fallbackToolCall)],
+            lastUpdate: Date.now(),
+            active: true,
+          },
+        },
+      });
+      return;
+    }
+    const hasToolCall = existing.toolCalls.some((tc) => tc.id === toolId);
+    const updated = hasToolCall
+      ? withCompletedTool(existing.toolCalls, toolId, success, summary)
+      : [...existing.toolCalls, fallbackToolCall];
+    const parts = hasToolCall
+      ? syncToolParts(entryParts(existing), updated)
+      : [...entryParts(existing), toolCallPart(fallbackToolCall)];
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [key]: {
           ...existing,
           toolCalls: updated,
+          parts,
           lastUpdate: Date.now(),
         },
       },
@@ -268,6 +530,26 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
+  ingestReplyPreview: (sessionId, actorId, text) => {
+    if (!text) return;
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    const preview = previewTextUpdate(entry, text);
+    set({
+      byKey: {
+        ...state.byKey,
+        [k(sessionId, actorId)]: {
+          ...entry,
+          outputText: preview.outputText,
+          parts: preview.parts,
+          lastUpdate: Date.now(),
+          active: true,
+        },
+      },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
+    });
+  },
+
   /** Finalize a streaming turn: replace outputText with the canonical final
    * content from the daemon's published Message and mark inactive. Keep
    * thinking + tool_calls + plan visible — the next turn's first acp.event
@@ -286,6 +568,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           [key]: {
             ...emptyEntry(sessionId, actorId),
             outputText: finalText,
+            parts: finalText ? appendTextPart([], finalText) : [],
             active: false,
           },
         },
@@ -298,6 +581,28 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         [key]: {
           ...existing,
           outputText: finalText || existing.outputText,
+          parts: finalText
+            ? previewTextUpdate(existing, finalText).parts
+            : entryParts(existing),
+          lastUpdate: Date.now(),
+          active: false,
+        },
+      },
+    });
+  },
+
+  finishSessionActor: (sessionId, actorId) => {
+    const key = k(sessionId, actorId);
+    const existing = get().byKey[key];
+    if (!existing) return;
+    const toolCalls = finishUnresolvedTools(existing.toolCalls);
+    set({
+      byKey: {
+        ...get().byKey,
+        [key]: {
+          ...existing,
+          toolCalls,
+          parts: syncToolParts(entryParts(existing), toolCalls),
           lastUpdate: Date.now(),
           active: false,
         },

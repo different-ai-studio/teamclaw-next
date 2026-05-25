@@ -54,6 +54,114 @@ export function adaptTeamclawMessageToSdk(m: TeamclawMessage): SdkMessage {
   };
 }
 
+function parseMetadata(m: TeamclawMessage): Record<string, unknown> {
+  try {
+    return m.metadataJson ? (JSON.parse(m.metadataJson) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function partsJson(m: TeamclawMessage): string {
+  return (m as unknown as { partsJson?: string | null }).partsJson ?? "";
+}
+
+function reviveToolCallDates(toolCall: ToolCall): ToolCall {
+  const rawStartTime = toolCall.startTime as unknown;
+  return {
+    ...toolCall,
+    startTime:
+      rawStartTime instanceof Date
+        ? rawStartTime
+        : typeof rawStartTime === "string" || typeof rawStartTime === "number"
+          ? new Date(rawStartTime)
+          : new Date(),
+  };
+}
+
+function parsePartsJson(json: string): MessagePart[] {
+  try {
+    const parsed = JSON.parse(json) as MessagePart[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((part) => part && typeof part === "object" && typeof part.type === "string")
+      .map((part) =>
+        part.type === "tool-call" && part.toolCall
+          ? { ...part, toolCall: reviveToolCallDates(part.toolCall) }
+          : part,
+      );
+  } catch {
+    return [];
+  }
+}
+
+function paramsFromDescription(description: string): Record<string, unknown> {
+  if (!description) return {};
+  if (!description.trim().startsWith("{")) {
+    return { _description: description };
+  }
+  try {
+    const parsed = JSON.parse(description) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { _description: description };
+    }
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
+        key,
+        typeof value === "string" ? value : JSON.stringify(value),
+      ]),
+    );
+  } catch {
+    return { _description: description };
+  }
+}
+
+function paramsFromMetadataParams(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, raw]) => [
+      key,
+      typeof raw === "string" ? raw : JSON.stringify(raw),
+    ]),
+  );
+}
+
+function optionalOrder(m: TeamclawMessage): bigint | null {
+  const maybe = m as unknown as {
+    sequence?: bigint | number | string;
+    order?: bigint | number | string;
+    orderIndex?: bigint | number | string;
+  };
+  const raw = maybe.sequence ?? maybe.order ?? maybe.orderIndex;
+  if (raw === undefined || raw === null || raw === "") return null;
+  try {
+    return BigInt(raw);
+  } catch {
+    return null;
+  }
+}
+
+function compareBigInt(a: bigint, b: bigint): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+function compareTeamclawMessages(a: TeamclawMessage, b: TeamclawMessage): number {
+  const aOrder = optionalOrder(a);
+  const bOrder = optionalOrder(b);
+  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
+    return compareBigInt(aOrder, bOrder);
+  }
+  if (aOrder !== null && bOrder === null) return -1;
+  if (aOrder === null && bOrder !== null) return 1;
+
+  const created = compareBigInt(a.createdAt, b.createdAt);
+  if (created !== 0) return created;
+
+  return a.messageId.localeCompare(b.messageId);
+}
+
 /** Collapse a run of consecutive same-(senderActorId, turnId) assistant
  * messages into one SdkMessage. Thinking → reasoning part. Tool calls →
  * toolCalls[] matched with results by metadata.tool_id. Replies →
@@ -66,47 +174,89 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
 
   const resultByToolId = new Map<string, { success: boolean; summary: string }>();
   for (const r of toolResultProtos) {
-    try {
-      const md = r.metadataJson ? (JSON.parse(r.metadataJson) as Record<string, unknown>) : {};
-      const toolId = String(md.tool_id ?? "");
-      if (toolId) {
-        resultByToolId.set(toolId, {
-          success: Boolean(md.success),
-          summary: r.content,
-        });
-      }
-    } catch {
-      // malformed metadata — skip
+    const md = parseMetadata(r);
+    const toolId = String(md.tool_id ?? "");
+    if (toolId) {
+      resultByToolId.set(toolId, {
+        success: Boolean(md.success),
+        summary: r.content,
+      });
     }
   }
 
   const toolCalls: ToolCall[] = toolCallProtos.map((tc) => {
-    let toolId = "";
-    let toolName = "unknown";
-    let description = "";
-    try {
-      const md = tc.metadataJson ? (JSON.parse(tc.metadataJson) as Record<string, unknown>) : {};
-      toolId = String(md.tool_id ?? "");
-      toolName = String(md.tool_name ?? "unknown");
-      description = String(md.description ?? "");
-    } catch {
-      // malformed metadata — leave defaults
-    }
+    const md = parseMetadata(tc);
+    const toolId = String(md.tool_id ?? "");
+    const toolName = String(md.tool_name ?? "unknown");
+    const description = String(md.description ?? "");
+    const args = {
+      ...paramsFromDescription(description),
+      ...paramsFromMetadataParams(md.params),
+    };
     const match = toolId ? resultByToolId.get(toolId) : undefined;
     return {
       id: toolId || tc.messageId,
       name: toolName,
       status: match ? (match.success ? "completed" : "failed") : "calling",
-      arguments: description ? { _description: description } : {},
+      arguments: args,
       startTime: new Date(Number(tc.createdAt) * 1000),
       result: match ? match.summary : undefined,
     };
   });
+  const toolCallByMessageId = new Map<string, ToolCall>();
+  toolCallProtos.forEach((proto, index) => {
+    const toolCall = toolCalls[index];
+    if (!toolCall) return;
+    toolCallByMessageId.set(proto.messageId, toolCall);
+  });
 
-  const replyText = replies.map((r) => r.content).join("\n\n");
+  // Legacy desktop builds wrote live-cache rows before Supabase generated a
+  // different id for the same reply. Collapse those exact same-turn echoes.
+  const uniqueReplies: TeamclawMessage[] = [];
+  const uniqueReplyIds = new Set<string>();
+  const seenReplyKeys = new Set<string>();
+  for (const reply of replies) {
+    const key = `${reply.content}\u0000${reply.model}`;
+    if (seenReplyKeys.has(key)) continue;
+    seenReplyKeys.add(key);
+    uniqueReplies.push(reply);
+    uniqueReplyIds.add(reply.messageId);
+  }
+  const replyText = uniqueReplies.map((r) => r.content).join("\n\n");
   const thinkingText = thinking.map((t) => t.content).join("\n");
 
-  const groupId = replies[0]?.messageId ?? group[0].messageId;
+  const groupId = uniqueReplies[0]?.messageId ?? group[0].messageId;
+  const canonicalReply = [...uniqueReplies].reverse().find((reply) => partsJson(reply));
+  if (canonicalReply) {
+    const canonicalParts = parsePartsJson(partsJson(canonicalReply));
+    if (canonicalParts.length > 0) {
+      const canonicalToolCalls = canonicalParts
+        .filter((part) => part.type === "tool-call" && part.toolCall)
+        .map((part) => part.toolCall!);
+      const canonicalText = canonicalParts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text || part.content || "")
+        .filter(Boolean)
+        .join("\n\n");
+      const canonicalModelID =
+        canonicalReply.model ||
+        uniqueReplies[uniqueReplies.length - 1]?.model ||
+        group.find((m) => m.model)?.model ||
+        undefined;
+      return {
+        id: canonicalReply.messageId,
+        sessionId: canonicalReply.sessionId,
+        senderActorId: canonicalReply.senderActorId,
+        role: "assistant",
+        content: canonicalText || canonicalReply.content || replyText,
+        modelID: canonicalModelID,
+        parts: canonicalParts,
+        toolCalls: canonicalToolCalls,
+        timestamp: new Date(Number(group[0].createdAt) * 1000),
+      };
+    }
+  }
+
   const parts: MessagePart[] = [];
   if (thinkingText) {
     parts.push({
@@ -116,17 +266,41 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
       content: thinkingText,
     });
   }
-  parts.push({
-    id: `${groupId}-p0`,
-    type: "text",
-    text: replyText,
-    content: replyText,
-  });
+  if (toolCalls.length > 0) {
+    let textPartIndex = 0;
+    for (const item of group) {
+      if (item.kind === MessageKind.AGENT_REPLY && uniqueReplyIds.has(item.messageId)) {
+        if (!item.content) continue;
+        parts.push({
+          id: `${item.messageId}-p${textPartIndex++}`,
+          type: "text",
+          text: item.content,
+          content: item.content,
+        });
+      } else if (item.kind === MessageKind.AGENT_TOOL_CALL) {
+        const toolCall = toolCallByMessageId.get(item.messageId);
+        if (!toolCall) continue;
+        parts.push({
+          id: `${item.messageId}-tool`,
+          type: "tool-call",
+          toolCallId: toolCall.id,
+          toolCall,
+        });
+      }
+    }
+  } else {
+    parts.push({
+      id: `${groupId}-p0`,
+      type: "text",
+      text: replyText,
+      content: replyText,
+    });
+  }
 
   // model: prefer last reply (most recent decision), fall back to any
   // message that carries one.
   const modelID =
-    replies[replies.length - 1]?.model ||
+    uniqueReplies[uniqueReplies.length - 1]?.model ||
     group.find((m) => m.model)?.model ||
     undefined;
 
@@ -176,6 +350,6 @@ export function adaptTeamclawMessages(
   if (!msgs) return undefined;
   // Sort defensively — caller should already merge in createdAt order,
   // but local cache + supabase merge can interleave at the same epoch.
-  const sorted = [...msgs].sort((a, b) => Number(a.createdAt - b.createdAt));
+  const sorted = [...msgs].sort(compareTeamclawMessages);
   return groupByTurn(sorted);
 }

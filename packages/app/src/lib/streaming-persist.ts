@@ -1,161 +1,62 @@
-// Synthesize proto Message rows from the in-memory streaming entry on
-// agent-reply finalize. The daemon only persists AGENT_REPLY to Supabase
-// (thinking / tool_call / tool_result are intentionally ephemeral), so
-// without this step the parts vanish on reload. Each synthetic row shares
-// the AGENT_REPLY's turn_id, so `v2-message-adapter.groupByTurn` reassembles
-// them into a single unified bubble.
+// Persist ordered runtime parts from the in-memory streaming entry onto the
+// final AGENT_REPLY row. The daemon persists reply text to Supabase, while
+// thinking/tool events are live-only; `parts_json` lets reload restore the
+// same text/tool ordering without reconstructing it from synthetic rows.
 
-import { create as createMessage } from "@bufbuild/protobuf";
-import {
-  MessageSchema,
-  MessageKind,
-  type Message as TeamclawMessage,
-} from "@/lib/proto/teamclaw_pb";
+import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
+import type { MessagePart } from "@/stores/session-types";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
-import { useSessionMessageStore } from "@/stores/session-message-store";
-import { useSessionListStore } from "@/stores/session-list-store";
-import { upsertMessagesBatch, type MessageRow } from "@/lib/local-cache";
+import { setMessageParts } from "@/lib/local-cache";
 
-function kindString(kind: MessageKind): string {
-  switch (kind) {
-    case MessageKind.AGENT_THINKING:
-      return "agent_thinking";
-    case MessageKind.AGENT_TOOL_CALL:
-      return "agent_tool_call";
-    case MessageKind.AGENT_TOOL_RESULT:
-      return "agent_tool_result";
-    case MessageKind.AGENT_REPLY:
-      return "agent_reply";
-    case MessageKind.SYSTEM:
-      return "system";
-    case MessageKind.TEXT:
-    default:
-      return "text";
-  }
-}
-
-function protoToRow(
-  proto: TeamclawMessage,
-  teamId: string,
-  metadataJson: string | null,
-): MessageRow {
-  const now = new Date().toISOString();
-  return {
-    id: proto.messageId,
-    teamId,
-    sessionId: proto.sessionId,
-    turnId: proto.turnId || null,
-    senderActorId: proto.senderActorId || null,
-    replyToMessageId: null,
-    kind: kindString(proto.kind),
-    content: proto.content,
-    metadataJson,
-    model: proto.model || null,
-    mentionsJson: null,
-    origin: "local-only",
-    createdAt: new Date(Number(proto.createdAt) * 1000).toISOString(),
-    updatedAt: now,
-    deletedAt: null,
-    syncedAt: now,
-    partsJson: null,
-  };
-}
-
-interface Synth {
-  proto: TeamclawMessage;
-  metadataJson: string | null;
-}
-
-/** Build synthetic proto Messages for the streaming entry's thinking and
- * tool calls. All share `turnId` and `senderActorId`. `replyCreatedAt`
- * (UNIX seconds) anchors createdAt so the rows sort before the agent reply.
- *
- * Idempotent: messageId is derived deterministically from turn_id + kind +
- * tool id, so calling twice produces the same rows (libsql upsert is a
- * no-op on equal updated_at, store.appendMessage dedups by messageId). */
-function synthesize(
+/** Build the canonical ordered parts that should survive a session reload. */
+function buildCanonicalParts(
   sessionId: string,
   actorId: string,
-  turnId: string,
-  replyCreatedAt: bigint,
-): Synth[] {
-  const entry = useV2StreamingStore.getState().byKey[`${sessionId}::${actorId}`];
+  reply: TeamclawMessage,
+): MessagePart[] {
+  const entry =
+    useV2StreamingStore.getState().byKey[`${sessionId}::${actorId}`];
   if (!entry) return [];
-  const out: Synth[] = [];
+  const parts: MessagePart[] = [];
 
-  // Anchor synthesized rows slightly *before* the reply so they sort first
-  // in adapter group order. Use 1-second offsets per part — coarse but the
-  // adapter groups by (turnId, senderId) so intra-turn ordering only needs
-  // to be stable enough for thinking/tools to land before the reply.
-  let createdAt = replyCreatedAt - BigInt(entry.toolCalls.length + 1);
-
-  if (entry.thinkingText.length > 0) {
-    out.push({
-      proto: createMessage(MessageSchema, {
-        messageId: `synth:${turnId}:thinking`,
-        sessionId,
-        senderActorId: actorId,
-        kind: MessageKind.AGENT_THINKING,
-        content: entry.thinkingText,
-        turnId,
-        createdAt,
-      }),
-      metadataJson: null,
+  if (entry.thinkingText) {
+    parts.push({
+      id: `${reply.messageId}:reasoning`,
+      type: "reasoning",
+      text: entry.thinkingText,
+      content: entry.thinkingText,
     });
-    createdAt += BigInt(1);
   }
 
-  for (const tc of entry.toolCalls) {
-    const callMeta = {
-      tool_id: tc.id,
-      tool_name: tc.name,
-      description:
-        typeof tc.arguments?._description === "string"
-          ? tc.arguments._description
-          : "",
-    };
-    out.push({
-      proto: createMessage(MessageSchema, {
-        messageId: `synth:${turnId}:call:${tc.id}`,
-        sessionId,
-        senderActorId: actorId,
-        kind: MessageKind.AGENT_TOOL_CALL,
-        content: tc.name,
-        turnId,
-        createdAt,
-      }),
-      metadataJson: JSON.stringify(callMeta),
-    });
-    createdAt += BigInt(1);
+  const orderedParts = entry.parts.filter(
+    (part) =>
+      (part.type === "text" && Boolean(part.text || part.content)) ||
+      (part.type === "tool-call" && Boolean(part.toolCall)),
+  );
+  parts.push(...orderedParts);
 
-    if (tc.status === "completed" || tc.status === "failed") {
-      const resultMeta = {
-        tool_id: tc.id,
-        success: tc.status === "completed",
-      };
-      out.push({
-        proto: createMessage(MessageSchema, {
-          messageId: `synth:${turnId}:result:${tc.id}`,
-          sessionId,
-          senderActorId: actorId,
-          kind: MessageKind.AGENT_TOOL_RESULT,
-          content: typeof tc.result === "string" ? tc.result : "",
-          turnId,
-          createdAt,
-        }),
-        metadataJson: JSON.stringify(resultMeta),
-      });
-    }
+  if (
+    reply.content &&
+    !orderedParts.some(
+      (part) =>
+        part.type === "text" &&
+        (part.text || part.content)?.includes(reply.content),
+    )
+  ) {
+    parts.push({
+      id: `${reply.messageId}:text`,
+      type: "text",
+      text: reply.content,
+      content: reply.content,
+    });
   }
 
-  return out;
+  return parts;
 }
 
-/** Called from the live MQTT handler when an AGENT_REPLY arrives. Pulls
- * thinking + tool_calls out of the in-memory streaming entry, synthesizes
- * proto Messages with the reply's turn_id, appends them to the session
- * store (idempotent by messageId), and persists to libsql so reload
- * restores the full conversation. */
+/** Called from the live MQTT handler when the turn ends. Pulls thinking,
+ * text, and tool calls out of the in-memory streaming entry, attaches them
+ * to the final reply as `parts_json`, and persists that blob to libsql. */
 export async function persistStreamingPartsForReply(
   sessionId: string,
   actorId: string,
@@ -163,22 +64,14 @@ export async function persistStreamingPartsForReply(
 ): Promise<void> {
   const turnId = reply.turnId;
   if (!turnId) return;
-  const synths = synthesize(sessionId, actorId, turnId, reply.createdAt);
-  if (synths.length === 0) return;
+  const parts = buildCanonicalParts(sessionId, actorId, reply);
+  if (parts.length === 0) return;
 
-  const store = useSessionMessageStore.getState();
-  for (const s of synths) {
-    store.appendMessage(sessionId, s.proto);
-  }
-
-  const teamId =
-    useSessionListStore.getState().rows.find((r) => r.id === sessionId)
-      ?.team_id ?? "";
+  const partsJson = JSON.stringify(parts);
+  Object.assign(reply, { partsJson });
   try {
-    await upsertMessagesBatch(
-      synths.map((s) => protoToRow(s.proto, teamId, s.metadataJson)),
-    );
+    await setMessageParts(reply.messageId, partsJson);
   } catch (e) {
-    console.warn("[streaming-persist] libsql write failed:", e);
+    console.warn("[streaming-persist] parts_json write failed:", e);
   }
 }

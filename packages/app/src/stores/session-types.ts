@@ -105,6 +105,9 @@ export interface MessagePart {
     type: string;
     content: string;
   };
+  /** v2 ordered renderer: inline tool call card at this point in the turn. */
+  toolCallId?: string;
+  toolCall?: ToolCall;
 }
 
 export interface Message {

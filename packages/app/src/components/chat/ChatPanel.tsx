@@ -47,10 +47,10 @@ import { PendingPermissionInline, hasVisiblePendingPermissions } from "./Permiss
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
 import { SessionContinueBanner } from "./SessionContinueBanner";
-import { useV2StreamingStore } from "@/stores/v2-streaming-store";
-import { StreamingAgentBubble } from "./StreamingAgentBubble";
+import { type AgentStreamEntry, useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
+import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -62,6 +62,70 @@ import { useTerminalStore } from "@/stores/terminal-store";
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_AGENTS: AttachedAgent[] = [];
+
+function streamEntryId(entry: AgentStreamEntry): string {
+  const archiveId = "archiveId" in entry ? entry.archiveId : "current";
+  return `stream:${entry.sessionId}:${entry.actorId}:${archiveId}`;
+}
+
+function streamEntryToMessage(entry: AgentStreamEntry): Message {
+  const errorText = entry.errorMessage
+    ? [entry.errorMessage, entry.errorDetails].filter(Boolean).join("\n\n")
+    : "";
+  const streamContent = errorText
+    ? [entry.outputText, errorText].filter(Boolean).join("\n\n")
+    : entry.outputText;
+  const fallbackToolParts =
+    entry.parts.length === 0
+      ? entry.toolCalls.map((toolCall) => ({
+          id: `stream:tool:${toolCall.id}`,
+          type: "tool-call",
+          toolCallId: toolCall.id,
+          toolCall,
+        }))
+      : [];
+  const outputFallback =
+    entry.parts.length === 0 && entry.outputText && !errorText
+      ? [{
+          id: `stream:text:${entry.actorId}`,
+          type: "text",
+          text: entry.outputText,
+          content: entry.outputText,
+        }]
+      : [];
+  const errorFallback = errorText
+    ? [{
+        id: `stream:error:${entry.actorId}`,
+        type: "text",
+        text: errorText,
+        content: errorText,
+      }]
+    : [];
+  return {
+    id: streamEntryId(entry),
+    sessionId: entry.sessionId,
+    senderActorId: entry.actorId,
+    role: "assistant",
+    content: streamContent,
+    parts: [
+      ...(entry.thinkingText
+        ? [{
+            id: `stream:reasoning:${entry.actorId}`,
+            type: "reasoning",
+            text: entry.thinkingText,
+            content: entry.thinkingText,
+          }]
+        : []),
+      ...entry.parts,
+      ...fallbackToolParts,
+      ...outputFallback,
+      ...errorFallback,
+    ],
+    toolCalls: entry.toolCalls,
+    timestamp: new Date(entry.lastUpdate),
+    isStreaming: entry.active && !errorText,
+  };
+}
 
 function parseSlashToken(body: string): { type: "role" | "skill" | "command"; name: string } {
   if (body.startsWith("role:")) return { type: "role", name: body.slice("role:".length) };
@@ -533,6 +597,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     () => adaptTeamclawMessages(displayMessagesRaw),
     [displayMessagesRaw],
   );
+  const displayMessagesWithStreams = React.useMemo(() => {
+    const base = displayMessages ?? [];
+    const visibleStreams = displaySessionId === activeSessionId ? v2Streams : [];
+    if (isViewingChild || visibleStreams.length === 0) return base;
+    return [
+      ...base,
+      ...visibleStreams.map(streamEntryToMessage),
+    ].sort((a, b) => {
+      const byTime = a.timestamp.getTime() - b.timestamp.getTime();
+      return byTime !== 0 ? byTime : a.id.localeCompare(b.id);
+    });
+  }, [activeSessionId, displayMessages, displaySessionId, isViewingChild, v2Streams]);
 
   const SESSION_FADE_MS = 150;
 
@@ -1074,6 +1150,16 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     if (outgoing && outgoing.trim()) {
       if (sid && authSession && teamIdForSend) {
         try {
+          sessionFlowLog("send.subscribe_live.begin", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+          });
+          await ensureSessionLiveSubscribed(teamIdForSend, sid);
+          sessionFlowLog("send.subscribe_live.ok", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+          });
+
           sessionFlowLog("send.resolve_sender.begin", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1308,7 +1394,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // Subscribe to the new session's live topic before publishing the
       // first message — otherwise the daemon's acp.event + message.created
       // can arrive before the reactive per-rows subscribe catches up.
-      const { ensureSessionLiveSubscribed } = await import('@/App');
       sessionFlowLog("session_create.subscribe_live.begin", {
         teamId: teamIdForSend,
         sessionId,
@@ -1509,12 +1594,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   const messageBottomContent = !isViewingChild ? (
     <>
-      {v2Streams.map(entry => {
-        const bubbleKey = "archiveId" in entry
-          ? (entry as { archiveId: string }).archiveId
-          : `current::${entry.actorId}`;
-        return <StreamingAgentBubble key={bubbleKey} entry={entry} />;
-      })}
       {visibleSessionError ? (
         <SessionErrorAlert
           error={visibleSessionError}
@@ -1691,7 +1770,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         ) : (
           <MessageList
             ref={messageListRef}
-            messages={displayMessages ?? []}
+            messages={displayMessagesWithStreams}
             activeSessionId={displaySessionId}
             isStreaming={isStreaming}
             streamingMessageId={streamingMessageId}

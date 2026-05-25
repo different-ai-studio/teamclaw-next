@@ -63,6 +63,7 @@ impl RecordedRuntimeUpsert {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedMessageInsert {
+    pub id: String,
     pub team_id: String,
     pub session_id: String,
     pub sender_actor_id: String,
@@ -267,10 +268,11 @@ impl Backend for MockBackend {
         supported_types: &[String],
         default_agent_type: &str,
     ) -> SupabaseResult<()> {
-        self.state.lock().unwrap().ensured_agent_types.push((
-            supported_types.to_vec(),
-            default_agent_type.to_string(),
-        ));
+        self.state
+            .lock()
+            .unwrap()
+            .ensured_agent_types
+            .push((supported_types.to_vec(), default_agent_type.to_string()));
         Ok(())
     }
 
@@ -549,6 +551,7 @@ impl Backend for MockBackend {
 
     async fn insert_message(
         &self,
+        id: &str,
         team_id: &str,
         session_id: &str,
         sender_actor_id: &str,
@@ -564,6 +567,7 @@ impl Backend for MockBackend {
             .unwrap()
             .messages_inserted
             .push(RecordedMessageInsert {
+                id: id.to_string(),
                 team_id: team_id.to_string(),
                 session_id: session_id.to_string(),
                 sender_actor_id: sender_actor_id.to_string(),
@@ -610,18 +614,22 @@ mod tests {
     async fn insert_message_records_each_call_with_metadata() {
         let (be, state) = dyn_backend();
         be.insert_message(
-            "team-x", "sess-1", "actor-y", "text", "hi", "{}", "model-z", "turn-1", 42,
+            "msg-1", "team-x", "sess-1", "actor-y", "text", "hi", "{}", "model-z", "turn-1", 42,
         )
         .await
         .unwrap();
-        be.insert_message("team-x", "sess-1", "actor-y", "text", "again", "{}", "", "", 43)
-            .await
-            .unwrap();
+        be.insert_message(
+            "msg-2", "team-x", "sess-1", "actor-y", "text", "again", "{}", "", "", 43,
+        )
+        .await
+        .unwrap();
         let snap = state.lock().unwrap();
         assert_eq!(snap.messages_inserted.len(), 2);
+        assert_eq!(snap.messages_inserted[0].id, "msg-1");
         assert_eq!(snap.messages_inserted[0].content, "hi");
         assert_eq!(snap.messages_inserted[0].model, "model-z");
         assert_eq!(snap.messages_inserted[0].sequence, 42);
+        assert_eq!(snap.messages_inserted[1].id, "msg-2");
         assert_eq!(snap.messages_inserted[1].content, "again");
         assert!(snap.messages_inserted[1].model.is_empty());
     }

@@ -13,6 +13,8 @@ describe("v2-streaming-store", () => {
     const streams = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
     expect(streams).toHaveLength(1);
     expect(streams[0].outputText).toBe("Hello world");
+    expect(streams[0].parts.map((p) => p.type)).toEqual(["text"]);
+    expect(streams[0].parts[0].text).toBe("Hello world");
   });
 
   it("appendThinking is separate from output", () => {
@@ -70,5 +72,165 @@ describe("v2-streaming-store", () => {
     const turn2 = all.find((e) => e.outputText === "turn 2 starting");
     expect(turn2).toBeDefined();
     expect(turn2!.active).toBe(true);
+  });
+
+  it("keeps live output and tool calls in event order", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "grep",
+      description: "search",
+      params: {},
+      toolKind: "search",
+    });
+    store.appendOutput("s1", "a1", "After tool.");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(stream.parts[0].text).toBe("Before tool.");
+    expect(stream.parts[1].toolCall?.id).toBe("tool-1");
+    expect(stream.parts[2].text).toBe("After tool.");
+  });
+
+  it("merges later toolUse updates into the existing tool call", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "Execute ps command",
+      params: {},
+      toolKind: "execute",
+    });
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.toolCalls).toHaveLength(1);
+    expect(stream.parts).toHaveLength(1);
+    expect(stream.toolCalls[0].arguments).toMatchObject({
+      _description: "Execute ps command",
+      command: "ps aux",
+    });
+    expect(stream.parts[0].toolCall?.arguments).toMatchObject({
+      _description: "Execute ps command",
+      command: "ps aux",
+    });
+  });
+
+  it("uses parked agent replies as a live preview without duplicating existing output", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+
+    store.ingestReplyPreview("s1", "a1", "Before tool.Final answer.");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.outputText).toBe("Before tool.Final answer.");
+    expect(stream.parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(stream.parts[0].text).toBe("Before tool.");
+    expect(stream.parts[2].text).toBe("Final answer.");
+
+    store.ingestReplyPreview("s1", "a1", "Before tool.Final answer.");
+    expect(selectStreamsForSession(useV2StreamingStore.getState(), "s1")[0].parts).toHaveLength(3);
+  });
+
+  it("places reply previews after the latest tool when final text is not cumulative", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+
+    store.ingestReplyPreview("s1", "a1", "Final answer only.");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.outputText).toBe("Final answer only.");
+    expect(stream.parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(stream.parts[0].text).toBe("Before tool.");
+    expect(stream.parts[2].text).toBe("Final answer only.");
+
+    store.ingestReplyPreview("s1", "a1", "Final answer only.");
+    expect(selectStreamsForSession(useV2StreamingStore.getState(), "s1")[0].parts).toHaveLength(3);
+
+    store.finalize("s1", "a1", "Updated final answer.");
+    const [finalized] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(finalized.active).toBe(false);
+    expect(finalized.parts).toHaveLength(3);
+    expect(finalized.parts[2].text).toBe("Updated final answer.");
+  });
+
+  it("finishSessionActor stops unresolved tool calls from loading", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "grep",
+      description: "search",
+      params: {},
+      toolKind: "search",
+    });
+
+    store.finishSessionActor("s1", "a1");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.active).toBe(false);
+    expect(stream.toolCalls[0].status).toBe("failed");
+    expect(stream.toolCalls[0].result).toBe("Stream ended before this tool returned a result.");
+    expect(stream.parts[0].toolCall?.status).toBe("failed");
+  });
+
+  it("creates a completed placeholder when tool result arrives without tool use", () => {
+    const store = useV2StreamingStore.getState();
+
+    store.completeToolUse("s1", "a1", {
+      toolId: "tool-1",
+      success: true,
+      summary: "done",
+    });
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.toolCalls).toHaveLength(1);
+    expect(stream.toolCalls[0]).toMatchObject({
+      id: "tool-1",
+      name: "unknown",
+      status: "completed",
+      result: "done",
+    });
+    expect(stream.parts).toHaveLength(1);
+    expect(stream.parts[0].toolCall?.status).toBe("completed");
+  });
+
+  it("adds a completed placeholder when a result references an unseen tool in an existing stream", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before.");
+
+    store.completeToolUse("s1", "a1", {
+      toolId: "tool-1",
+      success: false,
+      summary: "failed",
+    });
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.parts.map((p) => p.type)).toEqual(["text", "tool-call"]);
+    expect(stream.toolCalls[0]).toMatchObject({
+      id: "tool-1",
+      status: "failed",
+      result: "failed",
+    });
   });
 });

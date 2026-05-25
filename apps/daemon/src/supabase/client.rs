@@ -1328,6 +1328,7 @@ impl crate::backend::Backend for SupabaseBackend {
     #[allow(clippy::too_many_arguments)]
     async fn insert_message(
         &self,
+        id: &str,
         team_id: &str,
         session_id: &str,
         sender_actor_id: &str,
@@ -1347,6 +1348,7 @@ impl crate::backend::Backend for SupabaseBackend {
             serde_json::from_str(metadata_json).unwrap_or_else(|_| serde_json::json!({}))
         };
         let mut body = serde_json::json!({
+            "id": id,
             "team_id": team_id,
             "session_id": session_id,
             "sender_actor_id": sender_actor_id,
@@ -1393,7 +1395,7 @@ mod tests {
     use super::*;
     use crate::backend::Backend;
     use std::fs;
-    use wiremock::matchers::{method, path_regex};
+    use wiremock::matchers::{body_partial_json, method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_cfg(url: String) -> SupabaseConfig {
@@ -1693,6 +1695,42 @@ mod tests {
 
         let workspace = client.upsert_workspace(&row).await.unwrap();
         assert_eq!(workspace.id, "11111111-1111-1111-1111-111111111111");
+    }
+
+    #[tokio::test]
+    async fn insert_message_includes_caller_message_id() {
+        let srv = MockServer::start().await;
+        let message_id = "22222222-2222-2222-2222-222222222222";
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/rest/v1/messages$"))
+            .and(body_partial_json(serde_json::json!({ "id": message_id })))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&srv)
+            .await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+            })))
+            .mount(&srv)
+            .await;
+
+        let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
+        client
+            .insert_message(
+                message_id,
+                "team-1",
+                "session-1",
+                "actor-1",
+                "agent_reply",
+                "你好，Ye。",
+                "",
+                "alibaba-cn/qwen3.6-plus",
+                "turn-1",
+                7,
+            )
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -2263,6 +2301,7 @@ mod tests {
         let client = make_client(&srv).await;
         client
             .insert_message(
+                "msg-1",
                 "t-1",
                 "s-1",
                 "a-1",
@@ -2282,6 +2321,7 @@ mod tests {
             .find(|r| r.url.path() == "/rest/v1/messages")
             .expect("/rest/v1/messages was not called");
         let body_json: serde_json::Value = serde_json::from_slice(&body.body).unwrap();
+        assert_eq!(body_json["id"], serde_json::json!("msg-1"));
         assert_eq!(body_json["model"], serde_json::json!("claude-opus"));
         assert_eq!(body_json["turn_id"], serde_json::json!("turn-1"));
     }
@@ -2296,7 +2336,9 @@ mod tests {
             .await;
         let client = make_client(&srv).await;
         client
-            .insert_message("t-1", "s-1", "a-1", "text", "hello", "", "", "", 42)
+            .insert_message(
+                "msg-1", "t-1", "s-1", "a-1", "text", "hello", "", "", "", 42,
+            )
             .await
             .unwrap();
 
