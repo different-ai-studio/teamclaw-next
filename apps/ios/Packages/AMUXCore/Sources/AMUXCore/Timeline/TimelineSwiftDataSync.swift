@@ -90,6 +90,12 @@ public enum TimelineSwiftDataSync {
             event.outboxMessageID = entry.outboxMessageID; changed = true
         }
         if event.turnID != entry.turnID { event.turnID = entry.turnID; changed = true }
+        if event.resultSummary != entry.resultSummary {
+            event.resultSummary = entry.resultSummary; changed = true
+        }
+        if event.turnEnded != entry.turnEnded {
+            event.turnEnded = entry.turnEnded; changed = true
+        }
         return changed
     }
 
@@ -107,6 +113,8 @@ public enum TimelineSwiftDataSync {
         event.supabaseMessageId = entry.supabaseMessageID
         event.outboxMessageID = entry.outboxMessageID
         event.turnID = entry.turnID
+        event.resultSummary = entry.resultSummary
+        event.turnEnded = entry.turnEnded
         return event
     }
 }
