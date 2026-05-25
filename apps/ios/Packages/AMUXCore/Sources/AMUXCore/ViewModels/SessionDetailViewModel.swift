@@ -2015,8 +2015,7 @@ public final class SessionDetailViewModel {
     public func requestTurnHistory(modelContext: ModelContext,
                                    turnID: String,
                                    agentID: String? = nil) async throws {
-        let targetAgent = agentID ?? runtime?.runtimeId ?? ""
-        guard !targetAgent.isEmpty, !turnID.isEmpty else { return }
+        guard !turnID.isEmpty else { return }
         self.syncModelContext = modelContext
         isSyncing = true
 
@@ -2033,15 +2032,20 @@ public final class SessionDetailViewModel {
             }
         }
 
+        // The bubble passes an actor id (route.agentID). Resolve it to
+        // the owning runtime + device id via the same helper sendCommand
+        // uses so the MQTT topic matches the daemon's subscription.
+        let route = commandRoute(forAgentActorID: agentID, fallbackRuntime: runtime)
+        guard !route.runtimeID.isEmpty else { return }
+
         var req = Amux_AcpRequestTurnHistory()
         req.turnID = turnID
         req.requestID = UUID().uuidString
 
-        let deviceID = resolveDaemonDeviceId()
         let sender = RuntimeCommandSender(mqtt: mqtt, teamID: teamID, peerID: peerId)
         try await sender.send(
-            runtimeID: targetAgent,
-            deviceID: deviceID,
+            runtimeID: route.runtimeID,
+            deviceID: route.deviceID,
             currentHumanActorID: teamclawService?.currentHumanActorId,
             makeCommand: { $0.command = .requestTurnHistory(req) }
         )
