@@ -129,7 +129,8 @@ public enum ChatTimelineReducer {
                     text: t.text,
                     senderActorID: bucket,
                     timestamp: input.timestamp,
-                    model: input.acpEvent.model.isEmpty ? nil : input.acpEvent.model
+                    model: input.acpEvent.model.isEmpty ? nil : input.acpEvent.model,
+                    turnID: input.turnID
                 ))
             }
 
@@ -152,7 +153,8 @@ public enum ChatTimelineReducer {
                     toolID: tu.toolID,
                     toolName: tu.toolName,
                     senderActorID: bucket,
-                    timestamp: input.timestamp
+                    timestamp: input.timestamp,
+                    turnID: input.turnID
                 ))
             }
 
@@ -170,7 +172,8 @@ public enum ChatTimelineReducer {
                     senderActorID: bucket,
                     timestamp: input.timestamp,
                     isComplete: true,
-                    success: tr.success
+                    success: tr.success,
+                    turnID: input.turnID
                 ))
             }
 
