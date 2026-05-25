@@ -218,6 +218,7 @@ public struct ToolCallView: View {
 public struct CompactToolLine: View {
     public let event: AgentEvent
     @State private var showDetail = false
+    @State private var showResult = false
 
     private var toolName: String { event.toolName ?? "" }
     private var description: String { event.text ?? "" }
@@ -229,6 +230,11 @@ public struct CompactToolLine: View {
 
     private var detailSummary: String? {
         ToolDisplay.summary(for: description)
+    }
+
+    private var resultSummary: String? {
+        guard let s = event.resultSummary, !s.isEmpty else { return nil }
+        return s
     }
 
     public init(event: AgentEvent) {
@@ -281,6 +287,52 @@ public struct CompactToolLine: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 4)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if let summary = resultSummary {
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        withAnimation(AMUXAnimation.fast) { showResult.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: showResult ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 7))
+                                .foregroundStyle(Color.amux.slate)
+                                .frame(width: 10)
+
+                            Image(
+                                systemName: succeeded
+                                    ? "checkmark.circle.fill"
+                                    : "xmark.circle.fill"
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(
+                                succeeded ? Color.amux.sage : Color.amux.cinnabarDeep
+                            )
+
+                            Text("Result")
+                                .font(.caption2)
+                                .foregroundStyle(Color.amux.slate)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 16)
+                    .padding(.top, 2)
+                    .padding(.bottom, showResult ? 2 : 4)
+
+                    if showResult {
+                        Text(summary)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 6)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
             }
         }
     }
