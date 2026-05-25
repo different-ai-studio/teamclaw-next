@@ -71,6 +71,11 @@ and `AgentEvent` (`apps/ios/Packages/AMUXCore/Sources/AMUXCore/Models/AgentEvent
   plus `resultSummary` together represent the embedded tool result. No
   standalone `tool_result` entry is produced on the reducer path; the
   defensive `tool_result` branch for out-of-order arrivals stays as is.
+- Add `turnEnded: Bool` (default `false`). Set to `true` by the reducer
+  on the single highest-`sequence` entry of a turn when its
+  `StatusChange Active→Idle` arrives. `FeedItem.buildFeedItems` uses
+  this signal to close out the turn instead of the previous
+  `output.isComplete` heuristic.
 - `isComplete` on `output` rows narrows from "the whole turn has ended"
   to "this segment has ended." For non-output rows the field keeps its
   existing semantics (tool_use complete = result arrived; permission
@@ -115,7 +120,7 @@ Per incoming envelope kind:
 | `ToolUse` | Compose `k`. If `openSegmentByTurn[k] != nil`, locate the matching output entry, set `isComplete = true`, clear `openSegmentByTurn[k]`. Then upsert a `tool_use` entry by `(bucket, toolID)` — existing branch at `ChatTimelineReducer.swift:136-157` stays. |
 | `ToolResult` | Locate the `tool_use` entry with `toolID == tr.toolID` (existing branch, line 159-175). Set `success = tr.success`, `resultSummary = tr.summary`, `isComplete = true`. The defensive standalone-`tool_result` append for the no-match case (line 163-175) stays. |
 | `Thinking` | Existing handling unchanged. Thinking does **not** open or close output segments — a reply can resume after a thinking block without forcing a new segment (matches daemon: thinking and reply share buffers, only `ToolUse` flushes). |
-| `StatusChange Active→Idle` | Walk `openSegmentByTurn` for every key prefixed `"\(bucket)|"`: locate the matching output entry, set `isComplete = true`, remove the key. Existing branch at `ChatTimelineReducer.swift:222-245` that synthesizes a fallback `output` entry from `streamingTextByAgent[bucket]` is removed — the openSegmentByTurn flush always finds the entry it needs (since open segment ⇔ non-empty streaming buffer). The tool_use closing loop at lines 239-244 stays. |
+| `StatusChange Active→Idle` | Walk `openSegmentByTurn` for every key prefixed `"\(bucket)|"`: locate the matching output entry, set `isComplete = true`, remove the key. Existing branch at `ChatTimelineReducer.swift:222-245` that synthesizes a fallback `output` entry from `streamingTextByAgent[bucket]` is removed — the openSegmentByTurn flush always finds the entry it needs (since open segment ⇔ non-empty streaming buffer). The tool_use closing loop at lines 239-244 stays. **Then**, for each `turnID` that was closed in this idle: find the entry with the highest `sequence` matching `(turnID, bucket)` and set `turnEnded = true`. If no entries exist for the turn (empty turn), no-op. |
 
 Dedupe / lookup change: the existing `outputCompleteIndex(for:turnID:)`
 helper at `ChatTimelineReducer.swift:553-571` is replaced by
@@ -134,18 +139,30 @@ The history path (`applyHistory`, line 296+) currently runs a
 whole reply with no segment metadata; segmentation only applies to the
 `applyAcp` path that processes daemon envelopes.
 
-### 3.3 Feed `finalEvent` selection
+### 3.3 Feed — `buildFeedItems` and `finalEvent` selection
 
-`FeedItem.completedTurn(finalEvent:runtimeEvents:)` — `finalEvent` is now
-chosen as: the last entry in `runtimeEvents` with `eventType == "output"`
-by `sequence`. Falls back to the last non-empty-text entry of any type if
-the turn contains no output (pure-tool turn). `activeStream` is unchanged.
+`FeedItem.buildFeedItems` (`apps/ios/Packages/AMUXCore/Sources/AMUXCore/Models/FeedItem.swift:60-141`)
+changes how it decides when to close a turn:
 
-`SessionDetailView.activeStreamLastLine` — currently reads the latest
-streaming buffer; it should read the currently open segment's entry text,
-last line. If `openSegmentId == nil` (segment was just closed by a tool
-and no new chunk has arrived), fall back to the most recent closed
-`output` entry's last line. Behaviorally close to current.
+- **Old rule** (line 94-115): on a `output` row whose `isComplete = true`,
+  close the open turn and emit a `.completedTurn` with that row as
+  `finalEvent`.
+- **New rule**: accumulate **every** row (output, tool_use, thinking,
+  …) into `openTurnsByAgent[owner]` regardless of type or `isComplete`.
+  When a row's `turnEnded == true` arrives, close the open turn for
+  that owner and emit `.completedTurn`. Choose `finalEvent` as the last
+  entry in the accumulated `runtime` array with `eventType == "output"`
+  (by array order, which already mirrors `sequence`). Fallback: the
+  last non-empty-text entry of any type. The closing row itself is
+  included in `runtime` so the detail view sees it.
+
+`activeStream` trailing logic stays unchanged — turns that never saw
+`turnEnded` (live or never-flushed) still surface as the trailing
+active-stream card.
+
+`SessionDetailView.activeStreamLastLine` already reads from
+`streamingTextByAgent[bucket]`, which the reducer maintains the same
+way as today — no change needed.
 
 ### 3.4 Detail view rendering
 
@@ -202,7 +219,26 @@ Reducer unit tests in
    → idle`. Expect 1 output entry "AB" (thinking is a sibling, not a
    boundary).
 8. **ToolResult before ToolUse (defensive)**: ToolResult arrives for an
-   unknown tool_id. Expect drop, no crash, no orphan entry.
+   unknown tool_id. Expect the existing fallback branch to append a
+   standalone `tool_result` entry (line 163-175). No crash.
+9. **Turn-end marker placement**: a full turn (`Output(A) → ToolUse →
+   Output(B) → idle`) — expect exactly one entry with `turnEnded == true`,
+   on the `Output(B)` row (the highest-sequence entry for the turn).
+10. **Pure-tool turn**: `ToolUse → ToolResult → idle` (no output rows
+    at all). Expect the `tool_use` entry to carry `turnEnded == true`.
+
+Feed unit tests in
+`apps/ios/Packages/AMUXCore/Tests/AMUXCoreTests/FeedItemTests.swift`
+(or wherever `buildFeedItems` is currently tested — create a new file
+if none exists):
+
+- `buildFeedItems` closes a turn on `turnEnded == true` regardless of
+  the row's `eventType` or `isComplete`.
+- `buildFeedItems` picks the trailing output segment as `finalEvent`
+  even when the turn ends with a non-output row (turnEnded on
+  `tool_use`).
+- `buildFeedItems` keeps an open turn open when no row in the turn
+  carries `turnEnded`, producing a trailing `.activeStream`.
 
 Tool-result-embedded rendering: extend
 `apps/ios/Packages/AMUXSharedUI/Tests/AMUXSharedUITests/ToolDisplayTests.swift`
@@ -230,7 +266,10 @@ change.
   preserve multi-segment same-turn entries (distinct `sequence` per
   segment).
 - **`TimelineSwiftDataSync` field coverage**: the sync helper must
-  project `resultSummary` between `TimelineEntry` and `AgentEvent`.
+  project both `resultSummary` and `turnEnded` between `TimelineEntry`
+  and `AgentEvent`. Audit `apply(entry:to:)` and `makeAgentEvent(from:agentId:)`
+  (`TimelineSwiftDataSync.swift:74-111`) — the projection is currently
+  field-by-field and silently drops unknowns.
 - **Reducer state size**: `openSegmentByTurn` is one `UInt64` per active
   turn, cleared on Idle. Negligible.
 
