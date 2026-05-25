@@ -136,6 +136,8 @@ struct ReducerToolResultPairingTests {
         #expect(state.entries[0].eventType == "tool_use")
         #expect(state.entries[0].isComplete)
         #expect(state.entries[0].success == true)
+        #expect(state.entries[0].resultSummary == "ok",
+                "toolResult summary text must land on the paired tool_use so the detail card can render it")
     }
 
     @Test("later toolUse update fills in grep arguments without appending")

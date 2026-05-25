@@ -161,6 +161,7 @@ public enum ChatTimelineReducer {
         case .toolResult(let tr):
             if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tr.toolID }) {
                 state.entries[idx].success = tr.success
+                state.entries[idx].resultSummary = tr.summary
                 state.entries[idx].isComplete = true
             } else {
                 // Out-of-order arrival — append a standalone tool_result.

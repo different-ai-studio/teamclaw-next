@@ -42,6 +42,11 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
     /// nil for pre-turn_id rows and for kinds that don't have a turn
     /// (user_prompt, system, permission, etc.).
     public var turnID: String?
+    /// Result summary text from the matching `ToolResult` envelope,
+    /// written onto a `tool_use` entry when the result arrives. nil while
+    /// the tool is still running or for non-tool_use rows. Renders as an
+    /// embedded disclosure under the tool card in the turn detail view.
+    public var resultSummary: String?
 
     public init(id: String = UUID().uuidString,
                 sequence: UInt64 = 0,
@@ -57,7 +62,8 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
                 supabaseMessageID: String? = nil,
                 clientID: String? = nil,
                 outboxMessageID: String? = nil,
-                turnID: String? = nil) {
+                turnID: String? = nil,
+                resultSummary: String? = nil) {
         self.id = id
         self.sequence = sequence
         self.eventType = eventType
@@ -73,6 +79,7 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
         self.clientID = clientID
         self.outboxMessageID = outboxMessageID
         self.turnID = turnID
+        self.resultSummary = resultSummary
     }
 }
 
