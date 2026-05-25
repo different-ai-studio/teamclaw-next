@@ -33,6 +33,8 @@ public struct IdeaDetailView: View {
     @State private var progressImageUploads: [String: AttachmentUpload] = [:]
     @State private var progressPhotoItems: [PhotosPickerItem] = []
     @State private var showProgressCamera = false
+    @State private var showProgressPhotoPicker = false
+    @State private var showProgressImageSourceDialog = false
     @State private var progressUploadManager: AttachmentUploadManager?
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
@@ -161,6 +163,21 @@ public struct IdeaDetailView: View {
                 onCancel: { showProgressCamera = false }
             )
             .ignoresSafeArea()
+        }
+        .photosPicker(
+            isPresented: $showProgressPhotoPicker,
+            selection: $progressPhotoItems,
+            maxSelectionCount: 5,
+            matching: .images
+        )
+        .confirmationDialog(
+            "Add image",
+            isPresented: $showProgressImageSourceDialog,
+            titleVisibility: .hidden
+        ) {
+            Button("Photo Library") { showProgressPhotoPicker = true }
+            Button("Camera") { showProgressCamera = true }
+            Button("Cancel", role: .cancel) {}
         }
         .onChange(of: progressPhotoItems) { _, items in
             guard !items.isEmpty else { return }
@@ -402,13 +419,18 @@ public struct IdeaDetailView: View {
     // MARK: Composer
 
     private var composerArea: some View {
-        VStack(spacing: 8) {
-            IdeaImageAttachmentStrip(
-                urls: progressImageAttachments,
-                uploads: progressImageUploads,
-                onRemove: removeProgressImageAttachment
-            )
-            .padding(.horizontal, 2)
+        VStack(spacing: 6) {
+            // Strip only renders when there's at least one selected
+            // attachment — the add affordance lives inside the composer
+            // capsule below to keep the bottom bar visually unified.
+            if !progressImageAttachments.isEmpty {
+                IdeaImageAttachmentStrip(
+                    urls: progressImageAttachments,
+                    uploads: progressImageUploads,
+                    onRemove: removeProgressImageAttachment
+                )
+                .padding(.horizontal, 2)
+            }
 
             composerCapsule
         }
@@ -416,27 +438,18 @@ public struct IdeaDetailView: View {
 
     private var composerCapsule: some View {
         HStack(spacing: 8) {
-            PhotosPicker(selection: $progressPhotoItems, maxSelectionCount: 5, matching: .images) {
-                Image(systemName: "photo")
-                    .font(.body)
-                    .foregroundStyle(Color.amux.basalt)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isSubmittingProgress)
-
             Button {
-                showProgressCamera = true
+                showProgressImageSourceDialog = true
             } label: {
-                Image(systemName: "camera")
-                    .font(.body)
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(Color.amux.basalt)
                     .frame(width: 30, height: 30)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(isSubmittingProgress)
+            .accessibilityLabel("Add image")
 
             TextField("Submit progress, or @mention an agent…", text: $composerText, axis: .vertical)
                 .lineLimit(1...3)

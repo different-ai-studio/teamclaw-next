@@ -67,6 +67,8 @@ struct CreateIdeaSheet: View {
     @State private var imageUploads: [String: AttachmentUpload] = [:]
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showCamera = false
+    @State private var showPhotoPicker = false
+    @State private var showImageSourceDialog = false
     @State private var uploadManager: AttachmentUploadManager?
     @State private var draftAttachmentContextID = "idea-draft-\(UUID().uuidString)"
     @FocusState private var titleFocused: Bool
@@ -170,6 +172,21 @@ struct CreateIdeaSheet: View {
             )
             .ignoresSafeArea()
         }
+        .photosPicker(
+            isPresented: $showPhotoPicker,
+            selection: $photoItems,
+            maxSelectionCount: 5,
+            matching: .images
+        )
+        .confirmationDialog(
+            "Add image",
+            isPresented: $showImageSourceDialog,
+            titleVisibility: .hidden
+        ) {
+            Button("Photo Library") { showPhotoPicker = true }
+            Button("Camera") { showCamera = true }
+            Button("Cancel", role: .cancel) {}
+        }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -211,49 +228,27 @@ struct CreateIdeaSheet: View {
         .padding(.horizontal, 16)
     }
 
+    /// Image attachments live as a quiet thumbnail strip — no section
+    /// label, no paper card. Tap the trailing dashed `+` tile to pick a
+    /// source. The strip itself only renders when there's something to
+    /// show (either an image or the add tile), so an empty composer has
+    /// no visual weight.
     private var imageSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HaiSectionLabel("Images")
-            HaiPaperCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 12) {
-                        PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) {
-                            Label("Photos", systemImage: "photo.on.rectangle")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.amux.onyx)
-                        }
-                        .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 6) {
+            IdeaImageAttachmentStrip(
+                urls: imageAttachments,
+                uploads: imageUploads,
+                onRemove: removeImageAttachment,
+                onAddTapped: { showImageSourceDialog = true }
+            )
 
-                        Button {
-                            showCamera = true
-                        } label: {
-                            Label("Camera", systemImage: "camera")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.amux.onyx)
-                        }
-                        .buttonStyle(.plain)
-
-                        Spacer(minLength: 0)
-
-                        if hasUploadingImageAttachments {
-                            ProgressView().controlSize(.small)
-                        }
-                    }
-
-                    IdeaImageAttachmentStrip(
-                        urls: imageAttachments,
-                        uploads: imageUploads,
-                        onRemove: removeImageAttachment
-                    )
-
-                    if hasFailedImageAttachments {
-                        Text("One image failed to upload. Remove it and try again.")
-                            .font(.caption)
-                            .foregroundStyle(Color.amux.cinnabarDeep)
-                    }
-                }
+            if hasFailedImageAttachments {
+                Text("One image failed to upload. Remove it and try again.")
+                    .font(.caption)
+                    .foregroundStyle(Color.amux.cinnabarDeep)
             }
         }
+        .padding(.horizontal, 16)
     }
 
     private var workspaceSection: some View {
