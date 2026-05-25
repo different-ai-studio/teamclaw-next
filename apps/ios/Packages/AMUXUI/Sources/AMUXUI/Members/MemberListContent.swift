@@ -738,6 +738,7 @@ private struct ActorDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.amux.mist.opacity(0.85), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarVisibility(.hidden, for: .tabBar)
         .task {
             guard !actor.isMember, authorizedHumansStore == nil else { return }
             if let repo = try? SupabaseAgentAccessRepository() {
