@@ -4,13 +4,19 @@ import AMUXSharedUI
 
 #if os(iOS)
 
+/// Horizontal thumbnail row for in-progress idea image attachments. The
+/// optional `onAddTapped` slot renders a quiet, dashed `+` tile at the
+/// trailing edge so callers can host their own picker / camera flow without
+/// duplicating layout. When there are no attachments and no add affordance,
+/// the strip renders nothing — leaving the parent layout clean.
 struct IdeaImageAttachmentStrip: View {
     let urls: [URL]
     let uploads: [String: AttachmentUpload]
     let onRemove: (URL) -> Void
+    var onAddTapped: (() -> Void)? = nil
 
     var body: some View {
-        if !urls.isEmpty {
+        if !urls.isEmpty || onAddTapped != nil {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(urls, id: \.self) { url in
@@ -19,6 +25,9 @@ struct IdeaImageAttachmentStrip: View {
                             upload: uploads[url.absoluteString],
                             onRemove: { onRemove(url) }
                         )
+                    }
+                    if let onAddTapped {
+                        IdeaAddImageTile(action: onAddTapped)
                     }
                 }
                 .padding(.horizontal, 1)
@@ -70,6 +79,35 @@ struct IdeaActivityImageGrid: View {
     }
 }
 
+/// Tile size shared by the local-image tile and the add affordance so the
+/// strip reads as one row. Slightly larger than the old 58pt thumbnails —
+/// the previous size made the remove button feel cramped on the corner.
+private let ideaTileSide: CGFloat = 64
+
+private struct IdeaAddImageTile: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.amux.pebble.opacity(0.45))
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        Color.amux.basalt.opacity(0.32),
+                        style: StrokeStyle(lineWidth: 0.8, dash: [3, 3])
+                    )
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(Color.amux.basalt.opacity(0.75))
+            }
+            .frame(width: ideaTileSide, height: ideaTileSide)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add image")
+    }
+}
+
 private struct IdeaLocalImageTile: View {
     let url: URL
     let upload: AttachmentUpload?
@@ -82,7 +120,7 @@ private struct IdeaLocalImageTile: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             tileBody
-                .frame(width: 58, height: 58)
+                .frame(width: ideaTileSide, height: ideaTileSide)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -91,13 +129,17 @@ private struct IdeaLocalImageTile: View {
                 .overlay(progressOverlay)
 
             Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(Color.amux.mist, Color.amux.onyx.opacity(0.62))
+                ZStack {
+                    Circle()
+                        .fill(Color.amux.onyx.opacity(0.72))
+                        .frame(width: 18, height: 18)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.amux.mist)
+                }
             }
             .buttonStyle(.plain)
-            .offset(x: 5, y: -5)
+            .offset(x: 6, y: -6)
             .accessibilityLabel("Remove image")
         }
         .task(id: url) {
@@ -131,7 +173,7 @@ private struct IdeaLocalImageTile: View {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(Color.amux.mist)
-                    .frame(width: 38)
+                    .frame(width: 42)
             }
         case .failed:
             ZStack {
@@ -148,7 +190,7 @@ private struct IdeaLocalImageTile: View {
         await Task.detached(priority: .utility) {
             guard let data = try? Data(contentsOf: url),
                   let image = UIImage(data: data) else { return nil }
-            let target: CGFloat = 174
+            let target: CGFloat = 192
             let size = image.size
             let scale = max(target / size.width, target / size.height)
             let newSize = CGSize(width: size.width * scale, height: size.height * scale)
