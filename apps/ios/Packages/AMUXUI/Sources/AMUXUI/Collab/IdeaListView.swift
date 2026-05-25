@@ -154,13 +154,14 @@ public struct IdeaListView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             if filter == .all, filteredIdeas.count > 1 {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.16)) {
                             editMode = editMode.isEditing ? .inactive : .active
                         }
                     } label: {
                         Image(systemName: editMode.isEditing ? "checkmark" : "arrow.up.arrow.down")
+                            .font(.title3)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.primary)

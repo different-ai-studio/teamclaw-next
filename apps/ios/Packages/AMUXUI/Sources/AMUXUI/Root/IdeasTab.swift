@@ -16,7 +16,11 @@ public struct IdeasTab: View {
 
     @Environment(\.modelContext) private var modelContext
 
+    @Query(sort: \CachedActor.displayName) private var actors: [CachedActor]
+    @Query(sort: \Workspace.displayName)   private var workspaces: [Workspace]
+
     @State private var showCreate = false
+    @State private var showStats = false
     @State private var navigationPath: [String] = []
     @State private var ideaStore: IdeaStore?
     @State private var ideaStoreTeamID: String?
@@ -49,12 +53,32 @@ public struct IdeasTab: View {
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
                     if ideaStore != nil {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button { showStats = true } label: {
+                                Image(systemName: "chart.bar.xaxis")
+                                    .font(.title3)
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Idea Statistics")
+                            .accessibilityIdentifier("ideas.statsButton")
+                        }
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button { showCreate = true } label: {
                                 Image(systemName: "plus").font(.title3).foregroundStyle(.primary)
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+                }
+                .sheet(isPresented: $showStats) {
+                    if let ideaStore {
+                        IdeaStatsSheet(
+                            ideas: ideaStore.ideas,
+                            archivedIdeas: ideaStore.archivedIdeas,
+                            actors: actors,
+                            workspaces: workspaces
+                        )
                     }
                 }
                 .navigationDestination(for: String.self) { id in
