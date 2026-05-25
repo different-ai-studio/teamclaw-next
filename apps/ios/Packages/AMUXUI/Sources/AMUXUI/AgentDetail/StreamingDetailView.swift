@@ -55,6 +55,13 @@ public struct StreamingDetailView: View {
     let route: TurnRoute
     @Bindable var viewModel: SessionDetailViewModel
     @State private var todoDockCollapsed = true
+    /// Snapshot of the resolved turn, rebuilt only when feedItems changes
+    /// (not on every streaming-text delta). During streaming, feedItems is
+    /// stable between tool_use/thinking events so the sort + feedItems walk
+    /// inside `computeResolved()` fires far less often than the body itself.
+    @State private var resolvedSnapshot: (events: [AgentEvent], isActive: Bool, agentName: String) = ([], false, "")
+    /// Last feedItems fingerprint we used to build `resolvedSnapshot`.
+    @State private var lastFeedFingerprint = ""
 
     public init(route: TurnRoute, viewModel: SessionDetailViewModel) {
         self.route = route
@@ -65,18 +72,31 @@ public struct StreamingDetailView: View {
         viewModel.activePlanSnapshots.first(where: { $0.agentID == route.agentID })?.text
     }
 
-    /// Resolved turn data. We re-derive on every render from the
-    /// view-model's `feedItems` so streaming deltas + final-event arrival
-    /// reflect immediately. Returns events + isActive flag.
-    ///
-    /// The returned list is sorted chronologically by `(timestamp,
-    /// sequence, id)` — same key as `SessionDetailViewModel`'s primary
-    /// sort. Without this, a turn split as text→tool→text would render
-    /// all tools first and the merged text last, because the `final`
-    /// output's timestamp is later than the buffered tool events.
-    private var resolved: (events: [AgentEvent], isActive: Bool, agentName: String) {
-        // Look for a frozen completed turn first — the user explicitly
-        // pinned this when they tapped the bubble's detail icon.
+    /// Build a fingerprint for the current feedItems that changes when the
+    /// content relevant to this view changes (new events in this turn, or
+    /// active→completed transition). Used to invalidate `resolvedSnapshot`.
+    private var feedFingerprint: String {
+        let items = viewModel.feedItems
+        // Capture turn-relevant item count + total runtime event count so
+        // a new tool_use inside an active stream is detected even though
+        // the number of FeedItems is unchanged.
+        var turnEventCount = 0
+        for item in items {
+            switch item {
+            case .activeStream(_, let agentID, let runtime) where agentID == route.agentID:
+                turnEventCount = runtime.count
+            case .completedTurn(let id, _, _, let runtime)
+                    where id == route.frozenTurnID || route.frozenTurnID == nil:
+                turnEventCount = runtime.count
+            default: break
+            }
+        }
+        return "\(items.count)-\(turnEventCount)"
+    }
+
+    /// Compute resolved turn data fresh from feedItems. The result is sorted
+    /// chronologically so text→tool→text turns display in the correct order.
+    private func computeResolved() -> (events: [AgentEvent], isActive: Bool, agentName: String) {
         if let pinned = route.frozenTurnID {
             for item in viewModel.feedItems {
                 if case .completedTurn(let id, let agentID, let final, let runtime) = item,
@@ -85,15 +105,12 @@ public struct StreamingDetailView: View {
                 }
             }
         }
-        // Active stream wins next — user navigated from a live card.
         for item in viewModel.feedItems {
             if case .activeStream(_, let agentID, let runtime) = item,
                agentID == route.agentID {
                 return (chronologicallySorted(runtime), true, agentNameFor(agentID))
             }
         }
-        // Fallback: the most recent completed turn for this agent (e.g.
-        // the active stream finalized while the user was reading).
         for item in viewModel.feedItems.reversed() {
             if case .completedTurn(_, let agentID, let final, let runtime) = item,
                agentID == route.agentID {
@@ -133,7 +150,7 @@ public struct StreamingDetailView: View {
     }
 
     public var body: some View {
-        let snapshot = resolved
+        let snapshot = resolvedSnapshot
         let liveText = viewModel.streamingTextByAgent[route.agentID] ?? ""
         let stillStreaming = viewModel.streamingAgentSet.contains(route.agentID)
 
@@ -186,13 +203,28 @@ public struct StreamingDetailView: View {
             // turns inside the viewport.
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onChange(of: snapshot.events.count) {
+                // New event arrived in this turn — gentle animation to anchor.
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("detail-bottom", anchor: .bottom) }
             }
-            .onChange(of: liveText) {
-                if stillStreaming {
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("detail-bottom", anchor: .bottom) }
-                }
+            .onChange(of: liveText) { _, _ in
+                // Per-token scroll: no animation. The previous withAnimation
+                // layered a new 0.2s easeOut on every single token, compounding
+                // layout work at 30–60 deltas/sec. Plain scrollTo is instant
+                // and SwiftUI's scroll view still animates the position change
+                // smoothly via its own momentum tracking.
+                guard stillStreaming else { return }
+                proxy.scrollTo("detail-bottom", anchor: .bottom)
             }
+        }
+        .onAppear {
+            let fp = feedFingerprint
+            lastFeedFingerprint = fp
+            resolvedSnapshot = computeResolved()
+        }
+        .onChange(of: feedFingerprint) { _, newFP in
+            guard newFP != lastFeedFingerprint else { return }
+            lastFeedFingerprint = newFP
+            resolvedSnapshot = computeResolved()
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let text = planUpdateText {
