@@ -196,7 +196,9 @@ struct SessionComposer: View {
 
     // MARK: - Two-row capsule
 
-    /// The LiquidGlass capsule containing:
+    private static let composerCornerRadius: CGFloat = 28
+
+    /// The LiquidGlass composer containing:
     ///   Row 1 — text field (or waveform when recording)
     ///   Row 2 — [+] attachment · [@ …] agent button · Spacer · right-button
     @ViewBuilder
@@ -243,7 +245,7 @@ struct SessionComposer: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 8)
         }
-        .liquidGlass(in: Capsule())
+        .liquidGlass(in: RoundedRectangle(cornerRadius: Self.composerCornerRadius, style: .continuous))
     }
 
     /// The agent selection button. Shows "@ name ×N" when agents are selected,
