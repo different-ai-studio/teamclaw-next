@@ -271,7 +271,17 @@ public final class SessionDetailViewModel {
     /// fields on an existing event (eventType, isComplete, toolId).
     private func recomputeGroups() {
         groupedEvents = groupEvents(events)
-        feedItems = buildFeedItems(events, streamingAgentIDs: streamingAgentSet)
+        // Union the delta-driven `streamingAgentSet` with the computed
+        // `streamingAgentIDs` (which also covers `isAgentWorking`) so the
+        // active-stream card surfaces as soon as `markAgentWorking()` flips
+        // on send — without waiting for the first ACP runtime event to
+        // round-trip via MQTT. Before this union the card only appeared
+        // once a real delta arrived, which could take seconds on a
+        // cold-spawn agent.
+        feedItems = buildFeedItems(
+            events,
+            streamingAgentIDs: streamingAgentSet.union(streamingAgentIDs)
+        )
     }
 
     private func sortEventsForDisplay() {
@@ -2160,18 +2170,27 @@ public final class SessionDetailViewModel {
 
     /// Flip isAgentWorking on and arm a 10s safety reset so a missed
     /// `statusChange:.idle` event doesn't leave the chip stuck in stop.
+    /// Also rebuilds `feedItems` so the active-stream "Agent loading"
+    /// card appears synchronously — without this, the card would only
+    /// surface on the next `recomputeGroups()` trigger (the first ACP
+    /// runtime event), which is the latency the user sees on send.
     private func markAgentWorking() {
         isAgentWorking = true
+        recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
             guard let self, !Task.isCancelled else { return }
-            await MainActor.run { self.isAgentWorking = false }
+            await MainActor.run {
+                self.isAgentWorking = false
+                self.recomputeGroups()
+            }
         }
     }
 
     private func markAgentDone() {
         isAgentWorking = false
+        recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = nil
     }

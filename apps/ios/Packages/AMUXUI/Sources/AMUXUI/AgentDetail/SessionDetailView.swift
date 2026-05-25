@@ -498,6 +498,18 @@ public struct SessionDetailView: View {
             // path (SessionsTab / IdeasTab) — value-based pushes of
             // `TurnRoute` would be silently dropped by SwiftUI when the
             // type doesn't match the path's element type.
+            //
+            // `isPending` is true between send-tap and the first ACP
+            // delta/event arrival. In that window the card is surfaced
+            // by `markAgentWorking()` priming `streamingAgentSet` —
+            // there are no runtime events and no live text buffer yet,
+            // so we render the cinnabar breathing light + "Agent
+            // loading…". The first delta both populates `runtimeEvents`
+            // /`streamingTextByAgent` and flips `isPending` false, at
+            // which point the dot transitions to sage and the label
+            // switches to the live last-line preview.
+            let liveText = viewModel.streamingTextByAgent[agentID] ?? ""
+            let isPending = runtimeEvents.isEmpty && liveText.isEmpty
             NavigationLink(
                 destination: StreamingDetailView(
                     route: TurnRoute(agentID: agentID, frozenTurnID: nil),
@@ -506,7 +518,8 @@ public struct SessionDetailView: View {
             ) {
                 ActiveStreamCardView(
                     agentName: agentDisplayName(for: agentID),
-                    lastLine: activeStreamLastLine(agentID: agentID, runtimeEvents: runtimeEvents)
+                    lastLine: activeStreamLastLine(agentID: agentID, runtimeEvents: runtimeEvents),
+                    isPending: isPending
                 )
             }
             .buttonStyle(.plain)
