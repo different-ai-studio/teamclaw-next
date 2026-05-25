@@ -479,11 +479,16 @@ public struct SessionDetailView: View {
     /// at the view layer.
     private func activeStreamLastLine(agentID: String, runtimeEvents: [AgentEvent]) -> String {
         let live = viewModel.streamingTextByAgent[agentID] ?? ""
-        if !live.isEmpty { return live.replacingOccurrences(of: "\n", with: " ") }
+        if !live.isEmpty {
+            // The card is lineLimit(1). Operate on the buffer tail so a
+            // 50KB reply doesn't get copied and newline-replaced in full
+            // on every token — the visible output is identical.
+            return live.suffix(240).replacingOccurrences(of: "\n", with: " ")
+        }
         if let last = runtimeEvents.reversed().first(where: { e in
             (e.eventType == "output" || e.eventType == "thinking") && !(e.text ?? "").isEmpty
         }) {
-            return (last.text ?? "").replacingOccurrences(of: "\n", with: " ")
+            return (last.text ?? "").suffix(240).replacingOccurrences(of: "\n", with: " ")
         }
         if let lastTool = runtimeEvents.reversed().first(where: { $0.eventType == "tool_use" }) {
             return lastTool.toolName.map { "Running \($0)…" } ?? "Working…"
