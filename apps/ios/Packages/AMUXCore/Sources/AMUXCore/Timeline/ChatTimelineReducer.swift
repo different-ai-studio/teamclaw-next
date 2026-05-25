@@ -173,16 +173,30 @@ public enum ChatTimelineReducer {
             }
 
         case .toolUse(let tu):
-            if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tu.toolID }) {
-                if !tu.description_p.isEmpty {
-                    state.entries[idx].text = tu.description_p
-                }
-                if !tu.toolName.isEmpty {
-                    state.entries[idx].toolName = tu.toolName
-                }
-                if state.entries[idx].toolID == nil {
-                    state.entries[idx].toolID = tu.toolID
-                }
+            // A tool call interrupts any pending output segment — finalise
+            // the open segment for this turn first, mirroring the daemon's
+            // TurnAggregator flush behavior.
+            if let openSeq = state.openSegmentByTurn[turnKey],
+               let idx = findOutputSegmentEntry(bucket: bucket,
+                                                turnID: input.turnID,
+                                                segmentSeq: openSeq,
+                                                in: state) {
+                state.entries[idx].isComplete = true
+            }
+            state.openSegmentByTurn[turnKey] = nil
+            // Also clear the streaming buffer so the live preview line
+            // doesn't keep showing the just-closed segment's text after
+            // the tool card appears.
+            state.streamingAgentSet.remove(bucket)
+            state.streamingTextByAgent[bucket] = nil
+
+            // Upsert the tool_use entry by (bucket, toolID).
+            if let idx = state.entries.lastIndex(where: {
+                $0.eventType == "tool_use" && $0.toolID == tu.toolID
+            }) {
+                if !tu.description_p.isEmpty { state.entries[idx].text = tu.description_p }
+                if !tu.toolName.isEmpty { state.entries[idx].toolName = tu.toolName }
+                if state.entries[idx].toolID == nil { state.entries[idx].toolID = tu.toolID }
             } else {
                 state.entries.append(makeEntry(
                     sequence: input.envelopeSequence,
@@ -191,16 +205,20 @@ public enum ChatTimelineReducer {
                     toolID: tu.toolID,
                     toolName: tu.toolName,
                     senderActorID: bucket,
-                    timestamp: input.timestamp
+                    timestamp: input.timestamp,
+                    turnID: input.turnID
                 ))
             }
 
         case .toolResult(let tr):
-            if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tr.toolID }) {
+            if let idx = state.entries.lastIndex(where: {
+                $0.eventType == "tool_use" && $0.toolID == tr.toolID
+            }) {
                 state.entries[idx].success = tr.success
+                state.entries[idx].resultSummary = tr.summary
                 state.entries[idx].isComplete = true
             } else {
-                // Out-of-order arrival — append a standalone tool_result.
+                // Defensive: out-of-order arrival, no matching tool_use.
                 state.entries.append(makeEntry(
                     sequence: input.envelopeSequence,
                     eventType: "tool_result",
@@ -209,7 +227,8 @@ public enum ChatTimelineReducer {
                     senderActorID: bucket,
                     timestamp: input.timestamp,
                     isComplete: true,
-                    success: tr.success
+                    success: tr.success,
+                    turnID: input.turnID
                 ))
             }
 
