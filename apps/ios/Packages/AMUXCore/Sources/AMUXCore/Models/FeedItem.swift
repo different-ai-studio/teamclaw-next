@@ -14,6 +14,15 @@ import Foundation
 /// output lands it converts to `.completedTurn` at that chronological
 /// position. Multiple agents can have concurrent open turns — each gets
 /// its own card.
+///
+/// A daemon turn that gets cut by a ToolUse mid-stream flushes as
+/// multiple `output{isComplete=true}` rows sharing one `turnID`. The
+/// feed collapses them so one prompt yields one bubble: the latest
+/// output becomes `finalEvent`, earlier outputs + intervening tools
+/// fold into `runtimeEvents` for the detail view. If the turn is still
+/// in flight when a later segment is streaming, the prior bubble is
+/// removed and its content folds into the trailing `.activeStream` so
+/// the chat shows one in-progress item per agent.
 public enum FeedItem: Identifiable {
     /// A user prompt or another collaborator's chat message. Owns
     /// alignment + sender labeling at the view layer.
@@ -61,7 +70,18 @@ public func buildFeedItems(_ events: [AgentEvent],
                            streamingAgentIDs: Set<String> = []) -> [FeedItem] {
     var openTurnsByAgent: [String: [AgentEvent]] = [:]
     var openTurnFirstEventID: [String: String] = [:]
+    var openTurnTurnIDByAgent: [String: String] = [:]
     var result: [FeedItem] = []
+
+    // Index of the latest `.completedTurn` per (agent, turnID). A daemon
+    // turn can flush as multiple `output{isComplete=true}` rows when a
+    // ToolUse cuts the stream mid-turn — without this index each segment
+    // would render as its own bubble. With it, the later segment merges
+    // back into the earlier bubble: the new output becomes `finalEvent`
+    // (so the bubble shows the latest text) and the prior `finalEvent`
+    // plus any intervening tools fold into `runtimeEvents` for the
+    // detail view.
+    var completedTurnIndexByKey: [String: Int] = [:]
 
     func ownerFor(_ event: AgentEvent) -> String {
         // Empty senderActorID falls back to a synthetic key so missing-
@@ -76,6 +96,15 @@ public func buildFeedItems(_ events: [AgentEvent],
         if openTurnFirstEventID[owner] == nil {
             openTurnFirstEventID[owner] = event.id
         }
+        if openTurnTurnIDByAgent[owner] == nil,
+           let t = event.turnID, !t.isEmpty {
+            openTurnTurnIDByAgent[owner] = t
+        }
+    }
+
+    func turnKey(owner: String, turnID: String?) -> String? {
+        guard let t = turnID, !t.isEmpty else { return nil }
+        return "\(owner)|\(t)"
     }
 
     for event in events {
@@ -96,17 +125,32 @@ public func buildFeedItems(_ events: [AgentEvent],
                 let runtime = openTurnsByAgent[owner] ?? []
                 openTurnsByAgent[owner] = nil
                 openTurnFirstEventID[owner] = nil
+                openTurnTurnIDByAgent[owner] = nil
                 // Prefer daemon-assigned turnID so cross-device
                 // `TurnRoute.frozenTurnID` lands on the same turn from
                 // any client. Fallback to the synthetic id keeps
                 // pre-turn_id rows navigable.
                 let turnID = (event.turnID?.isEmpty == false ? event.turnID! : "turn-\(event.id)")
-                result.append(.completedTurn(
-                    id: turnID,
-                    agentID: owner,
-                    finalEvent: event,
-                    runtimeEvents: runtime
-                ))
+                let key = turnKey(owner: owner, turnID: event.turnID)
+                if let key,
+                   let idx = completedTurnIndexByKey[key],
+                   case let .completedTurn(existingID, existingAgent, oldFinal, oldRuntime) = result[idx] {
+                    let mergedRuntime = oldRuntime + [oldFinal] + runtime
+                    result[idx] = .completedTurn(
+                        id: existingID,
+                        agentID: existingAgent,
+                        finalEvent: event,
+                        runtimeEvents: mergedRuntime
+                    )
+                } else {
+                    result.append(.completedTurn(
+                        id: turnID,
+                        agentID: owner,
+                        finalEvent: event,
+                        runtimeEvents: runtime
+                    ))
+                    if let key { completedTurnIndexByKey[key] = result.count - 1 }
+                }
             } else {
                 // Persisted incomplete output (stop()-saved synthetic
                 // event re-applied across cold start). Treat as part of
@@ -124,16 +168,44 @@ public func buildFeedItems(_ events: [AgentEvent],
     // streaming raw text gets an active-stream card at the end of the
     // feed. Sorted by the first event id of the open turn so concurrent
     // agents render in the order they started speaking.
+    //
+    // Mid-turn fold: when the open turn shares a turnID with an earlier
+    // `.completedTurn` (text→tool→…still working), drop the prior bubble
+    // and prepend its events into the active-stream's runtime — the
+    // chat shows ONE in-progress item per agent. `activeStreamLastLine`
+    // surfaces the live streaming buffer first and falls back to the
+    // most recent output text we just folded in, so the user keeps
+    // seeing the latest segment while the tool runs.
     let liveAgents = Set(openTurnsByAgent.keys).union(streamingAgentIDs)
     let ordered = liveAgents.sorted { lhs, rhs in
         (openTurnFirstEventID[lhs] ?? lhs) < (openTurnFirstEventID[rhs] ?? rhs)
     }
+    var foldedIndices = Set<Int>()
+    var trailing: [(agentID: String, runtime: [AgentEvent])] = []
     for agentID in ordered {
-        let runtime = openTurnsByAgent[agentID] ?? []
+        var runtime = openTurnsByAgent[agentID] ?? []
+        if let turnID = openTurnTurnIDByAgent[agentID],
+           let key = turnKey(owner: agentID, turnID: turnID),
+           let idx = completedTurnIndexByKey[key],
+           case let .completedTurn(_, _, oldFinal, oldRuntime) = result[idx] {
+            runtime = oldRuntime + [oldFinal] + runtime
+            foldedIndices.insert(idx)
+        }
+        trailing.append((agentID, runtime))
+    }
+    if !foldedIndices.isEmpty {
+        var filtered: [FeedItem] = []
+        filtered.reserveCapacity(result.count - foldedIndices.count)
+        for (i, item) in result.enumerated() where !foldedIndices.contains(i) {
+            filtered.append(item)
+        }
+        result = filtered
+    }
+    for t in trailing {
         result.append(.activeStream(
-            id: "stream-\(agentID)",
-            agentID: agentID,
-            runtimeEvents: runtime
+            id: "stream-\(t.agentID)",
+            agentID: t.agentID,
+            runtimeEvents: t.runtime
         ))
     }
 
