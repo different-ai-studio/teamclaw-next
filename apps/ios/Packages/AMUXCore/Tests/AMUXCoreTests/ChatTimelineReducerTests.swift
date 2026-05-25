@@ -956,6 +956,63 @@ struct ReducerHistorySeedClearsStreamingTests {
     }
 }
 
+@Suite("ChatTimelineReducer — turnID propagation on tool / thinking entries")
+struct ReducerTurnIDPropagationTests {
+    @Test("toolUse entry carries the envelope's turnID")
+    func toolUseStampsTurnID() {
+        var state = TimelineState()
+        var use = Amux_AcpEvent()
+        use.event = .toolUse(makeToolUse(toolID: "t-1", toolName: "Bash", description: "cd /tmp"))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "TURN-42",
+                          acpEvent: use)),
+            to: &state
+        )
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].eventType == "tool_use")
+        #expect(state.entries[0].turnID == "TURN-42",
+                "tool_use entry must carry turnID so buildFeedItems can fold it into the same bubble as the turn's output")
+    }
+
+    @Test("thinking entry carries the envelope's turnID")
+    func thinkingStampsTurnID() {
+        var state = TimelineState()
+        var think = Amux_AcpEvent()
+        var t = Amux_AcpThinking()
+        t.text = "let me think"
+        think.event = .thinking(t)
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "TURN-42",
+                          acpEvent: think)),
+            to: &state
+        )
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].eventType == "thinking")
+        #expect(state.entries[0].turnID == "TURN-42")
+    }
+
+    @Test("out-of-order toolResult entry carries the envelope's turnID")
+    func standaloneToolResultStampsTurnID() {
+        var state = TimelineState()
+        var result = Amux_AcpEvent()
+        result.event = .toolResult(makeToolResult(toolID: "t-orphan", success: true, summary: "ok"))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "TURN-42",
+                          acpEvent: result)),
+            to: &state
+        )
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].eventType == "tool_result")
+        #expect(state.entries[0].turnID == "TURN-42")
+    }
+}
+
 // MARK: - Helpers building Amux_AcpEvent sub-payloads
 
 private func makeOutput(text: String, isComplete: Bool) -> Amux_AcpOutput {
