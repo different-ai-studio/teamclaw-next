@@ -197,6 +197,9 @@ struct SessionComposer: View {
     // MARK: - Two-row capsule
 
     private static let composerCornerRadius: CGFloat = 28
+    private static let composerInputFontSize: CGFloat = 15
+    private static let composerAgentLabelFontSize: CGFloat = 14
+    private static let composerAgentIconFontSize: CGFloat = 16
 
     /// The LiquidGlass composer containing:
     ///   Row 1 — text field (or waveform when recording)
@@ -209,6 +212,7 @@ struct SessionComposer: View {
                 switch inputMode {
                 case .textField:
                     TextField("Send a message…", text: $promptText, axis: .vertical)
+                        .font(.system(size: Self.composerInputFontSize))
                         .lineLimit(2...6)
                         .focused($inputFocused)
                         .submitLabel(.return)
@@ -255,10 +259,10 @@ struct SessionComposer: View {
         Button { showAgentsSheet = true } label: {
             HStack(spacing: 4) {
                 Image(systemName: "at")
-                    .font(.body)
+                    .font(.system(size: Self.composerAgentIconFontSize))
                 if let labelText = agentButtonLabelText {
                     Text(labelText)
-                        .font(.subheadline.weight(.medium))
+                        .font(.system(size: Self.composerAgentLabelFontSize, weight: .medium))
                         .lineLimit(1)
                 }
             }
