@@ -110,6 +110,7 @@ public struct ToolCallView: View {
     public let description: String
     public let status: String
     @State private var isExpanded = false
+    @State private var pulse = false
 
     private var hasDetails: Bool {
         ToolDisplay.summary(for: description) != nil
@@ -127,88 +128,71 @@ public struct ToolCallView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 4) {
             Button {
                 if hasDetails { withAnimation(AMUXAnimation.fast) { isExpanded.toggle() } }
             } label: {
-                HStack(spacing: 6) {
-                    ZStack {
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                            .foregroundStyle(.secondary)
-                            .opacity(hasDetails ? 1 : 0)
-                    }
-                    .frame(width: 14)
+                HStack(spacing: 8) {
+                    statusDot
+                        .frame(width: 5, height: 5)
 
-                    Image(systemName: ToolIcons.icon(for: toolName))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
-
-                    Text(ToolIcons.shortName(for: toolName.isEmpty ? toolId : toolName))
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.primary)
+                    Text((toolName.isEmpty ? toolId : toolName).uppercased())
+                        .font(.system(size: 10, design: .monospaced))
+                        .tracking(1.5)
+                        .foregroundStyle(Color.amux.basalt)
                         .lineLimit(1)
 
-                    if let detailSummary, !isExpanded {
+                    if let detailSummary {
                         Text(detailSummary)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.amux.slate)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
 
-                    Spacer()
-
-                    statusIndicator
-                        .frame(width: 16)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(!hasDetails)
 
             if isExpanded && hasDetails {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Details")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 12) {
+                    Rectangle()
+                        .fill(Color.amux.hairline)
+                        .frame(width: 0.5)
                     Text(description)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.amux.basalt)
                         .lineLimit(10)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(6)
-                        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+                .padding(.leading, 13) // align under the mono tool name (dot 5 + gap 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
-    private var statusIndicator: some View {
+    private var statusDot: some View {
         switch status {
         case "running":
-            ProgressView()
-                .scaleEffect(0.6)
-                .frame(width: 14, height: 14)
+            Circle()
+                .fill(Color.amux.sage)
+                .opacity(pulse ? 0.45 : 1.0)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                        pulse = true
+                    }
+                }
         case "completed":
-            Image(systemName: "checkmark.circle.fill")
-                .font(.caption2)
-                .foregroundStyle(Color.amux.sage)
+            Circle().fill(Color.amux.slate)
         case "failed":
-            Image(systemName: "xmark.circle.fill")
-                .font(.caption2)
-                .foregroundStyle(Color.amux.cinnabarDeep)
+            Circle().fill(Color.amux.cinnabarDeep)
         default:
-            EmptyView()
+            Circle().fill(Color.amux.slate.opacity(0.4))
         }
     }
 }
@@ -218,6 +202,7 @@ public struct ToolCallView: View {
 public struct CompactToolLine: View {
     public let event: AgentEvent
     @State private var showDetail = false
+    @State private var showResult = false
 
     private var toolName: String { event.toolName ?? "" }
     private var description: String { event.text ?? "" }
@@ -231,58 +216,103 @@ public struct CompactToolLine: View {
         ToolDisplay.summary(for: description)
     }
 
+    private var resultSummary: String? {
+        guard let s = event.resultSummary, !s.isEmpty else { return nil }
+        return s
+    }
+
     public init(event: AgentEvent) {
         self.event = event
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: succeeded ? "checkmark" : "xmark")
-                    .font(.system(size: 9))
-                    .foregroundStyle(succeeded ? .green : .red)
-                    .frame(width: 14)
-
-                Image(systemName: ToolIcons.icon(for: toolName))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-
-                Text(ToolIcons.shortName(for: toolName.isEmpty ? (event.toolId ?? "") : toolName))
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                if let detailSummary {
-                    Text(detailSummary)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 1)
-            .contentShape(Rectangle())
-            .onTapGesture {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
                 if hasDetails {
                     withAnimation(AMUXAnimation.fast) { showDetail.toggle() }
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(succeeded ? Color.amux.slate : Color.amux.cinnabarDeep)
+                        .frame(width: 5, height: 5)
+
+                    Text((toolName.isEmpty ? (event.toolId ?? "") : toolName).uppercased())
+                        .font(.system(size: 10, design: .monospaced))
+                        .tracking(1.5)
+                        .foregroundStyle(Color.amux.basalt)
+                        .lineLimit(1)
+
+                    if let detailSummary {
+                        Text(detailSummary)
+                            .font(.caption2)
+                            .foregroundStyle(Color.amux.slate)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(!hasDetails)
 
             if showDetail && hasDetails {
-                Text(description)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 4)
+                HStack(alignment: .top, spacing: 12) {
+                    Rectangle()
+                        .fill(Color.amux.hairline)
+                        .frame(width: 0.5)
+                    Text(description)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.amux.basalt)
+                        .lineLimit(10)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.leading, 13)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if let summary = resultSummary {
+                Button {
+                    withAnimation(AMUXAnimation.fast) { showResult.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("RESULT")
+                            .font(.system(size: 9, design: .monospaced))
+                            .tracking(2)
+                            .foregroundStyle(Color.amux.slate)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .medium))
+                            .rotationEffect(.degrees(showResult ? 90 : 0))
+                            .foregroundStyle(Color.amux.slate.opacity(0.6))
+                    }
+                    .padding(.leading, 13)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showResult {
+                    HStack(alignment: .top, spacing: 12) {
+                        Rectangle()
+                            .fill(Color.amux.hairline)
+                            .frame(width: 0.5)
+                        Text(summary)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color.amux.basalt)
+                            .textSelection(.enabled)
+                            .lineLimit(20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.leading, 13)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
     }
 }
 

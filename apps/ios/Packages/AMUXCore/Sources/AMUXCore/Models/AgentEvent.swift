@@ -44,6 +44,10 @@ public final class AgentEvent {
     /// pre-turn_id rows and for kinds that don't have a turn
     /// (user prompts, system notices, permission requests).
     public var turnID: String?
+    /// Mirror of `TimelineEntry.resultSummary` — populated on `tool_use`
+    /// rows when the matching `ToolResult` envelope lands. nil while the
+    /// tool is still running or for non-tool_use rows.
+    public var resultSummary: String?
 
     public init(agentId: String, sequence: Int, eventType: String) {
         self.id = UUID().uuidString

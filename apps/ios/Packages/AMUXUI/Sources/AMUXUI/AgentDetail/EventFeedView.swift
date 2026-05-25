@@ -448,53 +448,67 @@ public struct CompletedTurnBubbleView<DetailIcon: View>: View {
 }
 
 // MARK: - ThinkingBlockView
+//
+// Hai-language thinking row: mono uppercase eyebrow + slate inline preview.
+// Expanded body sits behind a hairline left-rule indent, no card chrome,
+// matching the wabi-sabi "spare the vermillion + trace of the hand" rules
+// in `apps/ios/DESIGN.md`.
 
 struct ThinkingBlockView: View {
     let text: String
     @State private var isExpanded = false
 
+    private var trimmedPreview: String {
+        let collapsed = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard collapsed.count > 80 else { return collapsed }
+        return String(collapsed.prefix(80)) + "…"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
             } label: {
-                HStack(spacing: 6) {
-                    ZStack {
-                        Image(systemName: "chevron.right")
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                HStack(spacing: 8) {
+                    Text("THINKING")
+                        .font(.system(size: 9, design: .monospaced))
+                        .tracking(2)
+                        .foregroundStyle(Color.amux.slate)
+                    if !isExpanded, !trimmedPreview.isEmpty {
+                        Text(trimmedPreview)
                             .font(.caption2)
-                    }
-                    .frame(width: 14)
-                    Image(systemName: "brain")
-                        .font(.caption)
-                        .frame(width: 16)
-                    Text("Thinking")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    if !isExpanded {
-                        Text(text.prefix(60) + (text.count > 60 ? "…" : ""))
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Color.amux.slate)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .medium))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .foregroundStyle(Color.amux.slate.opacity(0.6))
                 }
-                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .liquidGlass(in: RoundedRectangle(cornerRadius: 10), interactive: false)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                HStack(alignment: .top, spacing: 12) {
+                    Rectangle()
+                        .fill(Color.amux.hairline)
+                        .frame(width: 0.5)
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(Color.amux.basalt)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 }
 

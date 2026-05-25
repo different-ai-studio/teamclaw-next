@@ -42,6 +42,11 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
     /// nil for pre-turn_id rows and for kinds that don't have a turn
     /// (user_prompt, system, permission, etc.).
     public var turnID: String?
+    /// Result summary text from the matching `ToolResult` envelope,
+    /// written onto a `tool_use` entry when the result arrives. nil while
+    /// the tool is still running or for non-tool_use rows. Renders as an
+    /// embedded disclosure under the tool card in the turn detail view.
+    public var resultSummary: String?
 
     public init(id: String = UUID().uuidString,
                 sequence: UInt64 = 0,
@@ -57,7 +62,8 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
                 supabaseMessageID: String? = nil,
                 clientID: String? = nil,
                 outboxMessageID: String? = nil,
-                turnID: String? = nil) {
+                turnID: String? = nil,
+                resultSummary: String? = nil) {
         self.id = id
         self.sequence = sequence
         self.eventType = eventType
@@ -73,6 +79,7 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
         self.clientID = clientID
         self.outboxMessageID = outboxMessageID
         self.turnID = turnID
+        self.resultSummary = resultSummary
     }
 }
 
@@ -96,6 +103,16 @@ public struct TimelineState: Equatable, Sendable {
     /// `status_change=idle`.
     public var streamingAgentSet: Set<String> = []
 
+    /// Per-agent active turn id while a stream is in flight, captured
+    /// on the first delta of the turn. The MQTT subscribe loop reads
+    /// this on reconnect to call `requestTurnHistory(...)` for any
+    /// agent whose stream the broker may have left mid-turn — replays
+    /// the missing envelopes (including the trailing
+    /// `status_change=idle`) so the activeStream card clears instead
+    /// of hanging until the user pulls-to-refresh. Cleared in lockstep
+    /// with `streamingAgentSet` whenever the turn finalises.
+    public var streamingTurnIDByAgent: [String: String] = [:]
+
     /// Most recent slash-command catalog the daemon advertised. The
     /// composer's popup reads this directly.
     public var availableCommands: [SlashCommand] = []
@@ -104,11 +121,13 @@ public struct TimelineState: Equatable, Sendable {
                 streamingTextByAgent: [String: String] = [:],
                 streamingModelByAgent: [String: String] = [:],
                 streamingAgentSet: Set<String> = [],
+                streamingTurnIDByAgent: [String: String] = [:],
                 availableCommands: [SlashCommand] = []) {
         self.entries = entries
         self.streamingTextByAgent = streamingTextByAgent
         self.streamingModelByAgent = streamingModelByAgent
         self.streamingAgentSet = streamingAgentSet
+        self.streamingTurnIDByAgent = streamingTurnIDByAgent
         self.availableCommands = availableCommands
     }
 }
