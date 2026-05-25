@@ -547,20 +547,39 @@ public struct SessionDetailView: View {
                     // turns benefit from giving the user access to the
                     // turn's daemon-recorded trace (model, timing, future
                     // tool calls if requestTurnHistory finds them).
+                    //
+                    // Pebble-filled capsule with cinnabar label so the
+                    // affordance reads as a button rather than decoration.
+                    // Previous 13pt secondary glyph was easy to miss; the
+                    // bubble shows only the final reply text now, so the
+                    // turn's thinking + tool calls only surface here.
                     NavigationLink(
                         destination: StreamingDetailView(
                             route: TurnRoute(agentID: agentID, frozenTurnID: id),
                             viewModel: viewModel
                         )
                     ) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.secondary)
-                            .padding(8)
-                            .contentShape(Rectangle())
+                        HStack(spacing: 3) {
+                            Image(systemName: "list.bullet.indent")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("过程")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(Color.amux.cinnabar)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(Color.amux.pebble.opacity(0.85))
+                                .overlay(
+                                    Capsule().stroke(Color.amux.hairline, lineWidth: 0.5)
+                                )
+                        )
+                        .padding(6)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Show streaming detail")
+                    .accessibilityLabel("查看过程")
                 }
             )
         }

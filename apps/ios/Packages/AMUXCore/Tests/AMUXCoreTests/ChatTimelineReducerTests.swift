@@ -221,6 +221,103 @@ struct ReducerToolResultPairingTests {
         #expect(state.entries.count == 1)
         #expect(state.entries[0].eventType == "tool_result")
     }
+
+    @Test("toolUse arriving mid-stream flushes the buffered text as a complete output entry")
+    func toolUseFlushesPendingStreamText() {
+        var state = TimelineState()
+        // Two streaming deltas land in the per-agent buffer.
+        for chunk in ["I'll ", "use the Read tool. "] {
+            var delta = Amux_AcpEvent()
+            delta.event = .output(makeOutput(text: chunk, isComplete: false))
+            ChatTimelineReducer.apply(
+                .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
+                              agentBucketKey: "agent", timestamp: .now,
+                              turnID: "turn-A",
+                              acpEvent: delta)),
+                to: &state
+            )
+        }
+        #expect(state.streamingTextByAgent["agent"] == "I'll use the Read tool. ")
+        #expect(state.entries.isEmpty)
+
+        // ToolUse cuts in. The buffered prefix must persist as its own
+        // complete output entry (segment 1) BEFORE the tool_use row so
+        // the detail view can render text → tool, not all-tools-then-text.
+        var use = Amux_AcpEvent()
+        use.event = .toolUse(makeToolUse(toolID: "t-1", toolName: "Read", description: "reading SKILL.md"))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 5, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "turn-A",
+                          acpEvent: use)),
+            to: &state
+        )
+
+        #expect(state.entries.count == 2,
+                "mid-turn flush must persist the buffered text as a per-segment output entry alongside the new tool_use")
+        let segment = state.entries[0]
+        #expect(segment.eventType == "output")
+        #expect(segment.text == "I'll use the Read tool. ")
+        #expect(segment.isComplete)
+        #expect(segment.turnID == "turn-A")
+        #expect(segment.sequence == 0,
+                "synthetic segment must not borrow the ToolUse envelope's sequence — the sequence dedupe would otherwise swallow the originating tool envelope on replay")
+        #expect(state.entries[1].eventType == "tool_use")
+        #expect(state.streamingTextByAgent["agent"] == nil,
+                "buffer must be cleared so the next delta starts a fresh segment")
+        #expect(state.streamingAgentSet.contains("agent"),
+                "turn is still in flight, so the streaming flag must stay set")
+    }
+
+    @Test("ToolUse flush skips the synthetic segment when an identical one already exists")
+    func toolUseFlushDedupesOnReplay() {
+        var state = TimelineState()
+        // First pass: seed deltas + ToolUse.
+        var d1 = Amux_AcpEvent()
+        d1.event = .output(makeOutput(text: "thinking aloud ", isComplete: false))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "turn-X",
+                          acpEvent: d1)),
+            to: &state
+        )
+        var use = Amux_AcpEvent()
+        use.event = .toolUse(makeToolUse(toolID: "t-1", toolName: "Read", description: "reading"))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "turn-X",
+                          acpEvent: use)),
+            to: &state
+        )
+        #expect(state.entries.count == 2)
+
+        // Daemon restart renumbers sequence space but keeps the same
+        // turn_id. The Output delta re-seeds the streaming buffer, the
+        // ToolUse handler hits my flush logic again — but the same
+        // (bucket, turnID, text) segment already exists, so the
+        // synthetic entry must be skipped. The replayed ToolUse merges
+        // back onto the existing tool_use row via toolID, not append.
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 50, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "turn-X",
+                          acpEvent: d1)),
+            to: &state
+        )
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 100, runtimeID: "rt",
+                          agentBucketKey: "agent", timestamp: .now,
+                          turnID: "turn-X",
+                          acpEvent: use)),
+            to: &state
+        )
+        #expect(state.entries.count == 2,
+                "replayed deltas + ToolUse must dedupe against the existing per-segment entry")
+        #expect(state.entries.filter { $0.eventType == "output" }.count == 1)
+        #expect(state.entries.filter { $0.eventType == "tool_use" }.count == 1)
+    }
 }
 
 @Suite("ChatTimelineReducer — plan replace (case 3)")
@@ -633,12 +730,12 @@ struct ReducerHistoryCrossDedupeTests {
     }
 }
 
-// MARK: - turn_id history merge (case 8)
+// MARK: - turn_id history segments (case 8)
 
-@Suite("ChatTimelineReducer — history same-turn merge (case 8)")
+@Suite("ChatTimelineReducer — history per-segment turns (case 8)")
 struct ReducerHistoryTurnMergeTests {
-    @Test("two AgentReply rows with same turn_id merge into one bubble")
-    func sameTurnMergesIntoOneEntry() {
+    @Test("two AgentReply rows with same turn_id stay as separate entries")
+    func sameTurnStaysAsSeparateEntries() {
         var state = TimelineState()
         let t0 = Date(timeIntervalSince1970: 1_000)
         let t1 = Date(timeIntervalSince1970: 1_001)
@@ -662,9 +759,11 @@ struct ReducerHistoryTurnMergeTests {
                                           turnID: "turn-A")),
             to: &state
         )
-        #expect(state.entries.count == 1, "same turnID rows must merge")
-        #expect(state.entries[0].text == "I'll use the Read tool. Now I see — the answer is 42.")
-        #expect(state.entries[0].turnID == "turn-A")
+        #expect(state.entries.count == 2,
+                "multi-segment turn must keep per-segment entries so the detail view can interleave text + tools")
+        #expect(state.entries[0].text == "I'll use the Read tool. ")
+        #expect(state.entries[1].text == "Now I see — the answer is 42.")
+        #expect(state.entries.allSatisfy { $0.turnID == "turn-A" })
     }
 
     @Test("different turn_id keeps rows separate")
