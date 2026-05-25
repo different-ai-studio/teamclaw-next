@@ -63,45 +63,76 @@ Non-goals:
 
 ### 3.1 Data model
 
-`AgentEvent` (`apps/ios/Packages/AMUXCore/Sources/AMUXCore/Models/AgentEvent.swift`):
+`TimelineEntry` (`apps/ios/Packages/AMUXCore/Sources/AMUXCore/Timeline/TimelineState.swift`)
+and `AgentEvent` (`apps/ios/Packages/AMUXCore/Sources/AMUXCore/Models/AgentEvent.swift`):
 
-- `metadata` JSON gains a new optional key `tool_result` with shape
-  `{ "success": bool, "summary": string }`, populated on `tool_use` events
-  when their matching `ToolResult` envelope arrives. No standalone
-  `tool_result` entry is produced.
-- `isComplete` semantics narrows from "the whole turn has ended" to "this
-  segment has ended." For non-output events the field is unused (kept
-  `true` on emission for back-compat).
+- Add `resultSummary: String?`. Populated on `tool_use` rows when the
+  matching `ToolResult` envelope arrives. `success` (already exists)
+  plus `resultSummary` together represent the embedded tool result. No
+  standalone `tool_result` entry is produced on the reducer path; the
+  defensive `tool_result` branch for out-of-order arrivals stays as is.
+- `isComplete` on `output` rows narrows from "the whole turn has ended"
+  to "this segment has ended." For non-output rows the field keeps its
+  existing semantics (tool_use complete = result arrived; permission
+  complete = resolved; etc.).
 
-No new event types. No new entities.
+`TimelineState` (same file) gets one new scratch field:
+
+- `openSegmentByTurn: [String: UInt64]` — keyed by `"\(bucket)|\(turnID)"`,
+  value is the `sequence` of the segment's first `Output` chunk (the
+  segment id). Cleared per-key when a `ToolUse` arrives in that turn or
+  the turn flips to Idle.
+
+`TimelineSwiftDataSync` copies `resultSummary` between `TimelineEntry`
+and `AgentEvent`. No new event types, no new entities, no Supabase
+schema change.
+
+**Production data flow** (verified): `SessionDetailViewModel.handleAcpEvent`
+→ `applyTimelineInput(.acp(...))` → `ChatTimelineReducer.applyAcp` writes
+`timelineState.entries` → `TimelineSwiftDataSync.sync(state:into:)`
+projects entries to the SwiftData `events` array → `recomputeGroups`
+builds `feedItems` via `FeedItem.buildFeedItems(events)` →
+`StreamingDetailView` iterates `snapshot.events` (derived from the
+selected `FeedItem`) → `EventFeedView` / `EventBubbleView` renders. No
+view code reads the reducer state directly; everything flows through
+the SwiftData projection. Reducer changes are visible to the view
+without further wiring.
 
 ### 3.2 Reducer — `ChatTimelineReducer`
 
-New per-bucket-per-turn transient state: `openSegmentId: Int?` (the
-`sequence` of the segment's first `Output` chunk, used as the segment's
-stable id).
+`applyAcp` is reworked around segment boundaries keyed by
+`state.openSegmentByTurn["\(bucket)|\(turnID ?? "")"]`. The existing
+"primary turn-id dedupe" block at the top of `applyAcp`
+(`ChatTimelineReducer.swift:38-59`) is replaced by the new segment-aware
+matcher (see helper change below).
 
-Reducer rules per incoming envelope kind:
+Per incoming envelope kind:
 
 | Envelope | Action |
 |---|---|
-| `Output(partial)` | If `openSegmentId == nil`: open a new segment, allocate `segmentId = envelope.sequence`, create an `output` entry with that `segmentId` and the chunk text. Else: append chunk text to the entry keyed by `(bucket, turnID, openSegmentId)`. |
-| `Output(isComplete=true)` | Same append/open logic as partial. Then mark the entry `isComplete = true` and clear `openSegmentId`. (For old single-shot rows that come complete-only with no prior partials, this still produces a valid 1-chunk segment.) |
-| `ToolUse` | If `openSegmentId != nil`, mark the corresponding entry `isComplete = true` and clear `openSegmentId`. Then create a `tool_use` entry with `metadata.tool_id, tool_name, description` as today. |
-| `ToolResult` | Locate the `tool_use` entry with matching `(bucket, turnID, metadata.tool_id)`. Merge `{success, summary}` into its `metadata.tool_result`. No new entry. If no matching tool_use is found (out-of-order / missing tool_use), drop silently (acceptable for dev period). |
+| `Output(partial)` (`!o.isComplete`) | Compose key `k = "\(bucket)|\(turnID ?? "")"`. If `state.openSegmentByTurn[k] == nil`: open a new segment — set `segmentSeq = envelopeSequence`, write `openSegmentByTurn[k] = segmentSeq`, append a new `output` entry with `sequence = segmentSeq`, `isComplete = false`, `text = o.text`, `turnID`, `model`. Else: locate the entry via `findOutputSegmentEntry(bucket, turnID, segmentSeq: openSegmentByTurn[k]!)` and append `o.text` to its `text`. Always update `streamingTextByAgent[bucket] += o.text`, `streamingAgentSet.insert(bucket)`, `streamingModelByAgent[bucket] = acpEvent.model` (same as today). |
+| `Output(isComplete=true)` | Run the open/append logic from the partial row first (with the complete chunk's text). Then mark the located entry's `isComplete = true`, clear `openSegmentByTurn[k]`. Update `streamingAgentSet.remove(bucket)`, `streamingTextByAgent[bucket] = nil`, `streamingModelByAgent[bucket] = nil`. |
+| `ToolUse` | Compose `k`. If `openSegmentByTurn[k] != nil`, locate the matching output entry, set `isComplete = true`, clear `openSegmentByTurn[k]`. Then upsert a `tool_use` entry by `(bucket, toolID)` — existing branch at `ChatTimelineReducer.swift:136-157` stays. |
+| `ToolResult` | Locate the `tool_use` entry with `toolID == tr.toolID` (existing branch, line 159-175). Set `success = tr.success`, `resultSummary = tr.summary`, `isComplete = true`. The defensive standalone-`tool_result` append for the no-match case (line 163-175) stays. |
 | `Thinking` | Existing handling unchanged. Thinking does **not** open or close output segments — a reply can resume after a thinking block without forcing a new segment (matches daemon: thinking and reply share buffers, only `ToolUse` flushes). |
-| `StatusChange Active→Idle` | If `openSegmentId != nil`, mark its entry `isComplete = true` and clear. Tail-flush fallback. |
+| `StatusChange Active→Idle` | Walk `openSegmentByTurn` for every key prefixed `"\(bucket)|"`: locate the matching output entry, set `isComplete = true`, remove the key. Existing branch at `ChatTimelineReducer.swift:222-245` that synthesizes a fallback `output` entry from `streamingTextByAgent[bucket]` is removed — the openSegmentByTurn flush always finds the entry it needs (since open segment ⇔ non-empty streaming buffer). The tool_use closing loop at lines 239-244 stays. |
 
-Dedupe key for `output` entries changes from
-`(bucket, turnID, "output", isComplete)` to
-`(bucket, turnID, "output", segmentId)`. Same envelope replayed (live +
-history overlap, or two history fetches) lands on the same entry and is
-idempotent. Non-output event types (`tool_use`, `thinking`, etc.) keep
-their existing dedupe rules unchanged.
+Dedupe / lookup change: the existing `outputCompleteIndex(for:turnID:)`
+helper at `ChatTimelineReducer.swift:553-571` is replaced by
+`findOutputSegmentEntry(bucket:turnID:segmentSeq:)` that matches
+`(bucket, turnID, sequence == segmentSeq)`. The top-of-function turn-id
+dedupe block at lines 38-59 is removed: replays of the same envelope
+now land on the same segment entry by `(bucket, turnID, sequence)` and
+are idempotent without a special-cased early return. Non-output event
+types (`tool_use`, `thinking`, etc.) keep their existing per-type
+dedupe.
 
-`openSegmentId` lives in the reducer's `TimelineState` keyed by
-`(bucket, turnID)`. Cleared when `StatusChange Active→Idle` arrives or when
-the turn's entries are pruned.
+The history path (`applyHistory`, line 296+) currently runs a
+"same-turn merge" at lines 421-454 that concatenates multiple Supabase
+`AgentReply` rows into one bubble when they share `turnID`. This branch
+**stays** — `applyHistory` is fed from Supabase rows, which contain the
+whole reply with no segment metadata; segmentation only applies to the
+`applyAcp` path that processes daemon envelopes.
 
 ### 3.3 Feed `finalEvent` selection
 
@@ -125,12 +156,13 @@ already the right shape.
 
 `EventBubbleView`:
 
-- `tool_use` case: render the tool card as today, plus an embedded result
-  region driven by `metadata.tool_result`. Collapsed by default with a
-  success/failure indicator; tap to expand the result text. If
-  `metadata.tool_result` is absent, show a "running…" placeholder.
-- `tool_result` case: removed (results no longer arrive as standalone
-  entries from the reducer).
+- `tool_use` case: render the tool card as today, plus an embedded
+  result region driven by `event.resultSummary` and `event.success`.
+  Collapsed by default with a success/failure indicator; tap to expand
+  the summary text. If `event.isComplete == false` (no matching
+  ToolResult yet), show a "running…" placeholder.
+- `tool_result` case: kept for the defensive out-of-order arrival
+  branch in `ChatTimelineReducer.swift:163-175`; renders as today.
 - All other cases unchanged.
 
 ### 3.5 Historical compatibility
@@ -150,8 +182,8 @@ Reducer unit tests in
    entry, text fully merged, `isComplete = true`.
 2. **Tool interrupts reply**: `Output(A) → Output(B) → ToolUse → ToolResult
    → Output(C) → idle`. Expect entries in `sequence` order: output("AB",
-   complete), tool_use (metadata.tool_result populated), output("C",
-   complete).
+   complete), tool_use (`success` + `resultSummary` populated, `isComplete`
+   true), output("C", complete).
 3. **Two consecutive tools, no intervening text**: `Output(A) → Tool₁ →
    Result₁ → Tool₂ → Result₂ → Output(B) → idle`. Expect output("A"),
    tool₁, tool₂, output("B"). No phantom empty output entry between the
@@ -175,7 +207,7 @@ Reducer unit tests in
 Tool-result-embedded rendering: extend
 `apps/ios/Packages/AMUXSharedUI/Tests/AMUXSharedUITests/ToolDisplayTests.swift`
 with a case that asserts the tool card renders both name and result
-summary when `metadata.tool_result` is set.
+summary when `event.resultSummary` and `event.success` are set.
 
 SwiftUI snapshot tests for `EventFeedView` / `StreamingDetailView` are
 intentionally skipped — low ROI on iOS 26 for this kind of structural
@@ -183,20 +215,23 @@ change.
 
 ## Risks and edge cases
 
-- **`SessionDetailView.activeStreamLastLine`** currently expects "one
-  rolling output line"; with segments it should read from the open
-  segment's entry. Behaviorally near-identical but worth a spot-check in
-  the live preview.
-- **Main feed visual regression**: feed summary now shows the *last* reply
-  segment instead of the whole concatenated reply. For turns that end with
-  tool-only activity and no trailing text, fallback rule applies. Watch
-  feed during development; if the trailing-segment summary looks too
-  truncated, we can revisit feed rule in a follow-up (out of scope here).
+- **`SessionDetailView.activeStreamLastLine`** currently feeds off
+  `streamingTextByAgent[bucket]`; behavior is preserved because that
+  buffer is updated identically (per-bucket rolling concatenation).
+- **Main feed visual regression**: feed summary now shows the *last*
+  reply segment instead of the whole concatenated reply. For turns that
+  end with tool-only activity and no trailing text, the fallback in
+  `FeedItem.completedTurn.finalEvent` picks the last non-empty entry.
+  Watch feed during development; revisit in a follow-up if the
+  trailing-segment summary looks too truncated.
 - **Dedupe pruning**: `pruneDuplicateRuntimeEvents`
   (`SessionDetailViewModel.swift:286`) currently expects the old
   per-turn-single-output invariant. Audit the prune logic — it must
-  preserve multi-segment same-turn entries.
-- **Reducer state size**: `openSegmentId` is one optional Int per active
+  preserve multi-segment same-turn entries (distinct `sequence` per
+  segment).
+- **`TimelineSwiftDataSync` field coverage**: the sync helper must
+  project `resultSummary` between `TimelineEntry` and `AgentEvent`.
+- **Reducer state size**: `openSegmentByTurn` is one `UInt64` per active
   turn, cleared on Idle. Negligible.
 
 ## Out of scope
