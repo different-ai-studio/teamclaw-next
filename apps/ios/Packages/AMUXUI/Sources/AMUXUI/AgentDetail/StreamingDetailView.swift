@@ -55,6 +55,10 @@ public struct StreamingDetailView: View {
     let route: TurnRoute
     @Bindable var viewModel: SessionDetailViewModel
     @State private var todoDockCollapsed = true
+    @Query(sort: \CachedActor.displayName) private var cachedActors: [CachedActor]
+    private var cachedActorMap: CachedActorMap {
+        CachedActorMap(nameByActorID: Dictionary(uniqueKeysWithValues: cachedActors.map { ($0.actorId, $0.displayName) }))
+    }
     /// Snapshot of the resolved turn, rebuilt only when feedItems changes
     /// (not on every streaming-text delta). During streaming, feedItems is
     /// stable between tool_use/thinking events so the sort + feedItems walk
@@ -180,7 +184,8 @@ public struct StreamingDetailView: View {
                             // suppressing the per-bubble caption keeps
                             // this view's left margin clean and avoids
                             // repeating identity on every assistant row.
-                            showsAssistantHeader: false
+                            showsAssistantHeader: false,
+                            actorMap: cachedActorMap
                         )
                         .id(event.id)
                     }

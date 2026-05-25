@@ -3,6 +3,19 @@ import SwiftData
 import AMUXCore
 import AMUXSharedUI
 
+// MARK: - CachedActorMap
+
+/// Lightweight snapshot of actorID → displayName, built once at the parent
+/// from a single `@Query` and passed down so each bubble doesn't register
+/// its own SwiftData observation. With 100 visible bubbles the old approach
+/// caused 100 separate re-renders on every CachedActor change.
+public struct CachedActorMap: Sendable {
+    public static let empty = CachedActorMap(nameByActorID: [:])
+    public let nameByActorID: [String: String]
+    public init(nameByActorID: [String: String]) { self.nameByActorID = nameByActorID }
+    public func displayName(for actorID: String) -> String? { nameByActorID[actorID] }
+}
+
 // MARK: - EventBubbleView
 
 public struct EventBubbleView: View {
@@ -18,27 +31,27 @@ public struct EventBubbleView: View {
     /// already painted into the nav-bar title for the whole turn so the
     /// per-bubble caption would just be redundant.
     let showsAssistantHeader: Bool
+    /// Actor map built by the parent once per recomputeGroups cycle.
+    /// Replaces the per-row @Query(CachedActor) so ~100 bubbles don't
+    /// each register a SwiftData observation.
+    let actorMap: CachedActorMap
 
     @Environment(\.horizontalSizeClass) private var sizeClass
-    /// Resolves AgentEvent.senderActorID into a display name. Local user
-    /// renders as "You"; everyone else gets the matching CachedActor row's
-    /// displayName, falling back to the truncated actor id when the
-    /// directory hasn't synced yet.
-    @Query(sort: \CachedActor.displayName) private var cachedActors: [CachedActor]
-
     @State private var fullscreenImageContext: FullscreenImageContext?
 
     public init(event: AgentEvent, runtime: Runtime? = nil,
                 onGrant: ((String, String?) -> Void)? = nil,
                 onDeny: ((String, String?) -> Void)? = nil,
                 onRetryOutbox: ((String) -> Void)? = nil,
-                showsAssistantHeader: Bool = true) {
+                showsAssistantHeader: Bool = true,
+                actorMap: CachedActorMap = .empty) {
         self.event = event
         self.runtime = runtime
         self.onGrant = onGrant
         self.onDeny = onDeny
         self.onRetryOutbox = onRetryOutbox
         self.showsAssistantHeader = showsAssistantHeader
+        self.actorMap = actorMap
     }
 
     /// True when this event was produced by an actor other than the
@@ -63,9 +76,7 @@ public struct EventBubbleView: View {
     private var senderDisplayName: String {
         guard let senderID = event.senderActorID, !senderID.isEmpty else { return "You" }
         if senderID == currentActorID { return "You" }
-        if let actor = cachedActors.first(where: { $0.actorId == senderID }) {
-            return actor.displayName
-        }
+        if let name = actorMap.displayName(for: senderID) { return name }
         return String(senderID.prefix(8))
     }
 

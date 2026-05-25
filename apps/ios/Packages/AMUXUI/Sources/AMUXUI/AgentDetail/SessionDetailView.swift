@@ -9,6 +9,12 @@ public struct SessionDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: SessionDetailViewModel
+    /// Single actor-directory query shared by all EventBubbleView instances
+    /// in this session, replacing per-row @Query registrations.
+    @Query(sort: \CachedActor.displayName) private var cachedActors: [CachedActor]
+    private var cachedActorMap: CachedActorMap {
+        CachedActorMap(nameByActorID: Dictionary(uniqueKeysWithValues: cachedActors.map { ($0.actorId, $0.displayName) }))
+    }
     @State private var promptText = ""
     @State private var attachments: [URL] = []
     @State private var voiceRecorder = VoiceRecorder(contextualStrings: [
@@ -509,7 +515,8 @@ public struct SessionDetailView: View {
                     if let sender = viewModel.outboxSender {
                         Task { await sender.retry(messageID: msgID) }
                     }
-                }
+                },
+                actorMap: cachedActorMap
             )
         case .activeStream(_, let agentID, let runtimeEvents):
             // NavigationLink(destination:) instead of value-based push
