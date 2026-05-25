@@ -68,6 +68,12 @@ public struct StreamingDetailView: View {
     /// Resolved turn data. We re-derive on every render from the
     /// view-model's `feedItems` so streaming deltas + final-event arrival
     /// reflect immediately. Returns events + isActive flag.
+    ///
+    /// The returned list is sorted chronologically by `(timestamp,
+    /// sequence, id)` — same key as `SessionDetailViewModel`'s primary
+    /// sort. Without this, a turn split as text→tool→text would render
+    /// all tools first and the merged text last, because the `final`
+    /// output's timestamp is later than the buffered tool events.
     private var resolved: (events: [AgentEvent], isActive: Bool, agentName: String) {
         // Look for a frozen completed turn first — the user explicitly
         // pinned this when they tapped the bubble's detail icon.
@@ -75,8 +81,7 @@ public struct StreamingDetailView: View {
             for item in viewModel.feedItems {
                 if case .completedTurn(let id, let agentID, let final, let runtime) = item,
                    id == pinned {
-                    let all = runtime + [final]
-                    return (all, false, agentNameFor(agentID))
+                    return (chronologicallySorted(runtime + [final]), false, agentNameFor(agentID))
                 }
             }
         }
@@ -84,7 +89,7 @@ public struct StreamingDetailView: View {
         for item in viewModel.feedItems {
             if case .activeStream(_, let agentID, let runtime) = item,
                agentID == route.agentID {
-                return (runtime, true, agentNameFor(agentID))
+                return (chronologicallySorted(runtime), true, agentNameFor(agentID))
             }
         }
         // Fallback: the most recent completed turn for this agent (e.g.
@@ -92,11 +97,18 @@ public struct StreamingDetailView: View {
         for item in viewModel.feedItems.reversed() {
             if case .completedTurn(_, let agentID, let final, let runtime) = item,
                agentID == route.agentID {
-                let all = runtime + [final]
-                return (all, false, agentNameFor(agentID))
+                return (chronologicallySorted(runtime + [final]), false, agentNameFor(agentID))
             }
         }
         return ([], false, agentNameFor(route.agentID))
+    }
+
+    private func chronologicallySorted(_ events: [AgentEvent]) -> [AgentEvent] {
+        events.sorted { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            if lhs.sequence != rhs.sequence { return lhs.sequence < rhs.sequence }
+            return lhs.id < rhs.id
+        }
     }
 
     private func agentNameFor(_ agentID: String) -> String {

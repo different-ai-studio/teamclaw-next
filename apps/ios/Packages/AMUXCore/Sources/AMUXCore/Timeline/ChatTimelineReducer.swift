@@ -144,6 +144,49 @@ public enum ChatTimelineReducer {
             }
 
         case .toolUse(let tu):
+            // Mid-turn text flush: if the streaming buffer holds reply
+            // text that the agent emitted before this tool call, persist
+            // it as its own complete output entry first so the detail
+            // view shows text → tool → text instead of all-tools-then-
+            // text. The streaming buffer keeps accumulating after the
+            // tool returns; the next ToolUse or the Active→Idle flush
+            // produces another per-segment entry.
+            //
+            // sequence = 0 marks this as a synthetic entry not tied to
+            // a single envelope, so the envelopeSequence dedupe at the
+            // top doesn't mistake it for the originating ToolUse
+            // envelope. Replay dedupe: identical (bucket, turnID, text)
+            // already-flushed segments are skipped so requestTurnHistory
+            // doesn't double-emit.
+            if state.streamingAgentSet.contains(bucket),
+               let bufferedText = state.streamingTextByAgent[bucket],
+               !bufferedText.isEmpty {
+                let segmentTurnID = state.streamingTurnIDByAgent[bucket] ?? input.turnID
+                let alreadyFlushed = state.entries.contains { entry in
+                    entry.eventType == "output"
+                        && entry.isComplete
+                        && (entry.senderActorID ?? "") == bucket
+                        && entry.turnID == segmentTurnID
+                        && entry.text == bufferedText
+                }
+                if !alreadyFlushed {
+                    state.entries.append(makeEntry(
+                        sequence: 0,
+                        eventType: "output",
+                        text: bufferedText,
+                        senderActorID: bucket,
+                        timestamp: input.timestamp,
+                        model: state.streamingModelByAgent[bucket],
+                        isComplete: true,
+                        turnID: segmentTurnID
+                    ))
+                }
+                state.streamingTextByAgent[bucket] = nil
+                // streamingAgentSet stays — the turn is still in flight,
+                // and the next delta should keep appending to a fresh
+                // buffer without re-entering the firstDelta seed path.
+            }
+
             if let idx = state.entries.lastIndex(where: { $0.eventType == "tool_use" && $0.toolID == tu.toolID }) {
                 if !tu.description_p.isEmpty {
                     state.entries[idx].text = tu.description_p
@@ -234,15 +277,29 @@ public enum ChatTimelineReducer {
         case .statusChange(let sc):
             if sc.newStatus == .idle, state.streamingAgentSet.contains(bucket),
                let text = state.streamingTextByAgent[bucket], !text.isEmpty {
-                state.entries.append(makeEntry(
-                    sequence: input.envelopeSequence,
-                    eventType: "output",
-                    text: text,
-                    senderActorID: bucket,
-                    timestamp: input.timestamp,
-                    model: state.streamingModelByAgent[bucket],
-                    isComplete: true
-                ))
+                // Stamp the turnID we tracked across deltas so this final
+                // segment groups with any earlier mid-turn flushes under
+                // the same `.completedTurn`.
+                let segmentTurnID = state.streamingTurnIDByAgent[bucket] ?? input.turnID
+                let alreadyFlushed = state.entries.contains { entry in
+                    entry.eventType == "output"
+                        && entry.isComplete
+                        && (entry.senderActorID ?? "") == bucket
+                        && entry.turnID == segmentTurnID
+                        && entry.text == text
+                }
+                if !alreadyFlushed {
+                    state.entries.append(makeEntry(
+                        sequence: input.envelopeSequence,
+                        eventType: "output",
+                        text: text,
+                        senderActorID: bucket,
+                        timestamp: input.timestamp,
+                        model: state.streamingModelByAgent[bucket],
+                        isComplete: true,
+                        turnID: segmentTurnID
+                    ))
+                }
             }
             if sc.newStatus == .idle {
                 state.streamingAgentSet.remove(bucket)
@@ -433,40 +490,15 @@ public enum ChatTimelineReducer {
             return
         }
 
-        // Same-turn merge: when the daemon flushed a single logical turn
-        // into multiple AgentReply rows (ToolUse mid-stream cut), reload
-        // sees them as N separate rows. Walk back to find an existing
-        // entry with matching `turnID` + bucket and concatenate the
-        // text instead of producing a second bubble. Only applies to
-        // agent output kind — user_prompt rows are never split this way.
-        if eventType == "output",
-           let turnID = input.turnID,
-           !turnID.isEmpty,
-           let idx = state.entries.firstIndex(where: {
-               $0.eventType == "output"
-                   && $0.turnID == turnID
-                   && ($0.senderActorID ?? "") == (input.senderActorID ?? "")
-           }) {
-            let existing = state.entries[idx].text ?? ""
-            // Order earlier-row-first by createdAt: if the existing
-            // entry's timestamp is later, the incoming chunk belongs
-            // at the front. Production loads are createdAt-ordered so
-            // this branch is defensive.
-            if input.createdAt < state.entries[idx].timestamp {
-                state.entries[idx].text = input.content + existing
-                state.entries[idx].timestamp = input.createdAt
-            } else {
-                state.entries[idx].text = existing + input.content
-            }
-            if state.entries[idx].model == nil { state.entries[idx].model = input.model }
-            // Latest row's supabaseMessageID wins as the dedupe key for
-            // future re-seeds — first one stays, but we record this one
-            // too so a separate re-seed of either id stays a no-op.
-            if state.entries[idx].supabaseMessageID == nil {
-                state.entries[idx].supabaseMessageID = input.supabaseMessageID
-            }
-            return
-        }
+        // Multi-segment turns stay separate. The daemon's turn_aggregator
+        // flushes the reply buffer as its own AgentReply row whenever a
+        // ToolUse cuts the stream mid-turn, so a single turnID can map
+        // to multiple Supabase rows with different text content. The
+        // chat feed collapses these back into one bubble via
+        // `buildFeedItems`'s completedTurnIndexByKey, and the message-
+        // detail view sorts them chronologically alongside the tool
+        // rows; concatenating into a single entry here would discard
+        // the per-segment timestamps the detail view needs.
 
         state.entries.append(TimelineEntry(
             id: UUID().uuidString,
