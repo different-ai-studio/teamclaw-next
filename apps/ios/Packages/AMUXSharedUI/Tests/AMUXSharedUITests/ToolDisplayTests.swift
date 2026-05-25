@@ -35,7 +35,10 @@ struct CompactToolLineTests {
         event.success = true
         event.resultSummary = "12 lines"
 
+        // Smoke check: construct the view. Don't invoke .body — on macOS test
+        // host, SwiftUI @State views crash when body is accessed outside a
+        // hosting environment.
         let line = CompactToolLine(event: event)
-        _ = line.body  // Smoke check that init + body don't crash.
+        _ = line  // referenced to suppress unused-variable warning
     }
 }
