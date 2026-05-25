@@ -13,10 +13,26 @@ fi
 # Load root .env first. Its format is mixed — most lines are `KEY VALUE`
 # (space-separated, no `=`) which `source` cannot handle, so parse line
 # by line. Skip blanks and `#`-comments.
+trim_leading_space() {
+  local value="${1-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  printf '%s' "$value"
+}
+
+strip_accidental_equals_prefix() {
+  local value
+  value="$(trim_leading_space "${1-}")"
+  if [[ "$value" == =* ]]; then
+    value="${value#=}"
+    value="$(trim_leading_space "$value")"
+  fi
+  printf '%s' "$value"
+}
+
 if [ -f "$REPO_ROOT/.env" ]; then
   while IFS= read -r line; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
       export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
     elif [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+(.+)$ ]]; then
       export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
@@ -44,8 +60,9 @@ fi
 
 # Normalize names expected by s.yaml / FC runtime. The repo root .env
 # stores Aliyun creds under SRE_ACCESS_KEY_ID (preferred) or SLS_*.
-export ACCESS_KEY_ID="${ACCESS_KEY_ID:-${SRE_ACCESS_KEY_ID:-${SLS_ACCESS_KEY_ID:-}}}"
-export ACCESS_KEY_SECRET="${ACCESS_KEY_SECRET:-${SRE_ACCESS_KEY_SECRET:-${SLS_ACCESS_KEY_SECRET:-}}}"
+export ACCESS_KEY_ID="$(strip_accidental_equals_prefix "${ACCESS_KEY_ID:-${SRE_ACCESS_KEY_ID:-${SLS_ACCESS_KEY_ID:-}}}")"
+export ACCESS_KEY_SECRET="$(strip_accidental_equals_prefix "${ACCESS_KEY_SECRET:-${SRE_ACCESS_KEY_SECRET:-${SLS_ACCESS_KEY_SECRET:-}}}")"
+export ROLE_ARN="$(strip_accidental_equals_prefix "${ROLE_ARN:-}")"
 export LITELLM_URL="${LITELLM_URL:-${liteLLM_URL:-}}"
 export LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY:-${liteLLM_MASTER_KEY:-}}"
 export LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD="${LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD:-${liteLLM_DEFAULT_TEAM_MAX_BUDGET_USD:-}}"
@@ -87,4 +104,4 @@ export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}"
 npm install --omit=dev
 
 # Deploy
-s deploy -y
+printf 'yes\n' | s deploy -y
