@@ -38,6 +38,75 @@ public enum ChatTimelineReducer {
 
         switch input.acpEvent.event {
         case .output(let o):
+            // Guard 1: Replay of a completed turn. If we already have a
+            // completed output entry for this (bucket, turnID) AND no
+            // segment is currently open for that turn, this incoming
+            // envelope is a replay (daemon-restart resequenced history,
+            // or Supabase history seed overlapping with live). Update
+            // text in place and return — do NOT open a new segment.
+            if o.isComplete,
+               state.openSegmentByTurn[turnKey] == nil,
+               let turnID = input.turnID, !turnID.isEmpty,
+               let idx = state.entries.lastIndex(where: {
+                   $0.eventType == "output"
+                       && $0.isComplete
+                       && $0.turnID == turnID
+                       && ($0.senderActorID ?? "") == bucket
+               }) {
+                state.entries[idx].text = o.text
+                if !input.acpEvent.model.isEmpty {
+                    state.entries[idx].model = input.acpEvent.model
+                }
+                state.streamingAgentSet.remove(bucket)
+                state.streamingTextByAgent[bucket] = nil
+                state.streamingModelByAgent[bucket] = nil
+                return
+            }
+
+            // Guard 2: Sequence dedupe fallback for envelopes that lack
+            // a usable turnID. Same-sequence re-application would otherwise
+            // append a duplicate. Skip silently when we already have a
+            // *complete* entry at this (sequence, bucket) — applies only
+            // when turnID is missing because the turnID-based replay guard
+            // above already covers the keyed case. We require isComplete
+            // so that legitimate streaming deltas sharing a sequence number
+            // (no turnID path) still accumulate onto the open segment.
+            if input.envelopeSequence > 0,
+               (input.turnID?.isEmpty ?? true),
+               state.entries.contains(where: {
+                   $0.sequence == input.envelopeSequence
+                       && ($0.senderActorID ?? "") == bucket
+                       && $0.isComplete
+               }) {
+                return
+            }
+
+            // Guard 3: stop()-saved synthetic incomplete-output entries
+            // exist in state.entries but are NOT registered in
+            // openSegmentByTurn (they predate this reducer's segment
+            // tracking). A live completion event for this bucket should
+            // upgrade the sentinel in place rather than creating a
+            // second entry. Only fires when no segment is currently
+            // open for this turn.
+            if state.openSegmentByTurn[turnKey] == nil,
+               let idx = incompleteOutputIndex(for: bucket, in: state),
+               state.entries[idx].turnID == nil {
+                state.entries[idx].text = o.text
+                if !input.acpEvent.model.isEmpty {
+                    state.entries[idx].model = input.acpEvent.model
+                }
+                if o.isComplete {
+                    state.entries[idx].isComplete = true
+                    if let turnID = input.turnID, !turnID.isEmpty {
+                        state.entries[idx].turnID = turnID
+                    }
+                    state.streamingAgentSet.remove(bucket)
+                    state.streamingTextByAgent[bucket] = nil
+                    state.streamingModelByAgent[bucket] = nil
+                }
+                return
+            }
+
             // Locate or open this segment's entry.
             let segmentSeq: UInt64
             let entryIndex: Int
