@@ -135,6 +135,20 @@ public struct SessionDetailView: View {
                     await Task.yield()
                     proxy.scrollTo("session-detail-bottom", anchor: .bottom)
                 }
+                // Follow the bottom whenever the feed grows after the initial
+                // settle. `.defaultScrollAnchor(.bottom, for: .initialOffset)`
+                // only governs first paint, so without this the just-sent
+                // message lands beneath the composer's safeAreaInset and the
+                // user has to scroll manually to see it.
+                .onChange(of: viewModel.feedItems.count) { oldCount, newCount in
+                    guard initialAutoScrollSettled, newCount > oldCount else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(AMUXAnimation.fast) {
+                            proxy.scrollTo("session-detail-bottom", anchor: .bottom)
+                        }
+                    }
+                }
                 // Any scroll on the chat surface dismisses the keyboard.
                 // .interactively (iMessage-style finger-tracks-keyboard)
                 // got swallowed by the composer's nested TextField scroll
