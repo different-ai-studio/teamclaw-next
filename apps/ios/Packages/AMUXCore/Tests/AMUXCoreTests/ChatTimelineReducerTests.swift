@@ -28,8 +28,11 @@ struct ReducerStreamingOutputTests {
         )
         #expect(state.streamingAgentSet.contains("agent-1"))
         #expect(state.streamingTextByAgent["agent-1"] == "Hel")
-        #expect(state.entries.isEmpty,
-                "streaming deltas don't create entries until finalised")
+        // New segment-aware behavior: the first delta opens an entry immediately
+        // (isComplete: false). The entry accumulates text as more deltas arrive.
+        #expect(state.entries.count == 1)
+        #expect(state.entries[0].text == "Hel")
+        #expect(!state.entries[0].isComplete)
     }
 
     @Test("subsequent deltas append onto the open stream's buffer")
@@ -60,9 +63,11 @@ struct ReducerStreamingOutputTests {
                           acpEvent: delta)),
             to: &state
         )
-        // Final.
+        // Final chunk — contains only the remaining delta text, not the
+        // full accumulated text. The reducer appends this to the open
+        // segment entry so the total becomes "Hello, world".
         var done = Amux_AcpEvent()
-        done.event = .output(makeOutput(text: "Hello, world", isComplete: true))
+        done.event = .output(makeOutput(text: "lo, world", isComplete: true))
         done.model = "claude-opus-4-7"
         ChatTimelineReducer.apply(
             .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt-1",

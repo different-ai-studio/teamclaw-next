@@ -34,84 +34,54 @@ public enum ChatTimelineReducer {
 
     static func applyAcp(_ input: AcpInput, to state: inout TimelineState) {
         let bucket = input.agentBucketKey
-
-        // Turn-id dedupe (primary): same (bucket, turnID, output, isComplete)
-        // → idempotent merge regardless of sequence. This is what catches the
-        // "same logical completion arrives via MQTT live + daemon history
-        // replay + Supabase seed" duplication, since the daemon stamps
-        // turn_id on every envelope but renumbers sequence across restarts.
-        // Only the completion event needs this guard; deltas and other
-        // event types either don't dedupe by identity (deltas → streaming
-        // buffer) or arrive at most once per (sequence, bucket).
-        if case .output(let outComplete) = input.acpEvent.event,
-           outComplete.isComplete,
-           let turnID = input.turnID,
-           !turnID.isEmpty,
-           let idx = outputCompleteIndex(for: bucket, turnID: turnID, in: state) {
-            state.entries[idx].text = outComplete.text
-            if !input.acpEvent.model.isEmpty {
-                state.entries[idx].model = input.acpEvent.model
-            }
-            state.streamingAgentSet.remove(bucket)
-            state.streamingTextByAgent[bucket] = nil
-            state.streamingModelByAgent[bucket] = nil
-            return
-        }
-
-        // Sequence dedupe (fallback): same (sequence, bucket) → no-op.
-        // Holds across re-applications in a single daemon lifetime; does
-        // NOT survive daemon restarts (sequences renumber) — that's why
-        // the turn-id guard above is the primary path.
-        if input.envelopeSequence > 0,
-           state.entries.contains(where: { $0.sequence == input.envelopeSequence
-                                            && ($0.senderActorID ?? "") == input.agentBucketKey }) {
-            return
-        }
+        let turnKey = "\(bucket)|\(input.turnID ?? "")"
 
         switch input.acpEvent.event {
         case .output(let o):
-            if o.isComplete {
-                state.streamingAgentSet.remove(bucket)
-                if let idx = incompleteOutputIndex(for: bucket, in: state) {
-                    state.entries[idx].text = o.text
-                    state.entries[idx].isComplete = true
-                    // Backfill turnID so future replays for this turn match
-                    // by (bucket, turnID) and don't fall through to append.
-                    if let turnID = input.turnID,
-                       !turnID.isEmpty,
-                       state.entries[idx].turnID == nil {
-                        state.entries[idx].turnID = turnID
-                    }
-                    if !input.acpEvent.model.isEmpty {
-                        state.entries[idx].model = input.acpEvent.model
-                    }
-                } else {
-                    state.entries.append(makeEntry(
-                        sequence: input.envelopeSequence,
-                        eventType: "output",
-                        text: o.text,
-                        senderActorID: bucket,
-                        timestamp: input.timestamp,
-                        model: input.acpEvent.model.isEmpty ? nil : input.acpEvent.model,
-                        isComplete: true,
-                        turnID: input.turnID
-                    ))
+            // Locate or open this segment's entry.
+            let segmentSeq: UInt64
+            let entryIndex: Int
+            if let openSeq = state.openSegmentByTurn[turnKey],
+               let idx = findOutputSegmentEntry(bucket: bucket,
+                                                turnID: input.turnID,
+                                                segmentSeq: openSeq,
+                                                in: state) {
+                segmentSeq = openSeq
+                entryIndex = idx
+                state.entries[idx].text = (state.entries[idx].text ?? "") + o.text
+                if !input.acpEvent.model.isEmpty {
+                    state.entries[idx].model = input.acpEvent.model
                 }
+            } else {
+                segmentSeq = input.envelopeSequence
+                state.entries.append(makeEntry(
+                    sequence: segmentSeq,
+                    eventType: "output",
+                    text: o.text,
+                    senderActorID: bucket,
+                    timestamp: input.timestamp,
+                    model: input.acpEvent.model.isEmpty ? nil : input.acpEvent.model,
+                    isComplete: false,
+                    turnID: input.turnID
+                ))
+                entryIndex = state.entries.count - 1
+                state.openSegmentByTurn[turnKey] = segmentSeq
+            }
+
+            // Mirror to the streaming buffer for the live preview line.
+            state.streamingAgentSet.insert(bucket)
+            state.streamingTextByAgent[bucket, default: ""] += o.text
+            if !input.acpEvent.model.isEmpty {
+                state.streamingModelByAgent[bucket] = input.acpEvent.model
+            }
+
+            // Finalise the segment on complete.
+            if o.isComplete {
+                state.entries[entryIndex].isComplete = true
+                state.openSegmentByTurn[turnKey] = nil
+                state.streamingAgentSet.remove(bucket)
                 state.streamingTextByAgent[bucket] = nil
                 state.streamingModelByAgent[bucket] = nil
-            } else {
-                let firstDelta = !state.streamingAgentSet.contains(bucket)
-                if firstDelta, let idx = incompleteOutputIndex(for: bucket, in: state) {
-                    // Drop the synthetic stop()-saved entry: its text
-                    // seeds the streaming buffer, then it goes away.
-                    state.streamingTextByAgent[bucket] = state.entries[idx].text ?? ""
-                    state.entries.remove(at: idx)
-                }
-                state.streamingAgentSet.insert(bucket)
-                state.streamingTextByAgent[bucket, default: ""] += o.text
-                if !input.acpEvent.model.isEmpty {
-                    state.streamingModelByAgent[bucket] = input.acpEvent.model
-                }
             }
 
         case .thinking(let t):
@@ -219,28 +189,56 @@ public enum ChatTimelineReducer {
             }
 
         case .statusChange(let sc):
-            if sc.newStatus == .idle, state.streamingAgentSet.contains(bucket),
-               let text = state.streamingTextByAgent[bucket], !text.isEmpty {
-                state.entries.append(makeEntry(
-                    sequence: input.envelopeSequence,
-                    eventType: "output",
-                    text: text,
-                    senderActorID: bucket,
-                    timestamp: input.timestamp,
-                    model: state.streamingModelByAgent[bucket],
-                    isComplete: true
-                ))
-            }
+            // Mirror the existing reducer's idle-detection. The previous
+            // implementation guarded on `sc.newStatus == .idle` alone;
+            // daemon never emits idle→idle transitions, so this matches
+            // active→idle in practice without needing an extra check.
             if sc.newStatus == .idle {
+                // Close any open output segments for this bucket. Parse
+                // the (bucket|turnID) key directly so we don't have to
+                // walk entries to recover turnID.
+                let prefix = "\(bucket)|"
+                let openKeys = state.openSegmentByTurn.keys.filter { $0.hasPrefix(prefix) }
+                for k in openKeys {
+                    guard let openSeq = state.openSegmentByTurn[k] else { continue }
+                    let turnPart = String(k.dropFirst(prefix.count))
+                    let turnID: String? = turnPart.isEmpty ? nil : turnPart
+                    if let idx = findOutputSegmentEntry(bucket: bucket,
+                                                        turnID: turnID,
+                                                        segmentSeq: openSeq,
+                                                        in: state) {
+                        state.entries[idx].isComplete = true
+                    }
+                    state.openSegmentByTurn[k] = nil
+                }
                 state.streamingAgentSet.remove(bucket)
                 state.streamingTextByAgent[bucket] = nil
                 state.streamingModelByAgent[bucket] = nil
-                // Close any open tool_use rows from this bucket.
+                // Close any open tool_use rows from this bucket (preserves
+                // the existing behavior at lines 239-244 of the original
+                // reducer).
                 for i in state.entries.indices where state.entries[i].eventType == "tool_use"
                     && !state.entries[i].isComplete
                     && (state.entries[i].senderActorID ?? "") == bucket {
                     state.entries[i].isComplete = true
                     if state.entries[i].success == nil { state.entries[i].success = true }
+                }
+                // Mark the highest-sequence entry of each turn that this
+                // bucket touched with turnEnded so FeedItem.buildFeedItems
+                // knows when to flush the open accumulator. Group by
+                // turnID; entries without a turnID can't be marked
+                // (FeedItem falls back to streamingAgentIDs for those).
+                let bucketEntryIndices = state.entries.indices
+                    .filter { (state.entries[$0].senderActorID ?? "") == bucket
+                                && state.entries[$0].turnID != nil }
+                let turnGroups = Dictionary(grouping: bucketEntryIndices,
+                                            by: { state.entries[$0].turnID! })
+                for (_, indices) in turnGroups {
+                    if let maxIdx = indices.max(by: {
+                        state.entries[$0].sequence < state.entries[$1].sequence
+                    }) {
+                        state.entries[maxIdx].turnEnded = true
+                    }
                 }
             }
 
@@ -550,17 +548,15 @@ public enum ChatTimelineReducer {
         return nil
     }
 
-    private static func outputCompleteIndex(for bucket: String,
-                                            turnID: String,
-                                            in state: TimelineState) -> Int? {
-        // Walk newest-first — completed outputs land at the tail of the
-        // turn's event group, and history replays target the most recent
-        // turns first when the user reopens a stale session detail.
+    private static func findOutputSegmentEntry(bucket: String,
+                                               turnID: String?,
+                                               segmentSeq: UInt64,
+                                               in state: TimelineState) -> Int? {
         var i = state.entries.count - 1
         while i >= 0 {
             let e = state.entries[i]
             if e.eventType == "output",
-               e.isComplete,
+               e.sequence == segmentSeq,
                e.turnID == turnID,
                (e.senderActorID ?? "") == bucket {
                 return i
