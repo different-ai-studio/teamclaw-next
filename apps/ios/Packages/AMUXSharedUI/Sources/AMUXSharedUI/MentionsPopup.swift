@@ -24,23 +24,24 @@ public struct MentionsPopup: View {
                 } label: {
                     MentionRow(target: target)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(target.kind == .agent ? "agent \(target.displayName)" : "member \(target.displayName)"))
+                .buttonStyle(HaiRowPressStyle())
+                .accessibilityLabel(Text(target.kind == .agent
+                    ? "agent \(target.displayName)"
+                    : "member \(target.displayName)"))
 
                 if target.id != candidates.last?.id {
-                    Divider()
-                        .padding(.leading, 44)
-                        .opacity(0.4)
+                    Rectangle()
+                        .fill(Color.amux.onyx.opacity(0.08))
+                        .frame(height: 0.5)
+                        .padding(.leading, 28)
                 }
             }
         }
-        .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.amux.pebble, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.separator.opacity(0.35), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(Color.amux.onyx.opacity(0.08), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 }
@@ -50,52 +51,53 @@ private struct MentionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            avatar
+            glyph
+                .frame(width: 16, alignment: .center)
             VStack(alignment: .leading, spacing: 1) {
                 Text(target.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.amux.onyx)
                     .lineLimit(1)
                 if let subtitle = target.subtitle, !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.amux.slate)
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(minHeight: 36)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
 
-    private var avatar: some View {
-        ZStack {
+    @ViewBuilder
+    private var glyph: some View {
+        switch target.kind {
+        case .member:
+            Text("@")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Color.amux.slate)
+        case .agent:
             Circle()
-                .fill(avatarBackground)
-                .frame(width: 24, height: 24)
-            Image(systemName: target.kind == .agent ? "sparkles" : "person.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(avatarForeground)
+                .fill(Color.amux.slate)
+                .frame(width: 6, height: 6)
         }
     }
+}
 
-    private var avatarBackground: AnyShapeStyle {
-        switch target.kind {
-        case .member: AnyShapeStyle(Color.secondary.opacity(0.18))
-        case .agent:  AnyShapeStyle(Color.orange.opacity(0.22))
-        }
+private struct HaiRowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Color.amux.onyx
+                    .opacity(configuration.isPressed ? 0.04 : 0)
+            )
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
-
-    private var avatarForeground: Color {
-        switch target.kind {
-        case .member: .secondary
-        case .agent:  .orange
-        }
-    }
-
 }
 
 #Preview {
@@ -113,5 +115,5 @@ private struct MentionRow: View {
         .padding(.horizontal, 16)
         Spacer()
     }
-    .background(Color.gray.opacity(0.25))
+    .background(Color.amux.mist)
 }
