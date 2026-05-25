@@ -42,6 +42,16 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
     /// nil for pre-turn_id rows and for kinds that don't have a turn
     /// (user_prompt, system, permission, etc.).
     public var turnID: String?
+    /// Summary text from the matching `ToolResult` envelope, populated on
+    /// `tool_use` rows after the result arrives. `nil` while the tool is
+    /// still running. Together with `success` and `isComplete`, drives the
+    /// embedded result region in `EventBubbleView.toolUseBlock`.
+    public var resultSummary: String?
+    /// Marks the single highest-`sequence` entry of a turn that has flipped
+    /// to Idle. Drives `FeedItem.buildFeedItems`' turn-close decision so
+    /// multi-output-segment turns don't get split into multiple feed bubbles
+    /// at the first `output.isComplete`.
+    public var turnEnded: Bool
 
     public init(id: String = UUID().uuidString,
                 sequence: UInt64 = 0,
@@ -57,7 +67,9 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
                 supabaseMessageID: String? = nil,
                 clientID: String? = nil,
                 outboxMessageID: String? = nil,
-                turnID: String? = nil) {
+                turnID: String? = nil,
+                resultSummary: String? = nil,
+                turnEnded: Bool = false) {
         self.id = id
         self.sequence = sequence
         self.eventType = eventType
@@ -73,6 +85,8 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
         self.clientID = clientID
         self.outboxMessageID = outboxMessageID
         self.turnID = turnID
+        self.resultSummary = resultSummary
+        self.turnEnded = turnEnded
     }
 }
 
@@ -100,15 +114,25 @@ public struct TimelineState: Equatable, Sendable {
     /// composer's popup reads this directly.
     public var availableCommands: [SlashCommand] = []
 
+    /// Per-turn open output segment id (the `sequence` of the segment's
+    /// first chunk). Key format: `"\(bucket)|\(turnID ?? "")"`. Cleared
+    /// per-key when a `ToolUse` arrives in the turn or `Active→Idle`
+    /// flips. The reducer uses this to route incoming `Output(partial)`
+    /// chunks to the current segment's entry instead of merging the whole
+    /// turn into one row.
+    public var openSegmentByTurn: [String: UInt64] = [:]
+
     public init(entries: [TimelineEntry] = [],
                 streamingTextByAgent: [String: String] = [:],
                 streamingModelByAgent: [String: String] = [:],
                 streamingAgentSet: Set<String> = [],
-                availableCommands: [SlashCommand] = []) {
+                availableCommands: [SlashCommand] = [],
+                openSegmentByTurn: [String: UInt64] = [:]) {
         self.entries = entries
         self.streamingTextByAgent = streamingTextByAgent
         self.streamingModelByAgent = streamingModelByAgent
         self.streamingAgentSet = streamingAgentSet
         self.availableCommands = availableCommands
+        self.openSegmentByTurn = openSegmentByTurn
     }
 }
