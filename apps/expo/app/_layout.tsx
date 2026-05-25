@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import { router, Slot } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   createContext,
@@ -32,6 +33,7 @@ import {
 import { createOnboardingApi } from "../src/lib/supabase/onboarding-api";
 import { supabase } from "../src/lib/supabase/client";
 import { colors } from "../src/ui/theme";
+import { appStatusBarProps } from "../src/ui/status-bar";
 import { createTeamMqttClient, type TeamMqttClient } from "../src/lib/mqtt/team-mqtt";
 import { getOptionalMqttUrl } from "../src/lib/mqtt/config";
 import { createAgentAccessApi } from "../src/features/actors/agent-access-api";
@@ -379,6 +381,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
+      <StatusBar {...appStatusBarProps} />
       <OnboardingProvider>
         <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
           <View style={styles.layout}>

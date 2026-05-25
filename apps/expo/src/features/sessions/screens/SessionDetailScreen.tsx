@@ -4,13 +4,18 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import Markdown from "react-native-markdown-display";
 
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { StatusDot } from "../../../ui/atoms/StatusDot";
@@ -21,6 +26,7 @@ import {
 } from "../components/AgentChipBar";
 import { ConnectionBannerOverlay } from "../components/ConnectionBannerOverlay";
 import { DaySeparator } from "../components/DaySeparator";
+import { buildThinkingPreview } from "../components/agent-thinking-presentation";
 import { dayLabel, isSameCalendarDay } from "../components/day-separator-labels";
 import { MentionsPopup } from "../components/MentionsPopup";
 import {
@@ -58,6 +64,20 @@ import type {
   SessionDetailConnectionState,
   SessionDetailControllerState,
 } from "../session-detail-controller";
+import {
+  buildSessionFeedSources,
+  type AgentTurnFeedItem,
+  type SessionFeedSource,
+} from "../session-feed-items";
+import {
+  isFeedNearBottom,
+  shouldAutoScrollForNewFeedItem,
+  shouldAutoScrollFeed,
+} from "../session-feed-scroll";
+import {
+  buildAgentTurnDetailGroups,
+  type AgentTurnDetailGroupKind,
+} from "../session-turn-detail";
 import type { SessionMessage, SessionSummary } from "../session-types";
 
 type SessionDetailRenderableState = SessionDetailControllerState & {
@@ -260,6 +280,324 @@ function SessionHeader({
   );
 }
 
+function streamPreview(text: string): string {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines[lines.length - 1] ?? "";
+}
+
+function formatTime(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function detailGroupIcon(kind: AgentTurnDetailGroupKind): keyof typeof Ionicons.glyphMap {
+  switch (kind) {
+    case "thinking":
+      return "sparkles-outline";
+    case "tools":
+      return "terminal-outline";
+    case "plan":
+      return "list-outline";
+    case "events":
+    default:
+      return "ellipse-outline";
+  }
+}
+
+function runtimeEventBody(message: SessionMessage): string {
+  const body = message.content.trim();
+  if (message.kind.trim().toLowerCase() === "agent_thinking") {
+    return buildThinkingPreview(body, 120);
+  }
+  if (body) return body;
+  return "Working…";
+}
+
+function agentTurnPreview(turn: AgentTurnFeedItem): string {
+  const finalBody = turn.finalMessage?.content.trim();
+  if (finalBody) return finalBody;
+  const streamBody = streamPreview(turn.stream?.text ?? "");
+  if (streamBody) return streamBody;
+  const lastRuntime = turn.runtimeEvents[turn.runtimeEvents.length - 1];
+  if (lastRuntime) return runtimeEventBody(lastRuntime);
+  return "Working…";
+}
+
+function agentTurnTime(turn: AgentTurnFeedItem): string {
+  return formatTime(turn.finalMessage?.createdAt || turn.stream?.startedAt || turn.createdAt);
+}
+
+function agentTurnDetailCount(turn: AgentTurnFeedItem): number {
+  return turn.runtimeEvents.length + (turn.stream?.text.trim() ? 1 : 0);
+}
+
+function isOwnOutgoingFeedSource(
+  source: SessionFeedSource,
+  ownActorId?: string | null,
+): boolean {
+  return Boolean(
+    ownActorId &&
+      source.kind === "message" &&
+      source.message.senderActorId === ownActorId,
+  );
+}
+
+const turnMarkdown = {
+  body: { color: hai.onyx, ...typography.body, marginBottom: 0, marginTop: 0 },
+  code_inline: {
+    backgroundColor: hai.pebble,
+    borderRadius: 4,
+    color: hai.onyx,
+    paddingHorizontal: 4,
+  },
+  code_block: {
+    backgroundColor: hai.pebble,
+    borderRadius: 6,
+    color: hai.onyx,
+    padding: 8,
+  },
+  link: { color: hai.cinnabar, textDecorationLine: "underline" as const },
+  paragraph: { color: hai.onyx, marginBottom: 0, marginTop: 0 },
+};
+
+function AgentTurnCard({
+  onOpenDetail,
+  onInterrupt,
+  senderAvatarGlyph,
+  senderAvatarUrl,
+  senderName,
+  turn,
+}: {
+  onOpenDetail?: (turn: AgentTurnFeedItem) => void;
+  onInterrupt?: (agentId: string) => void;
+  senderAvatarGlyph?: string | null;
+  senderAvatarUrl?: string | null;
+  senderName?: string;
+  turn: AgentTurnFeedItem;
+}) {
+  const [cursorVisible, setCursorVisible] = useState(true);
+  useEffect(() => {
+    if (!turn.isActive || turn.stream?.isComplete) {
+      setCursorVisible(false);
+      return;
+    }
+    const timer = setInterval(() => {
+      setCursorVisible((value) => !value);
+    }, 420);
+    return () => clearInterval(timer);
+  }, [turn.isActive, turn.stream?.isComplete]);
+  const displayName = senderName ?? "Agent";
+  const avatarGlyph = senderAvatarGlyph ?? (displayName.charAt(0).toUpperCase() || "AI");
+  const preview = agentTurnPreview(turn);
+  const time = agentTurnTime(turn);
+  const detailCount = agentTurnDetailCount(turn);
+  const isWorking = turn.isActive && !turn.stream?.isComplete;
+  return (
+    <View style={[styles.row, styles.rowOther]}>
+      <View style={styles.senderAvatar}>
+        {senderAvatarUrl ? (
+          <Image
+            accessibilityRole="image"
+            source={{ uri: senderAvatarUrl }}
+            style={styles.senderAvatarImage}
+          />
+        ) : (
+          <Text style={styles.senderAvatarText}>{avatarGlyph}</Text>
+        )}
+      </View>
+      <Pressable
+        accessibilityHint="Open agent turn details"
+        accessibilityRole="button"
+        onPress={onOpenDetail ? () => onOpenDetail(turn) : undefined}
+        style={({ pressed }) => [
+          styles.turnCard,
+          turn.isActive ? styles.turnCardActive : null,
+          pressed && onOpenDetail ? styles.turnCardPressed : null,
+        ]}
+      >
+        <View style={styles.turnHeader}>
+          <View style={styles.turnTitleRow}>
+            <StatusDot kind={isWorking ? "working" : "active"} size={7} />
+            <Text numberOfLines={1} style={styles.turnTitle}>
+              {displayName}
+            </Text>
+            <Text style={styles.turnBadge}>
+              {turn.isActive ? (turn.stream?.isComplete ? "同步中" : "正在回复") : "回复"}
+            </Text>
+          </View>
+          <View style={styles.turnActions}>
+            {time ? <Text style={styles.turnTime}>{time}</Text> : null}
+            <Ionicons color={colors.slate} name="chevron-forward" size={14} />
+          </View>
+          {isWorking && onInterrupt ? (
+            <Pressable
+              accessibilityLabel={`Interrupt ${displayName}`}
+              accessibilityRole="button"
+              hitSlop={6}
+              onPress={() => onInterrupt(turn.agentId)}
+              style={styles.turnStopButton}
+            >
+              <Ionicons color={colors.cinnabarDeep} name="stop" size={10} />
+            </Pressable>
+          ) : null}
+        </View>
+        {(turn.finalMessage?.model || turn.stream?.model) ? (
+          <Text numberOfLines={1} style={styles.turnModel}>
+            {turn.finalMessage?.model || turn.stream?.model}
+          </Text>
+        ) : null}
+        {turn.finalMessage ? (
+          <Markdown style={turnMarkdown}>{preview || "(empty message)"}</Markdown>
+        ) : (
+          <Text numberOfLines={4} style={styles.turnPreview}>
+            {preview}
+            {isWorking && cursorVisible ? " ▌" : ""}
+          </Text>
+        )}
+        {detailCount > 0 ? (
+          <View style={styles.turnDetailRow}>
+            <Ionicons color={colors.slate} name="list-outline" size={13} />
+            <Text style={styles.turnDetailText}>
+              过程 · {detailCount} {detailCount === 1 ? "event" : "events"}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+    </View>
+  );
+}
+
+function AgentTurnDetailModal({
+  onClose,
+  senderName,
+  turn,
+}: {
+  onClose: () => void;
+  senderName?: string;
+  turn: AgentTurnFeedItem | null;
+}) {
+  const displayName = senderName ?? "Agent";
+  const isWorking = Boolean(turn?.isActive && !turn.stream?.isComplete);
+  const detailGroups = turn ? buildAgentTurnDetailGroups(turn.runtimeEvents) : [];
+  return (
+    <Modal
+      animationType="slide"
+      onRequestClose={onClose}
+      presentationStyle="pageSheet"
+      visible={turn !== null}
+    >
+      {turn ? (
+        <View style={styles.detailScreen}>
+          <View style={styles.detailHeader}>
+            <Pressable
+              accessibilityLabel="Close detail"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={onClose}
+              style={styles.detailHeaderButton}
+            >
+              <Ionicons color={colors.onyx} name="chevron-back" size={24} />
+            </Pressable>
+            <View style={styles.detailTitleBlock}>
+              <Text numberOfLines={1} style={styles.detailTitle}>
+                {displayName}
+              </Text>
+              <View style={styles.detailSubtitleRow}>
+                <StatusDot kind={isWorking ? "working" : "active"} size={6} />
+                <Text style={styles.detailSubtitle}>
+                  {turn.isActive ? "Streaming detail" : "Turn detail"}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              accessibilityLabel="Close detail"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={onClose}
+              style={styles.detailHeaderButton}
+            >
+              <Ionicons color={colors.onyx} name="close" size={21} />
+            </Pressable>
+          </View>
+          <Hairline />
+          <ScrollView contentContainerStyle={styles.detailContent}>
+            {detailGroups.length > 0 ? (
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionLabel}>Runtime</Text>
+                {detailGroups.map((group) => (
+                  <View key={`${group.kind}:${group.eventIds.join(":")}`} style={styles.detailEventRow}>
+                    <View style={styles.detailEventIcon}>
+                      <Ionicons
+                        color={colors.basalt}
+                        name={detailGroupIcon(group.kind)}
+                        size={14}
+                      />
+                    </View>
+                    <View style={styles.detailEventBody}>
+                      <View style={styles.detailEventHeader}>
+                        <Text style={styles.detailEventTitle}>
+                          {group.title}
+                          {group.count > 1 ? ` · ${group.count}` : ""}
+                        </Text>
+                        {formatTime(group.createdAt) ? (
+                          <Text style={styles.detailEventTime}>
+                            {formatTime(group.createdAt)}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text selectable style={styles.detailEventText}>
+                        {group.body}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {turn.stream?.text.trim() ? (
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionLabel}>Live output</Text>
+                <View style={styles.detailPaper}>
+                  <Text selectable style={styles.detailEventText}>
+                    {turn.stream.text.trim()}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {turn.finalMessage ? (
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionLabel}>Final reply</Text>
+                <View style={styles.detailPaper}>
+                  <Markdown style={turnMarkdown}>
+                    {turn.finalMessage.content.trim() || "(empty message)"}
+                  </Markdown>
+                </View>
+              </View>
+            ) : null}
+
+            {detailGroups.length === 0 && !turn.stream?.text.trim() && !turn.finalMessage ? (
+              <View style={styles.detailEmpty}>
+                <Ionicons color={colors.slate} name="sparkles-outline" size={22} />
+                <Text style={styles.detailEmptyText}>No detail events yet.</Text>
+              </View>
+            ) : null}
+          </ScrollView>
+        </View>
+      ) : null}
+    </Modal>
+  );
+}
+
 export function SessionDetailScreen(props: SessionDetailScreenProps) {
   const {
     agentChips,
@@ -304,64 +642,56 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
   } = props;
   const { session } = state;
 
-  const streamingRows = useMemo<SessionMessage[]>(
-    () =>
-      Array.from(state.streamingByAgent.values()).map((buf) => ({
-        messageId: buf.messageId,
-        sessionId: state.session?.sessionId ?? "",
-        teamId: state.session?.teamId ?? "",
-        senderActorId: buf.senderActorId,
-        content: buf.text,
-        kind: buf.kind,
-        createdAt: buf.startedAt,
-        metadata: null,
-        model: "",
-        replyToMessageId: "",
-        turnId: "",
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.streamingByAgent, state.session?.sessionId, state.session?.teamId],
-  );
-
-  const renderRows = useMemo(
-    () => [...state.messages, ...streamingRows],
-    [state.messages, streamingRows],
-  );
-
-  const streamingMessageIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const buf of state.streamingByAgent.values()) {
-      ids.add(buf.messageId);
-    }
-    return ids;
-  }, [state.streamingByAgent]);
-
-  const hasMessages = renderRows.length > 0;
-
   type FeedItem =
     | { kind: "separator"; key: string; label: string }
-    | { kind: "message"; key: string; message: SessionMessage };
+    | { kind: "message"; key: string; message: SessionMessage }
+    | { kind: "agentTurn"; key: string; turn: AgentTurnFeedItem };
+
+  const feedSources = useMemo(
+    () =>
+      buildSessionFeedSources(state.messages, state.streamingByAgent, {
+        ownActorId,
+      }),
+    [ownActorId, state.messages, state.streamingByAgent],
+  );
+  const [selectedTurnKey, setSelectedTurnKey] = useState<string | null>(null);
+  const selectedTurn = useMemo(() => {
+    const source = feedSources.find((item) => item.key === selectedTurnKey);
+    return source?.kind === "agentTurn" ? source.turn : null;
+  }, [feedSources, selectedTurnKey]);
 
   const feedItems: FeedItem[] = [];
-  for (let i = 0; i < renderRows.length; i += 1) {
-    const current = renderRows[i];
-    const prev = i > 0 ? renderRows[i - 1] : null;
+  for (let i = 0; i < feedSources.length; i += 1) {
+    const current = feedSources[i];
+    const prev = i > 0 ? feedSources[i - 1] : null;
     if (!prev || !isSameCalendarDay(prev.createdAt, current.createdAt)) {
       feedItems.push({
-        kind: "separator",
-        key: `sep:${current.messageId}`,
+        kind: "separator" as const,
+        key: `sep:${current.key}`,
         label: dayLabel(current.createdAt),
       });
     }
-    feedItems.push({
-      kind: "message",
-      key: current.messageId,
-      message: current,
-    });
+    if (current.kind === "message") {
+      feedItems.push({
+        kind: "message",
+        key: current.key,
+        message: current.message,
+      });
+    } else {
+      feedItems.push({
+        kind: "agentTurn",
+        key: current.key,
+        turn: current.turn,
+      });
+    }
   }
 
+  const hasMessages = feedSources.length > 0;
+
   const messageListRef = useRef<FlatList<FeedItem> | null>(null);
-  const lastMessageCount = useRef(renderRows.length);
+  const lastMessageCount = useRef(feedSources.length);
+  const hasMeasuredFeedLayout = useRef(false);
+  const shouldStickToFeedBottom = useRef(true);
 
   const outboxByMessageId = useSyncExternalStore(
     subscribeOutbox,
@@ -381,6 +711,7 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       }),
     [state.messages, senderNames],
   );
+  const activeTodoText = todoText ?? planSnapshots[0]?.text ?? "";
   const [plansPanelOpen, setPlansPanelOpen] = useState(true);
   useEffect(() => {
     // Reopen the panel automatically whenever a *new* agent gains an
@@ -397,20 +728,40 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
       if (feedItems[i].kind === "separator") out.push(i);
     }
     return out;
-    // feedItems is derived from renderRows each render; safe to depend on length only
+    // feedItems is derived from feedSources each render; safe to depend on length only
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderRows.length]);
+  }, [feedSources.length]);
 
   useEffect(() => {
-    if (renderRows.length > lastMessageCount.current) {
-      // New message appended — scroll to the bottom so the user sees
-      // the latest reply without manually paging down.
-      requestAnimationFrame(() => {
-        messageListRef.current?.scrollToEnd({ animated: true });
-      });
+    if (feedSources.length > lastMessageCount.current) {
+      const newSources = feedSources.slice(lastMessageCount.current);
+      const hasOwnOutgoingMessage = newSources.some((source) =>
+        isOwnOutgoingFeedSource(source, ownActorId),
+      );
+      if (
+        shouldAutoScrollForNewFeedItem({
+          isOwnOutgoingMessage: hasOwnOutgoingMessage,
+          wasNearBottom: shouldStickToFeedBottom.current,
+        })
+      ) {
+        shouldStickToFeedBottom.current = true;
+        // New message appended while the user is already following the tail.
+        requestAnimationFrame(() => {
+          messageListRef.current?.scrollToEnd({ animated: true });
+        });
+      }
     }
-    lastMessageCount.current = renderRows.length;
-  }, [renderRows.length]);
+    lastMessageCount.current = feedSources.length;
+  }, [feedSources, feedSources.length, ownActorId]);
+
+  const handleFeedScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    shouldStickToFeedBottom.current = isFeedNearBottom({
+      contentHeight: contentSize.height,
+      offsetY: contentOffset.y,
+      viewportHeight: layoutMeasurement.height,
+    });
+  };
 
   return (
     <View style={styles.screen}>
@@ -476,8 +827,18 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
             keyboardShouldPersistTaps="handled"
             keyExtractor={(item) => item.key}
             onContentSizeChange={() => {
-              messageListRef.current?.scrollToEnd({ animated: false });
+              const isInitialLayout = !hasMeasuredFeedLayout.current;
+              hasMeasuredFeedLayout.current = true;
+              if (
+                shouldAutoScrollFeed({
+                  isInitialLayout,
+                  wasNearBottom: shouldStickToFeedBottom.current,
+                })
+              ) {
+                messageListRef.current?.scrollToEnd({ animated: false });
+              }
             }}
+            onScroll={handleFeedScroll}
             refreshControl={
               onRefresh ? (
                 <RefreshControl
@@ -488,22 +849,36 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
               ) : undefined
             }
             ref={messageListRef}
+            scrollEventThrottle={80}
             stickyHeaderIndices={separatorIndices}
             renderItem={({ item }) => {
               if (item.kind === "separator") {
                 return <DaySeparator label={item.label} />;
               }
+              if (item.kind === "agentTurn") {
+                return (
+                  <AgentTurnCard
+                    onOpenDetail={() => setSelectedTurnKey(item.key)}
+                    onInterrupt={onAgentInterrupt}
+                    senderAvatarGlyph={
+                      senderAvatarGlyphs?.get(item.turn.agentId) ?? null
+                    }
+                    senderAvatarUrl={senderAvatars?.get(item.turn.agentId) ?? null}
+                    senderName={senderNames?.get(item.turn.agentId) ?? undefined}
+                    turn={item.turn}
+                  />
+                );
+              }
               const msg = item.message;
               const isOwn = ownActorId ? msg.senderActorId === ownActorId : false;
               const replyToMessage =
                 msg.replyToMessageId && msg.replyToMessageId.length > 0
-                  ? renderRows.find((m) => m.messageId === msg.replyToMessageId) ??
+                  ? state.messages.find((m) => m.messageId === msg.replyToMessageId) ??
                     null
                   : null;
               return (
                 <SessionMessageRow
                   isOwnMessage={isOwn}
-                  isStreaming={streamingMessageIds.has(msg.messageId)}
                   message={msg}
                   onDelete={onDeleteMessage}
                   onEdit={
@@ -597,7 +972,15 @@ export function SessionDetailScreen(props: SessionDetailScreenProps) {
         </View>
       ) : null}
 
-      {todoText ? <TodoDock text={todoText} /> : null}
+      <AgentTurnDetailModal
+        onClose={() => setSelectedTurnKey(null)}
+        senderName={
+          selectedTurn ? senderNames?.get(selectedTurn.agentId) ?? undefined : undefined
+        }
+        turn={selectedTurn}
+      />
+
+      {activeTodoText ? <TodoDock text={activeTodoText} /> : null}
 
       {(() => {
         const prefix = slashPrefix(composerText);
@@ -688,6 +1071,229 @@ const styles = StyleSheet.create({
   },
   feedContent: {
     paddingVertical: spacing.sm,
+  },
+  row: {
+    flexDirection: "row",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    width: "100%",
+  },
+  rowOther: {
+    alignItems: "flex-start",
+  },
+  senderAvatar: {
+    alignItems: "center",
+    alignSelf: "flex-end",
+    backgroundColor: hai.basalt,
+    borderRadius: 999,
+    height: 24,
+    justifyContent: "center",
+    marginBottom: 4,
+    overflow: "hidden",
+    width: 24,
+  },
+  senderAvatarImage: {
+    height: "100%",
+    width: "100%",
+  },
+  senderAvatarText: {
+    color: hai.paper,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  turnActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 3,
+  },
+  turnBadge: {
+    color: colors.cinnabarDeep,
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  turnPreview: {
+    color: colors.onyx,
+    ...typography.secondaryBody,
+  },
+  turnCard: {
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+    gap: 5,
+    maxWidth: "86%",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  turnCardActive: {
+    borderColor: "rgba(184,75,54,0.24)",
+  },
+  turnCardPressed: {
+    opacity: 0.88,
+  },
+  turnDetailRow: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(226,223,217,0.55)",
+    borderRadius: 8,
+    flexDirection: "row",
+    gap: 5,
+    marginTop: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  turnDetailText: {
+    color: colors.basalt,
+    ...typography.caption,
+    fontWeight: "600",
+  },
+  turnHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  turnModel: {
+    color: colors.slate,
+    ...typography.monoMeta,
+  },
+  turnStopButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(184,75,54,0.14)",
+    borderRadius: 999,
+    height: 18,
+    justifyContent: "center",
+    width: 18,
+  },
+  turnTime: {
+    color: colors.slate,
+    ...typography.monoMeta,
+    fontSize: 10,
+  },
+  turnTitle: {
+    color: colors.onyx,
+    flexShrink: 1,
+    ...typography.caption,
+    fontWeight: "700",
+  },
+  turnTitleRow: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+  },
+  detailContent: {
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  detailEmpty: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: spacing.xxl,
+  },
+  detailEmptyText: {
+    color: colors.slate,
+    ...typography.caption,
+  },
+  detailEventBody: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  detailEventHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  detailEventIcon: {
+    alignItems: "center",
+    backgroundColor: hai.pebble,
+    borderRadius: 8,
+    height: 28,
+    justifyContent: "center",
+    width: 28,
+  },
+  detailEventRow: {
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  detailEventText: {
+    color: colors.onyx,
+    ...typography.secondaryBody,
+  },
+  detailEventTime: {
+    color: colors.slate,
+    ...typography.monoMeta,
+    fontSize: 10,
+  },
+  detailEventTitle: {
+    color: colors.basalt,
+    flex: 1,
+    ...typography.caption,
+    fontWeight: "700",
+  },
+  detailHeader: {
+    alignItems: "center",
+    backgroundColor: colors.mist,
+    flexDirection: "row",
+    minHeight: 52,
+    paddingHorizontal: spacing.xs,
+  },
+  detailHeaderButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 42,
+    minWidth: 42,
+  },
+  detailPaper: {
+    backgroundColor: colors.paper,
+    borderColor: colors.hairline,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  detailScreen: {
+    backgroundColor: colors.mist,
+    flex: 1,
+  },
+  detailSection: {
+    gap: 8,
+  },
+  detailSectionLabel: {
+    color: colors.slate,
+    ...typography.pill,
+  },
+  detailSubtitle: {
+    color: colors.slate,
+    ...typography.caption,
+  },
+  detailSubtitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 5,
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  detailTitle: {
+    color: colors.onyx,
+    ...typography.cardTitle,
+  },
+  detailTitleBlock: {
+    alignItems: "center",
+    flex: 1,
+    paddingHorizontal: spacing.xs,
   },
   headerBar: {
     alignItems: "center",

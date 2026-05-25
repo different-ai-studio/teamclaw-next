@@ -14,6 +14,7 @@ import { Hairline } from "../../../ui/atoms/Hairline";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { SkeletonRow } from "../../../ui/atoms/SkeletonRow";
 import { PrimaryButton } from "../../../ui/button";
+import { PageHeader } from "../../../ui/PageHeader";
 import { colors, spacing, typography } from "../../../ui/theme";
 import { ActorRow } from "../components/ActorRow";
 import {
@@ -47,9 +48,9 @@ function HeaderBar({
   onInvite?: () => void;
 }) {
   return (
-    <View style={styles.headerWrap}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerSpacer} />
+    <PageHeader
+      count={count}
+      right={
         <Pressable
           accessibilityLabel="Invite Member"
           accessibilityRole="button"
@@ -64,12 +65,9 @@ function HeaderBar({
             size={22}
           />
         </Pressable>
-      </View>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>Actors</Text>
-        {count > 0 ? <Text style={styles.titleCount}>· {count}</Text> : null}
-      </View>
-    </View>
+      }
+      title="Actors"
+    />
   );
 }
 
@@ -257,20 +255,6 @@ const styles = StyleSheet.create({
   groups: {
     gap: spacing.lg,
   },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    minHeight: 36,
-    paddingHorizontal: spacing.lg,
-  },
-  headerSpacer: {
-    flex: 1,
-  },
-  headerWrap: {
-    backgroundColor: colors.mist,
-    gap: spacing.md,
-    paddingTop: spacing.md,
-  },
   loadingRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -321,28 +305,11 @@ const styles = StyleSheet.create({
     color: colors.onyx,
     ...typography.cardTitle,
   },
-  title: {
-    color: colors.onyx,
-    fontSize: 34,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    lineHeight: 38,
-  },
-  titleCount: {
-    color: colors.slate,
-    ...typography.body,
-  },
-  titleRow: {
-    alignItems: "baseline",
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingBottom: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
   toolbarButton: {
-    height: 36,
+    alignItems: "center",
+    height: 40,
     justifyContent: "center",
-    minWidth: 36,
+    width: 40,
   },
 });
 

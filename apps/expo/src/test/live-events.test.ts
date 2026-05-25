@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { create, toBinary } from "@bufbuild/protobuf";
 
 import {
+  AcpEventSchema,
+  EnvelopeSchema as AmuxEnvelopeSchema,
+} from "@teamclaw/app/proto/amux_pb";
+import {
   LiveEventEnvelopeSchema,
   MessageKind,
   MessageSchema,
@@ -69,6 +73,46 @@ describe("decodeLiveEvent", () => {
     });
 
     expect(decodeLiveEvent(toBinary(LiveEventEnvelopeSchema, liveEvent))).toBeNull();
+  });
+
+  it("decodes acp.event output payloads", () => {
+    const acpEvent = create(AcpEventSchema, {
+      event: {
+        case: "output",
+        value: {
+          text: "hello",
+          isComplete: false,
+        },
+      },
+      model: "gpt-5.2",
+    });
+    const amuxEnvelope = create(AmuxEnvelopeSchema, {
+      runtimeId: "runtime-1",
+      deviceId: "device-1",
+      sequence: BigInt(7),
+      timestamp: BigInt(1_747_642_000),
+      payload: {
+        case: "acpEvent",
+        value: acpEvent,
+      },
+    });
+    const liveEvent = create(LiveEventEnvelopeSchema, {
+      eventId: "event-output-1",
+      eventType: "acp.event",
+      sessionId: "session-1",
+      actorId: "actor-agent",
+      sentAt: BigInt(1_747_642_000),
+      body: toBinary(AmuxEnvelopeSchema, amuxEnvelope),
+    });
+
+    const decoded = decodeLiveEvent(toBinary(LiveEventEnvelopeSchema, liveEvent));
+
+    expect(decoded?.acpEvent?.event.case).toBe("output");
+    if (decoded?.acpEvent?.event.case === "output") {
+      expect(decoded.acpEvent.event.value.text).toBe("hello");
+      expect(decoded.acpEvent.event.value.isComplete).toBe(false);
+      expect(decoded.acpEvent.model).toBe("gpt-5.2");
+    }
   });
 });
 

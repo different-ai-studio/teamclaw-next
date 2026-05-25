@@ -18,6 +18,7 @@ import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { SkeletonRow } from "../../../ui/atoms/SkeletonRow";
 import { PrimaryButton } from "../../../ui/button";
 import { AppCard } from "../../../ui/card";
+import { PageHeader } from "../../../ui/PageHeader";
 import { impactLight, selectionTick } from "../../../lib/haptics";
 import { colors, spacing, typography } from "../../../ui/theme";
 import { matchesAnyField } from "../../search/search-matcher";
@@ -114,20 +115,19 @@ function HeaderBar({
   onShortcuts: () => void;
 }) {
   return (
-    <View style={styles.headerWrap}>
-      <View style={styles.headerRow}>
+    <PageHeader
+      left={
         <Pressable onPress={onShortcuts} hitSlop={8} style={styles.toolbarButton}>
           <Ionicons name="grid-outline" size={22} color={colors.onyx} />
         </Pressable>
-        <View style={styles.headerSpacer} />
+      }
+      right={
         <Pressable onPress={onNewSession} hitSlop={8} style={styles.toolbarButton}>
           <Ionicons name="create-outline" size={24} color={colors.onyx} />
         </Pressable>
-      </View>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>Sessions</Text>
-      </View>
-    </View>
+      }
+      title="Sessions"
+    />
   );
 }
 
@@ -558,20 +558,6 @@ const styles = StyleSheet.create({
   groups: {
     gap: spacing.lg,
   },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    minHeight: 36,
-    paddingHorizontal: spacing.lg,
-  },
-  headerSpacer: {
-    flex: 1,
-  },
-  headerWrap: {
-    backgroundColor: colors.mist,
-    gap: spacing.md,
-    paddingTop: spacing.md,
-  },
   loadingRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -678,27 +664,10 @@ const styles = StyleSheet.create({
     color: colors.onyx,
     ...typography.cardTitle,
   },
-  title: {
-    color: colors.onyx,
-    fontSize: 34,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    lineHeight: 38,
-  },
-  titleCount: {
-    color: colors.slate,
-    ...typography.body,
-  },
-  titleRow: {
-    alignItems: "baseline",
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
   toolbarButton: {
-    height: 36,
+    alignItems: "center",
+    height: 40,
     justifyContent: "center",
-    minWidth: 36,
+    width: 40,
   },
 });

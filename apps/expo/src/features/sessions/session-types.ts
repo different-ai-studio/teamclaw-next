@@ -246,7 +246,9 @@ export function reduceSessionDetailRouteState(
 }
 
 export type StreamingBuffer = {
+  isComplete?: boolean;
   messageId: string;
+  model?: string;
   text: string;
   kind: string;
   startedAt: string;
@@ -257,7 +259,7 @@ export type TimelineEvent =
   | { kind: "messageCommitted"; message: SessionMessage }
   | { kind: "streamingDelta";
       agentId: string; messageId: string; messageKind: string;
-      deltaText: string; createdAt: string; }
+      deltaText: string; createdAt: string; isComplete?: boolean; model?: string; }
   | { kind: "streamingDone"; agentId: string; messageId: string };
 
 export function groupSessionsByRecency(sessions: SessionSummary[], now = new Date()): SessionGroup[] {

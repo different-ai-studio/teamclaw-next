@@ -1,6 +1,10 @@
-import { create, toBinary } from "@bufbuild/protobuf";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  AcpEventSchema,
+  EnvelopeSchema as AmuxEnvelopeSchema,
+} from "@teamclaw/app/proto/amux_pb";
 import {
   LiveEventEnvelopeSchema,
   MessageKind,
@@ -68,6 +72,84 @@ function createLivePayload(input: {
   });
 
   return toBinary(LiveEventEnvelopeSchema, envelope);
+}
+
+function createAcpOutputPayload(input: {
+  actorId: string;
+  eventId: string;
+  isComplete?: boolean;
+  model?: string;
+  sequence?: bigint;
+  text: string;
+}) {
+  const acpEvent = create(AcpEventSchema, {
+    event: {
+      case: "output",
+      value: {
+        text: input.text,
+        isComplete: input.isComplete ?? false,
+      },
+    },
+    model: input.model ?? "",
+  });
+  const amuxEnvelope = create(AmuxEnvelopeSchema, {
+    runtimeId: "runtime-1",
+    deviceId: "device-1",
+    sequence: input.sequence ?? BigInt(1),
+    timestamp: BigInt(1_747_642_000),
+    payload: {
+      case: "acpEvent",
+      value: acpEvent,
+    },
+  });
+  const liveEvent = create(LiveEventEnvelopeSchema, {
+    eventId: input.eventId,
+    eventType: "acp.event",
+    sessionId: "session-1",
+    actorId: input.actorId,
+    sentAt: BigInt(1_747_642_000),
+    body: toBinary(AmuxEnvelopeSchema, amuxEnvelope),
+  });
+
+  return toBinary(LiveEventEnvelopeSchema, liveEvent);
+}
+
+function createAcpThinkingPayload(input: {
+  actorId: string;
+  eventId: string;
+  model?: string;
+  sequence?: bigint;
+  text: string;
+}) {
+  const acpEvent = create(AcpEventSchema, {
+    event: {
+      case: "thinking",
+      value: {
+        text: input.text,
+      },
+    },
+    model: input.model ?? "",
+  });
+  const amuxEnvelope = create(AmuxEnvelopeSchema, {
+    runtimeId: "runtime-1",
+    deviceId: "device-1",
+    sequence: input.sequence ?? BigInt(1),
+    timestamp: BigInt(1_747_642_000),
+    payload: {
+      case: "acpEvent",
+      value: acpEvent,
+    },
+  });
+  const liveEvent = create(LiveEventEnvelopeSchema, {
+    eventId: input.eventId,
+    eventType: "acp.event",
+    sessionId: "session-1",
+    actorId: input.actorId,
+    sentAt: BigInt(1_747_642_000),
+    body: toBinary(AmuxEnvelopeSchema, amuxEnvelope),
+  });
+
+  return toBinary(LiveEventEnvelopeSchema, liveEvent);
 }
 
 function createDeferred<T>() {
@@ -200,6 +282,77 @@ describe("createSessionDetailController", () => {
     expect(controller.getState().messages).toHaveLength(1);
     expect(controller.getState().messages[0]?.content).toBe("hello");
     expect(mqtt.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("mentions the sole agent participant when sending from the composer", async () => {
+    const { createSessionDetailController } = await import(
+      "../features/sessions/session-detail-controller"
+    );
+    const mqtt = createMockMqtt();
+    const api = {
+      getSession: vi.fn().mockResolvedValue(createSession()),
+      insertOutgoingMessage: vi.fn().mockResolvedValue(undefined),
+      listMessages: vi.fn().mockResolvedValue([]),
+      resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const controller = createSessionDetailController({
+      api: api as any,
+      currentMemberActorId: "actor-1",
+      getAuth: vi.fn().mockResolvedValue({
+        accessToken: "jwt-token",
+        userId: "user-1",
+      }),
+      getTeamActors: () => [
+        {
+          actorId: "actor-1",
+          actorType: "member",
+          avatarUrl: null,
+          displayName: "Me",
+          agentTypes: [],
+          defaultAgentType: null,
+          agentKind: null,
+          lastActiveAt: null,
+          role: null,
+          teamId: "team-1",
+        },
+        {
+          actorId: "actor-agent",
+          actorType: "agent",
+          avatarUrl: null,
+          displayName: "Codex",
+          agentTypes: ["codex"],
+          defaultAgentType: "codex",
+          agentKind: "codex",
+          lastActiveAt: null,
+          role: null,
+          teamId: "team-1",
+        },
+      ],
+      mqtt: mqtt as any,
+      mqttUrl: "wss://broker.example.com/mqtt",
+      sessionId: "session-1",
+      teamId: "team-1",
+    } as any);
+
+    await controller.load();
+    controller.setComposerText("hello daemon");
+    await controller.sendMessage();
+
+    expect(api.insertOutgoingMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { mention_actor_ids: ["actor-agent"] },
+      }),
+    );
+    expect(controller.getState().messages[0]).toMatchObject({
+      metadata: { mention_actor_ids: ["actor-agent"] },
+    });
+
+    const publishBytes = mqtt.publish.mock.calls[0]?.[1] as Uint8Array;
+    const live = fromBinary(LiveEventEnvelopeSchema, publishBytes);
+    const sessionMessage = fromBinary(SessionMessageEnvelopeSchema, live.body);
+    expect(sessionMessage.mentionActorIds).toEqual(["actor-agent"]);
   });
 
   it("sends a pending attachment even when composer text is empty", async () => {
@@ -397,6 +550,127 @@ describe("createSessionDetailController", () => {
     ]);
   });
 
+  it("streams acp output events into the agent buffer", async () => {
+    const { createSessionDetailController } = await import(
+      "../features/sessions/session-detail-controller"
+    );
+    const mqtt = createMockMqtt();
+    const api = {
+      getSession: vi.fn().mockResolvedValue(createSession()),
+      insertOutgoingMessage: vi.fn(),
+      listMessages: vi.fn().mockResolvedValue([]),
+      resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const controller = createSessionDetailController({
+      api: api as any,
+      currentMemberActorId: "actor-1",
+      getAuth: vi.fn().mockResolvedValue({
+        accessToken: "jwt-token",
+        userId: "user-1",
+      }),
+      mqtt: mqtt as any,
+      mqttUrl: "wss://broker.example.com/mqtt",
+      sessionId: "session-1",
+      teamId: "team-1",
+    });
+
+    await controller.load();
+    mqtt.emit(
+      "amux/team-1/session/session-1/live",
+      createAcpOutputPayload({
+        actorId: "actor-agent",
+        eventId: "event-output-1",
+        text: "Hel",
+        sequence: BigInt(11),
+      }),
+    );
+    mqtt.emit(
+      "amux/team-1/session/session-1/live",
+      createAcpOutputPayload({
+        actorId: "actor-agent",
+        eventId: "event-output-2",
+        text: "lo",
+        sequence: BigInt(12),
+        isComplete: true,
+        model: "gpt-5.2",
+      }),
+    );
+
+    const stream = controller.getState().streamingByAgent.get("actor-agent");
+    expect(stream).toMatchObject({
+      isComplete: true,
+      kind: "agent_reply",
+      model: "gpt-5.2",
+      senderActorId: "actor-agent",
+      text: "Hello",
+    });
+    expect(controller.getState().messages).toEqual([]);
+  });
+
+  it("preserves raw acp thinking chunks including leading spaces and punctuation", async () => {
+    const { createSessionDetailController } = await import(
+      "../features/sessions/session-detail-controller"
+    );
+    const mqtt = createMockMqtt();
+    const api = {
+      getSession: vi.fn().mockResolvedValue(createSession()),
+      insertOutgoingMessage: vi.fn(),
+      listMessages: vi.fn().mockResolvedValue([]),
+      resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const controller = createSessionDetailController({
+      api: api as any,
+      currentMemberActorId: "actor-1",
+      getAuth: vi.fn().mockResolvedValue({
+        accessToken: "jwt-token",
+        userId: "user-1",
+      }),
+      mqtt: mqtt as any,
+      mqttUrl: "wss://broker.example.com/mqtt",
+      sessionId: "session-1",
+      teamId: "team-1",
+    });
+
+    await controller.load();
+    mqtt.emit(
+      "amux/team-1/session/session-1/live",
+      createAcpThinkingPayload({
+        actorId: "actor-agent",
+        eventId: "event-thinking-1",
+        text: "I need",
+        sequence: BigInt(21),
+      }),
+    );
+    mqtt.emit(
+      "amux/team-1/session/session-1/live",
+      createAcpThinkingPayload({
+        actorId: "actor-agent",
+        eventId: "event-thinking-2",
+        text: " to inspect",
+        sequence: BigInt(22),
+      }),
+    );
+    mqtt.emit(
+      "amux/team-1/session/session-1/live",
+      createAcpThinkingPayload({
+        actorId: "actor-agent",
+        eventId: "event-thinking-3",
+        text: ".",
+        sequence: BigInt(23),
+      }),
+    );
+
+    expect(controller.getState().messages.map((message) => message.content)).toEqual([
+      "I need",
+      " to inspect",
+      ".",
+    ]);
+  });
+
   it("replays persisted messages fetched after subscribe to close the load gap", async () => {
     const { createSessionDetailController } = await import(
       "../features/sessions/session-detail-controller"
@@ -432,6 +706,60 @@ describe("createSessionDetailController", () => {
     expect(controller.getState().messages).toEqual([
       expect.objectContaining({ messageId: "message-gap" }),
     ]);
+  });
+
+  it("keeps the current session visible while a pull refresh is in flight", async () => {
+    const { createSessionDetailController } = await import(
+      "../features/sessions/session-detail-controller"
+    );
+    const deferredRefreshMessages = createDeferred<ReturnType<typeof createRowMessage>[]>();
+    const mqtt = createMockMqtt();
+    const api = {
+      getSession: vi.fn().mockResolvedValue(createSession()),
+      insertOutgoingMessage: vi.fn(),
+      listMessages: vi
+        .fn()
+        .mockResolvedValueOnce([createRowMessage("message-1")])
+        .mockResolvedValueOnce([createRowMessage("message-1")])
+        .mockReturnValueOnce(deferredRefreshMessages.promise)
+        .mockResolvedValueOnce([createRowMessage("message-2", "actor-agent")]),
+      resolveMemberActorId: vi.fn().mockResolvedValue("actor-1"),
+      markSessionRead: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const controller = createSessionDetailController({
+      api: api as any,
+      currentMemberActorId: "actor-1",
+      getAuth: vi.fn().mockResolvedValue({
+        accessToken: "jwt-token",
+        userId: "user-1",
+      }),
+      mqtt: mqtt as any,
+      mqttUrl: "wss://broker.example.com/mqtt",
+      sessionId: "session-1",
+      teamId: "team-1",
+    });
+
+    await controller.load();
+    const refreshPromise = controller.load({ preserveExisting: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(controller.getState()).toMatchObject({
+      isRefreshing: true,
+      messages: [expect.objectContaining({ messageId: "message-1" })],
+      session: expect.objectContaining({ sessionId: "session-1" }),
+      status: "ready",
+    });
+
+    deferredRefreshMessages.resolve([createRowMessage("message-2", "actor-agent")]);
+    await refreshPromise;
+
+    expect(controller.getState()).toMatchObject({
+      isRefreshing: false,
+      messages: [expect.objectContaining({ messageId: "message-2" })],
+      status: "ready",
+    });
   });
 
   it("preserves composer text when send insert fails", async () => {
