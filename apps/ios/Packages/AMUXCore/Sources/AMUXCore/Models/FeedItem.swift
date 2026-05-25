@@ -83,40 +83,42 @@ public func buildFeedItems(_ events: [AgentEvent],
         switch event.eventType {
         case "user_prompt":
             result.append(.userMessage(event))
+            continue
         case "permission_request":
             result.append(.permission(event))
+            continue
         case "plan_update":
             result.append(.todo(event))
+            continue
         case "error":
             result.append(.error(event))
-        case "thinking", "tool_use", "tool_result":
+            continue
+        case "thinking", "tool_use", "tool_result", "output":
             recordOpenTurn(event, owner: owner)
-        case "output":
-            if event.isComplete {
-                let runtime = openTurnsByAgent[owner] ?? []
-                openTurnsByAgent[owner] = nil
-                openTurnFirstEventID[owner] = nil
-                // Prefer daemon-assigned turnID so cross-device
-                // `TurnRoute.frozenTurnID` lands on the same turn from
-                // any client. Fallback to the synthetic id keeps
-                // pre-turn_id rows navigable.
-                let turnID = (event.turnID?.isEmpty == false ? event.turnID! : "turn-\(event.id)")
-                result.append(.completedTurn(
-                    id: turnID,
-                    agentID: owner,
-                    finalEvent: event,
-                    runtimeEvents: runtime
-                ))
-            } else {
-                // Persisted incomplete output (stop()-saved synthetic
-                // event re-applied across cold start). Treat as part of
-                // the open turn — the active-stream card surfaces it.
-                recordOpenTurn(event, owner: owner)
-            }
         default:
-            // Unknown / future event types fall through to a single row
-            // so they remain at least debuggable.
+            // Unknown event types fall through to a debug row.
             result.append(.userMessage(event))
+            continue
+        }
+
+        // After accumulating into the open turn, check if this event
+        // also ends the turn.
+        if event.turnEnded {
+            let runtime = openTurnsByAgent[owner] ?? []
+            openTurnsByAgent[owner] = nil
+            openTurnFirstEventID[owner] = nil
+            let finalEvent = runtime.last(where: { $0.eventType == "output" })
+                ?? runtime.last(where: { !($0.text?.isEmpty ?? true) })
+                ?? event
+            let turnID = (event.turnID?.isEmpty == false
+                          ? event.turnID!
+                          : "turn-\(event.id)")
+            result.append(.completedTurn(
+                id: turnID,
+                agentID: owner,
+                finalEvent: finalEvent,
+                runtimeEvents: runtime
+            ))
         }
     }
 
