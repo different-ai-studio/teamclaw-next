@@ -23,6 +23,7 @@ import {
 } from "../../actors/components/SegmentedFilter";
 import { Hairline } from "../../../ui/atoms/Hairline";
 import { PrimaryButton } from "../../../ui/button";
+import { PageHeader } from "../../../ui/PageHeader";
 import { SwipeableRow } from "../../../ui/SwipeableRow";
 import { impactLight, selectionTick } from "../../../lib/haptics";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
@@ -58,40 +59,39 @@ function HeaderBar({
   onOpenArchived?: () => void;
 }) {
   return (
-    <View style={styles.headerWrap}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerSpacer} />
-        {onOpenArchived ? (
+    <PageHeader
+      count={count}
+      right={
+        <View style={styles.toolbarGroup}>
+          {onOpenArchived ? (
+            <Pressable
+              accessibilityLabel="Archived ideas"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={onOpenArchived}
+              style={styles.toolbarButton}
+            >
+              <Ionicons color={colors.onyx} name="archive-outline" size={22} />
+            </Pressable>
+          ) : null}
           <Pressable
-            accessibilityLabel="Archived ideas"
+            accessibilityLabel="Create Idea"
             accessibilityRole="button"
+            disabled={!onCreate}
             hitSlop={8}
-            onPress={onOpenArchived}
+            onPress={onCreate}
             style={styles.toolbarButton}
           >
-            <Ionicons color={colors.onyx} name="archive-outline" size={22} />
+            <Ionicons
+              color={onCreate ? colors.onyx : colors.slate}
+              name="add"
+              size={26}
+            />
           </Pressable>
-        ) : null}
-        <Pressable
-          accessibilityLabel="Create Idea"
-          accessibilityRole="button"
-          disabled={!onCreate}
-          hitSlop={8}
-          onPress={onCreate}
-          style={styles.toolbarButton}
-        >
-          <Ionicons
-            color={onCreate ? colors.onyx : colors.slate}
-            name="add"
-            size={26}
-          />
-        </Pressable>
-      </View>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>Ideas</Text>
-        {count > 0 ? <Text style={styles.titleCount}>· {count}</Text> : null}
-      </View>
-    </View>
+        </View>
+      }
+      title="Ideas"
+    />
   );
 }
 
@@ -498,20 +498,6 @@ const styles = StyleSheet.create({
     ...typography.secondaryBody,
     fontWeight: "600",
   },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    minHeight: 36,
-    paddingHorizontal: spacing.lg,
-  },
-  headerSpacer: {
-    flex: 1,
-  },
-  headerWrap: {
-    backgroundColor: colors.mist,
-    gap: spacing.md,
-    paddingTop: spacing.md,
-  },
   loadingRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -644,28 +630,14 @@ const styles = StyleSheet.create({
     color: colors.onyx,
     ...typography.cardTitle,
   },
-  title: {
-    color: colors.onyx,
-    fontSize: 34,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    lineHeight: 38,
-  },
-  titleCount: {
-    color: colors.slate,
-    ...typography.body,
-  },
-  titleRow: {
-    alignItems: "baseline",
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingBottom: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
   toolbarButton: {
-    height: 36,
+    alignItems: "center",
+    height: 40,
     justifyContent: "center",
-    minWidth: 36,
+    width: 40,
+  },
+  toolbarGroup: {
+    flexDirection: "row",
   },
 });
 

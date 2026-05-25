@@ -5,15 +5,23 @@ import {
   MessageSchema,
   SessionMessageEnvelopeSchema,
   type Message,
+  type LiveEventEnvelope,
 } from "@teamclaw/app/proto/teamclaw_pb";
+import {
+  AgentStatus,
+  type AcpEvent,
+  type AcpPlanEntry,
+} from "@teamclaw/app/proto/amux_pb";
 
 import { decodeLiveEvent } from "../../lib/teamclaw/live-events";
 import type { TeamMqttClient } from "../../lib/mqtt/team-mqtt";
 import { uuidV4 } from "../../lib/uuid";
+import type { Actor } from "../actors/actor-types";
 import { setOutboxStatus, syncOutboxFromDao } from "./outbox-store";
 import type { OutboxDao } from "./outbox-db";
 import type { OutboxSender } from "./outbox-sender";
 import { peekPendingAttachments, takePendingAttachments } from "./pending-attachments";
+import { resolveMentionActorIdsForComposer } from "./session-mention-resolver";
 import type { SessionDetailCache } from "./session-detail-cache";
 import {
   buildSessionDetailState,
@@ -36,6 +44,7 @@ export type SessionDetailControllerState = {
   connectionState: SessionDetailConnectionState;
   composerText: string;
   isSending: boolean;
+  isRefreshing: boolean;
   sendErrorMessage: string | null;
   replyTarget: { messageId: string; content: string } | null;
   streamingByAgent: ReadonlyMap<string, StreamingBuffer>;
@@ -54,6 +63,7 @@ type SessionDetailControllerDeps = {
   >;
   currentMemberActorId: string | null;
   getAuth: () => Promise<{ accessToken: string | null; userId: string | null }>;
+  getTeamActors?: () => ReadonlyArray<Actor>;
   mqtt: Pick<TeamMqttClient, "subscribe" | "publish" | "onConnectionState">;
   mqttUrl: string | null;
   sessionId: string;
@@ -65,7 +75,7 @@ type SessionDetailControllerDeps = {
 type SessionDetailController = {
   subscribe: (listener: () => void) => () => void;
   getState: () => SessionDetailControllerState;
-  load: () => Promise<void>;
+  load: (options?: { preserveExisting?: boolean }) => Promise<void>;
   setComposerText: (value: string) => void;
   setReplyTarget: (target: { messageId: string; content: string } | null) => void;
   sendMessage: () => Promise<void>;
@@ -80,6 +90,7 @@ const initialState: SessionDetailControllerState = {
   connectionState: "disconnected",
   composerText: "",
   isSending: false,
+  isRefreshing: false,
   sendErrorMessage: null,
   replyTarget: null,
   streamingByAgent: emptyTimelineState().streamingByAgent,
@@ -87,6 +98,12 @@ const initialState: SessionDetailControllerState = {
 
 function toIsoFromSeconds(value: bigint): string {
   return new Date(Number(value) * 1000).toISOString();
+}
+
+function liveEventCreatedAt(envelope: LiveEventEnvelope): string {
+  return envelope.sentAt > BigInt(0)
+    ? toIsoFromSeconds(envelope.sentAt)
+    : new Date().toISOString();
 }
 
 function kindToString(kind: MessageKind): string {
@@ -127,6 +144,166 @@ function mapProtoMessage(message: Message, teamId: string): SessionMessage | nul
   };
 }
 
+function runtimeMessageId(
+  envelope: LiveEventEnvelope,
+  actorId: string,
+  eventCase: string,
+): string {
+  const eventId = envelope.eventId || `${envelope.sentAt.toString()}:${eventCase}`;
+  return `acp:${envelope.sessionId}:${actorId}:${eventId}`;
+}
+
+function planStatusPrefix(status: string): string {
+  switch (status) {
+    case "completed":
+      return "[done]";
+    case "in_progress":
+      return "[wip]";
+    case "cancelled":
+      return "[cancelled]";
+    case "pending":
+    default:
+      return "[todo]";
+  }
+}
+
+function planUpdateText(entries: readonly AcpPlanEntry[]): string {
+  return entries
+    .map((entry) => `${planStatusPrefix(entry.status)} ${entry.content.trim()}`.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+function createRuntimeMessage(input: {
+  actorId: string;
+  content: string;
+  createdAt: string;
+  envelope: LiveEventEnvelope;
+  kind: string;
+  metadata?: Record<string, unknown> | null;
+  model?: string;
+  teamId: string;
+}): SessionMessage {
+  return {
+    content: input.content,
+    createdAt: input.createdAt,
+    kind: input.kind,
+    messageId: runtimeMessageId(input.envelope, input.actorId, input.kind),
+    metadata: input.metadata ?? null,
+    model: input.model ?? "",
+    replyToMessageId: "",
+    senderActorId: input.actorId,
+    sessionId: input.envelope.sessionId || "",
+    teamId: input.teamId,
+    turnId: "",
+  };
+}
+
+function runtimeMessageFromAcpEvent(
+  acpEvent: AcpEvent,
+  envelope: LiveEventEnvelope,
+  actorId: string,
+  teamId: string,
+): SessionMessage | null {
+  const event = acpEvent.event;
+  const createdAt = liveEventCreatedAt(envelope);
+  switch (event.case) {
+    case "thinking": {
+      const content = event.value.text;
+      if (!content) return null;
+      return createRuntimeMessage({
+        actorId,
+        content,
+        createdAt,
+        envelope,
+        kind: "agent_thinking",
+        model: acpEvent.model,
+        teamId,
+      });
+    }
+    case "toolUse": {
+      const params = event.value.params ?? {};
+      const paramsText = Object.entries(params)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(", ");
+      const content = [
+        event.value.toolName || "Tool",
+        event.value.description,
+        paramsText ? `(${paramsText})` : "",
+      ].filter(Boolean).join(" ");
+      return createRuntimeMessage({
+        actorId,
+        content,
+        createdAt,
+        envelope,
+        kind: "agent_tool_call",
+        metadata: {
+          tool_id: event.value.toolId,
+          tool_kind: event.value.toolKind,
+          tool_name: event.value.toolName,
+          params,
+        },
+        teamId,
+      });
+    }
+    case "toolResult": {
+      return createRuntimeMessage({
+        actorId,
+        content: event.value.summary || (event.value.success ? "Tool completed" : "Tool failed"),
+        createdAt,
+        envelope,
+        kind: "agent_tool_result",
+        metadata: {
+          success: event.value.success,
+          tool_id: event.value.toolId,
+        },
+        teamId,
+      });
+    }
+    case "error": {
+      const content = [event.value.message, event.value.details].filter(Boolean).join("\n\n");
+      return createRuntimeMessage({
+        actorId,
+        content: content || "Agent error",
+        createdAt,
+        envelope,
+        kind: "agent_error",
+        teamId,
+      });
+    }
+    case "permissionRequest": {
+      return createRuntimeMessage({
+        actorId,
+        content: event.value.description,
+        createdAt,
+        envelope,
+        kind: "permission_request",
+        metadata: {
+          params: event.value.params ?? {},
+          request_id: event.value.requestId,
+          tool_id: event.value.requestId,
+          tool_name: event.value.toolName,
+        },
+        teamId,
+      });
+    }
+    case "planUpdate": {
+      const content = planUpdateText(event.value.entries);
+      if (!content) return null;
+      return createRuntimeMessage({
+        actorId,
+        content,
+        createdAt,
+        envelope,
+        kind: "plan_update",
+        teamId,
+      });
+    }
+    default:
+      return null;
+  }
+}
+
 function nextStatusForMessages(
   session: SessionSummary | null,
   messages: SessionMessage[],
@@ -141,6 +318,20 @@ function nextStatusForMessages(
 
 function toErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
+}
+
+function timelineFromMessages(
+  messages: readonly SessionMessage[],
+  streamingByAgent: ReadonlyMap<string, StreamingBuffer> = new Map(),
+): TimelineState {
+  let next: TimelineState = {
+    messages: [],
+    streamingByAgent: new Map(streamingByAgent),
+  };
+  for (const message of messages) {
+    next = reduceTimeline(next, { kind: "messageCommitted", message });
+  }
+  return next;
 }
 
 export function createSessionDetailController(
@@ -190,6 +381,78 @@ export function createSessionDetailController(
     return resolved;
   }
 
+  function publishTimelineState(next: TimelineState) {
+    timeline = next;
+    setState({
+      ...state,
+      messages: next.messages,
+      streamingByAgent: next.streamingByAgent,
+      status: nextStatusForMessages(state.session, next.messages, state.status),
+    });
+  }
+
+  function applyAcpEvent(acpEvent: AcpEvent, envelope: LiveEventEnvelope): boolean {
+    const actorId = envelope.actorId;
+    if (!actorId) return false;
+
+    const event = acpEvent.event;
+    const createdAt = liveEventCreatedAt(envelope);
+    let next: TimelineState | null = null;
+
+    if (event.case === "output") {
+      const prev = timeline.streamingByAgent.get(actorId);
+      const text = event.value.text ?? "";
+      if (!prev && !text && !event.value.isComplete) {
+        return false;
+      }
+      next = reduceTimeline(timeline, {
+        kind: "streamingDelta",
+        agentId: actorId,
+        messageId: prev?.messageId ?? runtimeMessageId(envelope, actorId, "agent_reply"),
+        messageKind: "agent_reply",
+        deltaText: text,
+        createdAt,
+        isComplete: event.value.isComplete,
+        model: acpEvent.model,
+      });
+    } else if (event.case === "statusChange") {
+      if (event.value.newStatus !== AgentStatus.IDLE) {
+        return false;
+      }
+      const prev = timeline.streamingByAgent.get(actorId);
+      if (!prev || prev.isComplete) {
+        return false;
+      }
+      next = reduceTimeline(timeline, {
+        kind: "streamingDelta",
+        agentId: actorId,
+        messageId: prev.messageId,
+        messageKind: prev.kind,
+        deltaText: "",
+        createdAt,
+        isComplete: true,
+        model: prev.model,
+      });
+    } else {
+      const message = runtimeMessageFromAcpEvent(
+        acpEvent,
+        envelope,
+        actorId,
+        deps.teamId,
+      );
+      if (!message) {
+        return false;
+      }
+      next = reduceTimeline(timeline, { kind: "messageCommitted", message });
+    }
+
+    if (next === timeline) {
+      return false;
+    }
+    publishTimelineState(next);
+    return true;
+  }
+
   async function connectRealtime(_session: SessionSummary, currentToken: number) {
     if (disposed || currentToken !== loadToken) {
       return;
@@ -214,7 +477,16 @@ export function createSessionDetailController(
         }
 
         const decoded = decodeLiveEvent(payload);
-        if (!decoded?.message) {
+        if (!decoded) {
+          return;
+        }
+
+        if (decoded.acpEvent) {
+          applyAcpEvent(decoded.acpEvent, decoded.envelope);
+          return;
+        }
+
+        if (!decoded.message) {
           return;
         }
 
@@ -225,13 +497,7 @@ export function createSessionDetailController(
 
         const event: TimelineEvent = { kind: "messageCommitted", message: nextMessage };
         const next = reduceTimeline(timeline, event);
-        timeline = next;
-        setState({
-          ...state,
-          messages: next.messages,
-          streamingByAgent: next.streamingByAgent,
-          status: nextStatusForMessages(state.session, next.messages, state.status),
-        });
+        publishTimelineState(next);
         void deps.cache?.saveMessages(deps.sessionId, next.messages);
 
         // Live-update the read marker so the Sessions list stays clean
@@ -297,29 +563,44 @@ export function createSessionDetailController(
     getState() {
       return state;
     },
-    async load() {
+    async load(options) {
       loadToken += 1;
       const currentToken = loadToken;
-      timeline = emptyTimelineState();
+      const preserveExisting = options?.preserveExisting === true && state.session !== null;
+      disconnectRealtime();
 
-      setState({
-        ...state,
-        status: "loading",
-        session: null,
-        messages: [],
-        errorMessage: null,
-        connectionState: "disconnected",
-        sendErrorMessage: null,
-      });
+      if (preserveExisting) {
+        setState({
+          ...state,
+          connectionState: "connecting",
+          errorMessage: null,
+          isRefreshing: true,
+          sendErrorMessage: null,
+        });
+      } else {
+        timeline = emptyTimelineState();
+        setState({
+          ...state,
+          status: "loading",
+          session: null,
+          messages: [],
+          errorMessage: null,
+          connectionState: "disconnected",
+          isRefreshing: false,
+          sendErrorMessage: null,
+          streamingByAgent: timeline.streamingByAgent,
+        });
+      }
 
       deps.outbox?.sender.start();
 
       // Hydrate from disk first so the user sees the timeline immediately on
       // cold start. The network results below overlay on top once they land.
-      if (deps.cache) {
+      if (deps.cache && !preserveExisting) {
         void deps.cache.load(deps.sessionId).then((cached) => {
           if (disposed || currentToken !== loadToken || !cached) return;
           if (state.session) return; // network beat the disk read
+          timeline = timelineFromMessages(cached.messages);
           const detailState = buildSessionDetailState(cached.session, cached.messages);
           setState({
             ...state,
@@ -327,6 +608,7 @@ export function createSessionDetailController(
             session: cached.session,
             messages: detailState.messages,
             errorMessage: null,
+            streamingByAgent: timeline.streamingByAgent,
           });
         });
       }
@@ -348,12 +630,14 @@ export function createSessionDetailController(
             ...state,
             status: "error",
             errorMessage: toErrorMessage(sessionResult.reason, "加载会话失败。"),
+            isRefreshing: false,
           });
         } else {
           setState({
             ...state,
             status: "error",
             errorMessage: toErrorMessage(sessionResult.reason, "加载会话失败。"),
+            isRefreshing: false,
           });
         }
         return;
@@ -361,9 +645,14 @@ export function createSessionDetailController(
 
       const session = sessionResult.value;
       if (!session) {
+        timeline = emptyTimelineState();
         setState({
           ...state,
           status: "not-found",
+          session: null,
+          messages: [],
+          isRefreshing: false,
+          streamingByAgent: timeline.streamingByAgent,
         });
         return;
       }
@@ -375,18 +664,25 @@ export function createSessionDetailController(
           session,
           messages: state.messages,
           errorMessage: toErrorMessage(messagesResult.reason, "加载消息失败。"),
+          isRefreshing: false,
         });
         await connectRealtime(session, currentToken);
         return;
       }
 
-      const detailState = buildSessionDetailState(session, messagesResult.value);
+      timeline = timelineFromMessages(
+        messagesResult.value,
+        preserveExisting ? timeline.streamingByAgent : undefined,
+      );
+      const detailState = buildSessionDetailState(session, timeline.messages);
       setState({
         ...state,
         status: detailState.status,
         session,
         messages: detailState.messages,
         errorMessage: null,
+        isRefreshing: preserveExisting,
+        streamingByAgent: timeline.streamingByAgent,
       });
 
       // Persist authoritative network state for the next cold start.
@@ -396,6 +692,12 @@ export function createSessionDetailController(
       });
 
       await connectRealtime(session, currentToken);
+      if (!disposed && currentToken === loadToken && state.isRefreshing) {
+        setState({
+          ...state,
+          isRefreshing: false,
+        });
+      }
     },
     setComposerText(value) {
       setState({
@@ -466,6 +768,11 @@ export function createSessionDetailController(
           : undefined;
 
         const replyTo = state.replyTarget?.messageId ?? null;
+        const mentionActorIds = resolveMentionActorIdsForComposer({
+          content,
+          session,
+          teamActors: deps.getTeamActors?.() ?? [],
+        });
 
         await deps.api.insertOutgoingMessage({
           id: messageId,
@@ -474,7 +781,7 @@ export function createSessionDetailController(
           senderActorId: actorId,
           content,
           createdAt,
-          metadata: { mention_actor_ids: [] },
+          metadata: { mention_actor_ids: mentionActorIds },
           attachments: attachmentsPayload,
           replyToMessageId: replyTo,
         });
@@ -484,7 +791,7 @@ export function createSessionDetailController(
           createdAt,
           kind: "text",
           messageId,
-          metadata: { mention_actor_ids: [] },
+          metadata: { mention_actor_ids: mentionActorIds },
           model: "",
           replyToMessageId: replyTo ?? "",
           senderActorId: actorId,
@@ -513,7 +820,7 @@ export function createSessionDetailController(
             teamId: deps.teamId,
             senderActorId: actorId,
             content,
-            mentionActorIds: [],
+            mentionActorIds,
             replyToMessageId: replyTo,
             attachments: pendingAttachments.map((row) => ({
               url: row.publicUrl || row.path,
@@ -536,7 +843,7 @@ export function createSessionDetailController(
           });
           const sessionMessage = create(SessionMessageEnvelopeSchema, {
             message: protoMessage,
-            mentionActorIds: [],
+            mentionActorIds,
           });
           const envelope = create(LiveEventEnvelopeSchema, {
             eventId: uuidV4(),

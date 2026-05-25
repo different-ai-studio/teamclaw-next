@@ -7,6 +7,7 @@ import { isAgentActor, type Actor } from "../../src/features/actors/actor-types"
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import { isOpenIdea, type Idea } from "../../src/features/ideas/idea-types";
 import { buildFirstMessageWithIdea } from "../../src/features/sessions/idea-preface";
+import { resolveInitialMessageMentionActorIds } from "../../src/features/sessions/session-mention-resolver";
 import { resolveAgentRuntimeStartPlans } from "../../src/features/sessions/runtime-start";
 import { createSessionsApi } from "../../src/features/sessions/session-api";
 import {
@@ -183,13 +184,17 @@ export default function NewSessionRoute() {
           }
 
           if (expandedMessage.trim().length > 0) {
+            const mentionActorIds = resolveInitialMessageMentionActorIds({
+              collaboratorActorIds,
+              teamActors: actors,
+            });
             await sessionsApi.insertOutgoingMessage({
               id: uuidV4(),
               teamId: state.currentTeam.id,
               sessionId,
               senderActorId: memberActorId,
               content: expandedMessage.trim(),
-              metadata: { mention_actor_ids: [] },
+              metadata: { mention_actor_ids: mentionActorIds },
             });
           }
 

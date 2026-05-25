@@ -42,6 +42,16 @@ describe("reduceTimeline · messageCommitted", () => {
     s = reduceTimeline(s, { kind: "messageCommitted", message: msg("a", "Hello") });
     expect(s.streamingByAgent.has("agent-1")).toBe(false);
   });
+
+  it("clears an agent stream when the committed message has a different persisted id", () => {
+    let s = emptyTimelineState();
+    s = reduceTimeline(s, {
+      kind: "streamingDelta", agentId: "agent-1", messageId: "acp:agent-1:1",
+      messageKind: "agent_reply", deltaText: "Hello", createdAt: "2026-05-20T10:00:00.000Z",
+    });
+    s = reduceTimeline(s, { kind: "messageCommitted", message: msg("db-message-1", "Hello") });
+    expect(s.streamingByAgent.has("agent-1")).toBe(false);
+  });
 });
 
 describe("reduceTimeline · streamingDelta", () => {
@@ -69,6 +79,21 @@ describe("reduceTimeline · streamingDelta", () => {
     s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
       messageKind: "agent_reply", deltaText: "Hi", createdAt: "2026-05-20T10:00:00.000Z" });
     expect(s.messages).toEqual([]);
+  });
+
+  it("marks an output buffer complete without clearing the visible text", () => {
+    let s = emptyTimelineState();
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "Hel", createdAt: "2026-05-20T10:00:00.000Z" });
+    s = reduceTimeline(s, { kind: "streamingDelta", agentId: "a", messageId: "m1",
+      messageKind: "agent_reply", deltaText: "lo", createdAt: "2026-05-20T10:00:01.000Z", isComplete: true,
+      model: "gpt-5.2" });
+
+    expect(s.streamingByAgent.get("a")).toMatchObject({
+      isComplete: true,
+      model: "gpt-5.2",
+      text: "Hello",
+    });
   });
 });
 

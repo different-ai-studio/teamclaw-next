@@ -39,12 +39,17 @@ function insertSorted(messages: SessionMessage[], next: SessionMessage): Session
 
 function clearStreamingByMessageId(
   streamingByAgent: Map<string, StreamingBuffer>,
-  messageId: string,
+  message: SessionMessage,
 ): Map<string, StreamingBuffer> {
   let changed = false;
   const next = new Map(streamingByAgent);
+  const kind = message.kind.trim().toLowerCase();
+  const mayBeFinalReply = kind === "agent_reply" || kind === "text";
   for (const [agentId, buf] of next) {
-    if (buf.messageId === messageId) {
+    if (
+      buf.messageId === message.messageId ||
+      (mayBeFinalReply && agentId === message.senderActorId)
+    ) {
       next.delete(agentId);
       changed = true;
     }
@@ -58,7 +63,7 @@ export function reduceTimeline(state: TimelineState, event: TimelineEvent): Time
       const messages = insertSorted(state.messages, event.message);
       const streamingByAgent = clearStreamingByMessageId(
         state.streamingByAgent,
-        event.message.messageId,
+        event.message,
       );
       if (messages === state.messages && streamingByAgent === state.streamingByAgent) {
         return state;
@@ -68,9 +73,16 @@ export function reduceTimeline(state: TimelineState, event: TimelineEvent): Time
     case "streamingDelta": {
       const prev = state.streamingByAgent.get(event.agentId);
       const next: StreamingBuffer = prev && prev.messageId === event.messageId
-        ? { ...prev, text: prev.text + event.deltaText }
+        ? {
+            ...prev,
+            isComplete: event.isComplete ?? prev.isComplete,
+            model: event.model || prev.model,
+            text: prev.text + event.deltaText,
+          }
         : {
+            isComplete: event.isComplete,
             messageId: event.messageId,
+            model: event.model,
             text: event.deltaText,
             kind: event.messageKind,
             startedAt: event.createdAt,

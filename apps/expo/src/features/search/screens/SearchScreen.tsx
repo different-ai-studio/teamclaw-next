@@ -20,6 +20,7 @@ import type { Idea } from "../../ideas/idea-types";
 import { SessionRow } from "../../sessions/components/SessionRow";
 import type { SessionSummary } from "../../sessions/session-types";
 import { Hairline } from "../../../ui/atoms/Hairline";
+import { PageHeader } from "../../../ui/PageHeader";
 import { SectionEyebrow } from "../../../ui/atoms/SectionEyebrow";
 import { colors, radii, spacing, typography } from "../../../ui/theme";
 import {
@@ -40,16 +41,7 @@ export type SearchScreenProps = {
 };
 
 function HeaderBar() {
-  return (
-    <View style={styles.headerWrap}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerSpacer} />
-      </View>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>Search</Text>
-      </View>
-    </View>
-  );
+  return <PageHeader title="Search" />;
 }
 
 export function SearchScreen({
@@ -281,20 +273,6 @@ const styles = StyleSheet.create({
   groups: {
     gap: spacing.lg,
   },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    minHeight: 16,
-    paddingHorizontal: spacing.lg,
-  },
-  headerSpacer: {
-    flex: 1,
-  },
-  headerWrap: {
-    backgroundColor: colors.mist,
-    gap: spacing.md,
-    paddingTop: spacing.md,
-  },
   loadingRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -377,20 +355,6 @@ const styles = StyleSheet.create({
   stateTitle: {
     color: colors.onyx,
     ...typography.cardTitle,
-  },
-  title: {
-    color: colors.onyx,
-    fontSize: 34,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    lineHeight: 38,
-  },
-  titleRow: {
-    alignItems: "baseline",
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingBottom: spacing.sm,
-    paddingHorizontal: spacing.lg,
   },
 });
 

@@ -1,10 +1,3 @@
-import { create, toBinary } from "@bufbuild/protobuf";
-import {
-  LiveEventEnvelopeSchema,
-  MessageKind,
-  MessageSchema,
-  SessionMessageEnvelopeSchema,
-} from "@teamclaw/app/proto/teamclaw_pb";
 import { Redirect, Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Share, StyleSheet, Text, View } from "react-native";
@@ -23,7 +16,8 @@ import {
 import type { AgentChip } from "../../../../src/features/sessions/components/AgentChipBar";
 import { createOutboxDao } from "../../../../src/features/sessions/outbox-db";
 import { createOutboxSender } from "../../../../src/features/sessions/outbox-sender";
-import type { OutboxRow, OutboxSqliteDb } from "../../../../src/features/sessions/outbox-db";
+import type { OutboxSqliteDb } from "../../../../src/features/sessions/outbox-db";
+import { publishOutboxRowViaOptionalMqtt } from "../../../../src/features/sessions/session-outbox-publish";
 import { resetOutbox, syncOutboxFromDao } from "../../../../src/features/sessions/outbox-store";
 import { createSessionsApi } from "../../../../src/features/sessions/session-api";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
@@ -41,49 +35,11 @@ import {
   resolvePermissionRuntimeTarget,
 } from "../../../../src/lib/teamclaw/runtime-command";
 import type { TeamMqttClient } from "../../../../src/lib/mqtt/team-mqtt";
-import { uuidV4 } from "../../../../src/lib/uuid";
 import { PrimaryButton } from "../../../../src/ui/button";
 import { AppCard } from "../../../../src/ui/card";
 import { TextPromptModal } from "../../../../src/ui/TextPromptModal";
 import { colors, spacing, typography } from "../../../../src/ui/theme";
 import type { SessionDetailControllerState } from "../../../../src/features/sessions/session-detail-controller";
-
-/**
- * Build the proto LiveEventEnvelope for an outbox row and publish it via MQTT.
- * This mirrors the fallback path in session-detail-controller but lives here at
- * the route so the sender closure can capture the live mqtt adapter reference.
- */
-async function sendOutboxRowViaMqtt(
-  row: OutboxRow,
-  mqtt: Pick<TeamMqttClient, "publish">,
-): Promise<void> {
-  const createdAtSeconds = BigInt(Math.floor(row.createdAt / 1000));
-  const protoMessage = create(MessageSchema, {
-    messageId: row.messageId,
-    sessionId: row.sessionId,
-    senderActorId: row.senderActorId,
-    kind: MessageKind.TEXT,
-    content: row.content,
-    createdAt: createdAtSeconds,
-  });
-  const sessionMessage = create(SessionMessageEnvelopeSchema, {
-    message: protoMessage,
-    mentionActorIds: row.mentionActorIds,
-  });
-  const envelope = create(LiveEventEnvelopeSchema, {
-    eventId: uuidV4(),
-    eventType: "message.created",
-    sessionId: row.sessionId,
-    actorId: row.senderActorId,
-    sentAt: createdAtSeconds,
-    body: toBinary(SessionMessageEnvelopeSchema, sessionMessage),
-  });
-  await mqtt.publish(
-    `amux/${row.teamId}/session/${row.sessionId}/live`,
-    toBinary(LiveEventEnvelopeSchema, envelope),
-    false,
-  );
-}
 
 const fallbackDetailState: SessionDetailControllerState = {
   status: "loading",
@@ -93,6 +49,7 @@ const fallbackDetailState: SessionDetailControllerState = {
   connectionState: "disconnected",
   composerText: "",
   isSending: false,
+  isRefreshing: false,
   sendErrorMessage: null,
   replyTarget: null,
   streamingByAgent: emptyTimelineState().streamingByAgent,
@@ -151,6 +108,7 @@ export default function SessionDetailRoute() {
   // across controller rebuilds and we can call sender.retry() from UI.
   type OutboxHandle = { dao: ReturnType<typeof createOutboxDao>; sender: ReturnType<typeof createOutboxSender> };
   const outboxRef = useRef<OutboxHandle | null>(null);
+  const teamActorsRef = useRef<Actor[]>([]);
   // Tracks message ids sent in this session so onChange can sync them.
   const recentMessageIdsRef = useRef<Set<string>>(new Set());
 
@@ -178,8 +136,8 @@ export default function SessionDetailRoute() {
     let cancelled = false;
     // Capture the shared team MQTT client for the outbox sender's send closure.
     // teamMqtt may be null while the root layout is still connecting; in that
-    // case the outbox falls back to a no-op publish and the controller shows
-    // a disconnected state.
+    // case the outbox send rejects so the row stays pending and retries after
+    // the route rebuilds with a live MQTT adapter.
     const mqttSnapshot = teamMqtt;
 
     void (async () => {
@@ -194,8 +152,7 @@ export default function SessionDetailRoute() {
         send: (row) => {
           // Track this id so onChange can sync its status from the DAO.
           recentMessageIdsRef.current.add(row.messageId);
-          if (!mqttSnapshot) return Promise.resolve();
-          return sendOutboxRowViaMqtt(row, mqttSnapshot);
+          return publishOutboxRowViaOptionalMqtt(row, mqttSnapshot);
         },
         onChange: () => {
           void syncOutboxFromDao(dao, Array.from(recentMessageIdsRef.current));
@@ -220,6 +177,7 @@ export default function SessionDetailRoute() {
             userId: data.session?.user.id ?? null,
           };
         },
+        getTeamActors: () => teamActorsRef.current,
         mqtt: mqttSnapshot ?? noOpMqtt,
         mqttUrl: getOptionalMqttUrl(),
         outbox: { dao, sender },
@@ -309,6 +267,10 @@ export default function SessionDetailRoute() {
   const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    teamActorsRef.current = teamActors;
+  }, [teamActors]);
+
+  useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
     void (async () => {
@@ -371,6 +333,16 @@ export default function SessionDetailRoute() {
     };
   }, [currentTeam?.id]);
 
+  const streamingAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const buffer of detailState.streamingByAgent.values()) {
+      if (!buffer.isComplete) {
+        ids.add(buffer.senderActorId);
+      }
+    }
+    return ids;
+  }, [detailState.streamingByAgent]);
+
   const agentChips: AgentChip[] = useMemo(() => {
     if (!detailState.session) return [];
     const participantIds = new Set(detailState.session.participantActorIds);
@@ -379,9 +351,11 @@ export default function SessionDetailRoute() {
       .map((actor) => ({
         agentId: actor.actorId,
         displayName: actor.displayName,
-        runtimeState: "ready" as const,
+        runtimeState: streamingAgentIds.has(actor.actorId)
+          ? "active" as const
+          : "ready" as const,
       }));
-  }, [detailState.session, teamActors]);
+  }, [detailState.session, streamingAgentIds, teamActors]);
 
   const agentParticipantIds = useMemo(() => {
     if (!detailState.session) return [];
@@ -588,6 +562,7 @@ export default function SessionDetailRoute() {
           connectionState={detailState.connectionState}
           headerAvatars={headerAvatars}
           isSending={detailState.isSending}
+          isRefreshing={detailState.isRefreshing}
           mentionPool={mentionPool}
           onAttach={() => {
             router.push(`/(app)/attach?sessionId=${sessionId}`);
@@ -636,7 +611,7 @@ export default function SessionDetailRoute() {
             void controller?.load();
           }}
           onRefresh={() => {
-            void controller?.load();
+            void controller?.load({ preserveExisting: true });
           }}
           onReplyToMessage={(messageId) => {
             selectionTick();
@@ -712,6 +687,7 @@ export default function SessionDetailRoute() {
           sendErrorMessage={detailState.sendErrorMessage}
           slashCommands={dynamicSlashCommands}
           state={detailState}
+          streamingAgentIds={streamingAgentIds}
         />
       ) : null}
 

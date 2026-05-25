@@ -16,17 +16,16 @@ import Markdown from "react-native-markdown-display";
 
 import { colors, hai, radii, spacing, typography } from "../../../ui/theme";
 import type { MessageAttachment, SessionMessage } from "../session-types";
+import { buildThinkingBody, buildThinkingPreview } from "./agent-thinking-presentation";
 import { AudioPlayerChip } from "./AudioPlayerChip";
 import { ImageLightbox } from "./ImageLightbox";
 import { PermissionBanner } from "./PermissionBanner";
 
 const HIDDEN_MESSAGE_KINDS = new Set<string>([]);
 
-const AGENT_NOTE_KINDS = new Set([
-  "agent_thinking",
-  "agent_tool_call",
-  "agent_tool_result",
-]);
+const AGENT_THINKING_KIND = "agent_thinking";
+
+const AGENT_NOTE_KINDS = new Set(["agent_tool_call", "agent_tool_result"]);
 
 export type SessionMessageRowProps = {
   message: SessionMessage;
@@ -68,11 +67,14 @@ export function isAgentNoteKind(kind: string): boolean {
   return AGENT_NOTE_KINDS.has(kind.trim().toLowerCase());
 }
 
+export function isAgentThinkingKind(kind: string): boolean {
+  return kind.trim().toLowerCase() === AGENT_THINKING_KIND;
+}
+
 /**
- * Eyebrow + tone palette for the three "agent note" message kinds. Mirrors
- * the iOS `StreamingDetailView` styling: tool calls/results use Pebble +
- * Basalt mono labels, agent_thinking is a quiet slate italic. Sage and
- * cinnabar are reserved for the chip bar.
+ * Eyebrow + tone palette for tool note message kinds. Mirrors the iOS
+ * `StreamingDetailView` styling: tool calls/results use Pebble + Basalt
+ * mono labels. Sage and cinnabar are reserved for the chip bar.
  */
 function agentNoteStyle(kind: string): { eyebrow: string; tint: string } {
   const lower = kind.trim().toLowerCase();
@@ -82,7 +84,7 @@ function agentNoteStyle(kind: string): { eyebrow: string; tint: string } {
   if (lower === "agent_tool_result") {
     return { eyebrow: "TOOL RESULT", tint: hai.basalt };
   }
-  return { eyebrow: "THINKING", tint: hai.slate };
+  return { eyebrow: "TOOL", tint: hai.basalt };
 }
 
 export function formatTimestamp(value: string): string {
@@ -220,6 +222,48 @@ export function SessionMessageRow({
     );
   }
 
+  if (isAgentThinkingKind(kindKey)) {
+    const body = buildThinkingBody(message.content);
+    const preview = buildThinkingPreview(message.content);
+    return (
+      <View style={[styles.row, styles.rowOther]}>
+        <View style={styles.thinkingGutter} />
+        <Pressable
+          accessibilityHint="Tap to expand"
+          accessibilityRole="button"
+          onPress={() => setNoteExpanded((value) => !value)}
+          style={({ pressed }) => [
+            styles.thinkingSurface,
+            pressed ? styles.surfacePressed : null,
+          ]}
+        >
+          <View style={styles.thinkingHeaderRow}>
+            <View style={styles.thinkingTitleRow}>
+              <Ionicons
+                color={colors.slate}
+                name={noteExpanded ? "chevron-down" : "chevron-forward"}
+                size={12}
+              />
+              <Ionicons color={colors.slate} name="sparkles-outline" size={13} />
+              <Text style={styles.thinkingLabel}>Thinking</Text>
+              {!noteExpanded ? (
+                <Text numberOfLines={1} style={styles.thinkingPreview}>
+                  {preview}
+                </Text>
+              ) : null}
+            </View>
+            {timestamp ? <Text style={styles.thinkingTime}>{timestamp}</Text> : null}
+          </View>
+          {noteExpanded ? (
+            <View style={styles.thinkingExpanded}>
+              <Text style={styles.thinkingExpandedText}>{body}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </View>
+    );
+  }
+
   if (isAgentNoteKind(kindKey)) {
     const note = agentNoteStyle(kindKey);
     const noteBody = normalizeBody(message);
@@ -249,7 +293,7 @@ export function SessionMessageRow({
           >
             {noteBody}
           </Text>
-          {timestamp ? <Text style={styles.timeOther}>{timestamp}</Text> : null}
+          {timestamp ? <Text style={styles.noteTime}>{timestamp}</Text> : null}
         </Pressable>
       </View>
     );
@@ -607,11 +651,72 @@ const styles = StyleSheet.create({
     gap: 6,
     justifyContent: "space-between",
   },
+  noteTime: {
+    alignSelf: "flex-end",
+    color: colors.slate,
+    ...typography.monoMeta,
+    fontSize: 10,
+  },
   surfaceNote: {
     backgroundColor: hai.pebble,
     borderRadius: radii.card,
     gap: 4,
     maxWidth: "92%",
+  },
+  thinkingExpanded: {
+    backgroundColor: "rgba(248,246,241,0.68)",
+    borderColor: colors.hairline,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  thinkingExpandedText: {
+    color: colors.basalt,
+    ...typography.secondaryBody,
+  },
+  thinkingGutter: {
+    width: 24,
+  },
+  thinkingHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  thinkingLabel: {
+    color: colors.basalt,
+    ...typography.caption,
+    fontWeight: "600",
+  },
+  thinkingPreview: {
+    color: colors.slate,
+    flex: 1,
+    ...typography.caption,
+  },
+  thinkingSurface: {
+    backgroundColor: "rgba(248,246,241,0.82)",
+    borderColor: colors.borderSoft,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexShrink: 1,
+    maxWidth: "82%",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  thinkingTime: {
+    color: colors.slate,
+    flexShrink: 0,
+    ...typography.monoMeta,
+    fontSize: 10,
+  },
+  thinkingTitleRow: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 5,
+    minWidth: 0,
   },
   surfaceOwn: {
     backgroundColor: colors.onyx,
