@@ -37,7 +37,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AMUXSharedUITests",
-            dependencies: ["AMUXSharedUI"]
+            dependencies: ["AMUXSharedUI", "AMUXCore"]
         ),
     ]
 )

@@ -22,7 +22,9 @@ public struct SessionPlansPanelView: View {
                 SessionPlansPage(snapshot: snapshot).tag(idx)
             }
         }
+        #if os(iOS)
         .tabViewStyle(.page(indexDisplayMode: snapshots.count > 1 ? .always : .never))
+        #endif
         .frame(height: 205)
         .background {
             RoundedRectangle(cornerRadius: 22)

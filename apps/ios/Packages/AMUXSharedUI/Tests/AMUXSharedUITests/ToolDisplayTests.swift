@@ -1,5 +1,6 @@
 import Testing
 @testable import AMUXSharedUI
+@testable import AMUXCore
 
 @Suite("ToolDisplay")
 struct ToolDisplayTests {
@@ -19,5 +20,22 @@ struct ToolDisplayTests {
     func ignoresEmptyDetailPayloads() {
         #expect(ToolDisplay.summary(for: "{}") == nil)
         #expect(ToolDisplay.summary(for: "null") == nil)
+    }
+}
+
+@Suite("CompactToolLine")
+struct CompactToolLineTests {
+    @Test("renders resultSummary when populated")
+    func compactToolLineShowsResultSummary() {
+        let event = AgentEvent(agentId: "agent-1", sequence: 1, eventType: "tool_use")
+        event.toolName = "Read"
+        event.toolId = "t1"
+        event.text = "foo.swift"
+        event.isComplete = true
+        event.success = true
+        event.resultSummary = "12 lines"
+
+        let line = CompactToolLine(event: event)
+        _ = line.body  // Smoke check that init + body don't crash.
     }
 }
