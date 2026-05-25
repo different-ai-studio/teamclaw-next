@@ -28,7 +28,20 @@ public enum ToolIcons {
 }
 
 public enum ToolDisplay {
+    /// Bounded FIFO cache keyed by description string. Tool descriptions
+    /// are stable per AgentEvent, so the same key is hit on every body
+    /// re-eval while a tool row is on screen. 256 entries covers a long
+    /// session's visible rows with negligible memory; eviction is FIFO.
+    private static let _cache = SummaryCache(capacity: 256)
+
     public static func summary(for description: String) -> String? {
+        if let cached = _cache.get(description) { return cached }
+        let computed = computeSummary(for: description)
+        _cache.set(description, value: computed)
+        return computed
+    }
+
+    private static func computeSummary(for description: String) -> String? {
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != "{}", trimmed != "null" else { return nil }
 
@@ -99,6 +112,35 @@ public enum ToolDisplay {
     private static func truncate(_ text: String, to limit: Int) -> String {
         guard text.count > limit else { return text }
         return String(text.prefix(limit - 1)) + "…"
+    }
+}
+
+// MARK: - SummaryCache
+
+/// Thread-safe, bounded FIFO key-value cache.
+private final class SummaryCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var dict: [String: String?] = [:]
+    private var order: [String] = []
+    private let capacity: Int
+
+    init(capacity: Int) { self.capacity = capacity }
+
+    func get(_ key: String) -> String?? {
+        lock.lock(); defer { lock.unlock() }
+        guard dict[key] != nil else { return nil }
+        return dict[key]
+    }
+
+    func set(_ key: String, value: String?) {
+        lock.lock(); defer { lock.unlock() }
+        if dict[key] == nil {
+            order.append(key)
+            if order.count > capacity {
+                dict.removeValue(forKey: order.removeFirst())
+            }
+        }
+        dict[key] = value
     }
 }
 
