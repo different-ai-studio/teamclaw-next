@@ -38,24 +38,37 @@ public enum ChatTimelineReducer {
 
         switch input.acpEvent.event {
         case .output(let o):
-            // Guard 1: Replay of a completed turn. If we already have a
-            // completed output entry for this (bucket, turnID) AND no
-            // segment is currently open for that turn, this incoming
-            // envelope is a replay (daemon-restart resequenced history,
-            // or Supabase history seed overlapping with live). Update
-            // text in place and return — do NOT open a new segment.
-            if o.isComplete,
-               state.openSegmentByTurn[turnKey] == nil,
+            // Guard 1: Replay of a completed turn. Fires when ALL of the
+            // following are true:
+            //   a) No segment is currently open for this (bucket|turnID).
+            //   b) The incoming envelope carries a usable turnID.
+            //   c) The turn has been FULLY ended (turnEnded == true on an
+            //      existing output entry for this turn) OR the incoming
+            //      envelope itself is complete.
+            // Condition (c) distinguishes a mid-turn tool-interrupted
+            // Output("C") — which arrives with isComplete:false while
+            // the turn is still live and turnEnded is unset — from a
+            // second-pass replay of the same partial-then-idle sequence
+            // where the first pass already set turnEnded via idle.
+            // Without (c) the guard would collapse Output("C") into
+            // Output("AB") after a tool interruption.
+            if state.openSegmentByTurn[turnKey] == nil,
                let turnID = input.turnID, !turnID.isEmpty,
                let idx = state.entries.lastIndex(where: {
                    $0.eventType == "output"
                        && $0.isComplete
                        && $0.turnID == turnID
                        && ($0.senderActorID ?? "") == bucket
-               }) {
-                state.entries[idx].text = o.text
-                if !input.acpEvent.model.isEmpty {
-                    state.entries[idx].model = input.acpEvent.model
+               }),
+               o.isComplete || state.entries[idx].turnEnded {
+                // Only update text when the incoming envelope is itself
+                // complete — partial replays should not truncate the
+                // accumulated text that idle already merged.
+                if o.isComplete {
+                    state.entries[idx].text = o.text
+                    if !input.acpEvent.model.isEmpty {
+                        state.entries[idx].model = input.acpEvent.model
+                    }
                 }
                 state.streamingAgentSet.remove(bucket)
                 state.streamingTextByAgent[bucket] = nil

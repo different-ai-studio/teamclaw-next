@@ -1106,4 +1106,161 @@ struct ReducerSegmentedTurnTests {
         #expect(ordered[2].isComplete == true)
         #expect(ordered[2].turnEnded == true)
     }
+
+    // MARK: - Scenario 3
+
+    @Test("two consecutive tools: A|T1|R1|T2|R2|B|idle → output(A), t1, t2, output(B)")
+    func twoConsecutiveTools() {
+        var state = TimelineState()
+        feed(&state, acpOutput("A", isComplete: false), seq: 1)
+        feed(&state, acpToolUse(id: "t1", name: "Read", desc: "foo"), seq: 2)
+        feed(&state, acpToolResult(id: "t1", success: true, summary: "ok1"), seq: 3)
+        feed(&state, acpToolUse(id: "t2", name: "Write", desc: "bar"), seq: 4)
+        feed(&state, acpToolResult(id: "t2", success: true, summary: "ok2"), seq: 5)
+        feed(&state, acpOutput("B", isComplete: false), seq: 6)
+        feed(&state, acpIdle(), seq: 7)
+
+        let ordered = state.entries.sorted { $0.sequence < $1.sequence }
+        #expect(ordered.count == 4)
+        #expect(ordered.map(\.eventType) == ["output", "tool_use", "tool_use", "output"])
+        #expect(ordered[0].text == "A")
+        #expect(ordered[1].toolID == "t1")
+        #expect(ordered[2].toolID == "t2")
+        #expect(ordered[3].text == "B")
+        #expect(ordered[3].turnEnded == true)
+    }
+
+    // MARK: - Scenario 4
+
+    @Test("live + history replay idempotence: same envelopes twice → identical entries")
+    func liveHistoryReplayIdempotent() {
+        var stateLive = TimelineState()
+        var stateReplay = TimelineState()
+
+        let envelopes: [(Amux_AcpEvent, UInt64)] = [
+            (acpOutput("A", isComplete: false), 1),
+            (acpToolUse(id: "t1", name: "Read", desc: "foo"), 2),
+            (acpToolResult(id: "t1", success: true, summary: "ok"), 3),
+            (acpOutput("B", isComplete: false), 4),
+            (acpIdle(), 5),
+        ]
+
+        for (e, s) in envelopes { feed(&stateLive, e, seq: s) }
+        for (e, s) in envelopes { feed(&stateReplay, e, seq: s) }
+        for (e, s) in envelopes { feed(&stateReplay, e, seq: s) }
+
+        let liveOrdered = stateLive.entries.sorted { $0.sequence < $1.sequence }
+        let replayOrdered = stateReplay.entries.sorted { $0.sequence < $1.sequence }
+
+        #expect(liveOrdered.count == replayOrdered.count)
+        for (l, r) in zip(liveOrdered, replayOrdered) {
+            #expect(l.eventType == r.eventType)
+            #expect(l.text == r.text)
+            #expect(l.toolID == r.toolID)
+            #expect(l.isComplete == r.isComplete)
+            #expect(l.turnEnded == r.turnEnded)
+            #expect(l.resultSummary == r.resultSummary)
+        }
+    }
+
+    // MARK: - Scenario 5
+
+    @Test("legacy single-shot Output(isComplete=true) produces one segment + closes")
+    func legacySingleShotComplete() {
+        var state = TimelineState()
+        feed(&state, acpOutput("Hello, world", isComplete: true), seq: 1)
+        feed(&state, acpIdle(), seq: 2)
+
+        let outputs = state.entries.filter { $0.eventType == "output" }
+        #expect(outputs.count == 1)
+        #expect(outputs[0].text == "Hello, world")
+        #expect(outputs[0].isComplete == true)
+        #expect(outputs[0].turnEnded == true)
+    }
+
+    // MARK: - Scenario 6
+
+    @Test("out-of-order chunks (seq 5, 3, 4) land on the same segment by turnID")
+    func outOfOrderChunksSameSegment() {
+        var state = TimelineState()
+        feed(&state, acpOutput("X", isComplete: false), seq: 5)
+        feed(&state, acpOutput("Y", isComplete: false), seq: 3)
+        feed(&state, acpOutput("Z", isComplete: false), seq: 4)
+        feed(&state, acpIdle(), seq: 6)
+
+        let outputs = state.entries.filter { $0.eventType == "output" }
+        #expect(outputs.count == 1, "all chunks share an open segment")
+        #expect((outputs[0].text ?? "").contains("X"))
+        #expect((outputs[0].text ?? "").contains("Y"))
+        #expect((outputs[0].text ?? "").contains("Z"))
+        #expect(outputs[0].turnEnded == true)
+    }
+
+    // MARK: - Scenario 7
+
+    private func acpThinking(_ text: String) -> Amux_AcpEvent {
+        var acp = Amux_AcpEvent()
+        var t = Amux_AcpThinking()
+        t.text = text
+        acp.event = .thinking(t)
+        return acp
+    }
+
+    @Test("thinking does not split segment: A|Thinking|B|idle → one output 'AB'")
+    func thinkingDoesNotSplitSegment() {
+        var state = TimelineState()
+        feed(&state, acpOutput("A", isComplete: false), seq: 1)
+        feed(&state, acpThinking("..."), seq: 2)
+        feed(&state, acpOutput("B", isComplete: false), seq: 3)
+        feed(&state, acpIdle(), seq: 4)
+
+        let outputs = state.entries.filter { $0.eventType == "output" }
+        #expect(outputs.count == 1)
+        #expect(outputs[0].text == "AB")
+    }
+
+    // MARK: - Scenario 8
+
+    @Test("ToolResult before ToolUse: standalone tool_result entry appended, no crash")
+    func toolResultBeforeToolUse() {
+        var state = TimelineState()
+        feed(&state, acpToolResult(id: "unknown", success: false, summary: "?"), seq: 1)
+        feed(&state, acpIdle(), seq: 2)
+
+        let toolResults = state.entries.filter { $0.eventType == "tool_result" }
+        #expect(toolResults.count == 1)
+        #expect(toolResults[0].toolID == "unknown")
+        #expect(toolResults[0].success == false)
+    }
+
+    // MARK: - Scenario 9
+
+    @Test("turnEnded marker lands on the highest-sequence entry")
+    func turnEndedMarkerPlacement() {
+        var state = TimelineState()
+        feed(&state, acpOutput("A", isComplete: false), seq: 1)
+        feed(&state, acpToolUse(id: "t1", name: "Read", desc: "foo"), seq: 2)
+        feed(&state, acpOutput("B", isComplete: false), seq: 3)
+        feed(&state, acpIdle(), seq: 4)
+
+        let ended = state.entries.filter { $0.turnEnded }
+        #expect(ended.count == 1)
+        #expect(ended[0].eventType == "output")
+        #expect(ended[0].text == "B")
+    }
+
+    // MARK: - Scenario 10
+
+    @Test("pure-tool turn: ToolUse | ToolResult | idle → turnEnded on the tool_use entry")
+    func pureToolTurnEndsOnToolUse() {
+        var state = TimelineState()
+        feed(&state, acpToolUse(id: "t1", name: "Read", desc: "foo"), seq: 1)
+        feed(&state, acpToolResult(id: "t1", success: true, summary: "ok"), seq: 2)
+        feed(&state, acpIdle(), seq: 3)
+
+        let ended = state.entries.filter { $0.turnEnded }
+        #expect(ended.count == 1)
+        #expect(ended[0].eventType == "tool_use")
+        #expect(ended[0].toolID == "t1")
+    }
 }
