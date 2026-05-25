@@ -225,6 +225,82 @@ final class SessionDetailViewModelTests: XCTestCase {
         }
     }
 
+    /// Regression test for "agent loading takes a long time after send".
+    ///
+    /// Before the fix, the `ActiveStreamCardView` was driven solely by
+    /// `streamingAgentSet`, which only got populated when the first ACP
+    /// text delta arrived over MQTT — typically seconds after the user
+    /// tapped send. After the fix, `recomputeGroups()` unions
+    /// `streamingAgentSet` with the computed `streamingAgentIDs` (which
+    /// reads `isAgentWorking`), and `markAgentWorking()` triggers a
+    /// re-render. So feedItems must contain an `.activeStream` for the
+    /// engaged agent immediately after `sendPrompt` returns.
+    func testSendPromptSurfacesActiveStreamCardImmediately() async throws {
+        let mqtt = MQTTService(
+            subscribeHook: { _ in },
+            unsubscribeHook: { _ in },
+            publishHook: { _, _, _ in }
+        )
+        let teamclawService = TeamclawService()
+        let container = try ModelContainer(
+            for: Session.self, Runtime.self, AgentEvent.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        teamclawService.configureRuntimeForTesting(
+            mqtt: mqtt,
+            teamId: "team-1",
+            peerId: "peer-1",
+            modelContainer: container
+        )
+        teamclawService.setLocalMemberIdForTesting("human-1")
+
+        let context = container.mainContext
+        let session = Session(sessionId: "session-1", teamId: "team-1")
+        session.primaryAgentId = "agent-actor-1"
+        context.insert(session)
+        let agentRuntime = Runtime(runtimeId: "agent-actor-1")
+        agentRuntime.daemonDeviceId = "daemon-device-1"
+        context.insert(agentRuntime)
+        try context.save()
+
+        let viewModel = SessionDetailViewModel(
+            runtime: agentRuntime,
+            mqtt: mqtt,
+            hub: MQTTMessageHub(mqtt: mqtt),
+            teamID: "team-1",
+            peerId: "peer-1",
+            session: session,
+            teamclawService: teamclawService
+        )
+        viewModel._test_setMemberSheetAgentsAndRelabel([
+            makeAgent(actorID: "agent-actor-1", runtimeID: "agent-actor-1")
+        ])
+
+        // Precondition: no busy state and no active-stream card.
+        XCTAssertFalse(viewModel.isAgentWorking)
+        XCTAssertFalse(viewModel.feedItems.contains(where: { item in
+            if case .activeStream = item { return true }
+            return false
+        }))
+
+        try await viewModel.sendPrompt("hello", modelContext: context)
+
+        // Postcondition: busy flag is up AND the feed shows the
+        // active-stream card for the engaged agent — without waiting
+        // for any ACP delta to round-trip.
+        XCTAssertTrue(viewModel.isAgentWorking)
+        let activeStreamForAgent = viewModel.feedItems.contains { item in
+            if case .activeStream(_, let agentID, let runtimeEvents) = item {
+                return agentID == "agent-actor-1" && runtimeEvents.isEmpty
+            }
+            return false
+        }
+        XCTAssertTrue(
+            activeStreamForAgent,
+            "Expected an .activeStream feed item for agent-actor-1 with empty runtimeEvents immediately after sendPrompt"
+        )
+    }
+
     func testInterruptAgentInSessionModePublishesCancelToThatAgentsRuntime() async throws {
         let published = PublishedMessages()
         let mqtt = MQTTService(

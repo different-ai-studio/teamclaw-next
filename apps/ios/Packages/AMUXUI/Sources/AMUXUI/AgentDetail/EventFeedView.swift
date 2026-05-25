@@ -307,14 +307,32 @@ public struct ActiveStreamCardView: View {
     public let agentName: String
     /// Latest single-line text drawn from (in priority): live streaming
     /// text buffer, the most recent runtime event's text, or "Working…"
-    /// when nothing readable has arrived yet.
+    /// when nothing readable has arrived yet. Ignored when `isPending`
+    /// is true — the placeholder label takes precedence there.
     public let lastLine: String
+    /// True when the agent has been engaged (send tapped) but no ACP
+    /// runtime event or text delta has come back yet. Drives the
+    /// breathing-light color (cinnabar = waiting) and the placeholder
+    /// label ("Agent loading…"). Flips false the moment the first event
+    /// arrives, at which point the dot turns sage and the label switches
+    /// to the live last-line preview.
+    public let isPending: Bool
 
     @State private var pulse = false
 
-    public init(agentName: String, lastLine: String) {
+    public init(agentName: String, lastLine: String, isPending: Bool = false) {
         self.agentName = agentName
         self.lastLine = lastLine
+        self.isPending = isPending
+    }
+
+    private var dotColor: Color {
+        isPending ? Color.amux.cinnabar : Color.amux.sage
+    }
+
+    private var displayText: String {
+        if isPending { return "Agent loading…" }
+        return lastLine.isEmpty ? "Working…" : lastLine
     }
 
     public var body: some View {
@@ -326,12 +344,13 @@ public struct ActiveStreamCardView: View {
 
             HStack(alignment: .center, spacing: 10) {
                 Circle()
-                    .fill(Color.amux.cinnabar)
+                    .fill(dotColor)
                     .frame(width: 8, height: 8)
                     .scaleEffect(pulse ? 1.25 : 0.85)
                     .opacity(pulse ? 0.55 : 1.0)
+                    .animation(AMUXAnimation.fast, value: dotColor)
 
-                Text(lastLine.isEmpty ? "Working…" : lastLine)
+                Text(displayText)
                     .font(.subheadline)
                     .foregroundStyle(Color.amux.onyx)
                     .lineLimit(1)
