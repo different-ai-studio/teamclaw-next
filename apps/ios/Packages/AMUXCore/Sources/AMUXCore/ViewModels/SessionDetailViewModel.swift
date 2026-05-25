@@ -80,6 +80,12 @@ public final class SessionDetailViewModel {
     /// no `isComplete` yet). Drives the active-stream-card visibility and
     /// the legacy `isStreaming` / `streamingText` shims.
     public private(set) var streamingAgentSet: Set<String> = []
+    /// Per-agent active turn id captured at the first delta. The MQTT
+    /// subscribe loop reads this on reconnect to replay any envelopes
+    /// (incl. the trailing `status_change=idle`) the broker may have
+    /// dropped while we were disconnected. Without that replay the
+    /// active-stream card hangs until pull-to-refresh.
+    private var streamingTurnIDByAgent: [String: String] = [:]
     /// Backwards-compat shim for callers that haven't migrated to the
     /// per-agent map. True when ANY agent is streaming raw text. Most call
     /// sites should prefer `streamingAgentSet` for correct multi-agent
@@ -1454,6 +1460,13 @@ public final class SessionDetailViewModel {
                 // Supabase rows AND daemon history; acceptable trade-off
                 // until we add cross-source content dedupe.
                 await self?.seedFromSupabaseMessages(modelContext: modelContext)
+                // Replay daemon-recorded envelopes for any agent the
+                // local state still thinks is mid-stream. Catches the
+                // case where the broker dropped the trailing
+                // `status_change=idle` (or other late envelopes) while
+                // we were disconnected — without this the active-stream
+                // card hangs until the user pulls-to-refresh.
+                await self?.replayStreamingTurnsAfterReconnect(modelContext: modelContext)
                 // No cold-start full-sync — Supabase rows are the timeline
                 // source of truth for completed turns. Intermediate ACP
                 // events (thinking / tool calls / partial outputs) live in
@@ -1520,6 +1533,7 @@ public final class SessionDetailViewModel {
             streamingAgentSet.removeAll()
             streamingTextByAgent.removeAll()
             streamingModelByAgent.removeAll()
+            streamingTurnIDByAgent.removeAll()
             recomputeGroups()
         }
         startModelContext = nil
@@ -1748,6 +1762,9 @@ public final class SessionDetailViewModel {
             if let model = timelineState.streamingModelByAgent.removeValue(forKey: rawID) {
                 timelineState.streamingModelByAgent[actorID] = model
             }
+            if let turnID = timelineState.streamingTurnIDByAgent.removeValue(forKey: rawID) {
+                timelineState.streamingTurnIDByAgent[actorID] = turnID
+            }
         }
 
         // Mirror reducer state onto the VM's @Observable fields so the
@@ -1755,6 +1772,7 @@ public final class SessionDetailViewModel {
         streamingAgentSet = timelineState.streamingAgentSet
         streamingTextByAgent = timelineState.streamingTextByAgent
         streamingModelByAgent = timelineState.streamingModelByAgent
+        streamingTurnIDByAgent = timelineState.streamingTurnIDByAgent
 
         if didMutateEvents {
             try? startModelContext?.save()
@@ -1951,6 +1969,37 @@ public final class SessionDetailViewModel {
             if dirty { anyChange = true }
         }
         if anyChange { recomputeGroups() }
+    }
+
+    /// On MQTT reconnect, replay the daemon's recorded envelopes for
+    /// any agent whose stream the broker may have left mid-turn. The
+    /// reducer's `.statusChange=idle` (and any thinking/tool envelopes
+    /// the broker dropped) flow back through the same code path that
+    /// originally clears `streamingAgentSet`, so the active-stream
+    /// card converges to the post-turn state without waiting for a
+    /// user pull-to-refresh. Idempotent: existing entries dedupe by
+    /// turnID / sequence in `applyAcp`.
+    private func replayStreamingTurnsAfterReconnect(modelContext: ModelContext) async {
+        let snapshot = streamingTurnIDByAgent
+        guard !snapshot.isEmpty else { return }
+        for (bucket, turnID) in snapshot {
+            guard !turnID.isEmpty else { continue }
+            // `bucket` is the actor id post-resolve; the daemon's
+            // RequestTurnHistory wants a runtime id. Map actor → runtime
+            // via the member sheet; fall back to treating bucket as a
+            // raw runtime id (covers the pre-memberSheet window).
+            let runtimeID = self.runtimeID(forAgentActorID: bucket) ?? bucket
+            guard !runtimeID.isEmpty else { continue }
+            do {
+                try await self.requestTurnHistory(
+                    modelContext: modelContext,
+                    turnID: turnID,
+                    agentID: runtimeID
+                )
+            } catch {
+                print("[RuntimeDetailVM] replay turn history failed for \(bucket)/\(turnID): \(error)")
+            }
+        }
     }
 
     /// Fetch every envelope the daemon has for a specific turn from a
@@ -2217,6 +2266,7 @@ public final class SessionDetailViewModel {
         streamingTextByAgent = timelineState.streamingTextByAgent
         streamingModelByAgent = timelineState.streamingModelByAgent
         streamingAgentSet = timelineState.streamingAgentSet
+        streamingTurnIDByAgent = timelineState.streamingTurnIDByAgent
         if !timelineState.availableCommands.isEmpty {
             dynamicAvailableCommands = timelineState.availableCommands
         }
@@ -2267,6 +2317,7 @@ public final class SessionDetailViewModel {
         timelineState.streamingTextByAgent = [:]
         timelineState.streamingModelByAgent = [:]
         timelineState.streamingAgentSet = []
+        timelineState.streamingTurnIDByAgent = [:]
     }
     public func grantPermission(requestId: String, agentActorID: String? = nil) async throws {
         var g = Amux_AcpGrantPermission(); g.requestID = requestId

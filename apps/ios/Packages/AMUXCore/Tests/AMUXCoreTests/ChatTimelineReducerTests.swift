@@ -78,6 +78,48 @@ struct ReducerStreamingOutputTests {
         #expect(state.entries[0].model == "claude-opus-4-7")
     }
 
+    @Test("first delta captures the active turn id; idle clears it")
+    func streamingTurnIDLifecycle() {
+        var state = TimelineState()
+        // First delta — should populate streamingTurnIDByAgent.
+        var delta = Amux_AcpEvent()
+        delta.event = .output(makeOutput(text: "Hel", isComplete: false))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 1, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-xyz",
+                          acpEvent: delta)),
+            to: &state
+        )
+        #expect(state.streamingTurnIDByAgent["agent-1"] == "turn-xyz",
+                "turn id from the first delta lets the reconnect replay path target this turn")
+
+        // Subsequent partials don't disturb it.
+        var more = Amux_AcpEvent()
+        more.event = .output(makeOutput(text: "lo", isComplete: false))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 2, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-xyz",
+                          acpEvent: more)),
+            to: &state
+        )
+        #expect(state.streamingTurnIDByAgent["agent-1"] == "turn-xyz")
+
+        // Idle clears, alongside the rest of the streaming state.
+        var idle = Amux_AcpEvent()
+        idle.event = .statusChange(makeStatusChange(.idle))
+        ChatTimelineReducer.apply(
+            .acp(AcpInput(envelopeSequence: 3, runtimeID: "rt-1",
+                          agentBucketKey: "agent-1", timestamp: .now,
+                          turnID: "turn-xyz",
+                          acpEvent: idle)),
+            to: &state
+        )
+        #expect(state.streamingTurnIDByAgent["agent-1"] == nil)
+        #expect(!state.streamingAgentSet.contains("agent-1"))
+    }
+
     @Test("two agents stream concurrently without bucket cross-contamination")
     func concurrentBuckets() {
         var state = TimelineState()

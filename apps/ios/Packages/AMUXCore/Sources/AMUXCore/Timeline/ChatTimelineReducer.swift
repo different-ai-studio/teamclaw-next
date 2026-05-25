@@ -55,6 +55,7 @@ public enum ChatTimelineReducer {
             state.streamingAgentSet.remove(bucket)
             state.streamingTextByAgent[bucket] = nil
             state.streamingModelByAgent[bucket] = nil
+            state.streamingTurnIDByAgent[bucket] = nil
             return
         }
 
@@ -99,6 +100,7 @@ public enum ChatTimelineReducer {
                 }
                 state.streamingTextByAgent[bucket] = nil
                 state.streamingModelByAgent[bucket] = nil
+                state.streamingTurnIDByAgent[bucket] = nil
             } else {
                 let firstDelta = !state.streamingAgentSet.contains(bucket)
                 if firstDelta, let idx = incompleteOutputIndex(for: bucket, in: state) {
@@ -111,6 +113,13 @@ public enum ChatTimelineReducer {
                 state.streamingTextByAgent[bucket, default: ""] += o.text
                 if !input.acpEvent.model.isEmpty {
                     state.streamingModelByAgent[bucket] = input.acpEvent.model
+                }
+                // Track the active turn id so the MQTT subscribe loop can
+                // replay missing envelopes (incl. trailing `idle`) after a
+                // reconnect — the broker may have dropped them on the
+                // floor while we were disconnected.
+                if let turnID = input.turnID, !turnID.isEmpty {
+                    state.streamingTurnIDByAgent[bucket] = turnID
                 }
             }
 
@@ -239,6 +248,7 @@ public enum ChatTimelineReducer {
                 state.streamingAgentSet.remove(bucket)
                 state.streamingTextByAgent[bucket] = nil
                 state.streamingModelByAgent[bucket] = nil
+                state.streamingTurnIDByAgent[bucket] = nil
                 // Close any open tool_use rows from this bucket.
                 for i in state.entries.indices where state.entries[i].eventType == "tool_use"
                     && !state.entries[i].isComplete
@@ -322,6 +332,7 @@ public enum ChatTimelineReducer {
                     state.streamingAgentSet.remove(bucket)
                     state.streamingTextByAgent[bucket] = nil
                     state.streamingModelByAgent[bucket] = nil
+                    state.streamingTurnIDByAgent[bucket] = nil
                 }
             }
         }
