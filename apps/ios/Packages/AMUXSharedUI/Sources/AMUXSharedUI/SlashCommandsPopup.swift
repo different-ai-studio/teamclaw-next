@@ -99,6 +99,7 @@ private struct HaiRowPressStyle: ButtonStyle {
                 Color.amux.onyx
                     .opacity(configuration.isPressed ? 0.04 : 0)
             )
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
