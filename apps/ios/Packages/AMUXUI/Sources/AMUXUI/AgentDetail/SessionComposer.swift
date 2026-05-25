@@ -196,7 +196,7 @@ struct SessionComposer: View {
 
     // MARK: - Two-row capsule
 
-    private static let composerCornerRadius: CGFloat = 28
+    private static let composerCornerRadius: CGFloat = 18
     private static let composerInputFontSize: CGFloat = 15
     private static let composerAgentLabelFontSize: CGFloat = 14
     private static let composerAgentIconFontSize: CGFloat = 16
