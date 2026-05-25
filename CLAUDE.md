@@ -20,8 +20,20 @@ It is a local, git-ignored SDLC override for this workspace.
 1. Create or reuse a project-local worktree under `.worktrees/` before making
    changes
 2. Do all file edits, verification, and commits inside that worktree
-3. Push the worktree branch and open a PR via `gh pr create`
-4. Do not merge or push to `main` directly, even for small fixes
+3. Patch the diff into `.worktrees/preview-integration` so the user can verify
+   it live (see the "Single-preview multi-agent workflow" section below)
+4. **Wait for the user to explicitly ask you to open the PR.** Do not push the
+   branch or run `gh pr create` on your own initiative — even if the worktree
+   work looks "done", tests pass, and the diff has been accepted into preview.
+   An explicit "open the PR", "ship it", "提 PR", or "可以提 PR 了" from the
+   user is the trigger; absent that, stop after the preview-integration commit
+   and report back.
+5. Do not merge or push to `main` directly, even for small fixes
+
+**Why this matters:** the user runs a worktree-develop → preview-integration
+patch → human verification → PR pipeline. Agents that race ahead and open a
+PR before the human has tested the change in preview break that pipeline.
+When in doubt, stop and ask.
 
 **All AI-made changes must happen in a project-local worktree.** Do not edit the
 stable repo checkout directly. If the user asks for a change and you are not

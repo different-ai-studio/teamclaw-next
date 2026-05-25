@@ -26,6 +26,13 @@ The local prototype copy lives in `/tmp/design-OLWqff/` when fetched.
 > `.worktrees/preview-integration` hot-reload worktree and apply selected
 > candidate diffs into it as WIP commits. See `CLAUDE.md` → Git Workflow for
 > the full rule.
+>
+> **PR rule:** Do **not** push the branch or run `gh pr create` on your own
+> initiative. The flow is: worktree-develop → patch diff into
+> `preview-integration` → user verifies live → user explicitly says "open the
+> PR" / "ship it" / "提 PR". Until that explicit prompt arrives, stop after
+> the preview-integration commit and report back — even if everything looks
+> "done", tests pass, and the user previously approved the diff.
 
 ---
 
