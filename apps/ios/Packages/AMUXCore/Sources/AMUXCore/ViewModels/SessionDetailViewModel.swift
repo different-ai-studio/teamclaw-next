@@ -283,6 +283,12 @@ public final class SessionDetailViewModel {
         rebuildIndexes()
     }
 
+    // AUDIT 2026-05-25: safe under multi-segment turns. Pass 1 dedupes by
+    // (sequence, eventType, senderActorID, toolId, text) — sequence is the
+    // first key component, so two output rows from different segments of the
+    // same turn always produce distinct keys and are preserved. Pass 2 only
+    // prunes rows where turnID == nil (un-segmented streaming partials) so it
+    // cannot touch segmented output rows at all.
     private func pruneDuplicateRuntimeEvents(modelContext: ModelContext) {
         struct Candidate {
             let index: Int
