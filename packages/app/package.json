@@ -55,7 +55,7 @@
     "@sentry/react": "^10.53.1",
     "@supabase/supabase-js": "^2.105.3",
     "@tanstack/react-virtual": "^3.13.18",
-    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.2.0",
