@@ -12,9 +12,11 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useProviderStore, type ModelOption } from '@/stores/provider'
+import { useCurrentTeamStore } from '@/stores/current-team'
+import { useSessionListStore } from '@/stores/session-list-store'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
@@ -110,38 +112,45 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
   const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
   const [agentToBackendType, setAgentToBackendType] = React.useState<Map<string, string>>(new Map())
   const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
+  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const sessionTeamId = useSessionListStore((s) =>
+    activeSessionId ? s.rows.find((row) => row.id === activeSessionId)?.team_id ?? null : null,
+  )
+  const teamId = sessionTeamId ?? currentTeamId
+  const engagedAgentIds = React.useMemo(() => engagedAgents.map((agent) => agent.id), [engagedAgents])
+  const engagedAgentIdSignature = React.useMemo(() => engagedAgentIds.join(','), [engagedAgentIds])
 
   // Load agent → runtime mapping for the active session. Refetched whenever
   // a daemon retain arrives for an engaged agent we don't yet know about
   // (covers the race where the daemon's INSERT into agent_runtimes hasn't
   // landed when this component mounts).
   React.useEffect(() => {
-    if (!activeSessionId) {
+    if (!activeSessionId || !teamId || engagedAgentIds.length === 0) {
       setAgentToRuntimeId(new Map())
       setAgentToBackendType(new Map())
       return
     }
     let cancelled = false
     void (async () => {
-      const { data: rtRows, error } = await supabase
-        .from('agent_runtimes')
-        .select('agent_id, runtime_id, backend_type')
-        .eq('session_id', activeSessionId)
-      if (error) {
+      let rtRows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
+      try {
+        rtRows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, engagedAgentIds)
+      } catch (error) {
         sessionFlowError('agent_selector.runtime_map.load_failed', error, {
           sessionId: activeSessionId,
         })
+        rtRows = []
       }
       if (cancelled) return
       const map = new Map<string, string>()
       const btMap = new Map<string, string>()
-      for (const r of (rtRows ?? []) as { agent_id: string; runtime_id: string; backend_type: string | null }[]) {
-        if (r.agent_id && r.runtime_id) map.set(r.agent_id, r.runtime_id)
-        if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
+      for (const r of rtRows.filter((row) => row.session_id === activeSessionId)) {
+        if (r.agent_id && r.runtime_id && !map.has(r.agent_id)) map.set(r.agent_id, r.runtime_id)
+        if (r.agent_id && r.backend_type && !btMap.has(r.agent_id)) btMap.set(r.agent_id, r.backend_type)
       }
       sessionFlowLog('agent_selector.runtime_map.loaded', {
         sessionId: activeSessionId,
-        rowCount: rtRows?.length ?? 0,
+        rowCount: rtRows.length,
         runtimeAgentIds: Array.from(map.keys()),
         backendAgentIds: Array.from(btMap.keys()),
       })
@@ -149,7 +158,7 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
       setAgentToBackendType(btMap)
     })()
     return () => { cancelled = true }
-  }, [activeSessionId])
+  }, [activeSessionId, teamId, engagedAgentIdSignature])
 
   // Retain-driven refetch: if any engaged agent has a retain but we haven't
   // mapped its runtime_id yet, re-pull agent_runtimes.
@@ -163,32 +172,32 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
   }, [runtimeStates, engagedAgents])
 
   React.useEffect(() => {
-    if (!activeSessionId || engagedAgents.length === 0) return
+    if (!activeSessionId || !teamId || engagedAgents.length === 0) return
     const missing = engagedAgents.some((a) => !agentToRuntimeId.has(a.id))
     if (!missing) return
     if (!retainSignature) return
     let cancelled = false
     void (async () => {
-      const { data: rtRows, error } = await supabase
-        .from('agent_runtimes')
-        .select('agent_id, runtime_id, backend_type')
-        .eq('session_id', activeSessionId)
-      if (error) {
+      let rtRows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
+      try {
+        rtRows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, engagedAgentIds)
+      } catch (error) {
         sessionFlowError('agent_selector.runtime_map.refetch_failed', error, {
           sessionId: activeSessionId,
           retainSignature,
         })
+        rtRows = []
       }
       if (cancelled) return
       const map = new Map<string, string>()
       const btMap = new Map<string, string>()
-      for (const r of (rtRows ?? []) as { agent_id: string; runtime_id: string; backend_type: string | null }[]) {
-        if (r.agent_id && r.runtime_id) map.set(r.agent_id, r.runtime_id)
-        if (r.agent_id && r.backend_type) btMap.set(r.agent_id, r.backend_type)
+      for (const r of rtRows.filter((row) => row.session_id === activeSessionId)) {
+        if (r.agent_id && r.runtime_id && !map.has(r.agent_id)) map.set(r.agent_id, r.runtime_id)
+        if (r.agent_id && r.backend_type && !btMap.has(r.agent_id)) btMap.set(r.agent_id, r.backend_type)
       }
       sessionFlowLog('agent_selector.runtime_map.refetched', {
         sessionId: activeSessionId,
-        rowCount: rtRows?.length ?? 0,
+        rowCount: rtRows.length,
         missingAgentIds: engagedAgents.filter((a) => !agentToRuntimeId.has(a.id)).map((a) => a.id),
         retainSignature,
       })
@@ -200,30 +209,28 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
       })
     })()
     return () => { cancelled = true }
-  }, [engagedAgents, activeSessionId, agentToRuntimeId, retainSignature])
+  }, [engagedAgents, activeSessionId, agentToRuntimeId, retainSignature, teamId, engagedAgentIdSignature])
 
   // Backfill backend_type from the agent's most recent historical runtime
   // when we have no live entry yet — mirrors iOS CachedAgentRuntime fallback.
   React.useEffect(() => {
     const missing = engagedAgents.filter((a) => !agentToBackendType.has(a.id))
-    if (missing.length === 0) return
+    if (missing.length === 0 || !teamId) return
     let cancelled = false
     void (async () => {
-      const { data: rows, error } = await supabase
-        .from('agent_runtimes')
-        .select('agent_id, backend_type, updated_at')
-        .in('agent_id', missing.map((a) => a.id))
-        .not('backend_type', 'is', null)
-        .order('updated_at', { ascending: false })
-      if (error) {
+      let rows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
+      try {
+        rows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, missing.map((a) => a.id))
+      } catch (error) {
         sessionFlowError('agent_selector.backend_type.backfill_failed', error, {
           sessionId: activeSessionId,
           missingAgentIds: missing.map((a) => a.id),
         })
+        rows = []
       }
       if (cancelled) return
       const latestByAgent = new Map<string, string>()
-      for (const r of (rows ?? []) as { agent_id: string; backend_type: string | null }[]) {
+      for (const r of rows) {
         if (r.agent_id && r.backend_type && !latestByAgent.has(r.agent_id)) {
           latestByAgent.set(r.agent_id, r.backend_type)
         }
@@ -241,7 +248,7 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
       }
     })()
     return () => { cancelled = true }
-  }, [engagedAgents, agentToBackendType])
+  }, [engagedAgents, agentToBackendType, teamId, activeSessionId])
 
   if (engagedAgents.length === 0) return null
 

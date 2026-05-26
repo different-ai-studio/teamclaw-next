@@ -2,13 +2,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { IdeasView } from '../IdeasView'
 
-const supabaseFrom = vi.fn()
-const updateIdeaSortOrder = vi.fn()
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (...args: unknown[]) => supabaseFrom(...args),
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u-1' } } }) },
-  },
+const listIdeasMock = vi.fn()
+const listActorDirectoryMock = vi.fn()
+const updateIdeaMock = vi.fn()
+
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    auth: { getSession: vi.fn().mockResolvedValue({ user: { id: 'u-1' } }) },
+    directory: { resolveFirstMemberActorForUser: vi.fn().mockResolvedValue(null) },
+    ideas: {
+      listIdeas: listIdeasMock,
+      updateIdea: updateIdeaMock,
+    },
+    actors: {
+      listActorDirectory: listActorDirectoryMock,
+    },
+  }),
 }))
 
 vi.mock('@/stores/session-list-store', () => ({
@@ -30,42 +39,16 @@ vi.mock('@/components/sidebar/IdeaDetailDialog', () => ({
 }))
 
 beforeEach(() => {
-  supabaseFrom.mockReset()
-  updateIdeaSortOrder.mockReset()
+  listIdeasMock.mockReset()
+  listActorDirectoryMock.mockReset()
+  updateIdeaMock.mockReset()
+  updateIdeaMock.mockResolvedValue(undefined)
   vi.useRealTimers()
 })
 
 function mockIdeasResponse(ideas: any[], actors: any[]) {
-  supabaseFrom.mockImplementation((table: string) => {
-    if (table === 'ideas') {
-      return {
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              order: () => ({
-                order: () => Promise.resolve({ data: ideas, error: null }),
-              }),
-            }),
-          }),
-        }),
-        update: (payload: any) => {
-          updateIdeaSortOrder(payload)
-          return {
-            eq: () => Promise.resolve({ error: null }),
-          }
-        },
-      }
-    }
-    if (table === 'actors') {
-      return {
-        select: () => ({
-          in: () => Promise.resolve({ data: actors, error: null }),
-          eq: () => ({ limit: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
-        }),
-      }
-    }
-    return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) }
-  })
+  listIdeasMock.mockResolvedValue(ideas)
+  listActorDirectoryMock.mockResolvedValue(actors)
 }
 
 describe('IdeasView', () => {
@@ -128,9 +111,9 @@ describe('IdeasView', () => {
     fireEvent.pointerUp(screen.getByLabelText('Drag idea Third idea'))
 
     await waitFor(() => {
-      expect(updateIdeaSortOrder).toHaveBeenCalledWith({ sort_order: 3000 })
+      expect(updateIdeaMock).toHaveBeenCalledWith({ ideaId: 'i-1', sortOrder: 3000 })
     })
-    expect(updateIdeaSortOrder).toHaveBeenCalledWith({ sort_order: 1000 })
-    expect(updateIdeaSortOrder).toHaveBeenCalledWith({ sort_order: 2000 })
+    expect(updateIdeaMock).toHaveBeenCalledWith({ ideaId: 'i-2', sortOrder: 1000 })
+    expect(updateIdeaMock).toHaveBeenCalledWith({ ideaId: 'i-3', sortOrder: 2000 })
   })
 })

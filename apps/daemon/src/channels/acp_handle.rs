@@ -54,11 +54,11 @@ pub struct AmuxdAcpHandle {
     /// runtime starts on the user-chosen model. In-memory only — cleared
     /// across daemon restarts (same caveat as `logical_to_acp`).
     pub model_override: Arc<Mutex<HashMap<String, (String, String)>>>,
-    /// Supabase client used to look up `sessions.binding` from the
+    /// Backend client used to look up `sessions.binding` from the
     /// SQL-minted `acp_session_id` when lazy-spawning a runtime. The
     /// binding is required to write the per-session MCP config file
     /// that mounts the `send` tool.
-    pub supabase: Arc<dyn Backend>,
+    pub backend: Arc<dyn Backend>,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was
@@ -74,7 +74,7 @@ impl AmuxdAcpHandle {
     /// Resolve the caller-supplied `session` (a logical id persisted on the
     /// `sessions` row) to a real ACP UUID, spawning a runtime on first use.
     /// On a fresh spawn, the matching `sessions.binding` is looked up from
-    /// Supabase so it can be baked into the per-session MCP config.
+    /// the backend so it can be baked into the per-session MCP config.
     async fn resolve_or_spawn(&self, session: &AmuxSessionId) -> Result<ResolveOutcome, AcpError> {
         {
             let map = self.logical_to_acp.lock().await;
@@ -87,7 +87,7 @@ impl AmuxdAcpHandle {
             }
         }
 
-        // Recover the supabase session UUID + binding URI for this logical
+        // Recover the remote session UUID + binding URI for this logical
         // session. The UUID is needed so the spawned runtime can carry it
         // on its handle, which is what daemon::server::target_sessions falls
         // back to when routing agent envelopes (otherwise gateway-spawned
@@ -96,8 +96,8 @@ impl AmuxdAcpHandle {
         // feeds the per-session MCP config so `send` defaults to the
         // originating chat. A missing row is non-fatal; we still spawn so
         // basic prompt/reply works.
-        let (supabase_session_id, binding) = match self
-            .supabase
+        let (remote_session_id, binding) = match self
+            .backend
             .get_gateway_session_by_acp_id(session)
             .await
             .map_err(|e| AcpError::Create(format!("session lookup: {e}")))?
@@ -123,7 +123,7 @@ impl AmuxdAcpHandle {
                 &binding,
                 "Gateway session",
                 model_arg,
-                supabase_session_id.as_deref(),
+                remote_session_id.as_deref(),
                 None,
             )
             .await

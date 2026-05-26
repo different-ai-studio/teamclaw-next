@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 // `create_team_invite` RPC returns deeplinks with the `amux://` scheme (shared
 // with iOS). The desktop app accepts both `amux://` and `teamclaw://` so users
@@ -40,15 +40,5 @@ export interface ClaimResult {
 }
 
 export async function claimInviteToken(token: string): Promise<ClaimResult> {
-  const { data, error } = await supabase.rpc('claim_team_invite', { p_token: token })
-  if (error) throw new Error(`claim_team_invite failed: ${error.message}`)
-  const row = Array.isArray(data) ? data[0] : data
-  if (!row) throw new Error('claim_team_invite returned empty result')
-  return {
-    actorId:      row.actor_id,
-    teamId:       row.team_id,
-    actorType:    row.actor_type,
-    displayName:  row.display_name,
-    refreshToken: row.refresh_token ?? null,
-  }
+  return getBackend().auth.claimInvite(token)
 }

@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
 
 export interface DaemonWorkspace {
@@ -43,28 +43,19 @@ function mapWorkspace(row: any): DaemonWorkspace {
 }
 
 export async function listDaemonAgents(teamId: string): Promise<DaemonAgent[]> {
-  const { data: connectedRows, error: connectedError } = await supabase.rpc('list_connected_agents', {
-    p_team_id: teamId,
-  })
-  if (connectedError) throw new Error(connectedError.message)
+  const connectedRows = await getBackend().actors.listConnectedAgents(teamId)
 
-  const connectedIds = (connectedRows ?? [])
-    .map((row: any) => row.agent_id)
+  const connectedIds = connectedRows
+    .map((row) => row.agent_id ?? row.id)
     .filter((id: unknown): id is string => typeof id === 'string')
 
   if (connectedIds.length === 0) return []
 
-  const { data, error } = await supabase
-    .from('actor_directory')
-    .select('id, display_name, agent_types, default_agent_type, default_workspace_id, agent_status, last_active_at')
-    .eq('team_id', teamId)
-    .eq('actor_type', 'agent')
-    .in('id', connectedIds)
-    .order('display_name', { ascending: true })
+  const data = (await getBackend().actors.listActorDirectory(teamId))
+    .filter((row) => row.actor_type === 'agent' && connectedIds.includes(row.id))
+    .sort((a, b) => (a.display_name || a.id).localeCompare(b.display_name || b.id))
 
-  if (error) throw new Error(error.message)
-
-  return (data ?? []).map((row: any) => ({
+  return data.map((row) => ({
     id: row.id,
     displayName: row.display_name || row.id,
     agentTypes: normalizeAgentTypes(row.agent_types),
@@ -90,16 +81,8 @@ export async function getCurrentDaemonWorkspaceAgent(teamId: string): Promise<Da
 }
 
 export async function listDaemonWorkspaces(teamId: string, agentId?: string | null): Promise<DaemonWorkspace[]> {
-  const { data, error } = await supabase
-    .from('workspaces')
-    .select('id, team_id, agent_id, created_by_member_id, name, path, archived, created_at, updated_at')
-    .eq('team_id', teamId)
-    .eq('agent_id', agentId ?? '')
-    .order('archived', { ascending: true })
-    .order('updated_at', { ascending: false })
-
-  if (error) throw new Error(error.message)
-  return (data ?? []).map(mapWorkspace)
+  const data = await getBackend().workspaces.listDaemonWorkspaces(teamId, agentId)
+  return data.map(mapWorkspace)
 }
 
 export async function createDaemonWorkspace(input: {
@@ -109,20 +92,7 @@ export async function createDaemonWorkspace(input: {
   name: string
   path: string
 }): Promise<DaemonWorkspace> {
-  const { data, error } = await supabase
-    .from('workspaces')
-    .insert({
-      team_id: input.teamId,
-      agent_id: input.agentId,
-      created_by_member_id: input.createdByMemberId,
-      name: input.name,
-      path: input.path,
-      archived: false,
-    })
-    .select('id, team_id, agent_id, created_by_member_id, name, path, archived, created_at, updated_at')
-    .single()
-
-  if (error) throw new Error(error.message)
+  const data = await getBackend().workspaces.createDaemonWorkspace(input)
   return mapWorkspace(data)
 }
 
@@ -132,25 +102,14 @@ export async function updateDaemonWorkspace(input: {
   path: string
   archived: boolean
 }): Promise<DaemonWorkspace> {
-  const { data, error } = await supabase
-    .from('workspaces')
-    .update({
-      name: input.name,
-      path: input.path,
-      archived: input.archived,
-    })
-    .eq('id', input.workspaceId)
-    .select('id, team_id, agent_id, created_by_member_id, name, path, archived, created_at, updated_at')
-    .single()
-
-  if (error) throw new Error(error.message)
+  const data = await getBackend().workspaces.updateDaemonWorkspace(input)
   return mapWorkspace(data)
 }
 
 export async function setAgentDefaultWorkspace(agentId: string, workspaceId: string): Promise<void> {
-  const { error } = await supabase.rpc('update_agent_defaults', {
-    p_agent_id: agentId,
-    p_default_workspace_id: workspaceId,
+  await getBackend().actors.updateAgentDefaults({
+    agentId,
+    defaultWorkspaceId: workspaceId,
+    agentKind: null,
   })
-  if (error) throw new Error(error.message)
 }

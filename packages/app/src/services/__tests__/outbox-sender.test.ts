@@ -7,7 +7,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   mqttPublish: vi.fn(),
-  supabaseInsert: vi.fn(),
+  insertOutgoingMessage: vi.fn(),
   upsertOutbox: vi.fn(),
   deleteOutbox: vi.fn(),
   listAllOutbox: vi.fn(),
@@ -17,14 +17,28 @@ vi.mock('@/lib/mqtt-bridge', () => ({
   mqttPublish: mocks.mqttPublish,
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (table: string) => {
-      if (table !== 'messages') throw new Error(`Unexpected table: ${table}`)
-      return { insert: mocks.supabaseInsert }
-    },
-  },
-}))
+vi.mock('@/lib/backend', () => {
+  class BackendError extends Error {
+    category: string
+    operation: string
+
+    constructor(args: { category: string; operation: string; message: string }) {
+      super(args.message)
+      this.name = 'BackendError'
+      this.category = args.category
+      this.operation = args.operation
+    }
+  }
+
+  return {
+    BackendError,
+    getBackend: () => ({
+      messages: {
+        insertOutgoingMessage: mocks.insertOutgoingMessage,
+      },
+    }),
+  }
+})
 
 vi.mock('@/lib/local-cache', () => ({
   upsertOutbox: mocks.upsertOutbox,
@@ -37,7 +51,7 @@ describe('outbox sender', () => {
     vi.resetModules()
     vi.clearAllMocks()
     mocks.mqttPublish.mockResolvedValue(undefined)
-    mocks.supabaseInsert.mockResolvedValue({ error: null })
+    mocks.insertOutgoingMessage.mockResolvedValue({})
     mocks.upsertOutbox.mockResolvedValue(undefined)
     mocks.deleteOutbox.mockResolvedValue(undefined)
     mocks.listAllOutbox.mockResolvedValue([])
@@ -81,8 +95,12 @@ describe('outbox sender', () => {
       expect(mocks.mqttPublish).toHaveBeenCalled()
     })
 
-    expect(mocks.supabaseInsert).toHaveBeenCalledWith(
+    expect(mocks.insertOutgoingMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: 'msg-1',
+        teamId: 'team-1',
+        sessionId: 'sess-1',
+        senderActorId: 'member-1',
         content: 'hello daemon',
         model: 'opencode/qwen3.6-plus-free',
         metadata: expect.objectContaining({
@@ -128,5 +146,37 @@ describe('outbox sender', () => {
       expect(entry.attemptCount).toBe(1)
       expect(entry.lastError).toMatch(/mqtt not connected/)
     })
+  })
+
+  it('treats backend conflicts as already delivered messages', async () => {
+    const { BackendError } = await import('@/lib/backend')
+    mocks.insertOutgoingMessage.mockRejectedValueOnce(new BackendError({
+      category: 'Conflict',
+      operation: 'messages.insertOutgoingMessage',
+      message: 'duplicate key',
+    }))
+
+    const { useOutboxStore } = await import('@/stores/outbox-store')
+    const { startOutboxSender } = await import('../outbox-sender')
+
+    await useOutboxStore.getState().enqueue({
+      messageId: 'msg-conflict',
+      teamId: 'team-1',
+      sessionId: 'session-1',
+      senderActorId: 'member-1',
+      content: 'already persisted',
+      model: null,
+      mentionActorIds: [],
+      attachmentUrls: [],
+    })
+
+    startOutboxSender()
+
+    await vi.waitFor(() => {
+      const entry = useOutboxStore.getState().byId['msg-conflict']
+      expect(entry.state).toBe('delivered')
+      expect(entry.lastError).toBeNull()
+    })
+    expect(mocks.mqttPublish).toHaveBeenCalled()
   })
 })

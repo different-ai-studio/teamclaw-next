@@ -1,38 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockSetModel = vi.fn().mockResolvedValue({})
-const supabaseFrom = vi.fn()
+const listRuntimeTargetsForSession = vi.fn()
 
 vi.mock('@/lib/teamclaw-rpc', () => ({
   setModel: (...args: unknown[]) => mockSetModel(...args),
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (...args: unknown[]) => supabaseFrom(...args),
-  },
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    runtime: { listRuntimeTargetsForSession },
+  }),
 }))
 
 describe('applySessionRuntimeModel', () => {
   beforeEach(() => {
     mockSetModel.mockClear()
-    supabaseFrom.mockReset()
+    listRuntimeTargetsForSession.mockReset()
   })
 
   it('sends setModel to each runtime in the active session', async () => {
-    supabaseFrom.mockReturnValue({
-      select: () => ({
-        eq: () => ({
-          in: () => Promise.resolve({
-            data: [
-              { agent_id: 'agent-1', runtime_id: 'rt-1' },
-              { agent_id: 'agent-2', runtime_id: 'rt-2' },
-            ],
-            error: null,
-          }),
-        }),
-      }),
-    })
+    listRuntimeTargetsForSession.mockResolvedValue([
+      { agent_id: 'agent-1', runtime_id: 'rt-1' },
+      { agent_id: 'agent-2', runtime_id: 'rt-2' },
+    ])
 
     const { applySessionRuntimeModel } = await import('../session-runtime-model')
 
@@ -56,25 +47,9 @@ describe('applySessionRuntimeModel', () => {
   })
 
   it('targets all session runtimes when no agent ids are provided', async () => {
-    const inSpy = vi.fn()
-    supabaseFrom.mockReturnValue({
-      select: () => ({
-        eq: () => ({
-          in: inSpy,
-          then: undefined,
-        }),
-      }),
-    })
-    supabaseFrom.mockReturnValueOnce({
-      select: () => ({
-        eq: () => Promise.resolve({
-          data: [
-            { agent_id: 'agent-1', runtime_id: 'rt-1' },
-          ],
-          error: null,
-        }),
-      }),
-    })
+    listRuntimeTargetsForSession.mockResolvedValue([
+      { agent_id: 'agent-1', runtime_id: 'rt-1' },
+    ])
 
     const { applySessionRuntimeModel } = await import('../session-runtime-model')
 
@@ -84,7 +59,7 @@ describe('applySessionRuntimeModel', () => {
       modelId: 'claude-sonnet-4-6',
     })
 
-    expect(inSpy).not.toHaveBeenCalled()
+    expect(listRuntimeTargetsForSession).toHaveBeenCalledWith('sess-1', [])
     expect(mockSetModel).toHaveBeenCalledWith({
       targetDeviceId: 'agent-1',
       runtimeId: 'rt-1',

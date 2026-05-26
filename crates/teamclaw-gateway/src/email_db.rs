@@ -322,7 +322,7 @@ impl EmailDb {
     /// Store / upsert a Message-ID → (session_id, binding) mapping. Called
     /// once for each inbound email we persist and once for each outbound
     /// reply we send; storing both lets future inbound emails in the same
-    /// thread find the right supabase session by either side of the
+    /// thread find the right backend session by either side of the
     /// `In-Reply-To` / `References` chain.
     pub async fn store_message_thread(
         &self,

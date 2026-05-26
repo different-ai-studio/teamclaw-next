@@ -7,7 +7,7 @@ import {
   MessageSchema,
   SessionMessageEnvelopeSchema,
 } from "@/lib/proto/teamclaw_pb";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import { getOpenCodeClient, isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
@@ -42,7 +42,7 @@ import { trackEvent } from "@/stores/telemetry";
 const syncSetSessionId = (_id: string | null) => {};
 import { insertMessageSorted } from "@/lib/insert-message-sorted";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
+import { isAgentActorType } from "@/lib/actor-type";
 import {
   resolvePendingPermissionActivityOwner,
   resolvePendingQuestionActivityOwner,
@@ -94,30 +94,18 @@ async function resolveMentionActorIdsForSession(
     return [];
   }
 
-  const { data: participants, error: participantError } = await supabase
-    .from("session_participants")
-    .select("actor_id")
-    .eq("session_id", sessionId);
-  if (participantError) {
+  let participants: Array<{ id: string; actor_type?: string | null }>;
+  try {
+    participants = await getBackend().sessionMembers.listParticipants(sessionId);
+  } catch (participantError) {
     console.warn("[SendMessage] failed to load session participants:", participantError);
     return [];
   }
 
-  const actorIds = (participants ?? []).map((row: { actor_id: string }) => row.actor_id);
-  if (actorIds.length === 0) return [];
+  const agents = participants.filter((row) => isAgentActorType(row.actor_type));
 
-  const { data: agents, error: agentError } = await supabase
-    .from("actor_directory")
-    .select("id")
-    .in("id", actorIds)
-    .in("actor_type", [...AGENT_ACTOR_TYPES]);
-  if (agentError) {
-    console.warn("[SendMessage] failed to resolve session agents:", agentError);
-    return [];
-  }
-
-  return (agents ?? []).length === 1
-    ? [(agents![0] as { id: string }).id]
+  return agents.length === 1
+    ? [agents[0].id]
     : [];
 }
 
@@ -143,19 +131,13 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
       throw new Error(`No member actor found for team ${currentTeam.id}`);
     }
 
-    const { data: agentRows, error: agentError } = await supabase
-      .from("actor_directory")
-      .select("id, display_name")
-      .eq("team_id", currentTeam.id)
-      .eq("actor_type", "agent")
-      .limit(2);
-    if (agentError) {
-      throw new Error(`Failed to load team agents: ${agentError.message}`);
-    }
+    const agentRows = (await getBackend().actors.listActorDirectory(currentTeam.id))
+      .filter((row) => row.actor_type === "agent")
+      .slice(0, 2);
 
     const soleAgent =
       (agentRows ?? []).length === 1
-        ? (agentRows?.[0] as { id: string; display_name: string | null })
+        ? agentRows[0]
         : null;
 
     const { createSessionShell, startAgentRuntimesAsync } = await import("@/lib/session-create");
@@ -202,15 +184,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     let teamId =
       useSessionListStore.getState().rows.find((row) => row.id === sessionId)?.team_id ?? null;
     if (!teamId) {
-      const { data: sessionRow, error: sessionError } = await supabase
-        .from("sessions")
-        .select("team_id")
-        .eq("id", sessionId)
-        .maybeSingle();
-      if (sessionError) {
-        throw new Error(`Failed to resolve session team: ${sessionError.message}`);
-      }
-      teamId = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
+      teamId = await getBackend().sessions.getSessionTeamId(sessionId);
     }
     if (!teamId) throw new Error(`No team_id found for session ${sessionId}`);
 
@@ -260,19 +234,16 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
       body: toBinary(SessionMessageEnvelopeSchema, sessionEnvelope),
     });
 
-    const { error: insertError } = await supabase.from("messages").insert({
+    await getBackend().messages.insertOutgoingMessage({
       id: messageId,
-      team_id: teamId,
-      session_id: sessionId,
-      sender_actor_id: senderActorId,
+      teamId,
+      sessionId,
+      senderActorId,
       kind: "text",
       content,
       model: messageModel || null,
       metadata: { mention_actor_ids: mentionActorIds },
     });
-    if (insertError) {
-      throw new Error(`Failed to persist message: ${insertError.message}`);
-    }
 
     await mqttPublish(
       `amux/${teamId}/session/${sessionId}/live`,

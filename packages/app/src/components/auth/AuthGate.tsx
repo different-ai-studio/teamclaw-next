@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { isTauri } from "@/lib/utils";
 import { generateRandomTeamName } from "@/lib/random-team-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
@@ -61,35 +61,23 @@ export function AuthGate({ children }: AuthGateProps) {
 
     void (async () => {
       try {
-        // RLS on `teams` restricts select to teams the user is a member of,
-        // so a non-empty result means they already have somewhere to land.
-        const { data: teams, error } = await supabase
-          .from("teams")
-          .select("id")
-          .limit(1);
-        if (error) {
-          console.warn("[AuthGate] team lookup failed", error);
-          return;
-        }
-        const existingTeamId = teams?.[0]?.id as string | undefined;
+        const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
+        const existingTeamId = teams[0]?.id;
         if (existingTeamId) {
           await useCurrentTeamStore.getState().reloadAndSwitchTo(existingTeamId);
           return;
         }
 
         const name = generateRandomTeamName();
-        const { data: created, error: createErr } = await supabase.rpc("create_team", {
-          p_name: name,
-        });
-        if (createErr) {
-          console.warn("[AuthGate] auto create_team failed", createErr);
-        } else {
-          const row = Array.isArray(created) ? created[0] : created;
-          const teamId = row?.team_id as string | undefined;
+        try {
+          const created = await getBackend().teams.createTeam({ name });
+          const teamId = created.id || undefined;
           if (teamId) {
             await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId);
           }
           console.log("[AuthGate] auto-created team", name);
+        } catch (createErr) {
+          console.warn("[AuthGate] auto create_team failed", createErr);
         }
       } catch (err) {
         console.warn("[AuthGate] team bootstrap threw", err);

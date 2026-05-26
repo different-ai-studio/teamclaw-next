@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client';
+import { getBackend } from '@/lib/backend';
 
 export interface NotificationPrefs {
   enabled: boolean;
@@ -15,42 +15,39 @@ export const DEFAULT_PREFS: NotificationPrefs = {
 };
 
 export async function loadPrefs(userId: string): Promise<NotificationPrefs> {
-  const { data } = await supabase
-    .from('notification_prefs').select('*')
-    .eq('user_id', userId).maybeSingle();
-  if (!data) return DEFAULT_PREFS;
-  return {
-    enabled: data.enabled,
-    dnd_start_min: data.dnd_start_min,
-    dnd_end_min: data.dnd_end_min,
-    dnd_tz: data.dnd_tz ?? DEFAULT_PREFS.dnd_tz,
-  };
+  try {
+    const data = await getBackend().notifications.loadPreferences(userId);
+    if (!data) return DEFAULT_PREFS;
+    return {
+      enabled: data.enabled ?? DEFAULT_PREFS.enabled,
+      dnd_start_min: data.dnd_start_min ?? null,
+      dnd_end_min: data.dnd_end_min ?? null,
+      dnd_tz: data.dnd_tz ?? DEFAULT_PREFS.dnd_tz,
+    };
+  } catch (error) {
+    console.warn('[notifications] loadPrefs failed, using defaults', error);
+    return DEFAULT_PREFS;
+  }
 }
 
 export async function savePrefs(userId: string, p: NotificationPrefs): Promise<void> {
-  await supabase.from('notification_prefs').upsert(
-    { user_id: userId, ...p, updated_at: new Date().toISOString() },
-    { onConflict: 'user_id' },
-  );
+  await getBackend().notifications.savePreferences({ user_id: userId, ...p, updated_at: new Date().toISOString() });
 }
 
 export async function setSessionMuted(
   userId: string, sessionId: string, muted: boolean
 ): Promise<void> {
-  if (muted) {
-    await supabase.from('session_mutes').upsert(
-      { user_id: userId, session_id: sessionId }, { onConflict: 'user_id,session_id' },
-    );
-  } else {
-    await supabase.from('session_mutes')
-      .delete().eq('user_id', userId).eq('session_id', sessionId);
-  }
+  await getBackend().notifications.setSessionMuted({ userId, sessionId, muted });
 }
 
 export async function isSessionMuted(userId: string, sessionId: string): Promise<boolean> {
-  const { data } = await supabase.from('session_mutes')
-    .select('session_id').eq('user_id', userId).eq('session_id', sessionId).limit(1);
-  return Boolean(data && data.length);
+  try {
+    const mutedSessionIds = await getBackend().notifications.listMutedSessionIds(userId);
+    return mutedSessionIds.includes(sessionId);
+  } catch (error) {
+    console.warn('[notifications] isSessionMuted failed, treating as unmuted', error);
+    return false;
+  }
 }
 
 export function isInDndWindow(prefs: { dnd_start_min: number | null;

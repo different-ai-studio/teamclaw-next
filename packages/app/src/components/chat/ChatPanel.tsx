@@ -23,7 +23,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
 import { useUIStore } from "@/stores/ui";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { create as createMessage } from "@bufbuild/protobuf";
 import {
   MessageSchema,
@@ -31,7 +31,7 @@ import {
 } from "@/lib/proto/teamclaw_pb";
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
-import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
+import { isAgentActorType } from "@/lib/actor-type";
 import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
@@ -100,30 +100,18 @@ async function resolveMentionActorIdsForSession(
     return [];
   }
 
-  const { data: participants, error: participantError } = await supabase
-    .from("session_participants")
-    .select("actor_id")
-    .eq("session_id", sessionId);
-  if (participantError) {
+  let participants: Array<{ id: string; actor_type?: string | null; display_name?: string | null }>;
+  try {
+    participants = await getBackend().sessionMembers.listParticipants(sessionId);
+  } catch (participantError) {
     console.warn("[ChatPanel] failed to load session participants:", participantError);
     return [];
   }
 
-  const actorIds = (participants ?? []).map((row: { actor_id: string }) => row.actor_id);
-  if (actorIds.length === 0) return [];
+  const agents = participants.filter((row) => isAgentActorType(row.actor_type));
 
-  const { data: agents, error: agentError } = await supabase
-    .from("actor_directory")
-    .select("id")
-    .in("id", actorIds)
-    .in("actor_type", [...AGENT_ACTOR_TYPES]);
-  if (agentError) {
-    console.warn("[ChatPanel] failed to resolve session agents:", agentError);
-    return [];
-  }
-
-  return (agents ?? []).length === 1
-    ? [(agents![0] as { id: string }).id]
+  return agents.length === 1
+    ? [agents[0].id]
     : [];
 }
 
@@ -378,27 +366,20 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     let cancelled = false;
     void (async () => {
-      const { data: parts, error: partErr } = await supabase
-        .from('session_participants')
-        .select('actor_id')
-        .eq('session_id', activeSessionId);
-      if (cancelled || partErr) return;
+      let actors: Awaited<ReturnType<ReturnType<typeof getBackend>['sessionMembers']['listParticipants']>>;
+      try {
+        actors = await getBackend().sessionMembers.listParticipants(activeSessionId);
+      } catch {
+        return;
+      }
+      if (cancelled) return;
 
-      const actorIds = (parts ?? []).map((row: { actor_id: string }) => row.actor_id);
-      if (actorIds.length === 0) return;
-
-      const { data: actors, error: actorErr } = await supabase
-        .from('actors')
-        .select('id, display_name, actor_type')
-        .in('id', actorIds)
-        .in('actor_type', [...AGENT_ACTOR_TYPES]);
-      if (cancelled || actorErr) return;
-
-      if ((actors ?? []).length === 1) {
-        const soleAgent = actors[0] as { id: string; display_name: string };
+      const agentActors = actors.filter((row) => isAgentActorType(row.actor_type));
+      if (agentActors.length === 1) {
+        const soleAgent = agentActors[0];
         useEngagedAgentStore.getState().setAgents(activeSessionId, [{
           id: soleAgent.id,
-          displayName: soleAgent.display_name,
+          displayName: soleAgent.display_name || "AI",
         }]);
       }
     })();
@@ -943,20 +924,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       useSessionListStore.getState().rows.find(r => r.id === sid)?.team_id ?? null;
     let teamIdForSend: string | null = teamIdFromSessionList;
     if (!teamIdForSend && sid) {
-      sessionFlowLog("send.resolve_team_from_supabase.begin", {
+      sessionFlowLog("send.resolve_team_from_backend.begin", {
         sessionId: sid,
       });
-      const { data: sessionRow } = await supabase
-        .from("sessions")
-        .select("team_id")
-        .eq("id", sid)
-        .maybeSingle();
-      teamIdForSend = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
+      teamIdForSend = await getBackend().sessions.getSessionTeamId(sid);
     }
     sessionFlowLog("send.team_resolved", {
       sessionId: sid,
       teamId: teamIdForSend,
-      source: teamIdFromSessionList ? "session-list-store" : "supabase",
+      source: teamIdFromSessionList ? "session-list-store" : "backend",
       hasAuthSession: !!authSession,
     });
 

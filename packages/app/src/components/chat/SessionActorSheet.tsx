@@ -11,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { loadActorsForTeam, loadActorsByIds, loadSessionParticipants } from '@/lib/local-cache'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncParticipantsForSession } from '@/lib/sync/session-participant-sync'
@@ -139,31 +139,16 @@ function mapCachedActor(a: {
 }
 
 async function fetchParticipantsFromSupabase(sessionId: string): Promise<{ ids: string[]; rows: Row[] }> {
-  const { data: parts, error: partsError } = await supabase
-    .from('session_participants')
-    .select('actor_id')
-    .eq('session_id', sessionId)
-  if (partsError) throw partsError
-
-  const ids = ((parts ?? []) as Array<{ actor_id: string }>).map((p) => p.actor_id).filter(Boolean)
-  if (ids.length === 0) return { ids, rows: [] }
-
-  const { data: actors, error: actorsError } = await supabase
-    .from('actor_directory')
-    .select('id, actor_type, display_name, member_status, agent_status, agent_types, default_agent_type, last_active_at')
-    .in('id', ids)
-  if (actorsError) throw actorsError
-
-  const byId = new Map(((actors ?? []) as Row[]).map((a) => [a.id, a] as const))
+  const actors = await getBackend().sessionMembers.listParticipants(sessionId)
+  const ids = actors.map((p) => p.id).filter(Boolean)
   return {
     ids,
-    rows: ids
-      .map((id) => byId.get(id))
-      .filter((a): a is Row => !!a)
+    rows: actors
+      .filter((a) => a.actor_type === 'member' || a.actor_type === 'agent')
       .map((a) => ({
         id: a.id,
-        actor_type: a.actor_type,
-        display_name: a.display_name,
+        actor_type: a.actor_type as 'member' | 'agent',
+        display_name: a.display_name || '',
         member_status: a.member_status ?? null,
         agent_status: a.agent_status ?? null,
         agent_types: normalizeAgentTypes(a.agent_types),
@@ -185,13 +170,15 @@ async function enrichAgentMetadata<T extends { id: string; agent_types: string[]
     .filter((r) => isAgent(r) && (r.agent_types.length === 0 || r.default_agent_type == null))
     .map((r) => r.id)
   if (missingIds.length === 0) return rows
-  const { data, error } = await supabase
-    .from('actor_directory')
-    .select('id, agent_types, default_agent_type')
-    .in('id', missingIds)
-  if (error || !data) return rows
+  let data: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listAgentDefaults']>>
+  try {
+    data = await getBackend().runtime.listAgentDefaults(missingIds)
+  } catch (error) {
+    console.warn('[SessionActorSheet] agent metadata enrichment failed', error)
+    return rows
+  }
   const byId = new Map(
-    (data as Array<{ id: string; agent_types: unknown; default_agent_type: string | null }>)
+    data
       .map((d) => [d.id, d] as const),
   )
   return rows.map((r) => {
@@ -206,28 +193,12 @@ async function enrichAgentMetadata<T extends { id: string; agent_types: string[]
 }
 
 async function fetchCandidateActorsFromSupabase(teamId: string, presentIds: Set<string>): Promise<CandidateActor[]> {
-  // agent_types / default_agent_type live on public.agents; actor_directory
-  // joins them through and applies the visibility=team filter for us.
-  const { data, error } = await supabase
-    .from('actor_directory')
-    .select('id, display_name, actor_type, member_status, agent_status, agent_types, default_agent_type, last_active_at')
-    .eq('team_id', teamId)
-  if (error) throw error
-  return ((data ?? []) as Array<{
-    id: string
-    display_name: string
-    actor_type: string
-    member_status: string | null
-    agent_status: string | null
-    agent_types: unknown
-    default_agent_type: string | null
-    last_active_at: string | null
-  }>)
-    .filter((a) => (a.actor_type === 'member' || a.actor_type === 'agent') && !presentIds.has(a.id))
+  return (await getBackend().sessionMembers.listCandidateActors(teamId, Array.from(presentIds)))
+    .filter((a) => a.actor_type === 'member' || a.actor_type === 'agent')
     .map((a) => ({
       id: a.id,
       actor_type: a.actor_type as 'member' | 'agent',
-      display_name: a.display_name,
+      display_name: a.display_name || '',
       member_status: a.member_status ?? null,
       agent_status: a.agent_status ?? null,
       agent_types: normalizeAgentTypes(a.agent_types),
@@ -508,7 +479,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           member_status: a.memberStatus ?? null,
           agent_status: a.agentStatus ?? null,
           // ActorRow cache lacks agent_types / default_agent_type today; the
-          // supabase fallback supplies them when no cached row matches.
+          // Backend fallback supplies them when no cached row matches.
           agent_types: [],
           default_agent_type: null,
           last_active_at: null,
@@ -578,7 +549,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
           member_status: a.memberStatus ?? null,
           agent_status: a.agentStatus ?? null,
           // ActorRow cache lacks agent_types / default_agent_type today; the
-          // supabase fallback supplies them when no cached row matches.
+          // Backend fallback supplies them when no cached row matches.
           agent_types: [],
           default_agent_type: null,
           last_active_at: null,
@@ -608,43 +579,41 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         applySnapshot(effectiveFreshIds, freshRows, freshCandidates)
       }
 
-      // ────────────────────────────────────────────────────────────────
-      // Live-state lookups that aren't cached: agent_runtimes + my-actor.
-      // Small queries, kept on supabase. Fire in parallel; failures are
-      // non-fatal (we already rendered from cache).
-      // ────────────────────────────────────────────────────────────────
-      let finalActorIds = (await loadSessionParticipants(sessionId)).map(p => p.actorId)
-      if (finalActorIds.length === 0) {
-        finalActorIds = (await fetchParticipantsFromSupabase(sessionId)).ids
-      }
-      if (cancelled) return
-
-      const [runtimeRes, userRes] = await Promise.all([
-        supabase
-          .from('agent_runtimes')
-          .select('agent_id, runtime_id')
-          .eq('session_id', sessionId),
-        supabase.auth.getUser(),
-      ])
-      if (cancelled) return
-
-      const runtimeMap = new Map<string, string>()
-      if (!runtimeRes.error) {
-        for (const r of (runtimeRes.data ?? []) as Array<{ agent_id: string; runtime_id: string }>) {
-          if (r.agent_id && r.runtime_id) runtimeMap.set(r.agent_id, r.runtime_id)
+      try {
+        // ──────────────────────────────────────────────────────────────
+        // Live-state lookups that aren't cached: agent runtime hints +
+        // my-actor. These must not hide the participant list when they fail.
+        // ──────────────────────────────────────────────────────────────
+        let finalActorIds = (await loadSessionParticipants(sessionId)).map(p => p.actorId)
+        if (finalActorIds.length === 0) {
+          finalActorIds = (await fetchParticipantsFromSupabase(sessionId)).ids
         }
-      }
-      setAgentToRuntimeId(runtimeMap)
-
-      const user = userRes.data.user
-      if (user && finalActorIds.length > 0) {
-        const { data: myActorRows } = await supabase
-          .from('actors')
-          .select('id')
-          .eq('user_id', user.id)
-          .in('id', finalActorIds)
         if (cancelled) return
-        setMyActorId(myActorRows?.[0]?.id ?? null)
+
+        const [runtimeRows, authSession] = await Promise.all([
+          teamId ? getBackend().runtime.listLatestAgentRuntimeHints(teamId, finalActorIds) : Promise.resolve([]),
+          getBackend().auth.getSession(),
+        ])
+        if (cancelled) return
+
+        const runtimeMap = new Map<string, string>()
+        for (const r of runtimeRows) {
+          if (r.session_id === sessionId && r.agent_id && r.runtime_id && !runtimeMap.has(r.agent_id)) {
+            runtimeMap.set(r.agent_id, r.runtime_id)
+          }
+        }
+        setAgentToRuntimeId(runtimeMap)
+
+        const user = authSession?.user
+        if (user && teamId && finalActorIds.length > 0) {
+          const myActor = await getBackend().directory.resolveCurrentMemberActor(teamId, user.id)
+          if (cancelled) return
+          setMyActorId(myActor && finalActorIds.includes(myActor.id) ? myActor.id : null)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('[SessionActorSheet] enrichment failed', e)
+        }
       }
     })().catch(e => {
       if (cancelled) return
@@ -664,20 +633,16 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
     // Optimistic: drop the row immediately
     setRows(prev => prev.filter(r => r.id !== actor.id))
     setPendingRemove(null)
-    const { error: deleteErr } = await supabase
-      .from('session_participants')
-      .delete()
-      .eq('session_id', sessionId)
-      .eq('actor_id', actor.id)
-    if (deleteErr) {
+    try {
+      await getBackend().sessionMembers.removeParticipant(sessionId, actor.id)
+      useSessionParticipantStore.getState().invalidateSessions([sessionId])
+    } catch (deleteErr) {
       console.error('[SessionActorSheet] remove failed:', deleteErr)
       // Rollback
       setRows(prevRows)
       // Toast
       const { toast } = await import('sonner')
       toast.error(t('chat.actorSheet.removeError', 'Failed to remove from session'))
-    } else {
-      useSessionParticipantStore.getState().invalidateSessions([sessionId])
     }
   }
 
@@ -706,16 +671,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
     setCandidateActors(prev => prev.filter(c => c.id !== candidate.id))
 
     try {
-      // 1. Upsert into session_participants — idempotent: if the row already
-      //    exists (candidate list was stale because phase 2 sync hadn't
-      //    landed yet), treat it as a no-op rather than failing.
-      const { error: insErr } = await supabase
-        .from('session_participants')
-        .upsert(
-          { session_id: sessionId, actor_id: candidate.id },
-          { onConflict: 'session_id,actor_id', ignoreDuplicates: true },
-        )
-      if (insErr) throw insErr
+      await getBackend().sessionMembers.addParticipant(sessionId, candidate.id)
 
       if (candidate.actor_type !== 'agent') {
         useSessionParticipantStore.getState().invalidateSessions([sessionId])
@@ -723,13 +679,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       }
 
       // 2. Derive workspace from the agent's prior runtime history
-      const { data: priorRows } = await supabase
-        .from('agent_runtimes')
-        .select('workspace_id, agent_id, current_model, status, backend_type, updated_at')
-        .eq('agent_id', candidate.id)
-        .eq('team_id', teamId)
-        .order('updated_at', { ascending: false })
-        .limit(1)
+      const priorRows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, [candidate.id])
 
       const workspaceId = priorRows?.[0]?.workspace_id ?? ''
       // Prefer the agent's explicit default_agent_type (set via UI) over the

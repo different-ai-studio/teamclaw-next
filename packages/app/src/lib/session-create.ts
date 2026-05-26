@@ -1,5 +1,5 @@
 import { create as createProtoMessage, toBinary } from '@bufbuild/protobuf'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { runtimeStart, setModel } from '@/lib/teamclaw-rpc'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import { mqttPublish } from '@/lib/mqtt-bridge'
@@ -37,7 +37,7 @@ export interface CreateSessionShellResult {
 }
 
 /**
- * Inserts the supabase rows needed to materialise a new session and its
+ * Inserts the backend rows needed to materialise a new session and its
  * initial participants. Does NOT trigger any agent runtimeStart RPC —
  * callers fire-and-forget {@link startAgentRuntimesAsync} afterward so
  * the UI can switch into the new session immediately while runtimes
@@ -57,51 +57,29 @@ export async function createSessionShell(
     title: trimmedTitle,
   })
 
-  const { error: sessionErr } = await supabase
-    .from('sessions')
-    .insert({
-      id: sessionId,
-      team_id: args.teamId,
-      created_by_actor_id: args.creatorActorId,
-      mode: 'collab',
-      title: trimmedTitle,
-      idea_id: args.ideaId ?? null,
-    })
-  if (sessionErr) {
-    sessionFlowError('session_shell.insert_session.failed', sessionErr, {
-      sessionId,
-      teamId: args.teamId,
-    })
-    throw new Error(`Failed to create session: ${sessionErr.message}`)
-  }
-  sessionFlowLog('session_shell.insert_session.ok', {
-    sessionId,
-    teamId: args.teamId,
-  })
-
   const participantActorIds = Array.from(new Set([args.creatorActorId, ...args.additionalActorIds]))
-  if (participantActorIds.length > 0) {
-    const rows = participantActorIds.map(actorId => ({ session_id: sessionId, actor_id: actorId }))
-    sessionFlowLog('session_shell.insert_participants.begin', {
-      sessionId,
+  try {
+    await getBackend().sessions.createSessionShell({
+      id: sessionId,
       teamId: args.teamId,
-      participantActorIds,
+      createdByActorId: args.creatorActorId,
+      title: trimmedTitle,
+      additionalActorIds: args.additionalActorIds,
+      ideaId: args.ideaId ?? null,
     })
-    const { error: partErr } = await supabase.from('session_participants').insert(rows)
-    if (partErr) {
-      sessionFlowError('session_shell.insert_participants.failed', partErr, {
-        sessionId,
-        teamId: args.teamId,
-        participantCount: participantActorIds.length,
-      })
-      throw new Error(`Failed to add participants: ${partErr.message}`)
-    }
-    sessionFlowLog('session_shell.insert_participants.ok', {
+  } catch (error) {
+    sessionFlowError('session_shell.create_backend.failed', error, {
       sessionId,
       teamId: args.teamId,
       participantCount: participantActorIds.length,
     })
+    throw error
   }
+  sessionFlowLog('session_shell.create_backend.ok', {
+    sessionId,
+    teamId: args.teamId,
+    participantCount: participantActorIds.length,
+  })
 
   // Mirror into local libsql immediately so the session-list-store + Actors
   // panel see the new session without waiting for a Supabase refetch.
@@ -241,23 +219,24 @@ export async function createSessionWithFirstMessage(
     body: toBinary(SessionMessageEnvelopeSchema, sessionEnvelope),
   })
 
-  const { error: insertError } = await supabase.from('messages').insert({
-    id: messageId,
-    team_id: args.teamId,
-    session_id: sessionId,
-    sender_actor_id: args.creatorActorId,
-    kind: 'text',
-    content: trimmed,
-    model: args.modelId ?? null,
-    metadata: { mention_actor_ids: [] },
-  })
-  if (insertError) {
-    sessionFlowError('session_with_first_message.insert_message.failed', insertError, {
+  try {
+    await getBackend().messages.insertOutgoingMessage({
+      id: messageId,
+      teamId: args.teamId,
+      sessionId,
+      senderActorId: args.creatorActorId,
+      kind: 'text',
+      content: trimmed,
+      model: args.modelId ?? null,
+      metadata: { mention_actor_ids: [] },
+    })
+  } catch (error) {
+    sessionFlowError('session_with_first_message.insert_message.failed', error, {
       sessionId,
       teamId: args.teamId,
       messageId,
     })
-    throw new Error(`Failed to persist message: ${insertError.message}`)
+    throw error
   }
   sessionFlowLog('session_with_first_message.insert_message.ok', {
     sessionId,
@@ -361,14 +340,25 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     modelId: args.modelId,
   })
 
+  const backend = getBackend()
   const priorByAgent = new Map<string, { workspace_id: string | null; backend_type: string | null }>()
-  const { data: priorRows } = await supabase
-    .from('agent_runtimes')
-    .select('agent_id, workspace_id, backend_type, updated_at')
-    .in('agent_id', args.agentActorIds)
-    .eq('team_id', args.teamId)
-    .order('updated_at', { ascending: false })
-  for (const r of priorRows ?? []) {
+  let priorRows: Awaited<ReturnType<typeof backend.runtime.listLatestAgentRuntimeHints>> = []
+  try {
+    priorRows = await backend.runtime.listLatestAgentRuntimeHints(args.teamId, args.agentActorIds)
+  } catch (error) {
+    sessionFlowError('runtime_start.lookup_prior.failed', error, {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+    })
+    console.warn('[session-create] runtime hint lookup failed; continuing with fallback values', {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+  }
+  for (const r of priorRows) {
     if (!priorByAgent.has(r.agent_id)) {
       priorByAgent.set(r.agent_id, {
         workspace_id: r.workspace_id,
@@ -380,11 +370,23 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
   // Fetch each agent's advertised supported types and default. The default
   // wins over previous runtime history only when it is present in agent_types.
   const defaultByAgent = new Map<string, { agent_types: string[]; default_agent_type: string | null }>()
-  const { data: agentRows } = await supabase
-    .from('agents')
-    .select('id, agent_types, default_agent_type')
-    .in('id', args.agentActorIds)
-  for (const r of agentRows ?? []) {
+  let agentRows: Awaited<ReturnType<typeof backend.runtime.listAgentDefaults>> = []
+  try {
+    agentRows = await backend.runtime.listAgentDefaults(args.agentActorIds)
+  } catch (error) {
+    sessionFlowError('runtime_start.lookup_agent_defaults.failed', error, {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+    })
+    console.warn('[session-create] agent defaults lookup failed; continuing with runtime history or fallback values', {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+  }
+  for (const r of agentRows) {
     defaultByAgent.set(r.id, {
       agent_types: normalizeAgentTypes(r.agent_types),
       default_agent_type: r.default_agent_type ?? null,

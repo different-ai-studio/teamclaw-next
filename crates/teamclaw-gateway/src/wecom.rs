@@ -1165,7 +1165,7 @@ impl WeComGateway {
 
         // Collect raw inbound attachments. WeCom delivers images/files
         // encrypted under a per-message aeskey; decrypt now, defer the
-        // Supabase Storage upload until we know the resolved session_id.
+        // backend attachment upload until we know the resolved session_id.
         struct InboundFile {
             bytes: Vec<u8>,
             filename: String,
@@ -1393,7 +1393,7 @@ impl WeComGateway {
         }
 
         // Dual-write attachments: save to local cache for the agent to read,
-        // then upload to Supabase Storage in parallel with the ACP turn so the
+        // then upload to backend attachment storage in parallel with the ACP turn so the
         // bot reply latency is unaffected by upload time.
         let local_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))

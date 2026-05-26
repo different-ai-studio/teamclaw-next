@@ -10,7 +10,7 @@ import { buildSessionReport } from '@/lib/telemetry/report-builder'
 import { useSessionStore } from '@/stores/session'
 import { insertFeedback } from '@/lib/telemetry/supabase-feedback'
 import { insertSessionReport } from '@/lib/telemetry/supabase-session-report'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useAuthStore } from '@/stores/auth-store'
 // Permissive proxy until the amuxd daemon client is wired up;
@@ -77,14 +77,8 @@ interface TelemetryState {
 async function resolveActorId(teamId: string): Promise<string | null> {
   const userId = useAuthStore.getState().session?.user?.id
   if (!userId) return null
-  const { data } = await supabase
-    .from('actors')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('team_id', teamId)
-    .limit(1)
-    .maybeSingle()
-  return data?.id ?? null
+  const actor = await getBackend().directory.resolveCurrentMemberActor(teamId, userId)
+  return actor?.id ?? null
 }
 
 // ─── Internal state ──────────────────────────────────────────────────────
@@ -242,13 +236,12 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       const actorId = await resolveActorId(teamId)
       if (!actorId) return
 
-      const { error } = await supabase
-        .from('actor_message_feedback')
-        .delete()
-        .eq('actor_id', actorId)
-        .eq('team_id', teamId)
-        .eq('message_id', messageId)
-      if (error) console.warn('[telemetry] removeFeedback', error.message)
+      await getBackend().telemetry.deleteFeedback({
+        actor_id: actorId,
+        team_id: teamId,
+        message_id: messageId,
+        kind: 'thumb',
+      })
 
       set((state) => {
         const cache = new Map(state.feedbackCache)
@@ -271,20 +264,16 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       const teamId = useCurrentTeamStore.getState().team?.id
       if (!teamId) return
 
-      const { data, error } = await supabase
-        .from('actor_message_feedback')
-        .select('message_id, kind, star_rating')
-        .eq('team_id', teamId)
-        .eq('session_id', sessionId)
-      if (error) { console.warn('[telemetry] loadFeedbacks', error.message); return }
+      const data = await getBackend().telemetry.listFeedbacks({ teamId, sessionId })
 
       set((state) => {
         const fb = new Map(state.feedbackCache)
         const sr = new Map(state.starRatingCache)
         for (const r of data ?? []) {
-          if (r.message_id) {
-            fb.set(r.message_id, r.kind as FeedbackRating)
-            if (r.star_rating != null) sr.set(r.message_id, r.star_rating as StarRating)
+          const messageId = typeof r.message_id === 'string' ? r.message_id : null
+          if (messageId) {
+            fb.set(messageId, r.kind as FeedbackRating)
+            if (r.star_rating != null) sr.set(messageId, r.star_rating as StarRating)
           }
         }
         return { feedbackCache: fb, starRatingCache: sr }
@@ -306,13 +295,12 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       if (!actorId) return
 
       // Delete any prior star_rating row for this message (idempotent re-rate)
-      await supabase
-        .from('actor_message_feedback')
-        .delete()
-        .eq('actor_id', actorId)
-        .eq('team_id', teamId)
-        .eq('message_id', messageId)
-        .not('star_rating', 'is', null)
+      await getBackend().telemetry.deleteFeedback({
+        actor_id: actorId,
+        team_id: teamId,
+        message_id: messageId,
+        kind: 'star',
+      })
 
       await insertFeedback({
         actorId,
@@ -354,14 +342,12 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       const actorId = await resolveActorId(teamId)
       if (!actorId) return
 
-      const { error } = await supabase
-        .from('actor_message_feedback')
-        .delete()
-        .eq('actor_id', actorId)
-        .eq('team_id', teamId)
-        .eq('message_id', messageId)
-        .not('star_rating', 'is', null)
-      if (error) console.warn('[telemetry] removeStarRating', error.message)
+      await getBackend().telemetry.deleteFeedback({
+        actor_id: actorId,
+        team_id: teamId,
+        message_id: messageId,
+        kind: 'star',
+      })
 
       set((state) => {
         const cache = new Map(state.starRatingCache)

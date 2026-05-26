@@ -4,9 +4,13 @@ import userEvent from '@testing-library/user-event'
 import { MentionPopover, __clearCacheForTest } from '../MentionPopover'
 
 const mockSelect = vi.fn()
-const supabaseFrom = vi.fn()
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: { from: (...args: unknown[]) => supabaseFrom(...args) },
+const listParticipants = vi.fn()
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    sessionMembers: {
+      listParticipants,
+    },
+  }),
 }))
 vi.mock('@/stores/session-selection-store', () => ({
   useSessionSelectionStore: (sel: any) => sel({ currentSessionId: 'sess-1' }),
@@ -20,19 +24,12 @@ vi.mock('react-i18next', () => ({
 
 beforeEach(() => {
   mockSelect.mockReset()
-  supabaseFrom.mockReset()
+  listParticipants.mockReset()
   __clearCacheForTest()
 })
 
 function mockParticipants(rows: Array<{ id: string; actor_type: 'member' | 'agent'; display_name: string }>) {
-  supabaseFrom.mockImplementation(() => ({
-    select: () => ({
-      eq: () => Promise.resolve({
-        data: rows.map(r => ({ actor_id: r.id, actors: r })),
-        error: null,
-      }),
-    }),
-  }))
+  listParticipants.mockResolvedValue(rows)
 }
 
 describe('MentionPopover', () => {
@@ -98,11 +95,7 @@ describe('MentionPopover', () => {
   })
 
   it('shows error state when supabase returns an error', async () => {
-    supabaseFrom.mockImplementation(() => ({
-      select: () => ({
-        eq: () => Promise.resolve({ data: null, error: new Error('rls denied') }),
-      }),
-    }))
+    listParticipants.mockRejectedValue(new Error('rls denied'))
     render(
       <MentionPopover
         open={true}

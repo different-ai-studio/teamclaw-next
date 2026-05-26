@@ -6,30 +6,12 @@
  */
 
 import { syncTableForTeam } from "@/lib/cache-sync";
+import { getBackend } from "@/lib/backend";
 import * as cache from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
+import type { IdeaSyncRow } from "@/lib/backend/types";
 
-// Supabase `ideas` columns: id, team_id, workspace_id, parent_idea_id,
-// created_by_actor_id, title, description, status, archived, sort_order, created_at, updated_at.
-interface SupabaseIdeaRow {
-  id: string;
-  team_id: string;
-  workspace_id?: string | null;
-  parent_idea_id?: string | null;
-  title: string;
-  description?: string | null;
-  status?: string | null;
-  created_by_actor_id?: string | null;
-  archived?: boolean | number | null;
-  sort_order?: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const COLUMNS =
-  "id, team_id, workspace_id, parent_idea_id, title, description, status, created_by_actor_id, archived, sort_order, created_at, updated_at";
-
-function mapRow(r: SupabaseIdeaRow): cache.IdeaRow {
+function mapRow(r: IdeaSyncRow): cache.IdeaRow {
   return {
     id: r.id,
     teamId: r.team_id,
@@ -61,10 +43,10 @@ export async function syncIdeasForTeam(
   opts?: { full?: boolean },
 ): Promise<number> {
   if (!isTauri()) return 0;
-  const { count } = await syncTableForTeam<SupabaseIdeaRow, cache.IdeaRow>({
-    tableName: "ideas",
+  const { count } = await syncTableForTeam<IdeaSyncRow, cache.IdeaRow>({
+    watermarkKey: "ideas",
     teamId,
-    selectColumns: COLUMNS,
+    pullRows: (updatedAfter) => getBackend().sync.listIdeasForSync(teamId, updatedAfter),
     mapRow,
     upsertBatch: cache.upsertIdeasBatch,
     full: opts?.full,

@@ -22,12 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
 
-use crate::backend::Backend;
-use crate::supabase::client::StoredMessage;
-use crate::supabase::error::{SupabaseError, SupabaseResult};
-use crate::supabase::{
-    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants, WorkspaceRow,
-    WorkspaceUpsert,
+use crate::backend::{
+    AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
+    BackendSessionAndParticipants, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 
 /// Owned snapshot of an `AgentRuntimeUpsert` so tests can assert without
@@ -146,7 +143,7 @@ pub struct MockState {
 
     // ── Pre-seeded responses for reads ─────────────────────────────────
     pub claim_result: Option<ClaimResult>,
-    pub sessions: HashMap<String, SessionAndParticipants>,
+    pub sessions: HashMap<String, BackendSessionAndParticipants>,
     pub messages_by_session: HashMap<String, Vec<StoredMessage>>,
     pub gateway_session_index: HashMap<String, (String, Option<String>)>,
     pub admin_member_actor_ids: HashMap<String, Vec<String>>,
@@ -203,23 +200,23 @@ impl Backend for MockBackend {
         &self.actor_id
     }
 
-    async fn auth_token(&self) -> SupabaseResult<String> {
+    async fn auth_token(&self) -> BackendResult<String> {
         Ok(self.auth_token.clone())
     }
 
-    async fn claim_team_invite(&self, _token: &str) -> SupabaseResult<ClaimResult> {
+    async fn claim_team_invite(&self, _token: &str) -> BackendResult<ClaimResult> {
         self.state
             .lock()
             .unwrap()
             .claim_result
             .clone()
-            .ok_or(SupabaseError::InviteInvalid)
+            .ok_or_else(|| BackendError::Validation("invite invalid or expired".into()))
     }
 
     async fn upsert_agent_runtime(
         &self,
         row: &AgentRuntimeUpsert<'_>,
-    ) -> SupabaseResult<Option<String>> {
+    ) -> BackendResult<Option<String>> {
         let mut st = self.state.lock().unwrap();
         st.upserted_runtimes
             .push(RecordedRuntimeUpsert::from_upsert(row));
@@ -235,7 +232,7 @@ impl Backend for MockBackend {
         session_id: &str,
         runtime_id: &str,
         backend_session_id: &str,
-    ) -> SupabaseResult<Option<AgentRuntimeRow>> {
+    ) -> BackendResult<Option<AgentRuntimeRow>> {
         Ok(self
             .state
             .lock()
@@ -253,7 +250,7 @@ impl Backend for MockBackend {
         &self,
         agent_id: &str,
         session_id: &str,
-    ) -> SupabaseResult<Option<AgentRuntimeRow>> {
+    ) -> BackendResult<Option<AgentRuntimeRow>> {
         Ok(self
             .state
             .lock()
@@ -267,7 +264,7 @@ impl Backend for MockBackend {
         &self,
         supported_types: &[String],
         default_agent_type: &str,
-    ) -> SupabaseResult<()> {
+    ) -> BackendResult<()> {
         self.state
             .lock()
             .unwrap()
@@ -276,7 +273,7 @@ impl Backend for MockBackend {
         Ok(())
     }
 
-    async fn set_agent_device_id(&self, device_id: &str) -> SupabaseResult<()> {
+    async fn set_agent_device_id(&self, device_id: &str) -> BackendResult<()> {
         self.state
             .lock()
             .unwrap()
@@ -289,7 +286,7 @@ impl Backend for MockBackend {
         &self,
         agent_id: &str,
         actor_id: &str,
-    ) -> SupabaseResult<Option<String>> {
+    ) -> BackendResult<Option<String>> {
         Ok(self
             .state
             .lock()
@@ -300,12 +297,12 @@ impl Backend for MockBackend {
             .unwrap_or(None))
     }
 
-    async fn heartbeat(&self) -> SupabaseResult<()> {
+    async fn heartbeat(&self) -> BackendResult<()> {
         self.state.lock().unwrap().heartbeats += 1;
         Ok(())
     }
 
-    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> SupabaseResult<WorkspaceRow> {
+    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow> {
         let mut st = self.state.lock().unwrap();
         st.upserted_workspaces.push(RecordedWorkspaceUpsert {
             team_id: row.team_id.to_string(),
@@ -322,7 +319,8 @@ impl Backend for MockBackend {
         st.workspace_results
             .get(&key)
             .cloned()
-            .ok_or(SupabaseError::Rpc {
+            .ok_or_else(|| BackendError::Provider {
+                provider: "mock",
                 code: None,
                 message: format!("MockBackend: no workspace_result seeded for {key:?}"),
             })
@@ -331,14 +329,15 @@ impl Backend for MockBackend {
     async fn fetch_session_with_participants(
         &self,
         session_id: &str,
-    ) -> SupabaseResult<SessionAndParticipants> {
+    ) -> BackendResult<BackendSessionAndParticipants> {
         self.state
             .lock()
             .unwrap()
             .sessions
             .get(session_id)
             .cloned()
-            .ok_or(SupabaseError::Rpc {
+            .ok_or_else(|| BackendError::Provider {
+                provider: "mock",
                 code: Some("404".into()),
                 message: format!("MockBackend: session {session_id} not seeded"),
             })
@@ -348,7 +347,7 @@ impl Backend for MockBackend {
         &self,
         session_id: &str,
         after_id: Option<&str>,
-    ) -> SupabaseResult<Vec<StoredMessage>> {
+    ) -> BackendResult<Vec<StoredMessage>> {
         let st = self.state.lock().unwrap();
         let mut msgs = st
             .messages_by_session
@@ -368,7 +367,7 @@ impl Backend for MockBackend {
         &self,
         runtime_row_id: &str,
         last_processed_message_id: &str,
-    ) -> SupabaseResult<()> {
+    ) -> BackendResult<()> {
         self.state.lock().unwrap().runtime_cursors_updated.push((
             runtime_row_id.to_string(),
             last_processed_message_id.to_string(),
@@ -382,7 +381,7 @@ impl Backend for MockBackend {
         source: &str,
         source_id: &str,
         display_name: &str,
-    ) -> SupabaseResult<String> {
+    ) -> BackendResult<String> {
         let mut st = self.state.lock().unwrap();
         st.external_actors_upserted.push(RecordedExternalActor {
             team_id: team_id.to_string(),
@@ -405,7 +404,7 @@ impl Backend for MockBackend {
     async fn get_gateway_session_by_acp_id(
         &self,
         acp_session_id: &str,
-    ) -> SupabaseResult<Option<(String, Option<String>)>> {
+    ) -> BackendResult<Option<(String, Option<String>)>> {
         Ok(self
             .state
             .lock()
@@ -423,7 +422,7 @@ impl Backend for MockBackend {
         primary_agent_actor_id: &str,
         owner_member_actor_ids: &[String],
         participant_actor_ids: &[String],
-    ) -> SupabaseResult<(String, String, bool)> {
+    ) -> BackendResult<(String, String, bool)> {
         let mut st = self.state.lock().unwrap();
         st.gateway_sessions_ensured.push(RecordedGatewayEnsure {
             team_id: team_id.to_string(),
@@ -435,7 +434,8 @@ impl Backend for MockBackend {
         });
         st.ensure_gateway_session_result
             .clone()
-            .ok_or(SupabaseError::Rpc {
+            .ok_or_else(|| BackendError::Provider {
+                provider: "mock",
                 code: None,
                 message: "MockBackend: ensure_gateway_session_result not seeded".into(),
             })
@@ -447,7 +447,7 @@ impl Backend for MockBackend {
         sender_actor_id: &str,
         content: &str,
         external_message_id: Option<&str>,
-    ) -> SupabaseResult<String> {
+    ) -> BackendResult<String> {
         self.insert_gateway_message_with_attachments(
             session_id,
             sender_actor_id,
@@ -465,7 +465,7 @@ impl Backend for MockBackend {
         content: &str,
         external_message_id: Option<&str>,
         attachments: serde_json::Value,
-    ) -> SupabaseResult<String> {
+    ) -> BackendResult<String> {
         let mut st = self.state.lock().unwrap();
         let id = format!("mock-msg-{}", st.gateway_messages_inserted.len() + 1);
         st.gateway_messages_inserted.push(RecordedGatewayMessage {
@@ -483,7 +483,7 @@ impl Backend for MockBackend {
         path: &str,
         bytes: Vec<u8>,
         mime: &str,
-    ) -> SupabaseResult<String> {
+    ) -> BackendResult<String> {
         self.state
             .lock()
             .unwrap()
@@ -499,7 +499,7 @@ impl Backend for MockBackend {
     async fn list_agent_admin_member_actor_ids(
         &self,
         agent_actor_id: &str,
-    ) -> SupabaseResult<Vec<String>> {
+    ) -> BackendResult<Vec<String>> {
         Ok(self
             .state
             .lock()
@@ -514,7 +514,7 @@ impl Backend for MockBackend {
         &self,
         session_id: &str,
         actor_id: &str,
-    ) -> SupabaseResult<()> {
+    ) -> BackendResult<()> {
         self.state
             .lock()
             .unwrap()
@@ -528,7 +528,7 @@ impl Backend for MockBackend {
         team_id: &str,
         primary_agent_actor_id: &str,
         title: &str,
-    ) -> SupabaseResult<String> {
+    ) -> BackendResult<String> {
         let mut st = self.state.lock().unwrap();
         let sid = format!("mock-cron-sess-{}", st.cron_sessions.len() + 1);
         st.cron_sessions.push(RecordedCronSession {
@@ -561,7 +561,7 @@ impl Backend for MockBackend {
         model: &str,
         turn_id: &str,
         sequence: u64,
-    ) -> SupabaseResult<()> {
+    ) -> BackendResult<()> {
         self.state
             .lock()
             .unwrap()
@@ -585,6 +585,31 @@ impl Backend for MockBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_session_records_are_provider_neutral() {
+        use crate::backend::{BackendParticipantRow, BackendSessionRow};
+
+        let session = BackendSessionRow {
+            id: "session-1".into(),
+            team_id: "team-1".into(),
+            created_by_actor_id: Some("member-1".into()),
+            primary_agent_id: None,
+            mode: "collab".into(),
+            title: "Title".into(),
+            summary: String::new(),
+            idea_id: None,
+            created_at: chrono::Utc::now(),
+        };
+        let participant = BackendParticipantRow {
+            session_id: "session-1".into(),
+            actor_id: "member-1".into(),
+            role: Some("owner".into()),
+            joined_at: chrono::Utc::now(),
+        };
+
+        assert_eq!(session.id, participant.session_id);
+    }
 
     fn dyn_backend() -> (Arc<dyn Backend>, Arc<Mutex<MockState>>) {
         let mock = MockBackend::with_identity("team-x", "actor-x");

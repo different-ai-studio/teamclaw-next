@@ -7,7 +7,7 @@ pub struct AttachmentRecord {
     pub filename: String,
     pub mime: String,
     pub size: usize,
-    /// Object path inside the Supabase `attachments` bucket. Empty when the
+    /// Object path inside the backend attachments storage. Empty when the
     /// upload failed and only the local cache copy exists.
     pub bucket_path: String,
     /// Absolute path to the locally-cached copy on the daemon that received
@@ -15,8 +15,8 @@ pub struct AttachmentRecord {
     pub local_path: Option<String>,
 }
 
-/// What a channel needs the Supabase-backed store to do.
-/// Concrete impl lives in amuxd (which holds the Supabase client).
+/// What a channel needs the daemon-backed store to do.
+/// Concrete impl lives in amuxd and decides which persistence backend to use.
 #[async_trait]
 pub trait ChannelStore: Send + Sync + 'static {
     /// Resolve or create an external actor (e.g., a WeCom user).
@@ -41,7 +41,7 @@ pub trait ChannelStore: Send + Sync + 'static {
         participant_actor_ids: &[String],
     ) -> Result<EnsureSessionOutcome, StoreError>;
 
-    /// Persist a single chat message to Supabase. Idempotent on (session_id, external_message_id).
+    /// Persist a single chat message. Idempotent on (session_id, external_message_id).
     async fn record_message(
         &self,
         session_id: &str,
@@ -62,7 +62,7 @@ pub trait ChannelStore: Send + Sync + 'static {
         attachments: Vec<AttachmentRecord>,
     ) -> Result<String /* message_id */, StoreError>;
 
-    /// Upload bytes to the Supabase `attachments` bucket at `bucket_path`.
+    /// Upload bytes to backend attachment storage at `bucket_path`.
     /// Returns the stored object path on success.
     async fn upload_attachment(
         &self,
@@ -84,6 +84,6 @@ pub struct EnsureSessionOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    #[error("supabase store error: {0}")]
-    Supabase(String),
+    #[error("backend store error: {0}")]
+    Backend(String),
 }

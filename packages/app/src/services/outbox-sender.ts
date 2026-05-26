@@ -11,7 +11,7 @@
 // be called once on app boot after the outbox store is hydrated.
 
 import { create as createMessage, toBinary } from "@bufbuild/protobuf";
-import { supabase } from "@/lib/supabase-client";
+import { BackendError, getBackend } from "@/lib/backend";
 import {
   LiveEventEnvelopeSchema,
   MessageKind,
@@ -96,31 +96,39 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       body: toBinary(SessionMessageEnvelopeSchema, sessionEnv),
     });
 
-    sessionFlowLog("outbox_sender.supabase_insert.begin", {
+    sessionFlowLog("outbox_sender.message_insert.begin", {
       messageId: entry.messageId,
       sessionId: entry.sessionId,
       teamId: entry.teamId,
     });
-    const { error: insErr } = await supabase.from("messages").insert({
-      id: entry.messageId,
-      team_id: entry.teamId,
-      session_id: entry.sessionId,
-      sender_actor_id: entry.senderActorId,
-      kind: "text",
-      content: entry.content,
-      model: entry.model ?? null,
-      metadata,
-    });
-
-    // Supabase unique-constraint violation on `id` means this same message
-    // already landed on a prior attempt (the network round-trip dropped
-    // before we got the ACK). Treat as success — the row is persisted.
-    if (insErr && insErr.code !== "23505") throw insErr;
-    sessionFlowLog("outbox_sender.supabase_insert.ok", {
+    let duplicateAlreadyInserted = false;
+    try {
+      await getBackend().messages.insertOutgoingMessage({
+        id: entry.messageId,
+        teamId: entry.teamId,
+        sessionId: entry.sessionId,
+        senderActorId: entry.senderActorId,
+        kind: "text",
+        content: entry.content,
+        model: entry.model ?? null,
+        metadata,
+        createdAt: entry.createdAt,
+      });
+    } catch (error) {
+      // Conflict on `id` means this same message
+      // already landed on a prior attempt (the network round-trip dropped
+      // before we got the ACK). Treat as success — the row is persisted.
+      if (error instanceof BackendError && error.category === "Conflict") {
+        duplicateAlreadyInserted = true;
+      } else {
+        throw error;
+      }
+    }
+    sessionFlowLog("outbox_sender.message_insert.ok", {
       messageId: entry.messageId,
       sessionId: entry.sessionId,
       teamId: entry.teamId,
-      duplicateAlreadyInserted: insErr?.code === "23505",
+      duplicateAlreadyInserted,
     });
 
     const topic = `amux/${entry.teamId}/session/${entry.sessionId}/live`;

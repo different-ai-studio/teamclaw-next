@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 export interface TeamWorkspaceConfig {
   teamId: string
@@ -33,17 +33,12 @@ function fromRow(r: Row): TeamWorkspaceConfig {
 }
 
 export async function getTeamWorkspaceConfig(teamId: string): Promise<TeamWorkspaceConfig | null> {
-  const { data, error } = await supabase
-    .from('team_workspace_config')
-    .select('team_id, git_url, git_branch, git_token, ai_gateway_endpoint, enabled, updated_at')
-    .eq('team_id', teamId)
-    .maybeSingle()
-  if (error) throw new Error(`getTeamWorkspaceConfig failed: ${error.message}`)
+  const data = await getBackend().teamWorkspaceConfig.load(teamId)
   return data ? fromRow(data as Row) : null
 }
 
 export async function upsertTeamWorkspaceConfig(input: TeamWorkspaceConfig): Promise<void> {
-  const { error } = await supabase.from('team_workspace_config').upsert({
+  await getBackend().teamWorkspaceConfig.save({
     team_id:             input.teamId,
     git_url:             input.gitUrl,
     git_branch:          input.gitBranch,
@@ -51,5 +46,4 @@ export async function upsertTeamWorkspaceConfig(input: TeamWorkspaceConfig): Pro
     ai_gateway_endpoint: input.aiGatewayEndpoint,
     enabled:             input.enabled,
   })
-  if (error) throw new Error(`upsertTeamWorkspaceConfig failed: ${error.message}`)
 }

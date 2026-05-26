@@ -13,7 +13,8 @@ pub struct WorkspaceStore {
 pub struct StoredWorkspace {
     pub workspace_id: String,
     #[serde(default)]
-    pub supabase_workspace_id: String,
+    #[serde(alias = "supabase_workspace_id")]
+    pub remote_workspace_id: String,
     pub path: String,
     pub display_name: String,
 }
@@ -86,7 +87,7 @@ impl WorkspaceStore {
 
         let workspace = StoredWorkspace {
             workspace_id,
-            supabase_workspace_id: String::new(),
+            remote_workspace_id: String::new(),
             path: canonical_str,
             display_name,
         };
@@ -104,13 +105,13 @@ impl WorkspaceStore {
     }
 
     pub fn find_by_id(&self, workspace_id: &str) -> Option<&StoredWorkspace> {
-        // Match either the local 8-char id OR the Supabase UUID — iOS/Tauri
-        // clients send the Supabase id (since that's what they read from
+        // Match either the local 8-char id OR the remote UUID — iOS/Tauri
+        // clients send the remote id (since that's what they read from
         // the workspaces row), while CLI-spawned flows still pass the
         // local id. Looking up both keeps the caller dumb.
         self.workspaces
             .iter()
-            .find(|w| w.workspace_id == workspace_id || w.supabase_workspace_id == workspace_id)
+            .find(|w| w.workspace_id == workspace_id || w.remote_workspace_id == workspace_id)
     }
 
     pub fn to_proto_list(&self) -> amux::WorkspaceList {

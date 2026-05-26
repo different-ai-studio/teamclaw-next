@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 export interface DaemonRuntime {
   id: string
@@ -37,42 +37,22 @@ type RuntimeRow = {
 }
 
 export async function listDaemonRuntimes(teamId: string): Promise<DaemonRuntime[]> {
-  const { data: runtimeRows, error } = await supabase
-    .from('agent_runtimes')
-    .select('id, runtime_id, team_id, agent_id, session_id, workspace_id, backend_type, backend_session_id, status, current_model, last_seen_at, created_at, updated_at')
-    .eq('team_id', teamId)
-    .order('updated_at', { ascending: false })
-
-  if (error) throw new Error(error.message)
-
-  const rows = (runtimeRows ?? []) as RuntimeRow[]
+  const rows = await getBackend().runtime.listDaemonRuntimes(teamId) as RuntimeRow[]
   if (rows.length === 0) return []
 
   const agentIds = [...new Set(rows.map((row) => row.agent_id))]
   const sessionIds = [...new Set(rows.map((row) => row.session_id).filter((id): id is string => Boolean(id)))]
   const workspaceIds = [...new Set(rows.map((row) => row.workspace_id).filter((id): id is string => Boolean(id)))]
 
-  const [agentsResult, sessionsResult, workspacesResult] = await Promise.all([
-    supabase
-      .from('actor_directory')
-      .select('id, display_name')
-      .eq('team_id', teamId)
-      .in('id', agentIds),
-    sessionIds.length > 0
-      ? supabase.from('sessions').select('id, title').eq('team_id', teamId).in('id', sessionIds)
-      : Promise.resolve({ data: [], error: null }),
-    workspaceIds.length > 0
-      ? supabase.from('workspaces').select('id, name, path').eq('team_id', teamId).in('id', workspaceIds)
-      : Promise.resolve({ data: [], error: null }),
+  const [agentRows, sessionRows, workspaceRows] = await Promise.all([
+    getBackend().actors.listActorDirectoryByIds(agentIds),
+    getBackend().sessions.listSessionDisplayRows(teamId, sessionIds),
+    getBackend().workspaces.listWorkspacesByIds(teamId, workspaceIds),
   ])
 
-  if (agentsResult.error) throw new Error(agentsResult.error.message)
-  if (sessionsResult.error) throw new Error(sessionsResult.error.message)
-  if (workspacesResult.error) throw new Error(workspacesResult.error.message)
-
-  const agents = new Map((agentsResult.data ?? []).map((row: any) => [row.id, row.display_name || row.id]))
-  const sessions = new Map((sessionsResult.data ?? []).map((row: any) => [row.id, row.title || row.id]))
-  const workspaces = new Map((workspacesResult.data ?? []).map((row: any) => [row.id, {
+  const agents = new Map(agentRows.map((row) => [row.id, row.display_name || row.id]))
+  const sessions = new Map(sessionRows.map((row) => [row.id, row.title || row.id]))
+  const workspaces = new Map(workspaceRows.map((row) => [row.id, {
     name: row.name || row.id,
     path: row.path ?? null,
   }]))

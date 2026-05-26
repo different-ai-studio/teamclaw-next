@@ -15,22 +15,20 @@
  *   actor_session_report      — created_at only; FULL-PULL per team
  */
 
-import { supabase } from "@/lib/supabase-client";
 import * as cache from "@/lib/local-cache";
 
 // ── Team-scoped sync ────────────────────────────────────────────────────────
 
 /**
- * Pull rows from a Supabase table since the local watermark (delta sync),
+ * Pull domain rows since the local watermark (delta sync),
  * upsert them into the local cache, and bump the watermark.
  *
- * The watermark key is `tableName` and is namespaced by `teamId`.
+ * The watermark key is namespaced by `teamId`.
  */
 export async function syncTableForTeam<TSupabaseRow, TCacheRow>(args: {
-  /** Used as both the Supabase `from()` target and the watermark key. */
-  tableName: string;
+  watermarkKey: string;
   teamId: string;
-  selectColumns: string;
+  pullRows: (updatedAfter: string | null) => Promise<TSupabaseRow[]>;
   mapRow: (r: TSupabaseRow) => TCacheRow;
   upsertBatch: (rows: TCacheRow[]) => Promise<void>;
   /** When true, ignore the watermark and pull all rows (forced full refresh). */
@@ -38,21 +36,17 @@ export async function syncTableForTeam<TSupabaseRow, TCacheRow>(args: {
 }): Promise<{ count: number }> {
   const watermark = args.full
     ? null
-    : await cache.getWatermark(args.tableName, args.teamId);
+    : await cache.getWatermark(args.watermarkKey, args.teamId);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let q = (supabase.from(args.tableName) as any)
-    .select(args.selectColumns)
-    .eq("team_id", args.teamId);
-  if (watermark) q = q.gt("updated_at", watermark);
-
-  const { data, error } = await q;
-  if (error) {
-    console.warn(`[cache-sync] ${args.tableName} pull failed:`, error.message);
+  let data: TSupabaseRow[];
+  try {
+    data = await args.pullRows(watermark);
+  } catch (error) {
+    console.warn(`[cache-sync] ${args.watermarkKey} pull failed:`, error instanceof Error ? error.message : error);
     return { count: 0 };
   }
 
-  const rows = ((data as TSupabaseRow[]) ?? []).map(args.mapRow);
+  const rows = (data ?? []).map(args.mapRow);
   if (rows.length > 0) {
     await args.upsertBatch(rows);
     // Bump watermark to the newest updated_at in this batch.
@@ -61,7 +55,7 @@ export async function syncTableForTeam<TSupabaseRow, TCacheRow>(args: {
       return u > acc ? u : acc;
     }, watermark ?? "");
     if (maxUpdated) {
-      await cache.setWatermark(args.tableName, args.teamId, maxUpdated);
+      await cache.setWatermark(args.watermarkKey, args.teamId, maxUpdated);
     }
   }
   return { count: rows.length };
@@ -70,41 +64,37 @@ export async function syncTableForTeam<TSupabaseRow, TCacheRow>(args: {
 // ── Session-scoped sync ─────────────────────────────────────────────────────
 
 /**
- * Pull rows from a Supabase table scoped to a single session (e.g. messages,
- * session_participants).  Watermark key is `<tableName>:<sessionId>`,
+ * Pull domain rows scoped to a single session. Watermark key is
+ * `<watermarkKey>:<sessionId>`,
  * namespaced by `teamId`.
  */
 export async function syncTableForSession<TSupabaseRow, TCacheRow>(args: {
-  tableName: string;
+  watermarkKey: string;
   sessionId: string;
   /** Used only for watermark namespacing. */
   teamId: string;
-  selectColumns: string;
+  pullRows: (updatedAfter: string | null) => Promise<TSupabaseRow[]>;
   mapRow: (r: TSupabaseRow) => TCacheRow;
   upsertBatch: (rows: TCacheRow[]) => Promise<void>;
   full?: boolean;
 }): Promise<{ count: number }> {
-  const wmKey = `${args.tableName}:${args.sessionId}`;
+  const wmKey = `${args.watermarkKey}:${args.sessionId}`;
   const watermark = args.full
     ? null
     : await cache.getWatermark(wmKey, args.teamId);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let q = (supabase.from(args.tableName) as any)
-    .select(args.selectColumns)
-    .eq("session_id", args.sessionId);
-  if (watermark) q = q.gt("updated_at", watermark);
-
-  const { data, error } = await q;
-  if (error) {
+  let data: TSupabaseRow[];
+  try {
+    data = await args.pullRows(watermark);
+  } catch (error) {
     console.warn(
-      `[cache-sync] ${args.tableName}@${args.sessionId} pull failed:`,
-      error.message,
+      `[cache-sync] ${args.watermarkKey}@${args.sessionId} pull failed:`,
+      error instanceof Error ? error.message : error,
     );
     return { count: 0 };
   }
 
-  const rows = ((data as TSupabaseRow[]) ?? []).map(args.mapRow);
+  const rows = (data ?? []).map(args.mapRow);
   if (rows.length > 0) {
     await args.upsertBatch(rows);
     const maxUpdated = rows.reduce<string>((acc, r) => {

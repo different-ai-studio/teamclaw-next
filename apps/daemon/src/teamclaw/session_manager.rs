@@ -572,11 +572,11 @@ impl SessionManager {
         }
     }
 
-    /// Synthesise a local `StoredSession` from a Supabase fetch, populate
+    /// Synthesise a local `StoredSession` from a backend fetch, populate
     /// participants, and trigger a `refresh_membership_subscriptions` so the
     /// daemon subscribes to `session/{sid}/live` if it is a participant.
     ///
-    /// iOS creates collab sessions by writing directly to Supabase
+    /// iOS creates collab sessions by writing directly to the remote backend
     /// `sessions`/`session_participants`; the daemon only learns about them
     /// via this path (called from `apply_start_runtime`). Without this,
     /// inbound `message.created` events on `session/{sid}/live` are silently
@@ -589,10 +589,10 @@ impl SessionManager {
     /// load-bearing for `agents_to_activate`, which only routes messages to
     /// participants whose stored actor_type is `personal_agent` or
     /// `role_agent`.
-    pub async fn insert_session_from_supabase(
+    pub async fn insert_session_from_backend(
         &mut self,
-        session: &crate::supabase::SupabaseSessionRow,
-        participants: &[crate::supabase::SupabaseParticipantRow],
+        session: &crate::backend::BackendSessionRow,
+        participants: &[crate::backend::BackendParticipantRow],
     ) -> crate::error::Result<()> {
         let local_actor_id = self.actor_id.as_deref();
         let stored_participants: Vec<StoredParticipant> = participants
@@ -627,7 +627,7 @@ impl SessionManager {
         self.sessions.upsert(stored);
         if let Err(e) = self.sessions.save(&self.sessions_path) {
             warn!(
-                "insert_session_from_supabase: failed to save sessions: {}",
+                "insert_session_from_backend: failed to save sessions: {}",
                 e
             );
         }
@@ -635,21 +635,21 @@ impl SessionManager {
         self.refresh_membership_subscriptions().await?;
         info!(
             session_id = %session.id,
-            "inserted Supabase-sourced session into teamclaw cache"
+            "inserted backend-sourced session into teamclaw cache"
         );
         Ok(())
     }
 
     #[cfg(test)]
-    pub async fn insert_session_from_supabase_for_test(
+    pub async fn insert_session_from_backend_for_test(
         &mut self,
         session_id: &str,
         team_id: &str,
         primary_agent_id: Option<&str>,
         participants: &[(&str, &str)],
     ) -> crate::error::Result<()> {
-        use crate::supabase::{SupabaseParticipantRow, SupabaseSessionRow};
-        let session = SupabaseSessionRow {
+        use crate::backend::{BackendParticipantRow, BackendSessionRow};
+        let session = BackendSessionRow {
             id: session_id.into(),
             team_id: team_id.into(),
             created_by_actor_id: None,
@@ -661,16 +661,16 @@ impl SessionManager {
             created_at: chrono::Utc::now(),
         };
         let now = chrono::Utc::now();
-        let parts: Vec<SupabaseParticipantRow> = participants
+        let parts: Vec<BackendParticipantRow> = participants
             .iter()
-            .map(|(actor, role)| SupabaseParticipantRow {
+            .map(|(actor, role)| BackendParticipantRow {
                 session_id: session_id.into(),
                 actor_id: (*actor).into(),
                 role: Some((*role).into()),
                 joined_at: now,
             })
             .collect();
-        self.insert_session_from_supabase(&session, &parts).await
+        self.insert_session_from_backend(&session, &parts).await
     }
 
     async fn handle_create_idea(
@@ -1191,8 +1191,8 @@ impl SessionManager {
     }
 
     /// Emit one logical agent message: append to local TOML, publish to
-    /// session/live as `message.created`, and (if `persist_supabase`) write
-    /// to Supabase `messages`. The Supabase write is fire-and-forget — local
+    /// session/live as `message.created`, and (if `persist_backend`) write
+    /// to backend `messages`. The backend write is fire-and-forget — local
     /// TOML and session/live are the source of truth for iOS rendering.
     #[allow(clippy::too_many_arguments)]
     pub async fn emit_agent_message(
@@ -1205,8 +1205,8 @@ impl SessionManager {
         model: &str,
         turn_id: &str,
         sequence: u64,
-        persist_supabase: bool,
-        supabase: Option<&std::sync::Arc<dyn Backend>>,
+        persist_backend: bool,
+        backend: Option<&std::sync::Arc<dyn Backend>>,
     ) {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
@@ -1248,9 +1248,9 @@ impl SessionManager {
             warn!(?e, session_id, "publish_message failed");
         }
 
-        // 3. Supabase (final replies only — see TurnAggregator::supabase_persistent)
-        if persist_supabase {
-            if let Some(sb) = supabase {
+        // 3. Backend (final replies only — see TurnAggregator::supabase_persistent)
+        if persist_backend {
+            if let Some(sb) = backend {
                 let team_id = self.team_id.clone();
                 // message_kind_to_string is the pub(crate) fn defined later in this file.
                 let kind_str = message_kind_to_string(kind as i32);
@@ -1277,7 +1277,7 @@ impl SessionManager {
                         )
                         .await
                     {
-                        warn!(?e, "Supabase insert_message failed");
+                        warn!(?e, "backend insert_message failed");
                     }
                 });
             }
@@ -1739,10 +1739,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_insert_session_from_supabase_subscribes_when_daemon_is_participant() {
+    async fn test_insert_session_from_backend_subscribes_when_daemon_is_participant() {
         let (_tmp, mut sm) = make_test_session_manager_with_actor("daemon-actor-1");
 
-        sm.insert_session_from_supabase_for_test(
+        sm.insert_session_from_backend_for_test(
             "sess-1",
             "team-1",
             Some("daemon-actor-1"),

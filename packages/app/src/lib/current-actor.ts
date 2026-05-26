@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 
 export interface CurrentActorHint {
   currentTeamId?: string | null;
@@ -14,25 +14,6 @@ export async function resolveCurrentMemberActorId(
     return hint.currentMemberId;
   }
 
-  const { data: directoryRows, error: directoryError } = await supabase
-    .from("actor_directory")
-    .select("id")
-    .eq("team_id", teamId)
-    .eq("user_id", userId)
-    .eq("actor_type", "member")
-    .limit(1);
-
-  if (!directoryError && directoryRows?.[0]?.id) {
-    return directoryRows[0].id as string;
-  }
-
-  const { data: actorRows, error: actorError } = await supabase
-    .from("actors")
-    .select("id, team_id")
-    .eq("user_id", userId);
-
-  if (actorError) throw actorError;
-
-  const match = (actorRows ?? []).find((row) => row.team_id === teamId);
-  return (match?.id as string | undefined) ?? null;
+  const actor = await getBackend().directory.resolveCurrentMemberActor(teamId, userId);
+  return actor?.id ?? null;
 }

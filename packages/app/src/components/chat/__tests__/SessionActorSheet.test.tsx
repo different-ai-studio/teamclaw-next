@@ -11,19 +11,39 @@ vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
 }))
 
-const supabaseFrom = vi.fn()
-const supabaseDelete = vi.fn()
+const backendListParticipants = vi.fn()
+const backendListCandidateActors = vi.fn()
+const backendAddParticipant = vi.fn()
+const backendRemoveParticipant = vi.fn()
+const backendListLatestRuntimeHints = vi.fn()
+const backendListAgentDefaults = vi.fn()
+const backendGetSession = vi.fn()
+const backendResolveCurrentMemberActor = vi.fn()
 const loadSessionParticipantsMock = vi.fn()
 const loadActorsForTeamMock = vi.fn()
 const loadActorsByIdsMock = vi.fn()
 const syncActorsForTeamMock = vi.fn().mockResolvedValue(undefined)
 const syncParticipantsForSessionMock = vi.fn().mockResolvedValue(undefined)
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (...args: unknown[]) => supabaseFrom(...args),
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-  },
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    sessionMembers: {
+      listParticipants: backendListParticipants,
+      listCandidateActors: backendListCandidateActors,
+      addParticipant: backendAddParticipant,
+      removeParticipant: backendRemoveParticipant,
+    },
+    runtime: {
+      listLatestAgentRuntimeHints: backendListLatestRuntimeHints,
+      listAgentDefaults: backendListAgentDefaults,
+    },
+    auth: {
+      getSession: backendGetSession,
+    },
+    directory: {
+      resolveCurrentMemberActor: backendResolveCurrentMemberActor,
+    },
+  }),
 }))
 
 vi.mock('@/lib/local-cache', () => ({
@@ -51,8 +71,20 @@ vi.mock('react-i18next', () => ({
 }))
 
 beforeEach(() => {
-  supabaseFrom.mockReset()
-  supabaseDelete.mockReset()
+  backendListParticipants.mockReset()
+  backendListCandidateActors.mockReset()
+  backendAddParticipant.mockReset()
+  backendRemoveParticipant.mockReset()
+  backendListLatestRuntimeHints.mockReset()
+  backendListAgentDefaults.mockReset()
+  backendGetSession.mockReset()
+  backendResolveCurrentMemberActor.mockReset()
+  backendAddParticipant.mockResolvedValue(undefined)
+  backendRemoveParticipant.mockResolvedValue(undefined)
+  backendListLatestRuntimeHints.mockResolvedValue([])
+  backendListAgentDefaults.mockResolvedValue([])
+  backendGetSession.mockResolvedValue({ user: { id: 'user-1' } })
+  backendResolveCurrentMemberActor.mockResolvedValue({ id: 'm-1', team_id: 'team-1' })
   mockRuntimeStart.mockReset()
   loadSessionParticipantsMock.mockReset()
   loadActorsForTeamMock.mockReset()
@@ -62,34 +94,6 @@ beforeEach(() => {
   mockRuntimeStart.mockResolvedValue({ accepted: true, runtimeId: 'rt-new', sessionId: 'sess-1', rejectedReason: '' })
   useRuntimeStateStore.getState().clear()
 })
-
-function makeActorsMock(myActorId = 'm-1') {
-  // Only the self-actor lookup queries the bare `actors` table now.
-  // `agent_kind` / `default_agent_type` come via the `actor_directory` view.
-  return {
-    select: () => ({
-      eq: () => ({
-        in: () => Promise.resolve({ data: [{ id: myActorId }], error: null }),
-      }),
-    }),
-  }
-}
-
-function makeActorDirectoryMock(actorRows: unknown[], teamAgentRows: unknown[]) {
-  return {
-    select: () => {
-      const inResult = Promise.resolve({ data: actorRows, error: null })
-      return {
-        // participants query: .select(...).in('id', ids)
-        in: () => inResult,
-        // candidate agents query: .select(...).eq('team_id', ...).eq('actor_type', 'agent')
-        eq: () => ({
-          eq: () => Promise.resolve({ data: teamAgentRows, error: null }),
-        }),
-      }
-    },
-  }
-}
 
 function mockJoinedRows(participantActorIds: string[], actorRows: unknown[]) {
   loadSessionParticipantsMock.mockResolvedValue(
@@ -105,30 +109,10 @@ function mockJoinedRows(participantActorIds: string[], actorRows: unknown[]) {
       agentStatus: row.agent_status ?? null,
     })),
   )
-  supabaseFrom.mockImplementation((table: string) => {
-    if (table === 'session_participants') {
-      return {
-        select: () => ({
-          eq: () => Promise.resolve({
-            data: participantActorIds.map(id => ({ actor_id: id })),
-            error: null,
-          }),
-        }),
-      }
-    }
-    if (table === 'actor_directory') {
-      return makeActorDirectoryMock(actorRows, [])
-    }
-    if (table === 'agent_runtimes') {
-      return {
-        select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }),
-      }
-    }
-    if (table === 'actors') {
-      return makeActorsMock('m-1')
-    }
-    return { select: () => Promise.resolve({ data: [], error: null }) }
-  })
+  backendListParticipants.mockResolvedValue(actorRows)
+  backendListCandidateActors.mockResolvedValue([])
+  backendListLatestRuntimeHints.mockResolvedValue([])
+  backendListAgentDefaults.mockResolvedValue([])
 }
 
 function mockSheetData(
@@ -163,53 +147,22 @@ function mockSheetData(
   )
   loadActorsForTeamMock.mockResolvedValue(teamCacheRows)
   loadActorsByIdsMock.mockResolvedValue(actorCacheRows)
-
-  supabaseFrom.mockImplementation((table: string) => {
-    if (table === 'session_participants') {
-      return {
-        select: () => ({
-          eq: () => Promise.resolve({
-            data: participantActorIds.map(id => ({ actor_id: id })),
-            error: null,
-          }),
-        }),
-        upsert: () => Promise.resolve({ error: null }),
-        delete: () => ({
-          eq: () => ({
-            eq: () => supabaseDelete(),
-          }),
-        }),
-        insert: () => Promise.resolve({ error: null }),
-      }
-    }
-    if (table === 'actor_directory') {
-      return makeActorDirectoryMock(actorRows, teamAgentRows)
-    }
-    if (table === 'agent_runtimes') {
-      return {
-        select: () => ({
-          eq: vi.fn().mockImplementation((col: string) => {
-            if (col === 'session_id') {
-              // fetch-effect query: .eq('session_id', ...) → returns Promise
-              return Promise.resolve({ data: runtimeRows, error: null })
-            }
-            // handleAddAgent history query: .eq('agent_id', ...).eq('team_id', ...).order(...).limit(...)
-            return {
-              eq: vi.fn().mockReturnValue({
-                order: vi.fn().mockReturnValue({
-                  limit: () => Promise.resolve({ data: agentHistoryRows, error: null }),
-                }),
-              }),
-            }
-          }),
-        }),
-      }
-    }
-    if (table === 'actors') {
-      return makeActorsMock('m-1')
-    }
-    return { select: () => Promise.resolve({ data: [], error: null }) }
+  backendListParticipants.mockResolvedValue(actorRows)
+  backendListCandidateActors.mockResolvedValue(
+    (teamAgentRows as Array<any>).map((row) => ({ ...row, is_present: false })),
+  )
+  backendListLatestRuntimeHints.mockImplementation((_teamId: string, agentIds: string[]) => {
+    const historyMatches = (agentHistoryRows as Array<any>).filter((row) => agentIds.includes(row.agent_id))
+    if (historyMatches.length > 0) return Promise.resolve(historyMatches)
+    return Promise.resolve((runtimeRows as Array<any>).map((row) => ({ session_id: 'sess-1', ...row })))
   })
+  backendListAgentDefaults.mockResolvedValue(
+    ([...(actorRows as Array<any>), ...(teamAgentRows as Array<any>)]).map((row) => ({
+      id: row.id,
+      agent_types: row.agent_types ?? [],
+      default_agent_type: row.default_agent_type ?? null,
+    })),
+  )
 }
 
 describe('SessionActorSheet', () => {
@@ -221,7 +174,7 @@ describe('SessionActorSheet', () => {
         { id: 'a-1', actor_type: 'agent', display_name: 'Reviewer', member_status: null, agent_status: 'idle', agent_kind: 'claude', last_active_at: null },
       ],
     )
-    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
     expect(screen.getByText('Reviewer')).toBeInTheDocument()
     expect(screen.getByText('团队')).toBeInTheDocument()
@@ -230,7 +183,7 @@ describe('SessionActorSheet', () => {
 
   it('shows empty state when session has no participants', async () => {
     mockJoinedRows([], [])
-    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText(/no participants in this session/i)).toBeInTheDocument())
   })
 
@@ -238,7 +191,7 @@ describe('SessionActorSheet', () => {
     render(<SessionActorPanel sessionId={null} teamId={null} />)
     // Brief wait to ensure no fetch fires
     await new Promise(r => setTimeout(r, 50))
-    expect(supabaseFrom).not.toHaveBeenCalled()
+    expect(backendListParticipants).not.toHaveBeenCalled()
   })
 
   it('shows breathing dot and model name for an active agent', async () => {
@@ -268,7 +221,7 @@ describe('SessionActorSheet', () => {
       [{ agent_id: 'a-1', runtime_id: '05532480', status: 'running', current_model: 'claude-opus-4-7' }],
     )
 
-    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Reviewer')).toBeInTheDocument())
 
     // Model name appears in subline
@@ -277,6 +230,116 @@ describe('SessionActorSheet', () => {
     // Status dot has animate-pulse (breathing) class
     const dot = document.querySelector('.animate-pulse.rounded-full')
     expect(dot).toBeTruthy()
+  })
+
+  it('keeps the newest runtime row when duplicate rows arrive newest-first', async () => {
+    useRuntimeStateStore.getState().upsert('rt-new', 'dev-a', create(RuntimeInfoSchema, {
+      runtimeId: 'rt-new',
+      agentType: AgentType.CLAUDE_CODE,
+      state: RuntimeLifecycle.ACTIVE,
+      status: AgentStatus.IDLE,
+      currentModel: 'new-model',
+    }))
+    useRuntimeStateStore.getState().upsert('rt-old', 'dev-a', create(RuntimeInfoSchema, {
+      runtimeId: 'rt-old',
+      agentType: AgentType.CLAUDE_CODE,
+      state: RuntimeLifecycle.ACTIVE,
+      status: AgentStatus.IDLE,
+      currentModel: 'old-model',
+    }))
+
+    mockSheetData(
+      ['a-1'],
+      [
+        {
+          id: 'a-1',
+          actor_type: 'agent',
+          display_name: 'Reviewer',
+          member_status: null,
+          agent_status: 'idle',
+          agent_types: ['claude'],
+          default_agent_type: 'claude',
+          last_active_at: null,
+        },
+      ],
+      [
+        { agent_id: 'a-1', runtime_id: 'rt-new', status: 'running', current_model: 'new-model' },
+        { agent_id: 'a-1', runtime_id: 'rt-old', status: 'running', current_model: 'old-model' },
+      ],
+    )
+
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
+
+    await waitFor(() => expect(screen.getByText('Reviewer')).toBeInTheDocument())
+    expect(screen.getByText(/new-model/)).toBeInTheDocument()
+    expect(screen.queryByText(/old-model/)).not.toBeInTheDocument()
+  })
+
+  it('keeps participant rows visible when runtime enrichment fails', async () => {
+    mockSheetData(
+      ['m-1', 'a-1'],
+      [
+        { id: 'm-1', actor_type: 'member', display_name: 'Me', member_status: 'active', agent_status: null, last_active_at: null },
+        { id: 'a-1', actor_type: 'agent', display_name: 'Reviewer', member_status: null, agent_status: 'idle', last_active_at: null },
+      ],
+      [],
+    )
+    backendListLatestRuntimeHints.mockRejectedValueOnce(new Error('runtime unavailable'))
+
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
+
+    await waitFor(() => expect(backendListLatestRuntimeHints).toHaveBeenCalled())
+    expect(screen.getByText('Me')).toBeInTheDocument()
+    expect(screen.getByText('Reviewer')).toBeInTheDocument()
+    expect(screen.queryByText(/failed to load actors/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['auth session load fails', () => backendGetSession.mockRejectedValueOnce(new Error('auth unavailable'))],
+    ['current member actor resolution fails', () => backendResolveCurrentMemberActor.mockRejectedValueOnce(new Error('directory unavailable'))],
+  ])('keeps participants and candidates visible when %s', async (_name, failEnrichment) => {
+    failEnrichment()
+    mockSheetData(
+      ['m-1'],
+      [
+        { id: 'm-1', actor_type: 'member', display_name: 'Me', member_status: 'active', agent_status: null, last_active_at: null },
+      ],
+      [],
+      [
+        { id: 'a-1', actor_type: 'agent', display_name: 'Candidate Bot', member_status: null, agent_status: 'idle', last_active_at: null },
+      ],
+    )
+
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
+
+    await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
+    expect(screen.getByText('Candidate Bot')).toBeInTheDocument()
+    expect(screen.getByText('邀请加入')).toBeInTheDocument()
+    expect(screen.queryByText(/failed to load actors/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps participants and candidates visible when agent metadata enrichment fails', async () => {
+    mockSheetData(
+      ['m-1', 'a-1'],
+      [
+        { id: 'm-1', actor_type: 'member', display_name: 'Me', member_status: 'active', agent_status: null, last_active_at: null },
+        { id: 'a-1', actor_type: 'agent', display_name: 'Reviewer', member_status: null, agent_status: 'idle', last_active_at: null },
+      ],
+      [],
+      [
+        { id: 'a-2', actor_type: 'agent', display_name: 'Candidate Bot', member_status: null, agent_status: 'idle', last_active_at: null },
+      ],
+    )
+    backendListAgentDefaults.mockRejectedValueOnce(new Error('agent defaults unavailable'))
+
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
+
+    await waitFor(() => expect(backendListAgentDefaults).toHaveBeenCalled())
+    expect(screen.getByText('Me')).toBeInTheDocument()
+    expect(screen.getByText('Reviewer')).toBeInTheDocument()
+    expect(screen.getByText('Candidate Bot')).toBeInTheDocument()
+    expect(screen.getByText('邀请加入')).toBeInTheDocument()
+    expect(screen.queryByText(/failed to load actors/i)).not.toBeInTheDocument()
   })
 
   it('hides X button for self row but shows it for others', async () => {
@@ -291,7 +354,7 @@ describe('SessionActorSheet', () => {
       [],
     )
 
-    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Me')).toBeInTheDocument())
 
     // There should be exactly 2 remove buttons: one for 'Other' (m-2) and one for 'Bot' (a-1)
@@ -344,7 +407,7 @@ describe('SessionActorSheet', () => {
       [],
     )
 
-    render(<SessionActorPanel sessionId="sess-1" teamId={null} />)
+    render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
     await waitFor(() => expect(screen.getByText('Other')).toBeInTheDocument())
 
     // Click the remove button on the non-self row

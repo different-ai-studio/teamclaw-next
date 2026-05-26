@@ -4,10 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
 
 const mocks = vi.hoisted(() => ({
-  agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null }>,
+  agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null; session_id?: string | null }>,
   runtimeStates: {} as Record<string, unknown>,
   providerModels: [] as Array<{ provider: string; id: string; name: string }>,
-  queriedSessionIds: [] as string[],
+  queriedTeamIds: [] as string[],
 }))
 
 vi.mock('react-i18next', () => ({
@@ -16,23 +16,25 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: () => ({
-      select: () => ({
-        eq: (_column: string, value: string) => {
-          mocks.queriedSessionIds.push(value)
-          return Promise.resolve({ data: mocks.agentRuntimeRows, error: null })
-        },
-        in: () => ({
-          eq: () => Promise.resolve({ data: [], error: null }),
-          not: () => ({
-            order: () => Promise.resolve({ data: [], error: null }),
-          }),
-        }),
-      }),
-    }),
-  },
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    runtime: {
+      listLatestAgentRuntimeHints: (teamId: string) => {
+        mocks.queriedTeamIds.push(teamId)
+        return Promise.resolve(mocks.agentRuntimeRows)
+      },
+    },
+  }),
+}))
+
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: (selector: (s: unknown) => unknown) =>
+    selector({ team: { id: 'team-1' } }),
+}))
+
+vi.mock('@/stores/session-list-store', () => ({
+  useSessionListStore: (selector: (s: unknown) => unknown) =>
+    selector({ rows: [{ id: 'displayed-session', team_id: 'team-1' }, { id: 'session-1', team_id: 'team-1' }] }),
 }))
 
 vi.mock('@/stores/runtime-state-store', () => ({
@@ -55,7 +57,7 @@ describe('AgentSelectorDock', () => {
     mocks.agentRuntimeRows = []
     mocks.runtimeStates = {}
     mocks.providerModels = []
-    mocks.queriedSessionIds = []
+    mocks.queriedTeamIds = []
   })
 
   it('renders nothing when no agents are engaged', () => {
@@ -94,7 +96,7 @@ describe('AgentSelectorDock', () => {
 
   it('loads runtime mapping for the displayed session id instead of legacy global state', async () => {
     mocks.agentRuntimeRows = [
-      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode' },
+      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'displayed-session' },
     ]
 
     render(
@@ -108,12 +110,50 @@ describe('AgentSelectorDock', () => {
     )
 
     await screen.findByText('OpenCode Bot')
-    expect(mocks.queriedSessionIds).toContain('displayed-session')
+    expect(mocks.queriedTeamIds).toContain('team-1')
+  })
+
+  it('keeps the newest runtime row when duplicate rows arrive newest-first', async () => {
+    mocks.agentRuntimeRows = [
+      { agent_id: 'a-1', runtime_id: 'runtime-new', backend_type: 'opencode', session_id: 'session-1' },
+      { agent_id: 'a-1', runtime_id: 'runtime-old', backend_type: 'claude', session_id: 'session-1' },
+    ]
+    mocks.runtimeStates = {
+      'runtime-new': {
+        daemonDeviceId: 'a-1',
+        lastUpdated: Date.now(),
+        info: {
+          availableModels: [],
+          currentModel: 'new-model',
+        },
+      },
+      'runtime-old': {
+        daemonDeviceId: 'a-1',
+        lastUpdated: Date.now() - 1,
+        info: {
+          availableModels: [],
+          currentModel: 'old-model',
+        },
+      },
+    }
+
+    render(
+      <AgentSelectorDock
+        activeSessionId="session-1"
+        engagedAgents={[
+          { id: 'a-1', displayName: 'OpenCode Bot' },
+        ]}
+        onRemoveAgent={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('new-model')).toBeInTheDocument()
+    expect(screen.queryByText('old-model')).not.toBeInTheDocument()
   })
 
   it('uses dynamic provider-store models for the agent backend while waiting for runtime advertised models', async () => {
     mocks.agentRuntimeRows = [
-      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode' },
+      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'session-1' },
     ]
     mocks.runtimeStates = {
       'runtime-1': {
