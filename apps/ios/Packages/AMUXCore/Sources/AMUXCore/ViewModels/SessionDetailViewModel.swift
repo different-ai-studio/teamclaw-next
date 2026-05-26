@@ -2221,18 +2221,24 @@ public final class SessionDetailViewModel {
         markAgentDone()
     }
 
-    /// Flip isAgentWorking on and arm a 10s safety reset so a missed
+    /// Flip isAgentWorking on and arm a long safety reset so a missed
     /// `statusChange:.idle` event doesn't leave the chip stuck in stop.
     /// Also rebuilds `feedItems` so the active-stream "Agent loading"
     /// card appears synchronously — without this, the card would only
     /// surface on the next `recomputeGroups()` trigger (the first ACP
     /// runtime event), which is the latency the user sees on send.
+    ///
+    /// The reset window (60s) covers a cold-spawn agent's first-delta
+    /// latency so the pending card doesn't get cleared mid-wait. The view
+    /// layer switches the label to a "请耐心等候" variant after ~15s so
+    /// the user knows we're still waiting rather than the indicator
+    /// silently dropping.
     private func markAgentWorking() {
         isAgentWorking = true
         recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(60))
             guard let self, !Task.isCancelled else { return }
             await MainActor.run {
                 self.isAgentWorking = false
