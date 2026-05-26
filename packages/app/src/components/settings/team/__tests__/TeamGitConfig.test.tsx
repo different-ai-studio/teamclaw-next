@@ -276,6 +276,37 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
   })
 
+  it('saves a pasted team env secret so encrypted shared secrets can be reused', async () => {
+    const sharedEnvSecret = 'ab'.repeat(32)
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
+      if (cmd === 'get_team_config') return null
+      if (cmd === 'team_shared_git_setup') return { sharedDirPath: '/workspace-a/teamclaw' }
+      if (cmd === 'save_team_config') return null
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    await screen.findByPlaceholderText('https://github.com/team/shared-workspace.git')
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/team/shared-workspace.git'), {
+      target: { value: 'https://example.com/private.git' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('64 hex characters'), {
+      target: { value: sharedEnvSecret },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Configure Team Shared Directory/ }))
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('save_team_config', {
+        team: expect.objectContaining({
+          envSecret: sharedEnvSecret,
+        }),
+        workspacePath: '/workspace-a',
+      })
+    })
+  })
+
   it('syncs configured teams through the shared git command', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
