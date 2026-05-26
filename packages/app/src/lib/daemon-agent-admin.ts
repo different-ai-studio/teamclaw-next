@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { getBackend } from '@/lib/backend'
 import { supabase } from '@/lib/supabase-client'
 
 export type AgentPermissionLevel = 'view' | 'prompt' | 'admin'
@@ -51,10 +52,8 @@ export async function getLocalDaemonDeviceId(): Promise<string | null> {
 
 export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaemonAgent | null> {
   const deviceId = await getLocalDaemonDeviceId()
-  const { data, error } = await supabase.rpc('list_connected_agents', { p_team_id: teamId })
-  if (error) throw new Error(error.message)
-
-  const rows = (data ?? []) as Array<{
+  const rows = await getBackend().actors.listConnectedAgents(teamId) as Array<{
+    id?: string
     agent_id: string
     display_name: string | null
     agent_types: unknown
@@ -103,12 +102,11 @@ export async function updateCurrentDaemonAgent(input: {
   displayName: string
   visibility: AgentVisibility
 }): Promise<void> {
-  const { error } = await supabase.rpc('update_owned_agent_profile', {
-    p_agent_id: input.agentId,
-    p_display_name: input.displayName,
-    p_visibility: input.visibility,
+  await getBackend().actors.updateOwnedAgentProfile({
+    agentId: input.agentId,
+    displayName: input.displayName,
+    visibility: input.visibility,
   })
-  if (error) throw new Error(error.message)
 }
 
 export async function listAgentAccess(agentId: string): Promise<AgentAccessRow[]> {

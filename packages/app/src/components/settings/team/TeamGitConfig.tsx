@@ -51,7 +51,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { formatBytes, type SyncPrecheckFile } from './syncPrecheck'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { upsertTeamWorkspaceConfig } from '@/lib/team-workspace-config'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -106,11 +106,8 @@ async function createTeam(args: {
   aiGatewayEndpoint?: string
 }): Promise<{ teamId: string; deeplink: string }> {
   // 1. Create team. Backend trigger inserts the owner actor + team_members row.
-  const { data: created, error: createErr } = await supabase
-    .rpc('create_team', { p_name: args.teamName })
-    .single()
-  if (createErr) throw new Error(createErr.message)
-  const teamId = (created as { id: string }).id
+  const created = await getBackend().teams.createTeam({ name: args.teamName })
+  const teamId = created.id
 
   // 2. Insert workspace config.
   await upsertTeamWorkspaceConfig({
@@ -124,15 +121,16 @@ async function createTeam(args: {
   })
 
   // 3. First invite (admin role).
-  const { data: invite, error: invErr } = await supabase.rpc('create_team_invite', {
-    p_team_id:       teamId,
-    p_kind:          'member',
-    p_display_name:  'New Member',
-    p_team_role:     'admin',
-    p_ttl_seconds:   604800,
+  const invite = await getBackend().teams.createTeamInvite({
+    teamId,
+    kind: 'member',
+    displayName: 'New Member',
+    teamRole: 'admin',
+    ttlSeconds: 604800,
   })
-  if (invErr) throw new Error(invErr.message)
-  const deeplink = ((invite as { deeplink: string }).deeplink).replace(/^amux:/, 'teamclaw:')
+  const rawDeeplink = invite.deeplink ?? invite.inviteUrl
+  if (!rawDeeplink) throw new Error('empty invite deeplink')
+  const deeplink = rawDeeplink.replace(/^amux:/, 'teamclaw:')
   return { teamId, deeplink }
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
+import { getBackend } from "@/lib/backend";
 import { supabase } from "@/lib/supabase-client";
 import { isTauri } from "@/lib/utils";
 import { generateRandomTeamName } from "@/lib/random-team-name";
@@ -78,18 +79,15 @@ export function AuthGate({ children }: AuthGateProps) {
         }
 
         const name = generateRandomTeamName();
-        const { data: created, error: createErr } = await supabase.rpc("create_team", {
-          p_name: name,
-        });
-        if (createErr) {
-          console.warn("[AuthGate] auto create_team failed", createErr);
-        } else {
-          const row = Array.isArray(created) ? created[0] : created;
-          const teamId = row?.team_id as string | undefined;
+        try {
+          const created = await getBackend().teams.createTeam({ name });
+          const teamId = created.id || undefined;
           if (teamId) {
             await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId);
           }
           console.log("[AuthGate] auto-created team", name);
+        } catch (createErr) {
+          console.warn("[AuthGate] auto create_team failed", createErr);
         }
       } catch (err) {
         console.warn("[AuthGate] team bootstrap threw", err);

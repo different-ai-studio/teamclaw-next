@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { authState, supabaseMock, currentTeamMock } = vi.hoisted(() => ({
+const { authState, supabaseMock, currentTeamMock, backendMock } = vi.hoisted(() => ({
   authState: {
     session: { user: { id: "user-1" } },
     loading: false,
@@ -14,6 +14,11 @@ const { authState, supabaseMock, currentTeamMock } = vi.hoisted(() => ({
   },
   currentTeamMock: {
     reloadAndSwitchTo: vi.fn(),
+  },
+  backendMock: {
+    teams: {
+      createTeam: vi.fn(),
+    },
   },
 }));
 
@@ -35,6 +40,10 @@ vi.mock("@/stores/current-team", () => ({
 
 vi.mock("@/lib/supabase-client", () => ({
   supabase: supabaseMock,
+}));
+
+vi.mock("@/lib/backend", () => ({
+  getBackend: () => backendMock,
 }));
 
 vi.mock("@/lib/utils", () => ({
@@ -63,6 +72,7 @@ beforeEach(() => {
   authState.hydrate.mockReset();
   supabaseMock.from.mockReset();
   supabaseMock.rpc.mockReset();
+  backendMock.teams.createTeam.mockReset();
   currentTeamMock.reloadAndSwitchTo.mockReset();
 });
 
@@ -126,13 +136,10 @@ describe("AuthGate", () => {
         limit: () => Promise.resolve({ data: [], error: null }),
       }),
     });
-    supabaseMock.rpc.mockResolvedValueOnce({
-      data: {
-        team_id: "team-new",
-        team_name: "Trial Team",
-        team_slug: "trial-team",
-      },
-      error: null,
+    backendMock.teams.createTeam.mockResolvedValueOnce({
+      id: "team-new",
+      name: "Trial Team",
+      slug: "trial-team",
     });
     currentTeamMock.reloadAndSwitchTo.mockResolvedValueOnce(undefined);
 

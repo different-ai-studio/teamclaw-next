@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
 
 export interface DaemonWorkspace {
@@ -43,13 +44,10 @@ function mapWorkspace(row: any): DaemonWorkspace {
 }
 
 export async function listDaemonAgents(teamId: string): Promise<DaemonAgent[]> {
-  const { data: connectedRows, error: connectedError } = await supabase.rpc('list_connected_agents', {
-    p_team_id: teamId,
-  })
-  if (connectedError) throw new Error(connectedError.message)
+  const connectedRows = await getBackend().actors.listConnectedAgents(teamId)
 
-  const connectedIds = (connectedRows ?? [])
-    .map((row: any) => row.agent_id)
+  const connectedIds = connectedRows
+    .map((row) => row.agent_id ?? row.id)
     .filter((id: unknown): id is string => typeof id === 'string')
 
   if (connectedIds.length === 0) return []
@@ -148,9 +146,9 @@ export async function updateDaemonWorkspace(input: {
 }
 
 export async function setAgentDefaultWorkspace(agentId: string, workspaceId: string): Promise<void> {
-  const { error } = await supabase.rpc('update_agent_defaults', {
-    p_agent_id: agentId,
-    p_default_workspace_id: workspaceId,
+  await getBackend().actors.updateAgentDefaults({
+    agentId,
+    defaultWorkspaceId: workspaceId,
+    agentKind: null,
   })
-  if (error) throw new Error(error.message)
 }

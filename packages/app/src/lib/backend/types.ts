@@ -214,17 +214,48 @@ export interface TeamSummary {
 export interface TeamInviteResult {
   token: string;
   inviteUrl?: string | null;
+  deeplink?: string | null;
+  expiresAt?: string | null;
   actorId?: string | null;
 }
 
+type TeamInviteBaseInput = {
+  teamId: string;
+  displayName?: string | null;
+  ttlSeconds?: number | null;
+  targetActorId?: string | null;
+};
+
+export type TeamInviteInput =
+  | (TeamInviteBaseInput & {
+      kind: "member";
+      actorType?: "member";
+      teamRole: "owner" | "admin" | "member";
+      agentKind?: null;
+    })
+  | (TeamInviteBaseInput & {
+      actorType: "member";
+      kind?: "member";
+      teamRole: "owner" | "admin" | "member";
+      agentKind?: null;
+    })
+  | (TeamInviteBaseInput & {
+      kind: "agent";
+      actorType?: "agent";
+      agentKind: string;
+      teamRole?: null;
+    })
+  | (TeamInviteBaseInput & {
+      actorType: "agent";
+      kind?: "agent";
+      agentKind: string;
+      teamRole?: null;
+    });
+
 export interface TeamsBackend {
-  createTeam(input: { name: string }): Promise<TeamSummary>;
+  createTeam(input: { name: string; slug?: string | null }): Promise<TeamSummary>;
   renameTeam(teamId: string, name: string): Promise<TeamSummary>;
-  createTeamInvite(input: {
-    teamId: string;
-    actorType?: "member" | "agent";
-    displayName?: string | null;
-  }): Promise<TeamInviteResult>;
+  createTeamInvite(input: TeamInviteInput): Promise<TeamInviteResult>;
   removeTeamActor(actorId: string): Promise<void>;
 }
 
@@ -261,19 +292,42 @@ export interface ActorDirectoryEntry {
   actor_type: string | null;
   avatar_url?: string | null;
   user_id?: string | null;
+  last_active_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  member_status?: string | null;
+  agent_status?: string | null;
+  team_role?: string | null;
+  agent_types?: string[] | null;
+  default_agent_type?: string | null;
+  default_workspace_id?: string | null;
 }
 
 export interface ConnectedAgentRow extends ActorDirectoryEntry {
+  agent_id?: string | null;
   device_id?: string | null;
   agent_types?: string[] | null;
   default_agent_type?: string | null;
+  permission_level?: string | null;
+  visibility?: string | null;
+  is_owner?: boolean | null;
 }
 
 export interface ActorsBackend {
   listActorDirectory(teamId: string): Promise<ActorDirectoryEntry[]>;
   listConnectedAgents(teamId: string): Promise<ConnectedAgentRow[]>;
-  updateOwnedAgentProfile(input: { agentId: string; displayName?: string | null; avatarUrl?: string | null }): Promise<void>;
-  updateAgentDefaults(input: { agentId: string; agentTypes: string[]; defaultAgentType: string }): Promise<void>;
+  updateOwnedAgentProfile(input: {
+    agentId: string;
+    displayName?: string | null;
+    visibility?: string | null;
+  }): Promise<void>;
+  updateAgentDefaults(input: {
+    agentId: string;
+    agentTypes?: string[] | null;
+    agentKind?: string | null;
+    defaultAgentType?: string | null;
+    defaultWorkspaceId?: string | null;
+  }): Promise<void>;
 }
 
 export interface SessionMemberCandidate extends ActorDirectoryEntry {

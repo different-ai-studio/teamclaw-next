@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "./auth-store";
 import {
   getTeamWorkspaceConfig,
@@ -119,23 +120,24 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     }
 
     set({ saving: true, error: null });
-    const { data, error } = await supabase.rpc("rename_team", {
-      p_team_id: team.id,
-      p_name: trimmed,
-    });
-
-    if (error) {
-      set({ saving: false, error: error.message });
+    try {
+      const renamed = await getBackend().teams.renameTeam(team.id, trimmed);
+      set({
+        team: {
+          id: renamed.id || team.id,
+          name: renamed.name || trimmed,
+          slug: renamed.slug ?? team.slug,
+        },
+        saving: false,
+      });
+      return true;
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
-    const row = Array.isArray(data) ? data[0] : data;
-    set({
-      team: row
-        ? { id: row.team_id, name: row.team_name, slug: row.team_slug }
-        : { ...team, name: trimmed },
-      saving: false,
-    });
-    return true;
   },
 }));
 
