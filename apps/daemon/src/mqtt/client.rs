@@ -169,6 +169,7 @@ mod tests {
                 broker_url: "mqtt://localhost:1883".into(),
             },
             agents: AgentsConfig::default(),
+            transport: None,
             team_id: Some("team-uuid-1234".into()),
             channels: Default::default(),
             idle_runtime_timeout_secs: None,

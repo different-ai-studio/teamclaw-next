@@ -3995,6 +3995,7 @@ mod tests {
                 broker_url: "mqtt://localhost:1883".to_string(),
             },
             agents: crate::config::AgentsConfig::default(),
+            transport: None,
             team_id: Some("team-test".to_string()),
             channels: crate::config::ChannelsConfig::default(),
             idle_runtime_timeout_secs: None,
