@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { CreateIdeaDialog } from '@/components/sidebar/CreateIdeaDialog'
 import { IdeaDetailDialog } from '@/components/sidebar/IdeaDetailDialog'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { formatRelativeTime } from '@/lib/date-format'
 import { cn, isTauri } from '@/lib/utils'
@@ -50,11 +50,13 @@ export function useIdeasForTeam(): UseIdeasForTeamResult {
     }
     let cancelled = false
     void (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: actorRow } = await supabase.from('actors').select('id, team_id').eq('user_id', user.id).limit(1).maybeSingle()
+      const backend = getBackend()
+      const session = await backend.auth.getSession()
+      const userId = session?.user.id
+      if (!userId) return
+      const actorRow = await backend.directory.resolveFirstMemberActorForUser(userId)
       if (cancelled) return
-      if (actorRow?.team_id) setTeamId(actorRow.team_id as string)
+      if (actorRow?.team_id) setTeamId(actorRow.team_id)
     })()
     return () => { cancelled = true }
   }, [sessionRows, teamId])
@@ -96,33 +98,37 @@ export function useIdeasForTeam(): UseIdeasForTeamResult {
         }
         setLoading(false)
       } else {
-        const { data, error } = await supabase
-          .from('ideas')
-          .select('id, title, status, created_by_actor_id, sort_order, updated_at')
-          .eq('team_id', teamId)
-          .eq('archived', false)
-          .order('sort_order', { ascending: true })
-          .order('updated_at', { ascending: false })
-        if (cancelled) return
-        if (error) { setError(true); setLoading(false); return }
-        const rows = (data ?? []) as IdeaRow[]
-        setIdeas(rows)
-        const creatorIds = Array.from(new Set(rows.map(r => r.created_by_actor_id).filter(Boolean)))
-        if (creatorIds.length > 0) {
-          const { data: actorRows } = await supabase
-            .from('actors')
-            .select('id, display_name')
-            .in('id', creatorIds)
+        try {
+          const backend = getBackend()
+          const rows = (await backend.ideas.listIdeas(teamId)).map((row) => ({
+            id: row.id,
+            title: row.title,
+            status: (row.status as IdeaRow['status']) ?? null,
+            created_by_actor_id: row.created_by_actor_id ?? '',
+            sort_order: row.sort_order ?? 0,
+            updated_at: row.updated_at ?? '',
+          }))
           if (cancelled) return
-          const map = new Map<string, string>()
-          for (const r of (actorRows ?? []) as { id: string; display_name: string }[]) {
-            map.set(r.id, r.display_name)
+          setIdeas(rows)
+          const creatorIds = Array.from(new Set(rows.map(r => r.created_by_actor_id).filter(Boolean)))
+          if (creatorIds.length > 0) {
+            const actorRows = await backend.actors.listActorDirectory(teamId)
+            if (cancelled) return
+            const map = new Map<string, string>()
+            for (const r of actorRows) {
+              if (creatorIds.includes(r.id) && r.display_name) map.set(r.id, r.display_name)
+            }
+            setCreators(map)
+          } else {
+            setCreators(new Map())
           }
-          setCreators(map)
-        } else {
-          setCreators(new Map())
+          setLoading(false)
+        } catch (e) {
+          if (cancelled) return
+          console.warn('[IdeasView] failed to load ideas', e)
+          setError(true)
+          setLoading(false)
         }
-        setLoading(false)
       }
     })()
     return () => { cancelled = true }
@@ -314,14 +320,10 @@ export function IdeasView() {
   const canReorder = filter === 'all' && query.trim().length === 0
 
   const persistIdeaOrder = React.useCallback(async (rows: IdeaRow[]) => {
-    const results = await Promise.all(rows.map((idea) => (
-      supabase
-        .from('ideas')
-        .update({ sort_order: idea.sort_order })
-        .eq('id', idea.id)
+    const backend = getBackend()
+    await Promise.all(rows.map((idea) => (
+      backend.ideas.updateIdea({ ideaId: idea.id, sortOrder: idea.sort_order })
     )))
-    const firstError = results.find((result) => result.error)?.error
-    if (firstError) throw firstError
   }, [])
 
   const clearLongPressTimer = React.useCallback(() => {

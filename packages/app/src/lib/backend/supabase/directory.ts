@@ -3,23 +3,20 @@ import { toBackendError } from "../errors";
 
 type ActorIdRow = {
   id: string;
+  team_id?: string;
+};
+
+type DirectoryQuery = {
+  select(columns: "id" | "id, team_id"): DirectoryQuery;
+  eq(column: string, value: string): DirectoryQuery;
+  order(column: string, options?: { ascending?: boolean }): DirectoryQuery;
+  limit(count: number): DirectoryQuery;
+  maybeSingle(): Promise<{ data: ActorIdRow | null; error: unknown | null }>;
 };
 
 export function createSupabaseDirectoryBackend(client: unknown): DirectoryBackend {
   const supabase = client as {
-    from(table: "actors"): {
-      select(columns: "id"): {
-        eq(column: string, value: string): {
-          eq(column: string, value: string): {
-            eq(column: string, value: string): {
-              limit(count: number): {
-                maybeSingle(): Promise<{ data: ActorIdRow | null; error: unknown | null }>;
-              };
-            };
-          };
-        };
-      };
-    };
+    from(table: "actors"): DirectoryQuery;
   };
 
   return {
@@ -34,6 +31,19 @@ export function createSupabaseDirectoryBackend(client: unknown): DirectoryBacken
         .maybeSingle();
       if (error) throw toBackendError(error, "directory.resolveCurrentMemberActor");
       return data ? { id: data.id } : null;
+    },
+    async resolveFirstMemberActorForUser(userId: string) {
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id, team_id")
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw toBackendError(error, "directory.resolveFirstMemberActorForUser");
+      return data ? { id: data.id, team_id: data.team_id } : null;
     },
   };
 }

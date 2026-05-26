@@ -160,4 +160,36 @@ describe("Supabase directory backend", () => {
 
     expect(result).toBeNull();
   });
+
+  it("resolveFirstMemberActorForUser uses deterministic actor ordering", async () => {
+    const query = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValueOnce({
+        data: { id: "actor-1", team_id: "team-1" },
+        error: null,
+      }),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.order.mockReturnValue(query);
+    query.limit.mockReturnValue(query);
+    const client = {
+      from: vi.fn().mockReturnValue(query),
+    };
+
+    const result = await createSupabaseDirectoryBackend(client).resolveFirstMemberActorForUser("user-1");
+
+    expect(client.from).toHaveBeenCalledWith("actors");
+    expect(query.select).toHaveBeenCalledWith("id, team_id");
+    expect(query.eq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(query.eq).toHaveBeenCalledWith("actor_type", "member");
+    expect(query.order).toHaveBeenCalledWith("created_at", { ascending: true });
+    expect(query.order).toHaveBeenCalledWith("id", { ascending: true });
+    expect(query.limit).toHaveBeenCalledWith(1);
+    expect(query.maybeSingle).toHaveBeenCalled();
+    expect(result).toEqual({ id: "actor-1", team_id: "team-1" });
+  });
 });

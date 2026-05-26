@@ -198,10 +198,12 @@ export interface AttachmentsBackend {
 
 export interface DirectoryMemberActor {
   id: string;
+  team_id?: string;
 }
 
 export interface DirectoryBackend {
   resolveCurrentMemberActor(teamId: string, userId: string): Promise<DirectoryMemberActor | null>;
+  resolveFirstMemberActorForUser(userId: string): Promise<DirectoryMemberActor | null>;
 }
 
 export interface TeamSummary {
@@ -264,23 +266,70 @@ export interface IdeaRow {
   team_id: string;
   title: string;
   body?: string | null;
+  description?: string | null;
+  workspace_id?: string | null;
   status?: string | null;
   created_by_actor_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   archived_at?: string | null;
+  archived?: boolean | null;
+  sort_order?: number | null;
 }
+
+export interface IdeaActivityRow {
+  id: string;
+  actor_id: string;
+  activity_type: string;
+  content?: string | null;
+  created_at: string;
+}
+
+export interface IdeaActorSummary {
+  id: string;
+  display_name: string | null;
+  actor_type?: string | null;
+}
+
+export interface IdeaDetailRow extends IdeaRow {
+  description?: string | null;
+  workspace_id?: string | null;
+  activities?: IdeaActivityRow[];
+  actors?: IdeaActorSummary[];
+}
+
+export type IdeaSortOrderUpdateInput = {
+  ideaId: string;
+  sortOrder: number | null;
+  title?: never;
+  body?: never;
+  description?: never;
+  status?: never;
+  workspaceId?: never;
+};
+
+export type IdeaFullUpdateInput = {
+  ideaId: string;
+  title: string;
+  body?: string | null;
+  description?: string | null;
+  status: string | null;
+  workspaceId: string | null;
+  sortOrder?: never;
+};
 
 export interface IdeasBackend {
   listIdeas(teamId: string): Promise<IdeaRow[]>;
-  getIdeaDetail(ideaId: string): Promise<IdeaRow | null>;
-  createIdea(input: { teamId: string; title: string; body?: string | null }): Promise<IdeaRow>;
-  updateIdea(input: { ideaId: string; title?: string; body?: string | null; status?: string | null }): Promise<void>;
+  getIdeaDetail(ideaId: string): Promise<IdeaDetailRow | null>;
+  createIdea(input: { teamId: string; title: string; body?: string | null; workspaceId?: string | null }): Promise<IdeaRow>;
+  updateIdea(input: IdeaSortOrderUpdateInput | IdeaFullUpdateInput): Promise<void>;
   archiveIdea(ideaId: string): Promise<void>;
   createIdeaActivity(input: {
     ideaId: string;
-    actorId: string;
-    eventType: string;
+    actorId?: string | null;
+    eventType?: string;
+    activityType?: string;
+    content?: string | null;
     metadata?: Record<string, unknown> | null;
   }): Promise<void>;
 }

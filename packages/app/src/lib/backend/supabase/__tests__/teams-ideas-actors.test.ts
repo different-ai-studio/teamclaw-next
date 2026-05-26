@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSupabaseTeamsBackend } from "../teams";
 import { createSupabaseActorsBackend } from "../actors";
+import { createSupabaseIdeasBackend } from "../ideas";
 
 describe("Supabase teams backend", () => {
   it("renames a team through the rename_team RPC", async () => {
@@ -169,6 +170,205 @@ describe("Supabase actors backend", () => {
       p_default_workspace_id: "workspace-1",
       p_agent_kind: null,
       p_default_agent_type: "codex",
+    });
+  });
+});
+
+describe("Supabase ideas backend", () => {
+  it("lists ideas from the ideas table in sidebar order", async () => {
+    const orderUpdatedAt = vi.fn().mockResolvedValue({
+      data: [{ id: "idea-1", team_id: "team-1", title: "Idea", sort_order: 1000 }],
+      error: null,
+    });
+    const orderSortOrder = vi.fn(() => ({ order: orderUpdatedAt }));
+    const eqArchived = vi.fn(() => ({ order: orderSortOrder }));
+    const eqTeam = vi.fn(() => ({ eq: eqArchived }));
+    const select = vi.fn(() => ({ eq: eqTeam }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseIdeasBackend({ from, rpc: vi.fn() }).listIdeas("team-1");
+
+    expect(from).toHaveBeenCalledWith("ideas");
+    expect(select).toHaveBeenCalledWith("id, title, status, created_by_actor_id, sort_order, updated_at");
+    expect(eqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(eqArchived).toHaveBeenCalledWith("archived", false);
+    expect(orderSortOrder).toHaveBeenCalledWith("sort_order", { ascending: true });
+    expect(orderUpdatedAt).toHaveBeenCalledWith("updated_at", { ascending: false });
+    expect(result).toEqual([{ id: "idea-1", team_id: "team-1", title: "Idea", sort_order: 1000 }]);
+  });
+
+  it("loads idea detail with activities and actors", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: "idea-1",
+        team_id: "team-1",
+        title: "Idea",
+        created_by_actor_id: "actor-1",
+      },
+      error: null,
+    });
+    const ideaEq = vi.fn(() => ({ maybeSingle }));
+    const activityOrder = vi.fn().mockResolvedValue({
+      data: [{ id: "activity-1", actor_id: "actor-2", activity_type: "progress", content: "Done" }],
+      error: null,
+    });
+    const activityEq = vi.fn(() => ({ order: activityOrder }));
+    const actorIn = vi.fn().mockResolvedValue({
+      data: [
+        { id: "actor-1", display_name: "Ada", actor_type: "member" },
+        { id: "actor-2", display_name: "Agent", actor_type: "agent" },
+      ],
+      error: null,
+    });
+    const from = vi.fn((table: string) => {
+      if (table === "ideas") return { select: vi.fn(() => ({ eq: ideaEq })) };
+      if (table === "idea_activities") return { select: vi.fn(() => ({ eq: activityEq })) };
+      return { select: vi.fn(() => ({ in: actorIn })) };
+    });
+
+    const result = await createSupabaseIdeasBackend({ from, rpc: vi.fn() }).getIdeaDetail("idea-1");
+
+    expect(from).toHaveBeenCalledWith("ideas");
+    expect(from).toHaveBeenCalledWith("idea_activities");
+    expect(from).toHaveBeenCalledWith("actors");
+    expect(ideaEq).toHaveBeenCalledWith("id", "idea-1");
+    expect(activityEq).toHaveBeenCalledWith("idea_id", "idea-1");
+    expect(activityOrder).toHaveBeenCalledWith("created_at", { ascending: false });
+    expect(actorIn).toHaveBeenCalledWith("id", ["actor-1", "actor-2"]);
+    expect(result?.id).toBe("idea-1");
+    expect(result?.activities).toEqual([{ id: "activity-1", actor_id: "actor-2", activity_type: "progress", content: "Done" }]);
+    expect(result?.actors).toEqual([
+      { id: "actor-1", display_name: "Ada", actor_type: "member" },
+      { id: "actor-2", display_name: "Agent", actor_type: "agent" },
+    ]);
+  });
+
+  it("creates an idea through create_idea", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { id: "idea-1", team_id: "team-1", title: "Idea", description: "Body" },
+      error: null,
+    });
+
+    const result = await createSupabaseIdeasBackend({ rpc }).createIdea({
+      teamId: "team-1",
+      title: "Idea",
+      body: "Body",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("create_idea", {
+      p_team_id: "team-1",
+      p_title: "Idea",
+      p_workspace_id: null,
+      p_description: "Body",
+    });
+    expect(result.id).toBe("idea-1");
+  });
+
+  it("rejects malformed create_idea results before returning", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [],
+      error: null,
+    });
+
+    await expect(createSupabaseIdeasBackend({ rpc }).createIdea({
+      teamId: "team-1",
+      title: "Idea",
+    })).rejects.toMatchObject({
+      operation: "ideas.createIdea",
+      message: "ideas.createIdea returned malformed idea row",
+    });
+  });
+
+  it("wraps Supabase errors with backend operation context", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "permission denied", status: 403 },
+    });
+
+    await expect(createSupabaseIdeasBackend({ rpc }).archiveIdea("idea-1")).rejects.toMatchObject({
+      operation: "ideas.archiveIdea",
+      category: "Forbidden",
+      message: "permission denied",
+    });
+  });
+
+  it("updates an idea through update_idea with the full edit payload", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    await createSupabaseIdeasBackend({ rpc }).updateIdea({
+      ideaId: "idea-1",
+      workspaceId: "workspace-1",
+      title: "Idea",
+      description: "Body",
+      status: "in_progress",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("update_idea", {
+      p_idea_id: "idea-1",
+      p_workspace_id: "workspace-1",
+      p_title: "Idea",
+      p_description: "Body",
+      p_status: "in_progress",
+    });
+  });
+
+  it("updates only sort_order through the ideas table", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+
+    await createSupabaseIdeasBackend({ from, rpc: vi.fn() }).updateIdea({
+      ideaId: "idea-1",
+      sortOrder: 2000,
+    });
+
+    expect(from).toHaveBeenCalledWith("ideas");
+    expect(update).toHaveBeenCalledWith({ sort_order: 2000 });
+    expect(eq).toHaveBeenCalledWith("id", "idea-1");
+  });
+
+  it("rejects unsupported partial idea updates before calling Supabase", async () => {
+    const rpc = vi.fn();
+    const from = vi.fn();
+
+    await expect(createSupabaseIdeasBackend({ from, rpc }).updateIdea({
+      ideaId: "idea-1",
+      status: "done",
+    } as never)).rejects.toMatchObject({
+      operation: "ideas.updateIdea",
+      message: "ideas.updateIdea requires either sortOrder only or title, status, and workspaceId",
+    });
+
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("creates idea activity through create_idea_activity", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    await createSupabaseIdeasBackend({ rpc }).createIdeaActivity({
+      ideaId: "idea-1",
+      activityType: "progress",
+      content: "Shipped",
+      metadata: { source: "test" },
+    });
+
+    expect(rpc).toHaveBeenCalledWith("create_idea_activity", {
+      p_idea_id: "idea-1",
+      p_activity_type: "progress",
+      p_content: "Shipped",
+      p_metadata: { source: "test" },
+    });
+  });
+
+  it("archives an idea through archive_idea", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    await createSupabaseIdeasBackend({ rpc }).archiveIdea("idea-1");
+
+    expect(rpc).toHaveBeenCalledWith("archive_idea", {
+      p_idea_id: "idea-1",
+      p_archived: true,
     });
   });
 });

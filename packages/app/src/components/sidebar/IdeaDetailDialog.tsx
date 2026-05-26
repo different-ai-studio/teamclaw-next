@@ -19,11 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { supabase } from '@/lib/supabase-client'
 import { formatRelativeTime } from '@/lib/date-format'
 import { updateIdea, createIdeaActivity, type IdeaStatus } from '@/lib/idea-mutations'
 import type { IdeaRow as SidebarIdeaRow } from '@/components/panel/IdeasView'
 import { cn } from '@/lib/utils'
+import { getBackend } from '@/lib/backend'
 
 type IdeaDetail = SidebarIdeaRow & {
   description: string | null
@@ -88,12 +88,8 @@ export function IdeaDetailDialog({ idea, onOpenChange, onChanged }: Props) {
     if (!ideaId) return
     setLoading(true)
     try {
-      const { data: ideaData, error: ideaError } = await supabase
-        .from('ideas')
-        .select('id, team_id, workspace_id, title, description, status, created_by_actor_id, created_at, updated_at')
-        .eq('id', ideaId)
-        .single()
-      if (ideaError) throw ideaError
+      const ideaData = await getBackend().ideas.getIdeaDetail(ideaId)
+      if (!ideaData) throw new Error('idea not found')
 
       const nextDetail = ideaData as IdeaDetail
       setDetail(nextDetail)
@@ -101,29 +97,10 @@ export function IdeaDetailDialog({ idea, onOpenChange, onChanged }: Props) {
       setDescription(nextDetail.description ?? '')
       setStatus((nextDetail.status as IdeaStatus | null) ?? 'open')
 
-      const { data: activityData, error: activityError } = await supabase
-        .from('idea_activities')
-        .select('id, actor_id, activity_type, content, created_at')
-        .eq('idea_id', ideaId)
-        .order('created_at', { ascending: false })
-      if (activityError) throw activityError
-      const nextActivities = (activityData ?? []) as IdeaActivity[]
+      const nextActivities = (ideaData.activities ?? []) as IdeaActivity[]
       setActivities(nextActivities)
 
-      const actorIds = Array.from(new Set([
-        nextDetail.created_by_actor_id,
-        ...nextActivities.map((activity) => activity.actor_id),
-      ].filter(Boolean)))
-      if (actorIds.length) {
-        const { data: actorData, error: actorError } = await supabase
-          .from('actors')
-          .select('id, display_name, actor_type')
-          .in('id', actorIds)
-        if (actorError) throw actorError
-        setActors(new Map(((actorData ?? []) as ActorSummary[]).map((actor) => [actor.id, actor])))
-      } else {
-        setActors(new Map())
-      }
+      setActors(new Map(((ideaData.actors ?? []) as ActorSummary[]).map((actor) => [actor.id, actor])))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(t('ideas.detail.loadFailed', 'Failed to load idea: {{msg}}', { msg }))
