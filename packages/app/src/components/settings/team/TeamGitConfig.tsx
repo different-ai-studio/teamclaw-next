@@ -152,6 +152,8 @@ export function TeamGitConfig() {
     | { newFiles: SyncPrecheckFile[]; totalBytes: number }
   >(null)
   const [pendingUpdateUi, setPendingUpdateUi] = React.useState(true)
+  const [sharedConfigSaving, setSharedConfigSaving] = React.useState(false)
+  const [sharedConfigSaved, setSharedConfigSaved] = React.useState(false)
 
   // LLM hosting (create form + connected editing share same state)
   const defaultLlmUrl = buildConfig.team.llm.baseUrl || ''
@@ -362,6 +364,8 @@ export function TeamGitConfig() {
   const handleSaveSharedDirectoryConfig = async () => {
     if (!teamConfig || !workspacePath) return
     setErrorMessage(null)
+    setSharedConfigSaved(false)
+    setSharedConfigSaving(true)
     try {
       const savedGitUrl = gitUrl.trim()
       const savedGitBranch = gitBranch.trim() || null
@@ -390,8 +394,11 @@ export function TeamGitConfig() {
       setTeamConfig(updatedConfig)
       setSharedDirName(updatedConfig.sharedDirName)
       setEnvSecretInput(updatedConfig.envSecret ?? '')
+      setSharedConfigSaved(true)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSharedConfigSaving(false)
     }
   }
 
@@ -887,11 +894,17 @@ export function TeamGitConfig() {
                 size="sm"
                 className="gap-1.5"
                 onClick={handleSaveSharedDirectoryConfig}
-                disabled={!gitUrl.trim() || state === 'syncing'}
+                disabled={!gitUrl.trim() || state === 'syncing' || sharedConfigSaving}
               >
-                <Save className="h-3.5 w-3.5" />
-                {t('common.save', 'Save')}
+                {sharedConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {sharedConfigSaving ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
               </Button>
+              {sharedConfigSaved && (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {t('common.saved', 'Saved')}
+                </span>
+              )}
             </div>
           </SettingCard>
 
