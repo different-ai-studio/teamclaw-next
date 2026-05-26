@@ -138,6 +138,10 @@ impl SupabaseBackend {
         &self.cfg
     }
 
+    pub fn current_refresh_token(&self) -> String {
+        self.state.lock().unwrap().refresh_token.clone()
+    }
+
     pub async fn access_token(&self) -> SupabaseResult<String> {
         {
             let st = self.state.lock().unwrap();
@@ -1582,6 +1586,7 @@ mod tests {
         let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let tok = client.access_token().await.unwrap();
         assert_eq!(tok, "at-new");
+        assert_eq!(client.current_refresh_token(), "rt-1");
 
         let tok2 = client.access_token().await.unwrap();
         assert_eq!(tok2, "at-new");

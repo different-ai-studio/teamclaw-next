@@ -29,7 +29,7 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
     let invite = invite_url::parse(raw_url)?;
 
     let base_cfg = supabase_build_env_config_from_process()?;
-    let claim_client = SupabaseBackend::new(base_cfg.clone())?;
+    let claim_client = SupabaseBackend::new_without_persistence(base_cfg.clone())?;
     let claim = claim_client
         .claim_team_invite(&invite.token)
         .await
@@ -44,7 +44,7 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
                 message: "claim_team_invite did not return a refresh token (kind=member?)".into(),
             })?;
 
-    let cfg = SupabaseConfig {
+    let mut cfg = SupabaseConfig {
         url: base_cfg.url,
         anon_key: base_cfg.anon_key,
         refresh_token,
@@ -52,14 +52,18 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         actor_id: claim.actor_id.clone(),
     };
 
-    let verify_client = SupabaseBackend::new(cfg.clone())?;
+    let verify_client = SupabaseBackend::new_without_persistence(cfg.clone())?;
     verify_client.access_token().await?;
+    cfg.refresh_token = verify_client.current_refresh_token();
 
     let path = match config_path {
         Some(p) => p.to_path_buf(),
         None => SupabaseConfig::default_path()?,
     };
     cfg.save(&path)?;
+    if config_path.is_none() {
+        save_legacy_supabase_config_if_present(&cfg)?;
+    }
 
     let daemon_path = DaemonConfig::default_path();
     let existing_daemon_cfg = DaemonConfig::load(&daemon_path).ok();
@@ -80,6 +84,14 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         display_name: claim.display_name,
         config_path: path,
     })
+}
+
+fn save_legacy_supabase_config_if_present(cfg: &SupabaseConfig) -> SupabaseResult<()> {
+    let legacy_path = SupabaseConfig::legacy_path()?;
+    if legacy_path.exists() {
+        cfg.save(&legacy_path)?;
+    }
+    Ok(())
 }
 
 fn actionable_invite_claim_error(err: SupabaseError) -> SupabaseError {
