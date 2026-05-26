@@ -176,6 +176,23 @@ describe("Supabase sessions backend", () => {
     expect(result).toEqual([{ session_id: "session-1", actor_id: "actor-1", role: "owner" }]);
   });
 
+  it("gets a session team id", async () => {
+    const maybeSingle = vi.fn().mockResolvedValueOnce({
+      data: { team_id: "team-1" },
+      error: null,
+    });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq }));
+    client.from.mockReturnValueOnce({ select });
+
+    const result = await createSupabaseSessionsBackend(client).getSessionTeamId("session-1");
+
+    expect(client.from).toHaveBeenCalledWith("sessions");
+    expect(select).toHaveBeenCalledWith("team_id");
+    expect(eq).toHaveBeenCalledWith("id", "session-1");
+    expect(result).toBe("team-1");
+  });
+
   it("lists team sessions updated since a timestamp", async () => {
     const { has_unread: _hasUnread, ...syncRow } = sessionRow();
     const gt = vi.fn().mockResolvedValueOnce({

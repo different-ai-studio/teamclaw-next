@@ -8,7 +8,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { type MentionedPerson } from '@/packages/ai/prompt-input'
 import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
@@ -39,15 +39,13 @@ export function __clearCacheForTest() { cache.clear() }
 async function fetchParticipants(sessionId: string): Promise<ParticipantRow[]> {
   const hit = cache.get(sessionId)
   if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS) return hit.rows
-  const { data, error } = await supabase
-    .from('session_participants')
-    .select('actor_id, actors!inner(id, actor_type, display_name)')
-    .eq('session_id', sessionId)
-  if (error) throw error
-  if (!data) return []
-  const rows: ParticipantRow[] = data
-    .map((d: any) => d.actors as ParticipantRow)
-    .filter((a): a is ParticipantRow => !!a)
+  const rows: ParticipantRow[] = (await getBackend().sessionMembers.listParticipants(sessionId))
+    .filter((a) => a.actor_type === 'member' || a.actor_type === 'agent')
+    .map((a) => ({
+      id: a.id,
+      actor_type: a.actor_type as 'member' | 'agent',
+      display_name: a.display_name || '',
+    }))
   cache.set(sessionId, { fetchedAt: Date.now(), rows })
   return rows
 }

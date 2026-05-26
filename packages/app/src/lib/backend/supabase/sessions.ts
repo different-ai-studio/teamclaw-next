@@ -159,6 +159,18 @@ export function createSupabaseSessionsBackend(client: unknown = defaultSupabase)
       if (error) throw toBackendError(error, "sessions.getSessionParticipants");
       return data ?? [];
     },
+    async getSessionTeamId(sessionId: string) {
+      assertSupabaseClient(supabase);
+      const query = supabase
+        .from("sessions")
+        .select("team_id")
+        .eq("id", sessionId) as {
+        maybeSingle(): QueryResult<{ team_id?: string | null } | null>;
+      };
+      const { data, error } = await query.maybeSingle();
+      if (error) throw toBackendError(error, "sessions.getSessionTeamId");
+      return data?.team_id ?? null;
+    },
     async listSessionsForTeamSince(teamId: string, updatedAfter: string) {
       assertSupabaseClient(supabase);
       const baseQuery = supabase

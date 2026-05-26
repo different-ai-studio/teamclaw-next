@@ -95,6 +95,7 @@ export interface SessionsBackend {
   updateSessionTitle(sessionId: string, title: string): Promise<void>;
   archiveSession(sessionId: string, archivedAt: string): Promise<void>;
   getSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
+  getSessionTeamId(sessionId: string): Promise<string | null>;
   listSessionsForTeamSince(teamId: string, updatedAfter: string): Promise<SessionSyncRow[]>;
 }
 
@@ -385,6 +386,7 @@ export interface SessionMemberCandidate extends ActorDirectoryEntry {
 
 export interface SessionMembersBackend {
   listParticipants(sessionId: string): Promise<ActorDirectoryEntry[]>;
+  listSessionIdsForActor(actorId: string): Promise<string[]>;
   listCandidateActors(teamId: string, presentActorIds: string[]): Promise<SessionMemberCandidate[]>;
   addParticipant(sessionId: string, actorId: string): Promise<void>;
   removeParticipant(sessionId: string, actorId: string): Promise<void>;

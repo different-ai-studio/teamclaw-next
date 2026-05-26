@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageSquare, ChevronRight } from 'lucide-react'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { useSessionListStore, type SessionListEntry } from '@/stores/session-list-store'
 import { useUIStore } from '@/stores/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -26,17 +26,14 @@ export function SessionContinueBanner({ actorId, actorName }: Props) {
   React.useEffect(() => {
     let cancelled = false
     void (async () => {
-      const { data, error } = await supabase
-        .from('session_participants')
-        .select('session_id')
-        .eq('actor_id', actorId)
-      if (cancelled) return
-      if (error) {
-        setMatchingIds(new Set())
-        return
+      let ids: string[]
+      try {
+        ids = await getBackend().sessionMembers.listSessionIdsForActor(actorId)
+      } catch {
+        ids = []
       }
-      const ids = new Set((data ?? []).map((r: { session_id: string }) => r.session_id))
-      setMatchingIds(ids)
+      if (cancelled) return
+      setMatchingIds(new Set(ids))
     })()
     return () => {
       cancelled = true

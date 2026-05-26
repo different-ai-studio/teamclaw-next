@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   selectModel: vi.fn(),
   createSessionWithFirstMessage: vi.fn(),
   ensureSessionLiveSubscribed: vi.fn(),
+  listActorDirectory: vi.fn(),
 }))
 
 vi.mock('react-i18next', () => ({
@@ -121,10 +122,12 @@ vi.mock('@/lib/sync/actor-sync', () => ({
   syncActorsForTeam: vi.fn().mockResolvedValue(0),
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: vi.fn(),
-  },
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    actors: {
+      listActorDirectory: mocks.listActorDirectory,
+    },
+  }),
 }))
 
 vi.mock('@/lib/actor-color', () => ({
@@ -149,6 +152,7 @@ describe('NewSessionDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.createSessionWithFirstMessage.mockResolvedValue({ sessionId: 'sess-1' })
+    mocks.listActorDirectory.mockResolvedValue([])
   })
 
   it('allows creating a daemon-agent session before the daemon has advertised models', async () => {

@@ -7,7 +7,7 @@ import {
   MessageKind,
 } from "@/lib/proto/teamclaw_pb";
 import { mqttPublish } from "@/lib/mqtt-bridge";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "@/stores/auth-store";
 import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useSessionSelectionStore } from "@/stores/session-selection-store";
@@ -27,14 +27,7 @@ export function ActorChatInput() {
     setSending(true);
     setError(null);
     try {
-      // Resolve sender actor_id: look up the member row for this user in this team.
-      // For Phase 1, use a heuristic — query members by user_id, find the actor in current team.
-      const { data: actorRows, error: actorErr } = await supabase
-        .from("actors")
-        .select("id, team_id")
-        .eq("user_id", session.user.id);
-      if (actorErr) throw actorErr;
-      const matching = (actorRows ?? []).find((a) => a.team_id === sessionRow.team_id);
+      const matching = await getBackend().directory.resolveCurrentMemberActor(sessionRow.team_id, session.user.id);
       if (!matching) {
         throw new Error(`No actor found for user in team ${sessionRow.team_id}`);
       }
@@ -69,17 +62,14 @@ export function ActorChatInput() {
       const topic = `amux/${sessionRow.team_id}/session/${sid}/live`;
       await mqttPublish(topic, toBinary(LiveEventEnvelopeSchema, live), false);
 
-      // Supabase persistence — DB id matches our messageId
-      const { error: insErr } = await supabase.from("messages").insert({
+      await getBackend().messages.insertOutgoingMessage({
         id: messageId,
-        team_id: sessionRow.team_id,
-        session_id: sid,
-        sender_actor_id: senderActorId,
+        teamId: sessionRow.team_id,
+        sessionId: sid,
+        senderActorId,
         kind: "text",
         content,
-        // created_at default
       });
-      if (insErr) throw insErr;
 
       // Optimistic local append — broker doesn't echo back to publisher and
       // single-window scope means we won't get a remote echo either.
