@@ -259,17 +259,6 @@ pub fn try_lazy_init_from_workspace(
     state: &SharedSecretsState,
     workspace_path: &str,
 ) -> Result<(), String> {
-    // Fast path: already initialized.
-    {
-        let dk = state
-            .derived_key
-            .lock()
-            .map_err(|e| format!("try_lazy_init: lock derived_key: {e}"))?;
-        if dk.is_some() {
-            return Ok(());
-        }
-    }
-
     let config_path = format!(
         "{}/{}/{}",
         workspace_path,
@@ -301,6 +290,23 @@ pub fn try_lazy_init_from_workspace(
         .unwrap_or("teamclaw");
     let team_dir =
         crate::commands::team_shared_git::shared_dir_path(workspace_path, Some(shared_dir_name))?;
+    let derived_key = derive_key(env_secret)?;
+
+    {
+        let current_team_dir = state
+            .team_dir
+            .lock()
+            .map_err(|e| format!("try_lazy_init: lock team_dir: {e}"))?
+            .clone();
+        let current_key = *state
+            .derived_key
+            .lock()
+            .map_err(|e| format!("try_lazy_init: lock derived_key: {e}"))?;
+        if current_team_dir.as_ref() == Some(&team_dir) && current_key == Some(derived_key) {
+            return Ok(());
+        }
+    }
+
     init_shared_secrets(state, env_secret, &team_dir)
 }
 
@@ -511,5 +517,47 @@ mod tests {
         assert!(result.is_ok());
         let team_dir = state.team_dir.lock().unwrap().clone().unwrap();
         assert_eq!(team_dir, workspace.join("teamclaw"));
+    }
+
+    #[test]
+    fn lazy_init_reinitializes_when_workspace_team_config_changes() {
+        let workspace_a_dir = tempfile::tempdir().unwrap();
+        let workspace_b_dir = tempfile::tempdir().unwrap();
+        let workspace_a = workspace_a_dir.path();
+        let workspace_b = workspace_b_dir.path();
+        for (workspace, secret) in [
+            (workspace_a, "00".repeat(32)),
+            (workspace_b, "11".repeat(32)),
+        ] {
+            let config_dir = workspace.join(crate::commands::TEAMCLAW_DIR);
+            std::fs::create_dir_all(&config_dir).unwrap();
+            std::fs::write(
+                config_dir.join(crate::commands::CONFIG_FILE_NAME),
+                serde_json::json!({
+                    "team": {
+                        "gitUrl": "https://example.com/repo.git",
+                        "enabled": true,
+                        "lastSyncAt": null,
+                        "sharedDirName": "teamclaw",
+                        "envSecret": secret
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+            std::fs::create_dir_all(workspace.join("teamclaw")).unwrap();
+        }
+
+        let state = SharedSecretsState::default();
+        try_lazy_init_from_workspace(&state, workspace_a.to_str().unwrap()).unwrap();
+        try_lazy_init_from_workspace(&state, workspace_b.to_str().unwrap()).unwrap();
+
+        let team_dir = state.team_dir.lock().unwrap().clone().unwrap();
+        let derived_key = state.derived_key.lock().unwrap().unwrap();
+        assert_eq!(team_dir, workspace_b.join("teamclaw"));
+        assert_eq!(
+            derived_key,
+            derive_key(&"11".repeat(32)).expect("derive workspace b key")
+        );
     }
 }

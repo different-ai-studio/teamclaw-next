@@ -105,6 +105,10 @@ function generateEnvSecret(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+function normalizeEnvSecretInput(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 // ─── Reusable Components (local to git config) ─────────────────────────────
 
 function SettingCard({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -137,6 +141,8 @@ export function TeamGitConfig() {
   const [gitToken, setGitToken] = React.useState('')
   const [sharedDirName, setSharedDirName] = React.useState('teamclaw')
   const [showToken, setShowToken] = React.useState(false)
+  const [envSecretInput, setEnvSecretInput] = React.useState('')
+  const [showEnvSecret, setShowEnvSecret] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [connectStep, setConnectStep] = React.useState('')
   const [disconnectDialogOpen, setDisconnectDialogOpen] = React.useState(false)
@@ -146,6 +152,8 @@ export function TeamGitConfig() {
     | { newFiles: SyncPrecheckFile[]; totalBytes: number }
   >(null)
   const [pendingUpdateUi, setPendingUpdateUi] = React.useState(true)
+  const [sharedConfigSaving, setSharedConfigSaving] = React.useState(false)
+  const [sharedConfigSaved, setSharedConfigSaved] = React.useState(false)
 
   // LLM hosting (create form + connected editing share same state)
   const defaultLlmUrl = buildConfig.team.llm.baseUrl || ''
@@ -160,6 +168,15 @@ export function TeamGitConfig() {
   const isHttpsUrl = gitUrl.trim().startsWith('https://') || gitUrl.trim().startsWith('http://')
   const effectiveSharedDirName = sharedDirName.trim() || 'teamclaw'
   const gitLocalPath = workspacePath ? `${workspacePath}/${effectiveSharedDirName}` : effectiveSharedDirName
+
+  const resolveEnvSecret = React.useCallback((fallback?: string | null) => {
+    const trimmed = normalizeEnvSecretInput(envSecretInput)
+    if (trimmed && !/^[0-9a-f]{64}$/.test(trimmed)) {
+      setErrorMessage(t('settings.team.envSecretInvalid', 'Team Env Secret must be 64 hex characters.'))
+      return null
+    }
+    return trimmed || fallback || generateEnvSecret()
+  }, [envSecretInput, t])
 
   // ─── Initialize: check git + load config ─────────────────────────────────
 
@@ -196,6 +213,7 @@ export function TeamGitConfig() {
         setGitBranch(normalizedConfig.gitBranch ?? '')
         if (normalizedConfig.gitToken) setGitToken(normalizedConfig.gitToken)
         setSharedDirName(normalizedConfig.sharedDirName)
+        setEnvSecretInput(normalizedConfig.envSecret ?? '')
 
         setState('connected')
 
@@ -299,7 +317,11 @@ export function TeamGitConfig() {
       const savedGitUrl = gitUrl.trim()
       const savedGitBranch = gitBranch.trim() || null
       const savedGitToken = isHttpsUrl && gitToken.trim() ? gitToken.trim() : null
-      const envSecret = teamConfig?.envSecret || generateEnvSecret()
+      const envSecret = resolveEnvSecret(teamConfig?.envSecret)
+      if (!envSecret) {
+        setState('unconfigured')
+        return
+      }
 
       setConnectStep(t('settings.team.initializingRepo', 'Initializing shared directory...'))
       await tauriInvoke('team_shared_git_setup', {
@@ -328,6 +350,7 @@ export function TeamGitConfig() {
       }
 
       setTeamConfig(newConfig)
+      setEnvSecretInput(newConfig.envSecret ?? '')
       setState('connected')
 
     } catch (err) {
@@ -341,11 +364,15 @@ export function TeamGitConfig() {
   const handleSaveSharedDirectoryConfig = async () => {
     if (!teamConfig || !workspacePath) return
     setErrorMessage(null)
+    setSharedConfigSaved(false)
+    setSharedConfigSaving(true)
     try {
       const savedGitUrl = gitUrl.trim()
       const savedGitBranch = gitBranch.trim() || null
       const savedGitToken = isHttpsUrl && gitToken.trim() ? gitToken.trim() : null
       const savedSharedDirName = sharedDirName.trim() || 'teamclaw'
+      const envSecret = resolveEnvSecret(teamConfig.envSecret)
+      if (!envSecret) return
       await tauriInvoke('team_shared_git_setup', {
         config: {
           workspacePath,
@@ -361,13 +388,17 @@ export function TeamGitConfig() {
         gitBranch: savedGitBranch,
         gitToken: savedGitToken,
         sharedDirName: savedSharedDirName,
-        envSecret: teamConfig.envSecret || generateEnvSecret(),
+        envSecret,
       }
       await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
       setTeamConfig(updatedConfig)
       setSharedDirName(updatedConfig.sharedDirName)
+      setEnvSecretInput(updatedConfig.envSecret ?? '')
+      setSharedConfigSaved(true)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSharedConfigSaving(false)
     }
   }
 
@@ -454,6 +485,7 @@ export function TeamGitConfig() {
       setGitToken('')
       setGitBranch('')
       setSharedDirName('teamclaw')
+      setEnvSecretInput('')
       setState('unconfigured')
     } catch (err) {
       console.error('Team disconnect error:', err)
@@ -496,6 +528,67 @@ export function TeamGitConfig() {
       return isoString
     }
   }
+
+  const renderEnvSecretInput = (disabled = false) => (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+        {t('settings.team.envSecret', 'Team Env Secret')}
+        <span className="text-muted-foreground/60 font-normal ml-1">({t('settings.team.optional', 'optional')})</span>
+      </label>
+      <div className="relative">
+        <Input
+          type={showEnvSecret ? 'text' : 'password'}
+          value={envSecretInput}
+          onChange={(e) => setEnvSecretInput(e.target.value)}
+          placeholder="64 hex characters"
+          className="bg-background/50 pr-28 font-mono text-xs"
+          disabled={disabled}
+        />
+        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            aria-label={t('settings.team.generateEnvSecret', 'Generate Team Env Secret')}
+            title={t('settings.team.generateEnvSecret', 'Generate Team Env Secret')}
+            disabled={disabled}
+            onClick={() => setEnvSecretInput(generateEnvSecret())}
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            aria-label={t('common.copy', 'Copy')}
+            title={t('common.copy', 'Copy')}
+            disabled={disabled || !envSecretInput.trim()}
+            onClick={() => {
+              void copyToClipboard(envSecretInput.trim())
+            }}
+          >
+            <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            aria-label={showEnvSecret ? t('settings.team.hideEnvSecret', 'Hide Team Env Secret') : t('settings.team.showEnvSecret', 'Show Team Env Secret')}
+            title={showEnvSecret ? t('settings.team.hideEnvSecret', 'Hide Team Env Secret') : t('settings.team.showEnvSecret', 'Show Team Env Secret')}
+            onClick={() => setShowEnvSecret(!showEnvSecret)}
+          >
+            {showEnvSecret ? <EyeOff className="h-3.5 w-3.5 text-muted-foreground" /> : <Eye className="h-3.5 w-3.5 text-muted-foreground" />}
+          </Button>
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground/60">
+        {t('settings.team.envSecretHint', 'Use the same 64-character secret on every workspace that needs to read encrypted _secrets. Leave blank to generate one for a new shared repository.')}
+      </p>
+    </div>
+  )
 
   return (
     <>
@@ -626,6 +719,7 @@ export function TeamGitConfig() {
                 {t('settings.team.tokenHint', 'Required for private HTTPS repositories. SSH URLs use your system keys automatically. The token is stored locally and never shared.')}
               </p>
             </div>
+            {renderEnvSecretInput(state === 'connecting')}
             <HostLlmConfig
               enabled={hostLlm}
               onEnabledChange={setHostLlm}
@@ -795,15 +889,22 @@ export function TeamGitConfig() {
                   </p>
                 </div>
               </div>
+              {renderEnvSecretInput(state === 'syncing')}
               <Button
                 size="sm"
                 className="gap-1.5"
                 onClick={handleSaveSharedDirectoryConfig}
-                disabled={!gitUrl.trim() || state === 'syncing'}
+                disabled={!gitUrl.trim() || state === 'syncing' || sharedConfigSaving}
               >
-                <Save className="h-3.5 w-3.5" />
-                {t('common.save', 'Save')}
+                {sharedConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {sharedConfigSaving ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
               </Button>
+              {sharedConfigSaved && (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {t('common.saved', 'Saved')}
+                </span>
+              )}
             </div>
           </SettingCard>
 

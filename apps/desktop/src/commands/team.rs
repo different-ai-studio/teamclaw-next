@@ -562,6 +562,46 @@ fn write_workspace_config(workspace_path: &str, json: &serde_json::Value) -> Res
         .map_err(|e| format!("Failed to write {}: {}", super::CONFIG_FILE_NAME, e))
 }
 
+fn save_team_config_for_workspace(
+    workspace_path: &str,
+    team: TeamConfig,
+    secrets_state: Option<&crate::commands::shared_secrets::SharedSecretsState>,
+) -> Result<(), String> {
+    let mut json = read_workspace_config(workspace_path)?;
+    let obj = json
+        .as_object_mut()
+        .ok_or_else(|| format!("{} is not an object", super::CONFIG_FILE_NAME))?;
+    obj.insert(
+        "team".to_string(),
+        serde_json::to_value(team.clone())
+            .map_err(|e| format!("Failed to serialize team config: {}", e))?,
+    );
+    obj.insert(
+        "team_mode".to_string(),
+        serde_json::Value::String("git".to_string()),
+    );
+    write_workspace_config(workspace_path, &json)?;
+
+    if team.enabled
+        && team
+            .env_secret
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|secret| !secret.is_empty())
+    {
+        if let Some(secrets_state) = secrets_state {
+            crate::commands::shared_secrets::try_lazy_init_from_workspace(
+                secrets_state,
+                workspace_path,
+            )
+            .map_err(|e| {
+                format!("Saved team config but failed to initialize shared env secrets: {e}")
+            })?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_team_config(
     workspace_path: Option<String>,
@@ -583,22 +623,10 @@ pub async fn save_team_config(
     workspace_path: Option<String>,
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
+    secrets_state: State<'_, crate::commands::shared_secrets::SharedSecretsState>,
 ) -> Result<(), String> {
     let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
-    let mut json = read_workspace_config(&workspace_path)?;
-    let obj = json
-        .as_object_mut()
-        .ok_or_else(|| format!("{} is not an object", super::CONFIG_FILE_NAME))?;
-    obj.insert(
-        "team".to_string(),
-        serde_json::to_value(team)
-            .map_err(|e| format!("Failed to serialize team config: {}", e))?,
-    );
-    obj.insert(
-        "team_mode".to_string(),
-        serde_json::Value::String("git".to_string()),
-    );
-    write_workspace_config(&workspace_path, &json)
+    save_team_config_for_workspace(&workspace_path, team, Some(&secrets_state))
 }
 
 #[tauri::command]
@@ -1550,6 +1578,35 @@ mod sync_precheck_tests {
         assert_eq!(value["gitBranch"], "main");
         assert_eq!(value["gitToken"], "token");
         assert!(value.get("teamId").is_none());
+    }
+
+    #[test]
+    fn save_team_config_reinitializes_shared_secrets_state() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = workspace_dir.path();
+        std::fs::create_dir_all(workspace.join("teamclaw")).unwrap();
+        let secrets_state = crate::commands::shared_secrets::SharedSecretsState::default();
+        let team = TeamConfig {
+            git_url: "https://example.com/repo.git".to_string(),
+            enabled: true,
+            last_sync_at: None,
+            shared_dir_name: "teamclaw".to_string(),
+            env_secret: Some("22".repeat(32)),
+            git_token: None,
+            git_branch: None,
+            fc_endpoint: None,
+        };
+
+        save_team_config_for_workspace(workspace.to_str().unwrap(), team, Some(&secrets_state))
+            .expect("save team config");
+
+        let team_dir = secrets_state.team_dir.lock().unwrap().clone().unwrap();
+        let derived_key = secrets_state.derived_key.lock().unwrap().unwrap();
+        assert_eq!(team_dir, workspace.join("teamclaw"));
+        assert_eq!(
+            derived_key,
+            crate::commands::shared_secrets_crypto::derive_key(&"22".repeat(32)).unwrap()
+        );
     }
 
     // Note: `resolve_workspace_path` integration test removed. Constructing a
