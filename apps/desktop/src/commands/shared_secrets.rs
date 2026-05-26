@@ -249,12 +249,12 @@ pub fn get_secret_value(state: &SharedSecretsState, key_id: &str) -> Option<Stri
 }
 
 /// Try to initialize shared_secrets from the workspace's team config.
-/// Supports configured Git teams.
+/// Supports configured shared Git directories.
 /// Fast-path returns Ok() immediately when already initialized.
 ///
 /// Called by `shared_secret_set` / `shared_secret_delete` so a user who joined
-/// a team but hasn't yet mounted the TeamGitConfig panel (which eagerly inits
-/// from the frontend) can still save/delete shared secrets.
+/// a team but hasn't yet mounted the TeamGitConfig panel can still save/delete
+/// shared secrets.
 pub fn try_lazy_init_from_workspace(
     state: &SharedSecretsState,
     workspace_path: &str,
@@ -281,17 +281,27 @@ pub fn try_lazy_init_from_workspace(
     let json: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse teamclaw.json: {e}"))?;
 
-    let team_id = json
+    let team_section = json
         .get("team")
         .and_then(|section| section.as_object())
         .filter(|obj| obj.get("enabled").and_then(|v| v.as_bool()) == Some(true))
-        .and_then(|obj| obj.get("teamId").and_then(|v| v.as_str()))
-        .map(String::from)
         .ok_or_else(|| "No team configured for this workspace".to_string())?;
 
-    let team_secret = super::team_secret_store::load_team_secret(workspace_path, &team_id)?;
-    let team_dir = std::path::Path::new(workspace_path).join(super::TEAM_REPO_DIR);
-    init_shared_secrets(state, &team_secret, &team_dir)
+    let env_secret = team_section
+        .get("envSecret")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            "Team shared environment variables are not initialized for this workspace".to_string()
+        })?;
+    let shared_dir_name = team_section
+        .get("sharedDirName")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or("teamclaw");
+    let team_dir =
+        crate::commands::team_shared_git::shared_dir_path(workspace_path, Some(shared_dir_name))?;
+    init_shared_secrets(state, env_secret, &team_dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -463,7 +473,7 @@ mod tests {
     #[test]
     fn init_shared_secrets_does_not_create_missing_team_dir() {
         let workspace_dir = tempfile::tempdir().unwrap();
-        let team_dir = workspace_dir.path().join(crate::commands::TEAM_REPO_DIR);
+        let team_dir = workspace_dir.path().join("teamclaw");
         let state = SharedSecretsState::default();
         let team_secret = "00".repeat(32);
 
@@ -471,5 +481,35 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!team_dir.exists());
+    }
+
+    #[test]
+    fn lazy_init_uses_shared_dir_and_env_secret() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = workspace_dir.path();
+        let config_dir = workspace.join(crate::commands::TEAMCLAW_DIR);
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join(crate::commands::CONFIG_FILE_NAME),
+            serde_json::json!({
+                "team": {
+                    "gitUrl": "https://example.com/repo.git",
+                    "enabled": true,
+                    "lastSyncAt": null,
+                    "sharedDirName": "teamclaw",
+                    "envSecret": "00".repeat(32)
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(workspace.join("teamclaw")).unwrap();
+
+        let state = SharedSecretsState::default();
+        let result = try_lazy_init_from_workspace(&state, workspace.to_str().unwrap());
+
+        assert!(result.is_ok());
+        let team_dir = state.team_dir.lock().unwrap().clone().unwrap();
+        assert_eq!(team_dir, workspace.join("teamclaw"));
     }
 }
