@@ -14,14 +14,14 @@
 use async_trait::async_trait;
 use std::time::Instant;
 
-use crate::supabase::client::StoredMessage;
-use crate::supabase::{
-    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants, WorkspaceRow,
-    WorkspaceUpsert,
-};
-
 pub mod error;
 pub use error::{BackendError, BackendResult};
+
+pub mod records;
+pub use records::{
+    AgentRuntimeRow, AgentRuntimeUpsert, BackendParticipantRow, BackendSessionAndParticipants,
+    BackendSessionRow, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
+};
 
 #[cfg(test)]
 pub mod mock;
@@ -103,7 +103,7 @@ pub trait Backend: Send + Sync {
     async fn fetch_session_with_participants(
         &self,
         session_id: &str,
-    ) -> BackendResult<SessionAndParticipants>;
+    ) -> BackendResult<BackendSessionAndParticipants>;
 
     /// Messages for `session_id` ordered ascending, with optional exclusive
     /// cursor — messages at or before `after_id` are dropped.

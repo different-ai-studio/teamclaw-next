@@ -55,12 +55,12 @@ pub struct RuntimeHandle {
     /// the mention set. Drained into a `[Context: …]` prefix on the next
     /// real send_prompt so the runtime catches up without firing N turns.
     pub pending_silent: Vec<PendingMessage>,
-    /// Supabase `agent_runtimes.id` for this runtime row. Used to PATCH
+    /// Backend `agent_runtimes.id` for this runtime row. Used to PATCH
     /// `last_processed_message_id` via `update_runtime_cursor`.
     ///
     /// TODO(task9): capture and store the returned row id from
     /// `upsert_agent_runtime` once that helper returns it.
-    pub supabase_runtime_row_id: Option<String>,
+    pub backend_runtime_row_id: Option<String>,
     /// Models the underlying ACP agent reported in its
     /// `session/new` / `session/load` response (via
     /// `SessionModelState.available_models`). Populated by the adapter on
@@ -104,7 +104,7 @@ impl RuntimeHandle {
             cmd_tx: None,
             turn_lock: Arc::new(AsyncMutex::new(())),
             pending_silent: Vec::new(),
-            supabase_runtime_row_id: None,
+            backend_runtime_row_id: None,
             last_processed_message_id: None,
             available_models: Vec::new(),
         }
@@ -266,7 +266,7 @@ impl RuntimeHandle {
             cmd_tx: None,
             turn_lock: Arc::new(AsyncMutex::new(())),
             pending_silent: Vec::new(),
-            supabase_runtime_row_id: None,
+            backend_runtime_row_id: None,
             last_processed_message_id: None,
             available_models: Vec::new(),
         }

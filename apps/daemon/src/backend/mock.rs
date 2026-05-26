@@ -22,11 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
 
-use crate::backend::{Backend, BackendError, BackendResult};
-use crate::supabase::client::StoredMessage;
-use crate::supabase::{
-    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants, WorkspaceRow,
-    WorkspaceUpsert,
+use crate::backend::{
+    AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
+    BackendSessionAndParticipants, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 
 /// Owned snapshot of an `AgentRuntimeUpsert` so tests can assert without
@@ -145,7 +143,7 @@ pub struct MockState {
 
     // ── Pre-seeded responses for reads ─────────────────────────────────
     pub claim_result: Option<ClaimResult>,
-    pub sessions: HashMap<String, SessionAndParticipants>,
+    pub sessions: HashMap<String, BackendSessionAndParticipants>,
     pub messages_by_session: HashMap<String, Vec<StoredMessage>>,
     pub gateway_session_index: HashMap<String, (String, Option<String>)>,
     pub admin_member_actor_ids: HashMap<String, Vec<String>>,
@@ -331,7 +329,7 @@ impl Backend for MockBackend {
     async fn fetch_session_with_participants(
         &self,
         session_id: &str,
-    ) -> BackendResult<SessionAndParticipants> {
+    ) -> BackendResult<BackendSessionAndParticipants> {
         self.state
             .lock()
             .unwrap()
@@ -587,6 +585,31 @@ impl Backend for MockBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_session_records_are_provider_neutral() {
+        use crate::backend::{BackendParticipantRow, BackendSessionRow};
+
+        let session = BackendSessionRow {
+            id: "session-1".into(),
+            team_id: "team-1".into(),
+            created_by_actor_id: Some("member-1".into()),
+            primary_agent_id: None,
+            mode: "collab".into(),
+            title: "Title".into(),
+            summary: String::new(),
+            idea_id: None,
+            created_at: chrono::Utc::now(),
+        };
+        let participant = BackendParticipantRow {
+            session_id: "session-1".into(),
+            actor_id: "member-1".into(),
+            role: Some("owner".into()),
+            joined_at: chrono::Utc::now(),
+        };
+
+        assert_eq!(session.id, participant.session_id);
+    }
 
     fn dyn_backend() -> (Arc<dyn Backend>, Arc<Mutex<MockState>>) {
         let mock = MockBackend::with_identity("team-x", "actor-x");

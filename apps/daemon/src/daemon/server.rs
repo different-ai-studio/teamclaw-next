@@ -10,7 +10,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
-use crate::backend::Backend;
+use crate::backend::{AgentRuntimeUpsert, Backend, WorkspaceUpsert};
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
 use crate::collab::{AuthManager, AuthResult, PeerState, PeerTracker, PermissionManager};
 use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
@@ -88,7 +88,7 @@ pub struct DaemonServer {
     sessions_path: PathBuf,
     history: EventHistory,
     teamclaw: Option<crate::teamclaw::SessionManager>,
-    supabase: Arc<dyn Backend>,
+    backend: Arc<dyn Backend>,
     actor_id: String,
     /// Channel manager (Discord/WeCom/Feishu/Kook/WeChat/Email gateways).
     /// `None` until `start_channels()` runs; held as `Option` so `shutdown(self)`
@@ -150,7 +150,7 @@ impl DaemonServer {
         config_path: &std::path::Path,
     ) -> crate::error::Result<Self> {
         // Supabase is required — fail fast with a clear message if absent.
-        let supabase: Arc<dyn Backend> = match SupabaseConfig::default_path() {
+        let backend: Arc<dyn Backend> = match SupabaseConfig::default_path() {
             Ok(path) if path.exists() => {
                 let concrete = SupabaseConfig::load(&path)
                     .and_then(SupabaseBackend::new)
@@ -167,16 +167,16 @@ impl DaemonServer {
         };
 
         info!(
-            actor_id = %supabase.actor_id(),
-            team_id  = %supabase.team_id(),
+            actor_id = %backend.actor_id(),
+            team_id  = %backend.team_id(),
             "Supabase client initialised"
         );
 
-        let actor_id = supabase.actor_id().to_string();
+        let actor_id = backend.actor_id().to_string();
 
         // Fetch first token — fails fast if Supabase is unreachable at startup.
         // Idea 5's outer loop handles retries on every subsequent reconnect.
-        let token = supabase.auth_token().await.map_err(|e| {
+        let token = backend.auth_token().await.map_err(|e| {
             crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
         })?;
 
@@ -238,7 +238,7 @@ impl DaemonServer {
 
         let agents = Arc::new(AsyncMutex::new(RuntimeManager::new(
             launch_configs,
-            Some(supabase.clone()),
+            Some(backend.clone()),
         )));
 
         let publisher_handle: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
@@ -273,7 +273,7 @@ impl DaemonServer {
             sessions_path,
             history,
             teamclaw,
-            supabase,
+            backend,
             actor_id,
             channel_mgr: None,
             cron_sessions: std::collections::HashMap::new(),
@@ -297,7 +297,7 @@ impl DaemonServer {
         // session_participants and can see gateway-originated DMs via RLS.
         let primary_agent_actor_id = self.actor_id.clone();
         let agent_owner_actor_ids: Vec<String> = match self
-            .supabase
+            .backend
             .list_agent_admin_member_actor_ids(&primary_agent_actor_id)
             .await
         {
@@ -323,10 +323,10 @@ impl DaemonServer {
             logical_to_acp: Arc::new(AsyncMutex::new(HashMap::new())),
             team_id: team_id.clone(),
             model_override: Arc::new(AsyncMutex::new(HashMap::new())),
-            supabase: self.supabase.clone(),
+            backend: self.backend.clone(),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
-            client: self.supabase.clone(),
+            client: self.backend.clone(),
         });
 
         let mgr = ChannelManager::new(
@@ -492,7 +492,7 @@ impl DaemonServer {
     /// "view session" button can resolve), adds the daemon's primary agent +
     /// admin members as `session_participants`, then spawns the ACP runtime
     /// bound to that Supabase session id. `cron_sessions` caches a
-    /// `(supabase_session_id, acp_session_id)` pair so subsequent turns reuse
+    /// `(remote_session_id, acp_session_id)` pair so subsequent turns reuse
     /// the same chat thread AND reach the same agent process.
     ///
     /// Returns `{text, session_id}` where `session_id` is the Supabase UUID —
@@ -515,11 +515,11 @@ impl DaemonServer {
             .ok_or_else(|| anyhow::anyhow!("daemon has no team_id; run `amuxd init` first"))?;
 
         // Look up or create the per-session_key binding. We cache the
-        // (supabase_session_id, acp_session_id) pair encoded as a single map
+        // (remote_session_id, acp_session_id) pair encoded as a single map
         // value `"<sb>|<acp>"` so the existing HashMap<String, String> shape
         // is preserved — sb is what we return to the client and stamp into
         // cron records; acp is what RuntimeManager needs to drive the turn.
-        let (supabase_session_id, acp_sid): (String, String) =
+        let (remote_session_id, acp_sid): (String, String) =
             if let Some(existing) = self.cron_sessions.get(parsed.session_key) {
                 let (sb, acp) = existing.split_once('|').ok_or_else(|| {
                     anyhow::anyhow!("cron_sessions entry malformed for {}", parsed.session_key)
@@ -541,7 +541,7 @@ impl DaemonServer {
                 };
 
                 let sb_sid = self
-                    .supabase
+                    .backend
                     .create_cron_session(&team_id, &primary_agent_actor_id, &title)
                     .await
                     .map_err(|e| anyhow::anyhow!("create_cron_session: {e}"))?;
@@ -563,7 +563,7 @@ impl DaemonServer {
 
                 tracing::debug!(
                     session_key = %parsed.session_key,
-                    supabase_session_id = %sb_sid,
+                    remote_session_id = %sb_sid,
                     acp_session_id = %acp_sid,
                     "cron: created Supabase session + spawned ACP runtime"
                 );
@@ -589,7 +589,7 @@ impl DaemonServer {
 
         Ok(serde_json::json!({
             "text": text,
-            "session_id": supabase_session_id,
+            "session_id": remote_session_id,
         }))
     }
 
@@ -689,7 +689,7 @@ impl DaemonServer {
         // One-time setup before the reconnect loop.
         // Heartbeat runs independently of MQTT session.
         {
-            let sb = self.supabase.clone();
+            let sb = self.backend.clone();
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_secs(60));
                 tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -725,7 +725,7 @@ impl DaemonServer {
 
         // Register device_id in Supabase once (background).
         {
-            let sb = self.supabase.clone();
+            let sb = self.backend.clone();
             let device_id = self.config.device.id.clone();
             let supported_agent_types = supported_agent_type_names(&self.config);
             let default_agent_type = supported_agent_types
@@ -760,7 +760,7 @@ impl DaemonServer {
         'outer: loop {
             // ── 1. Get fresh access_token (retry indefinitely on Supabase errors) ──
             let token = loop {
-                match self.supabase.auth_token().await {
+                match self.backend.auth_token().await {
                     Ok(t) => break t,
                     Err(e) => {
                         warn!("token fetch failed: {e}, retrying in 30s");
@@ -878,7 +878,7 @@ impl DaemonServer {
             // fallback if expiry isn't cached yet.
             let proactive_reconnect_in: Duration = {
                 let buffer = Duration::from_secs(5 * 60);
-                match self.supabase.cached_credential_expiry() {
+                match self.backend.cached_credential_expiry() {
                     Some(t) => t
                         .checked_duration_since(Instant::now())
                         .and_then(|d| d.checked_sub(buffer))
@@ -986,7 +986,7 @@ impl DaemonServer {
                     }
                     _ = &mut proactive_sleep => {
                         info!(
-                            expiry = ?self.supabase.cached_credential_expiry(),
+                            expiry = ?self.backend.cached_credential_expiry(),
                             "JWT nearing expiry, proactively reconnecting MQTT before broker silently denies ACL"
                         );
                         // Queue a graceful DISCONNECT so the broker sees an
@@ -1399,7 +1399,7 @@ impl DaemonServer {
         let my_actor = self.actor_id.clone();
         for session_id in session_ids {
             let prior = match self
-                .supabase
+                .backend
                 .fetch_latest_runtime_for_session(&my_actor, &session_id)
                 .await
             {
@@ -1433,7 +1433,7 @@ impl DaemonServer {
                 .as_deref()
                 .filter(|s| !s.is_empty());
             let messages = match self
-                .supabase
+                .backend
                 .messages_after_cursor(&session_id, cursor)
                 .await
             {
@@ -1465,7 +1465,7 @@ impl DaemonServer {
             let backend = resolve_requested_agent_type(&self.config, backend_requested);
 
             // Translate the Supabase workspace id into a local workspace id
-            // by matching on `supabase_workspace_id`. If we can't find a
+            // by matching on `remote_workspace_id`. If we can't find a
             // local mapping (workspace was archived locally, daemon
             // reinstalled, etc.) leave it empty so apply_start_runtime
             // falls back to the registered workspace lookup or current dir.
@@ -1476,7 +1476,7 @@ impl DaemonServer {
                     self.workspaces
                         .workspaces
                         .iter()
-                        .find(|w| w.supabase_workspace_id.as_str() == sb_ws.as_str())
+                        .find(|w| w.remote_workspace_id.as_str() == sb_ws.as_str())
                         .map(|w| w.workspace_id.clone())
                 })
                 .unwrap_or_default();
@@ -1495,9 +1495,9 @@ impl DaemonServer {
         &self,
         workspace: &mut crate::config::StoredWorkspace,
     ) -> bool {
-        let sb = &self.supabase;
+        let sb = &self.backend;
 
-        let row = crate::supabase::WorkspaceUpsert {
+        let row = WorkspaceUpsert {
             team_id: sb.team_id(),
             agent_id: sb.actor_id(),
             name: &workspace.display_name,
@@ -1511,10 +1511,10 @@ impl DaemonServer {
 
         match sb.upsert_workspace(&row).await {
             Ok(remote) => {
-                if workspace.supabase_workspace_id == remote.id {
+                if workspace.remote_workspace_id == remote.id {
                     return false;
                 }
-                workspace.supabase_workspace_id = remote.id;
+                workspace.remote_workspace_id = remote.id;
                 true
             }
             Err(e) => {
@@ -1578,7 +1578,7 @@ impl DaemonServer {
     /// Returns the single collab session_id this runtime should publish
     /// ACP events to. Each runtime is bound at spawn time to one session
     /// via `RuntimeHandle.session_id` (set from
-    /// `apply_start_runtime`'s supabase_session_id), so fanout has to be
+    /// `apply_start_runtime`'s remote_session_id), so fanout has to be
     /// scoped to that one session.
     ///
     /// Earlier versions of this function unioned in
@@ -1747,7 +1747,7 @@ impl DaemonServer {
 
             // Upsert agent_runtimes on status transitions
             {
-                let sb = &self.supabase;
+                let sb = &self.backend;
                 let new_status = amux::AgentStatus::try_from(sc.new_status)
                     .unwrap_or(amux::AgentStatus::Unknown);
                 let supabase_status: &'static str = match new_status {
@@ -1768,8 +1768,8 @@ impl DaemonServer {
                             .unwrap_or("claude"),
                     )
                 };
-                let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                    (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+                let remote_workspace_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                    (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
                 });
                 let team_id = sb.team_id().to_string();
                 let actor_id = sb.actor_id().to_string();
@@ -1777,11 +1777,11 @@ impl DaemonServer {
                 let sb_clone = sb.clone();
                 let now = chrono::Utc::now();
                 tokio::spawn(async move {
-                    let row = crate::supabase::AgentRuntimeUpsert {
+                    let row = AgentRuntimeUpsert {
                         team_id: &team_id,
                         agent_id: &actor_id,
                         session_id: (!session_id.is_empty()).then_some(session_id.as_str()),
-                        workspace_id: supabase_ws_id.as_deref(),
+                        workspace_id: remote_workspace_id.as_deref(),
                         backend_type,
                         backend_session_id: if acp_sid.is_empty() {
                             None
@@ -1884,7 +1884,7 @@ impl DaemonServer {
                             &turn_id,
                             seq,
                             persist,
-                            Some(&self.supabase),
+                            Some(&self.backend),
                         )
                         .await;
                     }
@@ -2049,9 +2049,9 @@ impl DaemonServer {
                     .agents
                     .lock()
                     .await
-                    .supabase_runtime_row_id(&runtime_id);
+                    .backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
-                    let sb = self.supabase.clone();
+                    let sb = self.backend.clone();
                     let row = row_id.clone();
                     let last = message.message_id.clone();
                     tokio::spawn(async move {
@@ -2077,9 +2077,9 @@ impl DaemonServer {
                     .agents
                     .lock()
                     .await
-                    .supabase_runtime_row_id(&runtime_id);
+                    .backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
-                    let sb = self.supabase.clone();
+                    let sb = self.backend.clone();
                     let row = row_id.clone();
                     let last = message.message_id.clone();
                     tokio::spawn(async move {
@@ -2113,11 +2113,11 @@ impl DaemonServer {
 
             let at =
                 amux::AgentType::try_from(stored.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
-            let supabase_ws_id = self
+            let remote_workspace_id = self
                 .workspaces
                 .find_by_id(&stored.workspace_id)
                 .and_then(|w| {
-                    (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+                    (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
                 });
 
             info!(
@@ -2136,7 +2136,7 @@ impl DaemonServer {
                     at,
                     &stored.worktree,
                     &stored.workspace_id,
-                    supabase_ws_id.as_deref(),
+                    remote_workspace_id.as_deref(),
                     Some(session_id),
                     "",
                 )
@@ -2156,12 +2156,12 @@ impl DaemonServer {
             };
 
             match self
-                .supabase
+                .backend
                 .fetch_agent_runtime_for_session(session_id, &stored.runtime_id, &new_acp_sid)
                 .await
             {
                 Ok(Some(row)) => {
-                    self.agents.lock().await.set_supabase_runtime_metadata(
+                    self.agents.lock().await.set_backend_runtime_metadata(
                         &stored.runtime_id,
                         Some(row.id),
                         row.last_processed_message_id,
@@ -2221,7 +2221,7 @@ impl DaemonServer {
         }
 
         let messages = match self
-            .supabase
+            .backend
             .messages_after_cursor(&session_id, last_processed_message_id.as_deref())
             .await
         {
@@ -2342,7 +2342,7 @@ impl DaemonServer {
         if agents.get_handle(agent_actor_id).is_some() {
             return Some(agent_actor_id.to_string());
         }
-        if agent_actor_id == self.supabase.actor_id() {
+        if agent_actor_id == self.backend.actor_id() {
             return agents.running_agent_id_for_collab_session(session_id);
         }
         None
@@ -2538,14 +2538,14 @@ impl DaemonServer {
                     Ok(n) => {
                         if n.event_type == "membership.refresh" && !n.refresh_hint.is_empty() {
                             match self
-                                .supabase
+                                .backend
                                 .fetch_session_with_participants(&n.refresh_hint)
                                 .await
                             {
                                 Ok(snap) => {
                                     if let Some(tc) = &mut self.teamclaw {
                                         if let Err(err) = tc
-                                            .insert_session_from_supabase(
+                                            .insert_session_from_backend(
                                                 &snap.session,
                                                 &snap.participants,
                                             )
@@ -2592,7 +2592,7 @@ impl DaemonServer {
             warn!("resolve_role: empty sender_actor_id, denying as Member");
             return amux::MemberRole::Member;
         }
-        let sb = &self.supabase;
+        let sb = &self.backend;
         let my_agent_id = sb.actor_id().to_string();
         match sb
             .check_agent_permission(&my_agent_id, sender_actor_id)
@@ -2734,9 +2734,9 @@ impl DaemonServer {
                         let acp_sid = stored.acp_session_id.clone();
                         let session_id = stored.session_id.clone();
                         info!(agent_id, "lazy-resuming historical session");
-                        let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                            (!w.supabase_workspace_id.is_empty())
-                                .then_some(w.supabase_workspace_id.clone())
+                        let remote_workspace_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                            (!w.remote_workspace_id.is_empty())
+                                .then_some(w.remote_workspace_id.clone())
                         });
                         let resume_res = self
                             .agents
@@ -2748,7 +2748,7 @@ impl DaemonServer {
                                 at,
                                 &worktree,
                                 &ws_id,
-                                supabase_ws_id.as_deref(),
+                                remote_workspace_id.as_deref(),
                                 (!session_id.is_empty()).then_some(session_id.as_str()),
                                 &prompt.text,
                             )
@@ -3475,7 +3475,7 @@ impl DaemonServer {
 
         // Resolve workspace + worktree. Same 4-branch logic as the legacy
         // AcpCommand::StartAgent arm (see server.rs ~800-836 pre-refactor).
-        let (mut resolved_worktree, mut ws_id, mut supabase_ws_id_owned): (
+        let (mut resolved_worktree, mut ws_id, mut remote_workspace_id_owned): (
             String,
             String,
             Option<String>,
@@ -3484,8 +3484,8 @@ impl DaemonServer {
                 (
                     ws.path.clone(),
                     ws.workspace_id.clone(),
-                    (!ws.supabase_workspace_id.is_empty())
-                        .then_some(ws.supabase_workspace_id.clone()),
+                    (!ws.remote_workspace_id.is_empty())
+                        .then_some(ws.remote_workspace_id.clone()),
                 )
             } else if !worktree.is_empty() {
                 (
@@ -3528,14 +3528,14 @@ impl DaemonServer {
                 .find(|w| w.path == resolved_worktree)
             {
                 ws_id = ws.workspace_id.clone();
-                if supabase_ws_id_owned.is_none() && !ws.supabase_workspace_id.is_empty() {
-                    supabase_ws_id_owned = Some(ws.supabase_workspace_id.clone());
+                if remote_workspace_id_owned.is_none() && !ws.remote_workspace_id.is_empty() {
+                    remote_workspace_id_owned = Some(ws.remote_workspace_id.clone());
                 }
                 resolved_worktree = ws.path.clone();
             }
         }
 
-        let supabase_ws_id = supabase_ws_id_owned.as_deref();
+        let remote_workspace_id = remote_workspace_id_owned.as_deref();
 
         // Idempotency: if a live runtime already exists for the same
         // (session_id, agent_type, workspace_id) tuple, return its id
@@ -3568,20 +3568,20 @@ impl DaemonServer {
         // only place the daemon learns about them.
         if !session_id.is_empty() {
             match self
-                .supabase
+                .backend
                 .fetch_session_with_participants(session_id)
                 .await
             {
                 Ok(snap) => {
                     if let Some(tc) = self.teamclaw.as_mut() {
                         if let Err(e) = tc
-                            .insert_session_from_supabase(&snap.session, &snap.participants)
+                            .insert_session_from_backend(&snap.session, &snap.participants)
                             .await
                         {
                             return Err(StartRuntimeError {
                                 error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
                                 error_message: format!(
-                                    "insert_session_from_supabase failed: {}",
+                                    "insert_session_from_backend failed: {}",
                                     e
                                 ),
                                 failed_stage: "session_subscribe".to_string(),
@@ -3619,7 +3619,7 @@ impl DaemonServer {
                 &resolved_worktree,
                 initial_prompt,
                 &ws_id,
-                supabase_ws_id,
+                remote_workspace_id,
                 session_id_opt,
                 initial_model_override,
                 None,
@@ -3691,7 +3691,7 @@ impl DaemonServer {
         // apply_start_runtime already has `&mut self` access and runs
         // synchronously after spawn_agent returns). This is the cleanest
         // insertion point — the handle is fully populated (session_id,
-        // supabase_runtime_row_id) and state is ACTIVE.
+        // backend_runtime_row_id) and state is ACTIVE.
         self.catchup_runtime(&new_id).await;
 
         Ok(StartRuntimeOutcome {
@@ -3871,7 +3871,7 @@ impl DaemonServer {
         if success {
             self.publish_runtime_state_by_id(&runtime_id).await;
 
-            let sb = &self.supabase;
+            let sb = &self.backend;
             let agents = self.agents.lock().await;
             let handle = agents.get_handle(&runtime_id);
             let (acp_sid, session_id, ws_id, backend_type) = (
@@ -3892,8 +3892,8 @@ impl DaemonServer {
                 .unwrap_or("starting");
             drop(agents);
 
-            let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+            let remote_workspace_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
             });
             let team_id = sb.team_id().to_string();
             let actor_id = sb.actor_id().to_string();
@@ -3901,11 +3901,11 @@ impl DaemonServer {
             let runtime_id_owned = runtime_id.clone();
             let model_id_owned = model_id.clone();
             tokio::spawn(async move {
-                let row = crate::supabase::AgentRuntimeUpsert {
+                let row = AgentRuntimeUpsert {
                     team_id: &team_id,
                     agent_id: &actor_id,
                     session_id: (!session_id.is_empty()).then_some(session_id.as_str()),
-                    workspace_id: supabase_ws_id.as_deref(),
+                    workspace_id: remote_workspace_id.as_deref(),
                     backend_type,
                     backend_session_id: if acp_sid.is_empty() {
                         None
@@ -4289,7 +4289,7 @@ mod tests {
         test_server_with_supabase(test_supabase())
     }
 
-    fn test_server_with_supabase(supabase: Arc<dyn Backend>) -> TestServer {
+    fn test_server_with_supabase(backend: Arc<dyn Backend>) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
         let mqtt = test_mqtt(&config.device.id);
@@ -4325,7 +4325,7 @@ mod tests {
                 sessions_path: tmp.path().join("sessions.toml"),
                 history: EventHistory::new(&tmp.path().join("history")),
                 teamclaw: Some(teamclaw),
-                supabase,
+                backend,
                 actor_id: "agent-actor".to_string(),
                 channel_mgr: None,
                 cron_sessions: HashMap::new(),
@@ -4472,7 +4472,7 @@ mod tests {
 
     async fn add_membership(fixture: &mut TestServer, session_id: &str) {
         let tc = fixture.server.teamclaw.as_mut().expect("teamclaw set");
-        tc.insert_session_from_supabase_for_test(
+        tc.insert_session_from_backend_for_test(
             session_id,
             "team-test",
             None,

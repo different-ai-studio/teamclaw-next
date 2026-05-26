@@ -9,11 +9,10 @@ use super::adapter;
 use super::handle::RuntimeHandle;
 use std::sync::Arc;
 
-use crate::backend::Backend;
+use crate::backend::{AgentRuntimeUpsert, Backend};
 use crate::config::DaemonConfig;
 use crate::proto::amux;
 use crate::runtime::turn_aggregator::TurnAggregator;
-use crate::supabase::AgentRuntimeUpsert;
 use chrono::Utc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +145,7 @@ pub struct RuntimeManager {
     /// `runtime/{id}/state` topic sees the same list the agent already
     /// announced earlier on the (non-retained) events topic.
     available_commands_per_agent: HashMap<String, Vec<amux::AcpAvailableCommand>>,
-    supabase: Option<Arc<dyn Backend>>,
+    backend: Option<Arc<dyn Backend>>,
     /// agent_ids that were stopped by the idle sweeper and still need their
     /// terminal `runtime/{id}/state` publish + retain clear. Drained by the
     /// main event loop via `drain_evicted`. Manual `stop_agent` calls go
@@ -163,7 +162,7 @@ pub struct RuntimeManager {
 impl RuntimeManager {
     pub fn new(
         launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
-        supabase: Option<Arc<dyn Backend>>,
+        backend: Option<Arc<dyn Backend>>,
     ) -> Self {
         Self {
             agents: HashMap::new(),
@@ -171,7 +170,7 @@ impl RuntimeManager {
             launch_configs,
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
-            supabase,
+            backend,
             evicted_pending_publish: Vec::new(),
             #[cfg(test)]
             last_sent: HashMap::new(),
@@ -242,16 +241,16 @@ impl RuntimeManager {
         worktree: &str,
         prompt: &str,
         workspace_id: &str,
-        supabase_workspace_id: Option<&str>,
-        supabase_session_id: Option<&str>,
+        remote_workspace_id: Option<&str>,
+        remote_session_id: Option<&str>,
     ) -> crate::error::Result<String> {
         self.spawn_agent_with_model(
             agent_type,
             worktree,
             prompt,
             workspace_id,
-            supabase_workspace_id,
-            supabase_session_id,
+            remote_workspace_id,
+            remote_session_id,
             None,
             None,
         )
@@ -272,8 +271,8 @@ impl RuntimeManager {
         worktree: &str,
         prompt: &str,
         workspace_id: &str,
-        supabase_workspace_id: Option<&str>,
-        supabase_session_id: Option<&str>,
+        remote_workspace_id: Option<&str>,
+        remote_session_id: Option<&str>,
         initial_model_override: Option<String>,
         mcp_config_path: Option<PathBuf>,
     ) -> crate::error::Result<String> {
@@ -285,7 +284,7 @@ impl RuntimeManager {
             workspace_id.into(),
         );
         handle.current_prompt = prompt.into();
-        handle.session_id = supabase_session_id.unwrap_or_default().to_string();
+        handle.session_id = remote_session_id.unwrap_or_default().to_string();
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         let (startup_tx, startup_rx) =
@@ -345,12 +344,12 @@ impl RuntimeManager {
             self.set_current_model(&agent_id, &model_id);
         }
 
-        self.seed_cursor_from_prior_runtime(&agent_id, supabase_session_id)
+        self.seed_cursor_from_prior_runtime(&agent_id, remote_session_id)
             .await;
 
         // Upsert agent_runtimes with status="starting"; capture the returned
         // row id so catchup_runtime can use update_runtime_cursor later.
-        if let Some(sb) = &self.supabase {
+        if let Some(sb) = &self.backend {
             let acp_sid = self
                 .agents
                 .get(&agent_id)
@@ -359,8 +358,8 @@ impl RuntimeManager {
             let row = AgentRuntimeUpsert {
                 team_id: sb.team_id(),
                 agent_id: sb.actor_id(),
-                session_id: supabase_session_id,
-                workspace_id: supabase_workspace_id,
+                session_id: remote_session_id,
+                workspace_id: remote_workspace_id,
                 backend_type: launch.backend_type,
                 backend_session_id: if acp_sid.is_empty() {
                     None
@@ -378,7 +377,7 @@ impl RuntimeManager {
             match sb.upsert_agent_runtime(&row).await {
                 Ok(Some(row_id)) => {
                     if let Some(handle) = self.agents.get_mut(&agent_id) {
-                        handle.supabase_runtime_row_id = Some(row_id);
+                        handle.backend_runtime_row_id = Some(row_id);
                     }
                 }
                 Ok(None) => warn!(agent_id, "upsert_agent_runtime returned no row id"),
@@ -398,19 +397,19 @@ impl RuntimeManager {
     /// the latest row and seed the in-memory handle so catchup only
     /// replays truly-new messages.
     ///
-    /// No-op when there is no Supabase client, no session id, no prior
+    /// No-op when there is no backend client, no session id, no prior
     /// row, or the prior row's cursor is empty. Errors are logged and
     /// swallowed — the worst case on failure is a redundant replay, not a
     /// missed message.
     pub(crate) async fn seed_cursor_from_prior_runtime(
         &mut self,
         agent_id: &str,
-        supabase_session_id: Option<&str>,
+        remote_session_id: Option<&str>,
     ) {
-        let Some(sb) = self.supabase.as_ref() else {
+        let Some(sb) = self.backend.as_ref() else {
             return;
         };
-        let Some(session_id) = supabase_session_id else {
+        let Some(session_id) = remote_session_id else {
             return;
         };
         match sb
@@ -446,8 +445,8 @@ impl RuntimeManager {
         agent_type: amux::AgentType,
         worktree: &str,
         workspace_id: &str,
-        supabase_workspace_id: Option<&str>,
-        supabase_session_id: Option<&str>,
+        remote_workspace_id: Option<&str>,
+        remote_session_id: Option<&str>,
         prompt: &str,
     ) -> crate::error::Result<String> {
         let mut handle = RuntimeHandle::new(
@@ -456,7 +455,7 @@ impl RuntimeManager {
             worktree.into(),
             workspace_id.into(),
         );
-        handle.session_id = supabase_session_id.unwrap_or_default().to_string();
+        handle.session_id = remote_session_id.unwrap_or_default().to_string();
 
         let (startup_tx, startup_rx) =
             tokio::sync::oneshot::channel::<Result<adapter::AcpStartupMetadata, String>>();
@@ -518,12 +517,12 @@ impl RuntimeManager {
         }
 
         // Upsert agent_runtimes with status="starting" on resume
-        if let Some(sb) = &self.supabase {
+        if let Some(sb) = &self.backend {
             let row = AgentRuntimeUpsert {
                 team_id: sb.team_id(),
                 agent_id: sb.actor_id(),
-                session_id: supabase_session_id,
-                workspace_id: supabase_workspace_id,
+                session_id: remote_session_id,
+                workspace_id: remote_workspace_id,
                 backend_type: launch.backend_type,
                 backend_session_id: if new_acp_sid.is_empty() {
                     None
@@ -541,7 +540,7 @@ impl RuntimeManager {
             match sb.upsert_agent_runtime(&row).await {
                 Ok(Some(row_id)) => {
                     if let Some(handle) = self.agents.get_mut(agent_id) {
-                        handle.supabase_runtime_row_id = Some(row_id);
+                        handle.backend_runtime_row_id = Some(row_id);
                     }
                 }
                 Ok(None) => warn!(
@@ -958,15 +957,15 @@ impl RuntimeManager {
         self.agents.get(runtime_id).map(|h| h.agent_id.clone())
     }
 
-    /// Return the Supabase `agent_runtimes.id` for this runtime, if known.
+    /// Return the backend `agent_runtimes.id` for this runtime, if known.
     /// Currently `None` until Task 9 wires the upsert return value back here.
-    pub fn supabase_runtime_row_id(&self, runtime_id: &str) -> Option<String> {
+    pub fn backend_runtime_row_id(&self, runtime_id: &str) -> Option<String> {
         self.agents
             .get(runtime_id)
-            .and_then(|h| h.supabase_runtime_row_id.clone())
+            .and_then(|h| h.backend_runtime_row_id.clone())
     }
 
-    pub fn set_supabase_runtime_metadata(
+    pub fn set_backend_runtime_metadata(
         &mut self,
         runtime_id: &str,
         row_id: Option<String>,
@@ -974,7 +973,7 @@ impl RuntimeManager {
     ) {
         if let Some(handle) = self.agents.get_mut(runtime_id) {
             if row_id.is_some() {
-                handle.supabase_runtime_row_id = row_id;
+                handle.backend_runtime_row_id = row_id;
             }
             if last_processed_message_id.is_some() {
                 handle.last_processed_message_id = last_processed_message_id;
@@ -1043,7 +1042,7 @@ impl RuntimeManager {
         binding: &str,
         _title: &str,
         model_override: Option<(String, String)>,
-        supabase_session_id: Option<&str>,
+        remote_session_id: Option<&str>,
         working_directory: Option<&str>,
     ) -> crate::error::Result<String> {
         // Gateway sessions don't yet have a "real" workspace concept — they
@@ -1104,7 +1103,7 @@ impl RuntimeManager {
                 "",
                 &workspace_id,
                 None,
-                supabase_session_id,
+                remote_session_id,
                 initial_model,
                 mcp_cfg_path,
             )
@@ -1684,11 +1683,11 @@ mod tests {
     }
 
     #[test]
-    fn supabase_runtime_row_id_returns_none_when_unset() {
+    fn backend_runtime_row_id_returns_none_when_unset() {
         let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         mgr.add_test_runtime("rt1", "agent_X", "session_S");
-        // supabase_runtime_row_id defaults to None until Task 9 wires it.
-        assert_eq!(mgr.supabase_runtime_row_id("rt1"), None);
+        // backend_runtime_row_id defaults to None until Task 9 wires it.
+        assert_eq!(mgr.backend_runtime_row_id("rt1"), None);
     }
 
     /// Simulate the "mentioned" branch: send_prompt is called with the message content.

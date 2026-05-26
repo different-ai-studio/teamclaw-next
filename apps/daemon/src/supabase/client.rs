@@ -1,3 +1,7 @@
+use crate::backend::{
+    AgentRuntimeRow, AgentRuntimeUpsert, BackendParticipantRow, BackendSessionAndParticipants,
+    BackendSessionRow, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
+};
 use crate::supabase::config::SupabaseConfig;
 use crate::supabase::error::{SupabaseError, SupabaseResult};
 use reqwest::Client;
@@ -6,9 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::warn;
-
-// chrono re-exported for callers constructing AgentRuntimeUpsert
-pub use chrono;
 
 #[derive(Debug, Clone)]
 pub struct SupabaseBackend {
@@ -263,123 +264,6 @@ impl SupabaseBackend {
         let rows: Vec<ClaimResult> = self.rpc_anon("claim_team_invite", &payload).await?;
         rows.into_iter().next().ok_or(SupabaseError::InviteInvalid)
     }
-}
-
-/// Returned by `public.claim_team_invite` — both member and agent branches.
-/// `refresh_token` is `None` for member claims.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ClaimResult {
-    pub actor_id: String,
-    pub team_id: String,
-    pub actor_type: String,
-    pub display_name: String,
-    pub refresh_token: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AgentRuntimeUpsert<'a> {
-    pub team_id: &'a str,
-    pub agent_id: &'a str,
-    pub session_id: Option<&'a str>,
-    pub workspace_id: Option<&'a str>,
-    pub backend_type: &'a str,
-    pub backend_session_id: Option<&'a str>,
-    /// Daemon-side 8-char runtime id, the topic segment in
-    /// `runtime/{runtime_id}/state`. iOS uses it to bridge a Supabase
-    /// `agent_runtimes` row to the live MQTT-published `Runtime`. Distinct
-    /// from `backend_session_id` (the 36-char ACP session id used by the
-    /// daemon to resume a Claude Code session).
-    pub runtime_id: Option<&'a str>,
-    pub status: &'a str,
-    pub current_model: Option<&'a str>,
-    pub last_seen_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WorkspaceUpsert<'a> {
-    pub team_id: &'a str,
-    pub agent_id: &'a str,
-    pub name: &'a str,
-    pub path: Option<&'a str>,
-    pub archived: bool,
-}
-
-/// Subset of `agent_runtimes` columns read by
-/// `fetch_latest_runtime_for_session`. The daemon uses this when it has to
-/// rebuild a runtime that the previous daemon process used to own (cursor
-/// carry-forward + offline-message catch-up).
-///
-/// `id`, `backend_session_id`, `status` are deserialised but not yet
-/// consumed by callers. Kept so future code (e.g. resuming a specific ACP
-/// backend session id, filtering by status) doesn't have to re-add them and
-/// re-bump the `select=` projection.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct AgentRuntimeRow {
-    pub id: String,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-    #[serde(default)]
-    pub backend_type: String,
-    #[serde(default)]
-    pub backend_session_id: Option<String>,
-    #[serde(default)]
-    pub status: String,
-    #[serde(default)]
-    pub last_processed_message_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct WorkspaceRow {
-    pub id: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct SupabaseSessionRow {
-    pub id: String,
-    pub team_id: String,
-    #[serde(default)]
-    pub created_by_actor_id: Option<String>,
-    #[serde(default)]
-    pub primary_agent_id: Option<String>,
-    #[serde(default)]
-    pub mode: String,
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub summary: String,
-    #[serde(default)]
-    pub idea_id: Option<String>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct SupabaseParticipantRow {
-    pub session_id: String,
-    pub actor_id: String,
-    #[serde(default)]
-    pub role: Option<String>,
-    pub joined_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SessionAndParticipants {
-    pub session: SupabaseSessionRow,
-    pub participants: Vec<SupabaseParticipantRow>,
-}
-
-/// A single `messages` table row returned from Supabase.
-#[derive(Debug, Clone)]
-pub struct StoredMessage {
-    pub id: String,
-    pub session_id: String,
-    pub sender_actor_id: String,
-    pub kind: String,
-    pub content: String,
-    /// Raw JSON string of the `metadata` column.
-    pub metadata_json: String,
-    /// Unix epoch seconds derived from the `created_at` timestamp.
-    pub created_at: i64,
 }
 
 /// Parse a `Vec<serde_json::Value>` (PostgREST rows) into `Vec<StoredMessage>`.
@@ -794,7 +678,7 @@ impl crate::backend::Backend for SupabaseBackend {
     async fn fetch_session_with_participants(
         &self,
         session_id: &str,
-    ) -> crate::backend::BackendResult<SessionAndParticipants> {
+    ) -> crate::backend::BackendResult<BackendSessionAndParticipants> {
         let token = self.access_token().await?;
 
         let session_url = format!(
@@ -818,7 +702,7 @@ impl crate::backend::Backend for SupabaseBackend {
             }
             .into());
         }
-        let mut rows: Vec<SupabaseSessionRow> = resp.json().await.map_err(SupabaseError::from)?;
+        let mut rows: Vec<BackendSessionRow> = resp.json().await.map_err(SupabaseError::from)?;
         let session = rows.pop().ok_or_else(|| SupabaseError::Rpc {
             code: Some("404".into()),
             message: format!("session {session_id} not found"),
@@ -845,10 +729,10 @@ impl crate::backend::Backend for SupabaseBackend {
             }
             .into());
         }
-        let participants: Vec<SupabaseParticipantRow> =
+        let participants: Vec<BackendParticipantRow> =
             resp.json().await.map_err(SupabaseError::from)?;
 
-        Ok(SessionAndParticipants {
+        Ok(BackendSessionAndParticipants {
             session,
             participants,
         })
