@@ -34,6 +34,14 @@ describe("backend provider facade", () => {
     expect(first.messages).toBeDefined();
     expect(first.runtime).toBeDefined();
     expect(first.attachments).toBeDefined();
+    expect(first.teams).toBeDefined();
+    expect(first.ideas).toBeDefined();
+    expect(first.actors).toBeDefined();
+    expect(first.sessionMembers).toBeDefined();
+    expect(first.shortcuts).toBeDefined();
+    expect(first.notifications).toBeDefined();
+    expect(first.teamWorkspaceConfig).toBeDefined();
+    expect(first.telemetry).toBeDefined();
   });
 
   it("keeps placeholder backend methods promise-rejecting", async () => {

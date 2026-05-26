@@ -204,6 +204,137 @@ export interface DirectoryBackend {
   resolveCurrentMemberActor(teamId: string, userId: string): Promise<DirectoryMemberActor | null>;
 }
 
+export interface TeamSummary {
+  id: string;
+  name: string;
+  slug?: string | null;
+  created_at?: string | null;
+}
+
+export interface TeamInviteResult {
+  token: string;
+  inviteUrl?: string | null;
+  actorId?: string | null;
+}
+
+export interface TeamsBackend {
+  createTeam(input: { name: string }): Promise<TeamSummary>;
+  renameTeam(teamId: string, name: string): Promise<TeamSummary>;
+  createTeamInvite(input: {
+    teamId: string;
+    actorType?: "member" | "agent";
+    displayName?: string | null;
+  }): Promise<TeamInviteResult>;
+  removeTeamActor(actorId: string): Promise<void>;
+}
+
+export interface IdeaRow {
+  id: string;
+  team_id: string;
+  title: string;
+  body?: string | null;
+  status?: string | null;
+  created_by_actor_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  archived_at?: string | null;
+}
+
+export interface IdeasBackend {
+  listIdeas(teamId: string): Promise<IdeaRow[]>;
+  getIdeaDetail(ideaId: string): Promise<IdeaRow | null>;
+  createIdea(input: { teamId: string; title: string; body?: string | null }): Promise<IdeaRow>;
+  updateIdea(input: { ideaId: string; title?: string; body?: string | null; status?: string | null }): Promise<void>;
+  archiveIdea(ideaId: string): Promise<void>;
+  createIdeaActivity(input: {
+    ideaId: string;
+    actorId: string;
+    eventType: string;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void>;
+}
+
+export interface ActorDirectoryEntry {
+  id: string;
+  team_id: string;
+  display_name: string | null;
+  actor_type: string | null;
+  avatar_url?: string | null;
+  user_id?: string | null;
+}
+
+export interface ConnectedAgentRow extends ActorDirectoryEntry {
+  device_id?: string | null;
+  agent_types?: string[] | null;
+  default_agent_type?: string | null;
+}
+
+export interface ActorsBackend {
+  listActorDirectory(teamId: string): Promise<ActorDirectoryEntry[]>;
+  listConnectedAgents(teamId: string): Promise<ConnectedAgentRow[]>;
+  updateOwnedAgentProfile(input: { agentId: string; displayName?: string | null; avatarUrl?: string | null }): Promise<void>;
+  updateAgentDefaults(input: { agentId: string; agentTypes: string[]; defaultAgentType: string }): Promise<void>;
+}
+
+export interface SessionMemberCandidate extends ActorDirectoryEntry {
+  is_present: boolean;
+}
+
+export interface SessionMembersBackend {
+  listParticipants(sessionId: string): Promise<ActorDirectoryEntry[]>;
+  listCandidateActors(teamId: string, presentActorIds: string[]): Promise<SessionMemberCandidate[]>;
+  addParticipant(sessionId: string, actorId: string): Promise<void>;
+  removeParticipant(sessionId: string, actorId: string): Promise<void>;
+}
+
+export interface ShortcutRow {
+  id: string;
+  scope: string;
+  title: string;
+  payload: unknown;
+  sort_order?: number | null;
+  visible_roles?: string[] | null;
+}
+
+export interface ShortcutsBackend {
+  listShortcuts(scope: string): Promise<ShortcutRow[]>;
+  createShortcut(input: Record<string, unknown>): Promise<ShortcutRow>;
+  updateShortcut(id: string, patch: Record<string, unknown>): Promise<void>;
+  deleteShortcut(id: string): Promise<void>;
+  batchMove(input: { ids: string[]; targetScope: string }): Promise<void>;
+  setVisibleRoles(input: { shortcutId: string; roles: string[] }): Promise<void>;
+}
+
+export interface NotificationPrefs {
+  actor_id: string;
+  enabled: boolean;
+  updated_at?: string | null;
+}
+
+export interface NotificationsBackend {
+  loadPreferences(actorId: string): Promise<NotificationPrefs | null>;
+  savePreferences(input: NotificationPrefs): Promise<void>;
+  setSessionMuted(input: { sessionId: string; actorId: string; muted: boolean }): Promise<void>;
+  listMutedSessionIds(actorId: string): Promise<string[]>;
+}
+
+export interface TeamWorkspaceConfigRow {
+  team_id: string;
+  workspace_path?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface TeamWorkspaceConfigBackend {
+  load(teamId: string): Promise<TeamWorkspaceConfigRow | null>;
+  save(input: TeamWorkspaceConfigRow): Promise<void>;
+}
+
+export interface TelemetryBackend {
+  insertFeedback(input: Record<string, unknown>): Promise<void>;
+  insertSessionReport(input: Record<string, unknown>): Promise<void>;
+  insertTelemetryEvent(input: Record<string, unknown>): Promise<void>;
+}
+
 export interface TeamClawBackend {
   kind: BackendKind;
   auth: AuthBackend;
@@ -212,4 +343,12 @@ export interface TeamClawBackend {
   messages: MessagesBackend;
   runtime: RuntimeBackend;
   attachments: AttachmentsBackend;
+  teams: TeamsBackend;
+  ideas: IdeasBackend;
+  actors: ActorsBackend;
+  sessionMembers: SessionMembersBackend;
+  shortcuts: ShortcutsBackend;
+  notifications: NotificationsBackend;
+  teamWorkspaceConfig: TeamWorkspaceConfigBackend;
+  telemetry: TelemetryBackend;
 }
