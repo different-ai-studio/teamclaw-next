@@ -1,6 +1,7 @@
 use chrono::Utc;
 use prost::Message;
-use rumqttc::{AsyncClient, QoS};
+use std::sync::Arc;
+use teamclaw_transport::{DeliveryGuarantee, MessagePublisher};
 use uuid::Uuid;
 
 use crate::mqtt::Topics;
@@ -8,12 +9,12 @@ use crate::proto::amux::Envelope as AmuxEnvelope;
 use crate::proto::teamclaw::{IdeaEvent, LiveEventEnvelope, Participant, SessionMessageEnvelope};
 
 pub struct LivePublisher {
-    client: AsyncClient,
+    client: Arc<dyn MessagePublisher>,
     topics: Topics,
 }
 
 impl LivePublisher {
-    pub fn new(client: AsyncClient, team_id: String, device_id: String) -> Self {
+    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, device_id: String) -> Self {
         Self {
             client,
             topics: Topics::new(&team_id, &device_id),
@@ -96,10 +97,10 @@ impl LivePublisher {
 
         self.client
             .publish(
-                self.topics.session_live(session_id),
-                QoS::AtLeastOnce,
-                false,
+                &self.topics.session_live(session_id),
                 payload,
+                false,
+                DeliveryGuarantee::AtLeastOnce,
             )
             .await?;
         Ok(())

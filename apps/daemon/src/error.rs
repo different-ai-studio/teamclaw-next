@@ -6,6 +6,8 @@ pub enum AmuxError {
     Config(String),
     #[error("mqtt error: {0}")]
     Mqtt(#[from] rumqttc::ClientError),
+    #[error("transport error: {0}")]
+    Transport(#[from] teamclaw_transport::PublisherError),
     #[error("proto encode error: {0}")]
     ProtoEncode(#[from] prost::EncodeError),
     #[error("proto decode error: {0}")]

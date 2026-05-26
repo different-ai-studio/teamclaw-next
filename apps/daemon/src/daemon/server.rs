@@ -2,6 +2,7 @@ use rumqttc::{Event, Packet};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use teamclaw_transport::MessagePublisher;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -229,8 +230,9 @@ impl DaemonServer {
         )));
 
         let teamclaw = if let Some(team_id) = &config.team_id {
+            let publisher: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
             Some(crate::teamclaw::SessionManager::new(
-                mqtt.client.clone(),
+                publisher,
                 team_id,
                 &config.device.id,
                 Some(actor_id.clone()),
@@ -759,8 +761,9 @@ impl DaemonServer {
 
             // ── 3. Rebuild teamclaw with new AsyncClient ──
             if let Some(team_id) = self.config.team_id.clone() {
+                let publisher: Arc<dyn MessagePublisher> = Arc::new(self.mqtt.client.clone());
                 self.teamclaw = match crate::teamclaw::SessionManager::new(
-                    self.mqtt.client.clone(),
+                    publisher,
                     &team_id,
                     &self.config.device.id,
                     Some(self.actor_id.clone()),
@@ -4035,7 +4038,7 @@ mod tests {
         let config = test_config();
         let mqtt = test_mqtt(&config.device.id);
         let teamclaw = crate::teamclaw::SessionManager::new(
-            mqtt.client.clone(),
+            Arc::new(mqtt.client.clone()) as Arc<dyn MessagePublisher>,
             "team-test",
             &config.device.id,
             Some("agent-actor".to_string()),

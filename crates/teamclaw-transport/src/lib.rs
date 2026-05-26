@@ -7,9 +7,14 @@
 //! - [`DeliveryGuarantee`] + [`TransportMessage`]: outbound message shape
 //! - [`IncomingFrame`]: inbound message shape (transport-agnostic)
 //! - [`Transport`]: per-protocol low-level publish/subscribe trait
+//! - [`MessagePublisher`]: dyn-safe high-level trait used by daemon modules
+//!   (teamclaw::SessionManager, live, rpc, notify) so they don't depend on
+//!   rumqttc directly
 //! - [`encode_subject`] / [`decode_subject`]: MQTT topic ↔ NATS subject
 
 pub mod nats;
+pub mod publisher;
+pub use publisher::{MessagePublisher, PublisherError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MqttBroker {
