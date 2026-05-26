@@ -17,17 +17,9 @@ function buildCanonicalPartsFromEntry(
   if (!entry) return [];
   const parts: MessagePart[] = [];
 
-  if (entry.thinkingText) {
-    parts.push({
-      id: `${reply?.messageId ?? `${entry.sessionId}:${entry.actorId}:live`}:reasoning`,
-      type: "reasoning",
-      text: entry.thinkingText,
-      content: entry.thinkingText,
-    });
-  }
-
   const orderedParts = entry.parts.filter(
     (part) =>
+      (part.type === "reasoning" && Boolean(part.text || part.content)) ||
       (part.type === "text" && Boolean(part.text || part.content)) ||
       (part.type === "tool-call" && Boolean(part.toolCall)),
   );

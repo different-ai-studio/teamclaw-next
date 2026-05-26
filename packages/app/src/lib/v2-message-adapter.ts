@@ -34,12 +34,14 @@ function kindToRole(kind: MessageKind): SdkMessage["role"] {
 /** 1:1 mapping (legacy path) for messages without a turn_id or for
  * non-assistant roles. */
 export function adaptTeamclawMessageToSdk(m: TeamclawMessage): SdkMessage {
+  const mentionActorIds = parseDisplayMentionActorIds(m);
   return {
     id: m.messageId,
     sessionId: m.sessionId,
     senderActorId: m.senderActorId,
     role: kindToRole(m.kind),
     content: m.content,
+    mentionActorIds,
     modelID: m.model || undefined,
     parts: [
       {
@@ -60,6 +62,13 @@ function parseMetadata(m: TeamclawMessage): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function parseDisplayMentionActorIds(m: TeamclawMessage): string[] {
+  const md = parseMetadata(m);
+  const raw = md.display_mention_actor_ids;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
 function partsJson(m: TeamclawMessage): string {

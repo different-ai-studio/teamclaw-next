@@ -338,6 +338,7 @@ pub struct OutboxRow {
     pub sender_actor_id: String,
     pub content: String,
     pub mention_actor_ids_json: Option<String>,
+    pub display_mention_actor_ids_json: Option<String>,
     pub attachment_urls_json: Option<String>,
     pub state: String,
     pub attempt_count: i64,
@@ -589,6 +590,7 @@ impl LocalCacheStore {
                 sender_actor_id         TEXT NOT NULL,
                 content                 TEXT NOT NULL,
                 mention_actor_ids_json  TEXT,
+                display_mention_actor_ids_json TEXT,
                 attachment_urls_json    TEXT,
                 state                   TEXT NOT NULL,
                 attempt_count           INTEGER NOT NULL DEFAULT 0,
@@ -602,6 +604,13 @@ impl LocalCacheStore {
         )
         .await
         .map_err(|e| format!("Failed to create outbox table: {}", e))?;
+
+        conn.execute(
+            "ALTER TABLE outbox ADD COLUMN display_mention_actor_ids_json TEXT",
+            (),
+        )
+        .await
+        .ok();
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(state, next_attempt_at)",
@@ -1619,10 +1628,10 @@ impl LocalCacheStore {
         conn.execute(
             "INSERT INTO outbox
                 (message_id, team_id, session_id, sender_actor_id, content,
-                 mention_actor_ids_json, attachment_urls_json,
+                 mention_actor_ids_json, display_mention_actor_ids_json, attachment_urls_json,
                  state, attempt_count, last_attempt_at, next_attempt_at, last_error,
                  created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
              ON CONFLICT(message_id) DO UPDATE SET
                 state            = excluded.state,
                 attempt_count    = excluded.attempt_count,
@@ -1637,6 +1646,7 @@ impl LocalCacheStore {
                 row.sender_actor_id.clone(),
                 row.content.clone(),
                 opt_val(&row.mention_actor_ids_json),
+                opt_val(&row.display_mention_actor_ids_json),
                 opt_val(&row.attachment_urls_json),
                 row.state.clone(),
                 row.attempt_count,
@@ -1672,7 +1682,7 @@ impl LocalCacheStore {
         let mut rows = conn
             .query(
                 "SELECT message_id, team_id, session_id, sender_actor_id, content,
-                        mention_actor_ids_json, attachment_urls_json,
+                        mention_actor_ids_json, display_mention_actor_ids_json, attachment_urls_json,
                         state, attempt_count, last_attempt_at, next_attempt_at, last_error,
                         created_at, updated_at
                  FROM outbox ORDER BY created_at ASC",
@@ -1693,14 +1703,15 @@ impl LocalCacheStore {
                 sender_actor_id: row.get::<String>(3).unwrap_or_default(),
                 content: row.get::<String>(4).unwrap_or_default(),
                 mention_actor_ids_json: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
-                attachment_urls_json: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
-                state: row.get::<String>(7).unwrap_or_default(),
-                attempt_count: row.get::<i64>(8).unwrap_or(0),
-                last_attempt_at: row.get::<String>(9).ok().filter(|s| !s.is_empty()),
-                next_attempt_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
-                last_error: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
-                created_at: row.get::<String>(12).unwrap_or_default(),
-                updated_at: row.get::<String>(13).unwrap_or_default(),
+                display_mention_actor_ids_json: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
+                attachment_urls_json: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
+                state: row.get::<String>(8).unwrap_or_default(),
+                attempt_count: row.get::<i64>(9).unwrap_or(0),
+                last_attempt_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
+                next_attempt_at: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
+                last_error: row.get::<String>(12).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(13).unwrap_or_default(),
+                updated_at: row.get::<String>(14).unwrap_or_default(),
             });
         }
         Ok(result)

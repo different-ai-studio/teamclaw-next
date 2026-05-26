@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { StreamingAgentBubble } from "../StreamingAgentBubble";
 import { selectStreamsForSession, useV2StreamingStore } from "@/stores/v2-streaming-store";
 
@@ -223,5 +223,160 @@ describe("StreamingAgentBubble", () => {
     expect(afterIndex).toBeGreaterThanOrEqual(0);
     expect(beforeIndex).toBeLessThan(toolIndex);
     expect(toolIndex).toBeLessThan(afterIndex);
+  });
+
+  it("renders independent thinking blocks in ACP event order and collapses completed ones", () => {
+    const { container } = render(
+      <StreamingAgentBubble
+        entry={{
+          sessionId: "s1",
+          actorId: "agent-a",
+          outputText: "Before tool.",
+          thinkingText: "Plan first.Plan second.Plan third.",
+          parts: [
+            {
+              id: "thinking-1",
+              type: "reasoning",
+              text: "Plan first.",
+              content: "Plan first.",
+            },
+            {
+              id: "text-before",
+              type: "text",
+              text: "Before tool.",
+              content: "Before tool.",
+            },
+            {
+              id: "thinking-2",
+              type: "reasoning",
+              text: "Plan second.",
+              content: "Plan second.",
+            },
+            {
+              id: "tool-1",
+              type: "tool-call",
+              toolCallId: "tool-1",
+              toolCall: {
+                id: "tool-1",
+                name: "grep",
+                status: "completed",
+                arguments: { pattern: "needle" },
+                result: "/tmp/project",
+                startTime: new Date(0),
+              },
+            },
+            {
+              id: "thinking-3",
+              type: "reasoning",
+              text: "Plan third.",
+              content: "Plan third.",
+            },
+          ],
+          toolCalls: [
+            {
+              id: "tool-1",
+              name: "grep",
+              status: "completed",
+              arguments: { pattern: "needle" },
+              result: "/tmp/project",
+              startTime: new Date(0),
+            },
+          ],
+          planEntries: [],
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: Date.now(),
+          active: true,
+        }}
+      />,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("Plan first.");
+    expect(text).not.toContain("Plan second.");
+    expect(text).toContain("Plan third.");
+
+    const thinkingButtons = Array.from(container.querySelectorAll("button")).filter((button) =>
+      button.textContent?.includes("Thinking Process"),
+    );
+    expect(thinkingButtons).toHaveLength(2);
+
+    fireEvent.click(thinkingButtons[0]);
+    fireEvent.click(thinkingButtons[1]);
+
+    const expandedText = container.textContent ?? "";
+    const firstThinkingIndex = expandedText.indexOf("Plan first.");
+    const beforeIndex = expandedText.indexOf("Before tool.");
+    const secondThinkingIndex = expandedText.indexOf("Plan second.");
+    const toolIndex = expandedText.indexOf("Grep");
+    const thirdThinkingIndex = expandedText.indexOf("Plan third.");
+
+    expect(firstThinkingIndex).toBeGreaterThanOrEqual(0);
+    expect(beforeIndex).toBeGreaterThanOrEqual(0);
+    expect(secondThinkingIndex).toBeGreaterThanOrEqual(0);
+    expect(toolIndex).toBeGreaterThanOrEqual(0);
+    expect(thirdThinkingIndex).toBeGreaterThanOrEqual(0);
+    expect(firstThinkingIndex).toBeLessThan(beforeIndex);
+    expect(beforeIndex).toBeLessThan(secondThinkingIndex);
+    expect(secondThinkingIndex).toBeLessThan(toolIndex);
+    expect(toolIndex).toBeLessThan(thirdThinkingIndex);
+  });
+
+  it("keeps finished thinking blocks collapsed until opened", () => {
+    const { container } = render(
+      <StreamingAgentBubble
+        entry={{
+          sessionId: "s1",
+          actorId: "agent-a",
+          outputText: "Before tool.",
+          thinkingText: "Plan first.Plan second.",
+          parts: [
+            {
+              id: "thinking-1",
+              type: "reasoning",
+              text: "Plan first.",
+              content: "Plan first.",
+            },
+            {
+              id: "text-before",
+              type: "text",
+              text: "Before tool.",
+              content: "Before tool.",
+            },
+            {
+              id: "thinking-2",
+              type: "reasoning",
+              text: "Plan second.",
+              content: "Plan second.",
+            },
+          ],
+          toolCalls: [],
+          planEntries: [],
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: Date.now(),
+          active: false,
+        }}
+      />,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("Plan first.");
+    expect(text).not.toContain("Plan second.");
+    expect(text).toContain("Before tool.");
+
+    const thinkingButtons = Array.from(container.querySelectorAll("button")).filter((button) =>
+      button.textContent?.includes("Thinking Process"),
+    );
+    expect(thinkingButtons).toHaveLength(2);
+
+    fireEvent.click(thinkingButtons[0]);
+    fireEvent.click(thinkingButtons[1]);
+
+    const expandedText = container.textContent ?? "";
+    expect(expandedText).toContain("Plan first.");
+    expect(expandedText).toContain("Plan second.");
   });
 });

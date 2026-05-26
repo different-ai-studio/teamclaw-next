@@ -59,6 +59,26 @@ describe("adaptTeamclawMessages", () => {
     expect(result[0].role).toBe("user");
   });
 
+  it("keeps routing mentions as metadata without adding them to user content", () => {
+    const msgs = [
+      tmsg({
+        kind: MessageKind.TEXT,
+        content: "执行pwd",
+        metadataJson: JSON.stringify({
+          mention_actor_ids: ["actor-mac2"],
+          display_mention_actor_ids: ["actor-mac2"],
+        }),
+        turnId: "",
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("执行pwd");
+    expect(result[0].mentionActorIds).toEqual(["actor-mac2"]);
+  });
+
   it("passes through SYSTEM messages with turnId (kindToRole → not assistant)", () => {
     // SYSTEM is role 'system' not 'assistant', so it bypasses grouping
     const msgs = [

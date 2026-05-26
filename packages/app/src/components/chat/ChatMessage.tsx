@@ -117,12 +117,19 @@ export const ChatMessage = React.memo(function ChatMessage({
     () =>
       latestMessage.parts.filter(
         (p) =>
+          (p.type === "reasoning" && Boolean(p.text || p.content)) ||
           (p.type === "text" && Boolean(p.text || p.content)) ||
           (p.type === "tool-call" && Boolean(p.toolCall)),
       ),
     [latestMessage.parts],
   );
   const hasOrderedToolParts = orderedRenderableParts.some((p) => p.type === "tool-call");
+  const hasOrderedReasoningParts = orderedRenderableParts.some((p) => p.type === "reasoning");
+  const shouldRenderOrderedAssistantParts =
+    !isUser &&
+    (hasOrderedToolParts ||
+      (hasOrderedReasoningParts &&
+        (orderedRenderableParts.some((p) => p.type === "text") || !textContent)));
 
   const hasActiveToolCalls =
     latestMessage.toolCalls?.some(
@@ -254,7 +261,7 @@ export const ChatMessage = React.memo(function ChatMessage({
       )}
 
       {/* Reasoning block - always before main content */}
-      {!isUser && hasReasoning && (
+      {!isUser && hasReasoning && !hasOrderedReasoningParts && (
         <div className="mb-0.5">
           <ThinkingBlock
             content={reasoningContent}
@@ -273,7 +280,11 @@ export const ChatMessage = React.memo(function ChatMessage({
         <Message from="user" basePath={basePath} className="items-end gap-1.5">
           <MessageStatusDot messageId={message.id} />
           <MessageContent>
-            <UserMessageWithMentions content={textContent} basePath={basePath} />
+            <UserMessageWithMentions
+              content={textContent}
+              basePath={basePath}
+              leadingMentionActorIds={latestMessage.mentionActorIds}
+            />
           </MessageContent>
         </Message>
       )}
@@ -301,9 +312,25 @@ export const ChatMessage = React.memo(function ChatMessage({
       )}
 
       {/* Assistant message - either dynamic UI or text */}
-      {!isUser && hasOrderedToolParts && (
+      {!isUser && shouldRenderOrderedAssistantParts && (
         <div className="mt-2 space-y-1">
-          {orderedRenderableParts.map((part) => {
+          {orderedRenderableParts.map((part, index) => {
+            if (part.type === "reasoning") {
+              const reasoningText = part.text || part.content || "";
+              if (!reasoningText) return null;
+              return (
+                <ThinkingBlock
+                  key={part.id}
+                  content={reasoningText}
+                  isStreaming={
+                    latestMessage.isStreaming &&
+                    index === orderedRenderableParts.length - 1 &&
+                    !textContent
+                  }
+                  isOpen={false}
+                />
+              );
+            }
             if (part.type === "tool-call" && part.toolCall) {
               return <ToolCallCard key={part.id} toolCall={part.toolCall} />;
             }
@@ -327,7 +354,7 @@ export const ChatMessage = React.memo(function ChatMessage({
         </div>
       )}
 
-      {!isUser && !hasOrderedToolParts && textContent && (
+      {!isUser && !shouldRenderOrderedAssistantParts && textContent && (
         <>
           {uiTree ? (
             <div className="mt-2">

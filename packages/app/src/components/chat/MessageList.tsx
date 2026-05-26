@@ -7,7 +7,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 import { useSessionStore, type Message } from "@/stores/session";
 import { useStreamingStore } from "@/stores/streaming";
-import { useV2StreamingStore } from "@/stores/v2-streaming-store";
+import { useV2StreamingStore, type AgentStreamEntry } from "@/stores/v2-streaming-store";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "./ChatMessage";
 import { SAFE_BOTTOM_SPACING, NEAR_BOTTOM_THRESHOLD } from "./layout-constants";
@@ -79,20 +79,42 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
     // v2 streaming bubbles render via bottomContent and grow as acp.event
     // deltas arrive into useV2StreamingStore. The legacy streamingContent
     // trigger stays 0 on the v2 path, so we need a dedicated trigger that
-    // bumps on every output/thinking/tool/todo change for active streams in
-    // the displayed session.
+    // follows both active streams and recently finalized streams whose tool
+    // results can still be enriched after terminal status.
     const v2StreamScrollTrigger = useV2StreamingStore((s) => {
+      if (!activeSessionId) return 0;
       let total = 0;
-      for (const key in s.byKey) {
-        const entry = s.byKey[key];
-        if (!entry.active) continue;
-        if (entry.sessionId !== activeSessionId) continue;
+      const addEntry = (entry: AgentStreamEntry) => {
+        if (entry.sessionId !== activeSessionId) return;
         total +=
+          entry.lastUpdate +
           entry.outputText.length +
           entry.thinkingText.length +
-          entry.toolCalls.length +
-          entry.planEntries.length;
+          entry.parts.reduce(
+            (sum, part) => sum + (part.text || part.content || "").length,
+            0,
+          ) +
+          entry.toolCalls.reduce(
+            (sum, toolCall) =>
+              sum +
+              toolCall.id.length +
+              toolCall.name.length +
+              toolCall.status.length +
+              String(toolCall.result || "").length,
+            0,
+          ) +
+          entry.planEntries.reduce(
+            (sum, item) => sum + item.content.length + item.status.length,
+            0,
+          ) +
+          (entry.pendingPermission ? 1 : 0) +
+          (entry.errorMessage?.length ?? 0) +
+          (entry.errorDetails?.length ?? 0);
+      };
+      for (const key in s.byKey) {
+        addEntry(s.byKey[key]);
       }
+      for (const entry of s.archived) addEntry(entry);
       return total;
     });
 

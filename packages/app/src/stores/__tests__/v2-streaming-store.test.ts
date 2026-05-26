@@ -25,6 +25,46 @@ describe("v2-streaming-store", () => {
     expect(streams[0].outputText).toBe("answer");
   });
 
+  it("appendThinking merges overlapping reasoning chunks", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendThinking("s1", "a1", "This");
+    store.appendThinking("s1", "a1", "This is");
+    store.appendThinking("s1", "a1", " is the");
+    store.appendThinking("s1", "a1", " the 8th");
+    store.appendThinking("s1", "a1", "8th time");
+
+    const streams = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(streams[0].thinkingText).toBe("This is the 8th time");
+  });
+
+  it("keeps thinking segments in ACP event order", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendThinking("s1", "a1", "Plan first.");
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.appendThinking("s1", "a1", "Plan second.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "pwd",
+      params: { command: "pwd" },
+      toolKind: "execute",
+    });
+    store.appendThinking("s1", "a1", "Plan third.");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.thinkingText).toBe("Plan first.Plan second.Plan third.");
+    expect(stream.parts.map((part) => part.type)).toEqual([
+      "reasoning",
+      "text",
+      "reasoning",
+      "tool-call",
+      "reasoning",
+    ]);
+    expect(stream.parts[0].text).toBe("Plan first.");
+    expect(stream.parts[2].text).toBe("Plan second.");
+    expect(stream.parts[4].text).toBe("Plan third.");
+  });
+
   it("clearActor removes only that actor", () => {
     useV2StreamingStore.getState().appendOutput("s1", "a1", "x");
     useV2StreamingStore.getState().appendOutput("s1", "a2", "y");

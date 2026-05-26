@@ -922,6 +922,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
     const memberIds = mentions.map((m) => m.id);
     const agentIds = allAgents.map((a) => a.id);
+    const displayMentionActorIds = Array.from(new Set(agentIds.filter(Boolean)));
     const mentionActorIds = await resolveMentionActorIdsForSession(
       sid,
       memberIds,
@@ -992,14 +993,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     const parts: string[] = [];
 
-    // Prepend literal @AgentName tokens so the rendered user message
-    // visibly carries the mention (matches @-member rendering and makes
-    // history readable). Picker auto-mentions land here too via
-    // extraMentionAgents.
-    const agentMentionPrefix = allAgents.length > 0
-      ? allAgents.map((a) => `@${a.displayName}`).join(" ")
-      : "";
-
     // Add person mentions at the beginning
     if (personMentions.length > 0) {
       parts.push(`[Mentioned: ${personMentions.join(', ')}]`);
@@ -1012,13 +1005,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
     }
 
-    // Add the processed text (with inline [File: ...] replacements),
-    // prefixed by agent @-mentions if any.
-    const bodyText = agentMentionPrefix
-      ? (processedText.trim()
-        ? `${agentMentionPrefix} ${processedText.trim()}`
-        : agentMentionPrefix)
-      : processedText.trim();
+    // Add the processed text (with inline [File: ...] replacements). Agent
+    // mentions are rendered from metadata only; they must not become prompt
+    // text delivered to the runtime.
+    const bodyText = processedText.trim();
     if (bodyText) {
       parts.push(bodyText);
     }
@@ -1105,6 +1095,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
           const outgoingModel = selectedModelOption?.id ?? "";
+          const outgoingMetadata = {
+            mention_actor_ids: mentionActorIds,
+            ...(displayMentionActorIds.length > 0
+              ? { display_mention_actor_ids: displayMentionActorIds }
+              : {}),
+            ...(attachmentUrls.length > 0
+              ? { attachment_urls: attachmentUrls }
+              : {}),
+          };
           sessionFlowLog("send.proto_created", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1122,6 +1121,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             senderActorId,
             kind: MessageKind.TEXT,
             content: outgoing,
+            metadataJson: JSON.stringify(outgoingMetadata),
             createdAt,
             model: outgoingModel,
           });
@@ -1153,6 +1153,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             content: outgoing,
             model: outgoingModel || null,
             mentionActorIds,
+            displayMentionActorIds,
             attachmentUrls,
           });
           sessionFlowLog("send.outbox_enqueue.ok", {
@@ -1517,7 +1518,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       ? error
       : null;
 
-  const messageBottomContent = !isViewingChild ? (
+  const messageBottomContent = !isViewingChild &&
+    (v2Streams.length > 0 || visibleSessionError || visibleError) ? (
     <>
       {v2Streams.map(entry => {
         const bubbleKey = "archiveId" in entry

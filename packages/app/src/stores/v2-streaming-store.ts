@@ -96,6 +96,17 @@ function entryParts(entry: AgentStreamEntry): MessagePart[] {
   return Array.isArray(entry.parts) ? entry.parts : [];
 }
 
+function appendOverlappingChunk(existing: string, chunk: string): string {
+  if (!existing || !chunk) return existing + chunk;
+  const maxOverlap = Math.min(existing.length, chunk.length);
+  for (let length = maxOverlap; length > 0; length -= 1) {
+    if (existing.endsWith(chunk.slice(0, length))) {
+      return existing + chunk.slice(length);
+    }
+  }
+  return existing + chunk;
+}
+
 function appendTextPart(parts: MessagePart[], delta: string): MessagePart[] {
   const last = parts[parts.length - 1];
   if (last?.type === "text") {
@@ -114,6 +125,30 @@ function appendTextPart(parts: MessagePart[], delta: string): MessagePart[] {
     {
       id: `stream:text:${Date.now()}:${parts.length}`,
       type: "text",
+      text: delta,
+      content: delta,
+    },
+  ];
+}
+
+function appendReasoningPart(parts: MessagePart[], delta: string): MessagePart[] {
+  const last = parts[parts.length - 1];
+  if (last?.type === "reasoning") {
+    const text = appendOverlappingChunk(last.text || last.content || "", delta);
+    return [
+      ...parts.slice(0, -1),
+      {
+        ...last,
+        text,
+        content: text,
+      },
+    ];
+  }
+  return [
+    ...parts,
+    {
+      id: `stream:reasoning:${Date.now()}:${parts.length}`,
+      type: "reasoning",
       text: delta,
       content: delta,
     },
@@ -382,7 +417,8 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
-          thinkingText: entry.thinkingText + delta,
+          thinkingText: appendOverlappingChunk(entry.thinkingText, delta),
+          parts: appendReasoningPart(entryParts(entry), delta),
           lastUpdate: Date.now(),
           active: true,
         },

@@ -83,6 +83,7 @@ export type OutboxRow = {
   content: string;
   model?: string | null;
   mentionActorIdsJson?: string | null;
+  displayMentionActorIdsJson?: string | null;
   attachmentUrlsJson?: string | null;
   /** 'pending' | 'inFlight' | 'delivered' | 'failed' */
   state: string;

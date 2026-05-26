@@ -30,7 +30,24 @@ function ErrorCard({ message, details }: { message: string; details: string }) {
   );
 }
 
-function renderOrderedPart(part: MessagePart, showText: boolean) {
+function renderOrderedPart(
+  part: MessagePart,
+  showText: boolean,
+  isStreamingReasoning: boolean,
+) {
+  if (part.type === "reasoning") {
+    const text = part.text || part.content || "";
+    if (!text) return null;
+    return (
+      <ThinkingBlock
+        key={part.id}
+        content={text}
+        isStreaming={isStreamingReasoning}
+        isOpen={false}
+      />
+    );
+  }
+
   if (part.type === "tool-call" && part.toolCall) {
     return (
       <div
@@ -64,19 +81,21 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   // above the prompt input (v1 style).
   const orderedParts = entry.parts.filter(
     (part) =>
+      (part.type === "reasoning" && Boolean(part.text || part.content)) ||
       (part.type === "text" && Boolean(part.text || part.content)) ||
       (part.type === "tool-call" && Boolean(part.toolCall)),
   );
   const isArchived = "archiveId" in entry;
   const showText = entry.active || !isArchived;
   const visibleOrderedParts = orderedParts.filter(
-    (part) => part.type === "tool-call" || showText,
+    (part) => part.type === "reasoning" || part.type === "tool-call" || showText,
   );
   const hasVisibleOrderedParts = visibleOrderedParts.length > 0;
   const showOutput =
     showText && !hasVisibleOrderedParts && entry.outputText.length > 0;
   const hasFallbackToolCalls = !hasVisibleOrderedParts && entry.toolCalls.length > 0;
-  const hasThinking = entry.thinkingText.length > 0;
+  const hasOrderedThinking = orderedParts.some((part) => part.type === "reasoning");
+  const hasThinking = !hasOrderedThinking && entry.thinkingText.length > 0;
   const hasError = !!entry.errorMessage;
 
   if (!hasVisibleOrderedParts && !showOutput && !hasFallbackToolCalls && !hasThinking && !hasError) {
@@ -98,13 +117,21 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
             <ThinkingBlock
               content={entry.thinkingText}
               isStreaming={entry.active}
-              isOpen={!entry.active}
+              isOpen={false}
             />
           )}
 
           {hasVisibleOrderedParts && (
             <div className="space-y-1">
-              {visibleOrderedParts.map((part) => renderOrderedPart(part, showText))}
+              {visibleOrderedParts.map((part, index) =>
+                renderOrderedPart(
+                  part,
+                  showText,
+                  entry.active &&
+                    part.type === "reasoning" &&
+                    index === visibleOrderedParts.length - 1,
+                ),
+              )}
             </div>
           )}
 

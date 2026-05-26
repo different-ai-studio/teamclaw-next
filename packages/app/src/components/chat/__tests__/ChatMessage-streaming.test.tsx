@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent } from '@testing-library/react';
 import { useStreamingStore } from '@/stores/streaming';
 import { useSessionStore, sessionLookupCache } from '@/stores/session';
 
@@ -215,5 +215,105 @@ describe('ChatMessage streaming typewriter', () => {
     );
 
     expect(container.textContent).toContain('Child stream in progress');
+  });
+
+  it('keeps persisted reasoning parts collapsed until opened', async () => {
+    const ChatMessage = await importChatMessage();
+
+    const message = makeMessage({
+      content: 'Before tool.\n\nAfter tool.',
+      parts: [
+        {
+          id: 'thinking-1',
+          type: 'reasoning',
+          text: 'Plan first.',
+          content: 'Plan first.',
+        },
+        {
+          id: 'text-before',
+          type: 'text',
+          text: 'Before tool.',
+          content: 'Before tool.',
+        },
+        {
+          id: 'thinking-2',
+          type: 'reasoning',
+          text: 'Plan second.',
+          content: 'Plan second.',
+        },
+        {
+          id: 'tool-1',
+          type: 'tool-call',
+          toolCallId: 'tool-1',
+          toolCall: {
+            id: 'tool-1',
+            name: 'grep',
+            status: 'completed',
+            arguments: { pattern: 'needle' },
+            result: 'result',
+            startTime: new Date(0),
+          },
+        },
+        {
+          id: 'thinking-3',
+          type: 'reasoning',
+          text: 'Plan third.',
+          content: 'Plan third.',
+        },
+        {
+          id: 'text-after',
+          type: 'text',
+          text: 'After tool.',
+          content: 'After tool.',
+        },
+      ],
+      toolCalls: [
+        {
+          id: 'tool-1',
+          name: 'grep',
+          status: 'completed',
+          arguments: { pattern: 'needle' },
+          result: 'result',
+          startTime: new Date(0),
+        },
+      ],
+    });
+
+    const { container } = render(<ChatMessage message={message} />);
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Plan first.');
+    expect(text).not.toContain('Plan second.');
+    expect(text).not.toContain('Plan third.');
+    expect(text).toContain('Before tool.');
+    expect(text).toContain('After tool.');
+
+    const thinkingButtons = Array.from(container.querySelectorAll('button')).filter((button) =>
+      button.textContent?.includes('Thinking Process'),
+    );
+    expect(thinkingButtons).toHaveLength(3);
+
+    fireEvent.click(thinkingButtons[0]);
+    fireEvent.click(thinkingButtons[1]);
+    fireEvent.click(thinkingButtons[2]);
+
+    const expandedText = container.textContent ?? '';
+    const firstThinkingIndex = expandedText.indexOf('Plan first.');
+    const beforeIndex = expandedText.indexOf('Before tool.');
+    const secondThinkingIndex = expandedText.indexOf('Plan second.');
+    const toolIndex = expandedText.indexOf('Grep');
+    const thirdThinkingIndex = expandedText.indexOf('Plan third.');
+    const afterIndex = expandedText.indexOf('After tool.');
+
+    expect(firstThinkingIndex).toBeGreaterThanOrEqual(0);
+    expect(beforeIndex).toBeGreaterThanOrEqual(0);
+    expect(secondThinkingIndex).toBeGreaterThanOrEqual(0);
+    expect(toolIndex).toBeGreaterThanOrEqual(0);
+    expect(thirdThinkingIndex).toBeGreaterThanOrEqual(0);
+    expect(afterIndex).toBeGreaterThanOrEqual(0);
+    expect(firstThinkingIndex).toBeLessThan(beforeIndex);
+    expect(beforeIndex).toBeLessThan(secondThinkingIndex);
+    expect(secondThinkingIndex).toBeLessThan(toolIndex);
+    expect(toolIndex).toBeLessThan(thirdThinkingIndex);
+    expect(thirdThinkingIndex).toBeLessThan(afterIndex);
   });
 });

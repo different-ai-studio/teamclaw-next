@@ -21,6 +21,7 @@ export interface OutboxEntry {
   content: string;
   model?: string | null;
   mentionActorIds: string[];
+  displayMentionActorIds?: string[];
   attachmentUrls: string[];
   state: OutboxState;
   attemptCount: number;
@@ -77,6 +78,9 @@ const rowToEntry = (r: OutboxRow): OutboxEntry => ({
   mentionActorIds: r.mentionActorIdsJson
     ? (JSON.parse(r.mentionActorIdsJson) as string[])
     : [],
+  displayMentionActorIds: r.displayMentionActorIdsJson
+    ? (JSON.parse(r.displayMentionActorIdsJson) as string[])
+    : [],
   attachmentUrls: r.attachmentUrlsJson
     ? (JSON.parse(r.attachmentUrlsJson) as string[])
     : [],
@@ -98,6 +102,10 @@ const entryToRow = (e: OutboxEntry): OutboxRow => ({
   model: e.model ?? null,
   mentionActorIdsJson:
     e.mentionActorIds.length > 0 ? JSON.stringify(e.mentionActorIds) : null,
+  displayMentionActorIdsJson:
+    e.displayMentionActorIds && e.displayMentionActorIds.length > 0
+      ? JSON.stringify(e.displayMentionActorIds)
+      : null,
   attachmentUrlsJson:
     e.attachmentUrls.length > 0 ? JSON.stringify(e.attachmentUrls) : null,
   state: e.state,
@@ -143,6 +151,7 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
       senderActorId: input.senderActorId,
       model: input.model ?? null,
       mentionActorCount: input.mentionActorIds.length,
+      displayMentionActorCount: input.displayMentionActorIds?.length ?? 0,
       attachmentUrlCount: input.attachmentUrls.length,
       ...summarizeText(input.content),
     });
