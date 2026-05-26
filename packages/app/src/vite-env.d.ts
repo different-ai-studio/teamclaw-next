@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;
   readonly VITE_POCKETBASE_URL?: string;
+  readonly VITE_POCKETBASE_PREVIEW_EMAIL?: string;
+  readonly VITE_POCKETBASE_PREVIEW_PASSWORD?: string;
   readonly VITE_MQTT_HOST?: string;
   readonly VITE_MQTT_PORT?: string;
   readonly VITE_MQTT_USE_TLS?: string;
