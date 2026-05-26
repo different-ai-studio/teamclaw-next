@@ -1531,6 +1531,27 @@ mod sync_precheck_tests {
         assert_eq!(paths, vec!["my new file.txt".to_string()]);
     }
 
+    #[test]
+    fn team_config_accepts_legacy_team_id_but_does_not_serialize_it() {
+        let config: TeamConfig = serde_json::from_value(serde_json::json!({
+            "gitUrl": "https://example.com/shared.git",
+            "enabled": true,
+            "lastSyncAt": null,
+            "sharedDirName": "teamclaw",
+            "envSecret": "secret",
+            "gitToken": "token",
+            "gitBranch": "main",
+            "teamId": "legacy-team-id"
+        }))
+        .unwrap();
+
+        let value = serde_json::to_value(config).unwrap();
+        assert_eq!(value["gitUrl"], "https://example.com/shared.git");
+        assert_eq!(value["gitBranch"], "main");
+        assert_eq!(value["gitToken"], "token");
+        assert!(value.get("teamId").is_none());
+    }
+
     // Note: `resolve_workspace_path` integration test removed. Constructing a
     // `WebviewWindow` in a unit test is impractical, and the "explicit beats
     // fallback" logic is now a trivial early-return inside the function.

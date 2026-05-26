@@ -4200,6 +4200,68 @@ mod tests {
         }
     }
 
+    #[test]
+    fn loads_team_shared_config_from_workspace_file() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".teamclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("teamclaw.json"),
+            serde_json::json!({
+                "team": {
+                    "gitUrl": "https://example.com/shared.git",
+                    "gitBranch": "main",
+                    "gitToken": "token",
+                    "sharedDirName": "teamclaw",
+                    "envSecret": "secret",
+                    "enabled": true
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let config = load_team_shared_config_for_workspace(tmp.path()).unwrap();
+
+        assert_eq!(
+            config.git_url.as_deref(),
+            Some("https://example.com/shared.git")
+        );
+        assert_eq!(config.git_branch.as_deref(), Some("main"));
+        assert_eq!(config.git_token.as_deref(), Some("token"));
+        assert_eq!(config.shared_dir_name, "teamclaw");
+        assert_eq!(config.env_secret.as_deref(), Some("secret"));
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn ignores_disabled_or_unconfigured_team_shared_config() {
+        for team in [
+            serde_json::json!({
+                "gitUrl": "https://example.com/shared.git",
+                "enabled": false
+            }),
+            serde_json::json!({
+                "gitUrl": "",
+                "enabled": true
+            }),
+            serde_json::json!({
+                "enabled": true
+            }),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let config_dir = tmp.path().join(".teamclaw");
+            std::fs::create_dir_all(&config_dir).unwrap();
+            std::fs::write(
+                config_dir.join("teamclaw.json"),
+                serde_json::json!({ "team": team }).to_string(),
+            )
+            .unwrap();
+
+            assert!(load_team_shared_config_for_workspace(tmp.path()).is_none());
+        }
+    }
+
     #[tokio::test]
     async fn auto_restart_offline_sessions_is_noop_without_membership() {
         // The default test fixture has no teamclaw memberships (no

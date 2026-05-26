@@ -191,6 +191,91 @@ describe('TeamGitConfig workspace-aware calls', () => {
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
   })
 
+  it('stores HTTPS branch and token only in the local workspace config', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
+      if (cmd === 'get_team_config') return null
+      if (cmd === 'team_shared_git_setup') return { sharedDirPath: '/workspace-a/teamclaw' }
+      if (cmd === 'save_team_config') return null
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    await screen.findByPlaceholderText('https://github.com/team/shared-workspace.git')
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/team/shared-workspace.git'), {
+      target: { value: 'https://example.com/private.git' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('main'), {
+      target: { value: 'release' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('glpat-xxxxxxxxxxxxxxxxxxxx'), {
+      target: { value: 'glpat-secret' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Configure Team Shared Directory/ }))
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_setup', {
+        config: {
+          workspacePath: '/workspace-a',
+          gitUrl: 'https://example.com/private.git',
+          gitBranch: 'release',
+          gitToken: 'glpat-secret',
+          sharedDirName: 'teamclaw',
+        },
+      })
+    })
+    expect(mockInvoke).toHaveBeenCalledWith('save_team_config', {
+      team: expect.objectContaining({
+        gitUrl: 'https://example.com/private.git',
+        gitBranch: 'release',
+        gitToken: 'glpat-secret',
+        sharedDirName: 'teamclaw',
+      }),
+      workspacePath: '/workspace-a',
+    })
+  })
+
+  it('does not persist a token for SSH repositories', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
+      if (cmd === 'get_team_config') return null
+      if (cmd === 'team_shared_git_setup') return { sharedDirPath: '/workspace-a/teamclaw' }
+      if (cmd === 'save_team_config') return null
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    await screen.findByPlaceholderText('https://github.com/team/shared-workspace.git')
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/team/shared-workspace.git'), {
+      target: { value: 'git@example.com:team/private.git' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('glpat-xxxxxxxxxxxxxxxxxxxx'), {
+      target: { value: 'glpat-secret' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Configure Team Shared Directory/ }))
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_setup', {
+        config: {
+          workspacePath: '/workspace-a',
+          gitUrl: 'git@example.com:team/private.git',
+          gitBranch: null,
+          gitToken: null,
+          sharedDirName: 'teamclaw',
+        },
+      })
+    })
+    expect(mockInvoke).toHaveBeenCalledWith('save_team_config', {
+      team: expect.objectContaining({
+        gitUrl: 'git@example.com:team/private.git',
+        gitToken: null,
+      }),
+      workspacePath: '/workspace-a',
+    })
+  })
+
   it('syncs configured teams through the shared git command', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
