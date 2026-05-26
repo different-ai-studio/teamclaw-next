@@ -67,6 +67,27 @@ fn load_team_runtime_env(
     }
 }
 
+fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamWorkspaceConfigRow) {
+    match crate::team_shared_git::setup_or_sync_shared_dir(workspace_root, config) {
+        Ok(status) => {
+            if status.synced {
+                info!(
+                    shared_dir = %status.shared_dir_path.display(),
+                    "team shared directory synced"
+                );
+            }
+        }
+        Err(e) => {
+            warn!(
+                workspace = %workspace_root.display(),
+                shared_dir_name = %config.shared_dir_name,
+                error = %e,
+                "team shared directory sync failed"
+            );
+        }
+    }
+}
+
 /// Per-session plan emitted by
 /// [`DaemonServer::plan_auto_restart_offline_sessions`]. Sessions that pass
 /// every filter (have a prior runtime, have unread from someone other than
@@ -662,6 +683,28 @@ impl DaemonServer {
         }
     }
 
+    async fn sync_team_shared_dirs_for_known_workspaces(&self) {
+        let config = match self
+            .supabase
+            .get_team_workspace_config(self.supabase.team_id())
+            .await
+        {
+            Ok(Some(config)) => config,
+            Ok(None) => return,
+            Err(e) => {
+                warn!("failed to fetch team workspace config for startup sync: {e}");
+                return;
+            }
+        };
+
+        for workspace in &self.workspaces.workspaces {
+            if workspace.path.trim().is_empty() {
+                continue;
+            }
+            sync_team_shared_dir_for_workspace(Path::new(&workspace.path), &config);
+        }
+    }
+
     /// Run the daemon. When `shutdown` resolves, the inner loop exits
     /// gracefully — channels are shut down (consuming `shutdown(self)`) and
     /// `Ok(())` is returned. Without a shutdown signal the daemon runs
@@ -678,6 +721,7 @@ impl DaemonServer {
         // daemon startup. This runs before the MQTT loop so a misconfigured
         // channel doesn't delay collab connectivity.
         self.start_channels().await;
+        self.sync_team_shared_dirs_for_known_workspaces().await;
 
         // Bind the control socket and spawn a listener that funnels parsed
         // commands into the main loop via mpsc. Done after channel start so
@@ -3383,26 +3427,7 @@ impl DaemonServer {
             }
         };
         let extra_env = if let Some(config) = team_workspace_config.as_ref() {
-            match crate::team_shared_git::setup_or_sync_shared_dir(
-                Path::new(&resolved_worktree),
-                config,
-            ) {
-                Ok(status) => {
-                    if status.synced {
-                        info!(
-                            shared_dir = %status.shared_dir_path.display(),
-                            "team shared directory synced"
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        shared_dir_name = %config.shared_dir_name,
-                        error = %e,
-                        "team shared directory sync failed"
-                    );
-                }
-            }
+            sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), config);
             load_team_runtime_env(Path::new(&resolved_worktree), config)
         } else {
             HashMap::new()

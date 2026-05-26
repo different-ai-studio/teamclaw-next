@@ -1420,7 +1420,7 @@ pub async fn team_sync_repo(
     crate::commands::team_shared_git::sync_shared_git_repo(&config, Some(&secrets_state), force)
 }
 
-/// 1.6 - Disconnect team repo: remove workspace/teamclaw-team directory
+/// 1.6 - Disconnect team repo: remove the configured shared team directory
 #[tauri::command]
 pub async fn team_disconnect_repo(
     workspace_path: Option<String>,
@@ -1428,9 +1428,18 @@ pub async fn team_disconnect_repo(
     registry: State<'_, crate::commands::window::WindowRegistry>,
 ) -> Result<TeamGitResult, String> {
     let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
-    let team_dir = get_team_repo_path(&workspace_path);
+    let shared_dir_name = read_workspace_config(&workspace_path)
+        .ok()
+        .and_then(|json| json.get("team").cloned())
+        .and_then(|value| serde_json::from_value::<TeamConfig>(value).ok())
+        .map(|team| team.shared_dir_name)
+        .unwrap_or_else(default_shared_dir_name);
+    let team_dir = crate::commands::team_shared_git::shared_dir_path(
+        &workspace_path,
+        Some(shared_dir_name.as_str()),
+    )?;
 
-    if !Path::new(&team_dir).exists() {
+    if !team_dir.exists() {
         return Ok(TeamGitResult {
             success: true,
             message: "Team folder not found, already disconnected".to_string(),
@@ -1439,7 +1448,7 @@ pub async fn team_disconnect_repo(
     }
 
     std::fs::remove_dir_all(&team_dir)
-        .map_err(|e| format!("Failed to remove {}: {}", TEAM_REPO_DIR, e))?;
+        .map_err(|e| format!("Failed to remove {}: {e}", team_dir.display()))?;
 
     Ok(TeamGitResult {
         success: true,
