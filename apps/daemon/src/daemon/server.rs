@@ -66,6 +66,18 @@ pub struct DaemonServer {
     /// without callers having to thread the path through every helper.
     config_path: PathBuf,
     mqtt: MqttClient,
+    /// Set when running on the NATS transport (`config.transport.kind = "nats"`).
+    /// Mutually exclusive with the MQTT event loop in `mqtt`. On the MQTT path
+    /// this stays `None` and `mqtt` is the live backend.
+    nats: Option<crate::nats::NatsBackend>,
+    /// Unified publisher handle. Set to `mqtt.client` on the MQTT path and
+    /// to `nats.client` on the NATS path during connect. All publishing
+    /// downstream (Publisher::new_from_handle, teamclaw, channels) reads
+    /// this so the same handler code works for both backends.
+    publisher_handle: Arc<dyn MessagePublisher>,
+    /// Mirror of the active backend's `Topics`. Updated alongside
+    /// `publisher_handle` during connect/reconnect.
+    topics: crate::mqtt::Topics,
     agents: Arc<AsyncMutex<RuntimeManager>>,
     auth: AuthManager,
     peers: PeerTracker,
@@ -229,10 +241,12 @@ impl DaemonServer {
             Some(supabase.clone()),
         )));
 
+        let publisher_handle: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
+        let topics = mqtt.topics.clone();
+
         let teamclaw = if let Some(team_id) = &config.team_id {
-            let publisher: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
             Some(crate::teamclaw::SessionManager::new(
-                publisher,
+                publisher_handle.clone(),
                 team_id,
                 &config.device.id,
                 Some(actor_id.clone()),
@@ -246,6 +260,9 @@ impl DaemonServer {
             config,
             config_path: config_path.to_path_buf(),
             mqtt,
+            nats: None,
+            publisher_handle,
+            topics,
             agents,
             auth,
             peers,
@@ -669,8 +686,6 @@ impl DaemonServer {
         let sock_path = DaemonConfig::sock_path();
         spawn_sock_listener(sock_path.clone(), sock_tx);
 
-        tokio::pin!(shutdown);
-
         // One-time setup before the reconnect loop.
         // Heartbeat runs independently of MQTT session.
         {
@@ -730,6 +745,16 @@ impl DaemonServer {
             });
         }
 
+        // Dispatch to the NATS transport when the operator opted in via
+        // `[transport] kind = "nats"`. The MQTT path below is unchanged.
+        if matches!(
+            self.config.transport.as_ref().map(|t| t.kind),
+            Some(crate::config::TransportKind::Nats)
+        ) {
+            return self.run_nats(shutdown, sock_rx, sock_path).await;
+        }
+
+        tokio::pin!(shutdown);
         let mut first_connect = true;
 
         'outer: loop {
@@ -761,9 +786,10 @@ impl DaemonServer {
 
             // ── 3. Rebuild teamclaw with new AsyncClient ──
             if let Some(team_id) = self.config.team_id.clone() {
-                let publisher: Arc<dyn MessagePublisher> = Arc::new(self.mqtt.client.clone());
+                self.publisher_handle = Arc::new(self.mqtt.client.clone());
+                self.topics = self.mqtt.topics.clone();
                 self.teamclaw = match crate::teamclaw::SessionManager::new(
-                    publisher,
+                    self.publisher_handle.clone(),
                     &team_id,
                     &self.config.device.id,
                     Some(self.actor_id.clone()),
@@ -812,7 +838,7 @@ impl DaemonServer {
                 }
             }
             {
-                let publisher = Publisher::new(&self.mqtt);
+                let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
                 if let Err(e) = publisher
                     .publish_device_state(&crate::proto::amux::DeviceState {
                         online: true,
@@ -933,7 +959,7 @@ impl DaemonServer {
                                 if let Some(tc) = &mut self.teamclaw {
                                     let _ = tc.subscribe_all().await;
                                 }
-                                let publisher = Publisher::new(&self.mqtt);
+                                let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
                                 let _ = publisher.publish_device_state(&crate::proto::amux::DeviceState {
                                     online: true,
                                     device_name: self.config.device.name.clone(),
@@ -995,6 +1021,235 @@ impl DaemonServer {
                 }
             }
             // loop exited → outer: get fresh token and reconnect
+        }
+    }
+
+    /// NATS transport main loop. Parallel to the MQTT path in `run()` above —
+    /// same token-refresh outer cadence, but the inner loop polls the NATS
+    /// inbound channel (mpsc Receiver fed by per-subscription tasks inside
+    /// `teamclaw_transport::nats::NatsClient`).
+    ///
+    /// Differences vs MQTT:
+    /// - No CONNACK wait: async_nats returns from `connect` only after the
+    ///   server has accepted the connection.
+    /// - No LWT: graceful offline state is written to JetStream KV during
+    ///   shutdown / reconnect; ungraceful disconnects are detected by the
+    ///   server-side auth callout.
+    /// - No `eventloop.poll()` to cancel — async_nats reconnects internally
+    ///   on transport-level errors, so the proactive-reconnect path just
+    ///   builds a fresh `NatsBackend` rather than draining a half-closed
+    ///   socket.
+    async fn run_nats<F>(
+        mut self,
+        shutdown: F,
+        mut sock_rx: mpsc::Receiver<SockCommand>,
+        sock_path: PathBuf,
+    ) -> crate::error::Result<()>
+    where
+        F: Future<Output = ()>,
+    {
+        use teamclaw_transport::DeliveryGuarantee;
+        tokio::pin!(shutdown);
+
+        let url = self
+            .config
+            .transport
+            .as_ref()
+            .map(|t| t.url.clone())
+            .ok_or_else(|| {
+                crate::error::AmuxError::Config(
+                    "[transport] section requires `url` when kind = nats".into(),
+                )
+            })?;
+
+        let mut first_connect = true;
+
+        'outer: loop {
+            // 1. Fresh Supabase access_token; same retry cadence as MQTT path.
+            let token = loop {
+                match self.supabase.auth_token().await {
+                    Ok(t) => break t,
+                    Err(e) => {
+                        warn!("token fetch failed: {e}, retrying in 30s");
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                }
+            };
+
+            // 2. Connect.
+            info!(
+                actor_id = %self.actor_id,
+                %url,
+                "NATS connecting with access_token"
+            );
+            let backend = match crate::nats::NatsBackend::connect(&self.config, &url, &token).await
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("NATS connect failed: {e}, retrying in 5s");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue 'outer;
+                }
+            };
+
+            // 3. Re-wire publisher_handle + topics so all downstream
+            //    Publisher::new_from_handle / SessionManager publishes route
+            //    through the NATS backend instead of the MQTT one.
+            self.publisher_handle = Arc::new(backend.client.clone());
+            self.topics = backend.topics.clone();
+            if let Some(team_id) = self.config.team_id.clone() {
+                self.teamclaw = match crate::teamclaw::SessionManager::new(
+                    self.publisher_handle.clone(),
+                    &team_id,
+                    &self.config.device.id,
+                    Some(self.actor_id.clone()),
+                    crate::config::DaemonConfig::config_dir(),
+                ) {
+                    Ok(tc) => Some(tc),
+                    Err(e) => {
+                        warn!("teamclaw rebuild on NATS failed: {e}");
+                        None
+                    }
+                };
+            }
+            self.nats = Some(backend);
+
+            // 4. Subscribe + announce online.
+            if let Err(e) = self.nats.as_ref().unwrap().subscribe_all().await {
+                warn!("nats subscribe_all failed: {e}, reconnecting");
+                continue 'outer;
+            }
+            if let Some(tc) = &mut self.teamclaw {
+                if let Err(e) = tc.subscribe_all().await {
+                    warn!("teamclaw subscribe failed on NATS: {e}, reconnecting");
+                    continue 'outer;
+                }
+            }
+            if let Err(e) = self
+                .nats
+                .as_ref()
+                .unwrap()
+                .announce_online(&self.config.device.name)
+                .await
+            {
+                warn!("nats announce_online failed: {e}, reconnecting");
+                continue 'outer;
+            }
+            self.publish_all_agent_states().await;
+            info!(device_id = %self.config.device.id, "NATS connected, listening for runtime commands");
+
+            if first_connect {
+                self.register_startup_workspace().await;
+                self.auto_restart_offline_sessions().await;
+                first_connect = false;
+            }
+
+            // 5. Proactive reconnect timer (mirrors MQTT path: refresh ~5min
+            //    before cached JWT expiry). On NATS this means tearing down
+            //    the current client and reconnecting with the new token —
+            //    async_nats keeps the auth token only at connect time, so an
+            //    in-place refresh isn't possible without a fresh connection.
+            let proactive_reconnect_in: Duration = {
+                let buffer = Duration::from_secs(5 * 60);
+                match self.supabase.cached_credential_expiry() {
+                    Some(t) => t
+                        .checked_duration_since(Instant::now())
+                        .and_then(|d| d.checked_sub(buffer))
+                        .unwrap_or(Duration::ZERO),
+                    None => Duration::from_secs(50 * 60),
+                }
+            };
+            info!(
+                reconnect_in_secs = proactive_reconnect_in.as_secs(),
+                "scheduled proactive NATS reconnect before token expiry"
+            );
+            let proactive_sleep = tokio::time::sleep(proactive_reconnect_in);
+            tokio::pin!(proactive_sleep);
+
+            // 6. Inner select loop — three arms: shutdown, sock command,
+            //    inbound NATS frame. The inbound receiver is moved out of
+            //    `self.nats` once for the duration of this select cycle and
+            //    re-attached on reconnect.
+            //
+            //    We can't borrow `&mut self.nats.inbound` *and* call
+            //    `&mut self` methods inside the same select arm, so the
+            //    receiver is owned locally and the backend reference goes
+            //    along with it. SessionManager and Publisher reads happen
+            //    via the cloned `publisher_handle`, which doesn't touch
+            //    `self.nats`.
+            let mut inbound = self.nats.as_mut().unwrap().inbound_take();
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut shutdown => {
+                        info!("shutdown signal received, draining channels");
+                        if let Some(nats) = &self.nats {
+                            let _ = nats.announce_offline(&self.config.device.name).await;
+                        }
+                        self.shutdown_channels().await;
+                        let _ = std::fs::remove_file(&sock_path);
+                        return Ok(());
+                    }
+                    sock_cmd = sock_rx.recv() => {
+                        match sock_cmd {
+                            Some(SockCommand::ChannelReload) => self.reload_channels().await,
+                            Some(SockCommand::ChannelStatus { reply_tx }) => {
+                                let body = self.channel_status_payload().await;
+                                let _ = reply_tx.send(body);
+                            }
+                            Some(SockCommand::ChannelSave { platform, config_json }) => {
+                                self.save_channel_config(&platform, &config_json).await;
+                            }
+                            Some(SockCommand::McpSend { payload, reply_tx }) => {
+                                let resp = match self.handle_mcp_send(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::PromptAwait { payload, reply_tx }) => {
+                                let resp = match self.handle_prompt_await(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::Unknown(line)) => warn!("amuxd.sock: unknown control command: {line:?}"),
+                            None => warn!("amuxd.sock: listener channel closed; control commands unavailable until restart"),
+                        }
+                    }
+                    frame = inbound.recv() => {
+                        match frame {
+                            Some(f) => {
+                                if let Some(msg) = crate::mqtt::subscriber::parse_frame(&f) {
+                                    self.handle_incoming(msg).await;
+                                }
+                            }
+                            None => {
+                                warn!("NATS inbound channel closed, reconnecting");
+                                break;
+                            }
+                        }
+                    }
+                    _ = &mut proactive_sleep => {
+                        info!(
+                            expiry = ?self.supabase.cached_credential_expiry(),
+                            "JWT nearing expiry, proactively reconnecting NATS"
+                        );
+                        // Mark offline before tearing down so subscribers see
+                        // the presence change immediately rather than waiting
+                        // for the next online publish.
+                        if let Some(nats) = &self.nats {
+                            let _ = nats.announce_offline(&self.config.device.name).await;
+                        }
+                        break;
+                    }
+                }
+            }
+            // Put the inbound receiver back so the next reconnect can take it.
+            self.nats.as_mut().unwrap().inbound_put_back(inbound);
+            // loop exited → outer: get fresh token and reconnect
+            let _ = DeliveryGuarantee::AtLeastOnce; // touch import so it stays
         }
     }
 
@@ -1300,7 +1555,7 @@ impl DaemonServer {
     /// topic. Swallows errors (same convention as other publish helpers).
     async fn publish_runtime_state_by_id(&self, agent_id: &str) {
         if let Some(info) = self.agent_info_by_id(agent_id).await {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_runtime_state(agent_id, &info).await;
         }
     }
@@ -1312,7 +1567,7 @@ impl DaemonServer {
     /// which the old single-list publish would blow past once the session
     /// count grew.
     async fn publish_all_agent_states(&self) {
-        let publisher = Publisher::new(&self.mqtt);
+        let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         for info in self.merged_agent_list().await.runtimes {
             let _ = publisher
                 .publish_runtime_state(&info.runtime_id, &info)
@@ -1410,7 +1665,7 @@ impl DaemonServer {
                 session.status = amux::AgentStatus::Error as i32;
                 let _ = self.sessions.save(&self.sessions_path);
             }
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher
                 .publish_runtime_failed(agent_id, "ACP_ERROR", &details, "acp")
                 .await;
@@ -2152,7 +2407,7 @@ impl DaemonServer {
         };
 
         // Publish response on the sender's rpc/res topic (mirrors RpcServer::respond).
-        let res_topic = self.mqtt.topics.rpc_res_for(&request.sender_device_id);
+        let res_topic = self.topics.rpc_res_for(&request.sender_device_id);
         let bytes = response.encode_to_vec();
         info!(
             request_id = %request.request_id,
@@ -2970,7 +3225,7 @@ impl DaemonServer {
 
         // Hint subscribers to re-fetch peers.
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("peers.changed", "").await;
         }
 
@@ -3001,7 +3256,7 @@ impl DaemonServer {
         let (accepted, error) = self.apply_peer_disconnect(&disconnect.peer_id).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("peers.changed", "").await;
         }
 
@@ -3084,7 +3339,7 @@ impl DaemonServer {
         let (accepted, error, workspace) = self.apply_add_workspace(&amux_add).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("workspaces.changed", "").await;
         }
 
@@ -3118,7 +3373,7 @@ impl DaemonServer {
         let (accepted, error) = self.apply_remove_workspace(&amux_remove).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("workspaces.changed", "").await;
         }
 
@@ -3178,7 +3433,7 @@ impl DaemonServer {
         let (accepted, error) = self.apply_remove_member(&amux_remove, is_owner).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("members.changed", "").await;
         }
 
@@ -3387,7 +3642,7 @@ impl DaemonServer {
         };
 
         // STARTING retain — fleeting but observable by mid-spawn reconnects.
-        let publisher = Publisher::new(&self.mqtt);
+        let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         let starting_info = amux::RuntimeInfo {
             runtime_id: new_id.clone(),
             agent_type: agent_type as i32,
@@ -3507,7 +3762,7 @@ impl DaemonServer {
             state: amux::RuntimeLifecycle::Stopped as i32,
             ..Default::default()
         };
-        let publisher = Publisher::new(&self.mqtt);
+        let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         let _ = publisher
             .publish_runtime_state(runtime_id, &stopped_info)
             .await;
@@ -4050,11 +4305,16 @@ mod tests {
         let mut agents = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
         agents.add_test_runtime("rt1", "runtime-agent", "session-1");
 
+        let publisher_handle: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
+        let topics = mqtt.topics.clone();
         TestServer {
             server: DaemonServer {
                 config,
                 config_path: tmp.path().join("daemon.toml"),
                 mqtt,
+                nats: None,
+                publisher_handle,
+                topics,
                 agents: Arc::new(AsyncMutex::new(agents)),
                 auth: AuthManager::new(tmp.path().join("members.toml")).unwrap(),
                 peers: PeerTracker::new(),

@@ -117,4 +117,20 @@ impl NatsBackend {
     pub fn publisher(&self) -> Arc<dyn MessagePublisher> {
         Arc::new(self.client.clone())
     }
+
+    /// Lift the inbound receiver out so the daemon's main loop can `select!`
+    /// on it without holding a `&mut self.nats` borrow alongside other
+    /// `&mut self` method calls. Replaced by a placeholder closed channel
+    /// until [`Self::inbound_put_back`] runs.
+    pub fn inbound_take(&mut self) -> mpsc::Receiver<IncomingFrame> {
+        let (_tx, placeholder) = mpsc::channel(1);
+        std::mem::replace(&mut self.inbound, placeholder)
+    }
+
+    /// Re-attach a previously taken receiver. The main loop calls this
+    /// before re-entering the outer reconnect loop so a subsequent
+    /// `inbound_take()` works.
+    pub fn inbound_put_back(&mut self, rx: mpsc::Receiver<IncomingFrame>) {
+        self.inbound = rx;
+    }
 }
