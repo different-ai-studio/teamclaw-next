@@ -161,7 +161,10 @@ pub fn setup_or_sync_shared_dir(
         anyhow::bail!("git pull --rebase failed: {}", stderr.trim());
     }
     if had_local_changes {
-        let _ = git(&["push", "origin", &branch], &team_dir);
+        let (ok, _, stderr) = git(&["push", "origin", &branch], &team_dir)?;
+        if !ok {
+            anyhow::bail!("git push failed: {}", stderr.trim());
+        }
     }
 
     Ok(TeamSharedGitStatus {
