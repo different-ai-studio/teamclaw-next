@@ -1682,6 +1682,7 @@
       "workspacePath": "Workspace 路径",
       "gitLocalPath": "Git 路径",
       "noWorkspace": "未选择 workspace",
+      "noTeamLoaded": "尚未加载团队，请稍后重试",
       "initializingRepo": "初始化仓库...",
       "generatingGitignore": "生成 .gitignore...",
       "savingConfig": "保存配置...",

@@ -1682,6 +1682,7 @@
       "workspacePath": "Workspace Path",
       "gitLocalPath": "Git Path",
       "noWorkspace": "No workspace selected",
+      "noTeamLoaded": "No team loaded yet. Please try again shortly.",
       "initializingRepo": "Initializing repository...",
       "generatingGitignore": "Generating .gitignore...",
       "savingConfig": "Saving configuration...",

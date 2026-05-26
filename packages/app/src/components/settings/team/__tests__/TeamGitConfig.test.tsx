@@ -16,6 +16,10 @@ const teamMembersStoreMocks = vi.hoisted(() => ({
   loadMyRole: vi.fn(),
 }))
 
+const currentTeamStoreMocks = vi.hoisted(() => ({
+  team: { id: 'team-current', name: 'Current Team', slug: 'current-team' } as null | { id: string; name: string; slug: string },
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallbackOrOptions?: string | Record<string, unknown>) => {
@@ -62,6 +66,11 @@ vi.mock('@/stores/workspace', () => ({
 
 vi.mock('@/stores/team-members', () => ({
   useTeamMembersStore: () => teamMembersStoreMocks,
+}))
+
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: (sel: (s: Record<string, unknown>) => unknown) =>
+    sel(currentTeamStoreMocks as unknown as Record<string, unknown>),
 }))
 
 vi.mock('./HostLlmConfig', () => ({
@@ -114,6 +123,7 @@ describe('TeamGitConfig workspace-aware calls', () => {
     vi.clearAllMocks()
     workspaceStoreMocks.workspacePath = '/workspace-a'
     workspaceStoreMocks.workspaceReady = true
+    currentTeamStoreMocks.team = { id: 'team-current', name: 'Current Team', slug: 'current-team' }
     teamMembersStoreMocks.loadMembers.mockReset()
     teamMembersStoreMocks.loadMyRole.mockReset()
     mockUpsertTeamWorkspaceConfig.mockReset()
@@ -169,15 +179,9 @@ describe('TeamGitConfig workspace-aware calls', () => {
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
   })
 
-  it('creates a team, sets up the shared git directory, and saves envSecret locally', async () => {
-    mockSupabaseRpc.mockImplementation((fn: string) => {
-      if (fn === 'create_team') {
-        return { single: vi.fn().mockResolvedValue({ data: { id: 'team-123' }, error: null }) }
-      }
-      return Promise.resolve({ data: null, error: null })
-    })
+  it('configures the current team shared git directory without creating a team', async () => {
     mockUpsertTeamWorkspaceConfig.mockResolvedValue({
-      teamId: 'team-123',
+      teamId: 'team-current',
       gitUrl: 'https://example.com/repo.git',
       gitBranch: 'main',
       gitToken: null,
@@ -223,7 +227,7 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
     expect(mockInvoke).toHaveBeenCalledWith('save_team_config', {
       team: expect.objectContaining({
-        teamId: 'team-123',
+        teamId: 'team-current',
         sharedDirName: 'teamclaw',
         envSecret: '11'.repeat(32),
       }),
@@ -231,7 +235,12 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
     expect(mockSupabaseRpc).not.toHaveBeenCalledWith('create_team_invite', expect.anything())
-    expect(mockSupabaseRpc).toHaveBeenCalledWith('create_team', { p_name: 'teamclaw' })
+    expect(mockSupabaseRpc).not.toHaveBeenCalledWith('create_team', expect.anything())
+    expect(mockUpsertTeamWorkspaceConfig).toHaveBeenCalledWith(expect.objectContaining({
+      teamId: 'team-current',
+      gitUrl: 'https://example.com/repo.git',
+      sharedDirName: 'teamclaw',
+    }))
   })
 
   it('syncs configured teams through the shared git command', async () => {

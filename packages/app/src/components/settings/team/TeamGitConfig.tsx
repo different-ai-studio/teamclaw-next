@@ -27,6 +27,7 @@ import { ToggleSwitch } from '@/components/settings/shared'
 import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
 import { useTeamMembersStore } from '@/stores/team-members'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { buildConfig, TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import {
@@ -51,7 +52,6 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { formatBytes, type SyncPrecheckFile } from './syncPrecheck'
-import { supabase } from '@/lib/supabase-client'
 import { upsertTeamWorkspaceConfig, type TeamWorkspaceConfig } from '@/lib/team-workspace-config'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -98,26 +98,18 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke<T>(cmd, args)
 }
 
-// ─── Supabase create-team flow ──────────────────────────────────────────────
+// ─── Supabase team workspace config flow ────────────────────────────────────
 
-async function createTeam(args: {
-  teamName: string
+async function configureTeamWorkspace(args: {
+  teamId: string
   gitUrl: string
   gitBranch?: string
   gitToken?: string
   sharedDirName?: string
   aiGatewayEndpoint?: string
 }): Promise<{ teamId: string; workspaceConfig: TeamWorkspaceConfig }> {
-  // 1. Create team. Backend trigger inserts the owner actor + team_members row.
-  const { data: created, error: createErr } = await supabase
-    .rpc('create_team', { p_name: args.teamName })
-    .single()
-  if (createErr) throw new Error(createErr.message)
-  const teamId = (created as { id: string }).id
-
-  // 2. Insert workspace config.
   const workspaceConfig = await upsertTeamWorkspaceConfig({
-    teamId,
+    teamId:            args.teamId,
     gitUrl:            args.gitUrl,
     gitBranch:         args.gitBranch ?? 'main',
     gitToken:          args.gitToken ?? null,
@@ -127,7 +119,7 @@ async function createTeam(args: {
     updatedAt:         new Date().toISOString(),
   })
 
-  return { teamId, workspaceConfig }
+  return { teamId: args.teamId, workspaceConfig }
 }
 
 // ─── Reusable Components (local to git config) ─────────────────────────────
@@ -148,6 +140,7 @@ function SettingCard({ children, className }: { children: React.ReactNode; class
 export function TeamGitConfig() {
   const { t } = useTranslation()
   const teamMembersStore = useTeamMembersStore()
+  const currentTeam = useCurrentTeamStore((s) => s.team)
   const myRole = useTeamMembersStore((s) => s.myRole)
   const canManageServiceConfig = myRole === 'owner' || myRole === 'manager'
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
@@ -311,7 +304,7 @@ export function TeamGitConfig() {
     }
   }
 
-  // ─── Create team flow (Supabase) ─────────────────────────────────────
+  // ─── Configure current team's shared directory ───────────────────────
 
   const handleCreate = async () => {
     if (!gitUrl.trim()) return
@@ -319,13 +312,17 @@ export function TeamGitConfig() {
       setErrorMessage(t('settings.team.noWorkspace', 'No workspace selected'))
       return
     }
+    if (!currentTeam?.id) {
+      setErrorMessage(t('settings.team.noTeamLoaded', 'No team loaded yet'))
+      return
+    }
     setState('connecting')
     setErrorMessage(null)
     try {
-      setConnectStep(t('settings.team.creatingTeam', 'Creating team...'))
+      setConnectStep(t('settings.team.savingConfig', 'Saving configuration...'))
       const dirName = sharedDirName.trim() || 'teamclaw'
-      const { teamId, workspaceConfig } = await createTeam({
-        teamName: dirName,
+      const { teamId, workspaceConfig } = await configureTeamWorkspace({
+        teamId: currentTeam.id,
         gitUrl:   gitUrl.trim(),
         gitBranch: gitBranch.trim() || undefined,
         gitToken:  isHttpsUrl && gitToken.trim() ? gitToken.trim() : undefined,
