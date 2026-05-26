@@ -8,16 +8,21 @@ import {
   hasPocketBaseBackendConfig,
 } from "./pocketbase";
 import { getEffectiveServerConfigSync } from "../server-config";
-import type { TeamClawBackend } from "./types";
+import type { BackendKind, TeamClawBackend } from "./types";
 
 export { BACKEND_CONFIG_MISSING_MESSAGE };
 
 let backend: TeamClawBackend | null = null;
 let backendCacheKey: string | null = null;
 
+export function getBackendKind(): Extract<BackendKind, "supabase" | "pocketbase"> {
+  const config = getEffectiveServerConfigSync();
+  return config.backendKind === "pocketbase" ? "pocketbase" : "supabase";
+}
+
 export function hasBackendConfig(): boolean {
   const config = getEffectiveServerConfigSync();
-  if (config.backendKind === "pocketbase") {
+  if (getBackendKind() === "pocketbase") {
     return hasPocketBaseBackendConfig(config);
   }
   return hasSupabaseBackendConfig();
@@ -25,7 +30,7 @@ export function hasBackendConfig(): boolean {
 
 export function getBackend(): TeamClawBackend {
   const config = getEffectiveServerConfigSync();
-  const kind = config.backendKind === "pocketbase" ? "pocketbase" : "supabase";
+  const kind = getBackendKind();
   const cacheKey =
     kind === "pocketbase"
       ? `${kind}:${config.pocketbaseUrl ?? ""}`
