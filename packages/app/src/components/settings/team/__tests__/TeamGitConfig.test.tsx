@@ -199,9 +199,9 @@ describe('TeamGitConfig workspace-aware calls', () => {
 
     render(<TeamGitConfig />)
 
-    fireEvent.change(await screen.findByPlaceholderText('My Team'), {
-      target: { value: 'My Team' },
-    })
+    await screen.findByPlaceholderText('https://github.com/team/shared-workspace.git')
+    expect(screen.queryByPlaceholderText('My Team')).toBeNull()
+    expect(screen.getByText('Git Token')).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText('https://github.com/team/shared-workspace.git'), {
       target: { value: 'https://example.com/repo.git' },
     })
@@ -231,6 +231,7 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
     expect(mockSupabaseRpc).not.toHaveBeenCalledWith('create_team_invite', expect.anything())
+    expect(mockSupabaseRpc).toHaveBeenCalledWith('create_team', { p_name: 'teamclaw' })
   })
 
   it('syncs configured teams through the shared git command', async () => {

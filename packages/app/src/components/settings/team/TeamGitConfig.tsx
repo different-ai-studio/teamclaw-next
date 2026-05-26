@@ -174,9 +174,6 @@ export function TeamGitConfig() {
   >(null)
   const [pendingUpdateUi, setPendingUpdateUi] = React.useState(true)
 
-  // Create form state
-  const [teamName, setTeamName] = React.useState('')
-
   // LLM hosting (create form + connected editing share same state)
   const defaultLlmUrl = buildConfig.team.llm.baseUrl || ''
   const [hostLlm, setHostLlm] = React.useState(!!defaultLlmUrl)
@@ -317,7 +314,7 @@ export function TeamGitConfig() {
   // ─── Create team flow (Supabase) ─────────────────────────────────────
 
   const handleCreate = async () => {
-    if (!teamName.trim() || !gitUrl.trim()) return
+    if (!gitUrl.trim()) return
     if (!workspacePath) {
       setErrorMessage(t('settings.team.noWorkspace', 'No workspace selected'))
       return
@@ -328,7 +325,7 @@ export function TeamGitConfig() {
       setConnectStep(t('settings.team.creatingTeam', 'Creating team...'))
       const dirName = sharedDirName.trim() || 'teamclaw'
       const { teamId, workspaceConfig } = await createTeam({
-        teamName: teamName.trim(),
+        teamName: dirName,
         gitUrl:   gitUrl.trim(),
         gitBranch: gitBranch.trim() || undefined,
         gitToken:  isHttpsUrl && gitToken.trim() ? gitToken.trim() : undefined,
@@ -601,16 +598,6 @@ export function TeamGitConfig() {
             <h4 className="text-sm font-semibold text-foreground/90">{t('settings.team.createTeam', 'Configure Team Shared Directory')}</h4>
           </div>
           <div className="space-y-3">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.teamName', 'Shared Name')}</label>
-              <Input
-                value={teamName}
-                onChange={(e) => setTeamName(e.target.value)}
-                placeholder="My Team"
-                className="bg-background/50"
-                disabled={state === 'connecting'}
-              />
-            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.gitUrl', 'Git Repository URL')}</label>
@@ -648,36 +635,34 @@ export function TeamGitConfig() {
                 disabled={state === 'connecting'}
               />
             </div>
-            {isHttpsUrl && (
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                  {t('settings.team.personalToken', 'Personal Access Token')}
-                  <span className="text-muted-foreground/60 font-normal ml-1">({t('settings.team.optional', 'optional')})</span>
-                </label>
-                <div className="relative">
-                  <Input
-                    type={showToken ? 'text' : 'password'}
-                    value={gitToken}
-                    onChange={(e) => setGitToken(e.target.value)}
-                    placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
-                    className="bg-background/50 pr-10"
-                    disabled={state === 'connecting'}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
-                    onClick={() => setShowToken(!showToken)}
-                  >
-                    {showToken ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
-                  </Button>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground/60">
-                  {t('settings.team.urlHint', 'Supports HTTPS and SSH URLs. SSH uses your system keys automatically.')}
-                </p>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                {t('settings.team.personalToken', 'Git Token')}
+                <span className="text-muted-foreground/60 font-normal ml-1">({t('settings.team.optional', 'optional')})</span>
+              </label>
+              <div className="relative">
+                <Input
+                  type={showToken ? 'text' : 'password'}
+                  value={gitToken}
+                  onChange={(e) => setGitToken(e.target.value)}
+                  placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+                  className="bg-background/50 pr-10"
+                  disabled={state === 'connecting'}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
+                  onClick={() => setShowToken(!showToken)}
+                >
+                  {showToken ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                </Button>
               </div>
-            )}
+              <p className="mt-1 text-xs text-muted-foreground/60">
+                {t('settings.team.tokenHint', 'Required for private HTTPS repositories. SSH URLs use your system keys automatically. The token is stored locally and never shared.')}
+              </p>
+            </div>
             <HostLlmConfig
               enabled={hostLlm}
               onEnabledChange={setHostLlm}
@@ -695,7 +680,7 @@ export function TeamGitConfig() {
             )}
             <Button
               onClick={handleCreate}
-              disabled={state === 'connecting' || !teamName.trim() || !gitUrl.trim()}
+              disabled={state === 'connecting' || !gitUrl.trim()}
               className="w-full"
             >
               <Users className="mr-2 h-4 w-4" />
@@ -832,19 +817,20 @@ export function TeamGitConfig() {
                     className="bg-background/50 font-mono text-xs"
                   />
                 </div>
-                {isHttpsUrl && (
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                      {t('settings.team.personalToken', 'Personal Access Token')}
-                    </label>
-                    <Input
-                      type={showToken ? 'text' : 'password'}
-                      value={gitToken}
-                      onChange={(e) => setGitToken(e.target.value)}
-                      className="bg-background/50"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                    {t('settings.team.personalToken', 'Git Token')}
+                  </label>
+                  <Input
+                    type={showToken ? 'text' : 'password'}
+                    value={gitToken}
+                    onChange={(e) => setGitToken(e.target.value)}
+                    className="bg-background/50"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground/60">
+                    {t('settings.team.tokenHint', 'Required for private HTTPS repositories. SSH URLs use your system keys automatically. The token is stored locally and never shared.')}
+                  </p>
+                </div>
               </div>
               <Button
                 size="sm"

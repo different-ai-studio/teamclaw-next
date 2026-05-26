@@ -4,7 +4,6 @@ import {
   Users,
 } from 'lucide-react'
 import { TeamGitConfig } from './team/TeamGitConfig'
-import { TeamNameCard } from './team/TeamNameCard'
 
 // ─── Section Header ──────────────────────────────────────────────────────────
 
@@ -44,7 +43,6 @@ export function TeamSection() {
         description={t('settings.team.description', 'Configure the team shared Git repository, local shared directory, and sync status')}
       />
 
-      <TeamNameCard />
       <TeamGitConfig />
     </div>
   )
