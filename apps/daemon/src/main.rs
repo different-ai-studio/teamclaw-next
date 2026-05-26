@@ -10,6 +10,7 @@ mod mqtt;
 mod nats;
 mod onboarding;
 mod proto;
+mod provider_config;
 mod runtime;
 mod supabase;
 mod team_shared_env;
