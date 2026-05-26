@@ -94,7 +94,7 @@ import { startOutboxSender } from "@/services/outbox-sender";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtime-state-store";
 import { initDevicePresenceStore, disposeDevicePresenceStore } from "@/stores/device-presence-store";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { create as createMessage } from "@bufbuild/protobuf";
 import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import {
@@ -1274,30 +1274,27 @@ function AppContent() {
         return;
       }
 
-      // ── Non-Tauri: full Supabase pull (unchanged) ─────────────────
-      const supabaseResult = await supabase
-        .from("messages")
-        .select("id, session_id, sender_actor_id, kind, content, model, created_at")
-        .eq("session_id", currentSessionId)
-        .order("created_at", { ascending: true });
-      if (cancelled) return;
-      if (supabaseResult.error) {
-        console.warn("[history] load failed:", supabaseResult.error.message);
+      // ── Non-Tauri: full backend pull ──────────────────────────────
+      let historyRows;
+      try {
+        historyRows = await getBackend().messages.listMessages(currentSessionId);
+      } catch (error) {
+        console.warn("[history] load failed:", error instanceof Error ? error.message : error);
         return;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const supabaseMsgs = (supabaseResult.data ?? []).map((r: any) =>
+      if (cancelled) return;
+      const backendMsgs = historyRows.map((r) =>
         createMessage(MessageSchema, {
           messageId: r.id,
           sessionId: r.session_id,
-          senderActorId: r.sender_actor_id,
+          senderActorId: r.sender_actor_id ?? "",
           kind: kindMap[r.kind] ?? MessageKind.TEXT,
           content: r.content ?? "",
           model: r.model ?? "",
           createdAt: BigInt(Math.floor(new Date(r.created_at).getTime() / 1000)),
         }),
       );
-      useSessionMessageStore.getState().setMessages(currentSessionId, supabaseMsgs);
+      useSessionMessageStore.getState().setMessages(currentSessionId, backendMsgs);
     })();
     return () => {
       cancelled = true;

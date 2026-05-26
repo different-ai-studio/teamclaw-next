@@ -229,4 +229,20 @@ describe("Supabase sessions backend", () => {
       updated_at: "2026-05-17T08:00:01.000Z",
     });
   });
+
+  it("lists display rows for selected sessions", async () => {
+    const rows = [{ id: "session-1", title: "Session" }];
+    const inFn = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const eq = vi.fn(() => ({ in: inFn }));
+    const select = vi.fn(() => ({ eq }));
+    client.from.mockReturnValueOnce({ select });
+
+    const result = await createSupabaseSessionsBackend(client).listSessionDisplayRows("team-1", ["session-1"]);
+
+    expect(client.from).toHaveBeenCalledWith("sessions");
+    expect(select).toHaveBeenCalledWith("id, title");
+    expect(eq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(inFn).toHaveBeenCalledWith("id", ["session-1"]);
+    expect(result).toBe(rows);
+  });
 });

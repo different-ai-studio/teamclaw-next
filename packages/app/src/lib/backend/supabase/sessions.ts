@@ -2,6 +2,7 @@ import { toBackendError } from "../errors";
 import { supabase as defaultSupabase } from "./client";
 import type {
   SessionCreateInput,
+  SessionDisplayRow,
   SessionListCursor,
   SessionListEntry,
   SessionParticipant,
@@ -184,6 +185,19 @@ export function createSupabaseSessionsBackend(client: unknown = defaultSupabase)
         ? await baseQuery.gt("updated_at", updatedAfter)
         : await baseQuery;
       if (error) throw toBackendError(error, "sessions.listSessionsForTeamSince");
+      return data ?? [];
+    },
+    async listSessionDisplayRows(teamId: string, sessionIds: string[]) {
+      assertSupabaseClient(supabase);
+      if (sessionIds.length === 0) return [];
+      const query = supabase
+        .from("sessions")
+        .select("id, title")
+        .eq("team_id", teamId) as {
+        in(column: string, values: string[]): QueryResult<SessionDisplayRow[]>;
+      };
+      const { data, error } = await query.in("id", sessionIds);
+      if (error) throw toBackendError(error, "sessions.listSessionDisplayRows");
       return data ?? [];
     },
   };

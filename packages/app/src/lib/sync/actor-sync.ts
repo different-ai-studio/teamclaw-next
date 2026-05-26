@@ -8,29 +8,12 @@
  * updated_at: ✓ present on actor_directory (confirmed via information_schema)
  */
 
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
+import type { ActorDirectorySyncRow } from "@/lib/backend/types";
 import * as cache from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
 
-// The Supabase row shape from actor_directory.
-// NOTE: actor_directory has no avatar_url column — that lives on a separate
-// member/agent extension table not surfaced by the view.
-interface ActorDirectoryRow {
-  id: string;
-  team_id: string;
-  actor_type: string;
-  display_name: string;
-  member_status?: string | null;
-  agent_status?: string | null;
-  last_active_at?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const COLUMNS =
-  "id, team_id, actor_type, display_name, member_status, agent_status, last_active_at, created_at, updated_at";
-
-function mapRow(r: ActorDirectoryRow): cache.ActorRow {
+function mapRow(r: ActorDirectorySyncRow): cache.ActorRow {
   return {
     id: r.id,
     teamId: r.team_id,
@@ -59,24 +42,20 @@ export async function syncActorsForTeam(
   opts?: { full?: boolean },
 ): Promise<number> {
   if (!isTauri()) return 0;
-  const TABLE = "actor_directory";
+  const WATERMARK_KEY = "actor_directory";
   const watermark = opts?.full
     ? null
-    : await cache.getWatermark(TABLE, teamId);
+    : await cache.getWatermark(WATERMARK_KEY, teamId);
 
-  let q = supabase
-    .from(TABLE)
-    .select(COLUMNS)
-    .eq("team_id", teamId);
-  if (watermark) q = q.gt("updated_at", watermark);
-
-  const { data, error } = await q;
-  if (error) {
-    console.warn("[actor-sync] pull failed:", error.message);
+  let data: ActorDirectorySyncRow[];
+  try {
+    data = await getBackend().sync.listActorDirectoryForSync(teamId, watermark);
+  } catch (error) {
+    console.warn("[actor-sync] pull failed:", error instanceof Error ? error.message : error);
     return 0;
   }
 
-  const rows = ((data ?? []) as ActorDirectoryRow[]).map(mapRow);
+  const rows = (data ?? []).map(mapRow);
   if (rows.length > 0) {
     await cache.upsertActorsBatch(rows);
     const maxUpdated = rows.reduce(
@@ -84,7 +63,7 @@ export async function syncActorsForTeam(
       watermark ?? "",
     );
     if (maxUpdated) {
-      await cache.setWatermark(TABLE, teamId, maxUpdated);
+      await cache.setWatermark(WATERMARK_KEY, teamId, maxUpdated);
     }
   }
 

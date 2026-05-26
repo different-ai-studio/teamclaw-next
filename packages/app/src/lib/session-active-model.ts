@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import type { RuntimeStateEntry } from '@/stores/runtime-state-store'
 import type { ModelOption } from '@/stores/provider'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
@@ -74,20 +74,17 @@ export async function loadSessionActiveModel(args: {
     runtimeStateCount: Object.keys(args.runtimeStates).length,
   })
 
-  const { data, error } = await supabase
-    .from('agent_runtimes')
-    .select('runtime_id, backend_type, current_model, updated_at')
-    .eq('session_id', args.sessionId)
-    .order('updated_at', { ascending: false })
-
-  if (error) {
+  let data: RuntimeRow[]
+  try {
+    data = await getBackend().runtime.listSessionRuntimeModels(args.sessionId)
+  } catch (error) {
     sessionFlowError('session_model.load.failed', error, {
       sessionId: args.sessionId,
     })
     return null
   }
 
-  const rows = (data ?? []) as RuntimeRow[]
+  const rows = data ?? []
   const resolved = resolveSessionModelFromRuntimeRows(rows, args.runtimeStates, args.models)
 
   sessionFlowLog('session_model.load.done', {

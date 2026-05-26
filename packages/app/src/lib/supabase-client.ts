@@ -1,31 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  BACKEND_CONFIG_MISSING_MESSAGE,
+  getSupabaseBackendConfig,
+  hasSupabaseBackendConfig,
+} from "@/lib/backend/supabase/config";
 
-function injectedSupabaseConfig(): { supabaseUrl?: string; supabaseAnonKey?: string } {
-  if (typeof window === "undefined") return {};
-  return window.__TEAMCLAW_SERVER_CONFIG__ ?? {};
-}
-
-function savedSupabaseConfig(): { supabaseUrl?: string; supabaseAnonKey?: string } {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem("teamclaw.serverConfig");
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { supabaseUrl?: string; supabaseAnonKey?: string };
-    return parsed;
-  } catch {
-    return {};
-  }
-}
-
-const injected = injectedSupabaseConfig();
-const saved = savedSupabaseConfig();
-const configuredUrl = injected.supabaseUrl || saved.supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
-const configuredAnonKey =
-  injected.supabaseAnonKey || saved.supabaseAnonKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
+const { url: configuredUrl, anonKey: configuredAnonKey } = getSupabaseBackendConfig();
 
 export const hasSupabaseConfig = Boolean(configuredUrl && configuredAnonKey);
-export const SUPABASE_CONFIG_MISSING_MESSAGE =
-  "Supabase config missing. Configure a server before signing in.";
+export const SUPABASE_CONFIG_MISSING_MESSAGE = BACKEND_CONFIG_MISSING_MESSAGE;
+export { hasSupabaseBackendConfig };
 
 if (!hasSupabaseConfig) {
   console.warn(

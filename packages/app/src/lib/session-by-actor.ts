@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { isTauri } from '@/lib/utils'
 
 const cache = new Map<string, Set<string>>()
@@ -27,17 +27,11 @@ export async function loadSessionIdsForActor(actorId: string, _teamId: string): 
     }
   }
 
-  const { data, error } = await supabase
-    .from('session_participants')
-    .select('session_id')
-    .eq('actor_id', actorId)
-
-  if (error) {
+  try {
+    const sessionIds = await getBackend().sessionMembers.listSessionIdsForActor(actorId)
+    for (const sessionId of sessionIds) ids.add(sessionId)
+  } catch (error) {
     console.error('[session-by-actor] supabase lookup failed', error)
-  } else {
-    for (const row of (data ?? []) as Array<{ session_id: string }>) {
-      ids.add(row.session_id)
-    }
   }
 
   cache.set(actorId, ids)

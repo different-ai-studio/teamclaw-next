@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { getBackend } from "@/lib/backend";
-import { supabase } from "@/lib/supabase-client";
 import { isTauri } from "@/lib/utils";
 import { generateRandomTeamName } from "@/lib/random-team-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
@@ -62,17 +61,8 @@ export function AuthGate({ children }: AuthGateProps) {
 
     void (async () => {
       try {
-        // RLS on `teams` restricts select to teams the user is a member of,
-        // so a non-empty result means they already have somewhere to land.
-        const { data: teams, error } = await supabase
-          .from("teams")
-          .select("id")
-          .limit(1);
-        if (error) {
-          console.warn("[AuthGate] team lookup failed", error);
-          return;
-        }
-        const existingTeamId = teams?.[0]?.id as string | undefined;
+        const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
+        const existingTeamId = teams[0]?.id;
         if (existingTeamId) {
           await useCurrentTeamStore.getState().reloadAndSwitchTo(existingTeamId);
           return;

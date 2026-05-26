@@ -1,23 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  hasSupabaseConfig: true,
-  supabase: { marker: "supabase-client" },
+  hasSupabaseBackendConfig: true,
 }));
 
-vi.mock("@/lib/supabase-client", () => ({
-  get hasSupabaseConfig() {
-    return mocks.hasSupabaseConfig;
-  },
-  SUPABASE_CONFIG_MISSING_MESSAGE:
-    "Supabase config missing. Configure a server before signing in.",
-  supabase: mocks.supabase,
+vi.mock("../supabase/config", () => ({
+  BACKEND_CONFIG_MISSING_MESSAGE: "Supabase config missing. Configure a server before signing in.",
+  hasSupabaseBackendConfig: () => mocks.hasSupabaseBackendConfig,
+}));
+
+vi.mock("../supabase", () => ({
+  createSupabaseBackend: () => ({
+    kind: "supabase",
+    auth: {},
+    directory: {},
+    sessions: {
+      listCurrentActorSessions: () => Promise.reject(new Error("sessions backend not implemented")),
+    },
+    messages: {},
+    runtime: {},
+    attachments: {},
+    teams: {},
+    ideas: {},
+    actors: {},
+    sessionMembers: {},
+    shortcuts: {},
+    notifications: {},
+    teamWorkspaceConfig: {},
+    workspaces: {},
+    sync: {},
+    telemetry: {},
+  }),
 }));
 
 describe("backend provider facade", () => {
   beforeEach(() => {
     vi.resetModules();
-    mocks.hasSupabaseConfig = true;
+    mocks.hasSupabaseBackendConfig = true;
   });
 
   it("defaults to a Supabase backend singleton", async () => {
@@ -41,6 +60,8 @@ describe("backend provider facade", () => {
     expect(first.shortcuts).toBeDefined();
     expect(first.notifications).toBeDefined();
     expect(first.teamWorkspaceConfig).toBeDefined();
+    expect(first.workspaces).toBeDefined();
+    expect(first.sync).toBeDefined();
     expect(first.telemetry).toBeDefined();
   });
 
@@ -58,7 +79,7 @@ describe("backend provider facade", () => {
     const { hasBackendConfig, BACKEND_CONFIG_MISSING_MESSAGE } = await import("../provider");
 
     expect(hasBackendConfig()).toBe(true);
-    mocks.hasSupabaseConfig = false;
+    mocks.hasSupabaseBackendConfig = false;
     expect(hasBackendConfig()).toBe(false);
     expect(BACKEND_CONFIG_MISSING_MESSAGE).toMatch(/Supabase config missing/);
   });

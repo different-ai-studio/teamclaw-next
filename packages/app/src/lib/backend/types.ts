@@ -87,6 +87,11 @@ export interface SessionParticipant {
   role?: string | null;
 }
 
+export interface SessionDisplayRow {
+  id: string;
+  title: string | null;
+}
+
 export interface SessionsBackend {
   listCurrentActorSessions(args: { limit: number; cursor: SessionListCursor | null }): Promise<SessionListPage>;
   markCurrentActorSessionViewed(sessionId: string, lastReadMessageId?: string | null): Promise<void>;
@@ -97,6 +102,7 @@ export interface SessionsBackend {
   getSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
   getSessionTeamId(sessionId: string): Promise<string | null>;
   listSessionsForTeamSince(teamId: string, updatedAfter: string): Promise<SessionSyncRow[]>;
+  listSessionDisplayRows(teamId: string, sessionIds: string[]): Promise<SessionDisplayRow[]>;
 }
 
 export interface OutgoingMessageInput {
@@ -173,10 +179,40 @@ export interface AgentDefaultRow {
   default_agent_type: string | null;
 }
 
+export interface SessionRuntimeModelRow {
+  runtime_id: string | null;
+  backend_type: string | null;
+  current_model: string | null;
+}
+
+export interface RuntimeTargetRow {
+  agent_id: string | null;
+  runtime_id: string | null;
+}
+
+export interface DaemonRuntimeBackendRow {
+  id: string;
+  runtime_id: string | null;
+  team_id: string;
+  agent_id: string;
+  session_id: string | null;
+  workspace_id: string | null;
+  backend_type: string;
+  backend_session_id: string | null;
+  status: string;
+  current_model: string | null;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RuntimeBackend {
   listLatestAgentRuntimeHints(teamId: string, agentActorIds: string[]): Promise<AgentRuntimeHintRow[]>;
   listAgentDefaults(agentActorIds: string[]): Promise<AgentDefaultRow[]>;
   updateRuntimeModel(runtimeId: string, model: string): Promise<void>;
+  listSessionRuntimeModels(sessionId: string): Promise<SessionRuntimeModelRow[]>;
+  listRuntimeTargetsForSession(sessionId: string, agentActorIds: string[]): Promise<RuntimeTargetRow[]>;
+  listDaemonRuntimes(teamId: string): Promise<DaemonRuntimeBackendRow[]>;
 }
 
 export interface AttachmentUploadInput {
@@ -202,9 +238,17 @@ export interface DirectoryMemberActor {
   team_id?: string;
 }
 
+export interface CurrentTeamMemberSummary {
+  id: string;
+  displayName: string;
+  role: string | null;
+  joinedAt: string | null;
+}
+
 export interface DirectoryBackend {
   resolveCurrentMemberActor(teamId: string, userId: string): Promise<DirectoryMemberActor | null>;
   resolveFirstMemberActorForUser(userId: string): Promise<DirectoryMemberActor | null>;
+  getCurrentTeamMember(teamId: string, userId: string): Promise<CurrentTeamMemberSummary | null>;
 }
 
 export interface TeamSummary {
@@ -256,6 +300,8 @@ export type TeamInviteInput =
     });
 
 export interface TeamsBackend {
+  listCurrentUserTeams(args?: { limit?: number }): Promise<TeamSummary[]>;
+  getTeam(teamId: string): Promise<TeamSummary | null>;
   createTeam(input: { name: string; slug?: string | null }): Promise<TeamSummary>;
   renameTeam(teamId: string, name: string): Promise<TeamSummary>;
   createTeamInvite(input: TeamInviteInput): Promise<TeamInviteResult>;
@@ -363,8 +409,28 @@ export interface ConnectedAgentRow extends ActorDirectoryEntry {
   is_owner?: boolean | null;
 }
 
+export interface AgentAccessBackendRow {
+  id: string;
+  agentId: string;
+  memberId: string;
+  memberName: string;
+  permissionLevel: "view" | "prompt" | "admin";
+  grantedByMemberId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamMemberOptionBackendRow {
+  id: string;
+  displayName: string;
+  role: string | null;
+}
+
 export interface ActorsBackend {
   listActorDirectory(teamId: string): Promise<ActorDirectoryEntry[]>;
+  listActorDirectoryByIds(actorIds: string[]): Promise<ActorDirectoryEntry[]>;
+  getActorDirectoryEntry(actorId: string): Promise<ActorDirectoryEntry | null>;
+  getDaemonAgentDirectoryEntry(teamId: string, agentId: string): Promise<ActorDirectoryEntry | null>;
   listConnectedAgents(teamId: string): Promise<ConnectedAgentRow[]>;
   updateOwnedAgentProfile(input: {
     agentId: string;
@@ -378,6 +444,15 @@ export interface ActorsBackend {
     defaultAgentType?: string | null;
     defaultWorkspaceId?: string | null;
   }): Promise<void>;
+  listAgentAccess(agentId: string): Promise<AgentAccessBackendRow[]>;
+  listTeamMembersForAccess(teamId: string): Promise<TeamMemberOptionBackendRow[]>;
+  upsertAgentAccess(input: {
+    agentId: string;
+    memberId: string;
+    permissionLevel: "view" | "prompt" | "admin";
+    grantedByMemberId: string | null;
+  }): Promise<void>;
+  removeAgentAccess(accessId: string): Promise<void>;
 }
 
 export interface SessionMemberCandidate extends ActorDirectoryEntry {
@@ -476,6 +551,79 @@ export interface TeamWorkspaceConfigBackend {
   save(input: TeamWorkspaceConfigRow): Promise<void>;
 }
 
+export interface DaemonWorkspaceBackendRow {
+  id: string;
+  team_id: string;
+  agent_id: string | null;
+  created_by_member_id: string | null;
+  name: string;
+  path: string | null;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspacesBackend {
+  listWorkspacesByIds(teamId: string, workspaceIds: string[]): Promise<Array<{ id: string; name: string | null; path: string | null }>>;
+  listDaemonWorkspaces(teamId: string, agentId?: string | null): Promise<DaemonWorkspaceBackendRow[]>;
+  createDaemonWorkspace(input: {
+    teamId: string;
+    agentId: string;
+    createdByMemberId: string | null;
+    name: string;
+    path: string;
+  }): Promise<DaemonWorkspaceBackendRow>;
+  updateDaemonWorkspace(input: {
+    workspaceId: string;
+    name: string;
+    path: string;
+    archived: boolean;
+  }): Promise<DaemonWorkspaceBackendRow>;
+}
+
+export interface ActorDirectorySyncRow {
+  id: string;
+  team_id: string;
+  actor_type: string;
+  display_name: string;
+  member_status?: string | null;
+  agent_status?: string | null;
+  last_active_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IdeaSyncRow {
+  id: string;
+  team_id: string;
+  workspace_id?: string | null;
+  parent_idea_id?: string | null;
+  title: string;
+  description?: string | null;
+  status?: string | null;
+  created_by_actor_id?: string | null;
+  archived?: boolean | number | null;
+  sort_order?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionParticipantSyncRow {
+  id: string;
+  session_id: string;
+  actor_id: string;
+  role?: string | null;
+  joined_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SyncBackend {
+  listActorDirectoryForSync(teamId: string, updatedAfter?: string | null): Promise<ActorDirectorySyncRow[]>;
+  listIdeasForSync(teamId: string, updatedAfter?: string | null): Promise<IdeaSyncRow[]>;
+  listSessionParticipantsForSync(sessionId: string, updatedAfter?: string | null): Promise<SessionParticipantSyncRow[]>;
+}
+
 export interface TelemetryFeedbackDeleteInput {
   actor_id: string;
   team_id: string;
@@ -507,5 +655,7 @@ export interface TeamClawBackend {
   shortcuts: ShortcutsBackend;
   notifications: NotificationsBackend;
   teamWorkspaceConfig: TeamWorkspaceConfigBackend;
+  workspaces: WorkspacesBackend;
+  sync: SyncBackend;
   telemetry: TelemetryBackend;
 }

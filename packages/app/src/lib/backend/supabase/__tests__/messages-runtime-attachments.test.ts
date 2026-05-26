@@ -211,6 +211,67 @@ describe("Supabase runtime backend", () => {
     });
     expect(eq).toHaveBeenCalledWith("id", "runtime-row-1");
   });
+
+  it("lists session runtime model rows ordered by recency", async () => {
+    const rows = [{ runtime_id: "rt-1", backend_type: "codex", current_model: "gpt-5" }];
+    const order = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const eq = vi.fn(() => ({ order }));
+    const select = vi.fn(() => ({ eq }));
+    client.from.mockReturnValueOnce({ select });
+
+    const result = await createSupabaseRuntimeBackend(client).listSessionRuntimeModels("session-1");
+
+    expect(client.from).toHaveBeenCalledWith("agent_runtimes");
+    expect(select).toHaveBeenCalledWith("runtime_id, backend_type, current_model, updated_at");
+    expect(eq).toHaveBeenCalledWith("session_id", "session-1");
+    expect(order).toHaveBeenCalledWith("updated_at", { ascending: false });
+    expect(result).toBe(rows);
+  });
+
+  it("lists runtime targets for a session and optional agents", async () => {
+    const rows = [{ agent_id: "agent-1", runtime_id: "rt-1" }];
+    const inFn = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const eq = vi.fn(() => ({ in: inFn }));
+    const select = vi.fn(() => ({ eq }));
+    client.from.mockReturnValueOnce({ select });
+
+    const result = await createSupabaseRuntimeBackend(client).listRuntimeTargetsForSession("session-1", ["agent-1"]);
+
+    expect(client.from).toHaveBeenCalledWith("agent_runtimes");
+    expect(select).toHaveBeenCalledWith("agent_id, runtime_id");
+    expect(eq).toHaveBeenCalledWith("session_id", "session-1");
+    expect(inFn).toHaveBeenCalledWith("agent_id", ["agent-1"]);
+    expect(result).toBe(rows);
+  });
+
+  it("lists all runtime targets for a session without an agent filter", async () => {
+    const rows = [{ agent_id: "agent-1", runtime_id: "rt-1" }];
+    const eq = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const select = vi.fn(() => ({ eq }));
+    client.from.mockReturnValueOnce({ select });
+
+    const result = await createSupabaseRuntimeBackend(client).listRuntimeTargetsForSession("session-1", []);
+
+    expect(result).toBe(rows);
+  });
+
+  it("lists daemon runtime rows for a team", async () => {
+    const rows = [{ id: "runtime-row-1", team_id: "team-1", agent_id: "agent-1" }];
+    const order = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const eq = vi.fn(() => ({ order }));
+    const select = vi.fn(() => ({ eq }));
+    client.from.mockReturnValueOnce({ select });
+
+    const result = await createSupabaseRuntimeBackend(client).listDaemonRuntimes("team-1");
+
+    expect(client.from).toHaveBeenCalledWith("agent_runtimes");
+    expect(select).toHaveBeenCalledWith(
+      "id, runtime_id, team_id, agent_id, session_id, workspace_id, backend_type, backend_session_id, status, current_model, last_seen_at, created_at, updated_at",
+    );
+    expect(eq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(order).toHaveBeenCalledWith("updated_at", { ascending: false });
+    expect(result).toBe(rows);
+  });
 });
 
 describe("Supabase attachments backend", () => {

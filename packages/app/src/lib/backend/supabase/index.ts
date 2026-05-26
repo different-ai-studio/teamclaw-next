@@ -13,6 +13,8 @@ import { createSupabaseShortcutsBackend } from "./shortcuts";
 import { createSupabaseTeamWorkspaceConfigBackend } from "./team-workspace-config";
 import { createSupabaseTeamsBackend } from "./teams";
 import { createSupabaseTelemetryBackend } from "./telemetry";
+import { createSupabaseWorkspacesBackend } from "./workspaces";
+import { createSupabaseSyncBackend } from "./sync";
 import type { TeamClawBackend } from "../types";
 
 export function createSupabaseBackend(): TeamClawBackend {
@@ -31,6 +33,8 @@ export function createSupabaseBackend(): TeamClawBackend {
     shortcuts: createSupabaseShortcutsBackend(supabase),
     notifications: createSupabaseNotificationsBackend(supabase),
     teamWorkspaceConfig: createSupabaseTeamWorkspaceConfigBackend(supabase),
+    workspaces: createSupabaseWorkspacesBackend(supabase),
+    sync: createSupabaseSyncBackend(supabase),
     telemetry: createSupabaseTelemetryBackend(supabase),
   };
 }

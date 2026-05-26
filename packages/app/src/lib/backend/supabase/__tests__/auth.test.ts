@@ -192,4 +192,66 @@ describe("Supabase directory backend", () => {
     expect(query.maybeSingle).toHaveBeenCalled();
     expect(result).toEqual({ id: "actor-1", team_id: "team-1" });
   });
+
+  it("gets current team member display and join metadata", async () => {
+    const actorRows = [{ id: "member-1", display_name: "Ada", team_role: "admin" }];
+    const memberRows = [{ joined_at: "2026-05-26T01:00:00.000Z" }];
+    const actorLimit = vi.fn().mockResolvedValue({ data: actorRows, error: null });
+    const actorEqType = vi.fn(() => ({ limit: actorLimit }));
+    const actorEqUser = vi.fn(() => ({ eq: actorEqType }));
+    const actorEqTeam = vi.fn(() => ({ eq: actorEqUser }));
+    const memberLimit = vi.fn().mockResolvedValue({ data: memberRows, error: null });
+    const memberEqMember = vi.fn(() => ({ limit: memberLimit }));
+    const memberEqTeam = vi.fn(() => ({ eq: memberEqMember }));
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "actor_directory") return { select: vi.fn(() => ({ eq: actorEqTeam })) };
+        if (table === "team_members") return { select: vi.fn(() => ({ eq: memberEqTeam })) };
+        throw new Error(`unexpected table ${table}`);
+      }),
+    };
+
+    const result = await createSupabaseDirectoryBackend(client).getCurrentTeamMember("team-1", "user-1");
+
+    expect(actorEqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(actorEqUser).toHaveBeenCalledWith("user_id", "user-1");
+    expect(actorEqType).toHaveBeenCalledWith("actor_type", "member");
+    expect(memberEqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(memberEqMember).toHaveBeenCalledWith("member_id", "member-1");
+    expect(result).toEqual({
+      id: "member-1",
+      displayName: "Ada",
+      role: "admin",
+      joinedAt: "2026-05-26T01:00:00.000Z",
+    });
+  });
+
+  it("returns current team member data with null joinedAt when join metadata lookup fails", async () => {
+    const actorRows = [{ id: "member-1", display_name: "Ada", team_role: "admin" }];
+    const actorLimit = vi.fn().mockResolvedValue({ data: actorRows, error: null });
+    const actorEqType = vi.fn(() => ({ limit: actorLimit }));
+    const actorEqUser = vi.fn(() => ({ eq: actorEqType }));
+    const actorEqTeam = vi.fn(() => ({ eq: actorEqUser }));
+    const memberLimit = vi.fn().mockResolvedValue({ data: null, error: { message: "permission denied" } });
+    const memberEqMember = vi.fn(() => ({ limit: memberLimit }));
+    const memberEqTeam = vi.fn(() => ({ eq: memberEqMember }));
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "actor_directory") return { select: vi.fn(() => ({ eq: actorEqTeam })) };
+        if (table === "team_members") return { select: vi.fn(() => ({ eq: memberEqTeam })) };
+        throw new Error(`unexpected table ${table}`);
+      }),
+    };
+
+    const result = await createSupabaseDirectoryBackend(client).getCurrentTeamMember("team-1", "user-1");
+
+    expect(memberEqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(memberEqMember).toHaveBeenCalledWith("member_id", "member-1");
+    expect(result).toEqual({
+      id: "member-1",
+      displayName: "Ada",
+      role: "admin",
+      joinedAt: null,
+    });
+  });
 });

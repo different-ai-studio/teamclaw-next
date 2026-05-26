@@ -4,6 +4,8 @@ import { createSupabaseSessionMembersBackend } from "../session-members";
 import { createSupabaseShortcutsBackend } from "../shortcuts";
 import { createSupabaseTeamWorkspaceConfigBackend } from "../team-workspace-config";
 import { createSupabaseTelemetryBackend } from "../telemetry";
+import { createSupabaseWorkspacesBackend } from "../workspaces";
+import { createSupabaseSyncBackend } from "../sync";
 
 describe("Supabase session members backend", () => {
   it("lists participants by session and preserves participant ordering", async () => {
@@ -240,6 +242,115 @@ describe("Supabase notifications backend", () => {
       },
       { onConflict: "user_id" },
     );
+  });
+});
+
+describe("Supabase workspaces backend", () => {
+  it("lists daemon workspaces by team and agent", async () => {
+    const rows = [{ id: "workspace-1", team_id: "team-1", agent_id: "agent-1", name: "Main", archived: false }];
+    const orderUpdated = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const orderArchived = vi.fn(() => ({ order: orderUpdated }));
+    const eqAgent = vi.fn(() => ({ order: orderArchived }));
+    const eqTeam = vi.fn(() => ({ eq: eqAgent }));
+    const select = vi.fn(() => ({ eq: eqTeam }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseWorkspacesBackend({ from }).listDaemonWorkspaces("team-1", "agent-1");
+
+    expect(from).toHaveBeenCalledWith("workspaces");
+    expect(select).toHaveBeenCalledWith("id, team_id, agent_id, created_by_member_id, name, path, archived, created_at, updated_at");
+    expect(eqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(eqAgent).toHaveBeenCalledWith("agent_id", "agent-1");
+    expect(orderArchived).toHaveBeenCalledWith("archived", { ascending: true });
+    expect(orderUpdated).toHaveBeenCalledWith("updated_at", { ascending: false });
+    expect(result).toBe(rows);
+  });
+
+  it("creates and updates daemon workspaces", async () => {
+    const row = { id: "workspace-1", team_id: "team-1", agent_id: "agent-1", name: "Main" };
+    const insertSingle = vi.fn().mockResolvedValue({ data: row, error: null });
+    const insertSelect = vi.fn(() => ({ single: insertSingle }));
+    const insert = vi.fn(() => ({ select: insertSelect }));
+    const updateSingle = vi.fn().mockResolvedValue({ data: row, error: null });
+    const updateSelect = vi.fn(() => ({ single: updateSingle }));
+    const updateEq = vi.fn(() => ({ select: updateSelect }));
+    const update = vi.fn(() => ({ eq: updateEq }));
+    const from = vi.fn(() => ({ insert, update }));
+    const backend = createSupabaseWorkspacesBackend({ from });
+
+    await backend.createDaemonWorkspace({
+      teamId: "team-1",
+      agentId: "agent-1",
+      createdByMemberId: "member-1",
+      name: "Main",
+      path: "/repo",
+    });
+    await backend.updateDaemonWorkspace({
+      workspaceId: "workspace-1",
+      name: "Renamed",
+      path: "/repo",
+      archived: true,
+    });
+
+    expect(insert).toHaveBeenCalledWith({
+      team_id: "team-1",
+      agent_id: "agent-1",
+      created_by_member_id: "member-1",
+      name: "Main",
+      path: "/repo",
+      archived: false,
+    });
+    expect(update).toHaveBeenCalledWith({ name: "Renamed", path: "/repo", archived: true });
+    expect(updateEq).toHaveBeenCalledWith("id", "workspace-1");
+  });
+});
+
+describe("Supabase sync backend", () => {
+  it("lists actor directory sync rows with a fixed select shape", async () => {
+    const rows = [{ id: "row-1", updated_at: "2026-05-26T01:00:00.000Z" }];
+    const gt = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const eq = vi.fn(() => ({ gt }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseSyncBackend({ from }).listActorDirectoryForSync("team-1", "2026-05-26T00:00:00.000Z");
+
+    expect(from).toHaveBeenCalledWith("actor_directory");
+    expect(select).toHaveBeenCalledWith("id, team_id, actor_type, display_name, member_status, agent_status, last_active_at, created_at, updated_at");
+    expect(eq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(gt).toHaveBeenCalledWith("updated_at", "2026-05-26T00:00:00.000Z");
+    expect(result).toBe(rows);
+  });
+
+  it("lists idea sync rows with a fixed select shape", async () => {
+    const rows = [{ id: "idea-1", updated_at: "2026-05-26T01:00:00.000Z" }];
+    const query = Promise.resolve({ data: rows, error: null });
+    const eq = vi.fn(() => query);
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseSyncBackend({ from }).listIdeasForSync("team-1", null);
+
+    expect(from).toHaveBeenCalledWith("ideas");
+    expect(select).toHaveBeenCalledWith("id, team_id, workspace_id, parent_idea_id, title, description, status, created_by_actor_id, archived, sort_order, created_at, updated_at");
+    expect(eq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(result).toBe(rows);
+  });
+
+  it("lists session participant sync rows with a fixed select shape", async () => {
+    const rows = [{ id: "participant-1", updated_at: "2026-05-26T01:00:00.000Z" }];
+    const gt = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const eq = vi.fn(() => ({ gt }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseSyncBackend({ from }).listSessionParticipantsForSync("session-1", "2026-05-26T00:00:00.000Z");
+
+    expect(from).toHaveBeenCalledWith("session_participants");
+    expect(select).toHaveBeenCalledWith("id, session_id, actor_id, joined_at, created_at, updated_at");
+    expect(eq).toHaveBeenCalledWith("session_id", "session-1");
+    expect(gt).toHaveBeenCalledWith("updated_at", "2026-05-26T00:00:00.000Z");
+    expect(result).toBe(rows);
   });
 });
 

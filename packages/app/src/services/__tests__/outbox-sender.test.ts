@@ -40,18 +40,6 @@ vi.mock('@/lib/backend', () => {
   }
 })
 
-vi.mock('@/lib/supabase-client', () => ({
-  get hasSupabaseConfig() {
-    return true
-  },
-  SUPABASE_CONFIG_MISSING_MESSAGE: 'missing',
-  supabase: {
-    from: (table: string) => {
-      throw new Error(`Unexpected table: ${table}`)
-    },
-  },
-}))
-
 vi.mock('@/lib/local-cache', () => ({
   upsertOutbox: mocks.upsertOutbox,
   deleteOutbox: mocks.deleteOutbox,

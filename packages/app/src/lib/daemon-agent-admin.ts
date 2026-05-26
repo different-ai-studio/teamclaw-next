@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
 import { getBackend } from '@/lib/backend'
-import { supabase } from '@/lib/supabase-client'
 
 export type AgentPermissionLevel = 'view' | 'prompt' | 'admin'
 export type AgentVisibility = 'personal' | 'team'
@@ -52,7 +51,8 @@ export async function getLocalDaemonDeviceId(): Promise<string | null> {
 
 export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaemonAgent | null> {
   const deviceId = await getLocalDaemonDeviceId()
-  const rows = await getBackend().actors.listConnectedAgents(teamId) as Array<{
+  const backend = getBackend()
+  const rows = await backend.actors.listConnectedAgents(teamId) as Array<{
     id?: string
     agent_id: string
     display_name: string | null
@@ -73,27 +73,20 @@ export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaem
 
   if (!row) return null
 
-  const { data: actorRows, error: actorError } = await supabase
-    .from('actor_directory')
-    .select('id, default_workspace_id')
-    .eq('team_id', teamId)
-    .eq('id', row.agent_id)
-    .limit(1)
-
-  if (actorError) throw new Error(actorError.message)
+  const directoryRow = await backend.actors.getDaemonAgentDirectoryEntry(teamId, row.agent_id)
 
   return {
     id: row.agent_id,
-    displayName: row.display_name || row.agent_id,
+    displayName: directoryRow?.display_name || row.display_name || row.agent_id,
     deviceId: row.device_id ?? null,
     visibility: row.visibility,
     permissionLevel: row.permission_level,
     isOwner: row.is_owner,
-    status: null,
-    agentTypes: normalizeAgentTypes(row.agent_types),
-    defaultAgentType: row.default_agent_type ?? null,
-    defaultWorkspaceId: (actorRows?.[0] as { default_workspace_id?: string | null } | undefined)?.default_workspace_id ?? null,
-    lastActiveAt: row.last_active_at ?? null,
+    status: directoryRow?.agent_status ?? null,
+    agentTypes: normalizeAgentTypes(directoryRow?.agent_types ?? row.agent_types),
+    defaultAgentType: directoryRow?.default_agent_type ?? row.default_agent_type ?? null,
+    defaultWorkspaceId: directoryRow?.default_workspace_id ?? null,
+    lastActiveAt: directoryRow?.last_active_at ?? row.last_active_at ?? null,
   }
 }
 
@@ -110,61 +103,21 @@ export async function updateCurrentDaemonAgent(input: {
 }
 
 export async function listAgentAccess(agentId: string): Promise<AgentAccessRow[]> {
-  const { data, error } = await supabase
-    .from('agent_member_access')
-    .select('id, agent_id, member_id, permission_level, granted_by_member_id, created_at, updated_at')
-    .eq('agent_id', agentId)
-    .order('permission_level', { ascending: true })
-
-  if (error) throw new Error(error.message)
-
-  const rows = (data ?? []) as Array<{
-    id: string
-    agent_id: string
-    member_id: string
-    permission_level: AgentPermissionLevel
-    granted_by_member_id: string | null
-    created_at: string
-    updated_at: string
-  }>
-
-  const memberIds = [...new Set(rows.map((row) => row.member_id))]
-  const memberNames = new Map<string, string>()
-  if (memberIds.length > 0) {
-    const { data: actors, error: actorError } = await supabase
-      .from('actor_directory')
-      .select('id, display_name')
-      .in('id', memberIds)
-    if (actorError) throw new Error(actorError.message)
-    ;(actors ?? []).forEach((actor: any) => memberNames.set(actor.id, actor.display_name || actor.id))
-  }
-
+  const rows = await getBackend().actors.listAgentAccess(agentId)
   return rows.map((row) => ({
     id: row.id,
-    agentId: row.agent_id,
-    memberId: row.member_id,
-    memberName: memberNames.get(row.member_id) ?? row.member_id,
-    permissionLevel: row.permission_level,
-    grantedByMemberId: row.granted_by_member_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    agentId: row.agentId,
+    memberId: row.memberId,
+    memberName: row.memberName,
+    permissionLevel: row.permissionLevel,
+    grantedByMemberId: row.grantedByMemberId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   }))
 }
 
 export async function listTeamMembersForAccess(teamId: string): Promise<TeamMemberOption[]> {
-  const { data, error } = await supabase
-    .from('actor_directory')
-    .select('id, display_name, team_role')
-    .eq('team_id', teamId)
-    .eq('actor_type', 'member')
-    .order('display_name', { ascending: true })
-
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((row: any) => ({
-    id: row.id,
-    displayName: row.display_name || row.id,
-    role: row.team_role ?? null,
-  }))
+  return getBackend().actors.listTeamMembersForAccess(teamId)
 }
 
 export async function upsertAgentAccess(input: {
@@ -173,21 +126,9 @@ export async function upsertAgentAccess(input: {
   permissionLevel: AgentPermissionLevel
   grantedByMemberId: string | null
 }): Promise<void> {
-  const { error } = await supabase
-    .from('agent_member_access')
-    .upsert({
-      agent_id: input.agentId,
-      member_id: input.memberId,
-      permission_level: input.permissionLevel,
-      granted_by_member_id: input.grantedByMemberId,
-    }, { onConflict: 'agent_id,member_id' })
-  if (error) throw new Error(error.message)
+  await getBackend().actors.upsertAgentAccess(input)
 }
 
 export async function removeAgentAccess(accessId: string): Promise<void> {
-  const { error } = await supabase
-    .from('agent_member_access')
-    .delete()
-    .eq('id', accessId)
-  if (error) throw new Error(error.message)
+  await getBackend().actors.removeAgentAccess(accessId)
 }

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { loadActorsByIds, upsertActorsBatch } from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
@@ -26,23 +26,8 @@ async function lookupActorDisplayName(actorId: string): Promise<string | null> {
     }
 
     // 3. Supabase fallback — upsert result into local cache
-    const { data, error } = await supabase
-      .from("actor_directory")
-      .select("id, team_id, actor_type, display_name, avatar_url, member_status, agent_status, created_at, updated_at")
-      .eq("id", actorId)
-      .maybeSingle();
-    if (error || !data) return null;
-    const row = data as {
-      id: string;
-      team_id: string;
-      actor_type: string;
-      display_name?: string;
-      avatar_url?: string | null;
-      member_status?: string | null;
-      agent_status?: string | null;
-      created_at: string;
-      updated_at: string;
-    };
+    const row = await getBackend().actors.getActorDirectoryEntry(actorId);
+    if (!row) return null;
     const name = row.display_name ?? null;
     if (name) {
       actorDisplayNameCache.set(actorId, name);
@@ -51,14 +36,14 @@ async function lookupActorDisplayName(actorId: string): Promise<string | null> {
         void upsertActorsBatch([{
           id: row.id,
           teamId: row.team_id,
-          actorType: row.actor_type,
+          actorType: row.actor_type ?? "member",
           displayName: name,
           avatarUrl: row.avatar_url ?? null,
           memberStatus: row.member_status ?? null,
           agentStatus: row.agent_status ?? null,
           metadataJson: null,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
+          createdAt: row.created_at ?? new Date().toISOString(),
+          updatedAt: row.updated_at ?? new Date().toISOString(),
           deletedAt: null,
           syncedAt: new Date().toISOString(),
         }]).catch((e) => console.warn("[actor-display-name] cache upsert:", e));

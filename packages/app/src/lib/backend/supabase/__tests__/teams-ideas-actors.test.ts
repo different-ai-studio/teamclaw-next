@@ -4,6 +4,37 @@ import { createSupabaseActorsBackend } from "../actors";
 import { createSupabaseIdeasBackend } from "../ideas";
 
 describe("Supabase teams backend", () => {
+  it("lists current user teams through RLS-visible teams", async () => {
+    const rows = [{ id: "team-1", name: "Team", slug: "team", created_at: "2026-05-26T01:00:00.000Z" }];
+    const limit = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const order = vi.fn(() => ({ limit }));
+    const select = vi.fn(() => ({ order }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseTeamsBackend({ from, rpc: vi.fn() }).listCurrentUserTeams({ limit: 1 });
+
+    expect(from).toHaveBeenCalledWith("teams");
+    expect(select).toHaveBeenCalledWith("id, name, slug, created_at");
+    expect(order).toHaveBeenCalledWith("created_at", { ascending: true });
+    expect(limit).toHaveBeenCalledWith(1);
+    expect(result).toBe(rows);
+  });
+
+  it("gets a team by id", async () => {
+    const row = { id: "team-1", name: "Team", slug: "team" };
+    const single = vi.fn().mockResolvedValue({ data: row, error: null });
+    const eq = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseTeamsBackend({ from, rpc: vi.fn() }).getTeam("team-1");
+
+    expect(from).toHaveBeenCalledWith("teams");
+    expect(select).toHaveBeenCalledWith("id, name, slug, created_at");
+    expect(eq).toHaveBeenCalledWith("id", "team-1");
+    expect(result).toBe(row);
+  });
+
   it("renames a team through the rename_team RPC", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: { id: "team-1", name: "New Team" },
@@ -171,6 +202,115 @@ describe("Supabase actors backend", () => {
       p_agent_kind: null,
       p_default_agent_type: "codex",
     });
+  });
+
+  it("gets one actor directory row by actor id", async () => {
+    const row = { id: "actor-1", team_id: "team-1", actor_type: "member", display_name: "Ada" };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseActorsBackend({ from, rpc: vi.fn() }).getActorDirectoryEntry("actor-1");
+
+    expect(from).toHaveBeenCalledWith("actor_directory");
+    expect(select).toHaveBeenCalledWith(
+      "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+    );
+    expect(eq).toHaveBeenCalledWith("id", "actor-1");
+    expect(result).toBe(row);
+  });
+
+  it("gets a daemon agent directory row by team and actor id with default fields", async () => {
+    const row = {
+      id: "agent-1",
+      team_id: "team-1",
+      actor_type: "agent",
+      display_name: "Agent",
+      agent_types: ["codex"],
+      default_agent_type: "codex",
+      default_workspace_id: "workspace-1",
+      last_active_at: "2026-05-26T01:00:00.000Z",
+    };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
+    const eqId = vi.fn(() => ({ maybeSingle }));
+    const eqTeam = vi.fn(() => ({ eq: eqId }));
+    const select = vi.fn(() => ({ eq: eqTeam }));
+    const from = vi.fn(() => ({ select }));
+
+    const result = await createSupabaseActorsBackend({ from, rpc: vi.fn() }).getDaemonAgentDirectoryEntry("team-1", "agent-1");
+
+    expect(from).toHaveBeenCalledWith("actor_directory");
+    expect(select).toHaveBeenCalledWith(
+      "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+    );
+    expect(eqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(eqId).toHaveBeenCalledWith("id", "agent-1");
+    expect(result).toBe(row);
+  });
+
+  it("lists agent access and member names", async () => {
+    const accessRows = [{
+      id: "access-1",
+      agent_id: "agent-1",
+      member_id: "member-1",
+      permission_level: "admin",
+      granted_by_member_id: null,
+      created_at: "2026-05-26T01:00:00.000Z",
+      updated_at: "2026-05-26T01:00:00.000Z",
+    }];
+    const accessOrder = vi.fn().mockResolvedValue({ data: accessRows, error: null });
+    const accessEq = vi.fn(() => ({ order: accessOrder }));
+    const memberIn = vi.fn().mockResolvedValue({
+      data: [{ id: "member-1", display_name: "Ada" }],
+      error: null,
+    });
+    const from = vi.fn((table: string) => {
+      if (table === "agent_member_access") return { select: vi.fn(() => ({ eq: accessEq })) };
+      if (table === "actor_directory") return { select: vi.fn(() => ({ in: memberIn })) };
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const result = await createSupabaseActorsBackend({ from, rpc: vi.fn() }).listAgentAccess("agent-1");
+
+    expect(from).toHaveBeenCalledWith("agent_member_access");
+    expect(accessEq).toHaveBeenCalledWith("agent_id", "agent-1");
+    expect(accessOrder).toHaveBeenCalledWith("permission_level", { ascending: true });
+    expect(memberIn).toHaveBeenCalledWith("id", ["member-1"]);
+    expect(result[0]).toMatchObject({
+      id: "access-1",
+      agentId: "agent-1",
+      memberId: "member-1",
+      memberName: "Ada",
+      permissionLevel: "admin",
+    });
+  });
+
+  it("upserts and removes agent access", async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const deleteEq = vi.fn().mockResolvedValue({ error: null });
+    const deleteMock = vi.fn(() => ({ eq: deleteEq }));
+    const from = vi.fn((table: string) => {
+      if (table !== "agent_member_access") throw new Error(`unexpected table ${table}`);
+      return { upsert, delete: deleteMock };
+    });
+    const backend = createSupabaseActorsBackend({ from, rpc: vi.fn() });
+
+    await backend.upsertAgentAccess({
+      agentId: "agent-1",
+      memberId: "member-1",
+      permissionLevel: "prompt",
+      grantedByMemberId: "owner-1",
+    });
+    await backend.removeAgentAccess("access-1");
+
+    expect(upsert).toHaveBeenCalledWith({
+      agent_id: "agent-1",
+      member_id: "member-1",
+      permission_level: "prompt",
+      granted_by_member_id: "owner-1",
+    }, { onConflict: "agent_id,member_id" });
+    expect(deleteEq).toHaveBeenCalledWith("id", "access-1");
   });
 });
 

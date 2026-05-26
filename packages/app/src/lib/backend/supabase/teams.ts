@@ -6,6 +6,16 @@ type RpcResult = Promise<{ data: unknown; error: unknown | null }>;
 
 type SupabaseTeamsClient = {
   rpc(name: string, args: Record<string, unknown>): RpcResult;
+  from?(table: string): {
+    select(columns: string): {
+      order(column: string, options?: { ascending?: boolean }): {
+        limit(count: number): Promise<{ data: TeamSummary[] | null; error: unknown | null }>;
+      };
+      eq(column: string, value: unknown): {
+        single(): Promise<{ data: TeamSummary | null; error: unknown | null }>;
+      };
+    };
+  };
 };
 
 type TeamRpcRow = {
@@ -88,6 +98,25 @@ export function createSupabaseTeamsBackend(client: unknown = defaultSupabase): T
   const supabase = client as SupabaseTeamsClient;
 
   return {
+    async listCurrentUserTeams(args = {}) {
+      const limit = args.limit ?? 50;
+      const { data, error } = await supabase
+        .from!("teams")
+        .select("id, name, slug, created_at")
+        .order("created_at", { ascending: true })
+        .limit(limit);
+      if (error) throw toBackendError(error, "teams.listCurrentUserTeams");
+      return data ?? [];
+    },
+    async getTeam(teamId) {
+      const { data, error } = await supabase
+        .from!("teams")
+        .select("id, name, slug, created_at")
+        .eq("id", teamId)
+        .single();
+      if (error) throw toBackendError(error, "teams.getTeam");
+      return data ?? null;
+    },
     async createTeam(input) {
       const args: Record<string, unknown> = {
         p_name: input.name,

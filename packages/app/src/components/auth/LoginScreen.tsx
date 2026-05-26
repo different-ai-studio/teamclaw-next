@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { buildConfig } from "@/lib/build-config";
-import { hasSupabaseConfig } from "@/lib/supabase-client";
+import { hasBackendConfig } from "@/lib/backend";
 import { useAppVersion } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const cardClassName = embedded
     ? "w-full space-y-5 rounded-[16px] border border-border bg-paper p-5"
     : "w-full max-w-sm space-y-5 rounded-2xl border border-border bg-paper p-7";
-  const serverConfigRequired = !hasSupabaseConfig;
+  const serverConfigRequired = !hasBackendConfig();
   const serverConfigMessage = t(
     "auth.serverConfigRequired",
     "Supabase is not configured. Go back and choose self-hosted server before signing in.",

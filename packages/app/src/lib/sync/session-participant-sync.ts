@@ -9,22 +9,12 @@
  */
 
 import { syncTableForSession } from "@/lib/cache-sync";
+import { getBackend } from "@/lib/backend";
 import * as cache from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
+import type { SessionParticipantSyncRow } from "@/lib/backend/types";
 
-interface SupabaseParticipantRow {
-  id: string;
-  session_id: string;
-  actor_id: string;
-  role?: string | null;
-  joined_at?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const COLUMNS = "id, session_id, actor_id, joined_at, created_at, updated_at";
-
-function mapRow(r: SupabaseParticipantRow): cache.SessionParticipantRow {
+function mapRow(r: SessionParticipantSyncRow): cache.SessionParticipantRow {
   return {
     id: r.id,
     sessionId: r.session_id,
@@ -50,13 +40,13 @@ export async function syncParticipantsForSession(
 ): Promise<number> {
   if (!isTauri()) return 0;
   const { count } = await syncTableForSession<
-    SupabaseParticipantRow,
+    SessionParticipantSyncRow,
     cache.SessionParticipantRow
   >({
-    tableName: "session_participants",
+    watermarkKey: "session_participants",
     sessionId,
     teamId,
-    selectColumns: COLUMNS,
+    pullRows: (updatedAfter) => getBackend().sync.listSessionParticipantsForSync(sessionId, updatedAfter),
     mapRow,
     upsertBatch: cache.upsertSessionParticipantsBatch,
     full: opts?.full,
