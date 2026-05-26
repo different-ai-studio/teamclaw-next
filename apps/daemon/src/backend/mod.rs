@@ -17,8 +17,8 @@ use std::time::Instant;
 use crate::supabase::client::StoredMessage;
 use crate::supabase::error::SupabaseResult;
 use crate::supabase::{
-    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants, WorkspaceRow,
-    WorkspaceUpsert,
+    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants,
+    TeamWorkspaceConfigRow, WorkspaceRow, WorkspaceUpsert,
 };
 
 #[cfg(test)]
@@ -96,6 +96,12 @@ pub trait Backend: Send + Sync {
 
     /// Upsert a `workspaces` row, returning the canonical id.
     async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> SupabaseResult<WorkspaceRow>;
+
+    /// Fetch enabled team-level workspace Git/env configuration.
+    async fn get_team_workspace_config(
+        &self,
+        team_id: &str,
+    ) -> SupabaseResult<Option<TeamWorkspaceConfigRow>>;
 
     /// Fetch a `sessions` row alongside its `session_participants`.
     async fn fetch_session_with_participants(

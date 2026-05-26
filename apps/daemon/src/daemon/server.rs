@@ -1,6 +1,7 @@
 use rumqttc::{Event, Packet};
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -23,11 +24,10 @@ use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
-use crate::supabase::{SupabaseBackend, SupabaseConfig};
+use crate::supabase::{SupabaseBackend, SupabaseConfig, TeamWorkspaceConfigRow};
 // SupabaseConfig + SupabaseBackend stay imported: the daemon boot path constructs
 // the concrete impl from `supabase.toml`, then hands out `Arc<dyn Backend>` to
 // the rest of the daemon.
-use std::path::PathBuf;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
 /// Outcome of apply_start_runtime. Success path returns the allocated
@@ -44,6 +44,27 @@ struct StartRuntimeError {
     error_code: String,
     error_message: String,
     failed_stage: String,
+}
+
+fn load_team_runtime_env(
+    workspace_root: &Path,
+    config: &TeamWorkspaceConfigRow,
+) -> HashMap<String, String> {
+    match crate::team_shared_env::load_team_env(
+        workspace_root,
+        &config.shared_dir_name,
+        &config.env_secret,
+    ) {
+        Ok(env) => env,
+        Err(e) => {
+            warn!(
+                shared_dir_name = %config.shared_dir_name,
+                error = %e,
+                "failed to load team shared environment variables"
+            );
+            HashMap::new()
+        }
+    }
 }
 
 /// Per-session plan emitted by
@@ -3350,6 +3371,42 @@ impl DaemonServer {
         }
 
         let session_id_opt = (!session_id.is_empty()).then_some(session_id);
+        let team_workspace_config = match self
+            .supabase
+            .get_team_workspace_config(self.supabase.team_id())
+            .await
+        {
+            Ok(config) => config,
+            Err(e) => {
+                warn!("failed to fetch team workspace config: {e}");
+                None
+            }
+        };
+        let extra_env = if let Some(config) = team_workspace_config.as_ref() {
+            match crate::team_shared_git::setup_or_sync_shared_dir(
+                Path::new(&resolved_worktree),
+                config,
+            ) {
+                Ok(status) => {
+                    if status.synced {
+                        info!(
+                            shared_dir = %status.shared_dir_path.display(),
+                            "team shared directory synced"
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        shared_dir_name = %config.shared_dir_name,
+                        error = %e,
+                        "team shared directory sync failed"
+                    );
+                }
+            }
+            load_team_runtime_env(Path::new(&resolved_worktree), config)
+        } else {
+            HashMap::new()
+        };
 
         // Spawn.
         let spawn_res = self
@@ -3365,6 +3422,7 @@ impl DaemonServer {
                 session_id_opt,
                 initial_model_override,
                 None,
+                extra_env,
             )
             .await;
         let new_id = match spawn_res {

@@ -26,8 +26,8 @@ use crate::backend::Backend;
 use crate::supabase::client::StoredMessage;
 use crate::supabase::error::{SupabaseError, SupabaseResult};
 use crate::supabase::{
-    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants, WorkspaceRow,
-    WorkspaceUpsert,
+    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants,
+    TeamWorkspaceConfigRow, WorkspaceRow, WorkspaceUpsert,
 };
 
 /// Owned snapshot of an `AgentRuntimeUpsert` so tests can assert without
@@ -156,6 +156,7 @@ pub struct MockState {
     pub runtime_upsert_row_ids: HashMap<(String, Option<String>), String>,
     pub runtime_rows_by_session_runtime: HashMap<(String, String, String), AgentRuntimeRow>,
     pub latest_runtime_rows: HashMap<(String, String), AgentRuntimeRow>,
+    pub team_workspace_configs: HashMap<String, TeamWorkspaceConfigRow>,
     pub ensured_agent_types: Vec<(Vec<String>, String)>,
 }
 
@@ -267,10 +268,11 @@ impl Backend for MockBackend {
         supported_types: &[String],
         default_agent_type: &str,
     ) -> SupabaseResult<()> {
-        self.state.lock().unwrap().ensured_agent_types.push((
-            supported_types.to_vec(),
-            default_agent_type.to_string(),
-        ));
+        self.state
+            .lock()
+            .unwrap()
+            .ensured_agent_types
+            .push((supported_types.to_vec(), default_agent_type.to_string()));
         Ok(())
     }
 
@@ -324,6 +326,19 @@ impl Backend for MockBackend {
                 code: None,
                 message: format!("MockBackend: no workspace_result seeded for {key:?}"),
             })
+    }
+
+    async fn get_team_workspace_config(
+        &self,
+        team_id: &str,
+    ) -> SupabaseResult<Option<TeamWorkspaceConfigRow>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .team_workspace_configs
+            .get(team_id)
+            .cloned())
     }
 
     async fn fetch_session_with_participants(
@@ -614,9 +629,11 @@ mod tests {
         )
         .await
         .unwrap();
-        be.insert_message("team-x", "sess-1", "actor-y", "text", "again", "{}", "", "", 43)
-            .await
-            .unwrap();
+        be.insert_message(
+            "team-x", "sess-1", "actor-y", "text", "again", "{}", "", "", 43,
+        )
+        .await
+        .unwrap();
         let snap = state.lock().unwrap();
         assert_eq!(snap.messages_inserted.len(), 2);
         assert_eq!(snap.messages_inserted[0].content, "hi");

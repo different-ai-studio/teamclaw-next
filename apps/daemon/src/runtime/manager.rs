@@ -254,6 +254,7 @@ impl RuntimeManager {
             supabase_session_id,
             None,
             None,
+            HashMap::new(),
         )
         .await
     }
@@ -276,6 +277,7 @@ impl RuntimeManager {
         supabase_session_id: Option<&str>,
         initial_model_override: Option<String>,
         mcp_config_path: Option<PathBuf>,
+        extra_env: HashMap<String, String>,
     ) -> crate::error::Result<String> {
         let agent_id = Uuid::new_v4().to_string()[..8].to_string();
         let mut handle = RuntimeHandle::new(
@@ -303,6 +305,7 @@ impl RuntimeManager {
             startup_tx,
             initial_model_override.clone(),
             mcp_config_path,
+            extra_env,
         )?;
 
         handle.cmd_tx = Some(cmd_tx);
@@ -473,6 +476,7 @@ impl RuntimeManager {
             startup_tx,
             None,
             None,
+            HashMap::new(),
         )?;
         handle.cmd_tx = Some(cmd_tx);
         handle.current_prompt = prompt.to_string();
@@ -1107,6 +1111,7 @@ impl RuntimeManager {
                 supabase_session_id,
                 initial_model,
                 mcp_cfg_path,
+                HashMap::new(),
             )
             .await?;
 
@@ -1314,14 +1319,16 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_supabase_with_url(url: String) -> Arc<dyn Backend> {
-        Arc::new(SupabaseBackend::new_without_persistence(SupabaseConfig {
-            url,
-            anon_key: "anon".into(),
-            refresh_token: "rt".into(),
-            team_id: "t".into(),
-            actor_id: "agent-actor".into(),
-        })
-        .unwrap())
+        Arc::new(
+            SupabaseBackend::new_without_persistence(SupabaseConfig {
+                url,
+                anon_key: "anon".into(),
+                refresh_token: "rt".into(),
+                team_id: "t".into(),
+                actor_id: "agent-actor".into(),
+            })
+            .unwrap(),
+        )
     }
 
     async fn auth_mock(srv: &MockServer) {
@@ -1649,6 +1656,7 @@ mod tests {
                 None,
                 None,
                 None,
+                HashMap::new(),
             )
             .await;
 

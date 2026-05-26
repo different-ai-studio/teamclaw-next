@@ -107,7 +107,7 @@ async function createTeam(args: {
   gitToken?: string
   sharedDirName?: string
   aiGatewayEndpoint?: string
-}): Promise<{ teamId: string; deeplink: string; workspaceConfig: TeamWorkspaceConfig }> {
+}): Promise<{ teamId: string; workspaceConfig: TeamWorkspaceConfig }> {
   // 1. Create team. Backend trigger inserts the owner actor + team_members row.
   const { data: created, error: createErr } = await supabase
     .rpc('create_team', { p_name: args.teamName })
@@ -127,17 +127,7 @@ async function createTeam(args: {
     updatedAt:         new Date().toISOString(),
   })
 
-  // 3. First invite (admin role).
-  const { data: invite, error: invErr } = await supabase.rpc('create_team_invite', {
-    p_team_id:       teamId,
-    p_kind:          'member',
-    p_display_name:  'New Member',
-    p_team_role:     'admin',
-    p_ttl_seconds:   604800,
-  })
-  if (invErr) throw new Error(invErr.message)
-  const deeplink = ((invite as { deeplink: string }).deeplink).replace(/^amux:/, 'teamclaw:')
-  return { teamId, deeplink, workspaceConfig }
+  return { teamId, workspaceConfig }
 }
 
 // ─── Reusable Components (local to git config) ─────────────────────────────
@@ -186,10 +176,6 @@ export function TeamGitConfig() {
 
   // Create form state
   const [teamName, setTeamName] = React.useState('')
-
-  // After creation: deeplink invite to share
-  const [createdTeamId, setCreatedTeamId] = React.useState('')
-  const [createdInviteDeeplink, setCreatedInviteDeeplink] = React.useState('')
 
   // LLM hosting (create form + connected editing share same state)
   const defaultLlmUrl = buildConfig.team.llm.baseUrl || ''
@@ -341,7 +327,7 @@ export function TeamGitConfig() {
     try {
       setConnectStep(t('settings.team.creatingTeam', 'Creating team...'))
       const dirName = sharedDirName.trim() || 'teamclaw'
-      const { teamId, deeplink, workspaceConfig } = await createTeam({
+      const { teamId, workspaceConfig } = await createTeam({
         teamName: teamName.trim(),
         gitUrl:   gitUrl.trim(),
         gitBranch: gitBranch.trim() || undefined,
@@ -377,8 +363,6 @@ export function TeamGitConfig() {
       }
 
       setTeamConfig(newConfig)
-      setCreatedTeamId(teamId)
-      setCreatedInviteDeeplink(deeplink)
       setState('connected')
 
     } catch (err) {
@@ -386,6 +370,44 @@ export function TeamGitConfig() {
       setState('unconfigured')
     } finally {
       setConnectStep('')
+    }
+  }
+
+  const handleSaveSharedDirectoryConfig = async () => {
+    if (!teamConfig?.teamId || !workspacePath) return
+    setErrorMessage(null)
+    try {
+      const workspaceConfig = await upsertTeamWorkspaceConfig({
+        teamId: teamConfig.teamId,
+        gitUrl: gitUrl.trim(),
+        gitBranch: gitBranch.trim() || 'main',
+        gitToken: isHttpsUrl && gitToken.trim() ? gitToken.trim() : null,
+        aiGatewayEndpoint: null,
+        sharedDirName: sharedDirName.trim() || 'teamclaw',
+        enabled: teamConfig.enabled,
+      })
+      await tauriInvoke('team_shared_git_setup', {
+        config: {
+          workspacePath,
+          gitUrl: workspaceConfig.gitUrl || '',
+          gitBranch: workspaceConfig.gitBranch || null,
+          gitToken: workspaceConfig.gitToken || null,
+          sharedDirName: workspaceConfig.sharedDirName,
+        },
+      })
+      const updatedConfig: TeamConfig = {
+        ...teamConfig,
+        gitUrl: workspaceConfig.gitUrl || '',
+        gitBranch: workspaceConfig.gitBranch,
+        gitToken: workspaceConfig.gitToken,
+        sharedDirName: workspaceConfig.sharedDirName,
+        envSecret: workspaceConfig.envSecret ?? teamConfig.envSecret,
+      }
+      await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
+      setTeamConfig(updatedConfig)
+      setSharedDirName(updatedConfig.sharedDirName)
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -775,6 +797,67 @@ export function TeamGitConfig() {
             </div>
           </SettingCard>
 
+          <SettingCard>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.gitUrl', 'Git Repository URL')}</label>
+                  <Input
+                    value={gitUrl}
+                    onChange={(e) => setGitUrl(e.target.value)}
+                    className="bg-background/50 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                    {t('settings.team.gitBranch', 'Branch')}
+                  </label>
+                  <Input
+                    value={gitBranch}
+                    onChange={(e) => setGitBranch(e.target.value)}
+                    placeholder="main"
+                    className="bg-background/50"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                    {t('settings.team.sharedDirName', 'Shared Directory')}
+                  </label>
+                  <Input
+                    value={sharedDirName}
+                    onChange={(e) => setSharedDirName(e.target.value)}
+                    placeholder="teamclaw"
+                    className="bg-background/50 font-mono text-xs"
+                  />
+                </div>
+                {isHttpsUrl && (
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      {t('settings.team.personalToken', 'Personal Access Token')}
+                    </label>
+                    <Input
+                      type={showToken ? 'text' : 'password'}
+                      value={gitToken}
+                      onChange={(e) => setGitToken(e.target.value)}
+                      className="bg-background/50"
+                    />
+                  </div>
+                )}
+              </div>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={handleSaveSharedDirectoryConfig}
+                disabled={!gitUrl.trim() || state === 'syncing'}
+              >
+                <Save className="h-3.5 w-3.5" />
+                {t('common.save', 'Save')}
+              </Button>
+            </div>
+          </SettingCard>
+
           {/* LLM Service Config — owner / manager only */}
           {canManageServiceConfig && (
             <SettingCard>
@@ -905,66 +988,6 @@ export function TeamGitConfig() {
           </div>
         </SettingCard>
       )}
-
-      {/* Team Created — Invite Deeplink Dialog */}
-      <Dialog open={!!(createdTeamId && createdInviteDeeplink)} onOpenChange={(open) => {
-        if (!open) {
-          setCreatedTeamId('')
-          setCreatedInviteDeeplink('')
-        }
-      }}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>{t('settings.team.teamCreatedTitle', 'Team Created Successfully')}</DialogTitle>
-            <DialogDescription>
-              {t('settings.team.teamCreatedDescInvite', 'Share the invite link below with your team members — they open it to join.')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t('settings.team.inviteLink', 'Invite Link')}</label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 rounded-md bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 px-3 py-2 text-xs font-mono break-all max-h-20 overflow-y-auto select-all">
-                  {createdInviteDeeplink}
-                </code>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 h-9 w-9 p-0"
-                  onClick={() => copyToClipboard(createdInviteDeeplink, t('common.copied', 'Copied!'))}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">{t('settings.team.inviteLinkExpiry', 'Valid for 7 days. Generate a new one if it expires.')}</p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t('settings.team.teamId', 'Team ID')}</label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 rounded-md bg-muted px-3 py-2 text-sm font-mono break-all">
-                  {createdTeamId}
-                </code>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 h-9 w-9 p-0"
-                  onClick={() => copyToClipboard(createdTeamId, t('common.copied', 'Copied!'))}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => {
-              setCreatedTeamId('')
-              setCreatedInviteDeeplink('')
-            }}>
-              {t('common.close', 'Close')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Disconnect Confirmation Dialog */}
       <Dialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>

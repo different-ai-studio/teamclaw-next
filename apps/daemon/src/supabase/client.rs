@@ -291,6 +291,25 @@ pub struct WorkspaceUpsert<'a> {
     pub archived: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TeamWorkspaceConfigRow {
+    pub team_id: String,
+    #[serde(default)]
+    pub git_url: Option<String>,
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub git_token: Option<String>,
+    #[serde(default = "default_shared_dir_name")]
+    pub shared_dir_name: String,
+    pub env_secret: String,
+    pub enabled: bool,
+}
+
+fn default_shared_dir_name() -> String {
+    "teamclaw".to_string()
+}
+
 /// Subset of `agent_runtimes` columns read by
 /// `fetch_latest_runtime_for_session`. The daemon uses this when it has to
 /// rebuild a runtime that the previous daemon process used to own (cursor
@@ -757,6 +776,34 @@ impl crate::backend::Backend for SupabaseBackend {
             code: None,
             message: "workspace upsert returned no rows".into(),
         })
+    }
+
+    async fn get_team_workspace_config(
+        &self,
+        team_id: &str,
+    ) -> SupabaseResult<Option<TeamWorkspaceConfigRow>> {
+        let token = self.access_token().await?;
+        let url = format!(
+            "{}/rest/v1/team_workspace_config?team_id=eq.{}&enabled=eq.true&select=team_id,git_url,git_branch,git_token,shared_dir_name,env_secret,enabled&limit=1",
+            self.cfg.url, team_id
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("apikey", &self.cfg.anon_key)
+            .bearer_auth(token)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SupabaseError::Rpc {
+                code: Some(status.as_u16().to_string()),
+                message: format!("get_team_workspace_config: {text}"),
+            });
+        }
+        let rows: Vec<TeamWorkspaceConfigRow> = resp.json().await?;
+        Ok(rows.into_iter().next())
     }
 
     /// Fetch a `sessions` row alongside its `session_participants`. Used when

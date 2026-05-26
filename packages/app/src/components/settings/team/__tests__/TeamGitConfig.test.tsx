@@ -174,9 +174,6 @@ describe('TeamGitConfig workspace-aware calls', () => {
       if (fn === 'create_team') {
         return { single: vi.fn().mockResolvedValue({ data: { id: 'team-123' }, error: null }) }
       }
-      if (fn === 'create_team_invite') {
-        return Promise.resolve({ data: { deeplink: 'amux://invite/abc' }, error: null })
-      }
       return Promise.resolve({ data: null, error: null })
     })
     mockUpsertTeamWorkspaceConfig.mockResolvedValue({
@@ -233,5 +230,44 @@ describe('TeamGitConfig workspace-aware calls', () => {
       workspacePath: '/workspace-a',
     })
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
+    expect(mockSupabaseRpc).not.toHaveBeenCalledWith('create_team_invite', expect.anything())
+  })
+
+  it('syncs configured teams through the shared git command', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
+      if (cmd === 'get_team_config') {
+        return {
+          gitUrl: 'https://example.com/repo.git',
+          gitBranch: 'main',
+          gitToken: null,
+          enabled: true,
+          lastSyncAt: null,
+          sharedDirName: 'teamclaw',
+          envSecret: '00'.repeat(32),
+          teamId: 'team-123',
+        }
+      }
+      if (cmd === 'team_shared_git_sync') return { success: true, message: 'Synced' }
+      if (cmd === 'save_team_config') return null
+      if (cmd === 'get_team_status') return { active: true, llm: null }
+      if (cmd === 'get_device_info') return { nodeId: 'node-123' }
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_sync', {
+        config: {
+          workspacePath: '/workspace-a',
+          gitUrl: 'https://example.com/repo.git',
+          gitBranch: 'main',
+          gitToken: null,
+          sharedDirName: 'teamclaw',
+        },
+        force: false,
+      })
+    })
   })
 })

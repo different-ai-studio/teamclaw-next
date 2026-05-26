@@ -11,6 +11,8 @@ mod onboarding;
 mod proto;
 mod runtime;
 mod supabase;
+mod team_shared_env;
+mod team_shared_git;
 mod teamclaw;
 
 use clap::Parser;
@@ -103,6 +105,7 @@ fn main() -> anyhow::Result<()> {
                     startup_tx,
                     None,
                     None,
+                    std::collections::HashMap::new(),
                 )?;
 
                 println!("--- Streaming events (Ctrl+C to stop) ---\n");
