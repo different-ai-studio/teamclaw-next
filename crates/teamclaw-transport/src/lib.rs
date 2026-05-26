@@ -45,6 +45,19 @@ pub struct TransportMessage {
     pub delivery: DeliveryGuarantee,
 }
 
+/// Transport-agnostic representation of an inbound message.
+///
+/// Both MQTT (`rumqttc::Publish`) and NATS (`async_nats::Message`) sources
+/// normalize into this type before being handed to subscriber routing logic.
+/// `topic` always uses the MQTT slash form (`amux/{team}/...`); NATS transport
+/// converts subject `.` segments back to `/` on receive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingFrame {
+    pub topic: String,
+    pub payload: Vec<u8>,
+    pub retained: bool,
+}
+
 pub trait Transport {
     type Error;
 

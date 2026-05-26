@@ -1,5 +1,6 @@
 use prost::Message;
 use rumqttc::Publish;
+use teamclaw_transport::IncomingFrame;
 use tracing::warn;
 
 use crate::proto::amux;
@@ -25,12 +26,21 @@ pub enum IncomingMessage {
 }
 
 pub fn parse_incoming(publish: &Publish) -> Option<IncomingMessage> {
-    let topic = &publish.topic;
+    parse_frame(&IncomingFrame {
+        topic: publish.topic.clone(),
+        payload: publish.payload.to_vec(),
+        retained: publish.retain,
+    })
+}
+
+pub fn parse_frame(frame: &IncomingFrame) -> Option<IncomingMessage> {
+    let topic = &frame.topic;
+    let payload = &frame.payload;
 
     if topic.starts_with("amux/") && topic.ends_with("/rpc/req") {
         return Some(IncomingMessage::TeamclawRpc {
             topic: topic.clone(),
-            payload: publish.payload.to_vec(),
+            payload: payload.clone(),
         });
     }
 
@@ -42,7 +52,7 @@ pub fn parse_incoming(publish: &Publish) -> Option<IncomingMessage> {
             if parts[4] == "live" {
                 return Some(IncomingMessage::TeamclawSessionLive {
                     session_id,
-                    payload: publish.payload.to_vec(),
+                    payload: payload.clone(),
                 });
             }
         }
@@ -53,7 +63,7 @@ pub fn parse_incoming(publish: &Publish) -> Option<IncomingMessage> {
         if parts.len() == 5 && parts[2] == "device" && parts[4] == "notify" {
             return Some(IncomingMessage::TeamclawNotify {
                 device_id: parts[3].to_string(),
-                payload: publish.payload.to_vec(),
+                payload: payload.clone(),
             });
         }
     }
@@ -64,7 +74,7 @@ pub fn parse_incoming(publish: &Publish) -> Option<IncomingMessage> {
         // = 7 segments
         if parts.len() == 7 && parts[4] == "runtime" {
             let runtime_id = parts[5].to_string();
-            match amux::RuntimeCommandEnvelope::decode(publish.payload.as_ref()) {
+            match amux::RuntimeCommandEnvelope::decode(payload.as_slice()) {
                 Ok(envelope) => {
                     return Some(IncomingMessage::RuntimeCommand {
                         runtime_id,
