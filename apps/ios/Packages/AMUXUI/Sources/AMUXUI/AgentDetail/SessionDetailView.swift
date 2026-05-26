@@ -9,6 +9,12 @@ public struct SessionDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: SessionDetailViewModel
+    /// Single actor-directory query shared by all EventBubbleView instances
+    /// in this session, replacing per-row @Query registrations.
+    @Query(sort: \CachedActor.displayName) private var cachedActors: [CachedActor]
+    private var cachedActorMap: CachedActorMap {
+        CachedActorMap(nameByActorID: Dictionary(uniqueKeysWithValues: cachedActors.map { ($0.actorId, $0.displayName) }))
+    }
     @State private var promptText = ""
     @State private var attachments: [URL] = []
     @State private var voiceRecorder = VoiceRecorder(contextualStrings: [
@@ -479,11 +485,16 @@ public struct SessionDetailView: View {
     /// at the view layer.
     private func activeStreamLastLine(agentID: String, runtimeEvents: [AgentEvent]) -> String {
         let live = viewModel.streamingTextByAgent[agentID] ?? ""
-        if !live.isEmpty { return live.replacingOccurrences(of: "\n", with: " ") }
+        if !live.isEmpty {
+            // The card is lineLimit(1). Operate on the buffer tail so a
+            // 50KB reply doesn't get copied and newline-replaced in full
+            // on every token — the visible output is identical.
+            return live.suffix(240).replacingOccurrences(of: "\n", with: " ")
+        }
         if let last = runtimeEvents.reversed().first(where: { e in
             (e.eventType == "output" || e.eventType == "thinking") && !(e.text ?? "").isEmpty
         }) {
-            return (last.text ?? "").replacingOccurrences(of: "\n", with: " ")
+            return (last.text ?? "").suffix(240).replacingOccurrences(of: "\n", with: " ")
         }
         if let lastTool = runtimeEvents.reversed().first(where: { $0.eventType == "tool_use" }) {
             return lastTool.toolName.map { "Running \($0)…" } ?? "Working…"
@@ -504,7 +515,8 @@ public struct SessionDetailView: View {
                     if let sender = viewModel.outboxSender {
                         Task { await sender.retry(messageID: msgID) }
                     }
-                }
+                },
+                actorMap: cachedActorMap
             )
         case .activeStream(_, let agentID, let runtimeEvents):
             // NavigationLink(destination:) instead of value-based push

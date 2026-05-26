@@ -2015,8 +2015,7 @@ public final class SessionDetailViewModel {
     public func requestTurnHistory(modelContext: ModelContext,
                                    turnID: String,
                                    agentID: String? = nil) async throws {
-        let targetAgent = agentID ?? runtime?.runtimeId ?? ""
-        guard !targetAgent.isEmpty, !turnID.isEmpty else { return }
+        guard !turnID.isEmpty else { return }
         self.syncModelContext = modelContext
         isSyncing = true
 
@@ -2033,15 +2032,20 @@ public final class SessionDetailViewModel {
             }
         }
 
+        // The bubble passes an actor id (route.agentID). Resolve it to
+        // the owning runtime + device id via the same helper sendCommand
+        // uses so the MQTT topic matches the daemon's subscription.
+        let route = commandRoute(forAgentActorID: agentID, fallbackRuntime: runtime)
+        guard !route.runtimeID.isEmpty else { return }
+
         var req = Amux_AcpRequestTurnHistory()
         req.turnID = turnID
         req.requestID = UUID().uuidString
 
-        let deviceID = resolveDaemonDeviceId()
         let sender = RuntimeCommandSender(mqtt: mqtt, teamID: teamID, peerID: peerId)
         try await sender.send(
-            runtimeID: targetAgent,
-            deviceID: deviceID,
+            runtimeID: route.runtimeID,
+            deviceID: route.deviceID,
             currentHumanActorID: teamclawService?.currentHumanActorId,
             makeCommand: { $0.command = .requestTurnHistory(req) }
         )
@@ -2246,23 +2250,25 @@ public final class SessionDetailViewModel {
 
     // MARK: - Phase 4 reducer apply + project
 
-    /// Apply one input to the reducer, mirror the reducer-owned
-    /// auxiliary state (streaming buffers, availableCommands) onto the
-    /// VM's @Observable fields, then project entries into the
-    /// SwiftData-backed `events`. Returns `true` iff the projection
-    /// mutated the events array — callers use that to decide when to
-    /// recompute groups.
+    /// Apply one input to the reducer, mirror the reducer-owned auxiliary
+    /// state (streaming buffers, availableCommands) onto the VM's
+    /// @Observable fields, then project entries into the SwiftData-backed
+    /// `events` **only when the reducer changed entries**. Returns `true`
+    /// iff the projection mutated the SwiftData `events` array.
+    ///
+    /// **Fast path:** streaming deltas after the first one return
+    /// `.streamingBufferOnly` from the reducer — `state.entries` is
+    /// byte-identical. We skip the O(N log N) sort and the O(N) SwiftData
+    /// diff entirely, saving the main-thread work that dominated Time
+    /// Profiler samples during streaming (dozens of frames per second).
     @discardableResult
     private func applyTimelineInput(_ input: TimelineInput,
                                     modelContext: ModelContext) -> Bool {
-        ChatTimelineReducer.apply(input, to: &timelineState)
-        timelineState.entries.sort {
-            if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
-            if $0.sequence != $1.sequence { return $0.sequence < $1.sequence }
-            return $0.id < $1.id
-        }
-        // Mirror the reducer's per-agent buffers + slash commands so
-        // the view's existing @Observable bindings stay correct.
+        let effect = ChatTimelineReducer.apply(input, to: &timelineState)
+
+        // Always mirror reducer-owned observable fields. These drive
+        // ActiveStreamCardView last-line and StreamingDetailView live text
+        // on every delta — they must update even when entries are unchanged.
         streamingTextByAgent = timelineState.streamingTextByAgent
         streamingModelByAgent = timelineState.streamingModelByAgent
         streamingAgentSet = timelineState.streamingAgentSet
@@ -2270,13 +2276,31 @@ public final class SessionDetailViewModel {
         if !timelineState.availableCommands.isEmpty {
             dynamicAvailableCommands = timelineState.availableCommands
         }
-        // Project entries → SwiftData rows.
-        return TimelineSwiftDataSync.sync(
-            state: timelineState,
-            into: &events,
-            agentId: eventScopeKey,
-            modelContext: modelContext
-        )
+
+        switch effect {
+        case .noop:
+            return false
+        case .streamingBufferOnly:
+            // Hot path: buffer mirrors above are sufficient. Skip sort +
+            // SwiftData diff — entries didn't change, so the projection
+            // would be a no-op and callers will correctly skip recomputeGroups.
+            #if DEBUG
+            SessionDetailViewModel._testFastPathSkipCount &+= 1
+            #endif
+            return false
+        case .entriesChanged:
+            timelineState.entries.sort {
+                if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+                if $0.sequence != $1.sequence { return $0.sequence < $1.sequence }
+                return $0.id < $1.id
+            }
+            return TimelineSwiftDataSync.sync(
+                state: timelineState,
+                into: &events,
+                agentId: eventScopeKey,
+                modelContext: modelContext
+            )
+        }
     }
 
     /// Rehydrate the reducer's entry state from the SwiftData-loaded
@@ -2468,6 +2492,36 @@ extension SessionDetailViewModel {
     public func applyMemberSheetSnapshotForTests(agents: [MemberSheetAgent]) {
         memberSheetAgents = agents
         pruneGhostAgentSelection()
+    }
+}
+
+extension SessionDetailViewModel {
+    /// Counts fast-path skips (streaming-buffer-only deltas that bypassed
+    /// sort + SwiftData sync). Incremented by `applyTimelineInput` only in
+    /// DEBUG builds. Stored on the type to avoid the stored-property-in-
+    /// extension restriction on @Observable classes; tests that call this
+    /// should be serial to avoid data races on the counter.
+    nonisolated(unsafe) public static var _testFastPathSkipCount: Int = 0
+
+    /// Direct test entry: build an AcpInput and run it through
+    /// `applyTimelineInput` without a live MQTT session.
+    @MainActor
+    public func _testApplyAcp(_ acp: Amux_AcpEvent,
+                              sequence: Int,
+                              runtimeID: String,
+                              agentBucketKey: String,
+                              modelContext: ModelContext) {
+        _ = applyTimelineInput(
+            .acp(AcpInput(
+                envelopeSequence: UInt64(sequence),
+                runtimeID: runtimeID,
+                agentBucketKey: agentBucketKey,
+                timestamp: .now,
+                turnID: nil,
+                acpEvent: acp
+            )),
+            modelContext: modelContext
+        )
     }
 }
 #endif
