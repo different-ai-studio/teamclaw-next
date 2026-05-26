@@ -1065,9 +1065,9 @@ impl DaemonServer {
         let mut first_connect = true;
 
         'outer: loop {
-            // 1. Fresh Supabase access_token; same retry cadence as MQTT path.
+            // 1. Fresh backend access_token; same retry cadence as MQTT path.
             let token = loop {
-                match self.supabase.auth_token().await {
+                match self.backend.auth_token().await {
                     Ok(t) => break t,
                     Err(e) => {
                         warn!("token fetch failed: {e}, retrying in 30s");
@@ -1151,7 +1151,7 @@ impl DaemonServer {
             //    in-place refresh isn't possible without a fresh connection.
             let proactive_reconnect_in: Duration = {
                 let buffer = Duration::from_secs(5 * 60);
-                match self.supabase.cached_credential_expiry() {
+                match self.backend.cached_credential_expiry() {
                     Some(t) => t
                         .checked_duration_since(Instant::now())
                         .and_then(|d| d.checked_sub(buffer))
@@ -1233,7 +1233,7 @@ impl DaemonServer {
                     }
                     _ = &mut proactive_sleep => {
                         info!(
-                            expiry = ?self.supabase.cached_credential_expiry(),
+                            expiry = ?self.backend.cached_credential_expiry(),
                             "JWT nearing expiry, proactively reconnecting NATS"
                         );
                         // Mark offline before tearing down so subscribers see
