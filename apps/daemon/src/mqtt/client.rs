@@ -10,6 +10,8 @@ use prost::Message;
 
 use super::Topics;
 
+const MQTT_MAX_PACKET_SIZE_BYTES: usize = 4 * 1024 * 1024;
+
 pub struct MqttClient {
     pub client: AsyncClient,
     pub eventloop: EventLoop,
@@ -75,6 +77,10 @@ impl MqttClient {
         opts.set_credentials(actor_id, token);
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(true);
+        // ACP live events can carry full LLM chunks and tool-call payloads.
+        // Match the desktop client so daemon-originated session/live publishes
+        // do not trip rumqttc's 10 KiB default packet cap.
+        opts.set_max_packet_size(MQTT_MAX_PACKET_SIZE_BYTES, MQTT_MAX_PACKET_SIZE_BYTES);
 
         if broker.use_tls && std::env::var("AMUXD_MQTT_INSECURE_TLS").as_deref() == Ok("1") {
             warn!("AMUXD_MQTT_INSECURE_TLS=1: MQTT TLS certificate verification is disabled");
@@ -158,9 +164,8 @@ mod tests {
     use super::*;
     use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
 
-    #[test]
-    fn new_succeeds_with_token_credentials() {
-        let config = DaemonConfig {
+    fn test_config() -> DaemonConfig {
+        DaemonConfig {
             device: DeviceConfig {
                 id: "abc123defg".into(),
                 name: "test-device".into(),
@@ -173,11 +178,31 @@ mod tests {
             team_id: Some("team-uuid-1234".into()),
             channels: Default::default(),
             idle_runtime_timeout_secs: None,
-        };
+        }
+    }
+
+    #[test]
+    fn new_succeeds_with_token_credentials() {
+        let config = test_config();
         let result = MqttClient::new(&config, "actor-uuid-1234", "jwt-token-value");
         assert!(
             result.is_ok(),
             "MqttClient::new should succeed with token credentials"
+        );
+    }
+
+    #[test]
+    fn new_allows_large_agent_live_events() {
+        let config = test_config();
+        let client = MqttClient::new(&config, "actor-uuid-1234", "jwt-token-value").unwrap();
+
+        assert_eq!(
+            client.eventloop.mqtt_options.max_packet_size(),
+            4 * 1024 * 1024
+        );
+        assert_eq!(
+            client.eventloop.state.max_outgoing_packet_size,
+            4 * 1024 * 1024
         );
     }
 }
