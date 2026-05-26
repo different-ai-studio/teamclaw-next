@@ -28,8 +28,11 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
     let invite = invite_url::parse(raw_url)?;
 
     let base_cfg = supabase_build_env_config_from_process()?;
-    let claim_client = SupabaseBackend::new(base_cfg.clone())?;
-    let claim = claim_client.claim_team_invite(&invite.token).await?;
+    let claim_client = SupabaseBackend::new_without_persistence(base_cfg.clone())?;
+    let claim = claim_client
+        .claim_team_invite(&invite.token)
+        .await
+        .map_err(actionable_invite_claim_error)?;
 
     let refresh_token =
         claim
@@ -40,7 +43,7 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
                 message: "claim_team_invite did not return a refresh token (kind=member?)".into(),
             })?;
 
-    let cfg = SupabaseConfig {
+    let mut cfg = SupabaseConfig {
         url: base_cfg.url,
         anon_key: base_cfg.anon_key,
         refresh_token,
@@ -48,14 +51,18 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         actor_id: claim.actor_id.clone(),
     };
 
-    let verify_client = SupabaseBackend::new(cfg.clone())?;
+    let verify_client = SupabaseBackend::new_without_persistence(cfg.clone())?;
     verify_client.access_token().await?;
+    cfg.refresh_token = verify_client.current_refresh_token();
 
     let path = match config_path {
         Some(p) => p.to_path_buf(),
         None => SupabaseConfig::default_path()?,
     };
     cfg.save(&path)?;
+    if config_path.is_none() {
+        save_legacy_supabase_config_if_present(&cfg)?;
+    }
 
     let daemon_path = DaemonConfig::default_path();
     let existing_daemon_cfg = DaemonConfig::load(&daemon_path).ok();
@@ -76,6 +83,28 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         display_name: claim.display_name,
         config_path: path,
     })
+}
+
+fn save_legacy_supabase_config_if_present(cfg: &SupabaseConfig) -> SupabaseResult<()> {
+    let legacy_path = SupabaseConfig::legacy_path()?;
+    if legacy_path.exists() {
+        cfg.save(&legacy_path)?;
+    }
+    Ok(())
+}
+
+fn actionable_invite_claim_error(err: SupabaseError) -> SupabaseError {
+    match err {
+        SupabaseError::Rpc { code, message } if message.contains("member claim requires authentication") => {
+            SupabaseError::Rpc {
+                code,
+                message: format!(
+                    "{message}\nThis is a teammate/member invite. `amuxd init` requires an Agent invite; create one from the app's Invite dialog with Kind = Agent."
+                ),
+            }
+        }
+        other => other,
+    }
 }
 
 fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
@@ -256,6 +285,22 @@ mod tests {
         assert_eq!(cfg.device.name, "existing-device");
         assert_eq!(cfg.team_id.as_deref(), Some("team-2"));
         assert_eq!(cfg.mqtt.broker_url, "mqtts://broker.example.com:8883");
+    }
+
+    #[test]
+    fn member_invite_claim_error_explains_agent_invite_requirement() {
+        let err = actionable_invite_claim_error(SupabaseError::Rpc {
+            code: Some("401".to_string()),
+            message: r#"{"message":"member claim requires authentication"}"#.to_string(),
+        });
+
+        match err {
+            SupabaseError::Rpc { message, .. } => {
+                assert!(message.contains("Kind = Agent"));
+                assert!(message.contains("member claim requires authentication"));
+            }
+            other => panic!("expected rpc error, got {other:?}"),
+        }
     }
 
     #[test]

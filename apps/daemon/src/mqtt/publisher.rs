@@ -62,12 +62,8 @@ impl<'a> Publisher<'a> {
         &self,
         agent_id: &str,
     ) -> Result<(), teamclaw_transport::PublisherError> {
-        self.publish_message(
-            self.topics.runtime_state(agent_id),
-            true,
-            Vec::<u8>::new(),
-        )
-        .await
+        self.publish_message(self.topics.runtime_state(agent_id), true, Vec::<u8>::new())
+            .await
     }
 
     /// Publishes DeviceState (online/offline) to the retained

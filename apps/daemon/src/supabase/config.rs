@@ -2,6 +2,7 @@ use crate::supabase::error::{SupabaseError, SupabaseResult};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SupabaseConfig {
@@ -35,18 +36,46 @@ impl SupabaseConfig {
             .ok_or_else(|| SupabaseError::Config("no home dir".into()))?
             .join(".amuxd");
         let path = dir.join("supabase.toml");
-        let legacy_path = dirs::config_dir()
-            .unwrap_or_else(|| dir.clone())
-            .join("amux")
-            .join("supabase.toml");
+        let legacy_path = Self::legacy_path()?;
 
-        if !path.exists() && legacy_path.exists() {
-            fs::create_dir_all(&dir)?;
-            fs::copy(&legacy_path, &path)?;
-        }
+        sync_legacy_if_newer(&path, &legacy_path)?;
 
         Ok(path)
     }
+
+    pub fn legacy_path() -> SupabaseResult<PathBuf> {
+        let dir = dirs::home_dir()
+            .ok_or_else(|| SupabaseError::Config("no home dir".into()))?
+            .join(".amuxd");
+        Ok(dirs::config_dir()
+            .unwrap_or_else(|| dir.clone())
+            .join("amux")
+            .join("supabase.toml"))
+    }
+}
+
+fn modified_at(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+fn should_sync_legacy(path_mtime: Option<SystemTime>, legacy_mtime: Option<SystemTime>) -> bool {
+    match (path_mtime, legacy_mtime) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(current), Some(legacy)) => legacy > current,
+    }
+}
+
+fn sync_legacy_if_newer(path: &Path, legacy_path: &Path) -> SupabaseResult<()> {
+    if should_sync_legacy(modified_at(path), modified_at(legacy_path)) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if legacy_path.exists() {
+            fs::copy(&legacy_path, &path)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -100,5 +129,29 @@ mod tests {
         };
         cfg.save(&path).unwrap();
         assert!(path.exists());
+    }
+
+    #[test]
+    fn should_sync_legacy_when_current_missing_or_older() {
+        let old = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        let new = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2);
+
+        assert!(should_sync_legacy(None, Some(new)));
+        assert!(should_sync_legacy(Some(old), Some(new)));
+        assert!(!should_sync_legacy(Some(new), Some(old)));
+        assert!(!should_sync_legacy(Some(new), None));
+    }
+
+    #[test]
+    fn sync_legacy_if_newer_copies_when_current_missing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("new").join("supabase.toml");
+        let legacy_path = dir.path().join("legacy").join("supabase.toml");
+        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        fs::write(&legacy_path, "legacy").unwrap();
+
+        sync_legacy_if_newer(&path, &legacy_path).unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "legacy");
     }
 }

@@ -25,6 +25,7 @@ pub mod supabase_auth_bridge;
 pub mod system_appearance;
 pub mod team;
 pub mod team_secret_store;
+pub mod team_shared_git;
 pub mod team_sync_all;
 pub mod team_types;
 pub mod team_unified;

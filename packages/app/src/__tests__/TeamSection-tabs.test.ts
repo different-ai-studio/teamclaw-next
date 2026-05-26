@@ -59,15 +59,14 @@ describe('TeamSection tab switcher', () => {
     expect(screen.queryByText('S3')).toBeNull()
   })
 
-  it('renders a heading for the Team section', async () => {
+  it('renders a heading for the Team Shared section', async () => {
     const { TeamSection } = await import('../components/settings/TeamSection')
 
     await act(async () => {
       render(React.createElement(TeamSection))
     })
 
-    const headings = screen.getAllByRole('heading')
-    expect(headings.length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: 'Team Shared' })).toBeInTheDocument()
   })
 
   it('does not render sync-method tabs as the default surface', async () => {

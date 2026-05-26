@@ -51,14 +51,20 @@ pub struct TeamConfig {
     pub git_url: String,
     pub enabled: bool,
     pub last_sync_at: Option<String>,
+    #[serde(default = "default_shared_dir_name")]
+    pub shared_dir_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_secret: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fc_endpoint: Option<String>,
+}
+
+fn default_shared_dir_name() -> String {
+    "teamclaw".to_string()
 }
 
 /// One untracked file surfaced by the sync precheck.
@@ -1390,205 +1396,29 @@ pub async fn team_sync_repo(
     let workspace_path = workspace_path
         .filter(|p| !p.is_empty())
         .ok_or_else(|| "No workspace path set. Please select a workspace first.".to_string())?;
-    let team_dir = get_team_repo_path(&workspace_path);
+    let json = read_workspace_config(&workspace_path)?;
+    let team = json
+        .get("team")
+        .cloned()
+        .map(serde_json::from_value::<TeamConfig>)
+        .transpose()
+        .map_err(|e| format!("Failed to parse team config: {}", e))?
+        .ok_or_else(|| "No team configured for this workspace".to_string())?;
+    if !team.enabled {
+        return Err("Team shared Git sync is disabled for this workspace".to_string());
+    }
 
-    // Self-heal: re-clone if the team directory is missing or has a corrupt .git.
-    // Since team config is now in Supabase (not teamclaw.json), we can no longer
-    // recover the git URL here — instruct the user to rejoin from settings.
-    let team_path = Path::new(&team_dir);
-    let git_dir = team_path.join(".git");
-    let needs_reclone = if !git_dir.exists() {
-        true
-    } else {
-        let (ok, _, _) = run_git(&["rev-parse", "--verify", "HEAD"], &team_dir).unwrap_or((
-            false,
-            String::new(),
-            String::new(),
-        ));
-        !ok
+    let config = crate::commands::team_shared_git::TeamSharedGitConfig {
+        workspace_path,
+        git_url: team.git_url,
+        git_branch: team.git_branch,
+        git_token: team.git_token,
+        shared_dir_name: Some(team.shared_dir_name),
     };
-    if needs_reclone {
-        return Err(format!(
-            "Team directory '{}' is not a usable git repository. Please rejoin the team from Settings to re-clone.",
-            team_dir
-        ));
-    }
-
-    // Pre-sync guard: block when untracked files breach thresholds, unless forced.
-    if !force.unwrap_or(false) {
-        if let Some((new_files, total_bytes)) = detect_precheck_breach(&team_dir) {
-            return Ok(TeamGitResult {
-                success: false,
-                message: String::new(),
-                needs_confirmation: true,
-                new_files,
-                total_bytes,
-            });
-        }
-    }
-
-    // Auto-commit local changes if any
-    let (_, status_out, _) = run_git(&["status", "--porcelain"], &team_dir)?;
-    let had_local_changes = !status_out.trim().is_empty();
-    if had_local_changes {
-        let _ = run_git(&["add", "-A"], &team_dir);
-        // Build commit message with changed file names
-        let changed_files: Vec<&str> = status_out
-            .lines()
-            .filter_map(|line| {
-                let file = line.get(3..)?.split(" -> ").last()?.trim();
-                if file.is_empty() || file.starts_with(".trash") {
-                    None
-                } else {
-                    Some(file)
-                }
-            })
-            .collect();
-        let msg = if changed_files.len() <= 5 {
-            format!("chore: sync ({})", changed_files.join(", "))
-        } else {
-            format!(
-                "chore: sync ({}, ... +{} more)",
-                changed_files[..3].join(", "),
-                changed_files.len() - 3
-            )
-        };
-        let _ = run_git(&["commit", "-m", &msg], &team_dir);
-    }
-
-    // Determine the branch to sync: current HEAD → remote default → "main"
-    let branch = {
-        let (ok, stdout, _) = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], &team_dir)
-            .unwrap_or((false, String::new(), String::new()));
-        if ok && !stdout.trim().is_empty() && stdout.trim() != "HEAD" {
-            stdout.trim().to_string()
-        } else {
-            let (ok2, stdout2, _) = run_git(
-                &["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
-                &team_dir,
-            )
-            .unwrap_or((false, String::new(), String::new()));
-            if ok2 && !stdout2.trim().is_empty() {
-                stdout2
-                    .trim()
-                    .strip_prefix("origin/")
-                    .unwrap_or(stdout2.trim())
-                    .to_string()
-            } else {
-                "main".to_string()
-            }
-        }
-    };
-
-    let remote_ref = format!("origin/{}", branch);
-    let (ok, _, stderr) = run_git(&["fetch", "origin"], &team_dir)?;
-    if !ok {
-        return Err(format!("git fetch failed: {}", stderr.trim()));
-    }
-    let (ref_exists, _, _) = run_git(&["rev-parse", "--verify", &remote_ref], &team_dir)?;
-    if !ref_exists {
-        return Err(format!(
-            "Remote branch '{}' not found. The remote repository may be empty or use a different default branch.",
-            remote_ref
-        ));
-    }
-
-    // Try pull --rebase to merge local commits with remote
-    let (rebase_ok, _, _) = run_git(&["pull", "--rebase", "origin", &branch], &team_dir)?;
-    let mut conflict_resolved = false;
-
-    if !rebase_ok {
-        // Conflict — abort rebase, backup local changed files, then reset to remote
-        let _ = run_git(&["rebase", "--abort"], &team_dir);
-
-        // Identify files that differ from remote to backup only conflicting content
-        let (_, diff_out, _) = run_git(&["diff", "--name-only", &remote_ref], &team_dir)?;
-        if !diff_out.trim().is_empty() {
-            let ts = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-            let trash_dir = Path::new(&team_dir).join(".trash").join(&ts);
-            let _ = std::fs::create_dir_all(&trash_dir);
-
-            for file in diff_out.lines() {
-                let file = file.trim();
-                if file.is_empty() || file.starts_with(".trash") {
-                    continue;
-                }
-                let src = Path::new(&team_dir).join(file);
-                if src.is_file() {
-                    let dest = trash_dir.join(file);
-                    if let Some(parent) = dest.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::copy(&src, &dest);
-                }
-            }
-            println!(
-                "[Team Sync] conflict detected, backed up local files to .trash/{}",
-                ts
-            );
-        }
-
-        // Force reset to remote
-        let (ok, _, stderr) = run_git(&["reset", "--hard", &remote_ref], &team_dir)?;
-        if !ok {
-            return Err(format!("git reset failed: {}", stderr.trim()));
-        }
-        conflict_resolved = true;
-    } else if had_local_changes {
-        // Rebase succeeded — push local commits to remote
-        let (ok, _, stderr) = run_git(&["push", "origin", &branch], &team_dir)?;
-        if !ok {
-            println!("[Team Sync] push failed (non-fatal): {}", stderr.trim());
-        }
-    }
-
-    // Ensure .gitignore has all required rules (auto-upgrade for existing repos)
-    ensure_gitignore_rules(&team_dir);
-
-    let mcp_msg = match sync_team_mcp_configs_from_dir(&team_dir, &workspace_path) {
-        Ok(count) if count > 0 => {
-            println!(
-                "[Team Sync] Synced {} MCP server(s) from .mcp/ to opencode.json",
-                count
-            );
-            format!(". Synced {} MCP server(s)", count)
-        }
-        Ok(_) => String::new(),
-        Err(e) => {
-            println!("[Team Sync] Warning: Failed to sync MCP configs: {}", e);
-            String::new()
-        }
-    };
-
-    // Reload shared secrets from disk (other members may have added/updated secrets)
-    if let Err(e) = crate::commands::shared_secrets::load_all_secrets(&secrets_state) {
-        println!(
-            "[Team Sync] Warning: Failed to reload shared secrets: {}",
-            e
-        );
-    }
-
-    let sync_detail = if conflict_resolved {
-        format!(
-            "Synced with origin/{} (conflict resolved, local backup in .trash/){}",
-            branch, mcp_msg
-        )
-    } else if had_local_changes {
-        format!(
-            "Synced with origin/{} (local changes pushed){}",
-            branch, mcp_msg
-        )
-    } else {
-        format!("Synced with origin/{}{}", branch, mcp_msg)
-    };
-    Ok(TeamGitResult {
-        success: true,
-        message: sync_detail,
-        ..Default::default()
-    })
+    crate::commands::team_shared_git::sync_shared_git_repo(&config, Some(&secrets_state), force)
 }
 
-/// 1.6 - Disconnect team repo: remove workspace/teamclaw-team directory
+/// 1.6 - Disconnect team repo: remove the configured shared team directory
 #[tauri::command]
 pub async fn team_disconnect_repo(
     workspace_path: Option<String>,
@@ -1596,9 +1426,18 @@ pub async fn team_disconnect_repo(
     registry: State<'_, crate::commands::window::WindowRegistry>,
 ) -> Result<TeamGitResult, String> {
     let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
-    let team_dir = get_team_repo_path(&workspace_path);
+    let shared_dir_name = read_workspace_config(&workspace_path)
+        .ok()
+        .and_then(|json| json.get("team").cloned())
+        .and_then(|value| serde_json::from_value::<TeamConfig>(value).ok())
+        .map(|team| team.shared_dir_name)
+        .unwrap_or_else(default_shared_dir_name);
+    let team_dir = crate::commands::team_shared_git::shared_dir_path(
+        &workspace_path,
+        Some(shared_dir_name.as_str()),
+    )?;
 
-    if !Path::new(&team_dir).exists() {
+    if !team_dir.exists() {
         return Ok(TeamGitResult {
             success: true,
             message: "Team folder not found, already disconnected".to_string(),
@@ -1607,7 +1446,7 @@ pub async fn team_disconnect_repo(
     }
 
     std::fs::remove_dir_all(&team_dir)
-        .map_err(|e| format!("Failed to remove {}: {}", TEAM_REPO_DIR, e))?;
+        .map_err(|e| format!("Failed to remove {}: {e}", team_dir.display()))?;
 
     Ok(TeamGitResult {
         success: true,
@@ -1690,6 +1529,27 @@ mod sync_precheck_tests {
         let input = b"?? my new file.txt\x00";
         let paths = parse_untracked_paths(input);
         assert_eq!(paths, vec!["my new file.txt".to_string()]);
+    }
+
+    #[test]
+    fn team_config_accepts_legacy_team_id_but_does_not_serialize_it() {
+        let config: TeamConfig = serde_json::from_value(serde_json::json!({
+            "gitUrl": "https://example.com/shared.git",
+            "enabled": true,
+            "lastSyncAt": null,
+            "sharedDirName": "teamclaw",
+            "envSecret": "secret",
+            "gitToken": "token",
+            "gitBranch": "main",
+            "teamId": "legacy-team-id"
+        }))
+        .unwrap();
+
+        let value = serde_json::to_value(config).unwrap();
+        assert_eq!(value["gitUrl"], "https://example.com/shared.git");
+        assert_eq!(value["gitBranch"], "main");
+        assert_eq!(value["gitToken"], "token");
+        assert!(value.get("teamId").is_none());
     }
 
     // Note: `resolve_workspace_path` integration test removed. Constructing a

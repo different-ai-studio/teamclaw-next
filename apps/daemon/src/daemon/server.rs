@@ -1,9 +1,10 @@
 use rumqttc::{Event, Packet};
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use teamclaw_transport::MessagePublisher;
 use std::time::{Duration, Instant};
+use teamclaw_transport::MessagePublisher;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex as AsyncMutex;
@@ -25,10 +26,10 @@ use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
 use crate::supabase::{SupabaseBackend, SupabaseConfig};
+use crate::team_shared_git::TeamSharedGitConfig;
 // SupabaseConfig + SupabaseBackend stay imported: the daemon boot path constructs
 // the concrete impl from `supabase.toml`, then hands out `Arc<dyn Backend>` to
 // the rest of the daemon.
-use std::path::PathBuf;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
 /// Outcome of apply_start_runtime. Success path returns the allocated
@@ -45,6 +46,80 @@ struct StartRuntimeError {
     error_code: String,
     error_message: String,
     failed_stage: String,
+}
+
+fn load_team_runtime_env(
+    workspace_root: &Path,
+    config: &TeamSharedGitConfig,
+) -> HashMap<String, String> {
+    let Some(env_secret) = config
+        .env_secret
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return HashMap::new();
+    };
+    match crate::team_shared_env::load_team_env(workspace_root, &config.shared_dir_name, env_secret)
+    {
+        Ok(env) => env,
+        Err(e) => {
+            warn!(
+                shared_dir_name = %config.shared_dir_name,
+                error = %e,
+                "failed to load team shared environment variables"
+            );
+            HashMap::new()
+        }
+    }
+}
+
+fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamSharedGitConfig) {
+    match crate::team_shared_git::setup_or_sync_shared_dir(workspace_root, config) {
+        Ok(status) => {
+            if status.synced {
+                info!(
+                    shared_dir = %status.shared_dir_path.display(),
+                    "team shared directory synced"
+                );
+            }
+        }
+        Err(e) => {
+            warn!(
+                workspace = %workspace_root.display(),
+                shared_dir_name = %config.shared_dir_name,
+                error = %e,
+                "team shared directory sync failed"
+            );
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct WorkspaceTeamclawConfig {
+    team: Option<TeamSharedGitConfig>,
+}
+
+fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
+    let path = workspace_root.join(".teamclaw").join("teamclaw.json");
+    let body = match std::fs::read_to_string(&path) {
+        Ok(body) => body,
+        Err(_) => return None,
+    };
+    let parsed: WorkspaceTeamclawConfig = match serde_json::from_str(&body) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            warn!(path = %path.display(), "failed to parse workspace team shared config: {e}");
+            return None;
+        }
+    };
+    parsed.team.filter(|team| {
+        team.enabled
+            && team
+                .git_url
+                .as_deref()
+                .map(|url| !url.trim().is_empty())
+                .unwrap_or(false)
+    })
 }
 
 /// Per-session plan emitted by
@@ -660,6 +735,18 @@ impl DaemonServer {
         }
     }
 
+    async fn sync_team_shared_dirs_for_known_workspaces(&self) {
+        for workspace in &self.workspaces.workspaces {
+            if workspace.path.trim().is_empty() {
+                continue;
+            }
+            let workspace_root = Path::new(&workspace.path);
+            if let Some(config) = load_team_shared_config_for_workspace(workspace_root) {
+                sync_team_shared_dir_for_workspace(workspace_root, &config);
+            }
+        }
+    }
+
     /// Run the daemon. When `shutdown` resolves, the inner loop exits
     /// gracefully — channels are shut down (consuming `shutdown(self)`) and
     /// `Ok(())` is returned. Without a shutdown signal the daemon runs
@@ -676,6 +763,7 @@ impl DaemonServer {
         // daemon startup. This runs before the MQTT loop so a misconfigured
         // channel doesn't delay collab connectivity.
         self.start_channels().await;
+        self.sync_team_shared_dirs_for_known_workspaces().await;
 
         // Bind the control socket and spawn a listener that funnels parsed
         // commands into the main loop via mpsc. Done after channel start so
@@ -838,7 +926,8 @@ impl DaemonServer {
                 }
             }
             {
-                let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
+                let publisher =
+                    Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
                 if let Err(e) = publisher
                     .publish_device_state(&crate::proto::amux::DeviceState {
                         online: true,
@@ -2045,11 +2134,7 @@ impl DaemonServer {
                 };
 
                 // Cursor advances to this message id.
-                let row_id_opt = self
-                    .agents
-                    .lock()
-                    .await
-                    .backend_runtime_row_id(&runtime_id);
+                let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
                     let sb = self.backend.clone();
                     let row = row_id.clone();
@@ -2073,11 +2158,7 @@ impl DaemonServer {
                         });
                     }
                 }
-                let row_id_opt = self
-                    .agents
-                    .lock()
-                    .await
-                    .backend_runtime_row_id(&runtime_id);
+                let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
                     let sb = self.backend.clone();
                     let row = row_id.clone();
@@ -2113,12 +2194,12 @@ impl DaemonServer {
 
             let at =
                 amux::AgentType::try_from(stored.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
-            let remote_workspace_id = self
-                .workspaces
-                .find_by_id(&stored.workspace_id)
-                .and_then(|w| {
-                    (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
-                });
+            let remote_workspace_id =
+                self.workspaces
+                    .find_by_id(&stored.workspace_id)
+                    .and_then(|w| {
+                        (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
+                    });
 
             info!(
                 runtime_id = %stored.runtime_id,
@@ -2734,10 +2815,11 @@ impl DaemonServer {
                         let acp_sid = stored.acp_session_id.clone();
                         let session_id = stored.session_id.clone();
                         info!(agent_id, "lazy-resuming historical session");
-                        let remote_workspace_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                            (!w.remote_workspace_id.is_empty())
-                                .then_some(w.remote_workspace_id.clone())
-                        });
+                        let remote_workspace_id =
+                            self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                                (!w.remote_workspace_id.is_empty())
+                                    .then_some(w.remote_workspace_id.clone())
+                            });
                         let resume_res = self
                             .agents
                             .lock()
@@ -3484,8 +3566,7 @@ impl DaemonServer {
                 (
                     ws.path.clone(),
                     ws.workspace_id.clone(),
-                    (!ws.remote_workspace_id.is_empty())
-                        .then_some(ws.remote_workspace_id.clone()),
+                    (!ws.remote_workspace_id.is_empty()).then_some(ws.remote_workspace_id.clone()),
                 )
             } else if !worktree.is_empty() {
                 (
@@ -3580,10 +3661,7 @@ impl DaemonServer {
                         {
                             return Err(StartRuntimeError {
                                 error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
-                                error_message: format!(
-                                    "insert_session_from_backend failed: {}",
-                                    e
-                                ),
+                                error_message: format!("insert_session_from_backend failed: {}", e),
                                 failed_stage: "session_subscribe".to_string(),
                             });
                         }
@@ -3608,6 +3686,14 @@ impl DaemonServer {
         }
 
         let session_id_opt = (!session_id.is_empty()).then_some(session_id);
+        let team_shared_config =
+            load_team_shared_config_for_workspace(Path::new(&resolved_worktree));
+        let extra_env = if let Some(config) = team_shared_config.as_ref() {
+            sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), config);
+            load_team_runtime_env(Path::new(&resolved_worktree), config)
+        } else {
+            HashMap::new()
+        };
 
         // Spawn.
         let spawn_res = self
@@ -3623,6 +3709,7 @@ impl DaemonServer {
                 session_id_opt,
                 initial_model_override,
                 None,
+                extra_env,
             )
             .await;
         let new_id = match spawn_res {
@@ -4364,6 +4451,68 @@ mod tests {
         subscriber::IncomingMessage::TeamclawSessionLive {
             session_id: session_id.to_string(),
             payload: live.encode_to_vec(),
+        }
+    }
+
+    #[test]
+    fn loads_team_shared_config_from_workspace_file() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".teamclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("teamclaw.json"),
+            serde_json::json!({
+                "team": {
+                    "gitUrl": "https://example.com/shared.git",
+                    "gitBranch": "main",
+                    "gitToken": "token",
+                    "sharedDirName": "teamclaw",
+                    "envSecret": "secret",
+                    "enabled": true
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let config = load_team_shared_config_for_workspace(tmp.path()).unwrap();
+
+        assert_eq!(
+            config.git_url.as_deref(),
+            Some("https://example.com/shared.git")
+        );
+        assert_eq!(config.git_branch.as_deref(), Some("main"));
+        assert_eq!(config.git_token.as_deref(), Some("token"));
+        assert_eq!(config.shared_dir_name, "teamclaw");
+        assert_eq!(config.env_secret.as_deref(), Some("secret"));
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn ignores_disabled_or_unconfigured_team_shared_config() {
+        for team in [
+            serde_json::json!({
+                "gitUrl": "https://example.com/shared.git",
+                "enabled": false
+            }),
+            serde_json::json!({
+                "gitUrl": "",
+                "enabled": true
+            }),
+            serde_json::json!({
+                "enabled": true
+            }),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let config_dir = tmp.path().join(".teamclaw");
+            std::fs::create_dir_all(&config_dir).unwrap();
+            std::fs::write(
+                config_dir.join("teamclaw.json"),
+                serde_json::json!({ "team": team }).to_string(),
+            )
+            .unwrap();
+
+            assert!(load_team_shared_config_for_workspace(tmp.path()).is_none());
         }
     }
 

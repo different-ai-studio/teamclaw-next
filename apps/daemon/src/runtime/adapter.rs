@@ -881,6 +881,7 @@ pub fn spawn_acp_agent(
     // amuxd's own `mcp-server` subcommand so the agent can call the
     // `send` tool. Bare/native runtimes pass `None`.
     mcp_config_path: Option<PathBuf>,
+    extra_env: HashMap<String, String>,
 ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
     let startup_reporter: StartupReporter = Arc::new(Mutex::new(Some(startup_tx)));
@@ -915,6 +916,7 @@ pub fn spawn_acp_agent(
                     startup_reporter,
                     initial_model_override,
                     mcp_config_path,
+                    extra_env,
                 )
                 .await
                 {
@@ -951,6 +953,7 @@ async fn run_acp_session(
     startup_reporter: StartupReporter,
     initial_model_override: Option<String>,
     mcp_config_path: Option<PathBuf>,
+    extra_env: HashMap<String, String>,
 ) -> anyhow::Result<()> {
     // Spawn the ACP agent process
     // Use claude-agent-acp wrapper (Node.js) which speaks ACP JSON-RPC over stdio
@@ -980,6 +983,11 @@ async fn run_acp_session(
     if let Some(ref cfg_path) = mcp_config_path {
         cmd.arg("--mcp-config").arg(cfg_path);
         info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config");
+    }
+    for (key, value) in extra_env {
+        if std::env::var_os(&key).is_none() {
+            cmd.env(key, value);
+        }
     }
     let mut child = cmd
         .current_dir(&worktree)

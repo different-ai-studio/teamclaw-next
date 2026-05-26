@@ -53,9 +53,7 @@ impl RetainedKv {
                     info!(bucket = BUCKET_NAME, "JetStream KV bucket reused");
                     b
                 } else {
-                    return Err(crate::error::AmuxError::Config(format!(
-                        "kv create: {msg}"
-                    )));
+                    return Err(crate::error::AmuxError::Config(format!("kv create: {msg}")));
                 }
             }
         };

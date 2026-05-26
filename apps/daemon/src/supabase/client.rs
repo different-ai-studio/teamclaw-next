@@ -6,6 +6,10 @@ use crate::supabase::config::SupabaseConfig;
 use crate::supabase::error::{SupabaseError, SupabaseResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
@@ -15,7 +19,7 @@ use tracing::warn;
 pub struct SupabaseBackend {
     http: Client,
     cfg: SupabaseConfig,
-    persist_path: Option<std::path::PathBuf>,
+    persist_path: Option<PathBuf>,
     state: Arc<Mutex<AuthState>>,
     /// Serializes `refresh()` so two concurrent callers can't race to spend
     /// the same refresh token (GoTrue invalidates the presented token and
@@ -43,6 +47,62 @@ struct RefreshRequest<'a> {
     refresh_token: &'a str,
 }
 
+struct RefreshFileLock {
+    file: std::fs::File,
+}
+
+impl RefreshFileLock {
+    fn acquire(config_path: &Path) -> SupabaseResult<Self> {
+        let lock_path = config_path.with_file_name(".supabase.toml.lock");
+        if let Some(parent) = lock_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
+        lock_file_exclusive(&file)?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for RefreshFileLock {
+    fn drop(&mut self) {
+        let _ = unlock_file(&self.file);
+    }
+}
+
+#[cfg(unix)]
+fn lock_file_exclusive(file: &std::fs::File) -> std::io::Result<()> {
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn unlock_file(file: &std::fs::File) -> std::io::Result<()> {
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_file_exclusive(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn unlock_file(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
 // Refresh while the access token still has >10 min of life left, so a single
 // slow call won't expire mid-flight.
 const REFRESH_SKEW: Duration = Duration::from_secs(10 * 60);
@@ -59,7 +119,7 @@ impl SupabaseBackend {
 
     fn new_with_persistence(
         cfg: SupabaseConfig,
-        persist_path: Option<std::path::PathBuf>,
+        persist_path: Option<PathBuf>,
     ) -> SupabaseResult<Self> {
         let http = Client::builder().timeout(Duration::from_secs(20)).build()?;
         let state = AuthState {
@@ -77,6 +137,10 @@ impl SupabaseBackend {
 
     pub fn config(&self) -> &SupabaseConfig {
         &self.cfg
+    }
+
+    pub fn current_refresh_token(&self) -> String {
+        self.state.lock().unwrap().refresh_token.clone()
     }
 
     pub async fn access_token(&self) -> SupabaseResult<String> {
@@ -105,6 +169,14 @@ impl SupabaseBackend {
             }
         }
 
+        let _file_lock = match &self.persist_path {
+            Some(path) => Some(RefreshFileLock::acquire(path)?),
+            None => None,
+        };
+        if let Some(path) = &self.persist_path {
+            self.reload_persisted_refresh_token(path);
+        }
+
         let rt = { self.state.lock().unwrap().refresh_token.clone() };
         let url = format!("{}/auth/v1/token?grant_type=refresh_token", self.cfg.url);
         let resp = self
@@ -117,7 +189,7 @@ impl SupabaseBackend {
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(SupabaseError::Auth(format!("refresh failed: {text}")));
+            return Err(SupabaseError::Auth(refresh_failure_message(&text)));
         }
         let body: TokenResponse = resp.json().await?;
 
@@ -140,8 +212,43 @@ impl SupabaseBackend {
                     "failed to persist rotated Supabase refresh token; next daemon restart may need re-auth"
                 );
             }
+            self.persist_legacy_refresh_token(path, &persisted);
         }
         Ok(body.access_token)
+    }
+
+    fn persist_legacy_refresh_token(&self, path: &Path, persisted: &SupabaseConfig) {
+        let Ok(default_path) = SupabaseConfig::default_path() else {
+            return;
+        };
+        if path != default_path {
+            return;
+        }
+        let Ok(legacy_path) = SupabaseConfig::legacy_path() else {
+            return;
+        };
+        if !legacy_path.exists() {
+            return;
+        }
+        if let Err(err) = persisted.save(&legacy_path) {
+            warn!(
+                ?err,
+                path = %legacy_path.display(),
+                "failed to persist rotated Supabase refresh token to legacy config path"
+            );
+        }
+    }
+
+    fn reload_persisted_refresh_token(&self, path: &Path) {
+        let Ok(persisted) = SupabaseConfig::load(path) else {
+            return;
+        };
+        let mut st = self.state.lock().unwrap();
+        if persisted.refresh_token != st.refresh_token {
+            st.access_token = None;
+            st.expires_at = None;
+            st.refresh_token = persisted.refresh_token;
+        }
     }
 
     /// Expiry of the currently cached access token without triggering a refresh.
@@ -263,6 +370,16 @@ impl SupabaseBackend {
         let payload = Req { p_token: token };
         let rows: Vec<ClaimResult> = self.rpc_anon("claim_team_invite", &payload).await?;
         rows.into_iter().next().ok_or(SupabaseError::InviteInvalid)
+    }
+}
+
+fn refresh_failure_message(text: &str) -> String {
+    if text.contains("refresh_token_already_used") {
+        format!(
+            "refresh failed: {text}. Stored daemon refresh token has already been consumed; run `amuxd init <teamclaw://invite?...>` again to mint a new daemon credential."
+        )
+    } else {
+        format!("refresh failed: {text}")
     }
 }
 
@@ -1358,6 +1475,7 @@ mod tests {
         let client = SupabaseBackend::new_without_persistence(test_cfg(srv.uri())).unwrap();
         let tok = client.access_token().await.unwrap();
         assert_eq!(tok, "at-new");
+        assert_eq!(client.current_refresh_token(), "rt-1");
 
         let tok2 = client.access_token().await.unwrap();
         assert_eq!(tok2, "at-new");
@@ -1387,6 +1505,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn refresh_reloads_rotated_token_from_disk_after_file_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("supabase.toml");
+
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at-new",
+                "expires_in": 3600,
+                "refresh_token": "rt-next"
+            })))
+            .mount(&srv)
+            .await;
+
+        let mut stale_cfg = test_cfg(srv.uri());
+        stale_cfg.refresh_token = "rt-stale".into();
+        let mut disk_cfg = stale_cfg.clone();
+        disk_cfg.refresh_token = "rt-disk".into();
+        disk_cfg.save(&path).unwrap();
+
+        let client = SupabaseBackend::new_with_persistence(stale_cfg, Some(path.clone())).unwrap();
+        let tok = client.access_token().await.unwrap();
+        assert_eq!(tok, "at-new");
+
+        let requests = srv.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["refresh_token"], "rt-disk");
+
+        let persisted = SupabaseConfig::load(&path).unwrap();
+        assert_eq!(persisted.refresh_token, "rt-next");
+    }
+
+    #[tokio::test]
     async fn refresh_failure_is_auth_error() {
         let srv = MockServer::start().await;
         Mock::given(method("POST"))
@@ -1400,6 +1553,16 @@ mod tests {
             Err(SupabaseError::Auth(_)) => {}
             other => panic!("expected auth error, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn refresh_already_used_error_is_actionable() {
+        let msg = refresh_failure_message(
+            r#"{"code":400,"error_code":"refresh_token_already_used","msg":"Invalid Refresh Token: Already Used"}"#,
+        );
+
+        assert!(msg.contains("refresh_token_already_used"));
+        assert!(msg.contains("amuxd init"));
     }
 
     #[tokio::test]
