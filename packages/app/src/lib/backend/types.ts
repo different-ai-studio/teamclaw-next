@@ -395,37 +395,79 @@ export interface SessionMembersBackend {
 export interface ShortcutRow {
   id: string;
   scope: string;
-  title: string;
-  payload: unknown;
+  label: string;
+  owner_member_id?: string | null;
+  team_id?: string | null;
+  parent_id?: string | null;
+  icon?: string | null;
+  order: number;
+  node_type: string;
+  target: string;
+  created_at?: string | null;
+  updated_at?: string | null;
   sort_order?: number | null;
   visible_roles?: string[] | null;
 }
 
+export interface ShortcutCreateArgs {
+  p_scope: string;
+  p_label: string;
+  p_node_type: string;
+  p_team_id?: string | null;
+  p_parent_id?: string | null;
+  p_icon?: string | null;
+  p_order?: number;
+  p_target?: string;
+}
+
+export interface ShortcutTeamRoleRow {
+  id: string;
+  team_id: string;
+  code: string;
+  name: string;
+}
+
+export interface ShortcutRoleBindingRow {
+  resource_id: string;
+  permission_roles: Array<{ role_id: string }>;
+}
+
 export interface ShortcutsBackend {
-  listShortcuts(scope: string): Promise<ShortcutRow[]>;
-  createShortcut(input: Record<string, unknown>): Promise<ShortcutRow>;
+  listShortcuts(scope: string, teamId?: string): Promise<ShortcutRow[]>;
+  createShortcut(input: ShortcutCreateArgs): Promise<{ id: string }>;
   updateShortcut(id: string, patch: Record<string, unknown>): Promise<void>;
   deleteShortcut(id: string): Promise<void>;
-  batchMove(input: { ids: string[]; targetScope: string }): Promise<void>;
-  setVisibleRoles(input: { shortcutId: string; roles: string[] }): Promise<void>;
+  batchMove(input: { ids?: string[]; targetScope?: string; moves?: Record<string, unknown>[]; [key: string]: unknown }): Promise<unknown>;
+  setVisibleRoles(input: { shortcutId?: string; roleIds?: string[]; roles?: string[]; [key: string]: unknown }): Promise<void>;
+  listTeamRoles(teamId: string): Promise<ShortcutTeamRoleRow[]>;
+  listShortcutRoleBindings(teamId: string): Promise<ShortcutRoleBindingRow[]>;
 }
 
 export interface NotificationPrefs {
-  actor_id: string;
+  user_id?: string;
   enabled: boolean;
+  dnd_start_min?: number | null;
+  dnd_end_min?: number | null;
+  dnd_tz?: string | null;
   updated_at?: string | null;
 }
 
 export interface NotificationsBackend {
-  loadPreferences(actorId: string): Promise<NotificationPrefs | null>;
+  loadPreferences(userId: string): Promise<NotificationPrefs | null>;
   savePreferences(input: NotificationPrefs): Promise<void>;
-  setSessionMuted(input: { sessionId: string; actorId: string; muted: boolean }): Promise<void>;
-  listMutedSessionIds(actorId: string): Promise<string[]>;
+  setSessionMuted(input: { sessionId: string; userId: string; muted: boolean }): Promise<void>;
+  listMutedSessionIds(userId: string): Promise<string[]>;
 }
 
 export interface TeamWorkspaceConfigRow {
   team_id: string;
   workspace_path?: string | null;
+  git_url?: string | null;
+  git_branch?: string | null;
+  git_token?: string | null;
+  ai_gateway_endpoint?: string | null;
+  enabled?: boolean;
+  updated_at?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -434,10 +476,20 @@ export interface TeamWorkspaceConfigBackend {
   save(input: TeamWorkspaceConfigRow): Promise<void>;
 }
 
+export interface TelemetryFeedbackDeleteInput {
+  actor_id: string;
+  team_id: string;
+  message_id: string;
+  kind: "thumb" | "star";
+}
+
 export interface TelemetryBackend {
   insertFeedback(input: Record<string, unknown>): Promise<void>;
+  deleteFeedback(input: TelemetryFeedbackDeleteInput): Promise<void>;
+  listFeedbacks(input: { teamId: string; sessionId: string }): Promise<Array<Record<string, unknown>>>;
+  listFeedbackSummary(teamId: string): Promise<Array<Record<string, unknown>>>;
   insertSessionReport(input: Record<string, unknown>): Promise<void>;
-  insertTelemetryEvent(input: Record<string, unknown>): Promise<void>;
+  listLeaderboard(teamId: string): Promise<Array<Record<string, unknown>>>;
 }
 
 export interface TeamClawBackend {

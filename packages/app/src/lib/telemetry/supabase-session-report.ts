@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 export interface SessionReportInsert {
   actorId: string
@@ -12,7 +12,7 @@ export interface SessionReportInsert {
 }
 
 export async function insertSessionReport(input: SessionReportInsert): Promise<void> {
-  const { error } = await supabase.from('actor_session_report').insert({
+  await getBackend().telemetry.insertSessionReport({
     actor_id:    input.actorId,
     team_id:     input.teamId,
     session_id:  input.sessionId ?? null,
@@ -22,7 +22,6 @@ export async function insertSessionReport(input: SessionReportInsert): Promise<v
     agent_kind:  input.agentKind ?? null,
     ended_at:    input.endedAt ?? null,
   })
-  if (error) throw new Error(`insertSessionReport failed: ${error.message}`)
 }
 
 export interface LeaderboardRow {
@@ -35,11 +34,6 @@ export interface LeaderboardRow {
 }
 
 export async function getLeaderboard(teamId: string): Promise<LeaderboardRow[]> {
-  const { data, error } = await supabase
-    .from('team_leaderboard')
-    .select('actor_id, display_name, tokens_used_30d, cost_usd_30d, positive_feedback_30d, negative_feedback_30d')
-    .eq('team_id', teamId)
-    .order('tokens_used_30d', { ascending: false })
-  if (error) throw new Error(`getLeaderboard failed: ${error.message}`)
-  return (data ?? []) as LeaderboardRow[]
+  const data = await getBackend().telemetry.listLeaderboard(teamId)
+  return data as unknown as LeaderboardRow[]
 }

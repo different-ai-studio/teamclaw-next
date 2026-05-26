@@ -34,8 +34,16 @@ vi.mock('@/lib/telemetry/supabase-session-report', () => ({
   insertSessionReport: vi.fn(),
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {},
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    directory: { resolveCurrentMemberActor: vi.fn() },
+    telemetry: {
+      deleteFeedback: vi.fn(),
+      listFeedbacks: vi.fn(),
+      insertFeedback: vi.fn(),
+      insertSessionReport: vi.fn(),
+    },
+  }),
 }))
 
 vi.mock('@/stores/current-team', () => ({

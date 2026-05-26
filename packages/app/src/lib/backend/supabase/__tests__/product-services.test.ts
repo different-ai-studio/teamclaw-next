@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { createSupabaseNotificationsBackend } from "../notifications";
 import { createSupabaseSessionMembersBackend } from "../session-members";
+import { createSupabaseShortcutsBackend } from "../shortcuts";
+import { createSupabaseTeamWorkspaceConfigBackend } from "../team-workspace-config";
+import { createSupabaseTelemetryBackend } from "../telemetry";
 
 describe("Supabase session members backend", () => {
   it("lists participants by session and preserves participant ordering", async () => {
@@ -132,5 +136,248 @@ describe("Supabase session members backend", () => {
     expect(deleteMock).toHaveBeenCalled();
     expect(eqSession).toHaveBeenCalledWith("session_id", "session-1");
     expect(eqActor).toHaveBeenCalledWith("actor_id", "actor-1");
+  });
+});
+
+describe("Supabase shortcuts backend", () => {
+  it("creates shortcuts through shortcut_create", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: "shortcut-1",
+      error: null,
+    });
+
+    const result = await createSupabaseShortcutsBackend({ rpc }).createShortcut({
+      p_scope: "team",
+      p_label: "Run",
+      p_node_type: "link",
+      p_team_id: "team-1",
+      p_parent_id: null,
+      p_icon: null,
+      p_order: 0,
+      p_target: "teamclaw://run",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("shortcut_create", {
+      p_scope: "team",
+      p_label: "Run",
+      p_node_type: "link",
+      p_team_id: "team-1",
+      p_parent_id: null,
+      p_icon: null,
+      p_order: 0,
+      p_target: "teamclaw://run",
+    });
+    expect(result).toEqual({ id: "shortcut-1" });
+  });
+
+  it("rejects an empty shortcut_create id", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    await expect(
+      createSupabaseShortcutsBackend({ rpc }).createShortcut({
+        p_scope: "personal",
+        p_label: "Run",
+        p_node_type: "link",
+        p_team_id: null,
+        p_parent_id: null,
+        p_icon: null,
+        p_order: 0,
+        p_target: "teamclaw://run",
+      }),
+    ).rejects.toMatchObject({ operation: "shortcuts.createShortcut" });
+  });
+});
+
+describe("Supabase notifications backend", () => {
+  it("mutes and unmutes sessions with session_mutes", async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const deleteEqUser = vi.fn().mockResolvedValue({ error: null });
+    const deleteEqSession = vi.fn().mockReturnValue({ eq: deleteEqUser });
+    const from = vi.fn((table: string) => {
+      if (table === "session_mutes") {
+        return {
+          upsert,
+          delete: () => ({ eq: deleteEqSession }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const backend = createSupabaseNotificationsBackend({ from });
+    await backend.setSessionMuted({ sessionId: "s1", userId: "u1", muted: true });
+    await backend.setSessionMuted({ sessionId: "s1", userId: "u1", muted: false });
+
+    expect(upsert).toHaveBeenCalledWith({ session_id: "s1", user_id: "u1" }, { onConflict: "user_id,session_id" });
+    expect(deleteEqSession).toHaveBeenCalledWith("session_id", "s1");
+    expect(deleteEqUser).toHaveBeenCalledWith("user_id", "u1");
+  });
+
+  it("saves notification preferences by user_id", async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "notification_prefs") return { upsert };
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    await createSupabaseNotificationsBackend({ from }).savePreferences({
+      user_id: "u1",
+      enabled: true,
+      dnd_start_min: 540,
+      dnd_end_min: 1020,
+      dnd_tz: "Asia/Shanghai",
+      updated_at: "2026-05-26T00:00:00.000Z",
+    });
+
+    expect(from).toHaveBeenCalledWith("notification_prefs");
+    expect(upsert).toHaveBeenCalledWith(
+      {
+        user_id: "u1",
+        enabled: true,
+        dnd_start_min: 540,
+        dnd_end_min: 1020,
+        dnd_tz: "Asia/Shanghai",
+        updated_at: "2026-05-26T00:00:00.000Z",
+      },
+      { onConflict: "user_id" },
+    );
+  });
+});
+
+describe("Supabase team workspace config backend", () => {
+  it("saves workspace config with team_workspace_config upsert", async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn().mockReturnValue({ upsert });
+
+    await createSupabaseTeamWorkspaceConfigBackend({ from }).save({
+      team_id: "team-1",
+      git_url: "https://example.com/repo.git",
+      git_branch: "main",
+      git_token: null,
+      ai_gateway_endpoint: null,
+      enabled: true,
+    });
+
+    expect(from).toHaveBeenCalledWith("team_workspace_config");
+    expect(upsert).toHaveBeenCalledWith({
+      team_id: "team-1",
+      git_url: "https://example.com/repo.git",
+      git_branch: "main",
+      git_token: null,
+      ai_gateway_endpoint: null,
+      enabled: true,
+    });
+  });
+});
+
+describe("Supabase telemetry backend", () => {
+  it("inserts feedback rows", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn().mockReturnValue({ insert });
+
+    await createSupabaseTelemetryBackend({ from }).insertFeedback({ message_id: "m1", rating: 1 });
+
+    expect(from).toHaveBeenCalledWith("actor_message_feedback");
+    expect(insert).toHaveBeenCalledWith({ message_id: "m1", rating: 1 });
+  });
+
+  it("does not expose telemetry event writes without a backing table", () => {
+    const from = vi.fn();
+    const backend = createSupabaseTelemetryBackend({ from }) as unknown as Record<string, unknown>;
+
+    expect(backend.insertTelemetryEvent).toBeUndefined();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("rejects feedback delete without required filters before deleting", async () => {
+    const from = vi.fn();
+
+    await expect(
+      createSupabaseTelemetryBackend({ from }).deleteFeedback({
+        actor_id: "actor-1",
+        team_id: "team-1",
+      } as never),
+    ).rejects.toMatchObject({ operation: "telemetry.deleteFeedback" });
+
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("applies a null star-rating predicate when deleting thumb feedback", async () => {
+    const result = Promise.resolve({ error: null });
+    const is = vi.fn().mockReturnValue(result);
+    const eqMessage = vi.fn().mockReturnValue({ eq: vi.fn(), is });
+    const eqTeam = vi.fn().mockReturnValue({ eq: eqMessage, is });
+    const eqActor = vi.fn().mockReturnValue({ eq: eqTeam, is });
+    const deleteMock = vi.fn().mockReturnValue({ eq: eqActor, is });
+    const from = vi.fn().mockReturnValue({ delete: deleteMock });
+
+    await createSupabaseTelemetryBackend({ from }).deleteFeedback({
+      actor_id: "actor-1",
+      team_id: "team-1",
+      message_id: "message-1",
+      kind: "thumb",
+    });
+
+    expect(from).toHaveBeenCalledWith("actor_message_feedback");
+    expect(eqActor).toHaveBeenCalledWith("actor_id", "actor-1");
+    expect(eqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(eqMessage).toHaveBeenCalledWith("message_id", "message-1");
+    expect(is).toHaveBeenCalledWith("star_rating", null);
+  });
+
+  it("applies a star-rating predicate when deleting star feedback", async () => {
+    const result = Promise.resolve({ error: null });
+    const not = vi.fn().mockReturnValue(result);
+    const eqMessage = vi.fn().mockReturnValue({ eq: vi.fn(), not });
+    const eqTeam = vi.fn().mockReturnValue({ eq: eqMessage, not });
+    const eqActor = vi.fn().mockReturnValue({ eq: eqTeam, not });
+    const deleteMock = vi.fn().mockReturnValue({ eq: eqActor, not });
+    const from = vi.fn().mockReturnValue({ delete: deleteMock });
+
+    await createSupabaseTelemetryBackend({ from }).deleteFeedback({
+      actor_id: "actor-1",
+      team_id: "team-1",
+      message_id: "message-1",
+      kind: "star",
+    });
+
+    expect(from).toHaveBeenCalledWith("actor_message_feedback");
+    expect(eqActor).toHaveBeenCalledWith("actor_id", "actor-1");
+    expect(eqTeam).toHaveBeenCalledWith("team_id", "team-1");
+    expect(eqMessage).toHaveBeenCalledWith("message_id", "message-1");
+    expect(not).toHaveBeenCalledWith("star_rating", "is", null);
+  });
+
+  it("rejects thumb feedback delete when the query builder cannot add an is predicate", async () => {
+    const eqMessage = vi.fn().mockResolvedValue({ error: null });
+    const eqTeam = vi.fn().mockReturnValue({ eq: eqMessage });
+    const eqActor = vi.fn().mockReturnValue({ eq: eqTeam });
+    const deleteMock = vi.fn().mockReturnValue({ eq: eqActor });
+    const from = vi.fn().mockReturnValue({ delete: deleteMock });
+
+    await expect(
+      createSupabaseTelemetryBackend({ from }).deleteFeedback({
+        actor_id: "actor-1",
+        team_id: "team-1",
+        message_id: "message-1",
+        kind: "thumb",
+      }),
+    ).rejects.toMatchObject({ operation: "telemetry.deleteFeedback" });
+  });
+
+  it("rejects star feedback delete when the query builder cannot add a not predicate", async () => {
+    const eqMessage = vi.fn().mockResolvedValue({ error: null });
+    const eqTeam = vi.fn().mockReturnValue({ eq: eqMessage });
+    const eqActor = vi.fn().mockReturnValue({ eq: eqTeam });
+    const deleteMock = vi.fn().mockReturnValue({ eq: eqActor });
+    const from = vi.fn().mockReturnValue({ delete: deleteMock });
+
+    await expect(
+      createSupabaseTelemetryBackend({ from }).deleteFeedback({
+        actor_id: "actor-1",
+        team_id: "team-1",
+        message_id: "message-1",
+        kind: "star",
+      }),
+    ).rejects.toMatchObject({ operation: "telemetry.deleteFeedback" });
   });
 });

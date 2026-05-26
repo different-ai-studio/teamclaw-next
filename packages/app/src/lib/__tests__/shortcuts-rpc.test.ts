@@ -1,12 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockRpc = vi.fn()
-const mockFrom = vi.fn()
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    rpc: (...args: unknown[]) => mockRpc(...args),
-    from: (...args: unknown[]) => mockFrom(...args),
-  },
+const mockShortcuts = vi.hoisted(() => ({
+  listShortcuts: vi.fn(),
+  createShortcut: vi.fn(),
+  updateShortcut: vi.fn(),
+  deleteShortcut: vi.fn(),
+  batchMove: vi.fn(),
+  setVisibleRoles: vi.fn(),
+  listTeamRoles: vi.fn(),
+  listShortcutRoleBindings: vi.fn(),
+}))
+
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({ shortcuts: mockShortcuts }),
 }))
 
 import {
@@ -18,13 +24,12 @@ import {
 } from '@/lib/shortcuts-rpc'
 
 beforeEach(() => {
-  mockRpc.mockReset()
-  mockFrom.mockReset()
+  for (const fn of Object.values(mockShortcuts)) fn.mockReset()
 })
 
 describe('rpcShortcutCreate', () => {
   it('calls shortcut_create RPC with named args for personal scope', async () => {
-    mockRpc.mockResolvedValue({ data: 'new-uuid', error: null })
+    mockShortcuts.createShortcut.mockResolvedValue({ id: 'new-uuid' })
     const id = await rpcShortcutCreate({
       scope: 'personal',
       label: 'My Link',
@@ -35,7 +40,7 @@ describe('rpcShortcutCreate', () => {
       target: 'https://example.com',
     })
     expect(id).toBe('new-uuid')
-    expect(mockRpc).toHaveBeenCalledWith('shortcut_create', {
+    expect(mockShortcuts.createShortcut).toHaveBeenCalledWith({
       p_scope: 'personal',
       p_label: 'My Link',
       p_node_type: 'link',
@@ -48,7 +53,7 @@ describe('rpcShortcutCreate', () => {
   })
 
   it('throws ShortcutsRpcError when RPC errors', async () => {
-    mockRpc.mockResolvedValue({ data: null, error: { message: 'forbidden', code: 'P0001' } })
+    mockShortcuts.createShortcut.mockRejectedValue({ message: 'forbidden', code: 'P0001' })
     await expect(rpcShortcutCreate({
       scope: 'team',
       teamId: 'team-uuid',
@@ -64,13 +69,13 @@ describe('rpcShortcutCreate', () => {
 
 describe('rpcShortcutBatchMove', () => {
   it('sends jsonb-shaped moves array', async () => {
-    mockRpc.mockResolvedValue({ data: 3, error: null })
+    mockShortcuts.batchMove.mockResolvedValue(3)
     const count = await rpcShortcutBatchMove([
       { id: 'a', parentId: null, order: 0 },
       { id: 'b', parentId: 'a',  order: 1 },
     ])
     expect(count).toBe(3)
-    expect(mockRpc).toHaveBeenCalledWith('shortcut_batch_move', {
+    expect(mockShortcuts.batchMove).toHaveBeenCalledWith({
       p_moves: [
         { id: 'a', parent_id: null, order: 0 },
         { id: 'b', parent_id: 'a',  order: 1 },
@@ -81,9 +86,9 @@ describe('rpcShortcutBatchMove', () => {
 
 describe('rpcShortcutSetVisibleRoles', () => {
   it('forwards shortcut_id and role_ids', async () => {
-    mockRpc.mockResolvedValue({ data: null, error: null })
+    mockShortcuts.setVisibleRoles.mockResolvedValue(undefined)
     await rpcShortcutSetVisibleRoles('shortcut-uuid', ['role-1', 'role-2'])
-    expect(mockRpc).toHaveBeenCalledWith('shortcut_set_visible_roles', {
+    expect(mockShortcuts.setVisibleRoles).toHaveBeenCalledWith({
       p_shortcut_id: 'shortcut-uuid',
       p_role_ids: ['role-1', 'role-2'],
     })
@@ -92,20 +97,13 @@ describe('rpcShortcutSetVisibleRoles', () => {
 
 describe('selectShortcuts', () => {
   it('queries shortcuts by scope and maps DB rows to ShortcutNode', async () => {
-    const chain = {
-      select: vi.fn().mockReturnThis(),
-      eq:     vi.fn().mockReturnThis(),
-      order:  vi.fn().mockResolvedValue({
-        data: [{
-          id: 'a', scope: 'personal', owner_member_id: 'm1', team_id: null,
-          parent_id: null, label: 'L', icon: null, order: 0,
-          node_type: 'link', target: 't', created_at: '2026-01-01', updated_at: '2026-01-01',
-        }],
-        error: null,
-      }),
-    }
-    mockFrom.mockReturnValue(chain)
+    mockShortcuts.listShortcuts.mockResolvedValue([{
+      id: 'a', scope: 'personal', owner_member_id: 'm1', team_id: null,
+      parent_id: null, label: 'L', icon: null, order: 0,
+      node_type: 'link', target: 't', created_at: '2026-01-01', updated_at: '2026-01-01',
+    }])
     const rows = await selectShortcuts({ scope: 'personal' })
+    expect(mockShortcuts.listShortcuts).toHaveBeenCalledWith('personal', undefined)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       id: 'a', label: 'L', type: 'link', target: 't', parentId: null, order: 0,
