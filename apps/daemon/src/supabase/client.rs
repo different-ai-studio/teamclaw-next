@@ -184,7 +184,7 @@ impl SupabaseBackend {
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(SupabaseError::Auth(format!("refresh failed: {text}")));
+            return Err(SupabaseError::Auth(refresh_failure_message(&text)));
         }
         let body: TokenResponse = resp.json().await?;
 
@@ -207,8 +207,31 @@ impl SupabaseBackend {
                     "failed to persist rotated Supabase refresh token; next daemon restart may need re-auth"
                 );
             }
+            self.persist_legacy_refresh_token(path, &persisted);
         }
         Ok(body.access_token)
+    }
+
+    fn persist_legacy_refresh_token(&self, path: &Path, persisted: &SupabaseConfig) {
+        let Ok(default_path) = SupabaseConfig::default_path() else {
+            return;
+        };
+        if path != default_path {
+            return;
+        }
+        let Ok(legacy_path) = SupabaseConfig::legacy_path() else {
+            return;
+        };
+        if !legacy_path.exists() {
+            return;
+        }
+        if let Err(err) = persisted.save(&legacy_path) {
+            warn!(
+                ?err,
+                path = %legacy_path.display(),
+                "failed to persist rotated Supabase refresh token to legacy config path"
+            );
+        }
     }
 
     fn reload_persisted_refresh_token(&self, path: &Path) {
@@ -329,6 +352,16 @@ impl SupabaseBackend {
             });
         }
         Ok(resp.json().await?)
+    }
+}
+
+fn refresh_failure_message(text: &str) -> String {
+    if text.contains("refresh_token_already_used") {
+        format!(
+            "refresh failed: {text}. Stored daemon refresh token has already been consumed; run `amuxd init <teamclaw://invite?...>` again to mint a new daemon credential."
+        )
+    } else {
+        format!("refresh failed: {text}")
     }
 }
 
@@ -1626,6 +1659,16 @@ mod tests {
             Err(SupabaseError::Auth(_)) => {}
             other => panic!("expected auth error, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn refresh_already_used_error_is_actionable() {
+        let msg = refresh_failure_message(
+            r#"{"code":400,"error_code":"refresh_token_already_used","msg":"Invalid Refresh Token: Already Used"}"#,
+        );
+
+        assert!(msg.contains("refresh_token_already_used"));
+        assert!(msg.contains("amuxd init"));
     }
 
     #[tokio::test]
