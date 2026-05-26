@@ -330,6 +330,14 @@ public struct ActiveStreamCardView: View {
     public let isPending: Bool
 
     @State private var pulse = false
+    @State private var pendingElapsed: TimeInterval = 0
+    @State private var pendingTicker: Timer? = nil
+
+    /// Seconds the pending card must stay visible before its label
+    /// switches from "Agent loading…" to the patience copy. Cold-spawn
+    /// agents routinely take >10s before the first delta lands, so 15s
+    /// is the point where the user starts to wonder if anything is happening.
+    private static let patienceThreshold: TimeInterval = 15
 
     public init(agentName: String, lastLine: String, isPending: Bool = false) {
         self.agentName = agentName
@@ -342,7 +350,12 @@ public struct ActiveStreamCardView: View {
     }
 
     private var displayText: String {
-        if isPending { return "Agent loading…" }
+        if isPending {
+            if pendingElapsed >= Self.patienceThreshold {
+                return "Agent 启动较慢，请耐心等候…"
+            }
+            return "Agent loading…"
+        }
         return lastLine.isEmpty ? "Working…" : lastLine
     }
 
@@ -384,7 +397,33 @@ public struct ActiveStreamCardView: View {
             withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
                 pulse.toggle()
             }
+            if isPending { startPendingTicker() }
         }
+        .onDisappear { stopPendingTicker() }
+        .onChange(of: isPending) { _, nowPending in
+            if nowPending {
+                startPendingTicker()
+            } else {
+                stopPendingTicker()
+                pendingElapsed = 0
+            }
+        }
+    }
+
+    private func startPendingTicker() {
+        stopPendingTicker()
+        let started = Date()
+        pendingElapsed = 0
+        pendingTicker = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                pendingElapsed = Date().timeIntervalSince(started)
+            }
+        }
+    }
+
+    private func stopPendingTicker() {
+        pendingTicker?.invalidate()
+        pendingTicker = nil
     }
 }
 
