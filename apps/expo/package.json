@@ -27,7 +27,7 @@
     "expo-linking": "~7.1.7",
     "expo-notifications": "~0.31.5",
     "expo-router": "~5.1.11",
-    "expo-sqlite": "~15.2.10",
+    "expo-sqlite": "~56.0.4",
     "expo-status-bar": "~2.2.3",
     "expo-web-browser": "~14.2.0",
     "mqtt": "5.14.0",
