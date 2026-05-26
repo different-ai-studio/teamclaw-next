@@ -164,8 +164,11 @@ function mapSession(row: PocketBaseRecord): SessionListEntry {
 }
 
 function mapMessage(row: PocketBaseRecord): MessageHistoryRow {
+  const clientMessageId = typeof row.client_message_id === "string" && row.client_message_id
+    ? row.client_message_id
+    : row.id;
   return {
-    id: row.id,
+    id: clientMessageId,
     team_id: relationId(row.team) ?? "",
     session_id: relationId(row.session) ?? "",
     turn_id: typeof row.turn_id === "string" ? row.turn_id : null,
@@ -482,6 +485,7 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
     messages: {
       async insertOutgoingMessage(input) {
         const row = await pb.create<PocketBaseRecord>("messages", {
+          client_message_id: input.id ?? "",
           team: input.teamId,
           session: input.sessionId,
           sender_actor: input.senderActorId,
@@ -508,7 +512,11 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
         return items.map(mapMessage);
       },
       async updateMessageContent(messageId, content) {
-        await pb.update("messages", messageId, { content });
+        const { items } = await pb.list<PocketBaseRecord>("messages", {
+          filter: `client_message_id = ${quoteFilter(messageId)}`,
+          perPage: 1,
+        });
+        await pb.update("messages", items[0]?.id ?? messageId, { content });
       },
       async listMessagesForSessionSince(sessionId, updatedAfter) {
         const rows = await this.listMessages(sessionId);

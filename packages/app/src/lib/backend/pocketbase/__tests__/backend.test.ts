@@ -65,7 +65,7 @@ describe("PocketBase backend preview auth", () => {
     unsubscribe();
   });
 
-  it("lets PocketBase mint session and message ids", async () => {
+  it("lets PocketBase mint session ids and preserves live message ids", async () => {
     const requestBodies: Record<string, Array<Record<string, unknown>>> = {};
     const fetchMock = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
       const path = String(url).replace("http://127.0.0.1:8090/api/", "");
@@ -89,8 +89,10 @@ describe("PocketBase backend preview auth", () => {
       }
       if (path === "collections/messages/records") {
         expect(body).not.toHaveProperty("id");
+        expect(body.client_message_id).toBe("d817451b-d8a0-4217-a214-3c98d57d83c7");
         return jsonResponse({
           id: "pb_message_1",
+          client_message_id: body.client_message_id,
           team: body.team,
           session: body.session,
           sender_actor: body.sender_actor,
@@ -128,7 +130,7 @@ describe("PocketBase backend preview auth", () => {
     });
 
     expect(created.sessionId).toBe("pb_session_1");
-    expect(message.id).toBe("pb_message_1");
+    expect(message.id).toBe("d817451b-d8a0-4217-a214-3c98d57d83c7");
     expect(requestBodies["collections/messages/records"][0].session).toBe("pb_session_1");
   });
 });
