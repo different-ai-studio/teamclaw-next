@@ -1,19 +1,24 @@
 use chrono::Utc;
 use prost::Message;
-use rumqttc::{AsyncClient, QoS};
+use std::sync::Arc;
+use teamclaw_transport::{DeliveryGuarantee, MessagePublisher};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::mqtt::Topics;
 use crate::proto::amux::Envelope as AmuxEnvelope;
 use crate::proto::teamclaw::{IdeaEvent, LiveEventEnvelope, Participant, SessionMessageEnvelope};
 
+const RUMQTTC_DEFAULT_PACKET_LIMIT_BYTES: usize = 10 * 1024;
+const LIVE_EVENT_WARN_BYTES: usize = 512 * 1024;
+
 pub struct LivePublisher {
-    client: AsyncClient,
+    client: Arc<dyn MessagePublisher>,
     topics: Topics,
 }
 
 impl LivePublisher {
-    pub fn new(client: AsyncClient, team_id: String, device_id: String) -> Self {
+    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, device_id: String) -> Self {
         Self {
             client,
             topics: Topics::new(&team_id, &device_id),
@@ -84,6 +89,7 @@ impl LivePublisher {
         actor_id: &str,
         body: Vec<u8>,
     ) -> crate::error::Result<()> {
+        let body_len = body.len();
         let payload = LiveEventEnvelope {
             event_id: Uuid::new_v4().to_string(),
             event_type: event_type.to_string(),
@@ -93,14 +99,33 @@ impl LivePublisher {
             body,
         }
         .encode_to_vec();
+        let topic = self.topics.session_live(session_id);
+        let payload_len = payload.len();
+
+        if payload_len > LIVE_EVENT_WARN_BYTES {
+            warn!(
+                event_type,
+                session_id,
+                actor_id,
+                topic,
+                payload_len,
+                body_len,
+                "large MQTT session/live publish"
+            );
+        } else if payload_len > RUMQTTC_DEFAULT_PACKET_LIMIT_BYTES {
+            debug!(
+                event_type,
+                session_id,
+                actor_id,
+                topic,
+                payload_len,
+                body_len,
+                "MQTT session/live publish exceeds rumqttc default packet cap"
+            );
+        }
 
         self.client
-            .publish(
-                self.topics.session_live(session_id),
-                QoS::AtLeastOnce,
-                false,
-                payload,
-            )
+            .publish(&topic, payload, false, DeliveryGuarantee::AtLeastOnce)
             .await?;
         Ok(())
     }

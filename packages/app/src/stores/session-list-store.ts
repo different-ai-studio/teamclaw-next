@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "./auth-store";
 import { isTauri } from "@/lib/utils";
 import { loadPinnedSessionIds, savePinnedSessionIds } from "./session-pins";
@@ -63,34 +63,6 @@ function mapCacheToEntry(r: SessionRow): SessionListEntry {
   };
 }
 
-type FreshSessionRow = {
-  id: string;
-  title: string;
-  team_id: string;
-  mode: string;
-  last_message_at: string | null;
-  last_message_preview: string | null;
-  created_at: string;
-  updated_at: string;
-  idea_id: string | null;
-  has_unread: boolean | null;
-};
-
-function mapFreshToEntry(r: FreshSessionRow): SessionListEntry {
-  return {
-    id: r.id,
-    title: r.title ?? "",
-    team_id: r.team_id,
-    last_message_at: r.last_message_at,
-    last_message_preview: r.last_message_preview,
-    mode: (r.mode as SessionListEntry["mode"]) ?? "solo",
-    idea_id: r.idea_id ?? null,
-    has_unread: r.has_unread === true,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-  };
-}
-
 /** Sort entries: null last_message_at first, then by last_message_at DESC */
 function sortEntries(entries: SessionListEntry[]): SessionListEntry[] {
   return [...entries].sort((a, b) => {
@@ -149,17 +121,11 @@ function cursorFromRows(rows: SessionListEntry[]): State["nextCursor"] {
 }
 
 async function loadPage(limit: number, cursor: State["nextCursor"]) {
-  const { data, error } = await supabase.rpc("list_current_actor_sessions", {
-    p_limit: limit,
-    p_before_last_message_at: cursor?.lastMessageAt ?? null,
-    p_before_created_at: cursor?.createdAt ?? null,
-    p_before_id: cursor?.id ?? null,
+  const { rows } = await getBackend().sessions.listCurrentActorSessions({
+    limit,
+    cursor,
   });
-
-  return {
-    data: ((data ?? []) as FreshSessionRow[]).map(mapFreshToEntry),
-    error,
-  };
+  return rows;
 }
 
 export const useSessionListStore = create<State>((set, get) => ({
@@ -197,9 +163,11 @@ export const useSessionListStore = create<State>((set, get) => ({
       }
     }
 
-    const { data: rows, error } = await loadPage(limit, null);
-    if (error) {
-      set({ loading: false, error: error.message });
+    let rows: SessionListEntry[];
+    try {
+      rows = await loadPage(limit, null);
+    } catch (error) {
+      set({ loading: false, error: error instanceof Error ? error.message : String(error) });
       return;
     }
 
@@ -243,9 +211,11 @@ export const useSessionListStore = create<State>((set, get) => ({
     if (!cursor) return;
 
     set({ loading: true, error: null });
-    const { data: rows, error } = await loadPage(limit, cursor);
-    if (error) {
-      set({ loading: false, error: error.message });
+    let rows: SessionListEntry[];
+    try {
+      rows = await loadPage(limit, cursor);
+    } catch (error) {
+      set({ loading: false, error: error instanceof Error ? error.message : String(error) });
       return;
     }
     const nextRows = mergeRows(get().rows, rows);
@@ -266,12 +236,10 @@ export const useSessionListStore = create<State>((set, get) => ({
     rows: state.rows.filter((row) => row.id !== sessionId),
   })),
   markSessionViewed: async (sessionId, lastReadMessageId = null) => {
-    const { error } = await supabase.rpc("mark_current_actor_session_viewed", {
-      p_session_id: sessionId,
-      p_last_read_message_id: lastReadMessageId,
-    });
-    if (error) {
-      set({ error: error.message });
+    try {
+      await getBackend().sessions.markCurrentActorSessionViewed(sessionId, lastReadMessageId);
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
       return;
     }
     get().patchRow(sessionId, { has_unread: false });
@@ -301,24 +269,20 @@ export const useSessionListStore = create<State>((set, get) => ({
   updateSessionTitle: async (sessionId, title) => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const { error } = await supabase
-      .from("sessions")
-      .update({ title: trimmed })
-      .eq("id", sessionId);
-    if (error) {
-      set({ error: error.message });
+    try {
+      await getBackend().sessions.updateSessionTitle(sessionId, trimmed);
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
       return;
     }
     get().patchRow(sessionId, { title: trimmed });
   },
   archiveSession: async (sessionId) => {
     const archivedAt = new Date().toISOString();
-    const { error } = await supabase
-      .from("sessions")
-      .update({ archived_at: archivedAt })
-      .eq("id", sessionId);
-    if (error) {
-      set({ error: error.message });
+    try {
+      await getBackend().sessions.archiveSession(sessionId, archivedAt);
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
       return;
     }
     get().removeRow(sessionId);

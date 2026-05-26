@@ -3,6 +3,9 @@ import { mqttSubscribe } from "@/lib/mqtt-bridge";
 export const subscribedSessionTopics = new Set<string>();
 
 const subscribedTeamSessionTopics = new Set<string>();
+const pendingSessionSubscriptions = new Map<string, Promise<void>>();
+const pendingTeamSessionSubscriptions = new Map<string, Promise<void>>();
+let subscriptionEpoch = 0;
 
 function teamSessionLiveTopic(teamId: string): string {
   return `amux/${teamId}/session/+/live`;
@@ -18,14 +21,28 @@ export function hasTeamSessionLiveSubscription(teamId: string): boolean {
 
 export async function ensureTeamSessionLiveSubscribed(teamId: string): Promise<void> {
   const topic = teamSessionLiveTopic(teamId);
-  if (subscribedTeamSessionTopics.has(topic)) return;
+  while (true) {
+    if (subscribedTeamSessionTopics.has(topic)) return;
+    const pending = pendingTeamSessionSubscriptions.get(topic);
+    if (pending) {
+      await pending;
+      continue;
+    }
 
-  subscribedTeamSessionTopics.add(topic);
-  try {
-    await mqttSubscribe(topic);
-  } catch (e) {
-    subscribedTeamSessionTopics.delete(topic);
-    throw e;
+    const epoch = subscriptionEpoch;
+    const subscription = mqttSubscribe(topic);
+    pendingTeamSessionSubscriptions.set(topic, subscription);
+    try {
+      await subscription;
+    } finally {
+      if (pendingTeamSessionSubscriptions.get(topic) === subscription) {
+        pendingTeamSessionSubscriptions.delete(topic);
+      }
+    }
+    if (subscriptionEpoch === epoch) {
+      subscribedTeamSessionTopics.add(topic);
+      return;
+    }
   }
 }
 
@@ -36,18 +53,38 @@ export async function ensureSessionLiveSubscribed(
   if (hasTeamSessionLiveSubscription(teamId)) return;
 
   const topic = sessionLiveTopic(teamId, sessionId);
-  if (subscribedSessionTopics.has(topic)) return;
+  while (true) {
+    if (hasTeamSessionLiveSubscription(teamId)) return;
+    if (subscribedSessionTopics.has(topic)) return;
+    const pending = pendingSessionSubscriptions.get(topic);
+    if (pending) {
+      await pending;
+      continue;
+    }
 
-  subscribedSessionTopics.add(topic);
-  try {
-    await mqttSubscribe(topic);
-  } catch (e) {
-    subscribedSessionTopics.delete(topic);
-    throw e;
+    const epoch = subscriptionEpoch;
+    const subscription = mqttSubscribe(topic);
+    pendingSessionSubscriptions.set(topic, subscription);
+    try {
+      await subscription;
+    } finally {
+      if (pendingSessionSubscriptions.get(topic) === subscription) {
+        pendingSessionSubscriptions.delete(topic);
+      }
+    }
+    if (subscriptionEpoch === epoch) {
+      subscribedSessionTopics.add(topic);
+      return;
+    }
   }
 }
 
-export function resetSessionLiveSubscriptionStateForTests(): void {
+export function resetSessionLiveSubscriptionState(): void {
+  subscriptionEpoch += 1;
   subscribedSessionTopics.clear();
   subscribedTeamSessionTopics.clear();
+  pendingSessionSubscriptions.clear();
+  pendingTeamSessionSubscriptions.clear();
 }
+
+export const resetSessionLiveSubscriptionStateForTests = resetSessionLiveSubscriptionState;

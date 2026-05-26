@@ -4,7 +4,7 @@ import { Check, Filter, Loader2, Plus, Search, Sparkles, User as UserIcon, Users
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatRelativeTime } from '@/lib/date-format'
 import { useSessionListStore } from '@/stores/session-list-store'
@@ -47,14 +47,9 @@ export function useActorsForTeam(): UseActorsForTeamResult {
     }
     let cancelled = false
     void (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user || cancelled) return
-      const { data: actorRow } = await supabase
-        .from('actors')
-        .select('id, team_id')
-        .eq('user_id', user.id)
-        .limit(1)
-        .maybeSingle()
+      const session = await getBackend().auth.getSession()
+      if (!session?.user || cancelled) return
+      const actorRow = await getBackend().directory.resolveFirstMemberActorForUser(session.user.id)
       if (!cancelled) setTeamId(actorRow?.team_id ?? null)
     })()
     return () => { cancelled = true }
@@ -86,20 +81,24 @@ export function useActorsForTeam(): UseActorsForTeamResult {
       }
       if (!hadLocal) setLoading(true)
 
-      const { data, error: fetchError } = await supabase
-        .from('actor_directory')
-        .select('id, actor_type, display_name, member_status, agent_status, last_active_at')
-        .eq('team_id', teamId)
-        .order('last_active_at', { ascending: false, nullsFirst: false })
-        .order('display_name', { ascending: true })
-      if (cancelled) return
-      if (fetchError) {
+      let data
+      try {
+        data = await getBackend().actors.listActorDirectory(teamId)
+      } catch (fetchError) {
         console.error('[useActorsForTeam] fetch failed', fetchError)
         if (!hadLocal) setError(true)
         setLoading(false)
         return
       }
-      const rows = (data ?? []) as ActorRow[]
+      if (cancelled) return
+      const rows = (data ?? []).map((row): ActorRow => ({
+        id: row.id,
+        actor_type: row.actor_type === 'agent' ? 'agent' : 'member',
+        display_name: row.display_name || row.id,
+        member_status: row.member_status ?? null,
+        agent_status: row.agent_status ?? null,
+        last_active_at: row.last_active_at ?? null,
+      }))
       setActors(rows)
       setLoading(false)
 

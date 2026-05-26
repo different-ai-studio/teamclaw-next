@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 
@@ -25,35 +25,29 @@ export async function applySessionRuntimeModel(args: ApplySessionRuntimeModelArg
     return
   }
 
-  let query = supabase
-    .from('agent_runtimes')
-    .select('agent_id, runtime_id')
-    .eq('session_id', args.sessionId)
-
   if (args.agentActorIds.length > 0) {
     sessionFlowLog('runtime_model.query.filter_agents', {
       sessionId: args.sessionId,
       agentActorIds: args.agentActorIds,
     })
-    query = query.in('agent_id', args.agentActorIds)
   } else {
     sessionFlowLog('runtime_model.query.all_session_agents', {
       sessionId: args.sessionId,
     })
   }
 
-  const { data, error } = await query
-
-  if (error) {
+  let runtimeRows: Array<{ agent_id: string | null; runtime_id: string | null }>
+  try {
+    runtimeRows = await getBackend().runtime.listRuntimeTargetsForSession(args.sessionId, args.agentActorIds)
+  } catch (error) {
     sessionFlowError('runtime_model.query.failed', error, {
       sessionId: args.sessionId,
       modelId: args.modelId,
       agentActorIds: args.agentActorIds,
     })
-    throw new Error(`Failed to load agent runtimes: ${error.message}`)
+    throw new Error(`Failed to load agent runtimes: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  const runtimeRows = ((data ?? []) as Array<{ agent_id: string | null; runtime_id: string | null }>)
   const validRuntimeRows = runtimeRows.filter(
     (row): row is { agent_id: string; runtime_id: string } => !!row.agent_id && !!row.runtime_id,
   )

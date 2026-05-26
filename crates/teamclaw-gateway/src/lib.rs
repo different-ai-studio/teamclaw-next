@@ -4,8 +4,8 @@ pub mod acp;
 pub use acp::{AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo};
 
 pub mod binding;
-pub mod supabase_store;
-pub use supabase_store::{AttachmentRecord, ChannelStore, EnsureSessionOutcome, StoreError};
+pub mod channel_store;
+pub use channel_store::{AttachmentRecord, ChannelStore, EnsureSessionOutcome, StoreError};
 
 pub mod config;
 pub mod discord;

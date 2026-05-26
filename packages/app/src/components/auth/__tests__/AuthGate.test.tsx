@@ -1,19 +1,21 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { authState, supabaseMock, currentTeamMock } = vi.hoisted(() => ({
+const { authState, currentTeamMock, backendMock } = vi.hoisted(() => ({
   authState: {
     session: { user: { id: "user-1" } },
     loading: false,
     authFlow: "idle" as "idle" | "invite",
     hydrate: vi.fn(),
   },
-  supabaseMock: {
-    from: vi.fn(),
-    rpc: vi.fn(),
-  },
   currentTeamMock: {
     reloadAndSwitchTo: vi.fn(),
+  },
+  backendMock: {
+    teams: {
+      listCurrentUserTeams: vi.fn(),
+      createTeam: vi.fn(),
+    },
   },
 }));
 
@@ -33,8 +35,8 @@ vi.mock("@/stores/current-team", () => ({
   },
 }));
 
-vi.mock("@/lib/supabase-client", () => ({
-  supabase: supabaseMock,
+vi.mock("@/lib/backend", () => ({
+  getBackend: () => backendMock,
 }));
 
 vi.mock("@/lib/utils", () => ({
@@ -61,8 +63,8 @@ beforeEach(() => {
   authState.loading = false;
   authState.authFlow = "idle";
   authState.hydrate.mockReset();
-  supabaseMock.from.mockReset();
-  supabaseMock.rpc.mockReset();
+  backendMock.teams.listCurrentUserTeams.mockReset();
+  backendMock.teams.createTeam.mockReset();
   currentTeamMock.reloadAndSwitchTo.mockReset();
 });
 
@@ -121,18 +123,11 @@ describe("AuthGate", () => {
   });
 
   it("creates a first team and switches to it before rendering the shell", async () => {
-    supabaseMock.from.mockReturnValue({
-      select: () => ({
-        limit: () => Promise.resolve({ data: [], error: null }),
-      }),
-    });
-    supabaseMock.rpc.mockResolvedValueOnce({
-      data: {
-        team_id: "team-new",
-        team_name: "Trial Team",
-        team_slug: "trial-team",
-      },
-      error: null,
+    backendMock.teams.listCurrentUserTeams.mockResolvedValueOnce([]);
+    backendMock.teams.createTeam.mockResolvedValueOnce({
+      id: "team-new",
+      name: "Trial Team",
+      slug: "trial-team",
     });
     currentTeamMock.reloadAndSwitchTo.mockResolvedValueOnce(undefined);
 

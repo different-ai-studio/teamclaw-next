@@ -1507,7 +1507,7 @@ fn build_thread_session_key(email: &EmailMessage) -> String {
 }
 
 /// Resolve a prior thread → session binding for an inbound email so the
-/// follow-up reply lands in the *same* supabase session instead of a new
+/// follow-up reply lands in the *same* backend session instead of a new
 /// one per message. Returns `Some(binding)` if any previously persisted
 /// Message-ID in this email's `In-Reply-To` / `References` chain (or a
 /// subject-based fallback) was tagged with a binding; falls back to
@@ -1662,7 +1662,7 @@ fn process_and_reply_sync(
     // If the inbound email is part of an existing thread we've seen before
     // (`In-Reply-To` / `References` matched a Message-ID we persisted, or
     // the subject matches a recent thread), reuse the original thread's
-    // binding so `ensure_session` joins the same supabase session row.
+    // binding so `ensure_session` joins the same backend session row.
     // First-time threads fall back to a binding derived from the current
     // message's id.
     let binding = if let Some(b) = resolved_binding.clone() {
@@ -1781,7 +1781,7 @@ fn process_and_reply_sync(
     let binding_for_db = binding.clone();
 
     // Store email indexes in email_db so subsequent replies in the same thread
-    // can be resolved back to this session_id without a Supabase round-trip.
+    // can be resolved back to this session_id without a backend lookup.
     rt_handle.block_on(async move {
         if let Some(db) = email_db {
             if !incoming_message_id_for_db.is_empty() {

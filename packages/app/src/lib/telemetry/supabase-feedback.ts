@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 export type FeedbackKind = 'positive' | 'negative'
 
@@ -13,7 +13,7 @@ export interface FeedbackInsert {
 }
 
 export async function insertFeedback(input: FeedbackInsert): Promise<void> {
-  const { error } = await supabase.from('actor_message_feedback').insert({
+  await getBackend().telemetry.insertFeedback({
     actor_id: input.actorId,
     team_id: input.teamId,
     session_id: input.sessionId ?? null,
@@ -22,7 +22,6 @@ export async function insertFeedback(input: FeedbackInsert): Promise<void> {
     star_rating: input.starRating ?? null,
     skill: input.skill ?? null,
   })
-  if (error) throw new Error(`insertFeedback failed: ${error.message}`)
 }
 
 export interface FeedbackSummaryRow {
@@ -33,10 +32,6 @@ export interface FeedbackSummaryRow {
 }
 
 export async function getTeamFeedbackSummary(teamId: string): Promise<FeedbackSummaryRow[]> {
-  const { data, error } = await supabase
-    .from('team_leaderboard')
-    .select('actor_id, display_name, positive_feedback_30d, negative_feedback_30d')
-    .eq('team_id', teamId)
-  if (error) throw new Error(`getTeamFeedbackSummary failed: ${error.message}`)
-  return (data ?? []) as FeedbackSummaryRow[]
+  const data = await getBackend().telemetry.listFeedbackSummary(teamId)
+  return data as unknown as FeedbackSummaryRow[]
 }

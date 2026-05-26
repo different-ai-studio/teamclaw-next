@@ -1,6 +1,7 @@
 use libsql::{params, Builder, Connection, Value};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -12,6 +13,237 @@ fn opt_val(v: &Option<String>) -> Value {
         Some(s) => Value::Text(s.clone()),
         None => Value::Null,
     }
+}
+
+fn opencode_db_paths(workspace_path: Option<&str>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(path) = std::env::var("OPENCODE_DB_PATH") {
+        if !path.trim().is_empty() {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    if let Some(workspace_path) = workspace_path.map(str::trim).filter(|p| !p.is_empty()) {
+        paths.push(PathBuf::from(workspace_path).join(".opencode/data/opencode/opencode.db"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local/share/opencode/opencode.db"));
+    }
+
+    let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
+}
+
+fn string_at<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(|v| v.as_str())
+}
+
+fn collect_description_values(args: Option<&serde_json::Value>) -> HashSet<String> {
+    let mut values = HashSet::new();
+    let Some(args) = args.and_then(|v| v.as_object()) else {
+        return values;
+    };
+
+    for key in ["description", "summary", "title", "action"] {
+        if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                values.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    if let Some(raw) = args.get("_description").and_then(|v| v.as_str()) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
+            for key in ["description", "summary", "title", "action"] {
+                if let Some(value) = parsed.get(key).and_then(|v| v.as_str()) {
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty() {
+                        values.insert(trimmed.to_string());
+                    }
+                }
+            }
+        } else {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                values.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    values
+}
+
+fn tool_call_id_from_part(part: &serde_json::Value) -> Option<String> {
+    string_at(part, "toolCallId")
+        .or_else(|| part.pointer("/toolCall/id").and_then(|v| v.as_str()))
+        .map(ToString::to_string)
+}
+
+fn tool_call_part_needs_output(part: &serde_json::Value) -> bool {
+    let result = part.pointer("/toolCall/result").and_then(|v| v.as_str());
+    let Some(result) = result.map(str::trim).filter(|s| !s.is_empty()) else {
+        return true;
+    };
+    let args = part.pointer("/toolCall/arguments");
+    collect_description_values(args).contains(result)
+}
+
+fn collect_opencode_tool_ids_from_parts_json(parts_json: &str) -> HashSet<String> {
+    let Ok(parts) = serde_json::from_str::<serde_json::Value>(parts_json) else {
+        return HashSet::new();
+    };
+    let Some(parts) = parts.as_array() else {
+        return HashSet::new();
+    };
+    parts
+        .iter()
+        .filter(|part| string_at(part, "type") == Some("tool-call"))
+        .filter(|part| tool_call_part_needs_output(part))
+        .filter_map(tool_call_id_from_part)
+        .collect()
+}
+
+fn opencode_part_output(data: &str, tool_call_id: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(data).ok()?;
+    if string_at(&value, "callID") != Some(tool_call_id) {
+        return None;
+    }
+    let state = value.get("state")?;
+    string_at(state, "output")
+        .or_else(|| state.pointer("/metadata/output").and_then(|v| v.as_str()))
+        .map(ToString::to_string)
+        .filter(|text| !text.trim().is_empty())
+}
+
+fn enrich_parts_json_with_opencode_outputs(
+    parts_json: &str,
+    outputs: &HashMap<String, String>,
+) -> Option<String> {
+    let mut parts = serde_json::from_str::<serde_json::Value>(parts_json).ok()?;
+    let parts_array = parts.as_array_mut()?;
+    let mut changed = false;
+
+    for part in parts_array {
+        if string_at(part, "type") != Some("tool-call") || !tool_call_part_needs_output(part) {
+            continue;
+        }
+        let Some(tool_call_id) = tool_call_id_from_part(part) else {
+            continue;
+        };
+        let Some(output) = outputs.get(&tool_call_id) else {
+            continue;
+        };
+        let Some(tool_call) = part.get_mut("toolCall").and_then(|v| v.as_object_mut()) else {
+            continue;
+        };
+        tool_call.insert(
+            "result".to_string(),
+            serde_json::Value::String(output.clone()),
+        );
+        changed = true;
+    }
+
+    if changed {
+        serde_json::to_string(&parts).ok()
+    } else {
+        None
+    }
+}
+
+async fn load_opencode_tool_outputs(
+    tool_call_ids: &HashSet<String>,
+    workspace_path: Option<&str>,
+) -> HashMap<String, String> {
+    if tool_call_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut outputs = HashMap::new();
+    for path in opencode_db_paths(workspace_path) {
+        if tokio::fs::metadata(&path).await.is_err() {
+            continue;
+        }
+        let db = match Builder::new_local(path.to_string_lossy().to_string())
+            .build()
+            .await
+        {
+            Ok(db) => db,
+            Err(_) => continue,
+        };
+        let conn = match db.connect() {
+            Ok(conn) => conn,
+            Err(_) => continue,
+        };
+
+        for tool_call_id in tool_call_ids {
+            if outputs.contains_key(tool_call_id) {
+                continue;
+            }
+            let pattern = format!("%{}%", tool_call_id);
+            let mut rows = match conn
+                .query(
+                    "SELECT data FROM part
+                     WHERE data LIKE ?1
+                     ORDER BY time_updated DESC, time_created DESC
+                     LIMIT 8",
+                    params![pattern],
+                )
+                .await
+            {
+                Ok(rows) => rows,
+                Err(_) => continue,
+            };
+            while let Ok(Some(row)) = rows.next().await {
+                let data = row.get::<String>(0).unwrap_or_default();
+                if let Some(output) = opencode_part_output(&data, tool_call_id) {
+                    outputs.insert(tool_call_id.clone(), output);
+                    break;
+                }
+            }
+        }
+
+        if outputs.len() == tool_call_ids.len() {
+            break;
+        }
+    }
+    outputs
+}
+
+async fn enrich_message_rows_from_opencode(rows: &mut [MessageRow], workspace_path: Option<&str>) {
+    let tool_call_ids = rows
+        .iter()
+        .filter_map(|row| row.parts_json.as_deref())
+        .flat_map(collect_opencode_tool_ids_from_parts_json)
+        .collect::<HashSet<_>>();
+    let outputs = load_opencode_tool_outputs(&tool_call_ids, workspace_path).await;
+    if outputs.is_empty() {
+        return;
+    }
+
+    for row in rows {
+        let Some(parts_json) = row.parts_json.as_deref() else {
+            continue;
+        };
+        if let Some(enriched) = enrich_parts_json_with_opencode_outputs(parts_json, &outputs) {
+            row.parts_json = Some(enriched);
+        }
+    }
+}
+
+pub async fn enrich_parts_json_from_opencode(
+    parts_json: &str,
+    workspace_path: Option<&str>,
+) -> String {
+    let tool_call_ids = collect_opencode_tool_ids_from_parts_json(parts_json);
+    let outputs = load_opencode_tool_outputs(&tool_call_ids, workspace_path).await;
+    if outputs.is_empty() {
+        return parts_json.to_string();
+    }
+    enrich_parts_json_with_opencode_outputs(parts_json, &outputs)
+        .unwrap_or_else(|| parts_json.to_string())
 }
 
 // ─── Row types ────────────────────────────────────────────────────────────
@@ -106,6 +338,7 @@ pub struct OutboxRow {
     pub sender_actor_id: String,
     pub content: String,
     pub mention_actor_ids_json: Option<String>,
+    pub display_mention_actor_ids_json: Option<String>,
     pub attachment_urls_json: Option<String>,
     pub state: String,
     pub attempt_count: i64,
@@ -357,6 +590,7 @@ impl LocalCacheStore {
                 sender_actor_id         TEXT NOT NULL,
                 content                 TEXT NOT NULL,
                 mention_actor_ids_json  TEXT,
+                display_mention_actor_ids_json TEXT,
                 attachment_urls_json    TEXT,
                 state                   TEXT NOT NULL,
                 attempt_count           INTEGER NOT NULL DEFAULT 0,
@@ -370,6 +604,13 @@ impl LocalCacheStore {
         )
         .await
         .map_err(|e| format!("Failed to create outbox table: {}", e))?;
+
+        conn.execute(
+            "ALTER TABLE outbox ADD COLUMN display_mention_actor_ids_json TEXT",
+            (),
+        )
+        .await
+        .ok();
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(state, next_attempt_at)",
@@ -932,21 +1173,24 @@ impl LocalCacheStore {
         &self,
         message_id: &str,
         parts_json: &str,
-    ) -> Result<(), String> {
+        workspace_path: Option<&str>,
+    ) -> Result<String, String> {
+        let parts_json = enrich_parts_json_from_opencode(parts_json, workspace_path).await;
         let conn = self.conn.lock().await;
         conn.execute(
             "UPDATE message SET parts_json = ?1 WHERE id = ?2",
-            params![parts_json.to_string(), message_id.to_string()],
+            params![parts_json.clone(), message_id.to_string()],
         )
         .await
         .map_err(|e| format!("message_set_parts: {}", e))?;
-        Ok(())
+        Ok(parts_json)
     }
 
     pub async fn message_load_session(
         &self,
         session_id: &str,
         include_deleted: bool,
+        workspace_path: Option<&str>,
     ) -> Result<Vec<MessageRow>, String> {
         let conn = self.conn.lock().await;
         let sql = if include_deleted {
@@ -990,6 +1234,9 @@ impl LocalCacheStore {
                 parts_json: row.get::<String>(16).ok().filter(|s| !s.is_empty()),
             });
         }
+        drop(rows);
+        drop(conn);
+        enrich_message_rows_from_opencode(&mut result, workspace_path).await;
         Ok(result)
     }
 
@@ -1381,10 +1628,10 @@ impl LocalCacheStore {
         conn.execute(
             "INSERT INTO outbox
                 (message_id, team_id, session_id, sender_actor_id, content,
-                 mention_actor_ids_json, attachment_urls_json,
+                 mention_actor_ids_json, display_mention_actor_ids_json, attachment_urls_json,
                  state, attempt_count, last_attempt_at, next_attempt_at, last_error,
                  created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
              ON CONFLICT(message_id) DO UPDATE SET
                 state            = excluded.state,
                 attempt_count    = excluded.attempt_count,
@@ -1399,6 +1646,7 @@ impl LocalCacheStore {
                 row.sender_actor_id.clone(),
                 row.content.clone(),
                 opt_val(&row.mention_actor_ids_json),
+                opt_val(&row.display_mention_actor_ids_json),
                 opt_val(&row.attachment_urls_json),
                 row.state.clone(),
                 row.attempt_count,
@@ -1434,7 +1682,7 @@ impl LocalCacheStore {
         let mut rows = conn
             .query(
                 "SELECT message_id, team_id, session_id, sender_actor_id, content,
-                        mention_actor_ids_json, attachment_urls_json,
+                        mention_actor_ids_json, display_mention_actor_ids_json, attachment_urls_json,
                         state, attempt_count, last_attempt_at, next_attempt_at, last_error,
                         created_at, updated_at
                  FROM outbox ORDER BY created_at ASC",
@@ -1455,14 +1703,15 @@ impl LocalCacheStore {
                 sender_actor_id: row.get::<String>(3).unwrap_or_default(),
                 content: row.get::<String>(4).unwrap_or_default(),
                 mention_actor_ids_json: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
-                attachment_urls_json: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
-                state: row.get::<String>(7).unwrap_or_default(),
-                attempt_count: row.get::<i64>(8).unwrap_or(0),
-                last_attempt_at: row.get::<String>(9).ok().filter(|s| !s.is_empty()),
-                next_attempt_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
-                last_error: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
-                created_at: row.get::<String>(12).unwrap_or_default(),
-                updated_at: row.get::<String>(13).unwrap_or_default(),
+                display_mention_actor_ids_json: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
+                attachment_urls_json: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
+                state: row.get::<String>(8).unwrap_or_default(),
+                attempt_count: row.get::<i64>(9).unwrap_or(0),
+                last_attempt_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
+                next_attempt_at: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
+                last_error: row.get::<String>(12).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(13).unwrap_or_default(),
+                updated_at: row.get::<String>(14).unwrap_or_default(),
             });
         }
         Ok(result)
@@ -1700,5 +1949,102 @@ mod tests {
 
         assert_eq!(team_a.len(), 0, "teamA should be wiped");
         assert_eq!(team_b.len(), 1, "teamB should be untouched");
+    }
+
+    #[test]
+    fn opencode_part_output_reads_real_tool_stdout() {
+        let data = serde_json::json!({
+            "type": "tool",
+            "tool": "bash",
+            "callID": "call_1",
+            "state": {
+                "status": "completed",
+                "input": {
+                    "command": "ps -o pid,%cpu,%mem,comm -r | head -10",
+                    "description": "Top 10 processes by CPU"
+                },
+                "output": "PID %CPU COMM\n1 launchd\n",
+                "metadata": {
+                    "output": "metadata output",
+                    "description": "Top 10 processes by CPU"
+                }
+            }
+        })
+        .to_string();
+
+        assert_eq!(
+            opencode_part_output(&data, "call_1").as_deref(),
+            Some("PID %CPU COMM\n1 launchd\n")
+        );
+        assert_eq!(opencode_part_output(&data, "call_2"), None);
+    }
+
+    #[test]
+    fn collect_opencode_tool_ids_only_when_result_is_description() {
+        let parts_json = serde_json::json!([
+            {
+                "type": "tool-call",
+                "toolCallId": "call_needs_output",
+                "toolCall": {
+                    "id": "call_needs_output",
+                    "result": "Top 10 processes by CPU",
+                    "arguments": {
+                        "description": "Top 10 processes by CPU"
+                    }
+                }
+            },
+            {
+                "type": "tool-call",
+                "toolCallId": "call_has_output",
+                "toolCall": {
+                    "id": "call_has_output",
+                    "result": "PID %CPU COMM\n1 launchd\n",
+                    "arguments": {
+                        "description": "Top 10 processes by CPU"
+                    }
+                }
+            }
+        ])
+        .to_string();
+
+        let ids = collect_opencode_tool_ids_from_parts_json(&parts_json);
+        assert!(ids.contains("call_needs_output"));
+        assert!(!ids.contains("call_has_output"));
+    }
+
+    #[test]
+    fn enrich_parts_json_with_opencode_output_replaces_title_result() {
+        let parts_json = serde_json::json!([
+            {
+                "id": "stream:tool:call_1",
+                "type": "tool-call",
+                "toolCallId": "call_1",
+                "toolCall": {
+                    "id": "call_1",
+                    "name": "bash",
+                    "status": "completed",
+                    "arguments": {
+                        "_description": "{\"command\":\"ps -o pid,%cpu,%mem,comm -r | head -10\",\"description\":\"Top 10 processes by CPU\"}",
+                        "command": "ps -o pid,%cpu,%mem,comm -r | head -10",
+                        "description": "Top 10 processes by CPU"
+                    },
+                    "result": "Top 10 processes by CPU"
+                }
+            }
+        ])
+        .to_string();
+        let outputs = HashMap::from([(
+            "call_1".to_string(),
+            "PID %CPU COMM\n50369 opencode\n".to_string(),
+        )]);
+
+        let enriched = enrich_parts_json_with_opencode_outputs(&parts_json, &outputs).unwrap();
+        let parsed = serde_json::from_str::<serde_json::Value>(&enriched).unwrap();
+        assert_eq!(
+            parsed
+                .pointer("/0/toolCall/result")
+                .and_then(|v| v.as_str()),
+            Some("PID %CPU COMM\n50369 opencode\n")
+        );
     }
 }

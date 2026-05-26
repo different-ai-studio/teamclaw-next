@@ -1,4 +1,5 @@
 /// Builds MQTT topic paths for a given team-scoped device namespace.
+#[derive(Clone, Debug)]
 pub struct Topics {
     team_id: String,
     device_id: String,

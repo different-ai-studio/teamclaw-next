@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { ActorsView } from '../ActorsView'
 
-const supabaseFrom = vi.fn()
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (...args: unknown[]) => supabaseFrom(...args),
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u-1' } } }) },
-  },
+const listActorDirectory = vi.fn()
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    actors: { listActorDirectory },
+    auth: { getSession: vi.fn().mockResolvedValue({ user: { id: 'u-1' } }) },
+    directory: { resolveFirstMemberActorForUser: vi.fn().mockResolvedValue({ team_id: 'team-1' }) },
+  }),
 }))
 
 vi.mock('@/stores/session-list-store', () => ({
@@ -19,28 +20,11 @@ vi.mock('react-i18next', () => ({
 }))
 
 beforeEach(() => {
-  supabaseFrom.mockReset()
+  listActorDirectory.mockReset()
 })
 
 function mockActorsRows(rows: any[]) {
-  supabaseFrom.mockImplementation((table: string) => {
-    if (table === 'actor_directory') {
-      return {
-        select: () => ({
-          eq: () => ({
-            order: () => ({
-              order: () => Promise.resolve({ data: rows, error: null }),
-            }),
-          }),
-        }),
-      }
-    }
-    return {
-      select: () => ({
-        eq: () => ({ limit: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
-      }),
-    }
-  })
+  listActorDirectory.mockResolvedValue(rows)
 }
 
 describe('ActorsView', () => {

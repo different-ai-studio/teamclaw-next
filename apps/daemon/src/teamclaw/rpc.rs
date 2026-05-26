@@ -1,19 +1,20 @@
 use crate::proto::teamclaw::{RpcRequest, RpcResponse};
 use prost::Message as ProstMessage;
-use rumqttc::{AsyncClient, QoS};
 use std::collections::HashMap;
+use std::sync::Arc;
+use teamclaw_transport::{DeliveryGuarantee, MessagePublisher};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// Server-side RPC handler: receives requests and sends responses.
 pub struct RpcServer {
-    pub client: AsyncClient,
+    pub client: Arc<dyn MessagePublisher>,
     pub team_id: String,
     pub device_id: String,
 }
 
 impl RpcServer {
-    pub fn new(client: AsyncClient, team_id: String, device_id: String) -> Self {
+    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, device_id: String) -> Self {
         Self {
             client,
             team_id,
@@ -51,7 +52,7 @@ impl RpcServer {
         let payload = response.encode_to_vec();
         if let Err(e) = self
             .client
-            .publish(topic, QoS::AtLeastOnce, false, payload)
+            .publish(&topic, payload, false, DeliveryGuarantee::AtLeastOnce)
             .await
         {
             tracing::warn!("RpcServer: failed to publish response: {e}");
@@ -61,14 +62,14 @@ impl RpcServer {
 
 /// Client-side RPC handler: sends requests and waits for responses via oneshot channels.
 pub struct RpcClient {
-    pub client: AsyncClient,
+    pub client: Arc<dyn MessagePublisher>,
     pub team_id: String,
     pub device_id: String,
     pub pending: HashMap<String, oneshot::Sender<RpcResponse>>,
 }
 
 impl RpcClient {
-    pub fn new(client: AsyncClient, team_id: String, device_id: String) -> Self {
+    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, device_id: String) -> Self {
         Self {
             client,
             team_id,
@@ -90,7 +91,7 @@ impl RpcClient {
         let (tx, rx) = oneshot::channel();
         self.pending.insert(request_id.clone(), tx);
         self.client
-            .publish(topic, QoS::AtLeastOnce, false, payload)
+            .publish(&topic, payload, false, DeliveryGuarantee::AtLeastOnce)
             .await?;
         Ok(rx)
     }
@@ -177,7 +178,11 @@ mod tests {
         rt.block_on(async {
             let (client, _eventloop) =
                 rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
-            let mut rpc_client = RpcClient::new(client, "team1".to_string(), "dev-a".to_string());
+            let mut rpc_client = RpcClient::new(
+                Arc::new(client) as Arc<dyn MessagePublisher>,
+                "team1".to_string(),
+                "dev-a".to_string(),
+            );
 
             // Manually insert a pending request
             let (tx, rx) = oneshot::channel();
@@ -212,7 +217,11 @@ mod tests {
         rt.block_on(async {
             let (client, _eventloop) =
                 rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
-            let mut rpc_client = RpcClient::new(client, "team1".to_string(), "dev-a".to_string());
+            let mut rpc_client = RpcClient::new(
+                Arc::new(client) as Arc<dyn MessagePublisher>,
+                "team1".to_string(),
+                "dev-a".to_string(),
+            );
 
             let response = RpcResponse {
                 request_id: "req999".to_string(),
@@ -239,7 +248,11 @@ mod tests {
         rt.block_on(async {
             let (client, _eventloop) =
                 rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
-            let mut rpc_client = RpcClient::new(client, "team1".to_string(), "dev-a".to_string());
+            let mut rpc_client = RpcClient::new(
+                Arc::new(client) as Arc<dyn MessagePublisher>,
+                "team1".to_string(),
+                "dev-a".to_string(),
+            );
             let matched = rpc_client.handle_response("bad/topic", &[]);
             assert!(!matched);
         });

@@ -14,11 +14,13 @@
 use async_trait::async_trait;
 use std::time::Instant;
 
-use crate::supabase::client::StoredMessage;
-use crate::supabase::error::SupabaseResult;
-use crate::supabase::{
-    AgentRuntimeRow, AgentRuntimeUpsert, ClaimResult, SessionAndParticipants, WorkspaceRow,
-    WorkspaceUpsert,
+pub mod error;
+pub use error::{BackendError, BackendResult};
+
+pub mod records;
+pub use records::{
+    AgentRuntimeRow, AgentRuntimeUpsert, BackendParticipantRow, BackendSessionAndParticipants,
+    BackendSessionRow, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 
 #[cfg(test)]
@@ -36,7 +38,7 @@ pub trait Backend: Send + Sync {
     // ── Credentials ───────────────────────────────────────────────────────
     /// Current auth token for downstream services (MQTT, etc.). Implementations
     /// are expected to refresh as needed and return a usable bearer string.
-    async fn auth_token(&self) -> SupabaseResult<String>;
+    async fn auth_token(&self) -> BackendResult<String>;
 
     /// Expiry of the cached credential without forcing a refresh. `None` if
     /// no credential has been fetched yet or the impl doesn't expose one.
@@ -49,14 +51,14 @@ pub trait Backend: Send + Sync {
     // ── Business operations ───────────────────────────────────────────────
     /// Claim a team invite token. Used both by the human onboarding path
     /// and by the daemon's `claim_daemon_invite` flow.
-    async fn claim_team_invite(&self, token: &str) -> SupabaseResult<ClaimResult>;
+    async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult>;
 
     /// Upsert an `agent_runtimes` row keyed on `(agent_id, backend_session_id)`.
     /// Returns the row id when the response carries one.
     async fn upsert_agent_runtime(
         &self,
         row: &AgentRuntimeUpsert<'_>,
-    ) -> SupabaseResult<Option<String>>;
+    ) -> BackendResult<Option<String>>;
 
     /// Fetch one `agent_runtimes` row for an exact runtime/backend session.
     async fn fetch_agent_runtime_for_session(
@@ -64,24 +66,24 @@ pub trait Backend: Send + Sync {
         session_id: &str,
         runtime_id: &str,
         backend_session_id: &str,
-    ) -> SupabaseResult<Option<AgentRuntimeRow>>;
+    ) -> BackendResult<Option<AgentRuntimeRow>>;
 
     /// Fetch the newest `agent_runtimes` row for `(agent_id, session_id)`.
     async fn fetch_latest_runtime_for_session(
         &self,
         agent_id: &str,
         session_id: &str,
-    ) -> SupabaseResult<Option<AgentRuntimeRow>>;
+    ) -> BackendResult<Option<AgentRuntimeRow>>;
 
     /// Advertise daemon-supported agent backend types on its `agents` row.
     async fn ensure_agent_types(
         &self,
         supported_types: &[String],
         default_agent_type: &str,
-    ) -> SupabaseResult<()>;
+    ) -> BackendResult<()>;
 
     /// Record this daemon's MQTT device identifier on its `agents` row.
-    async fn set_agent_device_id(&self, device_id: &str) -> SupabaseResult<()>;
+    async fn set_agent_device_id(&self, device_id: &str) -> BackendResult<()>;
 
     /// Look up `agent_member_access.permission_level` for a caller.
     /// Returns `Some("admin" | "write" | "view")` or `None`.
@@ -89,19 +91,19 @@ pub trait Backend: Send + Sync {
         &self,
         agent_id: &str,
         actor_id: &str,
-    ) -> SupabaseResult<Option<String>>;
+    ) -> BackendResult<Option<String>>;
 
     /// Touch `actor_last_active` for the current daemon actor.
-    async fn heartbeat(&self) -> SupabaseResult<()>;
+    async fn heartbeat(&self) -> BackendResult<()>;
 
     /// Upsert a `workspaces` row, returning the canonical id.
-    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> SupabaseResult<WorkspaceRow>;
+    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow>;
 
     /// Fetch a `sessions` row alongside its `session_participants`.
     async fn fetch_session_with_participants(
         &self,
         session_id: &str,
-    ) -> SupabaseResult<SessionAndParticipants>;
+    ) -> BackendResult<BackendSessionAndParticipants>;
 
     /// Messages for `session_id` ordered ascending, with optional exclusive
     /// cursor — messages at or before `after_id` are dropped.
@@ -109,14 +111,14 @@ pub trait Backend: Send + Sync {
         &self,
         session_id: &str,
         after_id: Option<&str>,
-    ) -> SupabaseResult<Vec<StoredMessage>>;
+    ) -> BackendResult<Vec<StoredMessage>>;
 
     /// Persist the per-runtime read cursor by PATCHing `agent_runtimes`.
     async fn update_runtime_cursor(
         &self,
         runtime_row_id: &str,
         last_processed_message_id: &str,
-    ) -> SupabaseResult<()>;
+    ) -> BackendResult<()>;
 
     /// Upsert an `actors` row of type `external` keyed on
     /// `(team_id, source, source_id)`. Returns the actor's UUID.
@@ -126,14 +128,14 @@ pub trait Backend: Send + Sync {
         source: &str,
         source_id: &str,
         display_name: &str,
-    ) -> SupabaseResult<String>;
+    ) -> BackendResult<String>;
 
     /// Look up `(sessions.id, binding)` for a gateway session by its
     /// SQL-minted `acp_session_id`. Returns `None` when no row matches.
     async fn get_gateway_session_by_acp_id(
         &self,
         acp_session_id: &str,
-    ) -> SupabaseResult<Option<(String, Option<String>)>>;
+    ) -> BackendResult<Option<(String, Option<String>)>>;
 
     /// Resolve (or create) the `sessions` row for a gateway binding.
     /// Returns `(session_id, acp_session_id, created)`.
@@ -146,7 +148,7 @@ pub trait Backend: Send + Sync {
         primary_agent_actor_id: &str,
         owner_member_actor_ids: &[String],
         participant_actor_ids: &[String],
-    ) -> SupabaseResult<(String, String, bool)>;
+    ) -> BackendResult<(String, String, bool)>;
 
     /// Insert one row into `public.messages` from a gateway message.
     /// Idempotent on `(session_id, external_id)`.
@@ -156,7 +158,7 @@ pub trait Backend: Send + Sync {
         sender_actor_id: &str,
         content: &str,
         external_message_id: Option<&str>,
-    ) -> SupabaseResult<String>;
+    ) -> BackendResult<String>;
 
     /// Same as `insert_gateway_message`, with an `attachments` JSON array.
     async fn insert_gateway_message_with_attachments(
@@ -166,7 +168,7 @@ pub trait Backend: Send + Sync {
         content: &str,
         external_message_id: Option<&str>,
         attachments: serde_json::Value,
-    ) -> SupabaseResult<String>;
+    ) -> BackendResult<String>;
 
     /// Upload bytes to the attachments bucket.
     async fn upload_attachment_bytes(
@@ -174,20 +176,20 @@ pub trait Backend: Send + Sync {
         path: &str,
         bytes: Vec<u8>,
         mime: &str,
-    ) -> SupabaseResult<String>;
+    ) -> BackendResult<String>;
 
     /// Return admin member actor ids granted access to `agent_actor_id`.
     async fn list_agent_admin_member_actor_ids(
         &self,
         agent_actor_id: &str,
-    ) -> SupabaseResult<Vec<String>>;
+    ) -> BackendResult<Vec<String>>;
 
     /// Add (or ignore-if-present) a participant on `session_participants`.
     async fn upsert_session_participant(
         &self,
         session_id: &str,
         actor_id: &str,
-    ) -> SupabaseResult<()>;
+    ) -> BackendResult<()>;
 
     /// Create a `sessions` row for a cron-triggered turn and seed
     /// participants (primary agent + that agent's admin members).
@@ -196,12 +198,13 @@ pub trait Backend: Send + Sync {
         team_id: &str,
         primary_agent_actor_id: &str,
         title: &str,
-    ) -> SupabaseResult<String>;
+    ) -> BackendResult<String>;
 
     /// Insert one row into `public.messages` from the daemon's runtime.
     #[allow(clippy::too_many_arguments)]
     async fn insert_message(
         &self,
+        id: &str,
         team_id: &str,
         session_id: &str,
         sender_actor_id: &str,
@@ -211,5 +214,5 @@ pub trait Backend: Send + Sync {
         model: &str,
         turn_id: &str,
         sequence: u64,
-    ) -> SupabaseResult<()>;
+    ) -> BackendResult<()>;
 }

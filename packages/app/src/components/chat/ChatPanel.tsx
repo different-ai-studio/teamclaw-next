@@ -23,7 +23,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
 import { useUIStore } from "@/stores/ui";
-import { supabase } from "@/lib/supabase-client";
+import { getBackend } from "@/lib/backend";
 import { create as createMessage } from "@bufbuild/protobuf";
 import {
   MessageSchema,
@@ -31,7 +31,7 @@ import {
 } from "@/lib/proto/teamclaw_pb";
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
-import { AGENT_ACTOR_TYPES } from "@/lib/actor-type";
+import { isAgentActorType } from "@/lib/actor-type";
 import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
@@ -51,6 +51,7 @@ import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
+import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -99,30 +100,18 @@ async function resolveMentionActorIdsForSession(
     return [];
   }
 
-  const { data: participants, error: participantError } = await supabase
-    .from("session_participants")
-    .select("actor_id")
-    .eq("session_id", sessionId);
-  if (participantError) {
+  let participants: Array<{ id: string; actor_type?: string | null; display_name?: string | null }>;
+  try {
+    participants = await getBackend().sessionMembers.listParticipants(sessionId);
+  } catch (participantError) {
     console.warn("[ChatPanel] failed to load session participants:", participantError);
     return [];
   }
 
-  const actorIds = (participants ?? []).map((row: { actor_id: string }) => row.actor_id);
-  if (actorIds.length === 0) return [];
+  const agents = participants.filter((row) => isAgentActorType(row.actor_type));
 
-  const { data: agents, error: agentError } = await supabase
-    .from("actor_directory")
-    .select("id")
-    .in("id", actorIds)
-    .in("actor_type", [...AGENT_ACTOR_TYPES]);
-  if (agentError) {
-    console.warn("[ChatPanel] failed to resolve session agents:", agentError);
-    return [];
-  }
-
-  return (agents ?? []).length === 1
-    ? [(agents![0] as { id: string }).id]
+  return agents.length === 1
+    ? [agents[0].id]
     : [];
 }
 
@@ -377,27 +366,20 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     let cancelled = false;
     void (async () => {
-      const { data: parts, error: partErr } = await supabase
-        .from('session_participants')
-        .select('actor_id')
-        .eq('session_id', activeSessionId);
-      if (cancelled || partErr) return;
+      let actors: Awaited<ReturnType<ReturnType<typeof getBackend>['sessionMembers']['listParticipants']>>;
+      try {
+        actors = await getBackend().sessionMembers.listParticipants(activeSessionId);
+      } catch {
+        return;
+      }
+      if (cancelled) return;
 
-      const actorIds = (parts ?? []).map((row: { actor_id: string }) => row.actor_id);
-      if (actorIds.length === 0) return;
-
-      const { data: actors, error: actorErr } = await supabase
-        .from('actors')
-        .select('id, display_name, actor_type')
-        .in('id', actorIds)
-        .in('actor_type', [...AGENT_ACTOR_TYPES]);
-      if (cancelled || actorErr) return;
-
-      if ((actors ?? []).length === 1) {
-        const soleAgent = actors[0] as { id: string; display_name: string };
+      const agentActors = actors.filter((row) => isAgentActorType(row.actor_type));
+      if (agentActors.length === 1) {
+        const soleAgent = agentActors[0];
         useEngagedAgentStore.getState().setAgents(activeSessionId, [{
           id: soleAgent.id,
-          displayName: soleAgent.display_name,
+          displayName: soleAgent.display_name || "AI",
         }]);
       }
     })();
@@ -921,6 +903,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
     const memberIds = mentions.map((m) => m.id);
     const agentIds = allAgents.map((a) => a.id);
+    const displayMentionActorIds = Array.from(new Set(agentIds.filter(Boolean)));
     const mentionActorIds = await resolveMentionActorIdsForSession(
       sid,
       memberIds,
@@ -941,20 +924,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       useSessionListStore.getState().rows.find(r => r.id === sid)?.team_id ?? null;
     let teamIdForSend: string | null = teamIdFromSessionList;
     if (!teamIdForSend && sid) {
-      sessionFlowLog("send.resolve_team_from_supabase.begin", {
+      sessionFlowLog("send.resolve_team_from_backend.begin", {
         sessionId: sid,
       });
-      const { data: sessionRow } = await supabase
-        .from("sessions")
-        .select("team_id")
-        .eq("id", sid)
-        .maybeSingle();
-      teamIdForSend = (sessionRow as { team_id?: string } | null)?.team_id ?? null;
+      teamIdForSend = await getBackend().sessions.getSessionTeamId(sid);
     }
     sessionFlowLog("send.team_resolved", {
       sessionId: sid,
       teamId: teamIdForSend,
-      source: teamIdFromSessionList ? "session-list-store" : "supabase",
+      source: teamIdFromSessionList ? "session-list-store" : "backend",
       hasAuthSession: !!authSession,
     });
 
@@ -991,14 +969,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     const parts: string[] = [];
 
-    // Prepend literal @AgentName tokens so the rendered user message
-    // visibly carries the mention (matches @-member rendering and makes
-    // history readable). Picker auto-mentions land here too via
-    // extraMentionAgents.
-    const agentMentionPrefix = allAgents.length > 0
-      ? allAgents.map((a) => `@${a.displayName}`).join(" ")
-      : "";
-
     // Add person mentions at the beginning
     if (personMentions.length > 0) {
       parts.push(`[Mentioned: ${personMentions.join(', ')}]`);
@@ -1011,13 +981,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
     }
 
-    // Add the processed text (with inline [File: ...] replacements),
-    // prefixed by agent @-mentions if any.
-    const bodyText = agentMentionPrefix
-      ? (processedText.trim()
-        ? `${agentMentionPrefix} ${processedText.trim()}`
-        : agentMentionPrefix)
-      : processedText.trim();
+    // Add the processed text (with inline [File: ...] replacements). Agent
+    // mentions are rendered from metadata only; they must not become prompt
+    // text delivered to the runtime.
+    const bodyText = processedText.trim();
     if (bodyText) {
       parts.push(bodyText);
     }
@@ -1074,6 +1041,16 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     if (outgoing && outgoing.trim()) {
       if (sid && authSession && teamIdForSend) {
         try {
+          sessionFlowLog("send.subscribe_live.begin", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+          });
+          await ensureSessionLiveSubscribed(teamIdForSend, sid);
+          sessionFlowLog("send.subscribe_live.ok", {
+            sessionId: sid,
+            teamId: teamIdForSend,
+          });
+
           sessionFlowLog("send.resolve_sender.begin", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1094,6 +1071,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
           const outgoingModel = selectedModelOption?.id ?? "";
+          const outgoingMetadata = {
+            mention_actor_ids: mentionActorIds,
+            ...(displayMentionActorIds.length > 0
+              ? { display_mention_actor_ids: displayMentionActorIds }
+              : {}),
+            ...(attachmentUrls.length > 0
+              ? { attachment_urls: attachmentUrls }
+              : {}),
+          };
           sessionFlowLog("send.proto_created", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1111,6 +1097,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             senderActorId,
             kind: MessageKind.TEXT,
             content: outgoing,
+            metadataJson: JSON.stringify(outgoingMetadata),
             createdAt,
             model: outgoingModel,
           });
@@ -1142,6 +1129,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             content: outgoing,
             model: outgoingModel || null,
             mentionActorIds,
+            displayMentionActorIds,
             attachmentUrls,
           });
           sessionFlowLog("send.outbox_enqueue.ok", {
@@ -1308,7 +1296,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // Subscribe to the new session's live topic before publishing the
       // first message — otherwise the daemon's acp.event + message.created
       // can arrive before the reactive per-rows subscribe catches up.
-      const { ensureSessionLiveSubscribed } = await import('@/App');
       sessionFlowLog("session_create.subscribe_live.begin", {
         teamId: teamIdForSend,
         sessionId,
@@ -1507,7 +1494,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       ? error
       : null;
 
-  const messageBottomContent = !isViewingChild ? (
+  const messageBottomContent = !isViewingChild &&
+    (v2Streams.length > 0 || visibleSessionError || visibleError) ? (
     <>
       {v2Streams.map(entry => {
         const bubbleKey = "archiveId" in entry

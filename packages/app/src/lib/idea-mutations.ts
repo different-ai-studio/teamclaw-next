@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 export type IdeaStatus = 'open' | 'in_progress' | 'done'
 
@@ -23,14 +23,14 @@ interface IdeaActivityInput {
 }
 
 async function fetchIdeaForUpdate(ideaId: string): Promise<IdeaForUpdate> {
-  const { data, error } = await supabase
-    .from('ideas')
-    .select('workspace_id, title, description, status')
-    .eq('id', ideaId)
-    .single()
-  if (error) throw error
+  const data = await getBackend().ideas.getIdeaDetail(ideaId)
   if (!data) throw new Error('idea not found')
-  return data as IdeaForUpdate
+  return {
+    workspace_id: data.workspace_id ?? null,
+    title: data.title,
+    description: data.description ?? null,
+    status: (data.status as IdeaStatus | null) ?? null,
+  }
 }
 
 export async function updateIdeaStatus(ideaId: string, status: IdeaStatus): Promise<void> {
@@ -58,22 +58,20 @@ export async function renameIdea(ideaId: string, title: string): Promise<void> {
 export async function updateIdea(ideaId: string, input: IdeaUpdateInput): Promise<void> {
   const trimmed = input.title.trim()
   if (!trimmed) throw new Error('title is required')
-  const { error } = await supabase.rpc('update_idea', {
-    p_idea_id: ideaId,
-    p_workspace_id: input.workspaceId,
-    p_title: trimmed,
-    p_description: input.description,
-    p_status: input.status,
+  await getBackend().ideas.updateIdea({
+    ideaId,
+    workspaceId: input.workspaceId,
+    title: trimmed,
+    description: input.description,
+    status: input.status,
   })
-  if (error) throw error
 }
 
 export async function createIdeaActivity(ideaId: string, input: IdeaActivityInput): Promise<void> {
-  const { error } = await supabase.rpc('create_idea_activity', {
-    p_idea_id: ideaId,
-    p_activity_type: input.activityType,
-    p_content: input.content,
-    p_metadata: input.metadata ?? {},
+  await getBackend().ideas.createIdeaActivity({
+    ideaId,
+    activityType: input.activityType,
+    content: input.content,
+    metadata: input.metadata ?? {},
   })
-  if (error) throw error
 }

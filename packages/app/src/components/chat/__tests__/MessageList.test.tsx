@@ -1,13 +1,18 @@
+import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn(),
 }))
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { useSessionStore } from '@/stores/session';
 import { useStreamingStore } from '@/stores/streaming';
+import {
+  useV2StreamingStore,
+  type AgentStreamEntry,
+} from '@/stores/v2-streaming-store';
 import { MessageList } from '../MessageList';
 import type { Message } from '@/stores/session';
 
@@ -82,6 +87,10 @@ describe('MessageList', () => {
       messageQueue: [],
       activeSessionId: 'sess-1',
       sessions: [],
+    });
+    useV2StreamingStore.setState({
+      byKey: {},
+      archived: [],
     });
   });
 
@@ -242,5 +251,119 @@ describe('MessageList', () => {
 
     expect(await screen.findByAltText('screenshot.png')).toBeTruthy();
     expect(readFileMock).toHaveBeenCalledWith('/archived/workspace/screenshot.png');
+  });
+
+  it('keeps following bottom streaming content after the stream has been marked inactive', async () => {
+    const scrollToMock = vi.fn();
+    const rafMock = vi
+      .fn()
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      });
+    const cancelRafMock = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+
+    HTMLElement.prototype.scrollTo = scrollToMock;
+    vi.stubGlobal('requestAnimationFrame', rafMock);
+    vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
+
+    const userMessage = makeMessage({
+      id: 'user-message',
+      role: 'user',
+      content: 'run pwd',
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+    const messages = [userMessage];
+    const inactiveEntry: AgentStreamEntry = {
+      sessionId: 'sess-1',
+      actorId: 'agent-1',
+      outputText: '',
+      thinkingText: '',
+      parts: [
+        {
+          id: 'part-1',
+          type: 'text',
+          text: 'initial stream text',
+          content: 'initial stream text',
+        },
+      ],
+      toolCalls: [],
+      planEntries: [],
+      pendingPermission: null,
+      errorMessage: null,
+      errorDetails: null,
+      lastUpdate: 1,
+      active: false,
+    };
+
+    useV2StreamingStore.setState({
+      byKey: { 'sess-1::agent-1': inactiveEntry },
+      archived: [],
+    });
+
+    function Harness() {
+      const byKey = useV2StreamingStore((state) => state.byKey);
+      const archived = useV2StreamingStore((state) => state.archived);
+      const streams = React.useMemo(
+        () => {
+          const current = Object.values(byKey).filter(
+            (entry) => entry.sessionId === 'sess-1',
+          );
+          const priorTurns = archived.filter(
+            (entry) => entry.sessionId === 'sess-1',
+          );
+          return [...priorTurns, ...current].sort(
+            (a, b) => a.lastUpdate - b.lastUpdate,
+          );
+        },
+        [archived, byKey],
+      );
+      const bottomContent = streams.length ? (
+        <div data-testid="stream-bottom">
+          {streams
+            .flatMap((stream) => stream.parts)
+            .map((part) => part.text || part.content || '')
+            .join('')}
+        </div>
+      ) : null;
+
+      return (
+        <MessageList
+          messages={messages}
+          activeSessionId="sess-1"
+          isStreaming={false}
+          streamingMessageId={null}
+          bottomContent={bottomContent}
+        />
+      );
+    }
+
+    try {
+      render(<Harness />);
+      expect(screen.getByTestId('stream-bottom').textContent).toContain(
+        'initial stream text',
+      );
+      scrollToMock.mockClear();
+
+      act(() => {
+        useV2StreamingStore.getState().replaceParts('sess-1', 'agent-1', [
+          {
+            id: 'part-1',
+            type: 'text',
+            text: 'updated stream text',
+            content: 'updated stream text',
+          },
+        ]);
+      });
+
+      expect(screen.getByTestId('stream-bottom').textContent).toContain(
+        'updated stream text',
+      );
+      await waitFor(() => expect(scrollToMock).toHaveBeenCalled());
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+      vi.unstubAllGlobals();
+    }
   });
 });

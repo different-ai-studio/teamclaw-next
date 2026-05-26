@@ -4,7 +4,7 @@ pub mod topics;
 pub use client::{ClientConfig, MqttClient};
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -17,6 +17,10 @@ pub struct MqttBusInner {
     /// connection, which is why we need this separate flag for honest UI
     /// status.
     pub connected: AtomicBool,
+    /// Monotonic token for the currently-owned MQTT connection. Reconnects
+    /// replace the client and spawn a new event loop; older event loops exit
+    /// when their captured generation no longer matches this value.
+    pub generation: AtomicU64,
 }
 
 impl MqttBusInner {
@@ -25,6 +29,7 @@ impl MqttBusInner {
             client: Mutex::new(None),
             subscribed: Mutex::new(HashSet::new()),
             connected: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -34,6 +39,14 @@ impl MqttBusInner {
 
     pub fn set_connected(&self, value: bool) {
         self.connected.store(value, Ordering::Release);
+    }
+
+    pub fn current_generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    pub fn bump_generation(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::AcqRel) + 1
     }
 
     pub async fn force_reconnect(&self) {

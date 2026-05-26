@@ -4,6 +4,7 @@ import { Message, MessageContent, MessageResponse } from "@/packages/ai/message"
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
 import { ThinkingBlock } from "./ThinkingBlock";
+import type { MessagePart } from "@/stores/session-types";
 
 // Plan entries used to render inline here as a card. They now surface in
 // the TodoList dock above the prompt input (v1 style) — see `planTodos`
@@ -29,6 +30,47 @@ function ErrorCard({ message, details }: { message: string; details: string }) {
   );
 }
 
+function renderOrderedPart(
+  part: MessagePart,
+  showText: boolean,
+  isStreamingReasoning: boolean,
+) {
+  if (part.type === "reasoning") {
+    const text = part.text || part.content || "";
+    if (!text) return null;
+    return (
+      <ThinkingBlock
+        key={part.id}
+        content={text}
+        isStreaming={isStreamingReasoning}
+        isOpen={false}
+      />
+    );
+  }
+
+  if (part.type === "tool-call" && part.toolCall) {
+    return (
+      <div
+        key={part.id}
+        data-testid="v2-streaming-tool"
+        data-tool-id={part.toolCall.id}
+        data-tool-status={part.toolCall.status}
+      >
+        <ToolCallCard toolCall={part.toolCall} />
+      </div>
+    );
+  }
+
+  if (!showText || part.type !== "text") return null;
+  const text = part.text || part.content || "";
+  if (!text) return null;
+  return (
+    <MessageContent key={part.id}>
+      <MessageResponse>{text}</MessageResponse>
+    </MessageContent>
+  );
+}
+
 export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   // After finalize (active=false), the persisted AGENT_REPLY ChatMessage
   // takes over the reply text — suppress outputText here to avoid showing
@@ -37,12 +79,26 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   // so the bubble is the only place they survive after the turn ends.
   // Plan entries are NOT rendered here — they surface in the TodoList dock
   // above the prompt input (v1 style).
-  const showOutput = entry.active && entry.outputText.length > 0;
-  const hasToolCalls = entry.toolCalls.length > 0;
-  const hasThinking = entry.thinkingText.length > 0;
+  const orderedParts = entry.parts.filter(
+    (part) =>
+      (part.type === "reasoning" && Boolean(part.text || part.content)) ||
+      (part.type === "text" && Boolean(part.text || part.content)) ||
+      (part.type === "tool-call" && Boolean(part.toolCall)),
+  );
+  const isArchived = "archiveId" in entry;
+  const showText = entry.active || !isArchived;
+  const visibleOrderedParts = orderedParts.filter(
+    (part) => part.type === "reasoning" || part.type === "tool-call" || showText,
+  );
+  const hasVisibleOrderedParts = visibleOrderedParts.length > 0;
+  const showOutput =
+    showText && !hasVisibleOrderedParts && entry.outputText.length > 0;
+  const hasFallbackToolCalls = !hasVisibleOrderedParts && entry.toolCalls.length > 0;
+  const hasOrderedThinking = orderedParts.some((part) => part.type === "reasoning");
+  const hasThinking = !hasOrderedThinking && entry.thinkingText.length > 0;
   const hasError = !!entry.errorMessage;
 
-  if (!showOutput && !hasToolCalls && !hasThinking && !hasError) {
+  if (!hasVisibleOrderedParts && !showOutput && !hasFallbackToolCalls && !hasThinking && !hasError) {
     return null;
   }
 
@@ -61,11 +117,25 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
             <ThinkingBlock
               content={entry.thinkingText}
               isStreaming={entry.active}
-              isOpen={!entry.active}
+              isOpen={false}
             />
           )}
 
-          {hasToolCalls && (
+          {hasVisibleOrderedParts && (
+            <div className="space-y-1">
+              {visibleOrderedParts.map((part, index) =>
+                renderOrderedPart(
+                  part,
+                  showText,
+                  entry.active &&
+                    part.type === "reasoning" &&
+                    index === visibleOrderedParts.length - 1,
+                ),
+              )}
+            </div>
+          )}
+
+          {hasFallbackToolCalls && (
             <div className="space-y-1">
               {entry.toolCalls.map((tc) => (
                 <div

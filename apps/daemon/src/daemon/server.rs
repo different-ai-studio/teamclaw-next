@@ -4,13 +4,14 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use teamclaw_transport::MessagePublisher;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
-use crate::backend::Backend;
+use crate::backend::{AgentRuntimeUpsert, Backend, WorkspaceUpsert};
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
 use crate::collab::{AuthManager, AuthResult, PeerState, PeerTracker, PermissionManager};
 use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
@@ -140,6 +141,18 @@ pub struct DaemonServer {
     /// without callers having to thread the path through every helper.
     config_path: PathBuf,
     mqtt: MqttClient,
+    /// Set when running on the NATS transport (`config.transport.kind = "nats"`).
+    /// Mutually exclusive with the MQTT event loop in `mqtt`. On the MQTT path
+    /// this stays `None` and `mqtt` is the live backend.
+    nats: Option<crate::nats::NatsBackend>,
+    /// Unified publisher handle. Set to `mqtt.client` on the MQTT path and
+    /// to `nats.client` on the NATS path during connect. All publishing
+    /// downstream (Publisher::new_from_handle, teamclaw, channels) reads
+    /// this so the same handler code works for both backends.
+    publisher_handle: Arc<dyn MessagePublisher>,
+    /// Mirror of the active backend's `Topics`. Updated alongside
+    /// `publisher_handle` during connect/reconnect.
+    topics: crate::mqtt::Topics,
     agents: Arc<AsyncMutex<RuntimeManager>>,
     auth: AuthManager,
     peers: PeerTracker,
@@ -150,7 +163,7 @@ pub struct DaemonServer {
     sessions_path: PathBuf,
     history: EventHistory,
     teamclaw: Option<crate::teamclaw::SessionManager>,
-    supabase: Arc<dyn Backend>,
+    backend: Arc<dyn Backend>,
     actor_id: String,
     /// Channel manager (Discord/WeCom/Feishu/Kook/WeChat/Email gateways).
     /// `None` until `start_channels()` runs; held as `Option` so `shutdown(self)`
@@ -212,7 +225,7 @@ impl DaemonServer {
         config_path: &std::path::Path,
     ) -> crate::error::Result<Self> {
         // Supabase is required — fail fast with a clear message if absent.
-        let supabase: Arc<dyn Backend> = match SupabaseConfig::default_path() {
+        let backend: Arc<dyn Backend> = match SupabaseConfig::default_path() {
             Ok(path) if path.exists() => {
                 let concrete = SupabaseConfig::load(&path)
                     .and_then(SupabaseBackend::new)
@@ -229,16 +242,16 @@ impl DaemonServer {
         };
 
         info!(
-            actor_id = %supabase.actor_id(),
-            team_id  = %supabase.team_id(),
+            actor_id = %backend.actor_id(),
+            team_id  = %backend.team_id(),
             "Supabase client initialised"
         );
 
-        let actor_id = supabase.actor_id().to_string();
+        let actor_id = backend.actor_id().to_string();
 
         // Fetch first token — fails fast if Supabase is unreachable at startup.
         // Idea 5's outer loop handles retries on every subsequent reconnect.
-        let token = supabase.auth_token().await.map_err(|e| {
+        let token = backend.auth_token().await.map_err(|e| {
             crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
         })?;
 
@@ -300,12 +313,15 @@ impl DaemonServer {
 
         let agents = Arc::new(AsyncMutex::new(RuntimeManager::new(
             launch_configs,
-            Some(supabase.clone()),
+            Some(backend.clone()),
         )));
+
+        let publisher_handle: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
+        let topics = mqtt.topics.clone();
 
         let teamclaw = if let Some(team_id) = &config.team_id {
             Some(crate::teamclaw::SessionManager::new(
-                mqtt.client.clone(),
+                publisher_handle.clone(),
                 team_id,
                 &config.device.id,
                 Some(actor_id.clone()),
@@ -319,6 +335,9 @@ impl DaemonServer {
             config,
             config_path: config_path.to_path_buf(),
             mqtt,
+            nats: None,
+            publisher_handle,
+            topics,
             agents,
             auth,
             peers,
@@ -329,7 +348,7 @@ impl DaemonServer {
             sessions_path,
             history,
             teamclaw,
-            supabase,
+            backend,
             actor_id,
             channel_mgr: None,
             cron_sessions: std::collections::HashMap::new(),
@@ -353,7 +372,7 @@ impl DaemonServer {
         // session_participants and can see gateway-originated DMs via RLS.
         let primary_agent_actor_id = self.actor_id.clone();
         let agent_owner_actor_ids: Vec<String> = match self
-            .supabase
+            .backend
             .list_agent_admin_member_actor_ids(&primary_agent_actor_id)
             .await
         {
@@ -379,10 +398,10 @@ impl DaemonServer {
             logical_to_acp: Arc::new(AsyncMutex::new(HashMap::new())),
             team_id: team_id.clone(),
             model_override: Arc::new(AsyncMutex::new(HashMap::new())),
-            supabase: self.supabase.clone(),
+            backend: self.backend.clone(),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
-            client: self.supabase.clone(),
+            client: self.backend.clone(),
         });
 
         let mgr = ChannelManager::new(
@@ -548,7 +567,7 @@ impl DaemonServer {
     /// "view session" button can resolve), adds the daemon's primary agent +
     /// admin members as `session_participants`, then spawns the ACP runtime
     /// bound to that Supabase session id. `cron_sessions` caches a
-    /// `(supabase_session_id, acp_session_id)` pair so subsequent turns reuse
+    /// `(remote_session_id, acp_session_id)` pair so subsequent turns reuse
     /// the same chat thread AND reach the same agent process.
     ///
     /// Returns `{text, session_id}` where `session_id` is the Supabase UUID —
@@ -571,11 +590,11 @@ impl DaemonServer {
             .ok_or_else(|| anyhow::anyhow!("daemon has no team_id; run `amuxd init` first"))?;
 
         // Look up or create the per-session_key binding. We cache the
-        // (supabase_session_id, acp_session_id) pair encoded as a single map
+        // (remote_session_id, acp_session_id) pair encoded as a single map
         // value `"<sb>|<acp>"` so the existing HashMap<String, String> shape
         // is preserved — sb is what we return to the client and stamp into
         // cron records; acp is what RuntimeManager needs to drive the turn.
-        let (supabase_session_id, acp_sid): (String, String) =
+        let (remote_session_id, acp_sid): (String, String) =
             if let Some(existing) = self.cron_sessions.get(parsed.session_key) {
                 let (sb, acp) = existing.split_once('|').ok_or_else(|| {
                     anyhow::anyhow!("cron_sessions entry malformed for {}", parsed.session_key)
@@ -597,7 +616,7 @@ impl DaemonServer {
                 };
 
                 let sb_sid = self
-                    .supabase
+                    .backend
                     .create_cron_session(&team_id, &primary_agent_actor_id, &title)
                     .await
                     .map_err(|e| anyhow::anyhow!("create_cron_session: {e}"))?;
@@ -619,7 +638,7 @@ impl DaemonServer {
 
                 tracing::debug!(
                     session_key = %parsed.session_key,
-                    supabase_session_id = %sb_sid,
+                    remote_session_id = %sb_sid,
                     acp_session_id = %acp_sid,
                     "cron: created Supabase session + spawned ACP runtime"
                 );
@@ -645,7 +664,7 @@ impl DaemonServer {
 
         Ok(serde_json::json!({
             "text": text,
-            "session_id": supabase_session_id,
+            "session_id": remote_session_id,
         }))
     }
 
@@ -755,12 +774,10 @@ impl DaemonServer {
         let sock_path = DaemonConfig::sock_path();
         spawn_sock_listener(sock_path.clone(), sock_tx);
 
-        tokio::pin!(shutdown);
-
         // One-time setup before the reconnect loop.
         // Heartbeat runs independently of MQTT session.
         {
-            let sb = self.supabase.clone();
+            let sb = self.backend.clone();
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_secs(60));
                 tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -796,7 +813,7 @@ impl DaemonServer {
 
         // Register device_id in Supabase once (background).
         {
-            let sb = self.supabase.clone();
+            let sb = self.backend.clone();
             let device_id = self.config.device.id.clone();
             let supported_agent_types = supported_agent_type_names(&self.config);
             let default_agent_type = supported_agent_types
@@ -816,12 +833,22 @@ impl DaemonServer {
             });
         }
 
+        // Dispatch to the NATS transport when the operator opted in via
+        // `[transport] kind = "nats"`. The MQTT path below is unchanged.
+        if matches!(
+            self.config.transport.as_ref().map(|t| t.kind),
+            Some(crate::config::TransportKind::Nats)
+        ) {
+            return self.run_nats(shutdown, sock_rx, sock_path).await;
+        }
+
+        tokio::pin!(shutdown);
         let mut first_connect = true;
 
         'outer: loop {
             // ── 1. Get fresh access_token (retry indefinitely on Supabase errors) ──
             let token = loop {
-                match self.supabase.auth_token().await {
+                match self.backend.auth_token().await {
                     Ok(t) => break t,
                     Err(e) => {
                         warn!("token fetch failed: {e}, retrying in 30s");
@@ -847,8 +874,10 @@ impl DaemonServer {
 
             // ── 3. Rebuild teamclaw with new AsyncClient ──
             if let Some(team_id) = self.config.team_id.clone() {
+                self.publisher_handle = Arc::new(self.mqtt.client.clone());
+                self.topics = self.mqtt.topics.clone();
                 self.teamclaw = match crate::teamclaw::SessionManager::new(
-                    self.mqtt.client.clone(),
+                    self.publisher_handle.clone(),
                     &team_id,
                     &self.config.device.id,
                     Some(self.actor_id.clone()),
@@ -897,7 +926,8 @@ impl DaemonServer {
                 }
             }
             {
-                let publisher = Publisher::new(&self.mqtt);
+                let publisher =
+                    Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
                 if let Err(e) = publisher
                     .publish_device_state(&crate::proto::amux::DeviceState {
                         online: true,
@@ -937,7 +967,7 @@ impl DaemonServer {
             // fallback if expiry isn't cached yet.
             let proactive_reconnect_in: Duration = {
                 let buffer = Duration::from_secs(5 * 60);
-                match self.supabase.cached_credential_expiry() {
+                match self.backend.cached_credential_expiry() {
                     Some(t) => t
                         .checked_duration_since(Instant::now())
                         .and_then(|d| d.checked_sub(buffer))
@@ -1018,7 +1048,7 @@ impl DaemonServer {
                                 if let Some(tc) = &mut self.teamclaw {
                                     let _ = tc.subscribe_all().await;
                                 }
-                                let publisher = Publisher::new(&self.mqtt);
+                                let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
                                 let _ = publisher.publish_device_state(&crate::proto::amux::DeviceState {
                                     online: true,
                                     device_name: self.config.device.name.clone(),
@@ -1045,7 +1075,7 @@ impl DaemonServer {
                     }
                     _ = &mut proactive_sleep => {
                         info!(
-                            expiry = ?self.supabase.cached_credential_expiry(),
+                            expiry = ?self.backend.cached_credential_expiry(),
                             "JWT nearing expiry, proactively reconnecting MQTT before broker silently denies ACL"
                         );
                         // Queue a graceful DISCONNECT so the broker sees an
@@ -1080,6 +1110,235 @@ impl DaemonServer {
                 }
             }
             // loop exited → outer: get fresh token and reconnect
+        }
+    }
+
+    /// NATS transport main loop. Parallel to the MQTT path in `run()` above —
+    /// same token-refresh outer cadence, but the inner loop polls the NATS
+    /// inbound channel (mpsc Receiver fed by per-subscription tasks inside
+    /// `teamclaw_transport::nats::NatsClient`).
+    ///
+    /// Differences vs MQTT:
+    /// - No CONNACK wait: async_nats returns from `connect` only after the
+    ///   server has accepted the connection.
+    /// - No LWT: graceful offline state is written to JetStream KV during
+    ///   shutdown / reconnect; ungraceful disconnects are detected by the
+    ///   server-side auth callout.
+    /// - No `eventloop.poll()` to cancel — async_nats reconnects internally
+    ///   on transport-level errors, so the proactive-reconnect path just
+    ///   builds a fresh `NatsBackend` rather than draining a half-closed
+    ///   socket.
+    async fn run_nats<F>(
+        mut self,
+        shutdown: F,
+        mut sock_rx: mpsc::Receiver<SockCommand>,
+        sock_path: PathBuf,
+    ) -> crate::error::Result<()>
+    where
+        F: Future<Output = ()>,
+    {
+        use teamclaw_transport::DeliveryGuarantee;
+        tokio::pin!(shutdown);
+
+        let url = self
+            .config
+            .transport
+            .as_ref()
+            .map(|t| t.url.clone())
+            .ok_or_else(|| {
+                crate::error::AmuxError::Config(
+                    "[transport] section requires `url` when kind = nats".into(),
+                )
+            })?;
+
+        let mut first_connect = true;
+
+        'outer: loop {
+            // 1. Fresh backend access_token; same retry cadence as MQTT path.
+            let token = loop {
+                match self.backend.auth_token().await {
+                    Ok(t) => break t,
+                    Err(e) => {
+                        warn!("token fetch failed: {e}, retrying in 30s");
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                }
+            };
+
+            // 2. Connect.
+            info!(
+                actor_id = %self.actor_id,
+                %url,
+                "NATS connecting with access_token"
+            );
+            let backend = match crate::nats::NatsBackend::connect(&self.config, &url, &token).await
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("NATS connect failed: {e}, retrying in 5s");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue 'outer;
+                }
+            };
+
+            // 3. Re-wire publisher_handle + topics so all downstream
+            //    Publisher::new_from_handle / SessionManager publishes route
+            //    through the NATS backend instead of the MQTT one.
+            self.publisher_handle = Arc::new(backend.client.clone());
+            self.topics = backend.topics.clone();
+            if let Some(team_id) = self.config.team_id.clone() {
+                self.teamclaw = match crate::teamclaw::SessionManager::new(
+                    self.publisher_handle.clone(),
+                    &team_id,
+                    &self.config.device.id,
+                    Some(self.actor_id.clone()),
+                    crate::config::DaemonConfig::config_dir(),
+                ) {
+                    Ok(tc) => Some(tc),
+                    Err(e) => {
+                        warn!("teamclaw rebuild on NATS failed: {e}");
+                        None
+                    }
+                };
+            }
+            self.nats = Some(backend);
+
+            // 4. Subscribe + announce online.
+            if let Err(e) = self.nats.as_ref().unwrap().subscribe_all().await {
+                warn!("nats subscribe_all failed: {e}, reconnecting");
+                continue 'outer;
+            }
+            if let Some(tc) = &mut self.teamclaw {
+                if let Err(e) = tc.subscribe_all().await {
+                    warn!("teamclaw subscribe failed on NATS: {e}, reconnecting");
+                    continue 'outer;
+                }
+            }
+            if let Err(e) = self
+                .nats
+                .as_ref()
+                .unwrap()
+                .announce_online(&self.config.device.name)
+                .await
+            {
+                warn!("nats announce_online failed: {e}, reconnecting");
+                continue 'outer;
+            }
+            self.publish_all_agent_states().await;
+            info!(device_id = %self.config.device.id, "NATS connected, listening for runtime commands");
+
+            if first_connect {
+                self.register_startup_workspace().await;
+                self.auto_restart_offline_sessions().await;
+                first_connect = false;
+            }
+
+            // 5. Proactive reconnect timer (mirrors MQTT path: refresh ~5min
+            //    before cached JWT expiry). On NATS this means tearing down
+            //    the current client and reconnecting with the new token —
+            //    async_nats keeps the auth token only at connect time, so an
+            //    in-place refresh isn't possible without a fresh connection.
+            let proactive_reconnect_in: Duration = {
+                let buffer = Duration::from_secs(5 * 60);
+                match self.backend.cached_credential_expiry() {
+                    Some(t) => t
+                        .checked_duration_since(Instant::now())
+                        .and_then(|d| d.checked_sub(buffer))
+                        .unwrap_or(Duration::ZERO),
+                    None => Duration::from_secs(50 * 60),
+                }
+            };
+            info!(
+                reconnect_in_secs = proactive_reconnect_in.as_secs(),
+                "scheduled proactive NATS reconnect before token expiry"
+            );
+            let proactive_sleep = tokio::time::sleep(proactive_reconnect_in);
+            tokio::pin!(proactive_sleep);
+
+            // 6. Inner select loop — three arms: shutdown, sock command,
+            //    inbound NATS frame. The inbound receiver is moved out of
+            //    `self.nats` once for the duration of this select cycle and
+            //    re-attached on reconnect.
+            //
+            //    We can't borrow `&mut self.nats.inbound` *and* call
+            //    `&mut self` methods inside the same select arm, so the
+            //    receiver is owned locally and the backend reference goes
+            //    along with it. SessionManager and Publisher reads happen
+            //    via the cloned `publisher_handle`, which doesn't touch
+            //    `self.nats`.
+            let mut inbound = self.nats.as_mut().unwrap().inbound_take();
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut shutdown => {
+                        info!("shutdown signal received, draining channels");
+                        if let Some(nats) = &self.nats {
+                            let _ = nats.announce_offline(&self.config.device.name).await;
+                        }
+                        self.shutdown_channels().await;
+                        let _ = std::fs::remove_file(&sock_path);
+                        return Ok(());
+                    }
+                    sock_cmd = sock_rx.recv() => {
+                        match sock_cmd {
+                            Some(SockCommand::ChannelReload) => self.reload_channels().await,
+                            Some(SockCommand::ChannelStatus { reply_tx }) => {
+                                let body = self.channel_status_payload().await;
+                                let _ = reply_tx.send(body);
+                            }
+                            Some(SockCommand::ChannelSave { platform, config_json }) => {
+                                self.save_channel_config(&platform, &config_json).await;
+                            }
+                            Some(SockCommand::McpSend { payload, reply_tx }) => {
+                                let resp = match self.handle_mcp_send(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::PromptAwait { payload, reply_tx }) => {
+                                let resp = match self.handle_prompt_await(&payload).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::Unknown(line)) => warn!("amuxd.sock: unknown control command: {line:?}"),
+                            None => warn!("amuxd.sock: listener channel closed; control commands unavailable until restart"),
+                        }
+                    }
+                    frame = inbound.recv() => {
+                        match frame {
+                            Some(f) => {
+                                if let Some(msg) = crate::mqtt::subscriber::parse_frame(&f) {
+                                    self.handle_incoming(msg).await;
+                                }
+                            }
+                            None => {
+                                warn!("NATS inbound channel closed, reconnecting");
+                                break;
+                            }
+                        }
+                    }
+                    _ = &mut proactive_sleep => {
+                        info!(
+                            expiry = ?self.backend.cached_credential_expiry(),
+                            "JWT nearing expiry, proactively reconnecting NATS"
+                        );
+                        // Mark offline before tearing down so subscribers see
+                        // the presence change immediately rather than waiting
+                        // for the next online publish.
+                        if let Some(nats) = &self.nats {
+                            let _ = nats.announce_offline(&self.config.device.name).await;
+                        }
+                        break;
+                    }
+                }
+            }
+            // Put the inbound receiver back so the next reconnect can take it.
+            self.nats.as_mut().unwrap().inbound_put_back(inbound);
+            // loop exited → outer: get fresh token and reconnect
+            let _ = DeliveryGuarantee::AtLeastOnce; // touch import so it stays
         }
     }
 
@@ -1229,7 +1488,7 @@ impl DaemonServer {
         let my_actor = self.actor_id.clone();
         for session_id in session_ids {
             let prior = match self
-                .supabase
+                .backend
                 .fetch_latest_runtime_for_session(&my_actor, &session_id)
                 .await
             {
@@ -1263,7 +1522,7 @@ impl DaemonServer {
                 .as_deref()
                 .filter(|s| !s.is_empty());
             let messages = match self
-                .supabase
+                .backend
                 .messages_after_cursor(&session_id, cursor)
                 .await
             {
@@ -1295,7 +1554,7 @@ impl DaemonServer {
             let backend = resolve_requested_agent_type(&self.config, backend_requested);
 
             // Translate the Supabase workspace id into a local workspace id
-            // by matching on `supabase_workspace_id`. If we can't find a
+            // by matching on `remote_workspace_id`. If we can't find a
             // local mapping (workspace was archived locally, daemon
             // reinstalled, etc.) leave it empty so apply_start_runtime
             // falls back to the registered workspace lookup or current dir.
@@ -1306,7 +1565,7 @@ impl DaemonServer {
                     self.workspaces
                         .workspaces
                         .iter()
-                        .find(|w| w.supabase_workspace_id.as_str() == sb_ws.as_str())
+                        .find(|w| w.remote_workspace_id.as_str() == sb_ws.as_str())
                         .map(|w| w.workspace_id.clone())
                 })
                 .unwrap_or_default();
@@ -1325,9 +1584,9 @@ impl DaemonServer {
         &self,
         workspace: &mut crate::config::StoredWorkspace,
     ) -> bool {
-        let sb = &self.supabase;
+        let sb = &self.backend;
 
-        let row = crate::supabase::WorkspaceUpsert {
+        let row = WorkspaceUpsert {
             team_id: sb.team_id(),
             agent_id: sb.actor_id(),
             name: &workspace.display_name,
@@ -1341,10 +1600,10 @@ impl DaemonServer {
 
         match sb.upsert_workspace(&row).await {
             Ok(remote) => {
-                if workspace.supabase_workspace_id == remote.id {
+                if workspace.remote_workspace_id == remote.id {
                     return false;
                 }
-                workspace.supabase_workspace_id = remote.id;
+                workspace.remote_workspace_id = remote.id;
                 true
             }
             Err(e) => {
@@ -1385,7 +1644,7 @@ impl DaemonServer {
     /// topic. Swallows errors (same convention as other publish helpers).
     async fn publish_runtime_state_by_id(&self, agent_id: &str) {
         if let Some(info) = self.agent_info_by_id(agent_id).await {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_runtime_state(agent_id, &info).await;
         }
     }
@@ -1397,7 +1656,7 @@ impl DaemonServer {
     /// which the old single-list publish would blow past once the session
     /// count grew.
     async fn publish_all_agent_states(&self) {
-        let publisher = Publisher::new(&self.mqtt);
+        let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         for info in self.merged_agent_list().await.runtimes {
             let _ = publisher
                 .publish_runtime_state(&info.runtime_id, &info)
@@ -1408,7 +1667,7 @@ impl DaemonServer {
     /// Returns the single collab session_id this runtime should publish
     /// ACP events to. Each runtime is bound at spawn time to one session
     /// via `RuntimeHandle.session_id` (set from
-    /// `apply_start_runtime`'s supabase_session_id), so fanout has to be
+    /// `apply_start_runtime`'s remote_session_id), so fanout has to be
     /// scoped to that one session.
     ///
     /// Earlier versions of this function unioned in
@@ -1495,7 +1754,7 @@ impl DaemonServer {
                 session.status = amux::AgentStatus::Error as i32;
                 let _ = self.sessions.save(&self.sessions_path);
             }
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher
                 .publish_runtime_failed(agent_id, "ACP_ERROR", &details, "acp")
                 .await;
@@ -1577,7 +1836,7 @@ impl DaemonServer {
 
             // Upsert agent_runtimes on status transitions
             {
-                let sb = &self.supabase;
+                let sb = &self.backend;
                 let new_status = amux::AgentStatus::try_from(sc.new_status)
                     .unwrap_or(amux::AgentStatus::Unknown);
                 let supabase_status: &'static str = match new_status {
@@ -1598,8 +1857,8 @@ impl DaemonServer {
                             .unwrap_or("claude"),
                     )
                 };
-                let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                    (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+                let remote_workspace_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                    (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
                 });
                 let team_id = sb.team_id().to_string();
                 let actor_id = sb.actor_id().to_string();
@@ -1607,11 +1866,11 @@ impl DaemonServer {
                 let sb_clone = sb.clone();
                 let now = chrono::Utc::now();
                 tokio::spawn(async move {
-                    let row = crate::supabase::AgentRuntimeUpsert {
+                    let row = AgentRuntimeUpsert {
                         team_id: &team_id,
                         agent_id: &actor_id,
                         session_id: (!session_id.is_empty()).then_some(session_id.as_str()),
-                        workspace_id: supabase_ws_id.as_deref(),
+                        workspace_id: remote_workspace_id.as_deref(),
                         backend_type,
                         backend_session_id: if acp_sid.is_empty() {
                             None
@@ -1714,7 +1973,7 @@ impl DaemonServer {
                             &turn_id,
                             seq,
                             persist,
-                            Some(&self.supabase),
+                            Some(&self.backend),
                         )
                         .await;
                     }
@@ -1875,13 +2134,9 @@ impl DaemonServer {
                 };
 
                 // Cursor advances to this message id.
-                let row_id_opt = self
-                    .agents
-                    .lock()
-                    .await
-                    .supabase_runtime_row_id(&runtime_id);
+                let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
-                    let sb = self.supabase.clone();
+                    let sb = self.backend.clone();
                     let row = row_id.clone();
                     let last = message.message_id.clone();
                     tokio::spawn(async move {
@@ -1903,13 +2158,9 @@ impl DaemonServer {
                         });
                     }
                 }
-                let row_id_opt = self
-                    .agents
-                    .lock()
-                    .await
-                    .supabase_runtime_row_id(&runtime_id);
+                let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
-                    let sb = self.supabase.clone();
+                    let sb = self.backend.clone();
                     let row = row_id.clone();
                     let last = message.message_id.clone();
                     tokio::spawn(async move {
@@ -1943,12 +2194,12 @@ impl DaemonServer {
 
             let at =
                 amux::AgentType::try_from(stored.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
-            let supabase_ws_id = self
-                .workspaces
-                .find_by_id(&stored.workspace_id)
-                .and_then(|w| {
-                    (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
-                });
+            let remote_workspace_id =
+                self.workspaces
+                    .find_by_id(&stored.workspace_id)
+                    .and_then(|w| {
+                        (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
+                    });
 
             info!(
                 runtime_id = %stored.runtime_id,
@@ -1966,7 +2217,7 @@ impl DaemonServer {
                     at,
                     &stored.worktree,
                     &stored.workspace_id,
-                    supabase_ws_id.as_deref(),
+                    remote_workspace_id.as_deref(),
                     Some(session_id),
                     "",
                 )
@@ -1986,12 +2237,12 @@ impl DaemonServer {
             };
 
             match self
-                .supabase
+                .backend
                 .fetch_agent_runtime_for_session(session_id, &stored.runtime_id, &new_acp_sid)
                 .await
             {
                 Ok(Some(row)) => {
-                    self.agents.lock().await.set_supabase_runtime_metadata(
+                    self.agents.lock().await.set_backend_runtime_metadata(
                         &stored.runtime_id,
                         Some(row.id),
                         row.last_processed_message_id,
@@ -2051,7 +2302,7 @@ impl DaemonServer {
         }
 
         let messages = match self
-            .supabase
+            .backend
             .messages_after_cursor(&session_id, last_processed_message_id.as_deref())
             .await
         {
@@ -2172,7 +2423,7 @@ impl DaemonServer {
         if agents.get_handle(agent_actor_id).is_some() {
             return Some(agent_actor_id.to_string());
         }
-        if agent_actor_id == self.supabase.actor_id() {
+        if agent_actor_id == self.backend.actor_id() {
             return agents.running_agent_id_for_collab_session(session_id);
         }
         None
@@ -2237,7 +2488,7 @@ impl DaemonServer {
         };
 
         // Publish response on the sender's rpc/res topic (mirrors RpcServer::respond).
-        let res_topic = self.mqtt.topics.rpc_res_for(&request.sender_device_id);
+        let res_topic = self.topics.rpc_res_for(&request.sender_device_id);
         let bytes = response.encode_to_vec();
         info!(
             request_id = %request.request_id,
@@ -2368,14 +2619,14 @@ impl DaemonServer {
                     Ok(n) => {
                         if n.event_type == "membership.refresh" && !n.refresh_hint.is_empty() {
                             match self
-                                .supabase
+                                .backend
                                 .fetch_session_with_participants(&n.refresh_hint)
                                 .await
                             {
                                 Ok(snap) => {
                                     if let Some(tc) = &mut self.teamclaw {
                                         if let Err(err) = tc
-                                            .insert_session_from_supabase(
+                                            .insert_session_from_backend(
                                                 &snap.session,
                                                 &snap.participants,
                                             )
@@ -2422,7 +2673,7 @@ impl DaemonServer {
             warn!("resolve_role: empty sender_actor_id, denying as Member");
             return amux::MemberRole::Member;
         }
-        let sb = &self.supabase;
+        let sb = &self.backend;
         let my_agent_id = sb.actor_id().to_string();
         match sb
             .check_agent_permission(&my_agent_id, sender_actor_id)
@@ -2564,10 +2815,11 @@ impl DaemonServer {
                         let acp_sid = stored.acp_session_id.clone();
                         let session_id = stored.session_id.clone();
                         info!(agent_id, "lazy-resuming historical session");
-                        let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                            (!w.supabase_workspace_id.is_empty())
-                                .then_some(w.supabase_workspace_id.clone())
-                        });
+                        let remote_workspace_id =
+                            self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                                (!w.remote_workspace_id.is_empty())
+                                    .then_some(w.remote_workspace_id.clone())
+                            });
                         let resume_res = self
                             .agents
                             .lock()
@@ -2578,7 +2830,7 @@ impl DaemonServer {
                                 at,
                                 &worktree,
                                 &ws_id,
-                                supabase_ws_id.as_deref(),
+                                remote_workspace_id.as_deref(),
                                 (!session_id.is_empty()).then_some(session_id.as_str()),
                                 &prompt.text,
                             )
@@ -3055,7 +3307,7 @@ impl DaemonServer {
 
         // Hint subscribers to re-fetch peers.
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("peers.changed", "").await;
         }
 
@@ -3086,7 +3338,7 @@ impl DaemonServer {
         let (accepted, error) = self.apply_peer_disconnect(&disconnect.peer_id).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("peers.changed", "").await;
         }
 
@@ -3169,7 +3421,7 @@ impl DaemonServer {
         let (accepted, error, workspace) = self.apply_add_workspace(&amux_add).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("workspaces.changed", "").await;
         }
 
@@ -3203,7 +3455,7 @@ impl DaemonServer {
         let (accepted, error) = self.apply_remove_workspace(&amux_remove).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("workspaces.changed", "").await;
         }
 
@@ -3263,7 +3515,7 @@ impl DaemonServer {
         let (accepted, error) = self.apply_remove_member(&amux_remove, is_owner).await;
 
         if accepted {
-            let publisher = Publisher::new(&self.mqtt);
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
             let _ = publisher.publish_notify("members.changed", "").await;
         }
 
@@ -3305,7 +3557,7 @@ impl DaemonServer {
 
         // Resolve workspace + worktree. Same 4-branch logic as the legacy
         // AcpCommand::StartAgent arm (see server.rs ~800-836 pre-refactor).
-        let (mut resolved_worktree, mut ws_id, mut supabase_ws_id_owned): (
+        let (mut resolved_worktree, mut ws_id, mut remote_workspace_id_owned): (
             String,
             String,
             Option<String>,
@@ -3314,8 +3566,7 @@ impl DaemonServer {
                 (
                     ws.path.clone(),
                     ws.workspace_id.clone(),
-                    (!ws.supabase_workspace_id.is_empty())
-                        .then_some(ws.supabase_workspace_id.clone()),
+                    (!ws.remote_workspace_id.is_empty()).then_some(ws.remote_workspace_id.clone()),
                 )
             } else if !worktree.is_empty() {
                 (
@@ -3358,14 +3609,14 @@ impl DaemonServer {
                 .find(|w| w.path == resolved_worktree)
             {
                 ws_id = ws.workspace_id.clone();
-                if supabase_ws_id_owned.is_none() && !ws.supabase_workspace_id.is_empty() {
-                    supabase_ws_id_owned = Some(ws.supabase_workspace_id.clone());
+                if remote_workspace_id_owned.is_none() && !ws.remote_workspace_id.is_empty() {
+                    remote_workspace_id_owned = Some(ws.remote_workspace_id.clone());
                 }
                 resolved_worktree = ws.path.clone();
             }
         }
 
-        let supabase_ws_id = supabase_ws_id_owned.as_deref();
+        let remote_workspace_id = remote_workspace_id_owned.as_deref();
 
         // Idempotency: if a live runtime already exists for the same
         // (session_id, agent_type, workspace_id) tuple, return its id
@@ -3398,22 +3649,19 @@ impl DaemonServer {
         // only place the daemon learns about them.
         if !session_id.is_empty() {
             match self
-                .supabase
+                .backend
                 .fetch_session_with_participants(session_id)
                 .await
             {
                 Ok(snap) => {
                     if let Some(tc) = self.teamclaw.as_mut() {
                         if let Err(e) = tc
-                            .insert_session_from_supabase(&snap.session, &snap.participants)
+                            .insert_session_from_backend(&snap.session, &snap.participants)
                             .await
                         {
                             return Err(StartRuntimeError {
                                 error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
-                                error_message: format!(
-                                    "insert_session_from_supabase failed: {}",
-                                    e
-                                ),
+                                error_message: format!("insert_session_from_backend failed: {}", e),
                                 failed_stage: "session_subscribe".to_string(),
                             });
                         }
@@ -3457,7 +3705,7 @@ impl DaemonServer {
                 &resolved_worktree,
                 initial_prompt,
                 &ws_id,
-                supabase_ws_id,
+                remote_workspace_id,
                 session_id_opt,
                 initial_model_override,
                 None,
@@ -3481,7 +3729,7 @@ impl DaemonServer {
         };
 
         // STARTING retain — fleeting but observable by mid-spawn reconnects.
-        let publisher = Publisher::new(&self.mqtt);
+        let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         let starting_info = amux::RuntimeInfo {
             runtime_id: new_id.clone(),
             agent_type: agent_type as i32,
@@ -3530,7 +3778,7 @@ impl DaemonServer {
         // apply_start_runtime already has `&mut self` access and runs
         // synchronously after spawn_agent returns). This is the cleanest
         // insertion point — the handle is fully populated (session_id,
-        // supabase_runtime_row_id) and state is ACTIVE.
+        // backend_runtime_row_id) and state is ACTIVE.
         self.catchup_runtime(&new_id).await;
 
         Ok(StartRuntimeOutcome {
@@ -3601,7 +3849,7 @@ impl DaemonServer {
             state: amux::RuntimeLifecycle::Stopped as i32,
             ..Default::default()
         };
-        let publisher = Publisher::new(&self.mqtt);
+        let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         let _ = publisher
             .publish_runtime_state(runtime_id, &stopped_info)
             .await;
@@ -3710,7 +3958,7 @@ impl DaemonServer {
         if success {
             self.publish_runtime_state_by_id(&runtime_id).await;
 
-            let sb = &self.supabase;
+            let sb = &self.backend;
             let agents = self.agents.lock().await;
             let handle = agents.get_handle(&runtime_id);
             let (acp_sid, session_id, ws_id, backend_type) = (
@@ -3731,8 +3979,8 @@ impl DaemonServer {
                 .unwrap_or("starting");
             drop(agents);
 
-            let supabase_ws_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
-                (!w.supabase_workspace_id.is_empty()).then_some(w.supabase_workspace_id.clone())
+            let remote_workspace_id = self.workspaces.find_by_id(&ws_id).and_then(|w| {
+                (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
             });
             let team_id = sb.team_id().to_string();
             let actor_id = sb.actor_id().to_string();
@@ -3740,11 +3988,11 @@ impl DaemonServer {
             let runtime_id_owned = runtime_id.clone();
             let model_id_owned = model_id.clone();
             tokio::spawn(async move {
-                let row = crate::supabase::AgentRuntimeUpsert {
+                let row = AgentRuntimeUpsert {
                     team_id: &team_id,
                     agent_id: &actor_id,
                     session_id: (!session_id.is_empty()).then_some(session_id.as_str()),
-                    workspace_id: supabase_ws_id.as_deref(),
+                    workspace_id: remote_workspace_id.as_deref(),
                     backend_type,
                     backend_session_id: if acp_sid.is_empty() {
                         None
@@ -4089,6 +4337,7 @@ mod tests {
                 broker_url: "mqtt://localhost:1883".to_string(),
             },
             agents: crate::config::AgentsConfig::default(),
+            transport: None,
             team_id: Some("team-test".to_string()),
             channels: crate::config::ChannelsConfig::default(),
             idle_runtime_timeout_secs: None,
@@ -4127,12 +4376,12 @@ mod tests {
         test_server_with_supabase(test_supabase())
     }
 
-    fn test_server_with_supabase(supabase: Arc<dyn Backend>) -> TestServer {
+    fn test_server_with_supabase(backend: Arc<dyn Backend>) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
         let mqtt = test_mqtt(&config.device.id);
         let teamclaw = crate::teamclaw::SessionManager::new(
-            mqtt.client.clone(),
+            Arc::new(mqtt.client.clone()) as Arc<dyn MessagePublisher>,
             "team-test",
             &config.device.id,
             Some("agent-actor".to_string()),
@@ -4143,11 +4392,16 @@ mod tests {
         let mut agents = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
         agents.add_test_runtime("rt1", "runtime-agent", "session-1");
 
+        let publisher_handle: Arc<dyn MessagePublisher> = Arc::new(mqtt.client.clone());
+        let topics = mqtt.topics.clone();
         TestServer {
             server: DaemonServer {
                 config,
                 config_path: tmp.path().join("daemon.toml"),
                 mqtt,
+                nats: None,
+                publisher_handle,
+                topics,
                 agents: Arc::new(AsyncMutex::new(agents)),
                 auth: AuthManager::new(tmp.path().join("members.toml")).unwrap(),
                 peers: PeerTracker::new(),
@@ -4158,7 +4412,7 @@ mod tests {
                 sessions_path: tmp.path().join("sessions.toml"),
                 history: EventHistory::new(&tmp.path().join("history")),
                 teamclaw: Some(teamclaw),
-                supabase,
+                backend,
                 actor_id: "agent-actor".to_string(),
                 channel_mgr: None,
                 cron_sessions: HashMap::new(),
@@ -4367,7 +4621,7 @@ mod tests {
 
     async fn add_membership(fixture: &mut TestServer, session_id: &str) {
         let tc = fixture.server.teamclaw.as_mut().expect("teamclaw set");
-        tc.insert_session_from_supabase_for_test(
+        tc.insert_session_from_backend_for_test(
             session_id,
             "team-test",
             None,

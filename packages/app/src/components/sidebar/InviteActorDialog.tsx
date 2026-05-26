@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { cn } from '@/lib/utils'
 
 type InviteKind = 'member' | 'agent'
@@ -58,32 +58,32 @@ export function InviteActorDialog({ open, onOpenChange, teamId }: InviteActorDia
     if (!canSubmit) return
     setSubmitting(true)
     try {
-      // Param names must match the SQL function signature exactly
-      // (`create_team_invite(p_team_id, p_kind, p_display_name, p_team_role,
-      // p_agent_kind, p_ttl_seconds, p_target_actor_id)`); PostgREST overloads
-      // by argument name so the `p_` prefix is required.
-      const { data, error } = await supabase.rpc('create_team_invite', {
-        p_team_id: teamId,
-        p_kind: kind,
-        p_display_name: trimmed,
-        p_team_role: kind === 'member' ? teamRole : null,
-        p_agent_kind: kind === 'agent' ? agentKind : null,
-        p_ttl_seconds: null,
-        p_target_actor_id: null,
-      })
-      if (error) {
-        toast.error(t('invite.failed', 'Failed to create invite: {{msg}}', { msg: error.message }))
-        return
-      }
-      const row = Array.isArray(data) ? data[0] : data
-      if (!row) {
+      const row = kind === 'member'
+        ? await getBackend().teams.createTeamInvite({
+            teamId,
+            kind: 'member',
+            displayName: trimmed,
+            teamRole,
+            ttlSeconds: null,
+            targetActorId: null,
+          })
+        : await getBackend().teams.createTeamInvite({
+            teamId,
+            kind: 'agent',
+            displayName: trimmed,
+            agentKind,
+            ttlSeconds: null,
+            targetActorId: null,
+          })
+      const deeplink = row.deeplink ?? row.inviteUrl
+      if (!deeplink) {
         toast.error(t('invite.failed', 'Failed to create invite: {{msg}}', { msg: 'empty response' }))
         return
       }
       setInvite({
         token: row.token,
-        expiresAt: row.expires_at,
-        deeplink: row.deeplink,
+        expiresAt: row.expiresAt ?? new Date(Date.now() + 604800 * 1000).toISOString(),
+        deeplink,
       })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

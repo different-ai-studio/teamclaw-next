@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Plus, Users } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { useActorsForTeam, type ActorRow as ActorRowData } from '@/components/panel/ActorsView'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
 import { ActorRow } from '@/components/sidebar/ActorRow'
@@ -65,14 +65,13 @@ export function ActorsSection() {
     if (!removeFor) return
     setRemoving(true)
     try {
-      const { error } = await supabase.rpc('remove_team_actor', { p_actor_id: removeFor.id })
-      if (error) {
-        toast.error(t('actors.removeFailed', 'Remove failed: {{msg}}', { msg: error.message }))
-        return
-      }
+      await getBackend().teams.removeTeamActor(removeFor.id)
       toast.success(t('actors.removed', 'Removed from team'))
       setRemoveFor(null)
       refetch()
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      toast.error(t('actors.removeFailed', 'Remove failed: {{msg}}', { msg }))
     } finally {
       setRemoving(false)
     }

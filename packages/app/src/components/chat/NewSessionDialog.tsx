@@ -14,7 +14,7 @@ import { useProviderStore } from '@/stores/provider'
 import { resolveCurrentMemberActorId } from '@/lib/current-actor'
 import { loadActorsForTeam } from '@/lib/local-cache'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { createSessionWithFirstMessage } from '@/lib/session-create'
 import { ensureSessionLiveSubscribed } from '@/App'
@@ -98,16 +98,12 @@ export function NewSessionDialog() {
         const synced = await syncActorsForTeam(teamId, { full: true })
         if (cancelled) return
         if (synced === 0 && localCount === 0) {
-          const { data, error } = await supabase
-            .from('actor_directory')
-            .select('id, actor_type, display_name')
-            .eq('team_id', teamId)
-            .order('display_name', { ascending: true })
+          const data = await getBackend().actors.listActorDirectory(teamId)
           if (cancelled) return
-          if (error) throw error
-          const remote = ((data ?? []) as Array<{ id: string; actor_type: string; display_name: string | null }>)
+          const remote = data
             .filter((r) => r.id !== currentMemberId)
             .filter((r) => r.actor_type === 'member' || r.actor_type === 'agent')
+            .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''))
             .map<Candidate>((r) => ({
               id: r.id,
               actor_type: r.actor_type as 'member' | 'agent',

@@ -1,4 +1,3 @@
-use crate::backend::Backend;
 use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
 use crate::onboarding::invite_url::{self, ParsedInvite};
 use crate::supabase::error::{SupabaseError, SupabaseResult};
@@ -118,6 +117,7 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
             broker_url: default_mqtt_broker_url(),
         },
         agents: AgentsConfig::default(),
+        transport: None,
         team_id: None,
         channels: Default::default(),
         idle_runtime_timeout_secs: None,
@@ -268,6 +268,7 @@ mod tests {
                     broker_url: "mqtts://old.example.com:8883".into(),
                 },
                 agents: AgentsConfig::default(),
+                transport: None,
                 team_id: Some("team-old".into()),
                 channels: Default::default(),
                 idle_runtime_timeout_secs: None,

@@ -6,10 +6,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback?: string) => fallback ?? _k }),
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    rpc: vi.fn(),
-  },
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    ideas: {
+      createIdea: vi.fn(),
+    },
+  }),
 }))
 
 describe('CreateIdeaDialog', () => {

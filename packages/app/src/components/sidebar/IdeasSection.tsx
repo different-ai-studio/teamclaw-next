@@ -2,7 +2,6 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, List, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase } from '@/lib/supabase-client'
 import { useIdeasForTeam, type IdeaRow as IdeaRowData } from '@/components/panel/IdeasView'
 import { CreateIdeaDialog } from '@/components/sidebar/CreateIdeaDialog'
 import { IdeaDetailDialog } from '@/components/sidebar/IdeaDetailDialog'
@@ -11,6 +10,7 @@ import { RenameIdeaDialog } from '@/components/sidebar/RenameIdeaDialog'
 import { updateIdeaStatus, type IdeaStatus } from '@/lib/idea-mutations'
 import { getTopIdeas } from '@/components/sidebar/sidebar-list-helpers'
 import { cn } from '@/lib/utils'
+import { getBackend } from '@/lib/backend'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,20 +65,16 @@ export function IdeasSection() {
     if (!deleteFor) return
     setDeleting(true)
     try {
-      const { error } = await supabase.rpc('archive_idea', {
-        p_idea_id: deleteFor.id,
-        p_archived: true,
-      })
-      if (error) {
-        toast.error(t('ideas.deleteFailed', 'Delete failed: {{msg}}', { msg: error.message }))
-        return
-      }
+      await getBackend().ideas.archiveIdea(deleteFor.id)
       toast.success(t('ideas.archived', 'Idea deleted'))
       if (filter.kind === 'idea' && filter.ideaId === deleteFor.id) {
         setFilter({ kind: 'all' })
       }
       setDeleteFor(null)
       refetch()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(t('ideas.deleteFailed', 'Delete failed: {{msg}}', { msg }))
     } finally {
       setDeleting(false)
     }

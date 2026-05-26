@@ -11,7 +11,7 @@
 // be called once on app boot after the outbox store is hydrated.
 
 import { create as createMessage, toBinary } from "@bufbuild/protobuf";
-import { supabase } from "@/lib/supabase-client";
+import { BackendError, getBackend } from "@/lib/backend";
 import {
   LiveEventEnvelopeSchema,
   MessageKind,
@@ -62,6 +62,16 @@ async function attempt(entry: OutboxEntry): Promise<void> {
     const createdAtSec = BigInt(
       Math.floor(new Date(entry.createdAt).getTime() / 1000),
     );
+    const displayMentionActorIds = entry.displayMentionActorIds ?? [];
+    const metadata = {
+      mention_actor_ids: entry.mentionActorIds,
+      ...(displayMentionActorIds.length > 0
+        ? { display_mention_actor_ids: displayMentionActorIds }
+        : {}),
+      ...(entry.attachmentUrls.length > 0
+        ? { attachment_urls: entry.attachmentUrls }
+        : {}),
+    };
 
     const proto = createMessage(MessageSchema, {
       messageId: entry.messageId,
@@ -69,6 +79,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       senderActorId: entry.senderActorId,
       kind: MessageKind.TEXT,
       content: entry.content,
+      metadataJson: JSON.stringify(metadata),
       createdAt: createdAtSec,
       model: entry.model ?? "",
     });
@@ -85,36 +96,39 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       body: toBinary(SessionMessageEnvelopeSchema, sessionEnv),
     });
 
-    sessionFlowLog("outbox_sender.supabase_insert.begin", {
+    sessionFlowLog("outbox_sender.message_insert.begin", {
       messageId: entry.messageId,
       sessionId: entry.sessionId,
       teamId: entry.teamId,
     });
-    const { error: insErr } = await supabase.from("messages").insert({
-      id: entry.messageId,
-      team_id: entry.teamId,
-      session_id: entry.sessionId,
-      sender_actor_id: entry.senderActorId,
-      kind: "text",
-      content: entry.content,
-      model: entry.model ?? null,
-      metadata: {
-        mention_actor_ids: entry.mentionActorIds,
-        ...(entry.attachmentUrls.length > 0
-          ? { attachment_urls: entry.attachmentUrls }
-          : {}),
-      },
-    });
-
-    // Supabase unique-constraint violation on `id` means this same message
-    // already landed on a prior attempt (the network round-trip dropped
-    // before we got the ACK). Treat as success — the row is persisted.
-    if (insErr && insErr.code !== "23505") throw insErr;
-    sessionFlowLog("outbox_sender.supabase_insert.ok", {
+    let duplicateAlreadyInserted = false;
+    try {
+      await getBackend().messages.insertOutgoingMessage({
+        id: entry.messageId,
+        teamId: entry.teamId,
+        sessionId: entry.sessionId,
+        senderActorId: entry.senderActorId,
+        kind: "text",
+        content: entry.content,
+        model: entry.model ?? null,
+        metadata,
+        createdAt: entry.createdAt,
+      });
+    } catch (error) {
+      // Conflict on `id` means this same message
+      // already landed on a prior attempt (the network round-trip dropped
+      // before we got the ACK). Treat as success — the row is persisted.
+      if (error instanceof BackendError && error.category === "Conflict") {
+        duplicateAlreadyInserted = true;
+      } else {
+        throw error;
+      }
+    }
+    sessionFlowLog("outbox_sender.message_insert.ok", {
       messageId: entry.messageId,
       sessionId: entry.sessionId,
       teamId: entry.teamId,
-      duplicateAlreadyInserted: insErr?.code === "23505",
+      duplicateAlreadyInserted,
     });
 
     const topic = `amux/${entry.teamId}/session/${entry.sessionId}/live`;

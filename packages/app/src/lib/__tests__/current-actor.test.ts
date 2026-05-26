@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveCurrentMemberActorId } from "../current-actor";
 
-const supabaseFrom = vi.fn();
+const resolveCurrentMemberActor = vi.fn();
 
-vi.mock("@/lib/supabase-client", () => ({
-  supabase: {
-    from: (...args: unknown[]) => supabaseFrom(...args),
-  },
+vi.mock("@/lib/backend", () => ({
+  getBackend: () => ({
+    directory: { resolveCurrentMemberActor },
+  }),
 }));
 
 beforeEach(() => {
-  supabaseFrom.mockReset();
+  resolveCurrentMemberActor.mockReset();
 });
 
 describe("resolveCurrentMemberActorId", () => {
@@ -22,70 +22,24 @@ describe("resolveCurrentMemberActorId", () => {
       }),
     ).resolves.toBe("actor-self");
 
-    expect(supabaseFrom).not.toHaveBeenCalled();
+    expect(resolveCurrentMemberActor).not.toHaveBeenCalled();
   });
 
-  it("falls back to actor_directory before actors", async () => {
-    supabaseFrom.mockImplementation((table: string) => {
-      if (table === "actor_directory") {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  limit: () => Promise.resolve({
-                    data: [{ id: "actor-directory-self" }],
-                    error: null,
-                  }),
-                }),
-              }),
-            }),
-          }),
-        };
-      }
-      throw new Error(`unexpected table ${table}`);
-    });
+  it("uses backend directory resolution without a hint", async () => {
+    resolveCurrentMemberActor.mockResolvedValue({ id: "actor-directory-self" });
 
     await expect(
       resolveCurrentMemberActorId("team-1", "user-1"),
     ).resolves.toBe("actor-directory-self");
 
-    expect(supabaseFrom).toHaveBeenCalledWith("actor_directory");
+    expect(resolveCurrentMemberActor).toHaveBeenCalledWith("team-1", "user-1");
   });
 
-  it("falls back to actors when actor_directory has no row", async () => {
-    supabaseFrom.mockImplementation((table: string) => {
-      if (table === "actor_directory") {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  limit: () => Promise.resolve({ data: [], error: null }),
-                }),
-              }),
-            }),
-          }),
-        };
-      }
-      if (table === "actors") {
-        return {
-          select: () => ({
-            eq: () => Promise.resolve({
-              data: [
-                { id: "other", team_id: "team-2" },
-                { id: "actor-self", team_id: "team-1" },
-              ],
-              error: null,
-            }),
-          }),
-        };
-      }
-      throw new Error(`unexpected table ${table}`);
-    });
+  it("returns null when backend directory has no member actor", async () => {
+    resolveCurrentMemberActor.mockResolvedValue(null);
 
     await expect(
       resolveCurrentMemberActorId("team-1", "user-1"),
-    ).resolves.toBe("actor-self");
+    ).resolves.toBeNull();
   });
 });

@@ -7,6 +7,7 @@ mod daemon;
 mod error;
 mod history;
 mod mqtt;
+mod nats;
 mod onboarding;
 mod proto;
 mod runtime;

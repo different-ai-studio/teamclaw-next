@@ -43,10 +43,9 @@ const mocks = vi.hoisted(() => {
     subscribeSessionList: vi.fn(() => () => {}),
     mqttPublish: vi.fn(),
     resolveCurrentMemberActorId: vi.fn(),
-    supabaseInsert: vi.fn(),
-    sessionParticipantsSelect: vi.fn(),
-    actorDirectorySelect: vi.fn(),
-    actorDirectoryActorTypeFilter: [] as string[],
+    backendInsertOutgoingMessage: vi.fn(),
+    listParticipants: vi.fn(),
+    getSessionTeamId: vi.fn(),
   }
 })
 
@@ -70,36 +69,18 @@ vi.mock('@/lib/current-actor', () => ({
   resolveCurrentMemberActorId: mocks.resolveCurrentMemberActorId,
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (table: string) => {
-      if (table === 'messages') {
-        return {
-          insert: mocks.supabaseInsert,
-        }
-      }
-      if (table === 'session_participants') {
-        return {
-          select: () => ({
-            eq: () => Promise.resolve(mocks.sessionParticipantsSelect()),
-          }),
-        }
-      }
-      if (table === 'actor_directory') {
-        return {
-          select: () => ({
-            in: () => ({
-              in: (_column: string, values: string[]) => {
-                mocks.actorDirectoryActorTypeFilter = values
-                return Promise.resolve(mocks.actorDirectorySelect())
-              },
-            }),
-          }),
-        }
-      }
-      throw new Error(`Unexpected table: ${table}`)
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    sessionMembers: {
+      listParticipants: mocks.listParticipants,
     },
-  },
+    sessions: {
+      getSessionTeamId: mocks.getSessionTeamId,
+    },
+    messages: {
+      insertOutgoingMessage: mocks.backendInsertOutgoingMessage,
+    },
+  }),
 }))
 
 vi.mock('@/stores/workspace', () => ({
@@ -161,16 +142,9 @@ describe('session store daemon send path', () => {
     mocks.client.getSessionChildren.mockResolvedValue([])
     mocks.client.restoreSession.mockResolvedValue(undefined)
     mocks.resolveCurrentMemberActorId.mockResolvedValue('member-1')
-    mocks.supabaseInsert.mockResolvedValue({ error: null })
-    mocks.sessionParticipantsSelect.mockReturnValue({
-      data: [],
-      error: null,
-    })
-    mocks.actorDirectorySelect.mockReturnValue({
-      data: [],
-      error: null,
-    })
-    mocks.actorDirectoryActorTypeFilter = []
+    mocks.backendInsertOutgoingMessage.mockResolvedValue({})
+    mocks.listParticipants.mockResolvedValue([])
+    mocks.getSessionTeamId.mockResolvedValue('team-1')
     mocks.mqttPublish.mockResolvedValue(undefined)
   })
 
@@ -198,14 +172,10 @@ describe('session store daemon send path', () => {
   it('auto-mentions the sole agent when no engaged agent is selected', async () => {
     const { useSessionStore } = await import('../session-store')
 
-    mocks.sessionParticipantsSelect.mockReturnValue({
-      data: [{ actor_id: 'agent-1' }, { actor_id: 'member-1' }],
-      error: null,
-    })
-    mocks.actorDirectorySelect.mockReturnValue({
-      data: [{ id: 'agent-1' }],
-      error: null,
-    })
+    mocks.listParticipants.mockResolvedValue([
+      { id: 'agent-1', actor_type: 'agent' },
+      { id: 'member-1', actor_type: 'member' },
+    ])
 
     useSessionStore.setState({
       activeSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
@@ -221,7 +191,7 @@ describe('session store daemon send path', () => {
 
     await useSessionStore.getState().sendMessage('hello daemon')
 
-    expect(mocks.supabaseInsert).toHaveBeenCalledWith(
+    expect(mocks.backendInsertOutgoingMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: { mention_actor_ids: ['agent-1'] },
       }),
@@ -250,7 +220,7 @@ describe('session store daemon send path', () => {
 
     await useSessionStore.getState().sendMessage('hello daemon')
 
-    expect(mocks.supabaseInsert).toHaveBeenCalledWith(
+    expect(mocks.backendInsertOutgoingMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'opencode/qwen3.6-plus-free',
       }),
@@ -265,14 +235,10 @@ describe('session store daemon send path', () => {
   it('treats personal_agent participants as agent mentions for daemon sessions', async () => {
     const { useSessionStore } = await import('../session-store')
 
-    mocks.sessionParticipantsSelect.mockReturnValue({
-      data: [{ actor_id: 'agent-1' }, { actor_id: 'member-1' }],
-      error: null,
-    })
-    mocks.actorDirectorySelect.mockReturnValue({
-      data: [{ id: 'agent-1', actor_type: 'personal_agent' }],
-      error: null,
-    })
+    mocks.listParticipants.mockResolvedValue([
+      { id: 'agent-1', actor_type: 'personal_agent' },
+      { id: 'member-1', actor_type: 'member' },
+    ])
 
     useSessionStore.setState({
       activeSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
@@ -288,8 +254,7 @@ describe('session store daemon send path', () => {
 
     await useSessionStore.getState().sendMessage('hello daemon')
 
-    expect(mocks.actorDirectoryActorTypeFilter).toContain('personal_agent')
-    expect(mocks.supabaseInsert).toHaveBeenCalledWith(
+    expect(mocks.backendInsertOutgoingMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: { mention_actor_ids: ['agent-1'] },
       }),

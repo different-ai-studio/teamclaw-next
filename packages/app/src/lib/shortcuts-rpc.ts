@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-client'
+import { getBackend } from '@/lib/backend'
 
 export type ShortcutScope = 'personal' | 'team'
 export type ShortcutNodeType = 'native' | 'link' | 'folder'
@@ -33,6 +33,19 @@ export class ShortcutsRpcError extends Error {
   }
 }
 
+function asShortcutsRpcError(error: unknown): ShortcutsRpcError {
+  if (error instanceof ShortcutsRpcError) return error
+  const record = error && typeof error === 'object' ? error as { code?: unknown; message?: unknown } : {}
+  const code = typeof record.code === 'string' ? record.code : null
+  const message =
+    typeof record.message === 'string' && record.message.trim() !== ''
+      ? record.message
+      : error instanceof Error
+        ? error.message
+        : 'Shortcuts RPC failed'
+  return new ShortcutsRpcError(code, message)
+}
+
 function rowToNode(row: Record<string, unknown>): ShortcutNode {
   return {
     id:            row.id as string,
@@ -54,11 +67,12 @@ export async function selectShortcuts(opts: {
   scope: ShortcutScope
   teamId?: string
 }): Promise<ShortcutNode[]> {
-  let q = supabase.from('shortcuts').select('*').eq('scope', opts.scope)
-  if (opts.scope === 'team' && opts.teamId) q = q.eq('team_id', opts.teamId)
-  const { data, error } = await q.order('order', { ascending: true })
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
-  return (data ?? []).map(rowToNode)
+  try {
+    const rows = await getBackend().shortcuts.listShortcuts(opts.scope, opts.teamId)
+    return rows.map(row => rowToNode(row as unknown as Record<string, unknown>))
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export interface ShortcutCreateInput {
@@ -73,18 +87,21 @@ export interface ShortcutCreateInput {
 }
 
 export async function rpcShortcutCreate(input: ShortcutCreateInput): Promise<string> {
-  const { data, error } = await supabase.rpc('shortcut_create', {
-    p_scope:     input.scope,
-    p_label:     input.label,
-    p_node_type: input.nodeType,
-    p_team_id:   input.scope === 'team' ? (input.teamId ?? null) : null,
-    p_parent_id: input.parentId,
-    p_icon:      input.icon,
-    p_order:     input.order,
-    p_target:    input.target,
-  })
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
-  return data as string
+  try {
+    const row = await getBackend().shortcuts.createShortcut({
+      p_scope:     input.scope,
+      p_label:     input.label,
+      p_node_type: input.nodeType,
+      p_team_id:   input.scope === 'team' ? (input.teamId ?? null) : null,
+      p_parent_id: input.parentId,
+      p_icon:      input.icon,
+      p_order:     input.order,
+      p_target:    input.target,
+    })
+    return row.id
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export async function rpcShortcutUpdate(
@@ -98,13 +115,19 @@ export async function rpcShortcutUpdate(
   if (patch.order    !== undefined) dbPatch.order     = patch.order
   if (patch.parentId !== undefined) dbPatch.parent_id = patch.parentId
   dbPatch.updated_at = new Date().toISOString()
-  const { error } = await supabase.from('shortcuts').update(dbPatch).eq('id', id)
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
+  try {
+    await getBackend().shortcuts.updateShortcut(id, dbPatch)
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export async function rpcShortcutDelete(id: string): Promise<void> {
-  const { error } = await supabase.from('shortcuts').delete().eq('id', id)
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
+  try {
+    await getBackend().shortcuts.deleteShortcut(id)
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export interface ShortcutMove {
@@ -114,45 +137,48 @@ export interface ShortcutMove {
 }
 
 export async function rpcShortcutBatchMove(moves: ShortcutMove[]): Promise<number> {
-  const { data, error } = await supabase.rpc('shortcut_batch_move', {
-    p_moves: moves.map(m => ({ id: m.id, parent_id: m.parentId, order: m.order })),
-  })
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
-  return data as number
+  try {
+    const result = await getBackend().shortcuts.batchMove({
+      p_moves: moves.map(m => ({ id: m.id, parent_id: m.parentId, order: m.order })),
+    })
+    return result as number
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export async function rpcShortcutSetVisibleRoles(
   shortcutId: string,
   roleIds: string[],
 ): Promise<void> {
-  const { error } = await supabase.rpc('shortcut_set_visible_roles', {
-    p_shortcut_id: shortcutId,
-    p_role_ids: roleIds,
-  })
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
+  try {
+    await getBackend().shortcuts.setVisibleRoles({
+      p_shortcut_id: shortcutId,
+      p_role_ids: roleIds,
+    })
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export async function selectTeamRoles(teamId: string): Promise<TeamRole[]> {
-  const { data, error } = await supabase
-    .from('team_roles')
-    .select('id, team_id, code, name')
-    .eq('team_id', teamId)
-    .order('code', { ascending: true })
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
-  return (data ?? []).map(r => ({ id: r.id, teamId: r.team_id, code: r.code, name: r.name }))
+  try {
+    const rows = await getBackend().shortcuts.listTeamRoles(teamId)
+    return rows.map(r => ({ id: r.id, teamId: r.team_id, code: r.code, name: r.name }))
+  } catch (error) {
+    throw asShortcutsRpcError(error)
+  }
 }
 
 export async function selectShortcutRoleBindings(teamId: string): Promise<Map<string, string[]>> {
-  // Returns shortcut_id → role_id[] for the given team. Uses permissions ⨝ permission_roles.
-  const { data, error } = await supabase
-    .from('permissions')
-    .select('resource_id, permission_roles(role_id)')
-    .eq('team_id', teamId)
-    .eq('resource_type', 'shortcut')
-  if (error) throw new ShortcutsRpcError(error.code ?? null, error.message)
-  const m = new Map<string, string[]>()
-  for (const p of (data ?? []) as Array<{ resource_id: string; permission_roles: Array<{ role_id: string }> }>) {
-    m.set(p.resource_id, p.permission_roles.map(pr => pr.role_id))
+  try {
+    const data = await getBackend().shortcuts.listShortcutRoleBindings(teamId)
+    const m = new Map<string, string[]>()
+    for (const p of data) {
+      m.set(p.resource_id, p.permission_roles.map(pr => pr.role_id))
+    }
+    return m
+  } catch (error) {
+    throw asShortcutsRpcError(error)
   }
-  return m
 }

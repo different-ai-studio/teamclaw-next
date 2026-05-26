@@ -32,10 +32,8 @@ vi.mock("@/lib/server-config", () => ({
   saveServerConfig,
 }));
 
-vi.mock("@/lib/supabase-client", () => ({
-  get hasSupabaseConfig() {
-    return hasConfig.value;
-  },
+vi.mock("@/lib/backend", () => ({
+  hasBackendConfig: () => hasConfig.value,
 }));
 
 vi.mock("@/lib/version", () => ({

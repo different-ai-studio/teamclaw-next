@@ -2,22 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "./auth-store";
 
 const mocks = vi.hoisted(() => ({
-  rpc: vi.fn(),
-  from: vi.fn(),
+  listCurrentActorSessions: vi.fn(),
+  markCurrentActorSessionViewed: vi.fn(),
+  updateSessionTitle: vi.fn(),
+  archiveSession: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase-client", () => ({
-  supabase: {
-    rpc: mocks.rpc,
-    from: mocks.from,
-    auth: {
-      getSession: vi.fn(),
-      onAuthStateChange: vi.fn(),
-      signInWithOtp: vi.fn(),
-      verifyOtp: vi.fn(),
-      signOut: vi.fn(),
+vi.mock("@/lib/backend", () => ({
+  getBackend: () => ({
+    sessions: {
+      listCurrentActorSessions: mocks.listCurrentActorSessions,
+      markCurrentActorSessionViewed: mocks.markCurrentActorSessionViewed,
+      updateSessionTitle: mocks.updateSessionTitle,
+      archiveSession: mocks.archiveSession,
     },
-  },
+  }),
 }));
 
 vi.mock("@/lib/utils", () => ({
@@ -66,19 +65,16 @@ describe("session-list-store", () => {
   });
 
   it("loads the first page from the current actor session RPC", async () => {
-    mocks.rpc.mockResolvedValueOnce({
-      data: [sessionRow({ has_unread: true })],
-      error: null,
+    mocks.listCurrentActorSessions.mockResolvedValueOnce({
+      rows: [sessionRow({ has_unread: true })],
     });
 
     const { useSessionListStore } = await import("./session-list-store");
     await useSessionListStore.getState().loadFirstPage();
 
-    expect(mocks.rpc).toHaveBeenCalledWith("list_current_actor_sessions", {
-      p_limit: 50,
-      p_before_last_message_at: null,
-      p_before_created_at: null,
-      p_before_id: null,
+    expect(mocks.listCurrentActorSessions).toHaveBeenCalledWith({
+      limit: 50,
+      cursor: null,
     });
     expect(useSessionListStore.getState().rows[0]).toMatchObject({
       id: "session-1",
@@ -87,9 +83,9 @@ describe("session-list-store", () => {
   });
 
   it("loads more with the last row composite cursor and dedupes rows", async () => {
-    mocks.rpc
+    mocks.listCurrentActorSessions
       .mockResolvedValueOnce({
-        data: [
+        rows: [
           sessionRow({
             id: "session-1",
             last_message_at: "2026-05-17T08:00:00.000Z",
@@ -101,10 +97,9 @@ describe("session-list-store", () => {
             created_at: "2026-05-17T06:59:00.000Z",
           }),
         ],
-        error: null,
       })
       .mockResolvedValueOnce({
-        data: [
+        rows: [
           sessionRow({
             id: "session-2",
             last_message_at: "2026-05-17T07:00:00.000Z",
@@ -116,18 +111,19 @@ describe("session-list-store", () => {
             created_at: "2026-05-17T05:59:00.000Z",
           }),
         ],
-        error: null,
       });
 
     const { useSessionListStore } = await import("./session-list-store");
     await useSessionListStore.getState().loadFirstPage(2);
     await useSessionListStore.getState().loadMore(2);
 
-    expect(mocks.rpc).toHaveBeenLastCalledWith("list_current_actor_sessions", {
-      p_limit: 2,
-      p_before_last_message_at: "2026-05-17T07:00:00.000Z",
-      p_before_created_at: "2026-05-17T06:59:00.000Z",
-      p_before_id: "session-2",
+    expect(mocks.listCurrentActorSessions).toHaveBeenLastCalledWith({
+      limit: 2,
+      cursor: {
+        lastMessageAt: "2026-05-17T07:00:00.000Z",
+        createdAt: "2026-05-17T06:59:00.000Z",
+        id: "session-2",
+      },
     });
     expect(useSessionListStore.getState().rows.map((row) => row.id)).toEqual([
       "session-1",
@@ -137,7 +133,7 @@ describe("session-list-store", () => {
   });
 
   it("marks the current actor session viewed and clears local unread state", async () => {
-    mocks.rpc.mockResolvedValueOnce({ data: null, error: null });
+    mocks.markCurrentActorSessionViewed.mockResolvedValueOnce(undefined);
 
     const { useSessionListStore } = await import("./session-list-store");
     useSessionListStore.setState({
@@ -146,40 +142,31 @@ describe("session-list-store", () => {
 
     await useSessionListStore.getState().markSessionViewed("session-1");
 
-    expect(mocks.rpc).toHaveBeenCalledWith("mark_current_actor_session_viewed", {
-      p_session_id: "session-1",
-      p_last_read_message_id: null,
-    });
+    expect(mocks.markCurrentActorSessionViewed).toHaveBeenCalledWith("session-1", null);
     expect(useSessionListStore.getState().rows[0].has_unread).toBe(false);
   });
 
-  it("renames a session through Supabase and patches the row", async () => {
-    const eq = vi.fn().mockResolvedValue({ error: null });
-    const update = vi.fn(() => ({ eq }));
-    mocks.from.mockReturnValue({ update });
+  it("renames a session through the backend and patches the row", async () => {
+    mocks.updateSessionTitle.mockResolvedValueOnce(undefined);
 
     const { useSessionListStore } = await import("./session-list-store");
     useSessionListStore.setState({ rows: [sessionRow()] });
 
     await useSessionListStore.getState().updateSessionTitle("session-1", "Renamed");
 
-    expect(mocks.from).toHaveBeenCalledWith("sessions");
-    expect(update).toHaveBeenCalledWith({ title: "Renamed" });
-    expect(eq).toHaveBeenCalledWith("id", "session-1");
+    expect(mocks.updateSessionTitle).toHaveBeenCalledWith("session-1", "Renamed");
     expect(useSessionListStore.getState().rows[0].title).toBe("Renamed");
   });
 
-  it("archives a session through Supabase and removes the row", async () => {
-    const eq = vi.fn().mockResolvedValue({ error: null });
-    const update = vi.fn(() => ({ eq }));
-    mocks.from.mockReturnValue({ update });
+  it("archives a session through the backend and removes the row", async () => {
+    mocks.archiveSession.mockResolvedValueOnce(undefined);
 
     const { useSessionListStore } = await import("./session-list-store");
     useSessionListStore.setState({ rows: [sessionRow()] });
 
     await useSessionListStore.getState().archiveSession("session-1");
 
-    expect(update).toHaveBeenCalledWith({ archived_at: expect.any(String) });
+    expect(mocks.archiveSession).toHaveBeenCalledWith("session-1", expect.any(String));
     expect(useSessionListStore.getState().rows).toEqual([]);
   });
 });

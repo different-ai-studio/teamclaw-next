@@ -9,31 +9,14 @@
  * envelope handler in App.tsx.
  */
 
-import { syncTableForSession } from "@/lib/cache-sync";
+import { getBackend } from "@/lib/backend";
+import type { BackendKind, MessageSyncRow } from "@/lib/backend/types";
 import * as cache from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
 
 // Supabase column on public.messages is `metadata` (jsonb), not `metadata_json`.
 // We stringify it into local libsql's metadata_json TEXT column.
-interface SupabaseMessageRow {
-  id: string;
-  team_id: string;
-  session_id: string;
-  turn_id?: string | null;
-  sender_actor_id?: string | null;
-  reply_to_message_id?: string | null;
-  kind: string;
-  content: string;
-  metadata?: unknown | null;
-  model?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const COLUMNS =
-  "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
-
-function mapRow(r: SupabaseMessageRow): cache.MessageRow {
+function mapRow(r: MessageSyncRow, origin: BackendKind): cache.MessageRow {
   const metadataJson =
     r.metadata == null
       ? null
@@ -52,7 +35,7 @@ function mapRow(r: SupabaseMessageRow): cache.MessageRow {
     metadataJson,
     model: r.model ?? null,
     mentionsJson: null,
-    origin: "supabase",
+    origin,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     deletedAt: null,
@@ -72,17 +55,32 @@ export async function syncMessagesForSession(
   opts?: { full?: boolean },
 ): Promise<number> {
   if (!isTauri()) return 0;
-  const { count } = await syncTableForSession<
-    SupabaseMessageRow,
-    cache.MessageRow
-  >({
-    tableName: "messages",
-    sessionId,
-    teamId,
-    selectColumns: COLUMNS,
-    mapRow,
-    upsertBatch: cache.upsertMessagesBatch,
-    full: opts?.full,
-  });
-  return count;
+  const watermarkKey = `messages:${sessionId}`;
+  const watermark = opts?.full
+    ? null
+    : await cache.getWatermark(watermarkKey, teamId);
+
+  const backend = getBackend();
+  let data: MessageSyncRow[];
+  try {
+    data = await backend.messages.listMessagesForSessionSince(
+      sessionId,
+      watermark,
+    );
+  } catch (error) {
+    console.warn("[message-sync] pull failed:", error);
+    return 0;
+  }
+  const rows = data.map((row) => mapRow(row, backend.kind));
+  if (rows.length > 0) {
+    await cache.upsertMessagesBatch(rows);
+    const maxUpdated = rows.reduce(
+      (acc, row) => (row.updatedAt > acc ? row.updatedAt : acc),
+      watermark ?? "",
+    );
+    if (maxUpdated) {
+      await cache.setWatermark(watermarkKey, teamId, maxUpdated);
+    }
+  }
+  return rows.length;
 }

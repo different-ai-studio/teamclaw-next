@@ -1,6 +1,6 @@
-//! `ChannelStore` impl: adapts amuxd's Supabase client to the
+//! `ChannelStore` impl: adapts amuxd's backend client to the
 //! `teamclaw_gateway::ChannelStore` trait so channels persist external
-//! actors, gateway sessions, and messages through the same Supabase
+//! actors, gateway sessions, and messages through the same backend
 //! endpoints amuxd already uses for native sessions.
 
 use async_trait::async_trait;
@@ -26,7 +26,7 @@ impl ChannelStore for AmuxdChannelStore {
         self.client
             .rpc_upsert_external_actor(team_id, source, source_id, display_name)
             .await
-            .map_err(|e| StoreError::Supabase(e.to_string()))
+            .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
     async fn ensure_session(
@@ -49,7 +49,7 @@ impl ChannelStore for AmuxdChannelStore {
                 participant_actor_ids,
             )
             .await
-            .map_err(|e| StoreError::Supabase(e.to_string()))?;
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
         Ok(EnsureSessionOutcome {
             session_id,
             acp_session_id,
@@ -67,7 +67,7 @@ impl ChannelStore for AmuxdChannelStore {
         self.client
             .insert_gateway_message(session_id, sender_actor_id, content, external_message_id)
             .await
-            .map_err(|e| StoreError::Supabase(e.to_string()))
+            .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
     async fn record_message_with_attachments(
@@ -100,7 +100,7 @@ impl ChannelStore for AmuxdChannelStore {
                 serde_json::Value::Array(json_attachments),
             )
             .await
-            .map_err(|e| StoreError::Supabase(e.to_string()))
+            .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
     async fn upload_attachment(
@@ -112,14 +112,14 @@ impl ChannelStore for AmuxdChannelStore {
         self.client
             .upload_attachment_bytes(bucket_path, bytes, mime)
             .await
-            .map_err(|e| StoreError::Supabase(e.to_string()))
+            .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
     async fn add_participant(&self, session_id: &str, actor_id: &str) -> Result<(), StoreError> {
         self.client
             .upsert_session_participant(session_id, actor_id)
             .await
-            .map_err(|e| StoreError::Supabase(e.to_string()))
+            .map_err(|e| StoreError::Backend(e.to_string()))
     }
 }
 

@@ -9,60 +9,61 @@ const mockRuntimeStart = vi.fn().mockResolvedValue({
 })
 const mockSetModel = vi.fn().mockResolvedValue({})
 
-const supabaseFrom = vi.fn()
+const backendMocks = vi.hoisted(() => ({
+  createSessionShell: vi.fn(),
+  insertOutgoingMessage: vi.fn(),
+  listLatestAgentRuntimeHints: vi.fn(),
+  listAgentDefaults: vi.fn(),
+}))
 
 vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    from: (...args: unknown[]) => supabaseFrom(...args),
-  },
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    sessions: {
+      createSessionShell: backendMocks.createSessionShell,
+    },
+    messages: {
+      insertOutgoingMessage: backendMocks.insertOutgoingMessage,
+    },
+    runtime: {
+      listLatestAgentRuntimeHints: backendMocks.listLatestAgentRuntimeHints,
+      listAgentDefaults: backendMocks.listAgentDefaults,
+    },
+  }),
 }))
 
 describe('startAgentRuntimesAsync', () => {
   beforeEach(() => {
     mockRuntimeStart.mockClear()
     mockSetModel.mockClear()
-    supabaseFrom.mockReset()
+    backendMocks.createSessionShell.mockReset()
+    backendMocks.insertOutgoingMessage.mockReset()
+    backendMocks.listLatestAgentRuntimeHints.mockReset()
+    backendMocks.listAgentDefaults.mockReset()
+    backendMocks.createSessionShell.mockResolvedValue({ sessionId: 'sess-1' })
+    backendMocks.insertOutgoingMessage.mockResolvedValue({})
   })
 
   function mockTables(opts: {
     runtimes?: Array<{ agent_id: string; workspace_id: string | null; backend_type: string | null }>
     actors?: Array<{ id: string; agent_types: string[]; default_agent_type: string | null }>
   }) {
-    supabaseFrom.mockImplementation((table: string) => {
-      if (table === 'agent_runtimes') {
-        return {
-          select: () => ({
-            in: () => ({
-              eq: () => ({
-                order: () => Promise.resolve({
-                  data: (opts.runtimes ?? []).map((r) => ({
-                    ...r,
-                    updated_at: '2026-05-18T00:00:00.000Z',
-                  })),
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        }
-      }
-      if (table === 'agents') {
-        return {
-          select: () => ({
-            in: () => Promise.resolve({
-              data: opts.actors ?? [],
-              error: null,
-            }),
-          }),
-        }
-      }
-      throw new Error(`unexpected table: ${table}`)
-    })
+    backendMocks.listLatestAgentRuntimeHints.mockResolvedValue(
+      (opts.runtimes ?? []).map((r) => ({
+        id: `runtime-${r.agent_id}`,
+        runtime_id: `runtime-id-${r.agent_id}`,
+        session_id: 'previous-session',
+        status: 'running',
+        current_model: null,
+        updated_at: '2026-05-18T00:00:00.000Z',
+        ...r,
+      })),
+    )
+    backendMocks.listAgentDefaults.mockResolvedValue(opts.actors ?? [])
   }
 
   it('sends opencode runtimeStart requests for prior opencode agent runtimes', async () => {
@@ -217,6 +218,60 @@ describe('startAgentRuntimesAsync', () => {
         targetDeviceId: 'agent-5',
         agentType: AgentType.CLAUDE_CODE,
         modelId: 'claude-sonnet-4-6',
+      }),
+    )
+  })
+
+  it('starts agents with fallback values when runtime hint lookup fails', async () => {
+    backendMocks.listLatestAgentRuntimeHints.mockRejectedValue(new Error('runtime hints unavailable'))
+    backendMocks.listAgentDefaults.mockResolvedValue([
+      { id: 'agent-7', agent_types: [], default_agent_type: null },
+    ])
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-7'],
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-7',
+        workspaceId: '',
+        agentType: AgentType.CLAUDE_CODE,
+      }),
+    )
+  })
+
+  it('starts agents from prior runtime history when agent defaults lookup fails', async () => {
+    backendMocks.listLatestAgentRuntimeHints.mockResolvedValue([
+      {
+        id: 'runtime-agent-8',
+        agent_id: 'agent-8',
+        workspace_id: 'ws-prior',
+        backend_type: 'opencode',
+        runtime_id: 'runtime-id-agent-8',
+        session_id: 'previous-session',
+        status: 'running',
+        current_model: null,
+        updated_at: '2026-05-18T00:00:00.000Z',
+      },
+    ])
+    backendMocks.listAgentDefaults.mockRejectedValue(new Error('agent defaults unavailable'))
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-8'],
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-8',
+        workspaceId: 'ws-prior',
+        agentType: AgentType.OPENCODE,
       }),
     )
   })
