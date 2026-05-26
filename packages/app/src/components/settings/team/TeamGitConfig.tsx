@@ -702,7 +702,7 @@ export function TeamGitConfig() {
               {state === 'connecting' ? t('settings.team.creating', 'Creating...') : t('settings.team.createTeam', 'Create Team')}
             </Button>
             <p className="text-xs text-muted-foreground/70 text-center">
-              {t('settings.team.joinHint', 'To join a team, open the invite link shared by your team admin.')}
+              {t('settings.team.joinHint', 'Use the shared Git repository configured by your team admin.')}
             </p>
           </div>
         </SettingCard>

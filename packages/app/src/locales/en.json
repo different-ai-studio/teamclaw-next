@@ -1677,7 +1677,7 @@
       "renameSuccess": "Team renamed",
       "renameFailed": "Failed to rename team",
       "creatingTeam": "Creating team...",
-      "joinHint": "Open an invite link or ask a teammate to invite you.",
+      "joinHint": "Use the shared Git repository configured by your team admin.",
       "checkingWorkspace": "Checking workspace...",
       "workspacePath": "Workspace Path",
       "gitLocalPath": "Git Path",

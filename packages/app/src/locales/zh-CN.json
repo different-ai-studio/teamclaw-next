@@ -1677,7 +1677,7 @@
       "renameSuccess": "团队已重命名",
       "renameFailed": "重命名失败",
       "creatingTeam": "正在创建团队...",
-      "joinHint": "打开邀请链接，或请队友邀请你加入。",
+      "joinHint": "使用团队管理员配置的共享 Git 仓库。",
       "checkingWorkspace": "检查工作区...",
       "workspacePath": "Workspace 路径",
       "gitLocalPath": "Git 路径",
