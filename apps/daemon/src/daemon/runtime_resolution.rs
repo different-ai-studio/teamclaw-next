@@ -88,6 +88,7 @@ mod tests {
                 broker_url: "tcp://localhost:1883".to_string(),
             },
             agents: crate::config::AgentsConfig::default(),
+            transport: None,
             team_id: None,
             channels: crate::config::ChannelsConfig::default(),
             idle_runtime_timeout_secs: None,

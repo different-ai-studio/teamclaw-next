@@ -1,16 +1,17 @@
 use chrono::Utc;
 use prost::Message;
-use rumqttc::{AsyncClient, QoS};
+use std::sync::Arc;
+use teamclaw_transport::{DeliveryGuarantee, MessagePublisher};
 
 use crate::mqtt::Topics;
 
 pub struct NotifyPublisher {
-    client: AsyncClient,
+    client: Arc<dyn MessagePublisher>,
     team_id: String,
 }
 
 impl NotifyPublisher {
-    pub fn new(client: AsyncClient, team_id: String) -> Self {
+    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String) -> Self {
         Self { client, team_id }
     }
 
@@ -33,7 +34,7 @@ impl NotifyPublisher {
 
         let topic = Topics::new(&self.team_id, target_device_id).device_notify();
         self.client
-            .publish(topic, QoS::AtLeastOnce, false, payload)
+            .publish(&topic, payload, false, DeliveryGuarantee::AtLeastOnce)
             .await?;
         Ok(())
     }

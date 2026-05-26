@@ -6,9 +6,10 @@ use crate::teamclaw::{
     StoredMessage, StoredParticipant, StoredSession, StoredSubmission, TeamclawSessionStore,
 };
 use chrono::Utc;
-use rumqttc::{AsyncClient, QoS};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
+use teamclaw_transport::{DeliveryGuarantee, MessagePublisher};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -16,7 +17,7 @@ const RECENT_EVENT_CACHE_LIMIT: usize = 512;
 
 pub struct SessionManager {
     topics: Topics,
-    client: AsyncClient,
+    client: Arc<dyn MessagePublisher>,
     live_publisher: LivePublisher,
     notify_publisher: NotifyPublisher,
     rpc_server: RpcServer,
@@ -35,7 +36,7 @@ pub struct SessionManager {
 
 impl SessionManager {
     pub fn new(
-        client: AsyncClient,
+        client: Arc<dyn MessagePublisher>,
         team_id: &str,
         device_id: &str,
         actor_id: Option<String>,
@@ -72,7 +73,9 @@ impl SessionManager {
     /// Subscribe to all relevant teamclaw topics.
     pub async fn subscribe_all(&mut self) -> crate::error::Result<()> {
         for topic in self.base_subscription_topics() {
-            self.client.subscribe(topic, QoS::AtLeastOnce).await?;
+            self.client
+                .subscribe(&topic, DeliveryGuarantee::AtLeastOnce)
+                .await?;
         }
         // MQTT uses clean sessions, so a reconnect drops broker-side
         // session/live subscriptions even though this in-memory set still
@@ -1378,7 +1381,9 @@ impl SessionManager {
             return Ok(());
         }
         let topic = self.live_session_topic(session_id);
-        self.client.subscribe(&topic, QoS::AtLeastOnce).await?;
+        self.client
+            .subscribe(&topic, DeliveryGuarantee::AtLeastOnce)
+            .await?;
         info!(session_id, topic = %topic, "subscribed to session live");
         Ok(())
     }
@@ -1545,6 +1550,7 @@ mod tests {
     fn dummy_session_manager(config_dir: &Path) -> SessionManager {
         let (client, _eventloop) =
             rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
+        let client: Arc<dyn MessagePublisher> = Arc::new(client);
         let mut manager =
             SessionManager::new(client, "team1", "dev-a", None, config_dir.to_path_buf()).unwrap();
         manager.skip_live_subscription_io = true;
@@ -1707,6 +1713,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (client, _eventloop) =
             rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
+        let client: Arc<dyn MessagePublisher> = Arc::new(client);
         let mut sm = SessionManager::new(
             client,
             "team1",
@@ -1779,6 +1786,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (client, _eventloop) =
             rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
+        let client: Arc<dyn MessagePublisher> = Arc::new(client);
         let mut sm = SessionManager::new(
             client,
             "team1",
@@ -1810,6 +1818,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (client, _eventloop) =
             rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
+        let client: Arc<dyn MessagePublisher> = Arc::new(client);
         let mut sm = SessionManager::new(
             client,
             "team1",
@@ -1835,6 +1844,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (client, _eventloop) =
             rumqttc::AsyncClient::new(rumqttc::MqttOptions::new("test", "localhost", 1883), 10);
+        let client: Arc<dyn MessagePublisher> = Arc::new(client);
         let mut sm = SessionManager::new(
             client,
             "team1",
