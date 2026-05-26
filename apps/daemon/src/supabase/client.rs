@@ -2,6 +2,10 @@ use crate::supabase::config::SupabaseConfig;
 use crate::supabase::error::{SupabaseError, SupabaseResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
@@ -14,7 +18,7 @@ pub use chrono;
 pub struct SupabaseBackend {
     http: Client,
     cfg: SupabaseConfig,
-    persist_path: Option<std::path::PathBuf>,
+    persist_path: Option<PathBuf>,
     state: Arc<Mutex<AuthState>>,
     /// Serializes `refresh()` so two concurrent callers can't race to spend
     /// the same refresh token (GoTrue invalidates the presented token and
@@ -42,6 +46,62 @@ struct RefreshRequest<'a> {
     refresh_token: &'a str,
 }
 
+struct RefreshFileLock {
+    file: std::fs::File,
+}
+
+impl RefreshFileLock {
+    fn acquire(config_path: &Path) -> SupabaseResult<Self> {
+        let lock_path = config_path.with_file_name(".supabase.toml.lock");
+        if let Some(parent) = lock_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
+        lock_file_exclusive(&file)?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for RefreshFileLock {
+    fn drop(&mut self) {
+        let _ = unlock_file(&self.file);
+    }
+}
+
+#[cfg(unix)]
+fn lock_file_exclusive(file: &std::fs::File) -> std::io::Result<()> {
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn unlock_file(file: &std::fs::File) -> std::io::Result<()> {
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_file_exclusive(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn unlock_file(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
 // Refresh while the access token still has >10 min of life left, so a single
 // slow call won't expire mid-flight.
 const REFRESH_SKEW: Duration = Duration::from_secs(10 * 60);
@@ -58,7 +118,7 @@ impl SupabaseBackend {
 
     fn new_with_persistence(
         cfg: SupabaseConfig,
-        persist_path: Option<std::path::PathBuf>,
+        persist_path: Option<PathBuf>,
     ) -> SupabaseResult<Self> {
         let http = Client::builder().timeout(Duration::from_secs(20)).build()?;
         let state = AuthState {
@@ -104,6 +164,14 @@ impl SupabaseBackend {
             }
         }
 
+        let _file_lock = match &self.persist_path {
+            Some(path) => Some(RefreshFileLock::acquire(path)?),
+            None => None,
+        };
+        if let Some(path) = &self.persist_path {
+            self.reload_persisted_refresh_token(path);
+        }
+
         let rt = { self.state.lock().unwrap().refresh_token.clone() };
         let url = format!("{}/auth/v1/token?grant_type=refresh_token", self.cfg.url);
         let resp = self
@@ -141,6 +209,18 @@ impl SupabaseBackend {
             }
         }
         Ok(body.access_token)
+    }
+
+    fn reload_persisted_refresh_token(&self, path: &Path) {
+        let Ok(persisted) = SupabaseConfig::load(path) else {
+            return;
+        };
+        let mut st = self.state.lock().unwrap();
+        if persisted.refresh_token != st.refresh_token {
+            st.access_token = None;
+            st.expires_at = None;
+            st.refresh_token = persisted.refresh_token;
+        }
     }
 
     /// Expiry of the currently cached access token without triggering a refresh.
@@ -1495,6 +1575,41 @@ mod tests {
 
         let persisted = fs::read(&path).ok();
         assert_eq!(persisted, original);
+    }
+
+    #[tokio::test]
+    async fn refresh_reloads_rotated_token_from_disk_after_file_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("supabase.toml");
+
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/auth/v1/token$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at-new",
+                "expires_in": 3600,
+                "refresh_token": "rt-next"
+            })))
+            .mount(&srv)
+            .await;
+
+        let mut stale_cfg = test_cfg(srv.uri());
+        stale_cfg.refresh_token = "rt-stale".into();
+        let mut disk_cfg = stale_cfg.clone();
+        disk_cfg.refresh_token = "rt-disk".into();
+        disk_cfg.save(&path).unwrap();
+
+        let client = SupabaseBackend::new_with_persistence(stale_cfg, Some(path.clone())).unwrap();
+        let tok = client.access_token().await.unwrap();
+        assert_eq!(tok, "at-new");
+
+        let requests = srv.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["refresh_token"], "rt-disk");
+
+        let persisted = SupabaseConfig::load(&path).unwrap();
+        assert_eq!(persisted.refresh_token, "rt-next");
     }
 
     #[tokio::test]
