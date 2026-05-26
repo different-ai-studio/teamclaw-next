@@ -59,7 +59,7 @@ export function TeamNameCard() {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-medium uppercase tracking-wider text-faint">
-            {t("settings.team.currentTeam", "Current team")}
+            {t("settings.team.currentTeam", "Shared space")}
           </p>
           {editing ? (
             <div className="mt-2 flex items-center gap-2">
@@ -71,7 +71,7 @@ export function TeamNameCard() {
                 maxLength={80}
                 disabled={saving}
                 className="h-9 max-w-xs"
-                placeholder={t("settings.team.teamNamePlaceholder", "Team name")}
+                placeholder={t("settings.team.teamNamePlaceholder", "Shared name")}
               />
               <Button
                 size="icon-sm"
@@ -101,7 +101,7 @@ export function TeamNameCard() {
               <h4 className="truncate text-[18px] font-semibold text-foreground">
                 {loading && !team
                   ? t("common.loading", "Loading…")
-                  : team?.name ?? t("settings.team.noTeam", "No team")}
+                  : team?.name ?? t("settings.team.noTeam", "No shared space")}
               </h4>
               {team && (
                 <Button

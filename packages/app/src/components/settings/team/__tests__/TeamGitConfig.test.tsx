@@ -208,7 +208,7 @@ describe('TeamGitConfig workspace-aware calls', () => {
     fireEvent.change(screen.getByPlaceholderText('teamclaw'), {
       target: { value: 'teamclaw' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /Create Team/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Configure Team Shared Directory/ }))
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_setup', {

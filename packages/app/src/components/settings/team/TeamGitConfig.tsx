@@ -593,16 +593,16 @@ export function TeamGitConfig() {
         </SettingCard>
       )}
 
-      {/* Unconfigured State - Create Team */}
+      {/* Unconfigured State - Configure shared directory */}
       {(state === 'unconfigured' || state === 'connecting') && (
         <SettingCard>
           <div className="mb-4 flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
-            <h4 className="text-sm font-semibold text-foreground/90">{t('settings.team.createTeam', 'Create Team')}</h4>
+            <h4 className="text-sm font-semibold text-foreground/90">{t('settings.team.createTeam', 'Configure Team Shared Directory')}</h4>
           </div>
           <div className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.teamName', 'Team Name')}</label>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.teamName', 'Shared Name')}</label>
               <Input
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
@@ -699,7 +699,7 @@ export function TeamGitConfig() {
               className="w-full"
             >
               <Users className="mr-2 h-4 w-4" />
-              {state === 'connecting' ? t('settings.team.creating', 'Creating...') : t('settings.team.createTeam', 'Create Team')}
+              {state === 'connecting' ? t('settings.team.creating', 'Configuring...') : t('settings.team.createTeam', 'Configure Team Shared Directory')}
             </Button>
             <p className="text-xs text-muted-foreground/70 text-center">
               {t('settings.team.joinHint', 'Use the shared Git repository configured by your team admin.')}

@@ -40,8 +40,8 @@ export function TeamSection() {
     <div className="space-y-6">
       <SectionHeader
         icon={Users}
-        title={t('settings.team.title', 'Team')}
-        description={t('settings.team.description', 'Connect Git to share skills, MCP configs, and knowledge with your team')}
+        title={t('settings.team.title', 'Team Shared')}
+        description={t('settings.team.description', 'Configure the team shared Git repository, local shared directory, and sync status')}
       />
 
       <TeamNameCard />

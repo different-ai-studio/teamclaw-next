@@ -82,6 +82,8 @@ describe('Settings navigation', () => {
     expect(screen.queryByRole('button', { name: 'Channels' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Automation' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'General' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Team Shared' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Team' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Workspace' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Runtimes' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Env Variables' })).toBeNull()
