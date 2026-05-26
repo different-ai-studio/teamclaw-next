@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { actorAvatarColor } from '@/lib/actor-color'
-import { formatRelativeTime } from '@/lib/date-format'
+import { formatDate, formatRelativeTime } from '@/lib/date-format'
 import { useDevicePresenceStore } from '@/stores/device-presence-store'
 import { useUIStore } from '@/stores/ui'
 import { isActorOnline, type ActorRow } from '@/components/panel/ActorsView'
@@ -132,6 +132,47 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
               <dd className="min-w-0 truncate text-foreground">{status || actorTypeLabel}</dd>
               <dt className="text-muted-foreground">{t('actors.detail.type', 'Type')}</dt>
               <dd className="min-w-0 truncate text-foreground">{actorTypeLabel}</dd>
+              {isAgent && displayActor.default_agent_type && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.agentType', 'Agent type')}</dt>
+                  <dd className="min-w-0 truncate text-foreground">{displayActor.default_agent_type}</dd>
+                </>
+              )}
+              {isAgent && displayActor.agent_types && displayActor.agent_types.length > 0 && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.supportedAgentTypes', 'Supported types')}</dt>
+                  <dd className="min-w-0 text-foreground">
+                    <div className="flex flex-wrap gap-1.5">
+                      {displayActor.agent_types.map((tp) => (
+                        <span
+                          key={tp}
+                          className="rounded-md border border-border-soft bg-paper px-2 py-0.5 font-mono text-[11.5px] text-ink-2"
+                        >
+                          {tp}
+                        </span>
+                      ))}
+                    </div>
+                  </dd>
+                </>
+              )}
+              {isAgent && displayActor.user_id && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.authorizedMember', 'Authorized member')}</dt>
+                  <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{displayActor.user_id}</dd>
+                </>
+              )}
+              {isAgent && displayActor.default_workspace_id && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.defaultWorkspace', 'Default workspace')}</dt>
+                  <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{displayActor.default_workspace_id}</dd>
+                </>
+              )}
+              {displayActor.created_at && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.joined', 'Joined')}</dt>
+                  <dd className="min-w-0 truncate text-foreground">{formatDate(displayActor.created_at)}</dd>
+                </>
+              )}
               <dt className="text-muted-foreground">{t('actors.detail.lastActiveLabel', 'Last active')}</dt>
               <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">
                 {lastActive ?? t('actors.detail.never', 'Never')}

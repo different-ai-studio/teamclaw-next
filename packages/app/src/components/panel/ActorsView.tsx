@@ -20,6 +20,11 @@ export type ActorRow = {
   member_status: string | null
   agent_status: string | null
   last_active_at: string | null
+  agent_types?: string[] | null
+  default_agent_type?: string | null
+  default_workspace_id?: string | null
+  user_id?: string | null
+  created_at?: string | null
 }
 
 export interface UseActorsForTeamResult {
@@ -98,6 +103,11 @@ export function useActorsForTeam(): UseActorsForTeamResult {
         member_status: row.member_status ?? null,
         agent_status: row.agent_status ?? null,
         last_active_at: row.last_active_at ?? null,
+        agent_types: row.agent_types ?? null,
+        default_agent_type: row.default_agent_type ?? null,
+        default_workspace_id: row.default_workspace_id ?? null,
+        user_id: row.user_id ?? null,
+        created_at: row.created_at ?? null,
       }))
       setActors(rows)
       setLoading(false)
