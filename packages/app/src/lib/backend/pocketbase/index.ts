@@ -373,15 +373,21 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
         if (!teamId) return { rows: [] };
         const { items } = await pb.list<PocketBaseRecord>("sessions", {
           filter: `team = ${quoteFilter(teamId)}`,
-          sort: "-last_message_at,-created",
           perPage: limit,
         });
-        return { rows: items.map(mapSession) };
+        return {
+          rows: items
+            .map(mapSession)
+            .sort((a, b) => {
+              const aTime = a.last_message_at ?? a.created_at ?? "";
+              const bTime = b.last_message_at ?? b.created_at ?? "";
+              return bTime.localeCompare(aTime);
+            }),
+        };
       },
       async markCurrentActorSessionViewed() {},
       async createSessionShell(input) {
         const row = await pb.create<PocketBaseRecord>("sessions", {
-          id: input.id,
           team: input.teamId,
           title: input.title,
           mode: "collab",
@@ -443,7 +449,6 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
       async listSessionsForTeamSince(teamId, updatedAfter) {
         const { items } = await pb.list<PocketBaseRecord>("sessions", {
           filter: `team = ${quoteFilter(teamId)}`,
-          sort: "updated",
         });
         return items
           .filter((row) => rowDate(row, "updated") > updatedAfter)
@@ -477,7 +482,6 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
     messages: {
       async insertOutgoingMessage(input) {
         const row = await pb.create<PocketBaseRecord>("messages", {
-          id: input.id,
           team: input.teamId,
           session: input.sessionId,
           sender_actor: input.senderActorId,
@@ -499,7 +503,7 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
       async listMessages(sessionId) {
         const { items } = await pb.list<PocketBaseRecord>("messages", {
           filter: `session = ${quoteFilter(sessionId)}`,
-          sort: "created",
+          sort: "sequence",
         });
         return items.map(mapMessage);
       },
@@ -518,10 +522,10 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
         if (agentActorIds.length === 0) return [];
         const { items } = await pb.list<PocketBaseRecord>("agent_runtimes", {
           filter: `team = ${quoteFilter(teamId)}`,
-          sort: "-updated",
         });
         return items
           .filter((row) => agentActorIds.includes(relationId(row.agent) ?? ""))
+          .sort((a, b) => rowDate(b, "updated").localeCompare(rowDate(a, "updated")))
           .map((row) => ({
             id: row.id,
             agent_id: relationId(row.agent) ?? "",
@@ -637,9 +641,14 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
       async listIdeas(teamId) {
         const { items } = await pb.list<PocketBaseRecord>("ideas", {
           filter: `team = ${quoteFilter(teamId)}`,
-          sort: "sort_order,-updated",
         });
-        return items.map((row) => ({
+        return items
+          .sort((a, b) => {
+            const aOrder = typeof a.sort_order === "number" ? a.sort_order : Number.MAX_SAFE_INTEGER;
+            const bOrder = typeof b.sort_order === "number" ? b.sort_order : Number.MAX_SAFE_INTEGER;
+            return aOrder - bOrder || rowDate(b, "updated").localeCompare(rowDate(a, "updated"));
+          })
+          .map((row) => ({
           id: row.id,
           team_id: relationId(row.team) ?? teamId,
           title: typeof row.title === "string" ? row.title : "Untitled",
@@ -912,7 +921,6 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
       async listActorDirectoryForSync(teamId, updatedAfter) {
         const { items } = await pb.list<PocketBaseRecord>("actors", {
           filter: `team = ${quoteFilter(teamId)}`,
-          sort: "updated",
         });
         return items
           .filter((row) => !updatedAfter || rowDate(row, "updated") > updatedAfter)
@@ -931,7 +939,6 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
       async listIdeasForSync(teamId, updatedAfter) {
         const { items } = await pb.list<PocketBaseRecord>("ideas", {
           filter: `team = ${quoteFilter(teamId)}`,
-          sort: "updated",
         });
         return items
           .filter((row) => !updatedAfter || rowDate(row, "updated") > updatedAfter)
