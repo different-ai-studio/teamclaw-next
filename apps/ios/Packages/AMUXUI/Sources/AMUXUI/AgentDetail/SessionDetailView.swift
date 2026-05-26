@@ -174,6 +174,7 @@ public struct SessionDetailView: View {
                         withAnimation(AMUXAnimation.fast) {
                             isPlansPanelPresented.toggle()
                         }
+                        persistPlansPanelState(isPlansPanelPresented)
                     } label: {
                         Image(systemName: "list.bullet.clipboard")
                             .symbolRenderingMode(.hierarchical)
@@ -455,8 +456,14 @@ public struct SessionDetailView: View {
     private func considerAutoOpeningPlans(count: Int) {
         if count > 0 && !hasAutoOpenedPlans {
             hasAutoOpenedPlans = true
-            withAnimation(AMUXAnimation.fast) {
-                isPlansPanelPresented = true
+            if let saved = savedPlansPanelState() {
+                withAnimation(AMUXAnimation.fast) {
+                    isPlansPanelPresented = saved
+                }
+            } else {
+                withAnimation(AMUXAnimation.fast) {
+                    isPlansPanelPresented = true
+                }
             }
         }
         if count == 0 && isPlansPanelPresented {
@@ -464,6 +471,22 @@ public struct SessionDetailView: View {
                 isPlansPanelPresented = false
             }
         }
+    }
+
+    private func plansPanelDefaultsKey() -> String? {
+        guard let sid = viewModel.session?.sessionId, !sid.isEmpty else { return nil }
+        return "session.plansPanelOpen.\(sid)"
+    }
+
+    private func savedPlansPanelState() -> Bool? {
+        guard let key = plansPanelDefaultsKey(),
+              UserDefaults.standard.object(forKey: key) != nil else { return nil }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    private func persistPlansPanelState(_ open: Bool) {
+        guard let key = plansPanelDefaultsKey() else { return }
+        UserDefaults.standard.set(open, forKey: key)
     }
 
     /// Resolve an agent actor id to a member-sheet display name. Falls
