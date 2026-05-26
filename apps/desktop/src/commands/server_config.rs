@@ -13,9 +13,13 @@ const LEGACY_SERVER_CONFIG_FILE: &str = "server-config.json";
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
     #[serde(default)]
+    pub backend_kind: Option<String>,
+    #[serde(default)]
     pub supabase_url: Option<String>,
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
+    #[serde(default)]
+    pub pocketbase_url: Option<String>,
     #[serde(default)]
     pub mqtt_host: Option<String>,
     #[serde(default)]
@@ -67,8 +71,10 @@ fn legacy_teamclaw_json_path() -> PathBuf {
 fn default_server_config() -> ServerConfig {
     let d = services_defaults();
     ServerConfig {
+        backend_kind: Some("supabase".to_string()),
         supabase_url: Some(d.supabase_url.clone()),
         supabase_anon_key: Some(d.supabase_anon_key.clone()),
+        pocketbase_url: None,
         mqtt_host: Some(d.mqtt_host.clone()),
         mqtt_port: Some(d.mqtt_port),
         mqtt_use_tls: Some(d.mqtt_use_tls),
@@ -79,22 +85,62 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
     let defaults = default_server_config();
 
     if config
-        .supabase_url
+        .backend_kind
         .as_deref()
         .unwrap_or("")
         .trim()
         .is_empty()
     {
-        config.supabase_url = defaults.supabase_url;
+        config.backend_kind = defaults.backend_kind;
+    }
+    let is_pocketbase = config.backend_kind.as_deref() == Some("pocketbase");
+    if is_pocketbase {
+        if config
+            .supabase_url
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            config.supabase_url = None;
+        }
+        if config
+            .supabase_anon_key
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            config.supabase_anon_key = None;
+        }
+    } else {
+        if config
+            .supabase_url
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            config.supabase_url = defaults.supabase_url;
+        }
+        if config
+            .supabase_anon_key
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            config.supabase_anon_key = defaults.supabase_anon_key;
+        }
     }
     if config
-        .supabase_anon_key
+        .pocketbase_url
         .as_deref()
         .unwrap_or("")
         .trim()
         .is_empty()
     {
-        config.supabase_anon_key = defaults.supabase_anon_key;
+        config.pocketbase_url = None;
     }
     if config.mqtt_host.as_deref().unwrap_or("").trim().is_empty() {
         config.mqtt_host = defaults.mqtt_host;
@@ -208,8 +254,10 @@ mod tests {
 
     fn sample_config() -> ServerConfig {
         ServerConfig {
+            backend_kind: Some("pocketbase".to_string()),
             supabase_url: Some("https://project.supabase.co".to_string()),
             supabase_anon_key: Some("anon-key".to_string()),
+            pocketbase_url: Some("http://127.0.0.1:8090".to_string()),
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
             mqtt_use_tls: Some(false),
@@ -272,8 +320,10 @@ mod tests {
         write_config_file(
             &current,
             &ServerConfig {
+                backend_kind: None,
                 supabase_url: Some("https://custom.supabase.co".to_string()),
                 supabase_anon_key: None,
+                pocketbase_url: None,
                 mqtt_host: None,
                 mqtt_port: Some(1883),
                 mqtt_use_tls: Some(false),
@@ -297,5 +347,26 @@ mod tests {
         assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
         assert_eq!(loaded.mqtt_port, Some(1883));
         assert_eq!(loaded.mqtt_use_tls, Some(false));
+    }
+
+    #[test]
+    fn preserves_pocketbase_provider_fields() {
+        let config = merge_with_defaults(ServerConfig {
+            backend_kind: Some("pocketbase".to_string()),
+            supabase_url: None,
+            supabase_anon_key: None,
+            pocketbase_url: Some("http://127.0.0.1:8090".to_string()),
+            mqtt_host: Some("mqtt.example.com".to_string()),
+            mqtt_port: Some(1883),
+            mqtt_use_tls: Some(false),
+        });
+
+        assert_eq!(config.backend_kind.as_deref(), Some("pocketbase"));
+        assert_eq!(config.supabase_url, None);
+        assert_eq!(config.supabase_anon_key, None);
+        assert_eq!(
+            config.pocketbase_url.as_deref(),
+            Some("http://127.0.0.1:8090")
+        );
     }
 }

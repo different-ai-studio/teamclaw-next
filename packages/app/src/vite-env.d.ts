@@ -7,8 +7,10 @@ interface ImportMetaEnv {
    * App shell preset: unset / empty / "default" = classic; "workspace" = quick Automation/Skills in sidebar + embedded section panels.
    */
   readonly VITE_UI_VARIANT?: string;
+  readonly VITE_BACKEND_KIND?: string;
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;
+  readonly VITE_POCKETBASE_URL?: string;
   readonly VITE_MQTT_HOST?: string;
   readonly VITE_MQTT_PORT?: string;
   readonly VITE_MQTT_USE_TLS?: string;
@@ -62,8 +64,10 @@ interface Window {
   SpeechRecognition?: typeof SpeechRecognition;
   webkitSpeechRecognition?: typeof webkitSpeechRecognition;
   __TEAMCLAW_SERVER_CONFIG__?: {
+    backendKind?: "supabase" | "pocketbase" | "local";
     supabaseUrl?: string;
     supabaseAnonKey?: string;
+    pocketbaseUrl?: string;
     mqttHost?: string;
     mqttPort?: number;
     mqttUseTls?: boolean;

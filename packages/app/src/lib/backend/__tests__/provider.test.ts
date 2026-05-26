@@ -36,6 +36,8 @@ vi.mock("../supabase", () => ({
 describe("backend provider facade", () => {
   beforeEach(() => {
     vi.resetModules();
+    localStorage.clear();
+    delete window.__TEAMCLAW_SERVER_CONFIG__;
     mocks.hasSupabaseBackendConfig = true;
   });
 
@@ -82,5 +84,26 @@ describe("backend provider facade", () => {
     mocks.hasSupabaseBackendConfig = false;
     expect(hasBackendConfig()).toBe(false);
     expect(BACKEND_CONFIG_MISSING_MESSAGE).toMatch(/Supabase config missing/);
+  });
+
+  it("selects PocketBase when saved server config requests it", async () => {
+    localStorage.setItem(
+      "teamclaw.serverConfig",
+      JSON.stringify({
+        backendKind: "pocketbase",
+        pocketbaseUrl: "http://127.0.0.1:8090",
+      }),
+    );
+
+    const { getBackend, hasBackendConfig } = await import("../provider");
+
+    const backend = getBackend();
+
+    expect(hasBackendConfig()).toBe(true);
+    expect(backend.kind).toBe("pocketbase");
+    await expect(backend.telemetry.listLeaderboard("team-1")).rejects.toMatchObject({
+      category: "Unsupported",
+      operation: "pocketbase.telemetry.listLeaderboard",
+    });
   });
 });

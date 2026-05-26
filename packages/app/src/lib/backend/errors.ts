@@ -4,6 +4,7 @@ export type BackendErrorCategory =
   | "NotFound"
   | "Unauthenticated"
   | "RateLimited"
+  | "Unsupported"
   | "Unknown";
 
 export class BackendError extends Error {
