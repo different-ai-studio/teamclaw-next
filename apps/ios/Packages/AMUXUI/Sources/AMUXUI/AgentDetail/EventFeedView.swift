@@ -381,7 +381,7 @@ public struct ActiveStreamCardView: View {
 //
 // Final assistant bubble for a completed turn. Same look as
 // `EventBubbleView.assistantBubble` (gray glass, markdown, model caption)
-// but with an extra detail-icon overlay top-right that pushes the
+// but with an extra detail-icon overlay bottom-right that pushes the
 // streaming detail when the turn produced any thinking / tool runs the
 // user might want to inspect.
 
@@ -389,7 +389,7 @@ public struct CompletedTurnBubbleView<DetailIcon: View>: View {
     public let finalEvent: AgentEvent
     public let runtime: Runtime?
     public let agentName: String?
-    /// Optional content slot rendered top-right of the bubble. Used to
+    /// Optional content slot rendered bottom-right of the bubble. Used to
     /// host a `NavigationLink(value:)` so taps push the streaming detail
     /// — kept generic here so this view doesn't depend on the navigation
     /// route type defined in `StreamingDetailView.swift`.
@@ -419,7 +419,7 @@ public struct CompletedTurnBubbleView<DetailIcon: View>: View {
                     .padding(.leading, 4)
             }
 
-            ZStack(alignment: .topTrailing) {
+            ZStack(alignment: .bottomTrailing) {
                 VStack(alignment: .leading, spacing: 4) {
                     MarkdownRenderer(content: finalEvent.text ?? "")
                         .frame(maxWidth: .infinity, alignment: .leading)
