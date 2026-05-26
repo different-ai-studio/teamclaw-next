@@ -73,5 +73,7 @@ interface Window {
     mqttHost?: string;
     mqttPort?: number;
     mqttUseTls?: boolean;
+    mqttUsername?: string;
+    mqttPassword?: string;
   };
 }

@@ -17,6 +17,8 @@ describe("server config", () => {
       mqttHost: " mqtt.local ",
       mqttPort: 1883,
       mqttUseTls: false,
+      mqttUsername: " preview-mqtt ",
+      mqttPassword: " preview-secret ",
     });
 
     expect(saved).toMatchObject({
@@ -25,6 +27,8 @@ describe("server config", () => {
       mqttHost: "mqtt.local",
       mqttPort: 1883,
       mqttUseTls: false,
+      mqttUsername: "preview-mqtt",
+      mqttPassword: "preview-secret",
     });
     expect(saved.supabaseUrl).toBeUndefined();
     expect(saved.supabaseAnonKey).toBeUndefined();
@@ -36,6 +40,8 @@ describe("server config", () => {
     expect(await getEffectiveServerConfig()).toMatchObject({
       backendKind: "pocketbase",
       pocketbaseUrl: "http://127.0.0.1:8090",
+      mqttUsername: "preview-mqtt",
+      mqttPassword: "preview-secret",
     });
   });
 });

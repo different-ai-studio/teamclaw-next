@@ -86,6 +86,8 @@ mod tests {
             },
             mqtt: crate::config::MqttConfig {
                 broker_url: "tcp://localhost:1883".to_string(),
+                username: None,
+                password: None,
             },
             agents: crate::config::AgentsConfig::default(),
             transport: None,

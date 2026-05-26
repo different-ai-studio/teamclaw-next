@@ -26,6 +26,10 @@ pub struct ServerConfig {
     pub mqtt_port: Option<u16>,
     #[serde(default)]
     pub mqtt_use_tls: Option<bool>,
+    #[serde(default)]
+    pub mqtt_username: Option<String>,
+    #[serde(default)]
+    pub mqtt_password: Option<String>,
 }
 
 fn config_base_dir() -> PathBuf {
@@ -78,6 +82,8 @@ fn default_server_config() -> ServerConfig {
         mqtt_host: Some(d.mqtt_host.clone()),
         mqtt_port: Some(d.mqtt_port),
         mqtt_use_tls: Some(d.mqtt_use_tls),
+        mqtt_username: None,
+        mqtt_password: None,
     }
 }
 
@@ -150,6 +156,24 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
     }
     if config.mqtt_use_tls.is_none() {
         config.mqtt_use_tls = defaults.mqtt_use_tls;
+    }
+    if config
+        .mqtt_username
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        config.mqtt_username = None;
+    }
+    if config
+        .mqtt_password
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        config.mqtt_password = None;
     }
 
     config
@@ -261,6 +285,8 @@ mod tests {
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
             mqtt_use_tls: Some(false),
+            mqtt_username: Some("mqtt-user".to_string()),
+            mqtt_password: Some("mqtt-password".to_string()),
         }
     }
 
@@ -327,6 +353,8 @@ mod tests {
                 mqtt_host: None,
                 mqtt_port: Some(1883),
                 mqtt_use_tls: Some(false),
+                mqtt_username: None,
+                mqtt_password: None,
             },
         )
         .unwrap();
@@ -359,6 +387,8 @@ mod tests {
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
             mqtt_use_tls: Some(false),
+            mqtt_username: Some("mqtt-user".to_string()),
+            mqtt_password: Some("mqtt-password".to_string()),
         });
 
         assert_eq!(config.backend_kind.as_deref(), Some("pocketbase"));
@@ -368,5 +398,7 @@ mod tests {
             config.pocketbase_url.as_deref(),
             Some("http://127.0.0.1:8090")
         );
+        assert_eq!(config.mqtt_username.as_deref(), Some("mqtt-user"));
+        assert_eq!(config.mqtt_password.as_deref(), Some("mqtt-password"));
     }
 }

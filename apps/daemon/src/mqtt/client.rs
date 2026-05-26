@@ -74,7 +74,9 @@ impl MqttClient {
 
         let broker = MqttBroker::parse(&config.mqtt.broker_url);
         let mut opts = MqttOptions::new(&client_id, &broker.host, broker.port);
-        opts.set_credentials(actor_id, token);
+        let username = config.mqtt.username.as_deref().unwrap_or(actor_id);
+        let password = config.mqtt.password.as_deref().unwrap_or(token);
+        opts.set_credentials(username, password);
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(true);
         // ACP live events can carry full LLM chunks and tool-call payloads.
@@ -172,6 +174,8 @@ mod tests {
             },
             mqtt: MqttConfig {
                 broker_url: "mqtt://localhost:1883".into(),
+                username: None,
+                password: None,
             },
             agents: AgentsConfig::default(),
             transport: None,

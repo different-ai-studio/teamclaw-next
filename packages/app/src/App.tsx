@@ -774,11 +774,15 @@ function AppContent() {
           actorId,
         });
 
+        const configuredMqttUsername = serverConfig.mqttUsername?.trim();
+        const configuredMqttPassword = serverConfig.mqttPassword?.trim();
+        const useConfiguredMqttCredentials = Boolean(configuredMqttUsername && configuredMqttPassword);
+
         await mqttConnect({
           brokerHost,
           brokerPort,
-          username: actorId,
-          password: accessToken,
+          username: useConfiguredMqttCredentials ? configuredMqttUsername! : actorId,
+          password: useConfiguredMqttCredentials ? configuredMqttPassword! : accessToken,
           clientId: `teamclaw-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
           teamId: firstTeamId,
           useTls,

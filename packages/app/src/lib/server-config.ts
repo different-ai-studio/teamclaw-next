@@ -10,6 +10,8 @@ export interface ServerConfig {
   mqttHost?: string;
   mqttPort?: number;
   mqttUseTls?: boolean;
+  mqttUsername?: string;
+  mqttPassword?: string;
 }
 
 const STORAGE_KEY = "teamclaw.serverConfig";
@@ -48,6 +50,8 @@ function envConfig(): ServerConfig {
     mqttHost: import.meta.env.VITE_MQTT_HOST,
     mqttPort: Number.isFinite(mqttPort) ? mqttPort : undefined,
     mqttUseTls,
+    mqttUsername: import.meta.env.VITE_MQTT_USERNAME,
+    mqttPassword: import.meta.env.VITE_MQTT_PASSWORD,
   };
 }
 
@@ -65,6 +69,8 @@ function normalizeServerConfig(config: ServerConfig): ServerConfig {
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
     mqttUseTls: config.mqttUseTls,
+    mqttUsername: config.mqttUsername?.trim() || undefined,
+    mqttPassword: config.mqttPassword?.trim() || undefined,
   };
 }
 
@@ -79,6 +85,8 @@ export function getEffectiveServerConfigSync(): ServerConfig {
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
+    mqttUsername: saved.mqttUsername ?? env.mqttUsername,
+    mqttPassword: saved.mqttPassword ?? env.mqttPassword,
   };
 }
 
@@ -114,5 +122,7 @@ export async function getEffectiveServerConfig(): Promise<ServerConfig> {
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
+    mqttUsername: saved.mqttUsername ?? env.mqttUsername,
+    mqttPassword: saved.mqttPassword ?? env.mqttPassword,
   };
 }
