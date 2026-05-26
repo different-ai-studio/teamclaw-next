@@ -1,8 +1,10 @@
 import * as React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const mockInvoke = vi.hoisted(() => vi.fn())
+const mockUpsertTeamWorkspaceConfig = vi.hoisted(() => vi.fn())
+const mockSupabaseRpc = vi.hoisted(() => vi.fn())
 
 const workspaceStoreMocks = vi.hoisted(() => ({
   workspacePath: '/workspace-a',
@@ -41,6 +43,16 @@ vi.mock('@/lib/build-config', () => ({
   },
   TEAM_SYNCED_EVENT: 'team-synced',
   TEAM_REPO_DIR: 'teamclaw-team',
+}))
+
+vi.mock('@/lib/supabase-client', () => ({
+  supabase: {
+    rpc: (...args: unknown[]) => mockSupabaseRpc(...args),
+  },
+}))
+
+vi.mock('@/lib/team-workspace-config', () => ({
+  upsertTeamWorkspaceConfig: (...args: unknown[]) => mockUpsertTeamWorkspaceConfig(...args),
 }))
 
 vi.mock('@/stores/workspace', () => ({
@@ -104,6 +116,8 @@ describe('TeamGitConfig workspace-aware calls', () => {
     workspaceStoreMocks.workspaceReady = true
     teamMembersStoreMocks.loadMembers.mockReset()
     teamMembersStoreMocks.loadMyRole.mockReset()
+    mockUpsertTeamWorkspaceConfig.mockReset()
+    mockSupabaseRpc.mockReset()
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       value: {
         transformCallback: vi.fn(() => 0),
@@ -127,7 +141,7 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
   })
 
-  it('passes workspacePath when initializing secrets for a configured Git team', async () => {
+  it('loads configured shared directory without initializing legacy git secrets', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
       if (cmd === 'get_team_config') {
@@ -135,10 +149,11 @@ describe('TeamGitConfig workspace-aware calls', () => {
           gitUrl: 'https://example.com/repo.git',
           enabled: false,
           lastSyncAt: null,
+          sharedDirName: 'teamclaw',
+          envSecret: '00'.repeat(32),
           teamId: 'team-123',
         }
       }
-      if (cmd === 'init_git_team_secrets') return null
       if (cmd === 'get_team_status') return { active: true, llm: null }
       if (cmd === 'get_device_info') return { nodeId: 'node-123' }
       return null
@@ -149,12 +164,74 @@ describe('TeamGitConfig workspace-aware calls', () => {
     expect(await screen.findByText('Runtime Details')).toBeTruthy()
     expect(screen.getByText('Workspace Path')).toBeTruthy()
     expect(screen.getByText('/workspace-a')).toBeTruthy()
+    expect(screen.getByText('/workspace-a/teamclaw')).toBeTruthy()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
+  })
+
+  it('creates a team, sets up the shared git directory, and saves envSecret locally', async () => {
+    mockSupabaseRpc.mockImplementation((fn: string) => {
+      if (fn === 'create_team') {
+        return { single: vi.fn().mockResolvedValue({ data: { id: 'team-123' }, error: null }) }
+      }
+      if (fn === 'create_team_invite') {
+        return Promise.resolve({ data: { deeplink: 'amux://invite/abc' }, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    })
+    mockUpsertTeamWorkspaceConfig.mockResolvedValue({
+      teamId: 'team-123',
+      gitUrl: 'https://example.com/repo.git',
+      gitBranch: 'main',
+      gitToken: null,
+      aiGatewayEndpoint: null,
+      sharedDirName: 'teamclaw',
+      envSecret: '11'.repeat(32),
+      lastSyncAt: null,
+      lastSyncError: null,
+      enabled: true,
+      updatedAt: '2026-05-26T00:00:00.000Z',
+    })
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
+      if (cmd === 'get_team_config') return null
+      if (cmd === 'team_shared_git_setup') return { sharedDirPath: '/workspace-a/teamclaw' }
+      if (cmd === 'save_team_config') return null
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    fireEvent.change(await screen.findByPlaceholderText('My Team'), {
+      target: { value: 'My Team' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/team/shared-workspace.git'), {
+      target: { value: 'https://example.com/repo.git' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('teamclaw'), {
+      target: { value: 'teamclaw' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Create Team/ }))
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('init_git_team_secrets', {
-        teamId: 'team-123',
-        workspacePath: '/workspace-a',
+      expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_setup', {
+        config: {
+          workspacePath: '/workspace-a',
+          gitUrl: 'https://example.com/repo.git',
+          gitBranch: null,
+          gitToken: null,
+          sharedDirName: 'teamclaw',
+        },
       })
     })
+    expect(mockInvoke).toHaveBeenCalledWith('save_team_config', {
+      team: expect.objectContaining({
+        teamId: 'team-123',
+        sharedDirName: 'teamclaw',
+        envSecret: '11'.repeat(32),
+      }),
+      workspacePath: '/workspace-a',
+    })
+    expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
   })
 })

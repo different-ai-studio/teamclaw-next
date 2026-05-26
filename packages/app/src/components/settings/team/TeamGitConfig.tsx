@@ -28,7 +28,7 @@ import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
 import { useTeamMembersStore } from '@/stores/team-members'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { buildConfig, TEAM_SYNCED_EVENT, TEAM_REPO_DIR } from '@/lib/build-config'
+import { buildConfig, TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import {
   buildTeamProviderConfig,
   loadTeamProviderFormState,
@@ -52,7 +52,7 @@ import {
 } from '@/components/ui/collapsible'
 import { formatBytes, type SyncPrecheckFile } from './syncPrecheck'
 import { supabase } from '@/lib/supabase-client'
-import { upsertTeamWorkspaceConfig } from '@/lib/team-workspace-config'
+import { upsertTeamWorkspaceConfig, type TeamWorkspaceConfig } from '@/lib/team-workspace-config'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,8 @@ interface TeamConfig {
   gitUrl: string
   enabled: boolean
   lastSyncAt: string | null
+  sharedDirName: string
+  envSecret?: string | null
   gitToken?: string | null
   gitBranch?: string | null
   teamId?: string | null
@@ -103,8 +105,9 @@ async function createTeam(args: {
   gitUrl: string
   gitBranch?: string
   gitToken?: string
+  sharedDirName?: string
   aiGatewayEndpoint?: string
-}): Promise<{ teamId: string; deeplink: string }> {
+}): Promise<{ teamId: string; deeplink: string; workspaceConfig: TeamWorkspaceConfig }> {
   // 1. Create team. Backend trigger inserts the owner actor + team_members row.
   const { data: created, error: createErr } = await supabase
     .rpc('create_team', { p_name: args.teamName })
@@ -113,12 +116,13 @@ async function createTeam(args: {
   const teamId = (created as { id: string }).id
 
   // 2. Insert workspace config.
-  await upsertTeamWorkspaceConfig({
+  const workspaceConfig = await upsertTeamWorkspaceConfig({
     teamId,
     gitUrl:            args.gitUrl,
     gitBranch:         args.gitBranch ?? 'main',
     gitToken:          args.gitToken ?? null,
     aiGatewayEndpoint: args.aiGatewayEndpoint ?? null,
+    sharedDirName:     args.sharedDirName ?? 'teamclaw',
     enabled:           true,
     updatedAt:         new Date().toISOString(),
   })
@@ -133,7 +137,7 @@ async function createTeam(args: {
   })
   if (invErr) throw new Error(invErr.message)
   const deeplink = ((invite as { deeplink: string }).deeplink).replace(/^amux:/, 'teamclaw:')
-  return { teamId, deeplink }
+  return { teamId, deeplink, workspaceConfig }
 }
 
 // ─── Reusable Components (local to git config) ─────────────────────────────
@@ -168,9 +172,8 @@ export function TeamGitConfig() {
   const [gitUrl, setGitUrl] = React.useState('')
   const [gitBranch, setGitBranch] = React.useState('')
   const [gitToken, setGitToken] = React.useState('')
+  const [sharedDirName, setSharedDirName] = React.useState('teamclaw')
   const [showToken, setShowToken] = React.useState(false)
-  const [teamSecret, setTeamSecret] = React.useState<string | null>(null)
-  const [showTeamSecret, setShowTeamSecret] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [connectStep, setConnectStep] = React.useState('')
   const [disconnectDialogOpen, setDisconnectDialogOpen] = React.useState(false)
@@ -199,7 +202,8 @@ export function TeamGitConfig() {
 
   // Detect if current URL is HTTPS (needs token auth)
   const isHttpsUrl = gitUrl.trim().startsWith('https://') || gitUrl.trim().startsWith('http://')
-  const gitLocalPath = workspacePath ? `${workspacePath}/${TEAM_REPO_DIR}` : TEAM_REPO_DIR
+  const effectiveSharedDirName = sharedDirName.trim() || 'teamclaw'
+  const gitLocalPath = workspacePath ? `${workspacePath}/${effectiveSharedDirName}` : effectiveSharedDirName
 
   // ─── Initialize: check git + load config ─────────────────────────────────
 
@@ -227,31 +231,20 @@ export function TeamGitConfig() {
 
       const config = await tauriInvoke<TeamConfig | null>('get_team_config', workspaceArgs)
       if (config) {
-        setTeamConfig(config)
-        setGitUrl(config.gitUrl)
-        if (config.gitToken) setGitToken(config.gitToken)
-
-        // Init shared secrets if team_id exists
-        if (config.teamId) {
-          try {
-            await tauriInvoke('init_git_team_secrets', {
-              teamId: config.teamId,
-              ...workspaceArgs,
-            })
-          } catch (err) {
-            console.warn('Failed to init shared secrets:', err)
-          }
-
-          tauriInvoke<string>('get_git_team_secret', {
-            teamId: config.teamId,
-            ...workspaceArgs,
-          }).then(setTeamSecret).catch(() => setTeamSecret(null))
+        const normalizedConfig = {
+          ...config,
+          sharedDirName: config.sharedDirName || 'teamclaw',
         }
+        setTeamConfig(normalizedConfig)
+        setGitUrl(normalizedConfig.gitUrl)
+        setGitBranch(normalizedConfig.gitBranch ?? '')
+        if (normalizedConfig.gitToken) setGitToken(normalizedConfig.gitToken)
+        setSharedDirName(normalizedConfig.sharedDirName)
 
         setState('connected')
 
-        if (config.enabled) {
-          performSync(false)
+        if (normalizedConfig.enabled) {
+          performSync(false, false, normalizedConfig)
         }
       } else {
         setState('unconfigured')
@@ -339,23 +332,41 @@ export function TeamGitConfig() {
 
   const handleCreate = async () => {
     if (!teamName.trim() || !gitUrl.trim()) return
+    if (!workspacePath) {
+      setErrorMessage(t('settings.team.noWorkspace', 'No workspace selected'))
+      return
+    }
     setState('connecting')
     setErrorMessage(null)
     try {
       setConnectStep(t('settings.team.creatingTeam', 'Creating team...'))
-      const { teamId, deeplink } = await createTeam({
+      const dirName = sharedDirName.trim() || 'teamclaw'
+      const { teamId, deeplink, workspaceConfig } = await createTeam({
         teamName: teamName.trim(),
         gitUrl:   gitUrl.trim(),
         gitBranch: gitBranch.trim() || undefined,
         gitToken:  isHttpsUrl && gitToken.trim() ? gitToken.trim() : undefined,
+        sharedDirName: dirName,
       })
 
-      setConnectStep(t('settings.team.initializingRepo', 'Initializing repository...'))
+      setConnectStep(t('settings.team.initializingRepo', 'Initializing shared directory...'))
+      await tauriInvoke('team_shared_git_setup', {
+        config: {
+          workspacePath,
+          gitUrl: gitUrl.trim(),
+          gitBranch: gitBranch.trim() || null,
+          gitToken: isHttpsUrl && gitToken.trim() ? gitToken.trim() : null,
+          sharedDirName: workspaceConfig.sharedDirName,
+        },
+      })
+
       const now = new Date().toISOString()
       const newConfig: TeamConfig = {
         gitUrl: gitUrl.trim(),
         enabled: true,
         lastSyncAt: now,
+        sharedDirName: workspaceConfig.sharedDirName,
+        envSecret: workspaceConfig.envSecret,
         teamId,
         ...(isHttpsUrl && gitToken.trim() ? { gitToken: gitToken.trim() } : {}),
         ...(gitBranch.trim() ? { gitBranch: gitBranch.trim() } : {}),
@@ -368,10 +379,6 @@ export function TeamGitConfig() {
       setTeamConfig(newConfig)
       setCreatedTeamId(teamId)
       setCreatedInviteDeeplink(deeplink)
-      tauriInvoke<string>('get_git_team_secret', {
-        teamId,
-        ...workspaceArgs,
-      }).then(setTeamSecret).catch(() => setTeamSecret(null))
       setState('connected')
 
     } catch (err) {
@@ -384,14 +391,26 @@ export function TeamGitConfig() {
 
   // ─── Sync flow ─────────────────────────────────────────────────────
 
-  const performSync = async (updateUi = true, force = false) => {
+  const performSync = async (updateUi = true, force = false, configForSync: TeamConfig | null = teamConfig) => {
     if (updateUi) {
       setState('syncing')
     }
     setErrorMessage(null)
 
     try {
-      const result = await tauriInvoke<TeamGitResult>('team_sync_repo', { force, ...workspaceArgs })
+      if (!workspacePath || !configForSync) {
+        throw new Error(t('settings.team.noWorkspace', 'No workspace selected'))
+      }
+      const result = await tauriInvoke<TeamGitResult>('team_shared_git_sync', {
+        config: {
+          workspacePath,
+          gitUrl: configForSync.gitUrl,
+          gitBranch: configForSync.gitBranch || null,
+          gitToken: configForSync.gitToken || null,
+          sharedDirName: configForSync.sharedDirName || 'teamclaw',
+        },
+        force,
+      })
 
       if (result.needsConfirmation) {
         setPendingUpdateUi(updateUi)
@@ -418,7 +437,7 @@ export function TeamGitConfig() {
 
       const now = new Date().toISOString()
       const updatedConfig: TeamConfig = {
-        ...teamConfig!,
+        ...configForSync,
         lastSyncAt: now,
       }
       await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
@@ -451,7 +470,8 @@ export function TeamGitConfig() {
       setTeamConfig(null)
       setGitUrl('')
       setGitToken('')
-      setTeamSecret(null)
+      setGitBranch('')
+      setSharedDirName('teamclaw')
       setState('unconfigured')
     } catch (err) {
       console.error('Team disconnect error:', err)
@@ -594,6 +614,18 @@ export function TeamGitConfig() {
                 />
               </div>
             </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                {t('settings.team.sharedDirName', 'Shared Directory')}
+              </label>
+              <Input
+                value={sharedDirName}
+                onChange={(e) => setSharedDirName(e.target.value)}
+                placeholder="teamclaw"
+                className="bg-background/50 font-mono text-xs"
+                disabled={state === 'connecting'}
+              />
+            </div>
             {isHttpsUrl && (
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
@@ -682,7 +714,7 @@ export function TeamGitConfig() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{t('settings.team.teamRepo', 'Team Repository')}</p>
+                      <p className="text-sm font-medium">{t('settings.team.teamRepo', 'Team Shared Directory')}</p>
                       <span className={cn(
                         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
                         teamConfig.enabled
@@ -786,7 +818,7 @@ export function TeamGitConfig() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
-                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local Git path, team secret, and this device identity')}</p>
+                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory, team id, and this device identity')}</p>
                 </div>
               </div>
 
@@ -815,36 +847,10 @@ export function TeamGitConfig() {
                 )}
 
                 <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-                  <span className="text-xs text-muted-foreground">{t('settings.team.teamSecret', 'Team Secret')}</span>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <code className="min-w-0 flex-1 break-all font-mono text-xs text-foreground">
-                      {teamSecret
-                        ? showTeamSecret
-                          ? teamSecret
-                          : '••••••••••••••••••••••••••••••••'
-                        : t('settings.team.teamSecretUnavailable', 'Not saved on this device')}
-                    </code>
-                    {teamSecret && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 shrink-0 p-0"
-                          onClick={() => setShowTeamSecret((v) => !v)}
-                        >
-                          {showTeamSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 shrink-0 p-0"
-                          onClick={() => copyToClipboard(teamSecret, t('common.copied', 'Copied!'))}
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
+                  <span className="text-xs text-muted-foreground">{t('settings.team.sharedDirName', 'Shared Directory')}</span>
+                  <code className="min-w-0 break-all font-mono text-xs text-foreground">
+                    {teamConfig.sharedDirName || 'teamclaw'}
+                  </code>
                 </div>
               </div>
 
@@ -964,9 +970,9 @@ export function TeamGitConfig() {
       <Dialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
-            <DialogTitle>{t('settings.team.disconnectTitle', 'Disconnect Team Repository')}</DialogTitle>
+            <DialogTitle>{t('settings.team.disconnectTitle', 'Disconnect Team Shared Directory')}</DialogTitle>
             <DialogDescription>
-              {t('settings.team.disconnectConfirm', { defaultValue: 'Are you sure you want to disconnect the team repository? The {{teamRepoDir}} directory and all its content will be permanently deleted.', teamRepoDir: TEAM_REPO_DIR })}
+              {t('settings.team.disconnectConfirm', { defaultValue: 'Are you sure you want to disconnect the team shared directory? The {{teamRepoDir}} directory and all its content will be permanently deleted.', teamRepoDir: teamConfig?.sharedDirName || 'teamclaw' })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1093,7 +1099,7 @@ export function TeamGitConfig() {
                   {t('settings.team.repoGuide.usageTitle', 'Usage')}
                 </h5>
                 <ol className="list-decimal list-inside space-y-1">
-                  <li>{t('settings.team.repoGuide.usage1', { defaultValue: 'Clone the repo; {{appName}} will create a {{teamRepoDir}} folder in your workspace.', appName: buildConfig.app.name, teamRepoDir: TEAM_REPO_DIR })}</li>
+                  <li>{t('settings.team.repoGuide.usage1', { defaultValue: 'Clone the repo; {{appName}} will create a {{teamRepoDir}} folder in your workspace.', appName: buildConfig.app.name, teamRepoDir: effectiveSharedDirName })}</li>
                   <li>{t('settings.team.repoGuide.usage2', 'Whitelist .gitignore: only the three directories are tracked.')}</li>
                   <li>{t('settings.team.repoGuide.usage3', 'In Cursor, use @ to reference Skills and Knowledge.')}</li>
                 </ol>
