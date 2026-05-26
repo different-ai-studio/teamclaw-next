@@ -3,21 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const mockInvoke = vi.hoisted(() => vi.fn())
-const mockUpsertTeamWorkspaceConfig = vi.hoisted(() => vi.fn())
-const mockSupabaseRpc = vi.hoisted(() => vi.fn())
-
 const workspaceStoreMocks = vi.hoisted(() => ({
   workspacePath: '/workspace-a',
   workspaceReady: true,
-}))
-
-const teamMembersStoreMocks = vi.hoisted(() => ({
-  loadMembers: vi.fn(),
-  loadMyRole: vi.fn(),
-}))
-
-const currentTeamStoreMocks = vi.hoisted(() => ({
-  team: { id: 'team-current', name: 'Current Team', slug: 'current-team' } as null | { id: string; name: string; slug: string },
 }))
 
 vi.mock('react-i18next', () => ({
@@ -49,28 +37,9 @@ vi.mock('@/lib/build-config', () => ({
   TEAM_REPO_DIR: 'teamclaw-team',
 }))
 
-vi.mock('@/lib/supabase-client', () => ({
-  supabase: {
-    rpc: (...args: unknown[]) => mockSupabaseRpc(...args),
-  },
-}))
-
-vi.mock('@/lib/team-workspace-config', () => ({
-  upsertTeamWorkspaceConfig: (...args: unknown[]) => mockUpsertTeamWorkspaceConfig(...args),
-}))
-
 vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: (sel: (s: Record<string, unknown>) => unknown) =>
     sel(workspaceStoreMocks as unknown as Record<string, unknown>),
-}))
-
-vi.mock('@/stores/team-members', () => ({
-  useTeamMembersStore: () => teamMembersStoreMocks,
-}))
-
-vi.mock('@/stores/current-team', () => ({
-  useCurrentTeamStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel(currentTeamStoreMocks as unknown as Record<string, unknown>),
 }))
 
 vi.mock('./HostLlmConfig', () => ({
@@ -123,11 +92,6 @@ describe('TeamGitConfig workspace-aware calls', () => {
     vi.clearAllMocks()
     workspaceStoreMocks.workspacePath = '/workspace-a'
     workspaceStoreMocks.workspaceReady = true
-    currentTeamStoreMocks.team = { id: 'team-current', name: 'Current Team', slug: 'current-team' }
-    teamMembersStoreMocks.loadMembers.mockReset()
-    teamMembersStoreMocks.loadMyRole.mockReset()
-    mockUpsertTeamWorkspaceConfig.mockReset()
-    mockSupabaseRpc.mockReset()
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       value: {
         transformCallback: vi.fn(() => 0),
@@ -161,7 +125,6 @@ describe('TeamGitConfig workspace-aware calls', () => {
           lastSyncAt: null,
           sharedDirName: 'teamclaw',
           envSecret: '00'.repeat(32),
-          teamId: 'team-123',
         }
       }
       if (cmd === 'get_team_status') return { active: true, llm: null }
@@ -179,20 +142,7 @@ describe('TeamGitConfig workspace-aware calls', () => {
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
   })
 
-  it('configures the current team shared git directory without creating a team', async () => {
-    mockUpsertTeamWorkspaceConfig.mockResolvedValue({
-      teamId: 'team-current',
-      gitUrl: 'https://example.com/repo.git',
-      gitBranch: 'main',
-      gitToken: null,
-      aiGatewayEndpoint: null,
-      sharedDirName: 'teamclaw',
-      envSecret: '11'.repeat(32),
-      lastSyncAt: null,
-      lastSyncError: null,
-      enabled: true,
-      updatedAt: '2026-05-26T00:00:00.000Z',
-    })
+  it('configures the workspace shared git directory locally without a team id', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
       if (cmd === 'get_team_config') return null
@@ -227,20 +177,18 @@ describe('TeamGitConfig workspace-aware calls', () => {
     })
     expect(mockInvoke).toHaveBeenCalledWith('save_team_config', {
       team: expect.objectContaining({
-        teamId: 'team-current',
+        gitUrl: 'https://example.com/repo.git',
         sharedDirName: 'teamclaw',
-        envSecret: '11'.repeat(32),
+        envSecret: expect.stringMatching(/^[0-9a-f]{64}$/),
       }),
       workspacePath: '/workspace-a',
     })
+    const saveCall = mockInvoke.mock.calls.find((call) => call[0] === 'save_team_config')
+    expect(saveCall?.[1]).toEqual({
+      team: expect.not.objectContaining({ teamId: expect.anything() }),
+      workspacePath: '/workspace-a',
+    })
     expect(mockInvoke).not.toHaveBeenCalledWith('init_git_team_secrets', expect.anything())
-    expect(mockSupabaseRpc).not.toHaveBeenCalledWith('create_team_invite', expect.anything())
-    expect(mockSupabaseRpc).not.toHaveBeenCalledWith('create_team', expect.anything())
-    expect(mockUpsertTeamWorkspaceConfig).toHaveBeenCalledWith(expect.objectContaining({
-      teamId: 'team-current',
-      gitUrl: 'https://example.com/repo.git',
-      sharedDirName: 'teamclaw',
-    }))
   })
 
   it('syncs configured teams through the shared git command', async () => {
@@ -255,7 +203,6 @@ describe('TeamGitConfig workspace-aware calls', () => {
           lastSyncAt: null,
           sharedDirName: 'teamclaw',
           envSecret: '00'.repeat(32),
-          teamId: 'team-123',
         }
       }
       if (cmd === 'team_shared_git_sync') return { success: true, message: 'Synced' }

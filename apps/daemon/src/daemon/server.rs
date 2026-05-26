@@ -24,7 +24,8 @@ use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
-use crate::supabase::{SupabaseBackend, SupabaseConfig, TeamWorkspaceConfigRow};
+use crate::supabase::{SupabaseBackend, SupabaseConfig};
+use crate::team_shared_git::TeamSharedGitConfig;
 // SupabaseConfig + SupabaseBackend stay imported: the daemon boot path constructs
 // the concrete impl from `supabase.toml`, then hands out `Arc<dyn Backend>` to
 // the rest of the daemon.
@@ -48,13 +49,17 @@ struct StartRuntimeError {
 
 fn load_team_runtime_env(
     workspace_root: &Path,
-    config: &TeamWorkspaceConfigRow,
+    config: &TeamSharedGitConfig,
 ) -> HashMap<String, String> {
-    match crate::team_shared_env::load_team_env(
-        workspace_root,
-        &config.shared_dir_name,
-        &config.env_secret,
-    ) {
+    let Some(env_secret) = config
+        .env_secret
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return HashMap::new();
+    };
+    match crate::team_shared_env::load_team_env(workspace_root, &config.shared_dir_name, env_secret)
+    {
         Ok(env) => env,
         Err(e) => {
             warn!(
@@ -67,7 +72,7 @@ fn load_team_runtime_env(
     }
 }
 
-fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamWorkspaceConfigRow) {
+fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamSharedGitConfig) {
     match crate::team_shared_git::setup_or_sync_shared_dir(workspace_root, config) {
         Ok(status) => {
             if status.synced {
@@ -86,6 +91,34 @@ fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamWorksp
             );
         }
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct WorkspaceTeamclawConfig {
+    team: Option<TeamSharedGitConfig>,
+}
+
+fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
+    let path = workspace_root.join(".teamclaw").join("teamclaw.json");
+    let body = match std::fs::read_to_string(&path) {
+        Ok(body) => body,
+        Err(_) => return None,
+    };
+    let parsed: WorkspaceTeamclawConfig = match serde_json::from_str(&body) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            warn!(path = %path.display(), "failed to parse workspace team shared config: {e}");
+            return None;
+        }
+    };
+    parsed.team.filter(|team| {
+        team.enabled
+            && team
+                .git_url
+                .as_deref()
+                .map(|url| !url.trim().is_empty())
+                .unwrap_or(false)
+    })
 }
 
 /// Per-session plan emitted by
@@ -684,24 +717,14 @@ impl DaemonServer {
     }
 
     async fn sync_team_shared_dirs_for_known_workspaces(&self) {
-        let config = match self
-            .supabase
-            .get_team_workspace_config(self.supabase.team_id())
-            .await
-        {
-            Ok(Some(config)) => config,
-            Ok(None) => return,
-            Err(e) => {
-                warn!("failed to fetch team workspace config for startup sync: {e}");
-                return;
-            }
-        };
-
         for workspace in &self.workspaces.workspaces {
             if workspace.path.trim().is_empty() {
                 continue;
             }
-            sync_team_shared_dir_for_workspace(Path::new(&workspace.path), &config);
+            let workspace_root = Path::new(&workspace.path);
+            if let Some(config) = load_team_shared_config_for_workspace(workspace_root) {
+                sync_team_shared_dir_for_workspace(workspace_root, &config);
+            }
         }
     }
 
@@ -3415,18 +3438,9 @@ impl DaemonServer {
         }
 
         let session_id_opt = (!session_id.is_empty()).then_some(session_id);
-        let team_workspace_config = match self
-            .supabase
-            .get_team_workspace_config(self.supabase.team_id())
-            .await
-        {
-            Ok(config) => config,
-            Err(e) => {
-                warn!("failed to fetch team workspace config: {e}");
-                None
-            }
-        };
-        let extra_env = if let Some(config) = team_workspace_config.as_ref() {
+        let team_shared_config =
+            load_team_shared_config_for_workspace(Path::new(&resolved_worktree));
+        let extra_env = if let Some(config) = team_shared_config.as_ref() {
             sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), config);
             load_team_runtime_env(Path::new(&resolved_worktree), config)
         } else {

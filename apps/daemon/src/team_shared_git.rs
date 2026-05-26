@@ -1,6 +1,27 @@
-use crate::supabase::TeamWorkspaceConfigRow;
+use serde::Deserialize;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSharedGitConfig {
+    #[serde(default)]
+    pub git_url: Option<String>,
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub git_token: Option<String>,
+    #[serde(default = "default_shared_dir_name")]
+    pub shared_dir_name: String,
+    #[serde(default)]
+    pub env_secret: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+fn default_shared_dir_name() -> String {
+    "teamclaw".to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamSharedGitStatus {
@@ -104,7 +125,7 @@ fn ensure_scaffold(team_dir: &Path) -> anyhow::Result<()> {
 
 pub fn setup_or_sync_shared_dir(
     workspace_root: &Path,
-    config: &TeamWorkspaceConfigRow,
+    config: &TeamSharedGitConfig,
 ) -> anyhow::Result<TeamSharedGitStatus> {
     let team_dir = shared_dir_path(workspace_root, &config.shared_dir_name)?;
     let Some(git_url) = config.git_url.as_deref().filter(|u| !u.trim().is_empty()) else {
@@ -189,5 +210,28 @@ mod tests {
     fn resolves_shared_dir_under_workspace() {
         let path = shared_dir_path(Path::new("/tmp/workspace"), "teamclaw").unwrap();
         assert_eq!(path, PathBuf::from("/tmp/workspace/teamclaw"));
+    }
+
+    #[test]
+    fn deserializes_workspace_team_config_shape() {
+        let config: TeamSharedGitConfig = serde_json::from_value(serde_json::json!({
+            "gitUrl": "https://example.com/repo.git",
+            "gitBranch": "main",
+            "gitToken": "token",
+            "sharedDirName": "teamclaw",
+            "envSecret": "00",
+            "enabled": true
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.git_url.as_deref(),
+            Some("https://example.com/repo.git")
+        );
+        assert_eq!(config.git_branch.as_deref(), Some("main"));
+        assert_eq!(config.git_token.as_deref(), Some("token"));
+        assert_eq!(config.shared_dir_name, "teamclaw");
+        assert_eq!(config.env_secret.as_deref(), Some("00"));
+        assert!(config.enabled);
     }
 }

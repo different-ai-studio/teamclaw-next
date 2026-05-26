@@ -26,8 +26,6 @@ import { cn, isTauri, copyToClipboard } from '@/lib/utils'
 import { ToggleSwitch } from '@/components/settings/shared'
 import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
-import { useTeamMembersStore } from '@/stores/team-members'
-import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { buildConfig, TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import {
@@ -52,7 +50,6 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { formatBytes, type SyncPrecheckFile } from './syncPrecheck'
-import { upsertTeamWorkspaceConfig, type TeamWorkspaceConfig } from '@/lib/team-workspace-config'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +61,6 @@ interface TeamConfig {
   envSecret?: string | null
   gitToken?: string | null
   gitBranch?: string | null
-  teamId?: string | null
   fcEndpoint?: string | null
 }
 
@@ -98,28 +94,15 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke<T>(cmd, args)
 }
 
-// ─── Supabase team workspace config flow ────────────────────────────────────
-
-async function configureTeamWorkspace(args: {
-  teamId: string
-  gitUrl: string
-  gitBranch?: string
-  gitToken?: string
-  sharedDirName?: string
-  aiGatewayEndpoint?: string
-}): Promise<{ teamId: string; workspaceConfig: TeamWorkspaceConfig }> {
-  const workspaceConfig = await upsertTeamWorkspaceConfig({
-    teamId:            args.teamId,
-    gitUrl:            args.gitUrl,
-    gitBranch:         args.gitBranch ?? 'main',
-    gitToken:          args.gitToken ?? null,
-    aiGatewayEndpoint: args.aiGatewayEndpoint ?? null,
-    sharedDirName:     args.sharedDirName ?? 'teamclaw',
-    enabled:           true,
-    updatedAt:         new Date().toISOString(),
-  })
-
-  return { teamId: args.teamId, workspaceConfig }
+function generateEnvSecret(): string {
+  const bytes = new Uint8Array(32)
+  globalThis.crypto?.getRandomValues?.(bytes)
+  if (bytes.every((byte) => byte === 0)) {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 // ─── Reusable Components (local to git config) ─────────────────────────────
@@ -139,10 +122,7 @@ function SettingCard({ children, className }: { children: React.ReactNode; class
 
 export function TeamGitConfig() {
   const { t } = useTranslation()
-  const teamMembersStore = useTeamMembersStore()
-  const currentTeam = useCurrentTeamStore((s) => s.team)
-  const myRole = useTeamMembersStore((s) => s.myRole)
-  const canManageServiceConfig = myRole === 'owner' || myRole === 'manager'
+  const canManageServiceConfig = true
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const workspaceReady = !!workspacePath
   const workspaceArgs = React.useMemo<{ workspacePath?: string }>(
@@ -265,10 +245,9 @@ export function TeamGitConfig() {
     }
   }, [state, llmLoaded, workspaceArgs])
 
-  // Load role and device info when connected
+  // Load device info when connected
   React.useEffect(() => {
     if ((state === 'connected' || state === 'syncing') && isTauri()) {
-      teamMembersStore.loadMyRole()
       tauriInvoke<{ nodeId: string }>('get_device_info').then(setDeviceInfo).catch(() => {})
     }
   }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -312,44 +291,36 @@ export function TeamGitConfig() {
       setErrorMessage(t('settings.team.noWorkspace', 'No workspace selected'))
       return
     }
-    if (!currentTeam?.id) {
-      setErrorMessage(t('settings.team.noTeamLoaded', 'No team loaded yet'))
-      return
-    }
     setState('connecting')
     setErrorMessage(null)
     try {
       setConnectStep(t('settings.team.savingConfig', 'Saving configuration...'))
       const dirName = sharedDirName.trim() || 'teamclaw'
-      const { teamId, workspaceConfig } = await configureTeamWorkspace({
-        teamId: currentTeam.id,
-        gitUrl:   gitUrl.trim(),
-        gitBranch: gitBranch.trim() || undefined,
-        gitToken:  isHttpsUrl && gitToken.trim() ? gitToken.trim() : undefined,
-        sharedDirName: dirName,
-      })
+      const savedGitUrl = gitUrl.trim()
+      const savedGitBranch = gitBranch.trim() || null
+      const savedGitToken = isHttpsUrl && gitToken.trim() ? gitToken.trim() : null
+      const envSecret = teamConfig?.envSecret || generateEnvSecret()
 
       setConnectStep(t('settings.team.initializingRepo', 'Initializing shared directory...'))
       await tauriInvoke('team_shared_git_setup', {
         config: {
           workspacePath,
-          gitUrl: gitUrl.trim(),
-          gitBranch: gitBranch.trim() || null,
-          gitToken: isHttpsUrl && gitToken.trim() ? gitToken.trim() : null,
-          sharedDirName: workspaceConfig.sharedDirName,
+          gitUrl: savedGitUrl,
+          gitBranch: savedGitBranch,
+          gitToken: savedGitToken,
+          sharedDirName: dirName,
         },
       })
 
       const now = new Date().toISOString()
       const newConfig: TeamConfig = {
-        gitUrl: gitUrl.trim(),
+        gitUrl: savedGitUrl,
         enabled: true,
         lastSyncAt: now,
-        sharedDirName: workspaceConfig.sharedDirName,
-        envSecret: workspaceConfig.envSecret,
-        teamId,
-        ...(isHttpsUrl && gitToken.trim() ? { gitToken: gitToken.trim() } : {}),
-        ...(gitBranch.trim() ? { gitBranch: gitBranch.trim() } : {}),
+        sharedDirName: dirName,
+        envSecret,
+        gitToken: savedGitToken,
+        gitBranch: savedGitBranch,
       }
       await tauriInvoke('save_team_config', { team: newConfig, ...workspaceArgs })
       if (workspacePath) {
@@ -368,34 +339,29 @@ export function TeamGitConfig() {
   }
 
   const handleSaveSharedDirectoryConfig = async () => {
-    if (!teamConfig?.teamId || !workspacePath) return
+    if (!teamConfig || !workspacePath) return
     setErrorMessage(null)
     try {
-      const workspaceConfig = await upsertTeamWorkspaceConfig({
-        teamId: teamConfig.teamId,
-        gitUrl: gitUrl.trim(),
-        gitBranch: gitBranch.trim() || 'main',
-        gitToken: isHttpsUrl && gitToken.trim() ? gitToken.trim() : null,
-        aiGatewayEndpoint: null,
-        sharedDirName: sharedDirName.trim() || 'teamclaw',
-        enabled: teamConfig.enabled,
-      })
+      const savedGitUrl = gitUrl.trim()
+      const savedGitBranch = gitBranch.trim() || null
+      const savedGitToken = isHttpsUrl && gitToken.trim() ? gitToken.trim() : null
+      const savedSharedDirName = sharedDirName.trim() || 'teamclaw'
       await tauriInvoke('team_shared_git_setup', {
         config: {
           workspacePath,
-          gitUrl: workspaceConfig.gitUrl || '',
-          gitBranch: workspaceConfig.gitBranch || null,
-          gitToken: workspaceConfig.gitToken || null,
-          sharedDirName: workspaceConfig.sharedDirName,
+          gitUrl: savedGitUrl,
+          gitBranch: savedGitBranch,
+          gitToken: savedGitToken,
+          sharedDirName: savedSharedDirName,
         },
       })
       const updatedConfig: TeamConfig = {
         ...teamConfig,
-        gitUrl: workspaceConfig.gitUrl || '',
-        gitBranch: workspaceConfig.gitBranch,
-        gitToken: workspaceConfig.gitToken,
-        sharedDirName: workspaceConfig.sharedDirName,
-        envSecret: workspaceConfig.envSecret ?? teamConfig.envSecret,
+        gitUrl: savedGitUrl,
+        gitBranch: savedGitBranch,
+        gitToken: savedGitToken,
+        sharedDirName: savedSharedDirName,
+        envSecret: teamConfig.envSecret || generateEnvSecret(),
       }
       await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
       setTeamConfig(updatedConfig)
@@ -884,7 +850,7 @@ export function TeamGitConfig() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
-                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory, team id, and this device identity')}</p>
+                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory, Git URL, and this device identity')}</p>
                 </div>
               </div>
 
@@ -902,15 +868,6 @@ export function TeamGitConfig() {
                     {gitLocalPath}
                   </code>
                 </div>
-
-                {teamConfig.teamId && (
-                  <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-                    <span className="text-xs text-muted-foreground">{t('settings.team.teamId', 'Team ID')}</span>
-                    <code className="min-w-0 break-all font-mono text-xs text-foreground">
-                      {teamConfig.teamId}
-                    </code>
-                  </div>
-                )}
 
                 <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
                   <span className="text-xs text-muted-foreground">{t('settings.team.sharedDirName', 'Shared Directory')}</span>

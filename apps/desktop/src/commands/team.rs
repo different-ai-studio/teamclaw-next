@@ -60,8 +60,6 @@ pub struct TeamConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fc_endpoint: Option<String>,
 }
 

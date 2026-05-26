@@ -1,10 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/lib/supabase-client";
 import { useAuthStore } from "./auth-store";
-import {
-  getTeamWorkspaceConfig,
-  type TeamWorkspaceConfig,
-} from "@/lib/team-workspace-config";
 
 export interface CurrentTeam {
   id: string;
@@ -22,7 +18,6 @@ export interface CurrentTeamMember {
 interface State {
   team: CurrentTeam | null;
   currentMember: CurrentTeamMember | null;
-  activeWorkspaceConfig: TeamWorkspaceConfig | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -34,7 +29,6 @@ interface State {
 export const useCurrentTeamStore = create<State>((set, get) => ({
   team: null,
   currentMember: null,
-  activeWorkspaceConfig: null,
   loading: false,
   saving: false,
   error: null,
@@ -42,7 +36,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
   load: async () => {
     const session = useAuthStore.getState().session;
     if (!session) {
-      set({ team: null, currentMember: null, activeWorkspaceConfig: null, loading: false, error: null });
+      set({ team: null, currentMember: null, loading: false, error: null });
       return;
     }
 
@@ -62,13 +56,9 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     const currentMember = activeTeam
       ? await loadCurrentMember(activeTeam.id, session.user.id)
       : null;
-    const activeWorkspaceConfig = activeTeam
-      ? await getTeamWorkspaceConfig(activeTeam.id)
-      : null;
     set({
       team: activeTeam,
       currentMember,
-      activeWorkspaceConfig,
       loading: false,
     });
   },
@@ -76,7 +66,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
   reloadAndSwitchTo: async (teamId: string) => {
     const session = useAuthStore.getState().session;
     if (!session) {
-      set({ team: null, currentMember: null, activeWorkspaceConfig: null, loading: false, error: null });
+      set({ team: null, currentMember: null, loading: false, error: null });
       return;
     }
 
@@ -95,13 +85,9 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     const currentMember = activeTeam
       ? await loadCurrentMember(activeTeam.id, session.user.id)
       : null;
-    const activeWorkspaceConfig = activeTeam
-      ? await getTeamWorkspaceConfig(activeTeam.id)
-      : null;
     set({
       team: activeTeam,
       currentMember,
-      activeWorkspaceConfig,
       loading: false,
     });
   },
