@@ -1,3 +1,16 @@
+//! Transport abstraction for amuxd. Supports both MQTT (rumqttc) and NATS
+//! (async-nats over WebSocket or core protocol) as message buses.
+//!
+//! Public surface:
+//!
+//! - [`MqttBroker`] / [`TransportUrl`]: URL parsing for both protocols
+//! - [`DeliveryGuarantee`] + [`TransportMessage`]: outbound message shape
+//! - [`IncomingFrame`]: inbound message shape (transport-agnostic)
+//! - [`Transport`]: per-protocol low-level publish/subscribe trait
+//! - [`encode_subject`] / [`decode_subject`]: MQTT topic ↔ NATS subject
+
+pub mod nats;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MqttBroker {
     pub host: String,
@@ -27,6 +40,40 @@ impl MqttBroker {
             port,
             use_tls,
         }
+    }
+}
+
+/// Unified transport URL — discriminates by scheme.
+///
+/// Accepts: `mqtt://`, `mqtts://`, `nats://`, `tls://` (NATS+TLS),
+/// `ws://`, `wss://` (NATS-over-WebSocket).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransportUrl {
+    Mqtt(MqttBroker),
+    Nats {
+        /// Raw URL handed to `async_nats::connect`.
+        url: String,
+    },
+}
+
+impl TransportUrl {
+    pub fn parse(url: &str) -> Self {
+        if url.starts_with("mqtt://") || url.starts_with("mqtts://") {
+            TransportUrl::Mqtt(MqttBroker::parse(url))
+        } else {
+            // nats://, tls://, ws://, wss:// all go to async-nats verbatim.
+            TransportUrl::Nats {
+                url: url.to_string(),
+            }
+        }
+    }
+
+    pub fn is_mqtt(&self) -> bool {
+        matches!(self, TransportUrl::Mqtt(_))
+    }
+
+    pub fn is_nats(&self) -> bool {
+        matches!(self, TransportUrl::Nats { .. })
     }
 }
 
@@ -105,6 +152,34 @@ impl Transport for rumqttc::AsyncClient {
     }
 }
 
+/// Encode an MQTT topic (`amux/team/device/d1/state`) to a NATS subject
+/// (`amux.team.device.d1.state`).
+///
+/// MQTT wildcards: `+` → single-level `*`, `#` → multi-level `>`.
+/// Subjects with empty segments (e.g. `//`) are not supported by NATS;
+/// callers are expected to use well-formed topics.
+pub fn encode_subject(topic: &str) -> String {
+    let mut out = String::with_capacity(topic.len());
+    for (i, segment) in topic.split('/').enumerate() {
+        if i > 0 {
+            out.push('.');
+        }
+        match segment {
+            "+" => out.push('*'),
+            "#" => out.push('>'),
+            other => out.push_str(other),
+        }
+    }
+    out
+}
+
+/// Inverse of [`encode_subject`] for the inbound side. NATS wildcards
+/// (`*`, `>`) never appear in concrete delivered subjects, so we only
+/// translate `.` → `/`.
+pub fn decode_subject(subject: &str) -> String {
+    subject.replace('.', "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +225,38 @@ mod tests {
             rumqttc::QoS::ExactlyOnce,
             rumqttc::QoS::from(DeliveryGuarantee::ExactlyOnce)
         );
+    }
+
+    #[test]
+    fn transport_url_picks_backend_by_scheme() {
+        assert!(TransportUrl::parse("mqtt://broker:1883").is_mqtt());
+        assert!(TransportUrl::parse("mqtts://broker:8883").is_mqtt());
+        assert!(TransportUrl::parse("nats://broker:4222").is_nats());
+        assert!(TransportUrl::parse("ws://broker:80/nats").is_nats());
+        assert!(TransportUrl::parse("wss://broker:443/nats").is_nats());
+        assert!(TransportUrl::parse("tls://broker:4222").is_nats());
+    }
+
+    #[test]
+    fn encode_subject_translates_slash_to_dot() {
+        assert_eq!(
+            encode_subject("amux/team1/device/dev-a/state"),
+            "amux.team1.device.dev-a.state"
+        );
+    }
+
+    #[test]
+    fn encode_subject_translates_mqtt_wildcards() {
+        assert_eq!(
+            encode_subject("amux/team1/device/dev-a/runtime/+/commands"),
+            "amux.team1.device.dev-a.runtime.*.commands"
+        );
+        assert_eq!(encode_subject("amux/team1/#"), "amux.team1.>");
+    }
+
+    #[test]
+    fn decode_subject_is_inverse_for_concrete_subjects() {
+        let topic = "amux/team1/device/dev-a/state";
+        assert_eq!(decode_subject(&encode_subject(topic)), topic);
     }
 }
