@@ -30,7 +30,10 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
 
     let base_cfg = supabase_build_env_config_from_process()?;
     let claim_client = SupabaseBackend::new(base_cfg.clone())?;
-    let claim = claim_client.claim_team_invite(&invite.token).await?;
+    let claim = claim_client
+        .claim_team_invite(&invite.token)
+        .await
+        .map_err(actionable_invite_claim_error)?;
 
     let refresh_token =
         claim
@@ -77,6 +80,20 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         display_name: claim.display_name,
         config_path: path,
     })
+}
+
+fn actionable_invite_claim_error(err: SupabaseError) -> SupabaseError {
+    match err {
+        SupabaseError::Rpc { code, message } if message.contains("member claim requires authentication") => {
+            SupabaseError::Rpc {
+                code,
+                message: format!(
+                    "{message}\nThis is a teammate/member invite. `amuxd init` requires an Agent invite; create one from the app's Invite dialog with Kind = Agent."
+                ),
+            }
+        }
+        other => other,
+    }
 }
 
 fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
@@ -255,6 +272,22 @@ mod tests {
         assert_eq!(cfg.device.name, "existing-device");
         assert_eq!(cfg.team_id.as_deref(), Some("team-2"));
         assert_eq!(cfg.mqtt.broker_url, "mqtts://broker.example.com:8883");
+    }
+
+    #[test]
+    fn member_invite_claim_error_explains_agent_invite_requirement() {
+        let err = actionable_invite_claim_error(SupabaseError::Rpc {
+            code: Some("401".to_string()),
+            message: r#"{"message":"member claim requires authentication"}"#.to_string(),
+        });
+
+        match err {
+            SupabaseError::Rpc { message, .. } => {
+                assert!(message.contains("Kind = Agent"));
+                assert!(message.contains("member claim requires authentication"));
+            }
+            other => panic!("expected rpc error, got {other:?}"),
+        }
     }
 
     #[test]
