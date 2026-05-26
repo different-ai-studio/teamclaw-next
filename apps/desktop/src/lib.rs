@@ -463,6 +463,7 @@ pub fn run() {
             local_cache::commands::local_cache_message_load_session,
             local_cache::commands::local_cache_message_soft_delete,
             local_cache::commands::local_cache_message_set_parts,
+            local_cache::commands::local_cache_message_enrich_parts,
             local_cache::commands::local_cache_outbox_upsert,
             local_cache::commands::local_cache_outbox_delete,
             local_cache::commands::local_cache_outbox_list_all,

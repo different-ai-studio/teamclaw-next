@@ -25,6 +25,14 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+vi.mock('@/hooks/useActorDisplayName', () => ({
+  useActorDisplayName: (actorId?: string) => {
+    if (actorId === 'actor-mac2') return 'MAC2';
+    return actorId ?? '';
+  },
+  useAgentModelByActor: () => '',
+}));
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function makeMessage(overrides: Record<string, unknown> = {}) {
@@ -68,6 +76,20 @@ describe('ChatMessage', () => {
 
     const { container } = render(<ChatMessage message={message} />);
     expect(container.textContent).toContain('Hello from the user');
+  });
+
+  it('renders agent mentions from metadata before user content', () => {
+    const message = makeMessage({
+      id: 'msg-user-mention',
+      role: 'user',
+      content: '执行pwd',
+      mentionActorIds: ['actor-mac2'],
+    });
+
+    const { container } = render(<ChatMessage message={message} />);
+
+    expect(container.textContent).toContain('@MAC2');
+    expect(container.textContent).toContain('执行pwd');
   });
 
   it('assistant message renders its content', () => {

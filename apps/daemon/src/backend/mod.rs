@@ -202,6 +202,7 @@ pub trait Backend: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn insert_message(
         &self,
+        id: &str,
         team_id: &str,
         session_id: &str,
         sender_actor_id: &str,

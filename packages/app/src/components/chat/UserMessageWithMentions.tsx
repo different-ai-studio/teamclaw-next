@@ -2,6 +2,7 @@ import * as React from "react";
 import { FileText, Folder, User, UserRound, Paperclip, ChevronDown, ChevronUp, Zap, Command as CommandIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { useActorDisplayName } from "@/hooks/useActorDisplayName";
 import { ClickableImage, LocalImage, resolveImagePath } from "@/packages/ai/message";
 import { getTrailingPathLabel } from "@/packages/ai/chip-labels";
 
@@ -43,7 +44,25 @@ function stripChipMetadata(content: string): string {
   return separatorIndex >= 0 ? trimmed.slice(0, separatorIndex).trim() : trimmed;
 }
 
-export function UserMessageWithMentions({ content, basePath }: { content: string; basePath?: string }) {
+function ActorMentionChip({ actorId }: { actorId: string }) {
+  const name = useActorDisplayName(actorId);
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-1 mx-0.5 rounded-md text-xs bg-[#edf2f7] text-[#5a7086] dark:bg-[#202a34] dark:text-[#aec3d6]">
+      <User className="h-3 w-3" />
+      <span className="truncate max-w-[200px]">@{name || actorId}</span>
+    </span>
+  );
+}
+
+export function UserMessageWithMentions({
+  content,
+  basePath,
+  leadingMentionActorIds = [],
+}: {
+  content: string;
+  basePath?: string;
+  leadingMentionActorIds?: string[];
+}) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [needsCollapse, setNeedsCollapse] = React.useState(false);
@@ -68,13 +87,20 @@ export function UserMessageWithMentions({ content, basePath }: { content: string
 
   const parts = React.useMemo(() => {
     const result: Array<{
-      type: "text" | "file" | "directory" | "image" | "mentioned" | "attachment" | "filemention" | "role" | "skill" | "command";
+      type: "text" | "file" | "directory" | "image" | "mentioned" | "attachment" | "filemention" | "role" | "skill" | "command" | "actorMention";
       content: string;
       people?: string[];
       dataUrl?: string;
       size?: string;
       fullPath?: string;
     }> = [];
+
+    for (const actorId of leadingMentionActorIds) {
+      result.push({ type: "actorMention", content: actorId });
+    }
+    if (leadingMentionActorIds.length > 0 && displayContent) {
+      result.push({ type: "text", content: " " });
+    }
 
     let lastIndex = 0;
     // Match @{filepath}, unified /{type:name}, legacy /<role> and /[command], [Role: ...], [File: ...], [Skill: ...], [Command: ...], [Attachment: ...], and other formats
@@ -141,9 +167,11 @@ export function UserMessageWithMentions({ content, basePath }: { content: string
     }
 
     return result;
-  }, [displayContent]);
+  }, [displayContent, leadingMentionActorIds]);
 
-  const isSimpleText = parts.length === 0 || (parts.length === 1 && parts[0].type === "text");
+  const isSimpleText =
+    leadingMentionActorIds.length === 0 &&
+    (parts.length === 0 || (parts.length === 1 && parts[0].type === "text"));
 
   // Build the inner content - render parts in order
   const innerContent = isSimpleText ? (
@@ -153,6 +181,10 @@ export function UserMessageWithMentions({ content, basePath }: { content: string
       {parts.map((part, index) => {
         if (part.type === "text") {
           return <span key={index}>{part.content}</span>;
+        }
+
+        if (part.type === "actorMention") {
+          return <ActorMentionChip key={index} actorId={part.content} />;
         }
         
         if (part.type === "mentioned" && part.people) {

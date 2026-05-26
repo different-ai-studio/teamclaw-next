@@ -105,6 +105,9 @@ export interface MessagePart {
     type: string;
     content: string;
   };
+  /** v2 ordered renderer: inline tool call card at this point in the turn. */
+  toolCallId?: string;
+  toolCall?: ToolCall;
 }
 
 export interface Message {
@@ -116,6 +119,10 @@ export interface Message {
   senderActorId?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** Actor mentions rendered as UI-only chips before user-authored content.
+   * Routing still uses the v2 envelope/metadata; these labels are not part of
+   * the prompt delivered to an agent. */
+  mentionActorIds?: string[];
   parts: MessagePart[];
   toolCalls?: ToolCall[];
   timestamp: Date;

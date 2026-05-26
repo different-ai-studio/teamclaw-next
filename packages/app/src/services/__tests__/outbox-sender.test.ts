@@ -62,6 +62,7 @@ describe('outbox sender', () => {
           content: 'hello daemon',
           model: 'opencode/qwen3.6-plus-free',
           mentionActorIds: ['agent-1'],
+          displayMentionActorIds: ['agent-1'],
           attachmentUrls: [],
           state: 'pending',
           attemptCount: 0,
@@ -82,7 +83,12 @@ describe('outbox sender', () => {
 
     expect(mocks.supabaseInsert).toHaveBeenCalledWith(
       expect.objectContaining({
+        content: 'hello daemon',
         model: 'opencode/qwen3.6-plus-free',
+        metadata: expect.objectContaining({
+          mention_actor_ids: ['agent-1'],
+          display_mention_actor_ids: ['agent-1'],
+        }),
       }),
     )
 
@@ -90,6 +96,11 @@ describe('outbox sender', () => {
     const live = fromBinary(LiveEventEnvelopeSchema, publishBytes)
     const sessionMessage = fromBinary(SessionMessageEnvelopeSchema, live.body)
     expect(sessionMessage.message?.model).toBe('opencode/qwen3.6-plus-free')
+    expect(sessionMessage.message?.content).toBe('hello daemon')
+    expect(JSON.parse(sessionMessage.message?.metadataJson ?? '{}')).toMatchObject({
+      mention_actor_ids: ['agent-1'],
+      display_mention_actor_ids: ['agent-1'],
+    })
   })
 
   it('retries agent-mentioned messages when MQTT publish fails', async () => {

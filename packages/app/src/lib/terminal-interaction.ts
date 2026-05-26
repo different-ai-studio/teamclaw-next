@@ -10,17 +10,64 @@ export function getCommandText(
   );
 }
 
-export function getToolCallOutputText(result: unknown): string {
+function contentTextFromValue(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+
+  return value
+    .map((item: unknown) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return "";
+
+      const itemObj = item as Record<string, unknown>;
+      if (typeof itemObj.text === "string") return itemObj.text;
+      return textFromToolResult(itemObj.content);
+    })
+    .filter((text) => text.trim())
+    .join("\n");
+}
+
+function textFromToolResult(result: unknown): string {
   if (typeof result === "string") return result;
+  if (Array.isArray(result)) return contentTextFromValue(result);
   if (result && typeof result === "object") {
     const resultObj = result as Record<string, unknown>;
-    return (
-      (typeof resultObj.raw === "string" ? resultObj.raw : null) ||
-      (typeof resultObj.output === "string" ? resultObj.output : null) ||
-      (typeof resultObj.result === "string" ? resultObj.result : null) ||
-      (typeof resultObj.text === "string" ? resultObj.text : null) ||
-      ""
-    );
+    for (const key of ["raw", "output", "result", "text", "metadata"]) {
+      const text = textFromToolResult(resultObj[key]);
+      if (text.trim()) return text;
+    }
+
+    const stdio = ["stdout", "stderr"]
+      .map((key) => textFromToolResult(resultObj[key]))
+      .filter((text) => text.trim());
+    if (stdio.length > 0) return stdio.join("\n");
+
+    return contentTextFromValue(resultObj.content);
   }
   return "";
+}
+
+function commandDescriptionValues(
+  args: Record<string, unknown> | undefined,
+): Set<string> {
+  const values = new Set<string>();
+  if (!args) return values;
+  for (const key of ["_description", "description", "summary", "title", "action"]) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) {
+      values.add(value.trim());
+    }
+  }
+  return values;
+}
+
+export function getToolCallOutputText(
+  result: unknown,
+  args?: Record<string, unknown>,
+): string {
+  const output = textFromToolResult(result);
+  if (!output.trim()) return "";
+  if (commandDescriptionValues(args).has(output.trim())) {
+    return "";
+  }
+  return output;
 }

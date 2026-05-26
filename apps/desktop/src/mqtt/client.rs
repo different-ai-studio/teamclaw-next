@@ -56,23 +56,36 @@ impl MqttClient {
     }
 }
 
-pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle) {
+pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle, generation: u64) {
     use rumqttc::{Event, Packet};
     use tauri::Emitter;
 
     let mut backoff_secs: u64 = 1;
     loop {
+        if bus.current_generation() != generation {
+            return;
+        }
         let event_loop_arc = {
             let guard = bus.client.lock().await;
             guard.as_ref().map(|c| c.event_loop.clone())
         };
+        if bus.current_generation() != generation {
+            return;
+        }
         let Some(event_loop) = event_loop_arc else {
+            if bus.current_generation() != generation {
+                return;
+            }
             bus.set_connected(false);
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         };
         let mut event_loop = event_loop.lock().await;
-        match event_loop.poll().await {
+        let poll_result = event_loop.poll().await;
+        if bus.current_generation() != generation {
+            return;
+        }
+        match poll_result {
             Ok(Event::Incoming(Packet::ConnAck(ack))) => {
                 backoff_secs = 1;
                 bus.set_connected(true);

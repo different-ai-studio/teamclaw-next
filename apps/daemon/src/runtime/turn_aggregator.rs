@@ -73,6 +73,7 @@ impl TurnAggregator {
                     "tool_name": tu.tool_name,
                     "tool_kind": tu.tool_kind,
                     "description": tu.description,
+                    "params": tu.params,
                 })
                 .to_string();
                 out.push(EmittedMessage {
@@ -205,6 +206,27 @@ mod tests {
         }
     }
 
+    fn tool_use_with_params(
+        id: &str,
+        name: &str,
+        desc: &str,
+        params: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> amux::AcpEvent {
+        amux::AcpEvent {
+            event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
+                tool_id: id.into(),
+                tool_name: name.into(),
+                description: desc.into(),
+                params: params
+                    .into_iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect(),
+                tool_kind: String::new(),
+            })),
+            model: String::new(),
+        }
+    }
+
     fn tool_result(id: &str, success: bool, summary: &str) -> amux::AcpEvent {
         amux::AcpEvent {
             event: Some(amux::acp_event::Event::ToolResult(amux::AcpToolResult {
@@ -260,6 +282,21 @@ mod tests {
         assert_eq!(emitted[2].kind, MessageKind::AgentToolCall);
         assert!(emitted[2].content.contains("Read"));
         assert!(emitted[2].metadata_json.contains("\"tool_id\":\"t1\""));
+    }
+
+    #[test]
+    fn tool_call_metadata_preserves_params() {
+        let mut agg = TurnAggregator::new();
+        let emitted = agg.ingest(&tool_use_with_params(
+            "t1",
+            "Bash",
+            "Execute ps command",
+            [("command", "ps aux")],
+        ));
+
+        assert_eq!(emitted.len(), 1);
+        let metadata: serde_json::Value = serde_json::from_str(&emitted[0].metadata_json).unwrap();
+        assert_eq!(metadata["params"]["command"], "ps aux");
     }
 
     #[test]

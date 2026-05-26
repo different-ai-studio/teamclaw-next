@@ -23,6 +23,10 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
+    if (!isStreaming) setOpen(isOpen);
+  }, [isOpen, isStreaming]);
+
+  React.useEffect(() => {
     if (isStreaming && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }

@@ -62,6 +62,16 @@ async function attempt(entry: OutboxEntry): Promise<void> {
     const createdAtSec = BigInt(
       Math.floor(new Date(entry.createdAt).getTime() / 1000),
     );
+    const displayMentionActorIds = entry.displayMentionActorIds ?? [];
+    const metadata = {
+      mention_actor_ids: entry.mentionActorIds,
+      ...(displayMentionActorIds.length > 0
+        ? { display_mention_actor_ids: displayMentionActorIds }
+        : {}),
+      ...(entry.attachmentUrls.length > 0
+        ? { attachment_urls: entry.attachmentUrls }
+        : {}),
+    };
 
     const proto = createMessage(MessageSchema, {
       messageId: entry.messageId,
@@ -69,6 +79,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       senderActorId: entry.senderActorId,
       kind: MessageKind.TEXT,
       content: entry.content,
+      metadataJson: JSON.stringify(metadata),
       createdAt: createdAtSec,
       model: entry.model ?? "",
     });
@@ -98,12 +109,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       kind: "text",
       content: entry.content,
       model: entry.model ?? null,
-      metadata: {
-        mention_actor_ids: entry.mentionActorIds,
-        ...(entry.attachmentUrls.length > 0
-          ? { attachment_urls: entry.attachmentUrls }
-          : {}),
-      },
+      metadata,
     });
 
     // Supabase unique-constraint violation on `id` means this same message

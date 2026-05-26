@@ -1205,7 +1205,7 @@ impl SessionManager {
         persist_supabase: bool,
         supabase: Option<&std::sync::Arc<dyn Backend>>,
     ) {
-        let message_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
+        let message_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
 
         let proto_msg = crate::proto::teamclaw::Message {
@@ -1261,6 +1261,7 @@ impl SessionManager {
                 tokio::spawn(async move {
                     if let Err(e) = sb_clone
                         .insert_message(
+                            &message_id,
                             &team_id,
                             &session,
                             &sender,
