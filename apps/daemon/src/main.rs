@@ -10,6 +10,7 @@ mod mqtt;
 mod nats;
 mod onboarding;
 mod proto;
+mod pocketbase;
 mod provider_config;
 mod runtime;
 mod supabase;

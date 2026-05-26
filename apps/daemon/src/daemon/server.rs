@@ -23,6 +23,7 @@ use crate::daemon::runtime_resolution::{
 use crate::daemon::session_events::{format_idea_prompt, parse_mention_actor_ids};
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
+use crate::pocketbase::PocketBaseBackend;
 use crate::proto::amux;
 use crate::provider_config::ProviderConfig;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
@@ -236,10 +237,12 @@ fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<
             })?;
             Ok(Arc::new(backend))
         }
-        ProviderConfig::PocketBase(_) => Err(crate::error::AmuxError::Config(
-            "PocketBase backend is configured but the daemon PocketBase backend is not implemented yet"
-                .to_string(),
-        )),
+        ProviderConfig::PocketBase(config) => {
+            let backend = PocketBaseBackend::new(config).map_err(|e| {
+                crate::error::AmuxError::Config(format!("pocketbase init failed: {e}"))
+            })?;
+            Ok(Arc::new(backend))
+        }
     }
 }
 
@@ -4382,6 +4385,23 @@ mod tests {
             team_id: "team-test".to_string(),
             actor_id: "agent-actor".to_string(),
         });
+
+        let backend = backend_from_provider_config(config).unwrap();
+
+        assert_eq!(backend.team_id(), "team-test");
+        assert_eq!(backend.actor_id(), "agent-actor");
+    }
+
+    #[test]
+    fn backend_from_provider_config_initializes_pocketbase_backend() {
+        let config = crate::provider_config::ProviderConfig::PocketBase(
+            crate::provider_config::PocketBaseConfig {
+                url: "http://127.0.0.1:8090".to_string(),
+                refresh_token: "pb-token".to_string(),
+                team_id: "team-test".to_string(),
+                actor_id: "agent-actor".to_string(),
+            },
+        );
 
         let backend = backend_from_provider_config(config).unwrap();
 
