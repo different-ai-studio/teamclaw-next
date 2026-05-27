@@ -750,6 +750,53 @@ async heartbeat() {
       const mime = data.type || "application/octet-stream";
       return { mime, bytes: Buffer.from(arrayBuffer) };
     },
+
+    async submitFeedback(body) {
+      const row = {
+        message_id: body.messageId,
+        actor_id: body.actorId,
+        kind: body.kind,
+        star_rating: body.starRating ?? null,
+        note: body.note ?? null,
+      };
+      const { data, error } = await supabase
+        .from("actor_message_feedback")
+        .upsert(row, { onConflict: "actor_id,message_id" })
+        .select("*")
+        .single();
+      if (error) throw error;
+      return mapFeedbackRow(data);
+    },
+
+    async listFeedback({ sessionId }) {
+      const { data, error } = await supabase
+        .from("actor_message_feedback")
+        .select("*")
+        .eq("session_id", sessionId);
+      if (error) throw error;
+      return { items: (data ?? []).map(mapFeedbackRow) };
+    },
+
+    async deleteFeedback(messageId, actorId) {
+      const query = supabase
+        .from("actor_message_feedback")
+        .delete()
+        .eq("message_id", messageId);
+      if (actorId) query.eq("actor_id", actorId);
+      const { error } = await query;
+      if (error) throw error;
+    },
+
+    async getTeamLeaderboard(teamId, { period = "week" } = {}) {
+      const { data, error } = await supabase
+        .from("team_leaderboard")
+        .select("*")
+        .eq("team_id", teamId)
+        .eq("period", period)
+        .order("score", { ascending: false });
+      if (error) throw error;
+      return { items: (data ?? []).map(mapLeaderboardRow) };
+    },
   };
 }
 
@@ -984,5 +1031,28 @@ function mapIdeaActivityRow(row) {
     actorId: requiredString(row?.actor_id, "ideas.mapIdeaActivityRow", "actor_id"),
     metadata: row?.metadata ?? null,
     createdAt: requiredString(row?.created_at, "ideas.mapIdeaActivityRow", "created_at"),
+  };
+}
+
+function mapFeedbackRow(row) {
+  return {
+    messageId: requiredString(row?.message_id, "feedback.mapFeedbackRow", "message_id"),
+    actorId: requiredString(row?.actor_id, "feedback.mapFeedbackRow", "actor_id"),
+    kind: requiredString(row?.kind, "feedback.mapFeedbackRow", "kind"),
+    starRating: row?.star_rating ?? null,
+    note: row?.note ?? null,
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function mapLeaderboardRow(row) {
+  return {
+    actorId: requiredString(row?.actor_id, "leaderboard.mapLeaderboardRow", "actor_id"),
+    teamId: row?.team_id ?? null,
+    period: requiredString(row?.period, "leaderboard.mapLeaderboardRow", "period"),
+    score: row?.score ?? 0,
+    rank: row?.rank ?? null,
+    displayName: row?.display_name ?? null,
   };
 }

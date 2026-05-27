@@ -1985,6 +1985,131 @@ paths:
                 $ref: "#/components/schemas/IdeaActivity"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/feedback:
+    post:
+      operationId: submitFeedback
+      summary: Submit feedback for a message
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, actorId, kind]
+              properties:
+                messageId:
+                  type: string
+                  format: uuid
+                actorId:
+                  type: string
+                  format: uuid
+                kind:
+                  type: string
+                  enum: [up, down, star]
+                starRating:
+                  type:
+                    - integer
+                    - "null"
+                  minimum: 1
+                  maximum: 5
+                note:
+                  type:
+                    - string
+                    - "null"
+      responses:
+        "201":
+          description: Feedback submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feedback"
+        "401":
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listFeedback
+      summary: List feedback for a session
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Feedback list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Feedback"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/feedback/{messageId}:
+    delete:
+      operationId: deleteFeedback
+      summary: Delete feedback for a message
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/leaderboard:
+    get:
+      operationId: getTeamLeaderboard
+      summary: Get the leaderboard for a team
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: teamId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: period
+          schema:
+            type: string
+            enum: [day, week, month]
+            default: week
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LeaderboardEntry"
+        "401":
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -2765,3 +2890,61 @@ components:
         createdAt:
           type: string
           format: date-time
+    Feedback:
+      type: object
+      required: [messageId, actorId, kind, createdAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [up, down, star]
+        starRating:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          maximum: 5
+        note:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        updatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    LeaderboardEntry:
+      type: object
+      required: [actorId, period, score]
+      properties:
+        actorId:
+          type: string
+          format: uuid
+        teamId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        period:
+          type: string
+          enum: [day, week, month]
+        score:
+          type: number
+        rank:
+          type:
+            - integer
+            - "null"
+        displayName:
+          type:
+            - string
+            - "null"

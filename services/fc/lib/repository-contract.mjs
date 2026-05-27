@@ -642,6 +642,40 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     const out = await repo.downloadAttachment("contract/does-not-exist-xyz.bin");
     assert.equal(out, null);
   });
+
+  test("repository contract: submitFeedback returns feedback object", async () => {
+    const repo = createRepository();
+    const out = await repo.submitFeedback({
+      messageId: "00000000-0000-0000-0000-000000000001",
+      actorId: "00000000-0000-0000-0000-000000000002",
+      kind: "up",
+      starRating: null,
+      note: null,
+    });
+    assert.ok(out, "result must be returned");
+    assert.equal(out.messageId, "00000000-0000-0000-0000-000000000001");
+    assert.equal(out.actorId, "00000000-0000-0000-0000-000000000002");
+    assert.equal(out.kind, "up");
+  });
+
+  test("repository contract: listFeedback returns items array", async () => {
+    const repo = createRepository();
+    const out = await repo.listFeedback({ sessionId: "00000000-0000-0000-0000-000000000003" });
+    assert.ok(out, "result must be returned");
+    assert.ok(Array.isArray(out.items), "items must be an array");
+  });
+
+  test("repository contract: deleteFeedback succeeds", async () => {
+    const repo = createRepository();
+    await repo.deleteFeedback("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002");
+  });
+
+  test("repository contract: getTeamLeaderboard returns items array", async () => {
+    const repo = createRepository();
+    const out = await repo.getTeamLeaderboard("00000000-0000-0000-0000-000000000004", { period: "week" });
+    assert.ok(out, "result must be returned");
+    assert.ok(Array.isArray(out.items), "items must be an array");
+  });
 }
 
 export function runAuthRepositoryContract({ test, assert, createAuthRepository }) {

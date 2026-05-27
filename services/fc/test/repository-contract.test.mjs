@@ -445,6 +445,24 @@ function contractRepo() {
     async updateRuntimeCursor(runtimeRowId, { lastProcessedMessageId }) {},
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {},
     async setAgentDeviceId(agentActorId, { deviceId }) {},
+    async submitFeedback(body) {
+      return {
+        messageId: body.messageId,
+        actorId: body.actorId,
+        kind: body.kind,
+        starRating: body.starRating ?? null,
+        note: body.note ?? null,
+        createdAt: "2026-05-28T00:00:00Z",
+        updatedAt: null,
+      };
+    },
+    async listFeedback({ sessionId }) {
+      return { items: [] };
+    },
+    async deleteFeedback(messageId, actorId) {},
+    async getTeamLeaderboard(teamId, { period } = {}) {
+      return { items: [] };
+    },
   };
 }
 

@@ -11,6 +11,7 @@ import { registerIdeas } from "./ideas.mjs";
 import { registerShortcuts } from "./shortcuts.mjs";
 import { registerRuntime } from "./runtime.mjs";
 import { registerAttachments } from "./attachments.mjs";
+import { registerTelemetry } from "./telemetry.mjs";
 
 export function registerAllRoutes(router) {
   registerAuth(router);
@@ -26,6 +27,7 @@ export function registerAllRoutes(router) {
   registerShortcuts(router);
   registerRuntime(router);
   registerAttachments(router);
+  registerTelemetry(router);
 }
 
-export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas, registerShortcuts, registerRuntime, registerAttachments };
+export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas, registerShortcuts, registerRuntime, registerAttachments, registerTelemetry };

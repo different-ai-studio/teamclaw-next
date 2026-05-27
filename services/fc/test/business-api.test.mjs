@@ -1237,6 +1237,109 @@ test("GET /v1/attachments/:path returns 404 when attachment missing", async () =
   assert.equal(parsed.error.code, "not_found");
 });
 
+// Telemetry routes
+
+test("POST /v1/feedback requires bearer token", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/feedback",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "up" }),
+  }, { createRepository: () => fakeRepo() });
+  assert.equal(response.statusCode, 401);
+});
+
+test("POST /v1/feedback returns 400 when messageId is missing", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/feedback",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ actorId: "00000000-0000-0000-0000-000000000002", kind: "up" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "validation_failed");
+});
+
+test("POST /v1/feedback happy path returns 201", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/feedback",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "star", starRating: 5, note: "great" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 201);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.kind, "star");
+  assert.deepEqual(repo.calls[0], { method: "submitFeedback", body: { messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "star", starRating: 5, note: "great" } });
+});
+
+test("GET /v1/feedback returns 400 when sessionId is missing", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/feedback",
+    headers: { Authorization: "Bearer token" },
+    queryStringParameters: {},
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "validation_failed");
+});
+
+test("GET /v1/feedback returns items list", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/feedback",
+    headers: { Authorization: "Bearer token" },
+    queryStringParameters: { sessionId: "00000000-0000-0000-0000-000000000003" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.ok(Array.isArray(parsed.items), "items must be an array");
+  assert.deepEqual(repo.calls[0], { method: "listFeedback", args: { sessionId: "00000000-0000-0000-0000-000000000003" } });
+});
+
+test("DELETE /v1/feedback/:messageId returns 204", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/feedback/00000000-0000-0000-0000-000000000001",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "deleteFeedback", messageId: "00000000-0000-0000-0000-000000000001", actorId: null });
+});
+
+test("GET /v1/teams/:teamId/leaderboard defaults to week period", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/leaderboard",
+    headers: { Authorization: "Bearer token" },
+    queryStringParameters: {},
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.ok(Array.isArray(parsed.items));
+  assert.deepEqual(repo.calls[0], { method: "getTeamLeaderboard", teamId: "team-1", args: { period: "week" } });
+});
+
+test("GET /v1/teams/:teamId/leaderboard uses provided period", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/leaderboard",
+    headers: { Authorization: "Bearer token" },
+    queryStringParameters: { period: "month" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(repo.calls[0], { method: "getTeamLeaderboard", teamId: "team-1", args: { period: "month" } });
+});
+
 function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, workspaces = [], ideas = null } = {}) {
   const calls = [];
   const configs = { ...teamWorkspaceConfigs };
@@ -1310,5 +1413,9 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async setAgentDeviceId(agentActorId, input) { calls.push({ method: "setAgentDeviceId", agentActorId, input }); if (error) throw error; },
     async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/attachments/${input.path}` }; },
     async downloadAttachment(path) { calls.push({ method: "downloadAttachment", path }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
+    async submitFeedback(body) { calls.push({ method: "submitFeedback", body }); if (error) throw error; return { messageId: body.messageId, actorId: body.actorId, kind: body.kind, starRating: body.starRating ?? null, note: body.note ?? null, createdAt: "2026-05-28T00:00:00Z", updatedAt: null }; },
+    async listFeedback(args) { calls.push({ method: "listFeedback", args }); if (error) throw error; return { items: [] }; },
+    async deleteFeedback(messageId, actorId) { calls.push({ method: "deleteFeedback", messageId, actorId }); if (error) throw error; },
+    async getTeamLeaderboard(teamId, args) { calls.push({ method: "getTeamLeaderboard", teamId, args }); if (error) throw error; return { items: [] }; },
   };
 }
