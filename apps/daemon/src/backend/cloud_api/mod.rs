@@ -395,10 +395,19 @@ impl Backend for CloudApiBackend {
 
     async fn update_runtime_cursor(
         &self,
-        _runtime_row_id: &str,
-        _last_processed_message_id: &str,
+        runtime_row_id: &str,
+        last_processed_message_id: &str,
     ) -> BackendResult<()> {
-        self.unsupported("update_runtime_cursor")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "lastProcessedMessageId")]
+            last_processed_message_id: &'a str,
+        }
+        self.patch_no_content(
+            &format!("/v1/agents/runtimes/{runtime_row_id}/cursor"),
+            &Body { last_processed_message_id },
+        )
+        .await
     }
 
     async fn rpc_upsert_external_actor(
@@ -787,6 +796,22 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn update_runtime_cursor_patches_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("PATCH"))
+            .and(path("/v1/agents/runtimes/runtime-row-1/cursor"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        backend
+            .update_runtime_cursor("runtime-row-1", "msg-10")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
