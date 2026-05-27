@@ -3,6 +3,7 @@ export type BackendKind = "supabase" | "pocketbase" | "local";
 export interface AuthUser {
   id: string;
   email?: string | null;
+  isAnonymous?: boolean;
   [key: string]: unknown;
 }
 
@@ -32,6 +33,10 @@ export interface AuthBackend {
   signInAnonymously(): Promise<AuthSession | null>;
   signOut(): Promise<void>;
   claimInvite(token: string): Promise<AuthClaimResult>;
+  /** Attach an email identity to the current (anonymous) user. Triggers an OTP. */
+  sendUpgradeEmailOtp(email: string): Promise<void>;
+  /** Confirm the OTP and finalize the upgrade. */
+  verifyUpgradeEmailOtp(email: string, code: string): Promise<AuthSession | null>;
 }
 
 export interface SessionListEntry {

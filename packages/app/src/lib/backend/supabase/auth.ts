@@ -15,10 +15,11 @@ type SupabaseAuthClient = {
     verifyOtp(args: {
       email: string;
       token: string;
-      type: "email";
+      type: "email" | "email_change";
     }): Promise<{ data: { session: SupabaseSession | null }; error: unknown | null }>;
     signInAnonymously(): Promise<{ data: { session: SupabaseSession | null }; error: unknown | null }>;
     signOut(): Promise<{ error: unknown | null }>;
+    updateUser(args: { email: string }): Promise<{ data: unknown; error: unknown | null }>;
   };
   rpc(name: "claim_team_invite", args: { p_token: string }): Promise<{ data: unknown; error: unknown | null }>;
 };
@@ -37,6 +38,7 @@ function mapSupabaseSession(session: SupabaseSession | null): AuthSession | null
     user: {
       id: session.user.id,
       email: session.user.email ?? null,
+      isAnonymous: (session.user as { is_anonymous?: boolean }).is_anonymous ?? false,
       providerData: session.user,
     },
     accessToken: session.access_token ?? null,
@@ -95,6 +97,19 @@ export function createSupabaseAuthBackend(client: unknown): AuthBackend {
     async signOut(): Promise<void> {
       const { error } = await supabase.auth.signOut();
       if (error) throw toBackendError(error, "auth.signOut");
+    },
+    async sendUpgradeEmailOtp(email: string): Promise<void> {
+      const { error } = await supabase.auth.updateUser({ email });
+      if (error) throw toBackendError(error, "auth.sendUpgradeEmailOtp");
+    },
+    async verifyUpgradeEmailOtp(email: string, code: string): Promise<AuthSession | null> {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: code,
+        type: "email_change",
+      });
+      if (error) throw toBackendError(error, "auth.verifyUpgradeEmailOtp");
+      return mapSupabaseSession(data.session);
     },
     async claimInvite(token: string) {
       const { data, error } = await supabase.rpc("claim_team_invite", { p_token: token });
