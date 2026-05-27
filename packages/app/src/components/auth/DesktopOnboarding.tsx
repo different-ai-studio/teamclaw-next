@@ -167,7 +167,7 @@ function ChooseStep({
           <ChoiceRow
             icon={<Server className="h-4 w-4" />}
             title={t("auth.onboarding.selfHosted", "Use self-hosted server")}
-            caption={t("auth.onboarding.selfHostedDesc", "Configure Supabase and MQTT, then restart on your own server.")}
+            caption={t("auth.onboarding.selfHostedDesc", "Configure Cloud API and MQTT, then restart on your own server.")}
             disabled={loading}
             onClick={onServer}
           />
@@ -248,16 +248,12 @@ function ServerStep({ onBack }: { onBack: () => void }) {
       <form onSubmit={submit} className="rounded-[16px] border border-border bg-paper p-5">
         <h1 className="text-[18px] font-semibold">{t("auth.onboarding.serverTitle", "Self-hosted server")}</h1>
         <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-          {t("auth.onboarding.serverDesc", "Saving writes the local TeamClaw config and restarts the frontend so Supabase initializes again.")}
+          {t("auth.onboarding.serverDesc", "Saving writes the local TeamClaw config and restarts the frontend so Cloud API initializes again.")}
         </p>
         <div className="mt-5 grid gap-4">
           <label className="space-y-2">
-            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.supabaseUrl", "Supabase URL")}</span>
-            <Input value={config.supabaseUrl ?? ""} onChange={(event) => update({ supabaseUrl: event.target.value })} />
-          </label>
-          <label className="space-y-2">
-            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.supabaseAnonKey", "Anon key")}</span>
-            <Input value={config.supabaseAnonKey ?? ""} onChange={(event) => update({ supabaseAnonKey: event.target.value })} />
+            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.cloudApiUrl", "Cloud API URL")}</span>
+            <Input value={config.cloudApiUrl ?? ""} onChange={(event) => update({ cloudApiUrl: event.target.value })} placeholder="https://cloud.ucar.cc" />
           </label>
           <label className="space-y-2">
             <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.mqttHost", "MQTT host")}</span>
