@@ -1,0 +1,356 @@
+//! OSS Sync v3 — Rust implementation (spec §4).
+//!
+//! Module layout:
+//!   mod.rs          — re-exports + Tauri commands
+//!   engine.rs       — SyncEngine::tick() + sync_now() entry points
+//!   state.rs        — LocalSyncState serde (.teamclaw/sync/state.json)
+//!   scanner.rs      — workspace walker, mtime/size dirty detection
+//!   manifest.rs     — manifest pagination helpers + tests
+//!   conflict.rs     — conflict sidecar file writes
+//!   fc_client.rs    — reqwest FC client with JWT injection and error mapping
+//!   crypto.rs       — AMXC blob envelope (AES-256-GCM)
+//!   path_validator.rs — client-side mirror of FC validateSyncPath + symlink check
+//!   error.rs        — SyncError unified error type
+
+pub mod conflict;
+pub mod crypto;
+pub mod engine;
+pub mod error;
+pub mod fc_client;
+pub mod manifest;
+pub mod path_validator;
+pub mod scanner;
+pub mod state;
+
+use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+
+use crate::commands::{shared_secrets_crypto::derive_key, team_secret_store};
+use engine::TickResult;
+use fc_client::{CreateTeamResult as FcCreateTeamResult, FcClient, VersionInfo};
+use state::LocalSyncState;
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, String), String> {
+    // Read teamclaw.json to get fc_endpoint (falls back to default production URL).
+    let config_path = std::path::Path::new(workspace_path)
+        .join(crate::commands::TEAMCLAW_DIR)
+        .join(crate::commands::CONFIG_FILE_NAME);
+
+    let json: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let base_url = json
+        .get("fc_endpoint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("https://cloud.ucar.cc")
+        .trim_end_matches('/')
+        .to_string();
+
+    // JWT is the Supabase session token stored in env_blob.
+    let jwt = json
+        .get("supabase_jwt")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("SUPABASE_JWT").ok())
+        .ok_or_else(|| "supabase_jwt not found — user not logged in".to_string())?;
+
+    Ok((base_url, jwt))
+}
+
+fn get_team_id(workspace_path: &str) -> Result<String, String> {
+    let config_path = std::path::Path::new(workspace_path)
+        .join(crate::commands::TEAMCLAW_DIR)
+        .join(crate::commands::CONFIG_FILE_NAME);
+    let json: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    json.get("oss_team_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "oss_team_id not found in teamclaw.json".to_string())
+}
+
+fn write_oss_team_config(
+    workspace_path: &str,
+    team_id: &str,
+    team_slug: &str,
+    ai_gateway_endpoint: &str,
+    litellm_key: &str,
+) -> Result<(), String> {
+    let config_path = std::path::Path::new(workspace_path)
+        .join(crate::commands::TEAMCLAW_DIR)
+        .join(crate::commands::CONFIG_FILE_NAME);
+
+    let mut json: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    json["team_mode"] = serde_json::Value::String("oss".to_string());
+    json["oss_team_id"] = serde_json::Value::String(team_id.to_string());
+    json["oss_team_slug"] = serde_json::Value::String(team_slug.to_string());
+    json["ai_gateway_endpoint"] =
+        serde_json::Value::String(ai_gateway_endpoint.to_string());
+    json["litellm_key"] = serde_json::Value::String(litellm_key.to_string());
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create config dir: {e}"))?;
+    }
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("write teamclaw.json: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Result types for Tauri commands
+// ---------------------------------------------------------------------------
+
+/// Returned by oss_sync_create_team — includes the team secret the user must share.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTeamCommandResult {
+    pub team_id: String,
+    pub team_slug: String,
+    pub ai_gateway_endpoint: String,
+    pub litellm_key: String,
+    /// The raw 64-hex team_secret. Show to user ONCE; share with new members.
+    pub team_secret: String,
+}
+
+/// Current sync status for the workspace.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatus {
+    pub team_id: Option<String>,
+    pub last_server_seq: i64,
+    pub last_sync_at: String,
+    pub dirty_count: usize,
+    pub total_files: usize,
+}
+
+/// Conflict resolution choices.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictChoice {
+    /// Keep the remote version (discard local edits).
+    KeepRemote,
+    /// Keep the local version (will be uploaded on next push).
+    KeepLocal,
+}
+
+// ---------------------------------------------------------------------------
+// Tauri commands
+// ---------------------------------------------------------------------------
+
+/// Create a new OSS sync team.
+///
+/// Flow:
+///   1. Generate 32 random bytes → hex team_secret.
+///   2. Save secret temporarily under key "PENDING".
+///   3. Call FC /sync/create-team.
+///   4. Rename keychain entry to real teamId.
+///   5. Write local team config (sync_mode=oss, teamId, etc.).
+///   6. Return CreateTeamCommandResult (includes team_secret for sharing).
+///
+/// TODO(join): joining an existing OSS team (user inputs team_secret) is out
+/// of scope for Tranche 2 — implement in frontend Tranche 3 when the join UI
+/// is designed.
+#[tauri::command]
+pub async fn oss_sync_create_team(
+    name: String,
+    workspace_path: String,
+    _app: AppHandle,
+) -> Result<CreateTeamCommandResult, String> {
+    // 1. Generate random team_secret (32 bytes → 64 hex).
+    let mut raw = [0u8; 32];
+    getrandom::getrandom(&mut raw).map_err(|e| format!("getrandom: {e}"))?;
+    let team_secret = hex::encode(raw);
+
+    // 2. Save temporarily under "PENDING".
+    team_secret_store::save_team_secret(&workspace_path, "PENDING", &team_secret)?;
+
+    // Derive key to validate it works (fail early before calling FC).
+    let _key = derive_key(&team_secret)?;
+
+    // 3. Get JWT and call FC.
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+    let result: FcCreateTeamResult = fc
+        .create_team(&name, None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 4. Rename keychain entry to real teamId.
+    team_secret_store::save_team_secret(&workspace_path, &result.team_id, &team_secret)?;
+    let _ = team_secret_store::delete_team_secret(&workspace_path, "PENDING");
+
+    // 5. Write local config.
+    write_oss_team_config(
+        &workspace_path,
+        &result.team_id,
+        &result.team_slug,
+        &result.ai_gateway_endpoint,
+        &result.litellm_key,
+    )?;
+
+    Ok(CreateTeamCommandResult {
+        team_id: result.team_id,
+        team_slug: result.team_slug,
+        ai_gateway_endpoint: result.ai_gateway_endpoint,
+        litellm_key: result.litellm_key,
+        team_secret,
+    })
+}
+
+/// Run a full OSS sync tick (pull + push).
+#[tauri::command]
+pub async fn oss_sync_now(
+    workspace_path: String,
+    _app: AppHandle,
+) -> Result<TickResult, String> {
+    let team_id = get_team_id(&workspace_path)?;
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+    engine::tick(&workspace_path, &team_id, &fc)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Return current sync status (dirty count, last sync time, etc.).
+#[tauri::command]
+pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, String> {
+    let team_id = get_team_id(&workspace_path).ok();
+    let tid = team_id.as_deref().unwrap_or("unknown");
+    let state = LocalSyncState::load(&workspace_path, tid)?;
+    let dirty_count = state.files.values().filter(|f| f.dirty).count();
+    let total_files = state.files.len();
+    Ok(SyncStatus {
+        team_id: team_id,
+        last_server_seq: state.last_server_seq,
+        last_sync_at: state.last_sync_at.clone(),
+        dirty_count,
+        total_files,
+    })
+}
+
+/// List version history for a file.
+#[tauri::command]
+pub async fn oss_sync_list_versions(
+    workspace_path: String,
+    path: String,
+) -> Result<Vec<VersionInfo>, String> {
+    let team_id = get_team_id(&workspace_path)?;
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+    fc.list_versions(&team_id, &path, None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Restore a file to a specific version by downloading its blob.
+#[tauri::command]
+pub async fn oss_sync_restore_version(
+    workspace_path: String,
+    path: String,
+    content_hash: String,
+    _app: AppHandle,
+) -> Result<(), String> {
+    let team_id = get_team_id(&workspace_path)?;
+    let team_secret = team_secret_store::load_team_secret(&workspace_path, &team_id)?;
+    let key = derive_key(&team_secret)?;
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+
+    let mut state = LocalSyncState::load(&workspace_path, &team_id)?;
+
+    // Download and overwrite local file.
+    // version=0 placeholder; we don't know the exact version just from hash,
+    // but we still write the blob and mark it synced.
+    let dl = fc
+        .download(&team_id, &content_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    let blob = fc
+        .get_blob(&dl.download_url, &content_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    let plaintext = crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key)
+        .map_err(|e| e.to_string())?;
+    let plain_hash = crate::commands::oss_sync::crypto::sha256_hex(&plaintext);
+
+    let abs_path = std::path::Path::new(&workspace_path).join(&path);
+    if let Some(parent) = abs_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&abs_path, &plaintext)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let meta = std::fs::metadata(&abs_path).map_err(|e| e.to_string())?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let size = meta.len();
+
+    // Find version number in state, or use existing.
+    let synced_version = state
+        .files
+        .get(&path)
+        .map(|f| f.synced_version)
+        .unwrap_or(0);
+
+    state.upsert(
+        &path,
+        synced_version,
+        content_hash,
+        plain_hash.clone(),
+        plain_hash,
+        mtime,
+        size,
+    );
+    state.save(&workspace_path)?;
+    Ok(())
+}
+
+/// Resolve a conflict for a file.
+#[tauri::command]
+pub async fn oss_sync_resolve_conflict(
+    workspace_path: String,
+    path: String,
+    choice: ConflictChoice,
+    _app: AppHandle,
+) -> Result<(), String> {
+    let team_id = get_team_id(&workspace_path)?;
+    let mut state = LocalSyncState::load(&workspace_path, &team_id)?;
+
+    match choice {
+        ConflictChoice::KeepRemote => {
+            // Mark local as matching synced (non-dirty); next tick will not re-upload.
+            if let Some(fs) = state.files.get_mut(&path) {
+                fs.local_plain_hash = fs.synced_plain_hash.clone();
+                fs.dirty = false;
+            }
+        }
+        ConflictChoice::KeepLocal => {
+            // Mark dirty=true so next push uploads local version.
+            if let Some(fs) = state.files.get_mut(&path) {
+                fs.dirty = true;
+            }
+        }
+    }
+    state.save(&workspace_path)?;
+    Ok(())
+}

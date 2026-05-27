@@ -1,0 +1,142 @@
+//! Conflict sidecar file management (spec §4.4).
+//!
+//! Name format: `<dir>/<stem>.conflict.<unix_ts>.<short_cipher_hash[0..8]>.<ext>`
+//! (or no ext if original had none).
+//!
+//! Scanner skips all `*.conflict.*` files so they are never uploaded.
+
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Write a conflict sidecar file containing `data` alongside the original `abs_path`.
+/// Returns the path of the conflict file written.
+pub async fn write_conflict_sidecar(
+    abs_path: &Path,
+    data: &[u8],
+    cipher_hash: &str,
+) -> Result<std::path::PathBuf, String> {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let conflict_path = conflict_filename(abs_path, ts, cipher_hash);
+
+    tokio::fs::write(&conflict_path, data)
+        .await
+        .map_err(|e| format!("conflict: write {}: {e}", conflict_path.display()))?;
+
+    Ok(conflict_path)
+}
+
+/// Construct the conflict filename for a given original path, timestamp and cipher_hash.
+/// This is public so the scanner test can exercise it.
+pub fn conflict_filename(original: &Path, unix_ts: u64, cipher_hash: &str) -> std::path::PathBuf {
+    let dir = original.parent().unwrap_or_else(|| Path::new("."));
+    let filename = original
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    // Split into stem and extension
+    // e.g. "foo.md" → stem="foo", ext=Some("md")
+    //      "foo"    → stem="foo", ext=None
+    //      "foo.tar.gz" → stem="foo.tar", ext=Some("gz")
+    let (stem, ext) = if let Some(dot_pos) = filename.rfind('.') {
+        let (s, e) = filename.split_at(dot_pos);
+        (s.to_string(), Some(e[1..].to_string())) // e[1..] skips the dot
+    } else {
+        (filename, None)
+    };
+
+    let short_hash = &cipher_hash[..cipher_hash.len().min(8)];
+
+    let conflict_name = match &ext {
+        Some(e) if !e.is_empty() => {
+            format!("{}.conflict.{}.{}.{}", stem, unix_ts, short_hash, e)
+        }
+        _ => {
+            format!("{}.conflict.{}.{}", stem, unix_ts, short_hash)
+        }
+    };
+
+    dir.join(conflict_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_conflict_name_with_extension() {
+        let path = Path::new("/ws/skills/foo.md");
+        let name = conflict_filename(path, 1748332800, "abc123defxxx");
+        let filename = name.file_name().unwrap().to_str().unwrap();
+        assert_eq!(filename, "foo.conflict.1748332800.abc123de.md");
+        assert_eq!(name.parent().unwrap(), Path::new("/ws/skills"));
+    }
+
+    #[test]
+    fn test_conflict_name_no_extension() {
+        let path = Path::new("/ws/skills/Makefile");
+        let name = conflict_filename(path, 9999, "deadbeefabcd");
+        let filename = name.file_name().unwrap().to_str().unwrap();
+        assert_eq!(filename, "Makefile.conflict.9999.deadbeef");
+    }
+
+    #[test]
+    fn test_conflict_name_dotfile() {
+        // e.g. ".gitignore" — stem is "", ext is "gitignore"
+        // rfind('.') at 0 → stem="", ext="gitignore"
+        let path = Path::new("/ws/skills/.gitignore");
+        let name = conflict_filename(path, 100, "aabbccdd1234");
+        let filename = name.file_name().unwrap().to_str().unwrap();
+        // stem="" ext="gitignore" → ".conflict.100.aabbccdd.gitignore"
+        assert!(filename.contains(".conflict."));
+        assert!(filename.ends_with(".gitignore"));
+    }
+
+    #[test]
+    fn test_conflict_name_short_hash() {
+        // If hash is shorter than 8 chars, take all of it
+        let path = Path::new("/ws/skills/x.md");
+        let name = conflict_filename(path, 1, "ab");
+        let filename = name.file_name().unwrap().to_str().unwrap();
+        assert!(filename.contains(".conflict.1.ab.md"));
+    }
+
+    #[test]
+    fn test_same_ts_produces_deterministic_name() {
+        let path = Path::new("/ws/skills/doc.txt");
+        let name1 = conflict_filename(path, 1234567890, "hash1111aaaa");
+        let name2 = conflict_filename(path, 1234567890, "hash1111aaaa");
+        assert_eq!(name1, name2);
+    }
+
+    #[test]
+    fn test_different_hashes_produce_different_names() {
+        let path = Path::new("/ws/skills/doc.txt");
+        let name1 = conflict_filename(path, 1000, "aaaa1111bbbb");
+        let name2 = conflict_filename(path, 1000, "xxxx9999yyyy");
+        assert_ne!(name1, name2);
+    }
+
+    #[tokio::test]
+    async fn test_write_conflict_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("skills").join("test.md");
+        std::fs::create_dir_all(original.parent().unwrap()).unwrap();
+        std::fs::write(&original, b"original").unwrap();
+
+        let sidecar = write_conflict_sidecar(&original, b"remote content", "abcdef1234567890")
+            .await
+            .unwrap();
+
+        assert!(sidecar.exists());
+        let content = std::fs::read(&sidecar).unwrap();
+        assert_eq!(content, b"remote content");
+        let name = sidecar.file_name().unwrap().to_str().unwrap();
+        assert!(name.contains(".conflict."));
+        assert!(name.ends_with(".md"));
+    }
+}
