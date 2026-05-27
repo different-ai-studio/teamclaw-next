@@ -1,5 +1,8 @@
 import type { AuthBackend, AuthSession, Unsubscribe } from "../types";
 import { BackendError, toBackendError } from "../errors";
+import { isTauri } from "@/lib/utils";
+import { invoke } from "@tauri-apps/api/core";
+import { useWorkspaceStore } from "@/stores/workspace";
 import type { Session as SupabaseSession } from "@supabase/supabase-js";
 
 type SupabaseAuthClient = {
@@ -22,6 +25,7 @@ type SupabaseAuthClient = {
     updateUser(args: { email: string }): Promise<{ data: unknown; error: unknown | null }>;
   };
   rpc(name: "claim_team_invite", args: { p_token: string }): Promise<{ data: unknown; error: unknown | null }>;
+  rpc(name: "get_team_sync_mode", args: { p_team_id: string }): Promise<{ data: unknown; error: unknown | null }>;
 };
 
 type InviteClaimRow = {
@@ -122,7 +126,30 @@ export function createSupabaseAuthBackend(client: unknown): AuthBackend {
           message: "Invite claim returned no team.",
         });
       }
-      return mapInviteClaimRow(row);
+      const claim = mapInviteClaimRow(row);
+
+      // Tranche 5: auto-detect sync_mode after join and persist locally.
+      // The 5-min tick will dispatch to the correct backend on next cycle.
+      try {
+        const { data: modeData } = await supabase.rpc("get_team_sync_mode", {
+          p_team_id: claim.teamId,
+        });
+        const detected = typeof modeData === "string" ? modeData : null;
+        if (detected && isTauri()) {
+          const workspacePath = useWorkspaceStore.getState().workspacePath;
+          if (workspacePath) {
+            await invoke("oss_sync_set_local_sync_mode", {
+              workspacePath,
+              teamId: claim.teamId,
+              mode: detected,
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[claim-invite] failed to auto-detect sync_mode", e);
+      }
+
+      return claim;
     },
   };
 }

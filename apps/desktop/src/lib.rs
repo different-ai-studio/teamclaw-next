@@ -524,6 +524,16 @@ pub fn run() {
             commands::team_unified::unified_team_remove_member,
             commands::team_unified::unified_team_update_member_role,
             commands::team_unified::unified_team_get_my_role,
+            commands::oss_sync::oss_sync_create_team,
+            commands::oss_sync::oss_sync_now,
+            commands::oss_sync::oss_sync_status,
+            commands::oss_sync::oss_sync_list_versions,
+            commands::oss_sync::oss_sync_restore_version,
+            commands::oss_sync::oss_sync_resolve_conflict,
+            commands::oss_sync::oss_sync_set_jwt,
+            commands::oss_sync::oss_sync_set_team_sync_mode,
+            commands::oss_sync::oss_sync_get_team_sync_mode,
+            commands::oss_sync::oss_sync_set_local_sync_mode,
         ])
         .setup(|app| {
             let setup_t0 = std::time::Instant::now();

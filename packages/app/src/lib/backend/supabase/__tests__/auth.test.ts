@@ -2,6 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSupabaseAuthBackend } from "../auth";
 import { createSupabaseDirectoryBackend } from "../directory";
 
+// ---------------------------------------------------------------------------
+// Mock Tauri + utilities used in claimInvite auto-detect (Tranche 5)
+// ---------------------------------------------------------------------------
+const mockInvoke = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockIsTauri = vi.hoisted(() => vi.fn(() => true));
+const mockGetWorkspacePath = vi.hoisted(() => vi.fn(() => '/workspace'));
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }));
+vi.mock('@/lib/utils', () => ({ isTauri: mockIsTauri }));
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: { getState: () => ({ workspacePath: mockGetWorkspacePath() }) },
+}));
+
 const session = {
   access_token: "access-1",
   refresh_token: "refresh-1",
@@ -85,18 +98,21 @@ describe("Supabase auth backend", () => {
   });
 
   it("claimInvite calls the existing RPC and maps actor/team fields", async () => {
-    client.rpc.mockResolvedValueOnce({
-      data: [
-        {
-          actor_id: "actor-1",
-          team_id: "team-1",
-          actor_type: "member",
-          display_name: "Alice",
-          refresh_token: "refresh-claim",
-        },
-      ],
-      error: null,
-    });
+    client.rpc
+      .mockResolvedValueOnce({
+        data: [
+          {
+            actor_id: "actor-1",
+            team_id: "team-1",
+            actor_type: "member",
+            display_name: "Alice",
+            refresh_token: "refresh-claim",
+          },
+        ],
+        error: null,
+      })
+      // get_team_sync_mode call
+      .mockResolvedValueOnce({ data: "git", error: null });
 
     const result = await createSupabaseAuthBackend(client).claimInvite("invite-token");
 
@@ -108,6 +124,85 @@ describe("Supabase auth backend", () => {
       displayName: "Alice",
       refreshToken: "refresh-claim",
     });
+  });
+
+  it("claimInvite calls get_team_sync_mode after claim and invokes oss_sync_set_local_sync_mode when in Tauri", async () => {
+    mockIsTauri.mockReturnValue(true);
+    mockGetWorkspacePath.mockReturnValue('/ws');
+    mockInvoke.mockResolvedValue(undefined);
+
+    client.rpc
+      .mockResolvedValueOnce({
+        data: [
+          {
+            actor_id: "actor-2",
+            team_id: "team-2",
+            actor_type: "member",
+            display_name: "Bob",
+            refresh_token: null,
+          },
+        ],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: "oss", error: null });
+
+    await createSupabaseAuthBackend(client).claimInvite("tok-oss");
+
+    expect(client.rpc).toHaveBeenCalledWith("get_team_sync_mode", { p_team_id: "team-2" });
+    expect(mockInvoke).toHaveBeenCalledWith("oss_sync_set_local_sync_mode", {
+      workspacePath: '/ws',
+      teamId: "team-2",
+      mode: "oss",
+    });
+  });
+
+  it("claimInvite skips invoke when not in Tauri", async () => {
+    mockIsTauri.mockReturnValue(false);
+    mockInvoke.mockClear();
+
+    client.rpc
+      .mockResolvedValueOnce({
+        data: [
+          {
+            actor_id: "actor-3",
+            team_id: "team-3",
+            actor_type: "member",
+            display_name: "Cara",
+            refresh_token: null,
+          },
+        ],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: "git", error: null });
+
+    await createSupabaseAuthBackend(client).claimInvite("tok-web");
+
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it("claimInvite does not throw when sync_mode detection fails", async () => {
+    mockIsTauri.mockReturnValue(true);
+    mockGetWorkspacePath.mockReturnValue('/ws');
+    mockInvoke.mockRejectedValueOnce(new Error("IPC error"));
+
+    client.rpc
+      .mockResolvedValueOnce({
+        data: [
+          {
+            actor_id: "actor-4",
+            team_id: "team-4",
+            actor_type: "member",
+            display_name: "Dave",
+            refresh_token: null,
+          },
+        ],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: "oss", error: null });
+
+    // Should not throw even if invoke fails
+    const result = await createSupabaseAuthBackend(client).claimInvite("tok-fail");
+    expect(result.teamId).toBe("team-4");
   });
 });
 

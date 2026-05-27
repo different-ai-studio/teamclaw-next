@@ -12,6 +12,19 @@ import { createApnsJwtCache } from './lib/apns-jwt.mjs';
 import { createApnsClient, createHttp2Transport } from './lib/apns.mjs';
 import { dispatchPush } from './lib/push-dispatch.mjs';
 import { createMqttPublisher } from './lib/mqtt-client.mjs';
+import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.mjs';
+import { logSyncEvent } from './lib/sync-log.mjs';
+import {
+  handleSyncCreateTeam,
+  handleSyncManifest,
+  handleSyncUploadPrepare,
+  handleSyncUploadComplete,
+  handleSyncDownload,
+  handleSyncDelete,
+  handleSyncVersions,
+  handleSyncSetMode,
+  handleSyncTeamMode,
+} from './lib/sync-handlers.mjs';
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -922,18 +935,112 @@ export async function handler(event, context) {
     return { statusCode: 204, headers: {}, body: "" };
   }
 
-  if (httpMethod !== "POST") {
+  // GET is allowed only for /sync/versions; all others must be POST.
+  if (httpMethod !== "POST" && !(httpMethod === "GET" && path === "/sync/versions")) {
     return json(405, { error: "Method not allowed" });
   }
 
   let body;
-  try {
-    body = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody || {};
-  } catch {
-    return json(400, { error: "Invalid JSON body" });
+  if (httpMethod === "GET") {
+    // Parse query string into body-like object for /sync/versions
+    body = {};
+    const qIdx = (event.rawQueryString || event.queryString || "").indexOf("?") >= 0
+      ? event.rawQueryString || event.queryString
+      : null;
+    const qs = event.rawQueryString || event.queryString || "";
+    new URLSearchParams(qs).forEach((v, k) => { body[k] = v; });
+  } else {
+    try {
+      body = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody || {};
+    } catch {
+      return json(400, { error: "Invalid JSON body" });
+    }
   }
 
   try {
+    // ---------------------------------------------------------------------------
+    // /sync/* routes — JWT auth required for all
+    // ---------------------------------------------------------------------------
+    if (path === "/sync/create-team") {
+      const auth = await authenticateJwtOnly({ headers });
+      if (!auth.ok) return json(auth.status, { error: auth.error });
+      return await handleSyncCreateTeam(auth.userId, body);
+    }
+
+    if (path === "/sync/set-mode") {
+      const auth = await authenticateJwtOnly({ headers });
+      if (!auth.ok) return json(auth.status, { error: auth.error });
+      return await handleSyncSetMode(auth.userId, body);
+    }
+
+    if (path === "/sync/team-mode") {
+      const auth = await authenticateJwtOnly({ headers });
+      if (!auth.ok) return json(auth.status, { error: auth.error });
+      return await handleSyncTeamMode(auth.userId, body);
+    }
+
+    if (path.startsWith("/sync/")) {
+      const teamId = body.teamId || body.team_id;
+      if (!teamId) return json(400, { error: "teamId is required" });
+
+      const auth = await authenticateSyncCall({ headers, teamId });
+      if (!auth.ok) return json(auth.status, { error: auth.error });
+
+      const startedAt = Date.now();
+      let result, errorCode;
+      try {
+        switch (path) {
+          case "/sync/manifest":
+            result = await handleSyncManifest(auth, body);
+            break;
+          case "/sync/upload/prepare":
+            result = await handleSyncUploadPrepare(auth, body);
+            break;
+          case "/sync/upload/complete":
+            result = await handleSyncUploadComplete(auth, body);
+            break;
+          case "/sync/download":
+            result = await handleSyncDownload(auth, body);
+            break;
+          case "/sync/delete":
+            result = await handleSyncDelete(auth, body);
+            break;
+          case "/sync/versions":
+            result = await handleSyncVersions(auth, body);
+            break;
+          default:
+            result = json(404, { error: "Not found" });
+        }
+      } catch (e) {
+        errorCode = e.code || 'unhandled';
+        throw e;
+      } finally {
+        // Parse body to extract actorId for observability, then strip __actorId.
+        let parsedBody = null;
+        let actorId;
+        try {
+          parsedBody = result && typeof result.body === 'string' ? JSON.parse(result.body) : (result?.body ?? null);
+          actorId = parsedBody?.__actorId;
+          if (parsedBody && '__actorId' in parsedBody) {
+            delete parsedBody.__actorId;
+            if (result) result = { ...result, body: JSON.stringify(parsedBody) };
+          }
+        } catch { /* ignore parse errors */ }
+        logSyncEvent({
+          endpoint: path,
+          teamId: body?.teamId,
+          actorId,
+          latencyMs: Date.now() - startedAt,
+          result: result?.statusCode ?? (errorCode ? 'error' : 'ok'),
+          changeSeq: parsedBody?.changeSeq,
+          contentHash: body?.contentHash,
+          sizeBytes: body?.size,
+          errorCode,
+        });
+      }
+      return result;
+    }
+
     switch (path) {
       case "/register":
         return await handleRegister(body);

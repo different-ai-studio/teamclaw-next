@@ -34,6 +34,10 @@ grant select on public.actor_directory to authenticated;
 -- 2. Keep update_current_actor_profile returning the new column too so
 --    callers that decode actor_directory rows from it stay consistent.
 -- ===========================================================================
+-- Drop first: adding default_workspace_id changes the RETURNS TABLE shape,
+-- which `create or replace` is not allowed to do for set-returning fns.
+drop function if exists public.update_current_actor_profile(uuid, text, text);
+
 create or replace function public.update_current_actor_profile(
   p_actor_id uuid,
   p_display_name text,
