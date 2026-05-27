@@ -1,6 +1,6 @@
 begin;
 
-select plan(42);
+select plan(46);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -583,6 +583,130 @@ select is(
   true,
   'amuxc_complete_delete: file marked deleted'
 );
+
+-- ---------------------------------------------------------------------------
+-- Tests for app.oss_sync_abandon_expired_sessions (migration 20260527000002)
+-- ---------------------------------------------------------------------------
+
+-- Tests 43-46: cleanup function tests — run with elevated privileges via security definer
+-- The app.* functions are security definer so they run as their owner (postgres);
+-- we call them directly from the postgres session (pgTAP runs as postgres).
+
+-- Test 43: expired pending session → status='abandoned'
+do $$
+declare v_team_id uuid;
+        v_actor_id uuid;
+        v_sess_id uuid;
+begin
+  v_team_id := (select id from public.teams where slug = 'oss-team');
+  v_actor_id := (select id from public.actors
+                  where user_id = 'a1111111-1111-1111-1111-111111111111'::uuid
+                    and team_id = v_team_id limit 1);
+  v_sess_id := gen_random_uuid();
+  -- Reset role to postgres so we can bypass RLS for test setup
+  set local role postgres;
+  insert into public.amuxc_upload_sessions
+    (id, team_id, actor_id, path, parent_version, oss_key, content_hash, size, status, expires_at)
+  values
+    (v_sess_id, v_team_id, v_actor_id,
+     'skills/cleanup-test1.md', 0, 'test/cleanup-key1', 'aabbcc', 100, 'pending', now() - interval '1 hour');
+  perform app.oss_sync_abandon_expired_sessions();
+end $$;
+
+select is(
+  (select status from public.amuxc_upload_sessions
+    where oss_key = 'test/cleanup-key1'),
+  'abandoned',
+  'oss_sync_abandon_expired_sessions: expired pending session → abandoned'
+);
+
+-- Test 44: abandoned + expires_at older than 24h → hard deleted
+do $$
+declare v_team_id uuid;
+        v_actor_id uuid;
+        v_sess_id uuid;
+begin
+  v_team_id := (select id from public.teams where slug = 'oss-team');
+  v_actor_id := (select id from public.actors
+                  where user_id = 'a1111111-1111-1111-1111-111111111111'::uuid
+                    and team_id = v_team_id limit 1);
+  v_sess_id := gen_random_uuid();
+  set local role postgres;
+  insert into public.amuxc_upload_sessions
+    (id, team_id, actor_id, path, parent_version, oss_key, content_hash, size, status, expires_at)
+  values
+    (v_sess_id, v_team_id, v_actor_id,
+     'skills/cleanup-test2.md', 0, 'test/cleanup-key2', 'aabbdd', 100, 'abandoned', now() - interval '25 hours');
+  perform app.oss_sync_abandon_expired_sessions();
+end $$;
+
+select is(
+  (select count(*)::int from public.amuxc_upload_sessions
+    where oss_key = 'test/cleanup-key2'),
+  0,
+  'oss_sync_abandon_expired_sessions: abandoned row older than 24h → deleted'
+);
+
+-- ---------------------------------------------------------------------------
+-- Tests for app.oss_sync_gc_orphan_blobs (migration 20260527000002)
+-- ---------------------------------------------------------------------------
+
+-- Test 45: orphan blob (8 days old, no version reference) → deleted
+do $$
+declare v_team_id uuid;
+        v_deleted int;
+begin
+  v_team_id := (select id from public.teams where slug = 'oss-team');
+  set local role postgres;
+  insert into public.amuxc_blobs (team_id, content_hash, oss_key, size, verified, created_at)
+  values (v_team_id, 'orphan-hash-gc-test-1', 'gc/orphan1', 42, true, now() - interval '8 days')
+  on conflict do nothing;
+  v_deleted := app.oss_sync_gc_orphan_blobs();
+  -- Verify the blob is gone
+  if (select count(*) from public.amuxc_blobs where content_hash = 'orphan-hash-gc-test-1') > 0 then
+    raise exception 'blob should have been deleted';
+  end if;
+end $$;
+
+select pass('oss_sync_gc_orphan_blobs: orphan blob 8 days old → deleted');
+
+-- Test 46: blob 8 days old but referenced by a version → preserved
+do $$
+declare v_team_id uuid;
+        v_file_id uuid;
+        v_actor_id uuid;
+        v_preserved_count int;
+begin
+  v_team_id := (select id from public.teams where slug = 'oss-team');
+  v_actor_id := (select id from public.actors
+                  where user_id = 'a1111111-1111-1111-1111-111111111111'::uuid
+                    and team_id = v_team_id limit 1);
+  set local role postgres;
+  -- Insert a fresh file for this test
+  insert into public.amuxc_files (team_id, path, current_version, deleted, updated_by, updated_at)
+  values (v_team_id, 'skills/gc-ref-test.md', 1, false, v_actor_id, now())
+  on conflict (team_id, path) do nothing;
+  v_file_id := (select id from public.amuxc_files
+                 where team_id = v_team_id and path = 'skills/gc-ref-test.md');
+  -- Insert the blob with old created_at
+  insert into public.amuxc_blobs (team_id, content_hash, oss_key, size, verified, created_at)
+  values (v_team_id, 'referenced-hash-gc-test-2', 'gc/referenced1', 99, true, now() - interval '8 days')
+  on conflict do nothing;
+  -- Insert a version that references this blob
+  insert into public.amuxc_file_versions
+    (file_id, version, parent_version, content_hash, size, deleted, created_by, created_at)
+  values (v_file_id, 99, 0, 'referenced-hash-gc-test-2', 99, false, v_actor_id, now());
+  -- Run GC
+  perform app.oss_sync_gc_orphan_blobs();
+  -- The blob must still exist
+  v_preserved_count := (select count(*)::int from public.amuxc_blobs
+                          where content_hash = 'referenced-hash-gc-test-2');
+  if v_preserved_count = 0 then
+    raise exception 'referenced blob should not have been deleted';
+  end if;
+end $$;
+
+select pass('oss_sync_gc_orphan_blobs: referenced blob 8 days old → preserved');
 
 select * from finish();
 rollback;
