@@ -188,9 +188,41 @@ impl Backend for CloudApiBackend {
 
     async fn upsert_agent_runtime(
         &self,
-        _row: &AgentRuntimeUpsert<'_>,
+        row: &AgentRuntimeUpsert<'_>,
     ) -> BackendResult<Option<String>> {
-        self.unsupported("upsert_agent_runtime")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "agentActorId")]
+            agent_actor_id: &'a str,
+            #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")]
+            session_id: Option<&'a str>,
+            #[serde(rename = "runtimeId", skip_serializing_if = "Option::is_none")]
+            runtime_id: Option<&'a str>,
+            #[serde(rename = "backendSessionId", skip_serializing_if = "Option::is_none")]
+            backend_session_id: Option<&'a str>,
+            #[serde(rename = "backendType")]
+            backend_type: &'a str,
+            status: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            id: Option<String>,
+        }
+        let r: Resp = self
+            .post(
+                "/v1/agents/runtimes",
+                &Body {
+                    agent_actor_id: row.agent_id,
+                    session_id: row.session_id,
+                    runtime_id: row.runtime_id,
+                    backend_session_id: row.backend_session_id,
+                    backend_type: row.backend_type,
+                    status: row.status,
+                },
+                None,
+            )
+            .await?;
+        Ok(r.id)
     }
 
     async fn fetch_agent_runtime_for_session(
@@ -720,6 +752,36 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn upsert_agent_runtime_returns_id() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "runtime-row-1"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let id = backend
+            .upsert_agent_runtime(&AgentRuntimeUpsert {
+                team_id: "team-1",
+                agent_id: "agent-1",
+                session_id: Some("session-1"),
+                workspace_id: None,
+                backend_type: "claude_code",
+                backend_session_id: Some("bs-1"),
+                runtime_id: Some("rt-1"),
+                status: "active",
+                current_model: None,
+                last_seen_at: chrono::Utc::now(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(id, Some("runtime-row-1".to_string()));
     }
 
     #[tokio::test]
