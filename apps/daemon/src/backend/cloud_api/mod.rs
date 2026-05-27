@@ -493,11 +493,31 @@ impl Backend for CloudApiBackend {
 
     async fn create_cron_session(
         &self,
-        _team_id: &str,
-        _primary_agent_actor_id: &str,
-        _title: &str,
+        team_id: &str,
+        primary_agent_actor_id: &str,
+        title: &str,
     ) -> BackendResult<String> {
-        self.unsupported("create_cron_session")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "teamId")]
+            team_id: &'a str,
+            #[serde(rename = "primaryAgentActorId")]
+            primary_agent_actor_id: &'a str,
+            title: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            #[serde(rename = "sessionId")]
+            session_id: String,
+        }
+        let r: Resp = self
+            .post(
+                "/v1/sessions/cron",
+                &Body { team_id, primary_agent_actor_id, title },
+                None,
+            )
+            .await?;
+        Ok(r.session_id)
     }
 
     async fn insert_message(
@@ -661,6 +681,25 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn create_cron_session_returns_session_id() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/sessions/cron"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sessionId": "session-cron-1"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let session_id = backend
+            .create_cron_session("team-1", "agent-1", "Daily summary")
+            .await
+            .unwrap();
+        assert_eq!(session_id, "session-cron-1");
     }
 
     #[tokio::test]
