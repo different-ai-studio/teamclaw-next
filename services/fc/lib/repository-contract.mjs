@@ -148,6 +148,100 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     assert.deepEqual(cfg.defaultWorkspaceId, "workspace-1");
   });
 
+  test("repository contract: getSession returns session with participants", async () => {
+    const repo = createRepository();
+    const s = await repo.getSession("session-1");
+    assert.ok(s, "session should exist");
+    assert.equal(s.id, "session-1");
+    assert.ok(Array.isArray(s.participants), "participants should be an array");
+  });
+
+  test("repository contract: patchSession mutates title", async () => {
+    const repo = createRepository();
+    const s = await repo.patchSession("session-1", { title: "Updated title" });
+    assert.ok(s, "session should exist");
+    assert.equal(s.title, "Updated title");
+  });
+
+  test("repository contract: createSession returns session with participants", async () => {
+    const repo = createRepository();
+    const s = await repo.createSession({
+      id: "session-new",
+      teamId: "team-1",
+      title: "New Session",
+      mode: "solo",
+      participantActorIds: ["actor-1"],
+    });
+    assert.equal(s.id, "session-new");
+    assert.equal(s.title, "New Session");
+    assert.ok(Array.isArray(s.participants), "participants should be an array");
+  });
+
+  test("repository contract: markSessionViewed succeeds", async () => {
+    const repo = createRepository();
+    await repo.markSessionViewed("session-1");
+  });
+
+  test("repository contract: listSessionParticipants returns items", async () => {
+    const repo = createRepository();
+    const out = await repo.listSessionParticipants("session-1");
+    assert.ok(Array.isArray(out.items), "items should be an array");
+  });
+
+  test("repository contract: upsertSessionParticipant returns participant", async () => {
+    const repo = createRepository();
+    const p = await repo.upsertSessionParticipant("session-1", { actorId: "actor-new", role: "member" });
+    assert.equal(p.actorId, "actor-new");
+    assert.equal(p.role, "member");
+  });
+
+  test("repository contract: removeSessionParticipant succeeds", async () => {
+    const repo = createRepository();
+    await repo.removeSessionParticipant("session-1", "actor-1");
+  });
+
+  test("repository contract: getSessionByAcp returns null when absent", async () => {
+    const repo = createRepository();
+    const out = await repo.getSessionByAcp("acp-missing");
+    assert.equal(out, null);
+  });
+
+  test("repository contract: ensureGatewaySession is idempotent", async () => {
+    const repo = createRepository();
+    const first = await repo.ensureGatewaySession({
+      teamId: "team-1",
+      binding: "wecom:room#1",
+      title: "Stand-up",
+      primaryAgentActorId: "actor-1",
+      ownerMemberActorIds: [],
+      participantActorIds: [],
+    });
+    assert.ok(first.sessionId, "sessionId should be present");
+    assert.ok(first.gatewaySessionId, "gatewaySessionId should be present");
+    assert.equal(first.created, true);
+
+    const second = await repo.ensureGatewaySession({
+      teamId: "team-1",
+      binding: "wecom:room#1",
+      title: "Stand-up",
+      primaryAgentActorId: "actor-1",
+      ownerMemberActorIds: [],
+      participantActorIds: [],
+    });
+    assert.equal(first.sessionId, second.sessionId, "sessionId should be identical");
+    assert.equal(second.created, false, "second call should not create new session");
+  });
+
+  test("repository contract: createCronSession returns sessionId", async () => {
+    const repo = createRepository();
+    const out = await repo.createCronSession({
+      teamId: "team-1",
+      primaryAgentActorId: "actor-1",
+      title: "Daily summary",
+    });
+    assert.ok(out.sessionId, "sessionId should be present");
+  });
+
   test("repository contract: listTeamActors returns paged team actors", async () => {
     const repo = createRepository();
     const page = await repo.listTeamActors("team-1", { kind: null, limit: 200 });
