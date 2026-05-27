@@ -276,9 +276,59 @@ impl Backend for CloudApiBackend {
 
     async fn fetch_session_with_participants(
         &self,
-        _session_id: &str,
+        session_id: &str,
     ) -> BackendResult<BackendSessionAndParticipants> {
-        self.unsupported("fetch_session_with_participants")
+        use super::records::{BackendParticipantRow, BackendSessionRow};
+        use chrono::{DateTime, Utc};
+        #[derive(serde::Deserialize)]
+        struct CloudParticipant {
+            #[serde(rename = "actorId")]
+            actor_id: String,
+            #[serde(default)]
+            role: Option<String>,
+            #[serde(rename = "joinedAt")]
+            joined_at: Option<DateTime<Utc>>,
+        }
+        #[derive(serde::Deserialize)]
+        struct CloudSession {
+            id: String,
+            #[serde(rename = "teamId")]
+            team_id: String,
+            #[serde(default)]
+            title: String,
+            #[serde(default)]
+            mode: String,
+            #[serde(rename = "ideaId", default)]
+            idea_id: Option<String>,
+            #[serde(rename = "createdAt")]
+            created_at: Option<DateTime<Utc>>,
+            #[serde(default)]
+            participants: Vec<CloudParticipant>,
+        }
+        let s: CloudSession = self.get(&format!("/v1/sessions/{session_id}")).await?;
+        let session_id_str = s.id.clone();
+        let session = BackendSessionRow {
+            id: s.id,
+            team_id: s.team_id,
+            created_by_actor_id: None,
+            primary_agent_id: None,
+            mode: s.mode,
+            title: s.title,
+            summary: String::new(),
+            idea_id: s.idea_id,
+            created_at: s.created_at.unwrap_or_else(Utc::now),
+        };
+        let participants = s
+            .participants
+            .into_iter()
+            .map(|p| BackendParticipantRow {
+                session_id: session_id_str.clone(),
+                actor_id: p.actor_id,
+                role: p.role,
+                joined_at: p.joined_at.unwrap_or_else(Utc::now),
+            })
+            .collect();
+        Ok(BackendSessionAndParticipants { session, participants })
     }
 
     async fn messages_after_cursor(
@@ -549,6 +599,35 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_session_with_participants_maps_response() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/session-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "session-1",
+                "teamId": "team-1",
+                "title": "Daily",
+                "mode": "solo",
+                "ideaId": null,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "participants": [
+                    { "actorId": "actor-1", "role": "admin", "joinedAt": "2026-01-01T00:00:00Z" }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let result = backend
+            .fetch_session_with_participants("session-1")
+            .await
+            .unwrap();
+        assert_eq!(result.session.id, "session-1");
+        assert_eq!(result.participants.len(), 1);
+        assert_eq!(result.participants[0].actor_id, "actor-1");
     }
 
     #[tokio::test]
