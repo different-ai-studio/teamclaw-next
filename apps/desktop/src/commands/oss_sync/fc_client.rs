@@ -303,6 +303,31 @@ impl FcClient {
         map_fc_response(resp).await
     }
 
+    /// POST /sync/set-mode — owner-only sync_mode switch (Tranche 5).
+    pub async fn set_team_sync_mode(
+        &self,
+        team_id: &str,
+        mode: &str,
+    ) -> Result<String, SyncError> {
+        let body = serde_json::json!({ "teamId": team_id, "mode": mode });
+        #[derive(serde::Deserialize)]
+        struct ModeResp { mode: String }
+        let resp: ModeResp = self.post("/sync/set-mode", &body).await?;
+        Ok(resp.mode)
+    }
+
+    /// POST /sync/team-mode — read sync_mode (Tranche 5).
+    pub async fn get_team_sync_mode(
+        &self,
+        team_id: &str,
+    ) -> Result<Option<String>, SyncError> {
+        let body = serde_json::json!({ "teamId": team_id });
+        #[derive(serde::Deserialize)]
+        struct ModeResp { mode: Option<String> }
+        let resp: ModeResp = self.post("/sync/team-mode", &body).await?;
+        Ok(resp.mode)
+    }
+
     /// Internal POST helper with JWT injection and error mapping.
     async fn post<T: serde::de::DeserializeOwned>(
         &self,

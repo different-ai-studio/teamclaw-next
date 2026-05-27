@@ -248,7 +248,7 @@ pub async fn oss_sync_now(
     let team_id = get_team_id(&workspace_path)?;
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
-    engine::tick(&workspace_path, &team_id, &fc)
+    engine::tick(&workspace_path, &team_id, &fc, &_app)
         .await
         .map_err(|e| e.to_string())
 }
@@ -380,4 +380,81 @@ pub async fn oss_sync_resolve_conflict(
     }
     state.save(&workspace_path)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tranche 5: sync_mode switch / get / local-only mirror
+// ---------------------------------------------------------------------------
+
+/// Switch the team's sync_mode on the server (owner-only) and persist
+/// the new mode into local teamclaw.json so the 5-min tick dispatches
+/// to the correct backend.
+#[tauri::command]
+pub async fn oss_sync_set_team_sync_mode(
+    workspace_path: String,
+    team_id: String,
+    mode: String,
+) -> Result<String, String> {
+    if mode != "git" && mode != "oss" {
+        return Err(format!("invalid sync_mode: {}", mode));
+    }
+
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+    let returned_mode = fc
+        .set_team_sync_mode(&team_id, &mode)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Mirror into local config so the periodic tick uses the right backend.
+    oss_sync_set_local_sync_mode_inner(&workspace_path, &returned_mode)?;
+
+    Ok(returned_mode)
+}
+
+/// Read the team's sync_mode from the server (no ownership required).
+#[tauri::command]
+pub async fn oss_sync_get_team_sync_mode(
+    workspace_path: String,
+    team_id: String,
+) -> Result<Option<String>, String> {
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+    fc.get_team_sync_mode(&team_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Write the sync_mode into local teamclaw.json WITHOUT touching the server.
+/// Called after join auto-detect so the local tick knows which backend to use.
+#[tauri::command]
+pub async fn oss_sync_set_local_sync_mode(
+    workspace_path: String,
+    _team_id: String,
+    mode: String,
+) -> Result<(), String> {
+    oss_sync_set_local_sync_mode_inner(&workspace_path, &mode)
+}
+
+fn oss_sync_set_local_sync_mode_inner(workspace_path: &str, mode: &str) -> Result<(), String> {
+    let config_path = std::path::Path::new(workspace_path)
+        .join(crate::commands::TEAMCLAW_DIR)
+        .join(crate::commands::CONFIG_FILE_NAME);
+
+    let mut json: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    json["team_mode"] = serde_json::Value::String(mode.to_string());
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create config dir: {e}"))?;
+    }
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("write teamclaw.json: {e}"))
 }

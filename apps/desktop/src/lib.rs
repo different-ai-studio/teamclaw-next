@@ -531,6 +531,9 @@ pub fn run() {
             commands::oss_sync::oss_sync_restore_version,
             commands::oss_sync::oss_sync_resolve_conflict,
             commands::oss_sync::oss_sync_set_jwt,
+            commands::oss_sync::oss_sync_set_team_sync_mode,
+            commands::oss_sync::oss_sync_get_team_sync_mode,
+            commands::oss_sync::oss_sync_set_local_sync_mode,
         ])
         .setup(|app| {
             let setup_t0 = std::time::Instant::now();
