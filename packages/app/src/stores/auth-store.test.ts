@@ -8,6 +8,8 @@ const authMock = {
   signOut: vi.fn(),
   signInAnonymously: vi.fn(),
   claimInvite: vi.fn(),
+  sendUpgradeEmailOtp: vi.fn(),
+  verifyUpgradeEmailOtp: vi.fn(),
 };
 const backendMock = {
   auth: authMock,

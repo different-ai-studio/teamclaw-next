@@ -341,6 +341,20 @@ export function createPocketBaseBackend(config: ServerConfig): TeamClawBackend {
           message: "PocketBase invite claim custom route is not wired in this preview.",
         });
       },
+      async sendUpgradeEmailOtp() {
+        throw new BackendError({
+          category: "Unsupported",
+          operation: "pocketbase.auth.sendUpgradeEmailOtp",
+          message: "PocketBase preview does not support anonymous account upgrade.",
+        });
+      },
+      async verifyUpgradeEmailOtp() {
+        throw new BackendError({
+          category: "Unsupported",
+          operation: "pocketbase.auth.verifyUpgradeEmailOtp",
+          message: "PocketBase preview does not support anonymous account upgrade.",
+        });
+      },
     },
     directory: {
       async resolveCurrentMemberActor(teamId) {
