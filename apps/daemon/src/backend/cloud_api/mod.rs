@@ -574,11 +574,40 @@ impl Backend for CloudApiBackend {
 
     async fn upload_attachment_bytes(
         &self,
-        _path: &str,
-        _bytes: Vec<u8>,
-        _mime: &str,
+        path: &str,
+        bytes: Vec<u8>,
+        mime: &str,
     ) -> BackendResult<String> {
-        self.unsupported("upload_attachment_bytes")
+        let token = self.access_token().await?;
+        let encoded_path: String = url::form_urlencoded::byte_serialize(path.as_bytes()).collect();
+        let url = format!(
+            "{}/v1/attachments?path={}",
+            self.cfg.url.trim_end_matches('/'),
+            encoded_path
+        );
+        let resp = self
+            .http
+            .post(url)
+            .bearer_auth(token)
+            .header("content-type", mime)
+            .header("x-request-id", request_id())
+            .body(bytes)
+            .send()
+            .await
+            .map_err(network_error)?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body_bytes = resp.bytes().await.map_err(network_error)?;
+            let envelope =
+                serde_json::from_slice::<client::CloudErrorEnvelope>(&body_bytes).ok();
+            return Err(client::decode_error(status, envelope));
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            url: String,
+        }
+        let r: Resp = resp.json().await.map_err(network_error)?;
+        Ok(r.url)
     }
 
     async fn list_agent_admin_member_actor_ids(
@@ -829,6 +858,26 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn upload_attachment_bytes_returns_url() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/attachments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "path": "uploads/file.txt",
+                "url": "https://example.com/uploads/file.txt"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let url = backend
+            .upload_attachment_bytes("uploads/file.txt", b"hello".to_vec(), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(url, "https://example.com/uploads/file.txt");
     }
 
     #[tokio::test]
