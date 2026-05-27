@@ -325,7 +325,9 @@ dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
+ "axum 0.7.9",
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "clap",
  "dirs 6.0.0",
@@ -333,16 +335,24 @@ dependencies = [
  "futures-util",
  "hex",
  "hkdf",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "humantime-serde",
  "jsonwebtoken",
  "libc",
+ "mime",
+ "parking_lot",
  "prost 0.13.5",
  "prost-types",
+ "rand 0.8.6",
  "reqwest 0.12.28",
  "rumqttc",
  "rustls 0.22.4",
  "serde",
  "serde_json",
  "sha2",
+ "subtle",
  "teamclaw-gateway",
  "teamclaw-proto",
  "teamclaw-transport",
@@ -351,8 +361,11 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls 0.25.0",
+ "tokio-stream",
  "tokio-util",
  "toml 0.8.2",
+ "tower 0.5.3",
+ "tower-http 0.6.8",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -797,6 +810,7 @@ checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
 dependencies = [
  "async-trait",
  "axum-core 0.4.5",
+ "axum-macros",
  "bytes",
  "futures-util",
  "http 1.4.0",
@@ -859,6 +873,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3946,6 +3971,22 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "humantime"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
+]
 
 [[package]]
 name = "hyper"
@@ -10799,6 +10840,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -11049,6 +11091,7 @@ dependencies = [
  "pin-project-lite",
  "sync_wrapper 1.0.2",
  "tokio",
+ "tokio-util",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -11085,11 +11128,14 @@ dependencies = [
  "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
+ "http-body-util",
  "iri-string",
  "pin-project-lite",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

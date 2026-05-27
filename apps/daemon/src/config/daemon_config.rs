@@ -23,6 +23,122 @@ pub struct DaemonConfig {
     /// kill mid-stream replies that exceed the threshold.
     #[serde(default)]
     pub idle_runtime_timeout_secs: Option<u64>,
+    /// Optional browser-facing HTTP/SSE API. When set, the daemon binds an
+    /// axum listener alongside the existing Unix control socket. When
+    /// omitted, no HTTP listener is started (the historical default).
+    #[serde(default)]
+    pub http: Option<HttpConfig>,
+}
+
+/// Configuration for the browser-facing HTTP+SSE listener. The listener is
+/// strictly opt-in — the daemon never binds a TCP port unless this section
+/// is present in `daemon.toml`. Defaults are tuned for "localhost browser
+/// connecting to a single user's daemon"; cross-host deployments must set
+/// `bind` + a TLS terminator in front.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpConfig {
+    /// Socket address to bind. Use `127.0.0.1:0` (default) to pick an
+    /// ephemeral loopback port — the actual port is written to
+    /// `<config_dir>/amuxd.http.port` so clients can discover it.
+    #[serde(default = "default_http_bind")]
+    pub bind: String,
+    /// Origins allowed by the CORS layer. `*` is rejected; supply
+    /// concrete origins like `http://localhost:5173`. Empty list disables
+    /// CORS (same-origin only).
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    /// Idle session TTL. Sessions with no activity for this long are
+    /// closed and removed from the registry.
+    #[serde(default = "default_session_idle_ttl", with = "humantime_serde")]
+    pub session_idle_ttl: std::time::Duration,
+    /// SSE comment-frame heartbeat interval.
+    #[serde(default = "default_heartbeat_interval", with = "humantime_serde")]
+    pub heartbeat_interval: std::time::Duration,
+    /// Max sessions a single session-token may own concurrently.
+    #[serde(default = "default_max_sessions_per_token")]
+    pub max_sessions_per_token: u32,
+    /// Per-session event ring buffer size. Drives `Last-Event-ID` replay
+    /// window — events beyond this point return `410 Gone`.
+    #[serde(default = "default_max_event_backlog")]
+    pub max_event_backlog: usize,
+    /// Per-token request rate (sustained req/sec). Bursts allowed up to
+    /// `rate_limit_burst`.
+    #[serde(default = "default_rate_limit_rps")]
+    pub rate_limit_rps: u32,
+    #[serde(default = "default_rate_limit_burst")]
+    pub rate_limit_burst: u32,
+    /// Max concurrent SSE streams per token.
+    #[serde(default = "default_max_sse_per_token")]
+    pub max_sse_per_token: u32,
+    /// Hard cap on POST body size in bytes (applies to /prompt etc.).
+    #[serde(default = "default_max_body_bytes")]
+    pub max_body_bytes: usize,
+    /// Root-token file. Mode 0600. Auto-generated if missing on startup.
+    #[serde(default)]
+    pub token_file: Option<PathBuf>,
+    /// File that receives the actually-bound port (useful when `bind`
+    /// uses port 0). Defaults to `<config_dir>/amuxd.http.port`.
+    #[serde(default)]
+    pub port_file: Option<PathBuf>,
+    /// Default scopes granted to session tokens minted via
+    /// `POST /v1/auth/exchange` when the caller does not pass `scopes`.
+    #[serde(default = "default_scopes")]
+    pub default_scopes: Vec<String>,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            bind: default_http_bind(),
+            allowed_origins: Vec::new(),
+            session_idle_ttl: default_session_idle_ttl(),
+            heartbeat_interval: default_heartbeat_interval(),
+            max_sessions_per_token: default_max_sessions_per_token(),
+            max_event_backlog: default_max_event_backlog(),
+            rate_limit_rps: default_rate_limit_rps(),
+            rate_limit_burst: default_rate_limit_burst(),
+            max_sse_per_token: default_max_sse_per_token(),
+            max_body_bytes: default_max_body_bytes(),
+            token_file: None,
+            port_file: None,
+            default_scopes: default_scopes(),
+        }
+    }
+}
+
+fn default_http_bind() -> String {
+    "127.0.0.1:0".into()
+}
+fn default_session_idle_ttl() -> std::time::Duration {
+    std::time::Duration::from_secs(30 * 60)
+}
+fn default_heartbeat_interval() -> std::time::Duration {
+    std::time::Duration::from_secs(15)
+}
+fn default_max_sessions_per_token() -> u32 {
+    32
+}
+fn default_max_event_backlog() -> usize {
+    1024
+}
+fn default_rate_limit_rps() -> u32 {
+    20
+}
+fn default_rate_limit_burst() -> u32 {
+    60
+}
+fn default_max_sse_per_token() -> u32 {
+    8
+}
+fn default_max_body_bytes() -> usize {
+    1024 * 1024
+}
+fn default_scopes() -> Vec<String> {
+    vec![
+        "sessions:read".into(),
+        "sessions:write".into(),
+        "events:read".into(),
+    ]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +327,14 @@ impl DaemonConfig {
 
     pub fn sock_path() -> PathBuf {
         Self::config_dir().join("amuxd.sock")
+    }
+
+    pub fn http_token_path() -> PathBuf {
+        Self::config_dir().join("amuxd.http.token")
+    }
+
+    pub fn http_port_path() -> PathBuf {
+        Self::config_dir().join("amuxd.http.port")
     }
 }
 

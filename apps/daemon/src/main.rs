@@ -6,6 +6,7 @@ mod config;
 mod daemon;
 mod error;
 mod history;
+mod http;
 mod mqtt;
 mod nats;
 mod onboarding;

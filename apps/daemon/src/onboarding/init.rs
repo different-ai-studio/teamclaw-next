@@ -123,6 +123,7 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
         team_id: None,
         channels: Default::default(),
         idle_runtime_timeout_secs: None,
+        http: None,
     }
 }
 
@@ -276,6 +277,7 @@ mod tests {
                 team_id: Some("team-old".into()),
                 channels: Default::default(),
                 idle_runtime_timeout_secs: None,
+            http: None,
             }),
             "new-display-name",
             "team-2",
