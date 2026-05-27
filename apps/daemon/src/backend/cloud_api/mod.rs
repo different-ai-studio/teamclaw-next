@@ -243,10 +243,15 @@ impl Backend for CloudApiBackend {
 
     async fn fetch_latest_runtime_for_session(
         &self,
-        _agent_id: &str,
-        _session_id: &str,
+        agent_id: &str,
+        session_id: &str,
     ) -> BackendResult<Option<AgentRuntimeRow>> {
-        self.unsupported("fetch_latest_runtime_for_session")
+        let path = format!("/v1/agents/runtimes/latest?agentId={agent_id}&sessionId={session_id}");
+        match self.get::<CloudAgentRuntime>(&path).await {
+            Ok(r) => Ok(Some(r.into_row())),
+            Err(BackendError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     async fn ensure_agent_types(
@@ -782,6 +787,25 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_latest_runtime_for_session_returns_none_on_404() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/runtimes/latest"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "not_found", "message": "not found" }
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let row = backend
+            .fetch_latest_runtime_for_session("agent-1", "session-1")
+            .await
+            .unwrap();
+        assert!(row.is_none());
     }
 
     #[tokio::test]
