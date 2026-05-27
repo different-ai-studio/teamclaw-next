@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, Link2, Server, Sparkles, Mail } from "lucide-react";
+import { ArrowLeft, Link2, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -151,26 +151,31 @@ function ChooseStep({
             onClick={onQuickTrial}
           />
           <ChoiceRow
-            icon={<Mail className="h-4 w-4" />}
-            title={t("auth.onboarding.signInOrRegister", "Sign in or register")}
-            caption={t("auth.onboarding.signInOrRegisterDesc", "Continue with an email code, matching the iOS flow.")}
-            disabled={loading}
-            onClick={onLogin}
-          />
-          <ChoiceRow
             icon={<Link2 className="h-4 w-4" />}
             title={t("auth.onboarding.joinTeam", "Join the team")}
             caption={t("auth.onboarding.joinTeamDesc", "Paste an invite link or token to join an existing team.")}
             disabled={loading}
             onClick={onInvite}
           />
-          <ChoiceRow
-            icon={<Server className="h-4 w-4" />}
-            title={t("auth.onboarding.selfHosted", "Use self-hosted server")}
-            caption={t("auth.onboarding.selfHostedDesc", "Configure Supabase and MQTT, then restart on your own server.")}
+        </div>
+        <div className="mt-5 flex items-center justify-center gap-3 text-[12px] text-muted-foreground">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onLogin}
+            className="rounded-[6px] px-1 py-0.5 underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {t("auth.onboarding.signInOrRegister", "Sign in or register")}
+          </button>
+          <span aria-hidden className="text-faint">·</span>
+          <button
+            type="button"
             disabled={loading}
             onClick={onServer}
-          />
+            className="rounded-[6px] px-1 py-0.5 underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {t("auth.onboarding.selfHosted", "Use self-hosted server")}
+          </button>
         </div>
         {errorMessage && (
           <p className="mt-4 rounded-[8px] border border-destructive/20 bg-paper px-3 py-2 text-[12px] leading-5 text-destructive">
