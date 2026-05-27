@@ -1,0 +1,504 @@
+mod auth;
+mod client;
+mod gateway;
+mod messages;
+
+use super::{
+    AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
+    BackendSessionAndParticipants, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
+};
+use crate::provider_config::CloudApiConfig;
+use async_trait::async_trait;
+use client::{
+    cloud_url, decode_response, network_error, refresh_failure_message, request_id,
+    RefreshRequest, TokenResponse,
+};
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
+
+#[derive(Clone)]
+pub struct CloudApiBackend {
+    pub(super) cfg: CloudApiConfig,
+    pub(super) http: reqwest::Client,
+}
+
+impl CloudApiBackend {
+    pub fn new(cfg: CloudApiConfig) -> Self {
+        Self {
+            cfg,
+            http: reqwest::Client::new(),
+        }
+    }
+
+    /// Obtain a fresh access token via the Cloud API (or Supabase for legacy configs).
+    pub(super) async fn access_token(&self) -> BackendResult<String> {
+        let url = format!(
+            "{}/auth/v1/token?grant_type=refresh_token",
+            self.cfg.supabase_url.trim_end_matches('/')
+        );
+        let resp = self
+            .http
+            .post(url)
+            .header("apikey", &self.cfg.supabase_anon_key)
+            .json(&RefreshRequest {
+                refresh_token: &self.cfg.refresh_token,
+            })
+            .send()
+            .await
+            .map_err(network_error)?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(BackendError::Auth(refresh_failure_message(&text)));
+        }
+
+        let body: TokenResponse = resp.json().await.map_err(network_error)?;
+        Ok(body.access_token)
+    }
+
+    pub(super) async fn get<T>(&self, path: &str) -> BackendResult<T>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let token = self.access_token().await?;
+        let resp = self
+            .http
+            .get(self.cloud_url(path))
+            .bearer_auth(token)
+            .header("x-request-id", request_id())
+            .send()
+            .await
+            .map_err(network_error)?;
+        decode_response(resp).await
+    }
+
+    pub(super) async fn post<Req, Resp>(
+        &self,
+        path: &str,
+        body: &Req,
+        idempotency_key: Option<&str>,
+    ) -> BackendResult<Resp>
+    where
+        Req: Serialize + ?Sized,
+        Resp: for<'de> Deserialize<'de>,
+    {
+        let token = self.access_token().await?;
+        let mut req = self
+            .http
+            .post(self.cloud_url(path))
+            .bearer_auth(token)
+            .header("x-request-id", request_id())
+            .json(body);
+        if let Some(key) = idempotency_key {
+            req = req.header("idempotency-key", key);
+        }
+        let resp = req.send().await.map_err(network_error)?;
+        decode_response(resp).await
+    }
+
+    pub(super) async fn patch_no_content<Req>(
+        &self,
+        path: &str,
+        body: &Req,
+    ) -> BackendResult<()>
+    where
+        Req: Serialize + ?Sized,
+    {
+        let token = self.access_token().await?;
+        let resp = self
+            .http
+            .patch(self.cloud_url(path))
+            .bearer_auth(token)
+            .header("x-request-id", request_id())
+            .json(body)
+            .send()
+            .await
+            .map_err(network_error)?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let bytes = resp.bytes().await.map_err(network_error)?;
+            let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
+            Err(client::decode_error(status, envelope))
+        }
+    }
+
+    pub(super) async fn put_no_content<Req>(
+        &self,
+        path: &str,
+        body: &Req,
+    ) -> BackendResult<()>
+    where
+        Req: Serialize + ?Sized,
+    {
+        let token = self.access_token().await?;
+        let resp = self
+            .http
+            .put(self.cloud_url(path))
+            .bearer_auth(token)
+            .header("x-request-id", request_id())
+            .json(body)
+            .send()
+            .await
+            .map_err(network_error)?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let bytes = resp.bytes().await.map_err(network_error)?;
+            let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
+            Err(client::decode_error(status, envelope))
+        }
+    }
+
+    pub(super) fn cloud_url(&self, path: &str) -> String {
+        cloud_url(&self.cfg, path)
+    }
+
+    fn unsupported<T>(&self, operation: &str) -> BackendResult<T> {
+        Err(BackendError::Provider {
+            provider: "cloud_api",
+            code: Some("not_implemented".to_string()),
+            message: format!("{operation} is not covered by the Phase 1 Cloud API contract"),
+        })
+    }
+}
+
+#[async_trait]
+impl Backend for CloudApiBackend {
+    fn team_id(&self) -> &str {
+        &self.cfg.team_id
+    }
+
+    fn actor_id(&self) -> &str {
+        &self.cfg.actor_id
+    }
+
+    async fn auth_token(&self) -> BackendResult<String> {
+        self.access_token().await
+    }
+
+    fn cached_credential_expiry(&self) -> Option<Instant> {
+        None
+    }
+
+    async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult> {
+        self.claim_invite_impl(token).await
+    }
+
+    async fn upsert_agent_runtime(
+        &self,
+        _row: &AgentRuntimeUpsert<'_>,
+    ) -> BackendResult<Option<String>> {
+        self.unsupported("upsert_agent_runtime")
+    }
+
+    async fn fetch_agent_runtime_for_session(
+        &self,
+        _session_id: &str,
+        _runtime_id: &str,
+        _backend_session_id: &str,
+    ) -> BackendResult<Option<AgentRuntimeRow>> {
+        self.unsupported("fetch_agent_runtime_for_session")
+    }
+
+    async fn fetch_latest_runtime_for_session(
+        &self,
+        _agent_id: &str,
+        _session_id: &str,
+    ) -> BackendResult<Option<AgentRuntimeRow>> {
+        self.unsupported("fetch_latest_runtime_for_session")
+    }
+
+    async fn ensure_agent_types(
+        &self,
+        _supported_types: &[String],
+        _default_agent_type: &str,
+    ) -> BackendResult<()> {
+        self.unsupported("ensure_agent_types")
+    }
+
+    async fn set_agent_device_id(&self, _device_id: &str) -> BackendResult<()> {
+        self.unsupported("set_agent_device_id")
+    }
+
+    async fn check_agent_permission(
+        &self,
+        _agent_id: &str,
+        _actor_id: &str,
+    ) -> BackendResult<Option<String>> {
+        self.unsupported("check_agent_permission")
+    }
+
+    async fn heartbeat(&self) -> BackendResult<()> {
+        self.unsupported("heartbeat")
+    }
+
+    async fn upsert_workspace(&self, _row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow> {
+        self.unsupported("upsert_workspace")
+    }
+
+    async fn fetch_session_with_participants(
+        &self,
+        _session_id: &str,
+    ) -> BackendResult<BackendSessionAndParticipants> {
+        self.unsupported("fetch_session_with_participants")
+    }
+
+    async fn messages_after_cursor(
+        &self,
+        session_id: &str,
+        after_id: Option<&str>,
+    ) -> BackendResult<Vec<StoredMessage>> {
+        self.messages_after_cursor_impl(session_id, after_id).await
+    }
+
+    async fn update_runtime_cursor(
+        &self,
+        _runtime_row_id: &str,
+        _last_processed_message_id: &str,
+    ) -> BackendResult<()> {
+        self.unsupported("update_runtime_cursor")
+    }
+
+    async fn rpc_upsert_external_actor(
+        &self,
+        _team_id: &str,
+        _source: &str,
+        _source_id: &str,
+        _display_name: &str,
+    ) -> BackendResult<String> {
+        self.unsupported("rpc_upsert_external_actor")
+    }
+
+    async fn get_gateway_session_by_acp_id(
+        &self,
+        _acp_session_id: &str,
+    ) -> BackendResult<Option<(String, Option<String>)>> {
+        self.unsupported("get_gateway_session_by_acp_id")
+    }
+
+    async fn rpc_ensure_gateway_session(
+        &self,
+        _team_id: &str,
+        _binding: &str,
+        _title: &str,
+        _primary_agent_actor_id: &str,
+        _owner_member_actor_ids: &[String],
+        _participant_actor_ids: &[String],
+    ) -> BackendResult<(String, String, bool)> {
+        self.unsupported("rpc_ensure_gateway_session")
+    }
+
+    async fn insert_gateway_message(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+    ) -> BackendResult<String> {
+        self.insert_gateway_message_impl(session_id, sender_actor_id, content, external_message_id)
+            .await
+    }
+
+    async fn insert_gateway_message_with_attachments(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+        attachments: serde_json::Value,
+    ) -> BackendResult<String> {
+        self.insert_gateway_message_with_attachments_impl(
+            session_id,
+            sender_actor_id,
+            content,
+            external_message_id,
+            attachments,
+        )
+        .await
+    }
+
+    async fn upload_attachment_bytes(
+        &self,
+        _path: &str,
+        _bytes: Vec<u8>,
+        _mime: &str,
+    ) -> BackendResult<String> {
+        self.unsupported("upload_attachment_bytes")
+    }
+
+    async fn list_agent_admin_member_actor_ids(
+        &self,
+        _agent_actor_id: &str,
+    ) -> BackendResult<Vec<String>> {
+        self.unsupported("list_agent_admin_member_actor_ids")
+    }
+
+    async fn upsert_session_participant(
+        &self,
+        _session_id: &str,
+        _actor_id: &str,
+    ) -> BackendResult<()> {
+        self.unsupported("upsert_session_participant")
+    }
+
+    async fn create_cron_session(
+        &self,
+        _team_id: &str,
+        _primary_agent_actor_id: &str,
+        _title: &str,
+    ) -> BackendResult<String> {
+        self.unsupported("create_cron_session")
+    }
+
+    async fn insert_message(
+        &self,
+        id: &str,
+        team_id: &str,
+        session_id: &str,
+        sender_actor_id: &str,
+        kind: &str,
+        content: &str,
+        metadata_json: &str,
+        model: &str,
+        turn_id: &str,
+        sequence: u64,
+    ) -> BackendResult<()> {
+        self.insert_message_impl(
+            id,
+            team_id,
+            session_id,
+            sender_actor_id,
+            kind,
+            content,
+            metadata_json,
+            model,
+            turn_id,
+            sequence,
+        )
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn config(server: &MockServer) -> CloudApiConfig {
+        CloudApiConfig {
+            url: server.uri(),
+            supabase_url: server.uri(),
+            supabase_anon_key: "anon".to_string(),
+            refresh_token: "refresh".to_string(),
+            team_id: "team-1".to_string(),
+            actor_id: "agent-1".to_string(),
+        }
+    }
+
+    fn refresh_ok() -> serde_json::Value {
+        serde_json::json!({ "access_token": "access-token" })
+    }
+
+    #[tokio::test]
+    async fn claim_invite_uses_refreshed_bearer_against_cloud_api() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(query_param("grant_type", "refresh_token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/invites/claim"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "actorId": "agent-1",
+                "teamId": "team-1",
+                "actorType": "agent",
+                "displayName": "Agent",
+                "refreshToken": "next-refresh"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+
+        let result = backend.claim_team_invite("invite-token").await.unwrap();
+
+        assert_eq!(result.actor_id, "agent-1");
+        assert_eq!(result.team_id, "team-1");
+        let requests = server.received_requests().await.unwrap();
+        let claim = requests
+            .iter()
+            .find(|request| request.url.path() == "/v1/invites/claim")
+            .expect("claim request");
+        assert_eq!(
+            claim
+                .headers
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Bearer access-token"
+        );
+    }
+
+    #[tokio::test]
+    async fn messages_after_cursor_maps_cloud_messages() {
+        use chrono::DateTime;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/session-1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [
+                    {
+                        "id": "old-message",
+                        "teamId": "team-1",
+                        "sessionId": "session-1",
+                        "senderActorId": "actor-1",
+                        "kind": "text",
+                        "content": "old",
+                        "metadata": null,
+                        "createdAt": "2026-05-27T10:00:00Z"
+                    },
+                    {
+                        "id": "new-message",
+                        "teamId": "team-1",
+                        "sessionId": "session-1",
+                        "senderActorId": "actor-1",
+                        "kind": "text",
+                        "content": "new",
+                        "metadata": { "k": "v" },
+                        "createdAt": "2026-05-27T10:01:00Z"
+                    }
+                ],
+                "nextCursor": null
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+
+        let messages = backend
+            .messages_after_cursor("session-1", Some("old-message"))
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, "new-message");
+        assert_eq!(messages[0].metadata_json, r#"{"k":"v"}"#);
+        assert_eq!(
+            messages[0].created_at,
+            "2026-05-27T10:01:00Z"
+                .parse::<DateTime<chrono::Utc>>()
+                .unwrap()
+                .timestamp()
+        );
+    }
+}
