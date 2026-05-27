@@ -18,6 +18,32 @@ export function registerSessions(router) {
     return { statusCode: 201, body: out };
   });
 
+  router.get("/v1/sessions/muted", async (ctx) => {
+    const out = await ctx.repository.listMutedSessions();
+    return { body: out };
+  });
+
+  router.get("/v1/sessions/:sessionId", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const out = await ctx.repository.getSession(sessionId);
+    if (!out) throw new ApiError(404, "not_found", "session not found");
+    return { body: out };
+  });
+
+  router.post("/v1/sessions", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.teamId, "teamId");
+    requireString(body.title, "title");
+    requireString(body.mode, "mode");
+    const out = await ctx.repository.createSession(body);
+    return { statusCode: 201, body: out };
+  });
+
+  router.get("/v1/sessions/muted", async (ctx) => {
+    const out = await ctx.repository.listMutedSessions();
+    return { body: out };
+  });
+
   router.get("/v1/sessions/:sessionId", async (ctx) => {
     const sessionId = decodeURIComponent(ctx.params.sessionId);
     const out = await ctx.repository.getSession(sessionId);

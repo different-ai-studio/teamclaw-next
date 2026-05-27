@@ -1,0 +1,28 @@
+import { ApiError } from "../http-utils.mjs";
+import { requireString } from "../router.mjs";
+
+export function registerNotifications(router) {
+  router.get("/v1/notifications/prefs", async (ctx) => {
+    const out = await ctx.repository.getNotificationPrefs();
+    return { body: out };
+  });
+
+  router.put("/v1/notifications/prefs", async (ctx) => {
+    const body = ctx.json ?? {};
+    const out = await ctx.repository.putNotificationPrefs(body);
+    return { body: out };
+  });
+
+  router.post("/v1/sessions/:sessionId/mute", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const body = ctx.json ?? {};
+    await ctx.repository.muteSession(sessionId, body);
+    return { statusCode: 204, body: null };
+  });
+
+  router.delete("/v1/sessions/:sessionId/mute", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    await ctx.repository.unmuteSession(sessionId);
+    return { statusCode: 204, body: null };
+  });
+}

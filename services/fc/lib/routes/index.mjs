@@ -6,6 +6,7 @@ import { registerInvites } from "./invites.mjs";
 import { registerWorkspaces } from "./workspaces.mjs";
 import { registerSystem } from "./system.mjs";
 import { registerActors } from "./actors.mjs";
+import { registerNotifications } from "./notifications.mjs";
 
 export function registerAllRoutes(router) {
   registerAuth(router);
@@ -16,6 +17,7 @@ export function registerAllRoutes(router) {
   registerWorkspaces(router);
   registerSystem(router);
   registerActors(router);
+  registerNotifications(router);
 }
 
-export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors };
+export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications };
