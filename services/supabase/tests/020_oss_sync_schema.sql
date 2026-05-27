@@ -1,6 +1,6 @@
 begin;
 
-select plan(15);
+select plan(18);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -176,6 +176,41 @@ begin
 end $$;
 select ok((select got_unique_violation from _files_uniq_result),
           'amuxc_files rejects duplicate (team_id, path) even when soft-deleted');
+select pg_temp.as_user((select alice from ctx));
+
+-- ---------------------------------------------------------------------------
+-- §2.4: amuxc_file_versions — immutable chain. (file_id, version) unique.
+-- ---------------------------------------------------------------------------
+select has_table('public', 'amuxc_file_versions',
+                 'amuxc_file_versions table exists');
+select col_is_unique('public', 'amuxc_file_versions',
+                     array['file_id', 'version'],
+                     'amuxc_file_versions has unique (file_id, version)');
+
+-- Deleting an amuxc_files row cascades into its version chain.
+set local role postgres;
+set local row_security = off;
+do $$
+declare v_team uuid; v_actor uuid; v_file uuid;
+begin
+  insert into public.teams (slug, name) values ('ver-cascade', 'Ver Cascade')
+    returning id into v_team;
+  insert into public.actors (team_id, actor_type, display_name, user_id)
+    values (v_team, 'member', 'X', 'a1111111-1111-1111-1111-111111111111')
+    returning id into v_actor;
+  insert into public.amuxc_files (team_id, path, updated_by)
+    values (v_team, 'skills/v.md', v_actor) returning id into v_file;
+  insert into public.amuxc_file_versions
+    (file_id, version, parent_version, content_hash, size, created_by)
+    values (v_file, 1, 0, 'abc', 10, v_actor);
+  -- Delete amuxc_files first (cascades to amuxc_file_versions), then team.
+  -- Direct team delete would hit restrict FK from amuxc_file_versions.created_by → actors.
+  delete from public.amuxc_files where id = v_file;
+  delete from public.teams where id = v_team;
+end $$;
+select is_empty(
+  'select 1 from public.amuxc_file_versions where content_hash = ''abc''',
+  'amuxc_file_versions cascades when parent amuxc_files row is deleted');
 select pg_temp.as_user((select alice from ctx));
 
 select * from finish();

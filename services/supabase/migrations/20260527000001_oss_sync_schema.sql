@@ -77,4 +77,28 @@ comment on column public.amuxc_files.content_hash is
 comment on column public.amuxc_files.change_seq is
   'Per-team manifest sequence, assigned by /sync/upload/complete. See team_workspace_config.oss_change_seq.';
 
+-- ===========================================================================
+-- 4. amuxc_file_versions: append-only history
+-- ===========================================================================
+create table public.amuxc_file_versions (
+  id                 uuid        primary key default gen_random_uuid(),
+  file_id            uuid        not null references public.amuxc_files(id) on delete cascade,
+  version            int         not null,
+  parent_version     int         not null,
+  content_hash       text,                       -- cipher_hash; null iff deleted version
+  size               bigint      not null default 0 check (size >= 0),
+  deleted            boolean     not null default false,
+  created_by         uuid        not null references public.actors(id) on delete restrict,
+  created_by_node_id text,
+  message            text,
+  created_at         timestamptz not null default now(),
+  unique (file_id, version)
+);
+
+create index idx_amuxc_file_versions_file
+  on public.amuxc_file_versions (file_id, version desc);
+
+comment on table public.amuxc_file_versions is
+  'Append-only version chain. parent_version=current_version at time of complete, so cas conflicts surface as a 409 before this row is written.';
+
 commit;
