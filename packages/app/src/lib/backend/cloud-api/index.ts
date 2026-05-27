@@ -6,6 +6,17 @@ import { createAuthModule } from "./auth";
 import { createTeamsModule } from "./teams";
 import { createSessionsModule } from "./sessions";
 import { createMessagesModule } from "./messages";
+import { createWorkspacesModule } from "./workspaces";
+import { createTeamWorkspaceConfigModule } from "./team-workspace-config";
+import { createActorsModule } from "./actors";
+import { createDirectoryModule } from "./directory";
+import { createSessionMembersModule } from "./session-members";
+import { createIdeasModule } from "./ideas";
+import { createShortcutsModule } from "./shortcuts";
+import { createNotificationsModule } from "./notifications";
+import { createRuntimeModule } from "./runtime";
+import { createAttachmentsModule } from "./attachments";
+import { createTelemetryModule } from "./telemetry";
 
 export function hasCloudApiBackendConfig(config: ServerConfig): boolean {
   return Boolean(config.cloudApiUrl && config.supabaseUrl && config.supabaseAnonKey);
@@ -28,6 +39,17 @@ export function createCloudApiBackend(
     teams: createTeamsModule(client, delegate.teams),
     sessions: createSessionsModule(client, delegate.sessions),
     messages: createMessagesModule(client, delegate.messages),
+    workspaces: createWorkspacesModule(client, delegate.workspaces),
+    teamWorkspaceConfig: createTeamWorkspaceConfigModule(client, delegate.teamWorkspaceConfig),
+    actors: createActorsModule(client, delegate.actors),
+    directory: createDirectoryModule(client, delegate.directory),
+    sessionMembers: createSessionMembersModule(client, delegate.sessionMembers),
+    ideas: createIdeasModule(client, delegate.ideas),
+    shortcuts: createShortcutsModule(client, delegate.shortcuts),
+    notifications: createNotificationsModule(client, delegate.notifications),
+    runtime: createRuntimeModule(client, delegate.runtime),
+    attachments: createAttachmentsModule(client, delegate.attachments),
+    telemetry: createTelemetryModule(client, delegate.telemetry),
   };
 }
 

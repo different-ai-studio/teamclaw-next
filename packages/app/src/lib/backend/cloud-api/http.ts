@@ -17,6 +17,10 @@ export class CloudApiError extends Error {
 export type CloudApiClient = {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body: unknown, options?: { idempotencyKey?: string }): Promise<T>;
+  patch<T>(path: string, body: unknown, options?: { idempotencyKey?: string }): Promise<T>;
+  delete<T>(path: string, options?: { idempotencyKey?: string }): Promise<T>;
+  postRaw<T>(path: string, body: BodyInit, options?: { contentType?: string }): Promise<T>;
+  getRaw(path: string): Promise<Response>;
 };
 
 export function createCloudApiClient(args: {
@@ -28,7 +32,7 @@ export function createCloudApiClient(args: {
   const fetchImpl = args.fetchImpl ?? fetch;
 
   async function request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     body?: unknown,
     options: { idempotencyKey?: string } = {},
@@ -67,9 +71,46 @@ export function createCloudApiClient(args: {
     return data as T;
   }
 
+  async function requestRaw(
+    method: "GET" | "POST",
+    path: string,
+    body?: BodyInit,
+    options: { contentType?: string } = {},
+  ): Promise<Response> {
+    const session = await args.auth.getSession();
+    const accessToken = session?.accessToken;
+    if (!accessToken) {
+      throw new CloudApiError(401, "missing_auth", "Missing auth session access token.", null);
+    }
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${accessToken}`,
+      "X-Request-Id": createRequestId(),
+    };
+    if (options.contentType) headers["Content-Type"] = options.contentType;
+    return fetchImpl(`${baseUrl}${path}`, { method, headers, body });
+  }
+
   return {
     get: (path) => request("GET", path),
     post: (path, body, options) => request("POST", path, body, options),
+    patch: (path, body, options) => request("PATCH", path, body, options),
+    delete: (path, options) => request("DELETE", path, undefined, options),
+    postRaw: <T>(path: string, body: BodyInit, options?: { contentType?: string }) =>
+      requestRaw("POST", path, body as BodyInit, options).then(async (res) => {
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!res.ok) {
+          const error = data?.error;
+          throw new CloudApiError(
+            res.status,
+            typeof error?.code === "string" ? error.code : "internal",
+            typeof error?.message === "string" ? error.message : "Cloud API request failed.",
+            res.headers.get("X-Request-Id") ?? error?.requestId ?? null,
+          );
+        }
+        return data as T;
+      }),
+    getRaw: (path: string) => requestRaw("GET", path),
   };
 }
 
