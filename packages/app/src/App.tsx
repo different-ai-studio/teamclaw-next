@@ -77,6 +77,7 @@ import { useSessionParticipantStore } from "@/stores/session-participant-store";
 import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridge";
+import { mqttConnectionKey } from "@/lib/mqtt-connection-key";
 import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import {
@@ -663,6 +664,12 @@ function AppContent() {
   // Wait for session list to populate so we have a real team_id for LWT —
   // the broker's ACL is keyed on team_id and rejects placeholders.
   const firstTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null);
+  const mqttAccessToken = useAuthStore((s) => s.session?.access_token ?? null);
+  const mqttAuthKey = mqttConnectionKey({
+    userId,
+    teamId: firstTeamId,
+    accessToken: mqttAccessToken,
+  });
   const pendingStreamRepliesRef = useRef<Record<string, TeamclawMessage>>({});
   const pendingStreamReplyTimersRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
@@ -737,9 +744,7 @@ function AppContent() {
   }
 
   useEffect(() => {
-    if (!userId || !firstTeamId) return;
-    const accessToken = useAuthStore.getState().session?.access_token ?? null;
-    if (!accessToken) return;
+    if (!mqttAuthKey || !userId || !firstTeamId || !mqttAccessToken) return;
     let cancelled = false;
     let unlisten: (() => void) | null = null;
 
@@ -782,7 +787,7 @@ function AppContent() {
           brokerHost,
           brokerPort,
           username: useConfiguredMqttCredentials ? configuredMqttUsername! : actorId,
-          password: useConfiguredMqttCredentials ? configuredMqttPassword! : accessToken,
+          password: useConfiguredMqttCredentials ? configuredMqttPassword! : mqttAccessToken,
           clientId: `teamclaw-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
           teamId: firstTeamId,
           useTls,
@@ -1117,7 +1122,7 @@ function AppContent() {
       disposeRuntimeStateStore();
       disposeDevicePresenceStore();
     };
-  }, [userId, firstTeamId]);
+  }, [mqttAuthKey, userId, firstTeamId, mqttAccessToken]);
 
   // Keep session/live subscriptions in sync with the user's most-recent
   // sessions. Rows are sorted by last_message_at DESC, so we slice the top
