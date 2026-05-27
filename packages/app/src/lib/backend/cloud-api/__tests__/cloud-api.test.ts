@@ -3,14 +3,13 @@ import { createCloudApiBackend, hasCloudApiBackendConfig } from "../index";
 import type { TeamClawBackend } from "../../types";
 
 describe("cloud api backend", () => {
-  it("requires both Cloud API and Supabase auth config", () => {
+  it("requires only cloudApiUrl for config to be considered valid", () => {
     expect(hasCloudApiBackendConfig({
       backendKind: "cloud_api",
       cloudApiUrl: "https://fc.example.com",
-      supabaseUrl: "https://project.supabase.co",
-      supabaseAnonKey: "anon",
     })).toBe(true);
-    expect(hasCloudApiBackendConfig({ backendKind: "cloud_api", cloudApiUrl: "https://fc.example.com" })).toBe(false);
+    expect(hasCloudApiBackendConfig({ backendKind: "cloud_api" })).toBe(false);
+    expect(hasCloudApiBackendConfig({})).toBe(false);
   });
 
   it("routes Phase 1 sessions/messages/teams/invites through Cloud API", async () => {
