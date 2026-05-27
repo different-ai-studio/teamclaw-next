@@ -570,7 +570,6 @@ export function WeComChannel() {
     isConnecting,
     isRunning,
     handleSave,
-    handleStartStop,
     handleRestart,
   } = useChannelConfig<WeComConfig>({
     storeConfig: wecom,
@@ -626,7 +625,8 @@ export function WeComChannel() {
         isConnecting={isConnecting}
         isRunning={isRunning}
         hasChanges={wecomHasChanges}
-        onStartStop={handleStartStop}
+        onStart={startWecomGateway}
+        onStop={stopWecomGateway}
         onRestart={handleRestart}
         startDisabled={!localConfig.botId || !localConfig.secret}
         onOpenWizard={() => setWizardOpen(true)}

@@ -12,8 +12,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Play,
-  Square,
   RefreshCw,
   X,
   ChevronDown,
@@ -240,11 +238,18 @@ export function KookChannel() {
             </Button>
             <ToggleSwitch
               enabled={kookLocalConfig.enabled}
-              onChange={(enabled) => {
+              onChange={async (enabled) => {
                 updateKookLocalConfig({ enabled })
+                if (enabled && !kookIsRunning) {
+                  await saveKookConfig({ ...kookLocalConfig, enabled })
+                  await startKookGateway()
+                } else if (!enabled && kookIsRunning) {
+                  await stopKookGateway()
+                }
               }}
+              disabled={kookIsLoading || kookIsConnecting}
             />
-            {kookHasChanges && kookIsRunning ? (
+            {kookHasChanges && kookIsRunning && (
               <Button
                 variant="default"
                 size="sm"
@@ -263,38 +268,6 @@ export function KookChannel() {
                   <>
                     <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.channels.restart', 'Restart')}
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                variant={kookIsRunning ? "destructive" : "default"}
-                size="sm"
-                onClick={async () => {
-                  if (kookIsRunning) {
-                    await stopKookGateway()
-                  } else {
-                    await saveKookConfig(kookLocalConfig)
-                    await startKookGateway()
-                  }
-                }}
-                disabled={kookIsLoading || kookIsConnecting || (!kookIsRunning && (!kookLocalConfig.enabled || !kookLocalConfig.token))}
-                className="h-7 gap-1.5 px-2.5 text-[12px]"
-              >
-                {kookIsLoading || kookIsConnecting ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {kookIsConnecting ? t('settings.channels.connecting', 'Connecting...') : t('common.loading', 'Loading...')}
-                  </>
-                ) : kookIsRunning ? (
-                  <>
-                    <Square className="h-3.5 w-3.5" />
-                    {t('settings.channels.stop', 'Stop')}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-3.5 w-3.5" />
-                    {t('settings.channels.start', 'Start')}
                   </>
                 )}
               </Button>

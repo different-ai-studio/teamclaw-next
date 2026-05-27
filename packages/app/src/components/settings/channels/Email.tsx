@@ -9,8 +9,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Play,
-  Square,
   RefreshCw,
   ChevronDown,
   ChevronRight,
@@ -91,19 +89,6 @@ export function EmailChannel() {
       await saveEmailConfig(emailLocalConfig)
       if (emailIsRunning) {
         setEmailHasChanges(true)
-      }
-    } catch {
-      // Error is handled by the store
-    }
-  }
-
-  const handleEmailStartStop = async () => {
-    try {
-      if (emailGatewayStatus.status === 'connected' || emailGatewayStatus.status === 'connecting') {
-        await stopEmailGateway()
-      } else {
-        await saveEmailConfig(emailLocalConfig)
-        await startEmailGateway()
       }
     } catch {
       // Error is handled by the store
@@ -212,13 +197,18 @@ export function EmailChannel() {
             </Button>
             <ToggleSwitch
               enabled={emailLocalConfig.enabled}
-              onChange={(enabled) => {
+              onChange={async (enabled) => {
                 updateEmailLocalConfig({ enabled })
-                toggleEmailEnabled(enabled, { ...emailLocalConfig, enabled })
+                await toggleEmailEnabled(enabled, { ...emailLocalConfig, enabled })
+                if (enabled && !emailIsRunning) {
+                  await startEmailGateway()
+                } else if (!enabled && emailIsRunning) {
+                  await stopEmailGateway()
+                }
               }}
-              disabled={emailIsLoading}
+              disabled={emailIsLoading || emailIsConnecting}
             />
-            {emailIsRunning && emailHasChanges ? (
+            {emailIsRunning && emailHasChanges && (
               <Button
                 variant="default"
                 size="sm"
@@ -237,28 +227,6 @@ export function EmailChannel() {
                   <>
                     <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.channels.restart', 'Restart')}
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                variant={emailIsRunning ? 'destructive' : 'default'}
-                size="sm"
-                onClick={handleEmailStartStop}
-                disabled={emailIsLoading || emailIsConnecting || (!emailIsRunning && !emailLocalConfig.enabled)}
-                className="h-7 gap-1.5 px-2.5 text-[12px]"
-              >
-                {emailIsLoading || emailIsConnecting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : emailIsRunning ? (
-                  <>
-                    <Square className="h-3.5 w-3.5" />
-                    {t('settings.channels.stop', 'Stop')}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-3.5 w-3.5" />
-                    {t('settings.channels.start', 'Start')}
                   </>
                 )}
               </Button>

@@ -526,7 +526,6 @@ export function FeishuChannel() {
     isConnecting: feishuIsConnecting,
     isRunning: feishuIsRunning,
     handleSave: handleFeishuSave,
-    handleStartStop: handleFeishuStartStop,
     handleRestart: handleFeishuRestart,
   } = useChannelConfig<FeishuConfig>({
     storeConfig: feishu,
@@ -600,7 +599,8 @@ export function FeishuChannel() {
         isConnecting={feishuIsConnecting}
         isRunning={feishuIsRunning}
         hasChanges={feishuHasChanges}
-        onStartStop={handleFeishuStartStop}
+        onStart={startFeishuGateway}
+        onStop={stopFeishuGateway}
         onRestart={handleFeishuRestart}
         startDisabled={!feishuLocalConfig.appId || !feishuLocalConfig.appSecret}
         onOpenWizard={() => setFeishuWizardOpen(true)}

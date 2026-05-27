@@ -7,8 +7,6 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Loader2,
-  Play,
-  Square,
   RefreshCw,
   ChevronDown,
   ChevronRight,
@@ -44,10 +42,14 @@ export interface GatewayStatusCardProps {
   isRunning: boolean
   /** Whether there are unsaved changes that need a restart */
   hasChanges: boolean
-  /** Handle start/stop */
-  onStartStop: () => void
+  /** Handle start/stop (legacy — kept for back-compat with callers that haven't migrated to onStart/onStop) */
+  onStartStop?: () => void
   /** Handle restart (stop + save + start) */
   onRestart: () => void
+  /** Start the gateway (called when toggle flips ON and not already running) */
+  onStart?: () => void | Promise<void>
+  /** Stop the gateway (called when toggle flips OFF and currently running) */
+  onStop?: () => void | Promise<void>
   /** Whether start should be disabled (e.g., missing credentials) */
   startDisabled?: boolean
   /** Optional: show setup wizard button */
@@ -70,13 +72,23 @@ export function GatewayStatusCard({
   isConnecting,
   isRunning,
   hasChanges,
-  onStartStop,
   onRestart,
-  startDisabled,
+  onStart,
+  onStop,
+  startDisabled: _startDisabled,
   onOpenWizard,
   children,
 }: GatewayStatusCardProps) {
   const { t } = useTranslation()
+
+  const handleToggle = async (next: boolean) => {
+    onToggleEnabled(next)
+    if (next && !isRunning && onStart) {
+      await onStart()
+    } else if (!next && isRunning && onStop) {
+      await onStop()
+    }
+  }
 
   return (
     <SettingCard className="!p-3">
@@ -117,10 +129,10 @@ export function GatewayStatusCard({
           )}
           <ToggleSwitch
             enabled={enabled}
-            onChange={onToggleEnabled}
-            disabled={isLoading}
+            onChange={handleToggle}
+            disabled={isLoading || isConnecting}
           />
-          {isRunning && hasChanges ? (
+          {isRunning && hasChanges && (
             <Button
               variant="default"
               size="sm"
@@ -134,28 +146,6 @@ export function GatewayStatusCard({
                 <>
                   <RefreshCw className="h-3.5 w-3.5" />
                   {t('settings.channels.restart', 'Restart')}
-                </>
-              )}
-            </Button>
-          ) : (
-            <Button
-              variant={isRunning ? 'destructive' : 'default'}
-              size="sm"
-              onClick={onStartStop}
-              disabled={isLoading || isConnecting || (!isRunning && (startDisabled || !enabled))}
-              className="h-7 gap-1.5 px-2.5 text-[12px]"
-            >
-              {isLoading || isConnecting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : isRunning ? (
-                <>
-                  <Square className="h-3.5 w-3.5" />
-                  {t('settings.channels.stop', 'Stop')}
-                </>
-              ) : (
-                <>
-                  <Play className="h-3.5 w-3.5" />
-                  {t('settings.channels.start', 'Start')}
                 </>
               )}
             </Button>

@@ -428,7 +428,6 @@ export function WeChatChannel() {
     isConnecting,
     isRunning,
     handleSave,
-    handleStartStop,
     handleRestart,
   } = useChannelConfig<WeChatConfig>({
     storeConfig: wechat,
@@ -490,7 +489,8 @@ export function WeChatChannel() {
         isConnecting={isConnecting}
         isRunning={isRunning}
         hasChanges={wechatHasChanges}
-        onStartStop={handleStartStop}
+        onStart={startWechatGateway}
+        onStop={stopWechatGateway}
         onRestart={handleRestart}
         startDisabled={!localConfig.botToken}
         onOpenWizard={() => setWizardOpen(true)}

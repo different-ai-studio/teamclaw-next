@@ -18,7 +18,7 @@ export function ToggleSwitch({
       disabled={disabled}
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-border/80 shadow-inner transition-colors",
-        enabled ? "bg-foreground" : "bg-panel",
+        enabled ? "bg-emerald-500" : "bg-foreground",
         disabled && "cursor-not-allowed opacity-50",
       )}
     >

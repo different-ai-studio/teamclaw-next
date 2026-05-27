@@ -12,8 +12,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Play,
-  Square,
   RefreshCw,
   ChevronDown,
   ChevronRight,
@@ -127,20 +125,6 @@ export function DiscordChannel() {
   const handleTestToken = async () => {
     if (!localConfig.token) return
     await testToken(localConfig.token)
-  }
-
-  const handleStartStop = async () => {
-    try {
-      if (gatewayStatus.status === 'connected' || gatewayStatus.status === 'connecting') {
-        await stopGateway()
-      } else {
-        // Save config before starting to ensure backend has latest settings
-        await saveDiscordConfig(localConfig)
-        await startGateway()
-      }
-    } catch {
-      // Error is handled by the store
-    }
   }
 
   const handleAddGuild = (guildId: string, config: GuildConfig) => {
@@ -284,13 +268,18 @@ export function DiscordChannel() {
             </Button>
             <ToggleSwitch
               enabled={localConfig.enabled}
-              onChange={(enabled) => {
+              onChange={async (enabled) => {
                 updateLocalConfig({ enabled })
-                toggleDiscordEnabled(enabled, { ...localConfig, enabled })
+                await toggleDiscordEnabled(enabled, { ...localConfig, enabled })
+                if (enabled && !isRunning) {
+                  await startGateway()
+                } else if (!enabled && isRunning) {
+                  await stopGateway()
+                }
               }}
-              disabled={isLoading}
+              disabled={isLoading || isConnecting}
             />
-            {isRunning && hasChanges ? (
+            {isRunning && hasChanges && (
               <Button
                 variant="default"
                 size="sm"
@@ -309,28 +298,6 @@ export function DiscordChannel() {
                   <>
                     <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.mcp.restart', 'Restart')}
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                variant={isRunning ? 'destructive' : 'default'}
-                size="sm"
-                onClick={handleStartStop}
-                disabled={isLoading || isConnecting || (!isRunning && (!localConfig.enabled || !localConfig.token))}
-                className="h-7 gap-1.5 px-2.5 text-[12px]"
-              >
-                {isLoading || isConnecting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : isRunning ? (
-                  <>
-                    <Square className="h-3.5 w-3.5" />
-                    {t('settings.channels.stop', 'Stop')}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-3.5 w-3.5" />
-                    {t('settings.channels.start', 'Start')}
                   </>
                 )}
               </Button>
