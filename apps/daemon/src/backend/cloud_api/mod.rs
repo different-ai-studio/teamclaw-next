@@ -231,7 +231,23 @@ impl Backend for CloudApiBackend {
     }
 
     async fn heartbeat(&self) -> BackendResult<()> {
-        self.unsupported("heartbeat")
+        let token = self.access_token().await?;
+        let resp = self
+            .http
+            .post(self.cloud_url("/v1/heartbeat"))
+            .bearer_auth(token)
+            .header("x-request-id", request_id())
+            .send()
+            .await
+            .map_err(network_error)?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let bytes = resp.bytes().await.map_err(network_error)?;
+            let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
+            Err(client::decode_error(status, envelope))
+        }
     }
 
     async fn upsert_workspace(&self, _row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow> {
@@ -513,5 +529,18 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_posts_to_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/heartbeat"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        backend.heartbeat().await.unwrap();
     }
 }
