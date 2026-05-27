@@ -202,5 +202,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     await getBackend().auth.signOut();
     set({ session: null, authFlow: "idle", otpEmail: null, upgradeEmail: null });
+    try {
+      const { useWorkspaceStore } = await import("@/stores/workspace");
+      await useWorkspaceStore.getState().clearWorkspace();
+    } catch (error) {
+      console.warn("[auth] clearWorkspace on signOut failed:", error);
+    }
   },
 }));

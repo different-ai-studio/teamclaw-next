@@ -12,9 +12,95 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { toast } from "sonner"
 import { useWorkspaceStore } from "@/stores/workspace"
+import { useCurrentTeamStore } from "@/stores/current-team"
 import { isTauri } from '@/lib/utils'
 import { DEFAULT_WORKSPACE_PATH } from '@/lib/build-config'
+
+interface WorkspaceTeamMeta {
+  teamId: string
+  teamName: string
+}
+
+/**
+ * Validate the chosen workspace against the currently-logged-in team.
+ *
+ * Returns `true` when the workspace is OK to continue with, `false` when the
+ * caller should re-prompt the user (after a mismatch was rejected or the user
+ * chose a different directory).
+ *
+ * Rules:
+ *  - No current team / not in Tauri → always continue.
+ *  - workspace has no teamclaw-team yet → continue, surface a toast so the
+ *    user knows they still need to finish team setup in Settings (next PR
+ *    will auto-init this).
+ *  - meta.teamId === currentTeam.id → continue.
+ *  - meta.teamId !== currentTeam.id → ask the user (twice) whether to
+ *    discard the existing teamclaw-team directory. If they confirm,
+ *    delete it and continue (workspace stays selected, team setup is
+ *    pending). If they decline, clear the workspace and return false so
+ *    the picker reopens.
+ */
+async function validateWorkspaceTeam(workspacePath: string): Promise<boolean> {
+  if (!isTauri()) return true
+
+  const currentTeam = useCurrentTeamStore.getState().team
+  if (!currentTeam) return true
+
+  let meta: WorkspaceTeamMeta | null
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    meta = await invoke<WorkspaceTeamMeta | null>("workspace_read_team_meta", {
+      workspacePath,
+    })
+  } catch (error) {
+    console.warn("[Workspace] Failed to read team meta:", error)
+    return true
+  }
+
+  if (!meta) {
+    toast.message(
+      "需要在团队设置中完成共享目录初始化",
+      { description: `当前工作区还没有 teamclaw-team/，请进入设置 → 团队完成设置。` },
+    )
+    return true
+  }
+
+  if (meta.teamId === currentTeam.id) return true
+
+  const first = window.confirm(
+    `该工作区已绑定团队「${meta.teamName}」，与当前登录的团队「${currentTeam.name}」不一致。\n\n继续将删除该工作区中的 teamclaw-team/ 目录并以当前团队重新初始化（其他文件保留不动）。\n\n是否继续？`,
+  )
+  if (!first) {
+    await useWorkspaceStore.getState().clearWorkspace()
+    return false
+  }
+
+  const second = window.confirm(
+    `再次确认：将删除工作区中的 teamclaw-team/ 目录（仅此一个目录）。该操作不可撤销。\n\n确认删除？`,
+  )
+  if (!second) {
+    await useWorkspaceStore.getState().clearWorkspace()
+    return false
+  }
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("workspace_delete_team_repo", { workspacePath })
+  } catch (error) {
+    console.error("[Workspace] Failed to delete teamclaw-team:", error)
+    toast.error("删除 teamclaw-team 失败", { description: String(error) })
+    await useWorkspaceStore.getState().clearWorkspace()
+    return false
+  }
+
+  toast.message(
+    "已清除旧团队目录",
+    { description: "请进入设置 → 团队完成当前团队的共享目录初始化。" },
+  )
+  return true
+}
 
 function BrandPill() {
   return (
@@ -56,11 +142,16 @@ export function WorkspacePrompt() {
     }
   }, [setWorkspace])
 
+  const applyWorkspace = async (path: string) => {
+    await setWorkspace(path)
+    await validateWorkspaceTeam(path)
+  }
+
   const handleSelectFolder = async () => {
     if (isWebMode) {
       // In web mode, use the custom path input
       if (customPath.trim()) {
-        await setWorkspace(customPath.trim())
+        await applyWorkspace(customPath.trim())
       }
       return
     }
@@ -75,7 +166,7 @@ export function WorkspacePrompt() {
       })
 
       if (selected && typeof selected === 'string') {
-        await setWorkspace(selected)
+        await applyWorkspace(selected)
       }
     } catch (error) {
       console.error('Failed to select folder:', error)
@@ -101,7 +192,7 @@ export function WorkspacePrompt() {
       if (!selected || typeof selected !== 'string') return
 
       await mkdir(selected, { recursive: true })
-      await setWorkspace(selected)
+      await applyWorkspace(selected)
     } catch (error) {
       console.error('Failed to create workspace:', error)
     }

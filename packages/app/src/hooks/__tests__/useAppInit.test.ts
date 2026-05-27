@@ -187,7 +187,7 @@ describe('useWorkspaceInit', () => {
     })
   })
 
-  it('clears a saved workspace when it no longer exists in Tauri', async () => {
+  it('clears a saved workspace when it no longer exists in Tauri and leaves the picker to handle it', async () => {
     mockIsTauri.mockReturnValue(true)
     mockExists.mockResolvedValue(false)
     localStorage.setItem('teamclaw-workspace-path', '/tmp/missing-workspace')
@@ -196,20 +196,23 @@ describe('useWorkspaceInit', () => {
     const { result } = renderHook(() => useWorkspaceInit())
 
     await waitFor(() => {
-      expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
       expect(localStorage.getItem('teamclaw-workspace-path')).toBeNull()
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
+    // The stale saved path is cleared, but we deliberately do NOT fall back
+    // to a default workspace — the user must pick one explicitly so a freshly
+    // joined team doesn't silently land in an unrelated directory.
+    expect(mockSetWorkspace).not.toHaveBeenCalled()
   })
 
-  it('uses the default workspace when no saved workspace exists', async () => {
+  it('does not set a default workspace when nothing is saved (picker handles it)', async () => {
     const { useWorkspaceInit } = await import('@/hooks/useAppInit')
     const { result } = renderHook(() => useWorkspaceInit())
 
     await waitFor(() => {
-      expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
+    expect(mockSetWorkspace).not.toHaveBeenCalled()
   })
 })
 

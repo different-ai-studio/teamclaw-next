@@ -31,7 +31,7 @@ import {
   waitForOpenCodeBootstrapped,
 } from "@/lib/opencode/preloader";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
-import { appShortName, DEFAULT_WORKSPACE_PATH, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
+import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
 
 export const SKILLS_CHANGED_EVENT = "skills-files-changed";
 
@@ -105,12 +105,14 @@ export function useWorkspaceInit() {
             }
 
             if (!restored) {
-              console.log("[App] Using default workspace:", DEFAULT_WORKSPACE_PATH);
-              await setWorkspace(DEFAULT_WORKSPACE_PATH);
+              // No saved workspace — leave workspacePath null so <WorkspacePrompt />
+              // forces the user to pick one before entering the app. Previously
+              // we silently set a default like ~/TeamClaw, which silently put
+              // freshly-joined teams into a workspace with no teamclaw-team/.
+              console.log("[App] No saved workspace — prompting user to pick one");
             }
-          } catch {
-            console.log("[App] Falling back to default workspace:", DEFAULT_WORKSPACE_PATH);
-            await setWorkspace(DEFAULT_WORKSPACE_PATH);
+          } catch (error) {
+            console.warn("[App] Workspace restore failed; falling through to picker:", error);
           }
         }
       }

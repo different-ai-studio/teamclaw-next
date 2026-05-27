@@ -421,6 +421,8 @@ pub fn run() {
             commands::terminal::terminal_subscribe,
             commands::terminal::terminal_write,
             commands::team::get_team_status,
+            commands::team::workspace_read_team_meta,
+            commands::team::workspace_delete_team_repo,
             commands::team::update_team_llm_config,
             commands::team::get_team_config,
             commands::team::save_team_config,
