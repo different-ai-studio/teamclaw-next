@@ -575,15 +575,15 @@ export function FeishuChannel() {
     <>
       <GatewayStatusCard
         icon={
-          <div className="rounded-lg p-2 bg-blue-100 dark:bg-blue-900/50">
-            <FeishuIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <div className="rounded-md p-1.5 bg-blue-100 dark:bg-blue-900/50">
+            <FeishuIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           </div>
         }
         title={t('settings.channels.feishu.gateway', 'Feishu Gateway')}
         status={feishuGatewayStatus.status}
         statusDetail={
           feishuGatewayStatus.appId ? (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               App: {feishuGatewayStatus.appId}
             </p>
           ) : undefined

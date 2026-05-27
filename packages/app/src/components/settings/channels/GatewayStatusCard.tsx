@@ -79,17 +79,17 @@ export function GatewayStatusCard({
   const { t } = useTranslation()
 
   return (
-    <SettingCard>
+    <SettingCard className="!p-3">
       {/* Header Row - always visible */}
       <div className="flex items-center justify-between">
         <button
           onClick={onToggleExpanded}
-          className="flex items-center gap-4 flex-1 text-left"
+          className="flex items-center gap-3 flex-1 text-left"
         >
           {icon}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium">{title}</span>
+              <span className="text-[13px] font-medium">{title}</span>
               <StatusBadge status={status} />
             </div>
             {statusDetail}
@@ -103,13 +103,13 @@ export function GatewayStatusCard({
             <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           )}
         </button>
-        <div className="flex items-center gap-2 ml-3">
+        <div className="flex items-center gap-1.5 ml-2">
           {onOpenWizard && (
             <Button
               variant="ghost"
               size="sm"
               onClick={onOpenWizard}
-              className="h-8 w-8 p-0"
+              className="h-7 w-7 p-0"
               title={t('settings.channels.startSetup', 'Start Setup')}
             >
               <BookOpen className="h-4 w-4 text-muted-foreground" />
@@ -126,13 +126,13 @@ export function GatewayStatusCard({
               size="sm"
               onClick={onRestart}
               disabled={isLoading || isConnecting}
-              className="gap-2"
+              className="h-7 gap-1.5 px-2.5 text-[12px]"
             >
               {isLoading || isConnecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <>
-                  <RefreshCw className="h-4 w-4" />
+                  <RefreshCw className="h-3.5 w-3.5" />
                   {t('settings.channels.restart', 'Restart')}
                 </>
               )}
@@ -143,18 +143,18 @@ export function GatewayStatusCard({
               size="sm"
               onClick={onStartStop}
               disabled={isLoading || isConnecting || (!isRunning && (startDisabled || !enabled))}
-              className="gap-2"
+              className="h-7 gap-1.5 px-2.5 text-[12px]"
             >
               {isLoading || isConnecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : isRunning ? (
                 <>
-                  <Square className="h-4 w-4" />
+                  <Square className="h-3.5 w-3.5" />
                   {t('settings.channels.stop', 'Stop')}
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4" />
+                  <Play className="h-3.5 w-3.5" />
                   {t('settings.channels.start', 'Start')}
                 </>
               )}

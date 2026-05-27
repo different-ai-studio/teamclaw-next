@@ -170,23 +170,23 @@ export function EmailChannel() {
 
   return (
     <>
-      <SettingCard>
+      <SettingCard className="!p-3">
         {/* Header Row - always visible */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => setEmailExpanded(!emailExpanded)}
-            className="flex items-center gap-4 flex-1 text-left"
+            className="flex items-center gap-3 flex-1 text-left"
           >
-            <div className="rounded-lg p-2 bg-blue-100 dark:bg-blue-900/50">
-              <GmailIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <div className="rounded-md p-1.5 bg-blue-100 dark:bg-blue-900/50">
+              <GmailIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-medium">{t('settings.channels.email.gateway', 'Email Gateway')}</span>
+                <span className="text-[13px] font-medium">{t('settings.channels.email.gateway', 'Email Gateway')}</span>
                 <StatusBadge status={emailGatewayStatus.status} />
               </div>
               {emailGatewayStatus.email && (
-                <p className="text-[13px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {emailGatewayStatus.email}
                 </p>
               )}
@@ -200,12 +200,12 @@ export function EmailChannel() {
               <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             )}
           </button>
-          <div className="flex items-center gap-2 ml-3">
+          <div className="flex items-center gap-1.5 ml-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setEmailWizardOpen(true)}
-              className="h-8 w-8 p-0"
+              className="h-7 w-7 p-0"
               title={t('settings.channels.startSetup', 'Start Setup')}
             >
               <BookOpen className="h-4 w-4 text-muted-foreground" />
@@ -229,13 +229,13 @@ export function EmailChannel() {
                   setEmailHasChanges(false)
                 }}
                 disabled={emailIsLoading || emailIsConnecting}
-                className="gap-2"
+                className="h-7 gap-1.5 px-2.5 text-[12px]"
               >
                 {emailIsLoading || emailIsConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <>
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.channels.restart', 'Restart')}
                   </>
                 )}
@@ -246,18 +246,18 @@ export function EmailChannel() {
                 size="sm"
                 onClick={handleEmailStartStop}
                 disabled={emailIsLoading || emailIsConnecting || (!emailIsRunning && !emailLocalConfig.enabled)}
-                className="gap-2"
+                className="h-7 gap-1.5 px-2.5 text-[12px]"
               >
                 {emailIsLoading || emailIsConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : emailIsRunning ? (
                   <>
-                    <Square className="h-4 w-4" />
+                    <Square className="h-3.5 w-3.5" />
                     {t('settings.channels.stop', 'Stop')}
                   </>
                 ) : (
                   <>
-                    <Play className="h-4 w-4" />
+                    <Play className="h-3.5 w-3.5" />
                     {t('settings.channels.start', 'Start')}
                   </>
                 )}

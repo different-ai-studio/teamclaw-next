@@ -461,15 +461,15 @@ export function WeChatChannel() {
     <>
       <GatewayStatusCard
         icon={
-          <div className="rounded-lg p-2 bg-green-100 dark:bg-green-900/50">
-            <WeChatIcon className="h-5 w-5" />
+          <div className="rounded-md p-1.5 bg-green-100 dark:bg-green-900/50">
+            <WeChatIcon className="h-4 w-4" />
           </div>
         }
         title={t('settings.channels.wechat.gateway', 'WeChat Gateway')}
         status={wechatGatewayStatus.status}
         statusDetail={
           wechatGatewayStatus.accountId ? (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Account: {wechatGatewayStatus.accountId}
             </p>
           ) : localConfig.accountId ? (

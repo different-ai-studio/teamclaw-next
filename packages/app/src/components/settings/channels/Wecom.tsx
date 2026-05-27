@@ -594,8 +594,8 @@ export function WeComChannel() {
     <>
       <GatewayStatusCard
         icon={
-          <div className="rounded-lg p-2 bg-blue-100 dark:bg-blue-900/50">
-            <WeComIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <div className="rounded-md p-1.5 bg-blue-100 dark:bg-blue-900/50">
+            <WeComIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           </div>
         }
         title={t('settings.channels.wecom.gateway', 'WeCom Gateway')}
@@ -603,7 +603,7 @@ export function WeComChannel() {
         statusDetail={
           wecomGatewayStatus.botId ? (
             <div className="space-y-1">
-              <p className="text-[13px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Bot: {wecomGatewayStatus.botId}
               </p>
               {wecomGatewayStatus.activeSessions && wecomGatewayStatus.activeSessions.length > 0 && (

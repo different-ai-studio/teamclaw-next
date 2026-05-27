@@ -237,23 +237,23 @@ export function DiscordChannel() {
 
   return (
     <>
-      <SettingCard>
+      <SettingCard className="!p-3">
         {/* Header Row - always visible */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => setDiscordExpanded(!discordExpanded)}
-            className="flex items-center gap-4 flex-1 text-left"
+            className="flex items-center gap-3 flex-1 text-left"
           >
-            <div className="rounded-lg p-2 bg-indigo-100 dark:bg-indigo-900/50">
-              <DiscordIcon className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+            <div className="rounded-md p-1.5 bg-indigo-100 dark:bg-indigo-900/50">
+              <DiscordIcon className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-medium">{t('settings.channels.discord.gateway', 'Discord Gateway')}</span>
+                <span className="text-[13px] font-medium">{t('settings.channels.discord.gateway', 'Discord Gateway')}</span>
                 <StatusBadge status={gatewayStatus.status} />
               </div>
               {gatewayStatus.botUsername && (
-                <p className="text-[13px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {t('settings.channels.connectedAs', { name: gatewayStatus.botUsername, defaultValue: 'Connected as @{{name}}' })}
                 </p>
               )}
@@ -272,12 +272,12 @@ export function DiscordChannel() {
               <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             )}
           </button>
-          <div className="flex items-center gap-2 ml-3">
+          <div className="flex items-center gap-1.5 ml-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setWizardOpen(true)}
-              className="h-8 w-8 p-0"
+              className="h-7 w-7 p-0"
               title={t('settings.channels.startSetup', 'Start Setup')}
             >
               <BookOpen className="h-4 w-4 text-muted-foreground" />
@@ -301,13 +301,13 @@ export function DiscordChannel() {
                   setHasChanges(false)
                 }}
                 disabled={isLoading || isConnecting}
-                className="gap-2"
+                className="h-7 gap-1.5 px-2.5 text-[12px]"
               >
                 {isLoading || isConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <>
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.mcp.restart', 'Restart')}
                   </>
                 )}
@@ -318,18 +318,18 @@ export function DiscordChannel() {
                 size="sm"
                 onClick={handleStartStop}
                 disabled={isLoading || isConnecting || (!isRunning && (!localConfig.enabled || !localConfig.token))}
-                className="gap-2"
+                className="h-7 gap-1.5 px-2.5 text-[12px]"
               >
                 {isLoading || isConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : isRunning ? (
                   <>
-                    <Square className="h-4 w-4" />
+                    <Square className="h-3.5 w-3.5" />
                     {t('settings.channels.stop', 'Stop')}
                   </>
                 ) : (
                   <>
-                    <Play className="h-4 w-4" />
+                    <Play className="h-3.5 w-3.5" />
                     {t('settings.channels.start', 'Start')}
                   </>
                 )}
