@@ -900,6 +900,152 @@ test("GET /v1/teams/:teamId/permissions calls repo.listTeamPermissions", async (
   assert.deepEqual(repo.calls[0], { method: "listTeamPermissions", teamId: "team-1" });
 });
 
+// ── Ideas ─────────────────────────────────────────────────────────────────────
+
+test("GET /v1/ideas returns 400 without teamId", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/ideas",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => fakeRepo() });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error.code, "validation_failed");
+});
+
+test("GET /v1/ideas returns 401 without bearer", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/ideas",
+    headers: {},
+    queryStringParameters: { teamId: "team-1" },
+  }, { createRepository: () => fakeRepo() });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(JSON.parse(response.body).error.code, "missing_auth");
+});
+
+test("GET /v1/ideas returns idea page", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/ideas",
+    headers: { Authorization: "Bearer token" },
+    queryStringParameters: { teamId: "team-1" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(Array.isArray(body.items));
+  assert.deepEqual(repo.calls[0], { method: "listIdeas", args: { teamId: "team-1", archived: false, limit: 50, cursor: null } });
+});
+
+test("GET /v1/ideas/:ideaId returns 404 for missing idea", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/ideas/idea-missing",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => fakeRepo({ ideas: [] }) });
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(JSON.parse(response.body).error.code, "not_found");
+});
+
+test("GET /v1/ideas/:ideaId returns idea", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/ideas/idea-1",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.id, "idea-1");
+  assert.deepEqual(repo.calls[0], { method: "getIdea", ideaId: "idea-1" });
+});
+
+test("POST /v1/ideas creates idea", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/ideas",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ teamId: "team-1", title: "New Idea", authorActorId: "actor-1" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 201);
+  const body = JSON.parse(response.body);
+  assert.equal(body.title, "New Idea");
+  assert.deepEqual(repo.calls[0], { method: "createIdea", input: { teamId: "team-1", title: "New Idea", authorActorId: "actor-1" } });
+});
+
+test("POST /v1/ideas returns 400 without required fields", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/ideas",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ teamId: "team-1" }),
+  }, { createRepository: () => fakeRepo() });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error.code, "validation_failed");
+});
+
+test("PATCH /v1/ideas/:ideaId updates idea", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/ideas/idea-1",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ title: "Updated Title" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.title, "Updated Title");
+  assert.deepEqual(repo.calls[0], { method: "updateIdea", ideaId: "idea-1", patch: { title: "Updated Title" } });
+});
+
+test("POST /v1/ideas/:ideaId/archive returns 204", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/ideas/idea-1/archive",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "archiveIdea", ideaId: "idea-1" });
+});
+
+test("POST /v1/ideas/:ideaId/activities creates activity", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/ideas/idea-1/activities",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ kind: "comment", actorId: "actor-1", content: "looks good" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 201);
+  const body = JSON.parse(response.body);
+  assert.ok(body.id);
+  assert.deepEqual(repo.calls[0], { method: "createIdeaActivity", ideaId: "idea-1", input: { kind: "comment", actorId: "actor-1", content: "looks good" } });
+});
+
+test("POST /v1/ideas/:ideaId/activities returns 400 without kind", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/ideas/idea-1/activities",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ actorId: "actor-1" }),
+  }, { createRepository: () => fakeRepo() });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error.code, "validation_failed");
+});
+
 function session(id, lastMessageAt) {
   return {
     id,
@@ -915,11 +1061,14 @@ function session(id, lastMessageAt) {
   };
 }
 
-function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, workspaces = [] } = {}) {
+function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, workspaces = [], ideas = null } = {}) {
   const calls = [];
   const configs = { ...teamWorkspaceConfigs };
   const workspaceStore = workspaces.length > 0 ? workspaces.slice() : [
     { id: "workspace-1", teamId: "team-1", name: "Alpha", slug: null, archived: false, metadata: null, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+  ];
+  const ideaStore = ideas !== null ? ideas.slice() : [
+    { id: "idea-1", teamId: "team-1", title: "Idea One", description: null, archived: false, authorActorId: "actor-1", actorIds: [], createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
   ];
   const sessionStore = sessions.length > 0 ? sessions.slice() : [
     { id: "session-1", teamId: "team-1", title: "Architecture plan", mode: "collab", ideaId: "idea-1", lastMessageAt: "2026-05-27T00:30:00Z", lastMessagePreview: "Start with OpenAPI.", hasUnread: false, createdAt: "2026-05-26T23:00:00Z", updatedAt: "2026-05-27T00:30:00Z", participants: [{ sessionId: "session-1", actorId: "actor-1", role: "owner", joinedAt: "2026-05-26T23:00:00Z" }] },
@@ -963,5 +1112,11 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async muteSession(sessionId, input) { calls.push({ method: "muteSession", sessionId, input }); if (error) throw error; },
     async unmuteSession(sessionId) { calls.push({ method: "unmuteSession", sessionId }); if (error) throw error; },
     async listMutedSessions() { calls.push({ method: "listMutedSessions" }); if (error) throw error; return { items: [] }; },
+    async listIdeas(args) { calls.push({ method: "listIdeas", args }); if (error) throw error; return { items: ideaStore }; },
+    async getIdea(ideaId) { calls.push({ method: "getIdea", ideaId }); if (error) throw error; return ideaStore.find(i => i.id === ideaId) ?? null; },
+    async createIdea(input) { calls.push({ method: "createIdea", input }); if (error) throw error; const idea = { id: input.id ?? "idea-new", teamId: input.teamId, title: input.title, description: input.description ?? null, archived: false, authorActorId: input.authorActorId, actorIds: input.actorIds ?? [], createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }; ideaStore.push(idea); return idea; },
+    async updateIdea(ideaId, patch) { calls.push({ method: "updateIdea", ideaId, patch }); if (error) throw error; const i = ideaStore.find(i => i.id === ideaId); if (!i) return null; if (patch.title !== undefined) i.title = patch.title; if (patch.description !== undefined) i.description = patch.description; return i; },
+    async archiveIdea(ideaId) { calls.push({ method: "archiveIdea", ideaId }); if (error) throw error; const i = ideaStore.find(i => i.id === ideaId); if (i) i.archived = true; },
+    async createIdeaActivity(ideaId, input) { calls.push({ method: "createIdeaActivity", ideaId, input }); if (error) throw error; return { id: "activity-1", ideaId, kind: input.kind, content: input.content ?? null, actorId: input.actorId, metadata: input.metadata ?? null, createdAt: "2026-05-27T01:00:00Z" }; },
   };
 }

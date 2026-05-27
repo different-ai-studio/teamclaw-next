@@ -42,10 +42,26 @@ test("golden response: GET /v1/sessions/{id}/messages", async () => {
   assert.deepEqual(JSON.parse(response.body), fixture("message-list.json"));
 });
 
+test("golden response: GET /v1/ideas", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/ideas",
+    headers: {
+      Authorization: "Bearer contract-token",
+      "X-Request-Id": "contract_req_ideas",
+    },
+    queryStringParameters: { teamId: "team-1" },
+  }, { createRepository: () => contractRepo() });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), fixture("ideas-list.json"));
+});
+
 function contractRepo() {
   const workspaceStore = [
     { id: "workspace-1", teamId: "team-1", name: "Alpha", slug: null, archived: false, metadata: null, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
   ];
+  const ideaStore = fixture("ideas-list.json").items.slice();
   const configStore = {};
   const messageStore = fixture("message-list.json").items.slice();
   const sessionStore = fixture("session-list.json").items.slice().map(s => ({ ...s, participants: [{ sessionId: s.id, actorId: "actor-1", role: "owner", joinedAt: s.createdAt }] }));
@@ -300,6 +316,50 @@ function contractRepo() {
     },
     async removeTeamActor(teamId, actorId) {
       assert.equal(teamId, "team-1");
+    },
+    async listIdeas({ teamId, archived, limit, cursor }) {
+      assert.equal(teamId, "team-1");
+      return { items: ideaStore };
+    },
+    async getIdea(ideaId) {
+      return ideaStore.find(i => i.id === ideaId) ?? null;
+    },
+    async createIdea(body) {
+      const idea = {
+        id: body.id ?? "idea-new",
+        teamId: body.teamId,
+        title: body.title,
+        description: body.description ?? null,
+        archived: false,
+        authorActorId: body.authorActorId,
+        actorIds: body.actorIds ?? [],
+        createdAt: "2026-05-27T01:00:00Z",
+        updatedAt: "2026-05-27T01:00:00Z",
+      };
+      ideaStore.push(idea);
+      return idea;
+    },
+    async updateIdea(ideaId, patch) {
+      const i = ideaStore.find(i => i.id === ideaId);
+      if (!i) return null;
+      if (patch.title !== undefined) i.title = patch.title;
+      if (patch.description !== undefined) i.description = patch.description;
+      return i;
+    },
+    async archiveIdea(ideaId) {
+      const i = ideaStore.find(i => i.id === ideaId);
+      if (i) i.archived = true;
+    },
+    async createIdeaActivity(ideaId, body) {
+      return {
+        id: "activity-1",
+        ideaId,
+        kind: body.kind,
+        content: body.content ?? null,
+        actorId: body.actorId,
+        metadata: body.metadata ?? null,
+        createdAt: "2026-05-27T01:00:00Z",
+      };
     },
   };
 }

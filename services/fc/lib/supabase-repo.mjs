@@ -467,6 +467,80 @@ async heartbeat() {
       if (error) throw error;
       return { items: (data ?? []).map((r) => r.session_id) };
     },
+
+    async listIdeas({ teamId, archived = false, limit = 50, cursor = null } = {}) {
+      let query = supabase
+        .from("ideas")
+        .select("*")
+        .eq("team_id", teamId)
+        .eq("archived", archived)
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(limit + 1);
+      if (cursor?.updatedAt) {
+        query = query.lt("updated_at", cursor.updatedAt);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = (data ?? []).slice(0, limit);
+      return { items: rows.map(mapIdeaRow) };
+    },
+
+    async getIdea(ideaId) {
+      const { data, error } = await supabase
+        .from("ideas")
+        .select("*")
+        .eq("id", ideaId)
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapIdeaRow(data);
+    },
+
+    async createIdea(body) {
+      const args = {
+        p_team_id: body.teamId,
+        p_title: body.title,
+        p_description: body.description ?? null,
+        p_author_actor_id: body.authorActorId,
+        p_actor_ids: body.actorIds ?? [],
+      };
+      if (body.id !== undefined) args.p_id = body.id;
+      const { data, error } = await supabase.rpc("create_idea", args);
+      if (error) throw error;
+      const id = requiredString(data, "ideas.createIdea", "id");
+      return this.getIdea(id);
+    },
+
+    async updateIdea(ideaId, body) {
+      const { error } = await supabase.rpc("update_idea", {
+        p_idea_id: ideaId,
+        p_title: body.title ?? null,
+        p_description: body.description ?? null,
+        p_actor_ids: body.actorIds ?? null,
+      });
+      if (error) throw error;
+      return this.getIdea(ideaId);
+    },
+
+    async archiveIdea(ideaId) {
+      const { error } = await supabase.rpc("archive_idea", { p_idea_id: ideaId });
+      if (error) throw error;
+    },
+
+    async createIdeaActivity(ideaId, body) {
+      const { data, error } = await supabase.rpc("create_idea_activity", {
+        p_idea_id: ideaId,
+        p_kind: body.kind,
+        p_content: body.content ?? null,
+        p_actor_id: body.actorId,
+        p_metadata: body.metadata ?? null,
+      });
+      if (error) throw error;
+      return mapIdeaActivityRow(requiredRow(data, "ideas.createIdeaActivity"));
+    },
   };
 }
 
@@ -646,5 +720,31 @@ function mapTeamMember(row) {
     teamId: requiredString(row?.team_id, "teamMembers.mapTeamMember", "team_id"),
     role: row?.role ?? "member",
     joinedAt: row?.joined_at ?? null,
+  };
+}
+
+function mapIdeaRow(row) {
+  return {
+    id: requiredString(row?.id, "ideas.mapIdeaRow", "id"),
+    teamId: requiredString(row?.team_id, "ideas.mapIdeaRow", "team_id"),
+    title: requiredString(row?.title, "ideas.mapIdeaRow", "title"),
+    description: row?.description ?? null,
+    archived: row?.archived === true,
+    authorActorId: row?.author_actor_id ?? null,
+    actorIds: row?.actor_ids ?? [],
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function mapIdeaActivityRow(row) {
+  return {
+    id: requiredString(row?.id, "ideas.mapIdeaActivityRow", "id"),
+    ideaId: requiredString(row?.idea_id, "ideas.mapIdeaActivityRow", "idea_id"),
+    kind: requiredString(row?.kind, "ideas.mapIdeaActivityRow", "kind"),
+    content: row?.content ?? null,
+    actorId: requiredString(row?.actor_id, "ideas.mapIdeaActivityRow", "actor_id"),
+    metadata: row?.metadata ?? null,
+    createdAt: requiredString(row?.created_at, "ideas.mapIdeaActivityRow", "created_at"),
   };
 }

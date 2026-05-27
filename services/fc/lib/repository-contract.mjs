@@ -533,6 +533,90 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.ok(perm.resourceId, "permission must have resourceId");
     assert.ok(Array.isArray(perm.roleIds), "roleIds must be an array");
   });
+
+  test("repository contract: listIdeas returns paged ideas with canonical fields", async () => {
+    const repo = createRepository();
+    const page = await repo.listIdeas({ teamId: "team-1", archived: false, limit: 50, cursor: null });
+
+    assert.ok(Array.isArray(page.items));
+    assert.ok(page.items.length >= 1, "contract fixture must include at least one idea");
+    assert.deepEqual(Object.keys(page.items[0]).sort(), [
+      "actorIds",
+      "archived",
+      "authorActorId",
+      "createdAt",
+      "description",
+      "id",
+      "teamId",
+      "title",
+      "updatedAt",
+    ].sort());
+  });
+
+  test("repository contract: getIdea returns single idea", async () => {
+    const repo = createRepository();
+    const page = await repo.listIdeas({ teamId: "team-1", archived: false, limit: 50, cursor: null });
+    const firstId = page.items[0].id;
+    const idea = await repo.getIdea(firstId);
+    assert.ok(idea, "idea should exist");
+    assert.equal(idea.id, firstId);
+  });
+
+  test("repository contract: getIdea returns null for missing idea", async () => {
+    const repo = createRepository();
+    const idea = await repo.getIdea("00000000-0000-0000-0000-000000000000");
+    assert.equal(idea, null);
+  });
+
+  test("repository contract: createIdea returns idea", async () => {
+    const repo = createRepository();
+    const idea = await repo.createIdea({
+      teamId: "team-1",
+      title: "Contract Idea",
+      authorActorId: "actor-1",
+    });
+    assert.ok(idea, "idea must be returned");
+    assert.equal(idea.title, "Contract Idea");
+    assert.equal(idea.archived, false);
+  });
+
+  test("repository contract: updateIdea mutates title", async () => {
+    const repo = createRepository();
+    const page = await repo.listIdeas({ teamId: "team-1", archived: false, limit: 50, cursor: null });
+    const firstId = page.items[0].id;
+    const idea = await repo.updateIdea(firstId, { title: "Updated Title" });
+    assert.ok(idea, "idea should exist");
+    assert.equal(idea.title, "Updated Title");
+  });
+
+  test("repository contract: archiveIdea succeeds", async () => {
+    const repo = createRepository();
+    const page = await repo.listIdeas({ teamId: "team-1", archived: false, limit: 50, cursor: null });
+    const firstId = page.items[0].id;
+    await repo.archiveIdea(firstId);
+  });
+
+  test("repository contract: createIdeaActivity returns activity with canonical fields", async () => {
+    const repo = createRepository();
+    const activity = await repo.createIdeaActivity("idea-1", {
+      kind: "comment",
+      actorId: "actor-1",
+      content: "test comment",
+      metadata: null,
+    });
+    assert.ok(activity, "activity must be returned");
+    assert.deepEqual(Object.keys(activity).sort(), [
+      "actorId",
+      "content",
+      "createdAt",
+      "id",
+      "ideaId",
+      "kind",
+      "metadata",
+    ].sort());
+    assert.equal(activity.kind, "comment");
+    assert.equal(activity.actorId, "actor-1");
+  });
 }
 
 export function runAuthRepositoryContract({ test, assert, createAuthRepository }) {

@@ -1594,6 +1594,186 @@ paths:
                       $ref: "#/components/schemas/Permission"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/ideas:
+    get:
+      operationId: listIdeas
+      summary: List ideas
+      tags: [Ideas]
+      parameters:
+        - in: query
+          name: teamId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: archived
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Idea page.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdeaPage"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createIdea
+      summary: Create idea
+      tags: [Ideas]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdeaCreate"
+      responses:
+        "201":
+          description: Created idea.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Idea"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/ideas/{ideaId}:
+    get:
+      operationId: getIdea
+      summary: Get idea
+      tags: [Ideas]
+      parameters:
+        - in: path
+          name: ideaId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Idea.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Idea"
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: updateIdea
+      summary: Update idea
+      tags: [Ideas]
+      parameters:
+        - in: path
+          name: ideaId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdeaUpdate"
+      responses:
+        "200":
+          description: Updated idea.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Idea"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/ideas/{ideaId}/archive:
+    post:
+      operationId: archiveIdea
+      summary: Archive idea
+      tags: [Ideas]
+      parameters:
+        - in: path
+          name: ideaId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/ideas/{ideaId}/activities:
+    post:
+      operationId: createIdeaActivity
+      summary: Create idea activity
+      tags: [Ideas]
+      parameters:
+        - in: path
+          name: ideaId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, actorId]
+              properties:
+                kind:
+                  type: string
+                content:
+                  type:
+                    - string
+                    - "null"
+                actorId:
+                  type: string
+                  format: uuid
+                metadata:
+                  type:
+                    - object
+                    - "null"
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Created activity.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdeaActivity"
+        "401":
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -2191,3 +2371,118 @@ components:
           items:
             type: string
             format: uuid
+    Idea:
+      type: object
+      required: [id, teamId, title, archived, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        archived:
+          type: boolean
+        authorActorId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        actorIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        createdAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        updatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    IdeaCreate:
+      type: object
+      required: [teamId, title, authorActorId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        authorActorId:
+          type: string
+          format: uuid
+        actorIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    IdeaUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        actorIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    IdeaPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Idea"
+        nextCursor:
+          type:
+            - string
+            - "null"
+    IdeaActivity:
+      type: object
+      required: [id, ideaId, kind, actorId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ideaId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        content:
+          type:
+            - string
+            - "null"
+        actorId:
+          type: string
+          format: uuid
+        metadata:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
