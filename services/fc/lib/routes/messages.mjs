@@ -22,4 +22,15 @@ export function registerMessages(router) {
     const message = await ctx.repository.insertMessage(decodeURIComponent(ctx.params.sessionId), body);
     return { body: message };
   });
+
+  router.patch("/v1/messages/:messageId", async (ctx) => {
+    const patch = ctx.json ?? {};
+    const message = await ctx.repository.patchMessage(decodeURIComponent(ctx.params.messageId), patch);
+    return { body: message };
+  });
+
+  router.delete("/v1/messages/:messageId", async (ctx) => {
+    await ctx.repository.deleteMessage(decodeURIComponent(ctx.params.messageId));
+    return { statusCode: 204 };
+  });
 }

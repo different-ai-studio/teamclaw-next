@@ -35,6 +35,12 @@ export function createRouter({ repository }) {
         : [optionsOrHandler, handlerMaybe];
       routes.push({ method: "PATCH", pattern, handler, auth: options.auth ?? "bearer" });
     },
+    delete(pattern, optionsOrHandler, handlerMaybe) {
+      const [options, handler] = typeof optionsOrHandler === "function"
+        ? [{}, optionsOrHandler]
+        : [optionsOrHandler, handlerMaybe];
+      routes.push({ method: "DELETE", pattern, handler, auth: options.auth ?? "bearer" });
+    },
     checkRoute({ method, path }) {
       const parts = path.split("/").filter(Boolean);
       for (const route of routes) {

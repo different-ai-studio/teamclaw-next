@@ -1,5 +1,5 @@
 import { ApiError } from "../http-utils.mjs";
-import { parseLimit, decodeCursor, nextSessionCursor } from "../router.mjs";
+import { parseLimit, decodeCursor, nextSessionCursor, requireString } from "../router.mjs";
 
 export function registerSessions(router) {
   router.get("/v1/sessions", async (ctx) => {
@@ -7,5 +7,81 @@ export function registerSessions(router) {
     const cursor = decodeCursor(ctx.query.get("cursor"));
     const items = await ctx.repository.listSessions({ limit, cursor });
     return { body: { items, nextCursor: nextSessionCursor(items, limit) } };
+  });
+
+  router.post("/v1/sessions", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.teamId, "teamId");
+    requireString(body.title, "title");
+    requireString(body.mode, "mode");
+    const out = await ctx.repository.createSession(body);
+    return { statusCode: 201, body: out };
+  });
+
+  router.get("/v1/sessions/:sessionId", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const out = await ctx.repository.getSession(sessionId);
+    if (!out) throw new ApiError(404, "not_found", "session not found");
+    return { body: out };
+  });
+
+  router.patch("/v1/sessions/:sessionId", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const body = ctx.json ?? {};
+    const out = await ctx.repository.patchSession(sessionId, body);
+    if (!out) throw new ApiError(404, "not_found", "session not found");
+    return { body: out };
+  });
+
+  router.post("/v1/sessions/:sessionId/mark-viewed", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    await ctx.repository.markSessionViewed(sessionId);
+    return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/sessions/:sessionId/participants", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const out = await ctx.repository.listSessionParticipants(sessionId);
+    return { body: out };
+  });
+
+  router.post("/v1/sessions/:sessionId/participants", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const body = ctx.json ?? {};
+    requireString(body.actorId, "actorId");
+    const out = await ctx.repository.upsertSessionParticipant(sessionId, body);
+    return { body: out };
+  });
+
+  router.delete("/v1/sessions/:sessionId/participants/:actorId", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    const actorId = decodeURIComponent(ctx.params.actorId);
+    await ctx.repository.removeSessionParticipant(sessionId, actorId);
+    return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/sessions/by-acp/:acpSessionId", async (ctx) => {
+    const acpSessionId = decodeURIComponent(ctx.params.acpSessionId);
+    const out = await ctx.repository.getSessionByAcp(acpSessionId);
+    if (!out) throw new ApiError(404, "not_found", "no session bound to ACP id");
+    return { body: out };
+  });
+
+  router.post("/v1/sessions/gateway/ensure", async (ctx) => {
+    const body = ctx.json ?? {};
+    for (const k of ["teamId", "binding", "title", "primaryAgentActorId"]) {
+      requireString(body[k], k);
+    }
+    const out = await ctx.repository.ensureGatewaySession(body);
+    return { body: out };
+  });
+
+  router.post("/v1/sessions/cron", async (ctx) => {
+    const body = ctx.json ?? {};
+    for (const k of ["teamId", "primaryAgentActorId", "title"]) {
+      requireString(body[k], k);
+    }
+    const out = await ctx.repository.createCronSession(body);
+    return { body: out };
   });
 }
