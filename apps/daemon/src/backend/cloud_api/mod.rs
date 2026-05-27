@@ -227,11 +227,18 @@ impl Backend for CloudApiBackend {
 
     async fn fetch_agent_runtime_for_session(
         &self,
-        _session_id: &str,
-        _runtime_id: &str,
-        _backend_session_id: &str,
+        session_id: &str,
+        runtime_id: &str,
+        backend_session_id: &str,
     ) -> BackendResult<Option<AgentRuntimeRow>> {
-        self.unsupported("fetch_agent_runtime_for_session")
+        let path = format!(
+            "/v1/agents/runtimes?sessionId={session_id}&runtimeId={runtime_id}&backendSessionId={backend_session_id}"
+        );
+        match self.get::<CloudAgentRuntime>(&path).await {
+            Ok(r) => Ok(Some(r.into_row())),
+            Err(BackendError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     async fn fetch_latest_runtime_for_session(
@@ -620,6 +627,29 @@ impl Backend for CloudApiBackend {
     }
 }
 
+/// Shared response type for agent_runtimes rows returned by the Cloud API.
+#[derive(serde::Deserialize)]
+struct CloudAgentRuntime {
+    id: String,
+    #[serde(rename = "backendSessionId", default)]
+    backend_session_id: Option<String>,
+    #[serde(rename = "lastProcessedMessageId", default)]
+    last_processed_message_id: Option<String>,
+}
+
+impl CloudAgentRuntime {
+    fn into_row(self) -> AgentRuntimeRow {
+        AgentRuntimeRow {
+            id: self.id,
+            workspace_id: None,
+            backend_type: String::new(),
+            backend_session_id: self.backend_session_id,
+            status: String::new(),
+            last_processed_message_id: self.last_processed_message_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,6 +782,52 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_agent_runtime_for_session_returns_row() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/runtimes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "runtime-row-1",
+                "agentActorId": "agent-1",
+                "sessionId": "session-1",
+                "runtimeId": "rt-1",
+                "backendSessionId": "bs-1",
+                "lastProcessedMessageId": "msg-5"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let row = backend
+            .fetch_agent_runtime_for_session("session-1", "rt-1", "bs-1")
+            .await
+            .unwrap();
+        assert!(row.is_some());
+        let row = row.unwrap();
+        assert_eq!(row.id, "runtime-row-1");
+        assert_eq!(row.last_processed_message_id, Some("msg-5".to_string()));
+    }
+
+    #[tokio::test]
+    async fn fetch_agent_runtime_for_session_returns_none_on_404() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/runtimes"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "not_found", "message": "not found" }
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let row = backend
+            .fetch_agent_runtime_for_session("session-x", "rt-x", "bs-x")
+            .await
+            .unwrap();
+        assert!(row.is_none());
     }
 
     #[tokio::test]
