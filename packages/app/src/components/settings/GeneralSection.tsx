@@ -175,7 +175,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
       {!import.meta.env.VITE_LOCALE || import.meta.env.VITE_LOCALE === 'all' ? (
         <SettingCard>
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
+            <label className="text-[13px] font-medium flex items-center gap-2">
               <Languages className="h-4 w-4 text-muted-foreground" />
               {t('settings.general.language', 'Language')}
             </label>
@@ -203,7 +203,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Save className="h-4 w-4 text-muted-foreground" />
                 {t('settings.general.autoSave', 'Auto Save')}
               </label>
@@ -216,7 +216,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
           
           <div className="border-t pt-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Bell className="h-4 w-4 text-muted-foreground" />
                 {t('settings.general.notifications', 'Notifications')}
               </label>
@@ -238,7 +238,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
 
           <div className="border-t pt-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Shield className="h-4 w-4 text-muted-foreground" />
                 {t('permission.policy', 'Permission Policy')}
               </label>
@@ -301,7 +301,7 @@ function AdvancedModeCard() {
     <SettingCard>
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-1">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label className="text-[13px] font-medium flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
             {t('settings.general.advancedMode', 'Advanced Mode')}
           </label>
@@ -402,12 +402,12 @@ function ChatSuggestionsCard() {
             onChange={(e) => setNewSuggestion(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={t('settings.general.suggestionPlaceholder', 'Enter a suggestion text...')}
-            className="h-9 text-sm"
+            className="h-8 text-[13px]"
           />
           <Button
             variant="outline"
             size="sm"
-            className="h-9 shrink-0"
+            className="h-8 shrink-0"
             onClick={handleAdd}
             disabled={!newSuggestion.trim()}
           >

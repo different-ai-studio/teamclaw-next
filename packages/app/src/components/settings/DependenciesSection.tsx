@@ -81,8 +81,8 @@ function SectionHeader({
         <Icon className="h-5 w-5" />
       </div>
       <div>
-        <h3 className="font-semibold text-lg">{title}</h3>
-        <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
+        <h3 className="font-semibold text-[13px]">{title}</h3>
+        <p className="text-[13px] text-muted-foreground mt-0.5">{description}</p>
       </div>
     </div>
   )
@@ -169,7 +169,7 @@ export function DependenciesSection() {
           iconColor="text-teal-500"
         />
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.deps.desktopOnly', 'Dependency checking is only available in the desktop app.')}
           </p>
         </SettingCard>
@@ -190,7 +190,7 @@ export function DependenciesSection() {
         <SettingCard>
           <div className="flex items-center justify-center py-8 gap-3">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">{t('settings.deps.checking', 'Checking dependencies...')}</span>
+            <span className="text-[13px] text-muted-foreground">{t('settings.deps.checking', 'Checking dependencies...')}</span>
           </div>
         </SettingCard>
       ) : (
@@ -204,7 +204,7 @@ export function DependenciesSection() {
                 ) : (
                   <AlertTriangle className="h-5 w-5 text-amber-500" />
                 )}
-                <span className="text-sm font-medium">
+                <span className="text-[13px] font-medium">
                   {installedCount === totalCount
                     ? t('settings.deps.allInstalled', 'All dependencies installed')
                     : t('settings.deps.installedCount', { installed: installedCount, total: totalCount, defaultValue: `${installedCount}/${totalCount} installed` })}
@@ -254,7 +254,7 @@ export function DependenciesSection() {
                     {/* Info */}
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">{dep.name}</span>
+                        <span className="font-medium text-[13px]">{dep.name}</span>
                         {dep.installed && dep.version && (
                           <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
                             {dep.version}

@@ -136,7 +136,7 @@ export function DaemonWorkspacesSection() {
           iconColor="text-slate-500"
         />
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.daemonWorkspaces.noTeam', 'Join or create a team before configuring daemon workspaces.')}
           </p>
         </SettingCard>
@@ -164,8 +164,8 @@ export function DaemonWorkspacesSection() {
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div>
-              <p className="text-sm font-medium text-destructive">{t('common.error', 'Error')}</p>
-              <p className="mt-1 break-words text-sm text-destructive/80">{error}</p>
+              <p className="text-[13px] font-medium text-destructive">{t('common.error', 'Error')}</p>
+              <p className="mt-1 break-words text-[13px] text-destructive/80">{error}</p>
             </div>
           </div>
         </SettingCard>
@@ -173,7 +173,7 @@ export function DaemonWorkspacesSection() {
 
       {!agent && !loading && (
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.daemonWorkspaces.noCurrentAgent', 'No daemon agent is associated with this machine yet.')}
           </p>
         </SettingCard>
@@ -182,7 +182,7 @@ export function DaemonWorkspacesSection() {
       <SettingCard>
         <div className="space-y-4">
           <div>
-            <p className="text-sm font-medium">{t('settings.daemonWorkspaces.addTitle', 'Add daemon workspace')}</p>
+            <p className="text-[13px] font-medium">{t('settings.daemonWorkspaces.addTitle', 'Add daemon workspace')}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {t('settings.daemonWorkspaces.addDesc', 'Writes to Supabase workspaces and binds the row to this machine daemon agent.')}
             </p>
@@ -191,7 +191,7 @@ export function DaemonWorkspacesSection() {
             <div className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.agent', 'Daemon Agent')}</span>
               <div className="rounded-md border border-border-soft bg-background/50 px-3 py-2">
-                <p className="truncate text-sm font-medium">{agent?.displayName || '-'}</p>
+                <p className="truncate text-[13px] font-medium">{agent?.displayName || '-'}</p>
                 <code className="block truncate font-mono text-xs text-muted-foreground">{agent?.id || '-'}</code>
               </div>
             </div>
@@ -210,7 +210,7 @@ export function DaemonWorkspacesSection() {
                 className="font-mono text-xs"
                 disabled={saving}
               />
-              <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={handleUseCurrentWorkspace} disabled={!currentWorkspacePath || saving}>
+              <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={handleUseCurrentWorkspace} disabled={!currentWorkspacePath || saving}>
                 {t('settings.daemonWorkspaces.useCurrent', 'Use current')}
               </Button>
             </div>
@@ -230,7 +230,7 @@ export function DaemonWorkspacesSection() {
       <SettingCard>
         <div className="space-y-4">
           <div>
-            <p className="text-sm font-medium">{t('settings.daemonWorkspaces.availableTitle', 'Daemon workspaces')}</p>
+            <p className="text-[13px] font-medium">{t('settings.daemonWorkspaces.availableTitle', 'Daemon workspaces')}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {t('settings.daemonWorkspaces.availableDesc', 'Rows are read from public.workspaces. Default workspace updates public.agents.default_workspace_id.')}
             </p>
@@ -241,7 +241,7 @@ export function DaemonWorkspacesSection() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : activeWorkspaces.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('settings.daemonWorkspaces.empty', 'No daemon workspaces configured yet.')}</p>
+            <p className="text-[13px] text-muted-foreground">{t('settings.daemonWorkspaces.empty', 'No daemon workspaces configured yet.')}</p>
           ) : (
             <div className="space-y-2">
               {activeWorkspaces.map((workspace) => {
@@ -251,7 +251,7 @@ export function DaemonWorkspacesSection() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-medium">{workspace.name}</p>
+                          <p className="text-[13px] font-medium">{workspace.name}</p>
                           {isDefault && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
                               <CheckCircle2 className="h-3 w-3" />
@@ -288,11 +288,11 @@ export function DaemonWorkspacesSection() {
       {archivedWorkspaces.length > 0 && (
         <SettingCard>
           <div className="space-y-3">
-            <p className="text-sm font-medium">{t('settings.daemonWorkspaces.archivedTitle', 'Archived')}</p>
+            <p className="text-[13px] font-medium">{t('settings.daemonWorkspaces.archivedTitle', 'Archived')}</p>
             {archivedWorkspaces.map((workspace) => (
               <div key={workspace.id} className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 p-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-muted-foreground">{workspace.name}</p>
+                  <p className="text-[13px] font-medium text-muted-foreground">{workspace.name}</p>
                   <p className="break-all font-mono text-xs text-muted-foreground">{workspace.path || '-'}</p>
                 </div>
                 <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => handleArchive(workspace, false)} disabled={saving}>

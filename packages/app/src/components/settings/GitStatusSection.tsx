@@ -79,7 +79,7 @@ export const GitStatusSection = React.memo(function GitStatusSection() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Eye className="h-4 w-4 text-muted-foreground" />
                 {t('settings.gitStatus.showStatus', 'Show Git Status')}
               </label>
@@ -93,7 +93,7 @@ export const GitStatusSection = React.memo(function GitStatusSection() {
           <div className="border-t pt-4">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <label className="text-sm font-medium flex items-center gap-2">
+                <label className="text-[13px] font-medium flex items-center gap-2">
                   <Palette className="h-4 w-4 text-muted-foreground" />
                   {t('settings.gitStatus.statusIcons', 'Status Icons')}
                 </label>
@@ -126,7 +126,7 @@ export const GitStatusSection = React.memo(function GitStatusSection() {
               <div key={status} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <span className={cn('w-3 h-3 rounded-full', statusColors[status]?.replace('text-', 'bg-'))} />
-                  <span className="text-sm">{label}</span>
+                  <span className="text-[13px]">{label}</span>
                 </div>
                 <Select
                   value={statusColors[status]}
@@ -155,7 +155,7 @@ export const GitStatusSection = React.memo(function GitStatusSection() {
       {/* Polling Interval */}
       <SettingCard>
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label className="text-[13px] font-medium flex items-center gap-2">
             <RefreshCw className="h-4 w-4 text-muted-foreground" />
             {t('settings.gitStatus.refreshInterval', 'Refresh Interval')}
           </label>

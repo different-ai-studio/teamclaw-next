@@ -146,7 +146,7 @@ export const RolesSkillsSection = React.memo(function RolesSkillsSection() {
 
   const tabButtonClass = (tab: ResourceTab) =>
     cn(
-      "inline-flex h-9 items-center justify-center gap-2 rounded-[10px] px-5 text-sm font-medium transition-colors",
+      "inline-flex h-8 items-center justify-center gap-2 rounded-[10px] px-5 text-[13px] font-medium transition-colors",
       displayedTab === tab ? "text-foreground" : "text-muted-foreground hover:text-foreground",
     )
 
@@ -202,10 +202,10 @@ export const RolesSkillsSection = React.memo(function RolesSkillsSection() {
             <Shapes className="h-4.5 w-4.5 text-foreground/80" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h1 className="text-base font-semibold tracking-tight">
               {t("settings.rolesSkills.title", "Roles & Skills")}
             </h1>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t(
                 "settings.rolesSkills.subtitle",
                 "Roles define routing and responsibility. Skills provide reusable execution procedures.",
@@ -216,7 +216,7 @@ export const RolesSkillsSection = React.memo(function RolesSkillsSection() {
       </div>
 
       {error ? (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/8 px-3 py-2.5 text-sm text-destructive">
+        <div className="rounded-xl border border-destructive/40 bg-destructive/8 px-3 py-2.5 text-[13px] text-destructive">
           {error}
         </div>
       ) : null}
@@ -232,7 +232,7 @@ export const RolesSkillsSection = React.memo(function RolesSkillsSection() {
                 <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
                   {t("settings.rolesSkills.workspaceSummary", "Workspace summary")}
                 </div>
-                <div className="mt-1 text-sm text-muted-foreground">
+                <div className="mt-1 text-[13px] text-muted-foreground">
                   {t(
                     "settings.rolesSkills.relationHint",
                     "Manage routing roles and reusable skills together in one workspace console.",
@@ -258,12 +258,12 @@ export const RolesSkillsSection = React.memo(function RolesSkillsSection() {
                       <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
                         {metric.label}
                       </div>
-                      <div className={cn("mt-1 text-lg font-semibold", metric.tone)}>{metric.value}</div>
+                      <div className={cn("mt-1 text-base font-semibold", metric.tone)}>{metric.value}</div>
                     </div>
                   ))}
                 </div>
 
-                <div className="text-sm text-foreground/85">
+                <div className="text-[13px] text-foreground/85">
                   {t("settings.rolesSkills.summaryLine", "{{roles}} roles · {{skills}} skills · {{linked}} linked · {{unlinked}} unlinked", {
                     roles: metrics?.rolesCount ?? 0,
                     skills: metrics?.skillsCount ?? 0,

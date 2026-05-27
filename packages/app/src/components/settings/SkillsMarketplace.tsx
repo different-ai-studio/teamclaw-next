@@ -423,7 +423,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
       {compact && !externalSourceControl ? (
         <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-center">
           <div className="min-w-0 flex-1 space-y-0.5">
-            <div className="text-sm font-medium">{t("settings.skills.marketplace", "Marketplace")}</div>
+            <div className="text-[13px] font-medium">{t("settings.skills.marketplace", "Marketplace")}</div>
             <div className="text-xs text-muted-foreground">
               {t("settings.skills.marketplaceSourceHint", "Choose a source and install workspace-ready skills.")}
             </div>
@@ -436,7 +436,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
               value={effectiveActiveSource}
               onValueChange={(value) => switchSource(value as "clawhub" | "skillssh")}
             >
-              <SelectTrigger className="h-11 rounded-xl border-border/70 bg-background text-sm shadow-none">
+              <SelectTrigger className="h-11 rounded-xl border-border/70 bg-background text-[13px] shadow-none">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -462,7 +462,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
             type="button"
             onClick={() => switchSource("clawhub")}
             className={cn(
-              "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
               effectiveActiveSource === "clawhub"
                 ? "bg-accent text-accent-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -475,7 +475,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
             type="button"
             onClick={() => switchSource("skillssh")}
             className={cn(
-              "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
               effectiveActiveSource === "skillssh"
                 ? "bg-accent text-accent-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -505,8 +505,8 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-destructive">{t("common.error", "Error")}</p>
-                  <p className="text-sm text-destructive/80 mt-1">{error}</p>
+                  <p className="text-[13px] font-medium text-destructive">{t("common.error", "Error")}</p>
+                  <p className="text-[13px] text-destructive/80 mt-1">{error}</p>
                 </div>
                 <Button
                   size="sm"
@@ -532,7 +532,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                     placeholder={t("skillssh.searchPlaceholder", "Search skills...")}
                     value={searchQuery}
                     onChange={(e) => handleSearchChange(e.target.value)}
-                    className="pl-9 h-9"
+                    className="pl-9 h-8"
                   />
                 </div>
                 <Button
@@ -598,27 +598,27 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
           {/* npx skills install */}
           <SettingCard className="bg-muted/30">
             <div className="space-y-3">
-              <h4 className="text-sm font-medium flex items-center gap-2">
+              <h4 className="text-[13px] font-medium flex items-center gap-2">
                 <Package className="h-4 w-4" />
                 {t("skillssh.installFromSource", "Install from Source")}
               </h4>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t("skillssh.installFromSourceDesc", "Install skills via npx skills add — supports GitHub shorthand (owner/repo), full URLs, and direct skill paths")}
               </p>
               <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-center">
                 <Input
                   placeholder={t("skillssh.sourcePlaceholder", "owner/repo or https://github.com/owner/repo")}
-                  className="h-9 min-w-0 font-mono text-xs"
+                  className="h-8 min-w-0 font-mono text-xs"
                   id="npx-source-input"
                 />
                 <Input
                   placeholder={t("skillssh.skillNamePlaceholder", "skill-name (optional)")}
-                  className="h-9 w-full text-xs"
+                  className="h-8 w-full text-xs"
                   id="npx-skill-input"
                 />
                 <Button
                   size="sm"
-                  className="gap-1.5 h-9"
+                  className="gap-1.5 h-8"
                   onClick={async () => {
                     const srcInput = document.getElementById('npx-source-input') as HTMLInputElement
                     const skillInput = document.getElementById('npx-skill-input') as HTMLInputElement
@@ -688,7 +688,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
           <SettingCard className="bg-muted/30">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h4 className="text-sm font-medium flex items-center gap-2">
+                <h4 className="text-[13px] font-medium flex items-center gap-2">
                   <ArrowUpCircle className="h-4 w-4" />
                   {t("skillssh.manageInstalled", "Manage Installed Skills")}
                 </h4>
@@ -802,7 +802,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                           <Skeleton className="h-4 w-12" />
                         </div>
                       </div>
-                      <Skeleton className="h-9 w-24 rounded-lg" />
+                      <Skeleton className="h-8 w-24 rounded-lg" />
                     </div>
                   </SettingCard>
                 ))}
@@ -812,7 +812,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                 <div className="text-center py-6 text-muted-foreground">
                   <Search className="h-8 w-8 mx-auto mb-3 opacity-50" />
                   <p className="font-medium">{t("skillssh.noResults", "No skills found")}</p>
-                  <p className="text-sm mt-1">{t("skillssh.tryDifferent", "Try a different search term")}</p>
+                  <p className="text-[13px] mt-1">{t("skillssh.tryDifferent", "Try a different search term")}</p>
                 </div>
               </SettingCard>
             ) : (
@@ -937,7 +937,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.skills.installLocation', 'Install Location')}</label>
+              <label className="text-[13px] font-medium">{t('settings.skills.installLocation', 'Install Location')}</label>
               <Select value={installLocation} onValueChange={(v) => setInstallLocation(v as 'workspace' | 'global')}>
                 <SelectTrigger>
                   <SelectValue>
@@ -1010,7 +1010,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
               )}
             </DialogTitle>
             <DialogDescription asChild>
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-2 text-[13px]">
                 <GitBranch className="h-3.5 w-3.5 shrink-0" />
                 {selectedSkill ? (
                   <a
@@ -1034,7 +1034,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
             <div className="flex-1 overflow-y-auto space-y-4 py-2">
               {/* Stats */}
               {selectedSkill && (
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-4 text-[13px]">
                   <div className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
                     <Download className="h-4 w-4" />
                     <span>{selectedSkill.installs.toLocaleString()} {t("skillssh.installs", "installs")}</span>
@@ -1085,7 +1085,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                       {metadata && (
                         <div className="rounded-lg border border-border overflow-hidden">
                           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 px-4 py-2 border-b border-border">
-                            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                            <h3 className="text-[13px] font-semibold text-foreground flex items-center gap-2">
                               <Package className="h-4 w-4 text-primary" />
                               {t("skillssh.metadata", "Skill Metadata")}
                             </h3>
@@ -1094,10 +1094,10 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                             <tbody className="divide-y divide-border">
                               {Object.entries(metadata).map(([key, value]) => (
                                 <tr key={key} className="hover:bg-muted/30 transition-colors">
-                                  <td className="px-4 py-3 text-sm font-medium text-muted-foreground bg-muted/20 w-1/4">
+                                  <td className="px-4 py-3 text-[13px] font-medium text-muted-foreground bg-muted/20 w-1/4">
                                     {key}
                                   </td>
-                                  <td className="px-4 py-3 text-sm text-foreground">
+                                  <td className="px-4 py-3 text-[13px] text-foreground">
                                     {value}
                                   </td>
                                 </tr>
@@ -1120,7 +1120,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                               <h3 className="text-base font-semibold mt-5 mb-2 first:mt-0">{children}</h3>
                             ),
                             h4: ({ children }) => (
-                              <h4 className="text-sm font-semibold mt-4 mb-2 first:mt-0">{children}</h4>
+                              <h4 className="text-[13px] font-semibold mt-4 mb-2 first:mt-0">{children}</h4>
                             ),
                             p: ({ children }) => (
                               <p className="mb-4 leading-relaxed">{children}</p>
@@ -1130,7 +1130,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                             ),
                             table: ({ children }) => (
                               <div className="overflow-x-auto my-5 rounded-lg border border-border">
-                                <table className="min-w-full border-collapse text-sm">
+                                <table className="min-w-full border-collapse text-[13px]">
                                   {children}
                                 </table>
                               </div>
@@ -1163,14 +1163,14 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                               const isInline = !className
                               return isInline ? (
                                 <code
-                                  className="bg-muted px-1.5 py-0.5 rounded text-primary text-sm font-mono"
+                                  className="bg-muted px-1.5 py-0.5 rounded text-primary text-[13px] font-mono"
                                   {...props}
                                 >
                                   {children}
                                 </code>
                               ) : (
                                 <code
-                                  className={cn('block p-4 font-mono text-sm leading-relaxed', className)}
+                                  className={cn('block p-4 font-mono text-[13px] leading-relaxed', className)}
                                   {...props}
                                 >
                                   {children}
@@ -1211,7 +1211,7 @@ export const SkillsMarketplace = React.memo(function SkillsMarketplace({
                 <div className="text-center py-8 text-muted-foreground">
                   <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-50" />
                   <p className="font-medium">{t("skillssh.contentNotAvailable", "Content not available")}</p>
-                  <p className="text-sm mt-1">{t("skillssh.contentNotAvailableHint", "Unable to fetch skill content from repository")}</p>
+                  <p className="text-[13px] mt-1">{t("skillssh.contentNotAvailableHint", "Unable to fetch skill content from repository")}</p>
                 </div>
               )}
             </div>

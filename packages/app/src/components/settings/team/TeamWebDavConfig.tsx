@@ -8,7 +8,7 @@ import { TEAM_REPO_DIR } from '@/lib/build-config'
 function SettingCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-border/50 bg-card/50 p-4">
-      <h4 className="mb-3 text-sm font-medium text-foreground/80">{title}</h4>
+      <h4 className="mb-3 text-[13px] font-medium text-foreground/80">{title}</h4>
       {children}
     </div>
   )
@@ -153,7 +153,7 @@ export function TeamWebDavConfig() {
               <select
                 value={authType}
                 onChange={(e) => setAuthType(e.target.value as 'basic' | 'bearer')}
-                className="w-full rounded border border-border bg-background px-3 py-2 text-sm"
+                className="w-full rounded border border-border bg-background px-3 py-2 text-[13px]"
               >
                 <option value="basic">Username + Password</option>
                 <option value="bearer">Bearer Token</option>
@@ -215,7 +215,7 @@ export function TeamWebDavConfig() {
       {/* Connected Status */}
       {connectionState === 'connected' && status && (
         <SettingCard title="Sync Status">
-          <div className="space-y-2 text-sm">
+          <div className="space-y-2 text-[13px]">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-green-500" />
               <span>Connected</span>
@@ -247,7 +247,7 @@ export function TeamWebDavConfig() {
 
       {/* Error display */}
       {error && (
-        <div className="rounded border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded border border-destructive/50 bg-destructive/10 p-3 text-[13px] text-destructive">
           {error}
         </div>
       )}
@@ -289,7 +289,7 @@ export function TeamWebDavConfig() {
               type="file"
               accept=".json"
               onChange={handleFileSelect}
-              className="text-sm"
+              className="text-[13px]"
             />
             <Input
               type="password"

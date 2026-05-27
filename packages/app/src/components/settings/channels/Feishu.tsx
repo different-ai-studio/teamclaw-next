@@ -146,7 +146,7 @@ function FeishuSetupWizard({
 
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.feishu.connectTitle', { defaultValue: 'Connect Feishu to {{appName}}', appName: buildConfig.app.name })}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.feishu.connectDesc', { defaultValue: "This wizard will guide you through creating a Feishu app and connecting it to {{appName}}. You'll be able to interact with AI directly from Feishu chats.", appName: buildConfig.app.name })}
               </p>
             </div>
@@ -157,7 +157,7 @@ function FeishuSetupWizard({
                   <Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.quickSetupDesc', 'Complete in about 5 minutes')}</p>
                 </div>
               </div>
@@ -166,7 +166,7 @@ function FeishuSetupWizard({
                   <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.feishu.longConnection', 'Long Connection')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.feishu.longConnection', 'Long Connection')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.feishu.longConnectionDesc', 'No public server needed, runs locally')}</p>
                 </div>
               </div>
@@ -180,7 +180,7 @@ function FeishuSetupWizard({
             <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
               <div className="flex items-start gap-3">
                 <BookOpen className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
-                <div className="space-y-2 text-sm">
+                <div className="space-y-2 text-[13px]">
                   <p className="font-medium text-blue-900 dark:text-blue-100">{t('settings.channels.feishu.createAppSteps', 'Steps to create your Feishu app')}:</p>
                   <ol className="list-decimal list-inside space-y-2 text-blue-800 dark:text-blue-200">
                     <li>{t('settings.channels.feishu.createAppStep1', 'Go to the Feishu Developer Portal')}</li>
@@ -210,7 +210,7 @@ function FeishuSetupWizard({
             <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div className="text-sm">
+                <div className="text-[13px]">
                   <p className="font-medium text-amber-900 dark:text-amber-100">{t('settings.channels.feishu.credentialsSecretWarning', 'Keep your credentials secret!')}</p>
                   <p className="text-amber-800 dark:text-amber-200">
                     {t('settings.channels.feishu.credentialsSecretDesc', 'Never share your App Secret. It is stored locally on your device.')}
@@ -220,13 +220,13 @@ function FeishuSetupWizard({
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.feishu.credentialsPortalHint', 'In the Feishu Developer Portal, go to "Credentials & Basic Info":')}
               </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.feishu.appId', 'App ID')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.feishu.appId', 'App ID')}</label>
               <Input
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
@@ -235,7 +235,7 @@ function FeishuSetupWizard({
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.feishu.appSecret', 'App Secret')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.feishu.appSecret', 'App Secret')}</label>
               <div className="relative">
                 <Input
                   type="password"
@@ -249,7 +249,7 @@ function FeishuSetupWizard({
             </div>
 
             {appId && appSecret && (
-              <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <div className="flex items-center gap-2 text-[13px] text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" />
                 {t('settings.channels.feishu.credentialsEntered', 'Credentials entered')}
               </div>
@@ -260,12 +260,12 @@ function FeishuSetupWizard({
       case 'permissions':
         return (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t('settings.channels.feishu.permissionsIntro', 'Configure the following in Feishu Developer Portal:')}
             </p>
 
             <div className="space-y-3">
-              <h4 className="text-sm font-medium">{t('settings.channels.feishu.requiredPermissions', '1. Required Permissions')}</h4>
+              <h4 className="text-[13px] font-medium">{t('settings.channels.feishu.requiredPermissions', '1. Required Permissions')}</h4>
               <div className="space-y-2">
                 {[
                   { name: 'im:message', desc: t('settings.channels.feishu.permReadMessages', 'Read messages') },
@@ -276,7 +276,7 @@ function FeishuSetupWizard({
                   <div key={perm.name} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
                     <Check className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                     <div>
-                      <p className="text-sm font-medium font-mono">{perm.name}</p>
+                      <p className="text-[13px] font-medium font-mono">{perm.name}</p>
                       <p className="text-xs text-muted-foreground">{perm.desc}</p>
                     </div>
                   </div>
@@ -285,8 +285,8 @@ function FeishuSetupWizard({
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-sm font-medium">{t('settings.channels.feishu.eventSubscription', '2. Event Subscription')}</h4>
-              <div className="p-3 rounded-lg bg-muted/50 text-sm space-y-2">
+              <h4 className="text-[13px] font-medium">{t('settings.channels.feishu.eventSubscription', '2. Event Subscription')}</h4>
+              <div className="p-3 rounded-lg bg-muted/50 text-[13px] space-y-2">
                 <p>{t('settings.channels.feishu.eventStep1', 'Go to "Events & Callbacks" → "Event Subscriptions"')}</p>
                 <p>{t('settings.channels.feishu.eventStep2', 'Select "Use Long Connection to Receive Events" mode')}</p>
                 <p>{t('settings.channels.feishu.eventStep3', 'Add event:')} <code className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">im.message.receive_v1</code></p>
@@ -294,8 +294,8 @@ function FeishuSetupWizard({
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-sm font-medium">{t('settings.channels.feishu.publish', '3. Publish')}</h4>
-              <p className="text-sm text-muted-foreground">
+              <h4 className="text-[13px] font-medium">{t('settings.channels.feishu.publish', '3. Publish')}</h4>
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.feishu.publishDesc', 'Create a version and publish the app to make it available.')}
               </p>
             </div>
@@ -313,14 +313,14 @@ function FeishuSetupWizard({
 
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.allSet', "You're all set!")}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.feishu.completeMessage', 'Your Feishu bot is now configured. Click "Finish" to save your settings and start using the bot.')}
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-muted/50 text-left space-y-2">
-              <p className="text-sm font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
+              <p className="text-[13px] font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
+              <ul className="text-[13px] text-muted-foreground space-y-1">
                 <li>• {t('settings.channels.nextStepConnect', 'Enable the gateway toggle to connect')}</li>
                 <li>• {t('settings.channels.feishu.nextStepConfigure', 'Configure chat/group settings if needed')}</li>
                 <li>• {t('settings.channels.nextStepTest', 'Send a message to your bot to test!')}</li>
@@ -447,7 +447,7 @@ function FeishuChatConfigDialog({
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.feishu.chatId', 'Chat ID')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.feishu.chatId', 'Chat ID')}</label>
             <Input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -461,7 +461,7 @@ function FeishuChatConfigDialog({
 
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium">{t('settings.channels.feishu.chatAllow', 'Allow')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.feishu.chatAllow', 'Allow')}</label>
               <p className="text-xs text-muted-foreground">
                 {t('settings.channels.feishu.chatAllowDesc', 'Allow bot responses in this chat')}
               </p>
@@ -470,7 +470,7 @@ function FeishuChatConfigDialog({
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')} ({t('settings.channels.optional', 'optional')})</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')} ({t('settings.channels.optional', 'optional')})</label>
             <Input
               value={users}
               onChange={(e) => setUsers(e.target.value)}
@@ -583,7 +583,7 @@ export function FeishuChannel() {
         status={feishuGatewayStatus.status}
         statusDetail={
           feishuGatewayStatus.appId ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               App: {feishuGatewayStatus.appId}
             </p>
           ) : undefined
@@ -614,7 +614,7 @@ export function FeishuChannel() {
                 <h4 className="font-semibold text-blue-900 dark:text-blue-100">
                   {t('settings.channels.feishu.setupTitle', 'Set up Feishu Integration')}
                 </h4>
-                <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                <p className="text-[13px] text-blue-700 dark:text-blue-300 mt-1">
                   {t('settings.channels.feishu.setupDesc', 'Connect a Feishu bot to interact with AI from Feishu chats.')}
                 </p>
               </div>
@@ -628,7 +628,7 @@ export function FeishuChannel() {
 
         {/* App Credentials */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label className="text-[13px] font-medium flex items-center gap-2">
             <Key className="h-4 w-4 text-muted-foreground" />
             {t('settings.channels.feishu.appCredentials', 'App Credentials')}
           </label>
@@ -673,7 +673,7 @@ export function FeishuChannel() {
             {/* Chat Settings */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium flex items-center gap-2">
+                <h4 className="text-[13px] font-medium flex items-center gap-2">
                   <Hash className="h-4 w-4 text-muted-foreground" />
                   {t('settings.channels.feishu.chatSettings', 'Chat Settings')}
                 </h4>
@@ -695,7 +695,7 @@ export function FeishuChannel() {
                 {Object.keys(feishuLocalConfig.chats).length === 0 ? (
                   <div className="text-center py-4 text-muted-foreground">
                     <Hash className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">{t('settings.channels.feishu.noChats', 'No chats configured')}</p>
+                    <p className="text-[13px] font-medium">{t('settings.channels.feishu.noChats', 'No chats configured')}</p>
                     <p className="text-xs">{t('settings.channels.feishu.noChatsHint', 'All chats and groups will be allowed by default. Add specific chats to restrict access.')}</p>
                   </div>
                 ) : (

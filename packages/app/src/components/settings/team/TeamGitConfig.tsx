@@ -599,7 +599,7 @@ export function TeamGitConfig() {
             <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-medium text-red-900 dark:text-red-100">{t('common.error', 'Error')}</p>
-              <p className="text-sm text-red-700 dark:text-red-300 mt-1 break-words">
+              <p className="text-[13px] text-red-700 dark:text-red-300 mt-1 break-words">
                 {errorMessage}
               </p>
             </div>
@@ -632,7 +632,7 @@ export function TeamGitConfig() {
               <AlertCircle className="h-4 w-4 text-yellow-500" />
               {t('settings.git.notAvailable', 'Git Not Available')}
             </h4>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t('settings.team.gitInstallHint', 'Git CLI is not installed or not in PATH. Install git to enable team repository sharing:')}
             </p>
             <div className="bg-muted rounded-md p-3 font-mono text-xs">
@@ -651,7 +651,7 @@ export function TeamGitConfig() {
         <SettingCard>
           <div className="mb-4 flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
-            <h4 className="text-sm font-semibold text-foreground/90">{t('settings.team.createTeam', 'Configure Team Shared Directory')}</h4>
+            <h4 className="text-[13px] font-semibold text-foreground/90">{t('settings.team.createTeam', 'Configure Team Shared Directory')}</h4>
           </div>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -730,7 +730,7 @@ export function TeamGitConfig() {
               disabled={state === 'connecting'}
             />
             {state === 'connecting' && connectStep && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 {connectStep}
               </div>
@@ -778,7 +778,7 @@ export function TeamGitConfig() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{t('settings.team.teamRepo', 'Team Shared Directory')}</p>
+                      <p className="text-[13px] font-medium">{t('settings.team.teamRepo', 'Team Shared Directory')}</p>
                       <span className={cn(
                         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
                         teamConfig.enabled
@@ -810,7 +810,7 @@ export function TeamGitConfig() {
 
               {/* Last sync info */}
               <div className="flex items-center justify-between pt-2 border-t">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                   <Clock className="h-3.5 w-3.5" />
                   {t('settings.team.lastSynced', 'Last synced')}: {formatLastSync(teamConfig.lastSyncAt)}
                 </div>
@@ -917,7 +917,7 @@ export function TeamGitConfig() {
                     <Settings className="h-5 w-5 text-slate-700 dark:text-slate-400" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">{t('settings.team.serviceConfig', 'Service Config')}</p>
+                    <p className="text-[13px] font-medium">{t('settings.team.serviceConfig', 'Service Config')}</p>
                     <p className="text-xs text-muted-foreground">{t('settings.team.serviceConfigDesc', 'LLM hosting settings for this team')}</p>
                   </div>
                 </div>
@@ -950,7 +950,7 @@ export function TeamGitConfig() {
                   <KeyRound className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory, Git URL, and this device identity')}</p>
                 </div>
               </div>
@@ -994,7 +994,7 @@ export function TeamGitConfig() {
                 <GitBranch className="h-4 w-4" />
                 {t('settings.team.sharedContent', 'Shared Content')}
               </h4>
-              <p className="text-sm text-blue-700 dark:text-blue-300">
+              <p className="text-[13px] text-blue-700 dark:text-blue-300">
                 {t('settings.team.sharedContentDesc', 'The following directories are synced from the team repository:')}
               </p>
               <div className="space-y-1.5">
@@ -1003,7 +1003,7 @@ export function TeamGitConfig() {
                   { path: '.mcp/', desc: t('settings.team.sharedMcp', 'Shared MCP server configs') },
                   { path: 'knowledge/', desc: t('settings.team.sharedKnowledge', 'Shared knowledge base') },
                 ].map((item) => (
-                  <div key={item.path} className="flex items-center gap-2 text-sm">
+                  <div key={item.path} className="flex items-center gap-2 text-[13px]">
                     <span className="font-mono text-xs bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded text-blue-800 dark:text-blue-200">
                       {item.path}
                     </span>
@@ -1074,7 +1074,7 @@ export function TeamGitConfig() {
           </DialogHeader>
           {precheckDialog && (
             <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-muted/30 px-3 py-2">
-              <ul className="space-y-1 text-sm font-mono">
+              <ul className="space-y-1 text-[13px] font-mono">
                 {[...precheckDialog.newFiles]
                   .sort((a, b) => b.sizeBytes - a.sizeBytes)
                   .slice(0, 10)
@@ -1121,13 +1121,13 @@ export function TeamGitConfig() {
         <SettingCard className="bg-muted/30 border-dashed">
           <CollapsibleTrigger className="flex w-full items-center gap-3 text-left hover:opacity-80 transition-opacity">
             <BookOpen className="h-5 w-5 text-violet-500 shrink-0" />
-            <span className="font-medium text-sm">
+            <span className="font-medium text-[13px]">
               {t('settings.team.repoGuide.title', 'How to set up a team repository')}
             </span>
             <ChevronRight className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", repoGuideOpen && "rotate-90")} />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="mt-4 pt-4 border-t space-y-4 text-sm text-muted-foreground">
+            <div className="mt-4 pt-4 border-t space-y-4 text-[13px] text-muted-foreground">
               <p>
                 {t('settings.team.repoGuide.intro', { defaultValue: 'A shared repository for your team to centrally manage Agent Skills, MCP configurations, and knowledge documents. Use the structure below so {{appName}} can sync correctly.', appName: buildConfig.app.name })}
               </p>

@@ -29,7 +29,7 @@ export function ApplicationDialog({ teamName, onSubmit, onCancel }: ApplicationD
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
         <h3 className="text-base font-semibold">{t('settings.team.applyTitle')}</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-[13px] text-muted-foreground">
           {t('settings.team.applyDesc', { teamName })}
         </p>
         <div className="mt-4 space-y-3">
@@ -63,7 +63,7 @@ export function ApplicationDialog({ teamName, onSubmit, onCancel }: ApplicationD
               onChange={(e) => setNote(e.target.value)}
               placeholder={t('settings.team.applyNotePlaceholder')}
               rows={2}
-              className="w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-background/50 px-3 py-2 text-[13px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
         </div>

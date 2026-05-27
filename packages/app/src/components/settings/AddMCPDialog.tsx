@@ -176,7 +176,7 @@ export function AddMCPDialog({
         <div className="space-y-4 py-4">
           {/* Server Name */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.mcp.serverName', 'Server Name')}</label>
+            <label className="text-[13px] font-medium">{t('settings.mcp.serverName', 'Server Name')}</label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -190,7 +190,7 @@ export function AddMCPDialog({
 
           {/* Server Type */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.mcp.serverType', 'Server Type')}</label>
+            <label className="text-[13px] font-medium">{t('settings.mcp.serverType', 'Server Type')}</label>
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => setServerType('local')}
@@ -209,7 +209,7 @@ export function AddMCPDialog({
                 />
                 <span
                   className={cn(
-                    'text-sm',
+                    'text-[13px]',
                     serverType === 'local' ? 'font-medium' : 'text-muted-foreground'
                   )}
                 >
@@ -233,7 +233,7 @@ export function AddMCPDialog({
                 />
                 <span
                   className={cn(
-                    'text-sm',
+                    'text-[13px]',
                     serverType === 'remote' ? 'font-medium' : 'text-muted-foreground'
                   )}
                 >
@@ -247,7 +247,7 @@ export function AddMCPDialog({
           {serverType === 'local' && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t('settings.mcp.command', 'Command')}</label>
+                <label className="text-[13px] font-medium">{t('settings.mcp.command', 'Command')}</label>
                 <Input
                   value={command}
                   onChange={(e) => setCommand(e.target.value)}
@@ -261,12 +261,12 @@ export function AddMCPDialog({
                   the env-var settings page instead of accepting inline values. */}
               {isInherent ? (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">
+                  <label className="text-[13px] font-medium">
                     {t('settings.mcp.envVars', '环境变量')}
                   </label>
                   <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 p-3 flex gap-3">
                     <KeyRound className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
-                    <div className="space-y-2 text-sm">
+                    <div className="space-y-2 text-[13px]">
                       <p className="text-foreground">
                         {t(
                           'settings.mcp.inherentEnvNotice',
@@ -296,7 +296,7 @@ export function AddMCPDialog({
               ) : (
               <div className="space-y-2">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium">
+                  <label className="text-[13px] font-medium">
                     {t('settings.mcp.envVars', '环境变量')} <span className="text-muted-foreground font-normal">({t('common.optional', '可选')})</span>
                   </label>
                   <Button
@@ -323,7 +323,7 @@ export function AddMCPDialog({
 
                 {envVars.length === 0 ? (
                   <div className="text-center py-6 px-4 border border-dashed rounded-lg bg-muted/30">
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-[13px] text-muted-foreground">
                       {t('settings.mcp.noEnvVars', '暂无环境变量，点击上方按钮添加')}
                     </p>
                   </div>
@@ -343,7 +343,7 @@ export function AddMCPDialog({
                               newVars[index] = { ...envVar, key: e.target.value }
                               setEnvVars(newVars)
                             }}
-                            className="h-8 font-mono text-sm"
+                            className="h-8 font-mono text-[13px]"
                           />
                           <div className="relative">
                             <Input
@@ -355,7 +355,7 @@ export function AddMCPDialog({
                                 newVars[index] = { ...envVar, value: e.target.value }
                                 setEnvVars(newVars)
                               }}
-                              className="h-8 font-mono text-sm pr-8"
+                              className="h-8 font-mono text-[13px] pr-8"
                             />
                             <button
                               type="button"
@@ -398,7 +398,7 @@ export function AddMCPDialog({
           {serverType === 'remote' && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t('settings.mcp.url', 'URL')}</label>
+                <label className="text-[13px] font-medium">{t('settings.mcp.url', 'URL')}</label>
                 <Input
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
@@ -409,7 +409,7 @@ export function AddMCPDialog({
               {/* Headers */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium">
+                  <label className="text-[13px] font-medium">
                     {t('settings.mcp.headers', 'Headers')} <span className="text-muted-foreground font-normal">({t('common.optional', '可选')})</span>
                   </label>
                   <Button
@@ -436,7 +436,7 @@ export function AddMCPDialog({
 
                 {headerVars.length === 0 ? (
                   <div className="text-center py-6 px-4 border border-dashed rounded-lg bg-muted/30">
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-[13px] text-muted-foreground">
                       {t('settings.mcp.noHeaders', '暂无请求头，点击上方按钮添加')}
                     </p>
                   </div>
@@ -456,7 +456,7 @@ export function AddMCPDialog({
                               newVars[index] = { ...headerVar, key: e.target.value }
                               setHeaderVars(newVars)
                             }}
-                            className="h-8 font-mono text-sm"
+                            className="h-8 font-mono text-[13px]"
                           />
                           <Input
                             type="text"
@@ -467,7 +467,7 @@ export function AddMCPDialog({
                               newVars[index] = { ...headerVar, value: e.target.value }
                               setHeaderVars(newVars)
                             }}
-                            className="h-8 font-mono text-sm"
+                            className="h-8 font-mono text-[13px]"
                           />
                         </div>
                         <Button
@@ -491,7 +491,7 @@ export function AddMCPDialog({
 
           {/* Error Message */}
           {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive">
+            <div className="flex items-center gap-2 text-[13px] text-destructive">
               <AlertCircle className="h-4 w-4" />
               {error}
             </div>

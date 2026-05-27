@@ -179,7 +179,7 @@ function WeChatSetupWizard({
 
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.wechat.connectTitle', { defaultValue: 'Connect WeChat to {{appName}}', appName: buildConfig.app.name })}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.wechat.connectDesc', "This wizard will connect your WeChat account via ClawBot. You'll scan a QR code with WeChat on your iPhone to log in.")}
               </p>
             </div>
@@ -190,7 +190,7 @@ function WeChatSetupWizard({
                   <Zap className="h-4 w-4 text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.wechat.quickSetupDesc', 'Scan and connect in under a minute')}</p>
                 </div>
               </div>
@@ -199,7 +199,7 @@ function WeChatSetupWizard({
                   <Smartphone className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.wechat.iosRequired', 'iPhone Required')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.wechat.iosRequired', 'iPhone Required')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.wechat.iosRequiredDesc', 'WeChat on iOS is required for QR code login')}</p>
                 </div>
               </div>
@@ -208,7 +208,7 @@ function WeChatSetupWizard({
                   <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.wechat.secure', 'Secure Connection')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.wechat.secure', 'Secure Connection')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.wechat.secureDesc', 'Credentials stored locally, never sent to our servers')}</p>
                 </div>
               </div>
@@ -221,7 +221,7 @@ function WeChatSetupWizard({
           <div className="space-y-4">
             {!qrData && !qrLoading && (
               <div className="text-center space-y-4">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   {t('settings.channels.wechat.clickToGetQr', 'Click below to generate a QR code for WeChat login.')}
                 </p>
                 <Button onClick={fetchQrCode} className="gap-2">
@@ -234,7 +234,7 @@ function WeChatSetupWizard({
             {qrLoading && (
               <div className="flex flex-col items-center justify-center py-8 gap-3">
                 <Loader2 className="h-8 w-8 animate-spin text-green-500" />
-                <p className="text-sm text-muted-foreground">{t('settings.channels.wechat.loadingQr', 'Generating QR code...')}</p>
+                <p className="text-[13px] text-muted-foreground">{t('settings.channels.wechat.loadingQr', 'Generating QR code...')}</p>
               </div>
             )}
 
@@ -243,17 +243,17 @@ function WeChatSetupWizard({
                 <div className="p-4 bg-white rounded-xl shadow-sm border">
                   <QRCodeSVG value={qrData.qrcodeImgContent || qrData.qrcode} size={200} level="M" />
                 </div>
-                <p className="text-sm text-muted-foreground text-center">
+                <p className="text-[13px] text-muted-foreground text-center">
                   {t('settings.channels.wechat.scanInstructions', 'Open WeChat on your iPhone and scan this QR code to log in.')}
                 </p>
                 {scanStatus === 'scaned' && (
-                  <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                  <div className="flex items-center gap-2 text-[13px] text-amber-600 dark:text-amber-400">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('settings.channels.wechat.waitingConfirm', 'QR scanned — please confirm on your phone...')}
                   </div>
                 )}
                 {scanStatus === 'wait' && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('settings.channels.wechat.waitingScan', 'Waiting for scan...')}
                   </div>
@@ -262,7 +262,7 @@ function WeChatSetupWizard({
             )}
 
             {error && (
-              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
+              <div className="flex items-center gap-2 text-[13px] text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
                 <span className="flex-1">{error}</span>
                 <Button variant="ghost" size="sm" onClick={fetchQrCode} className="gap-1">
@@ -284,7 +284,7 @@ function WeChatSetupWizard({
             </div>
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.wechat.loginSuccess', 'Login Successful!')}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.wechat.loginSuccessDesc', 'Your WeChat account has been connected to ClawBot.')}
               </p>
             </div>
@@ -302,14 +302,14 @@ function WeChatSetupWizard({
 
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.allSet', "You're all set!")}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.wechat.completeMessage', 'Your WeChat connection is configured. Click "Finish" to save your settings and start using it.')}
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-muted/50 text-left space-y-2">
-              <p className="text-sm font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
+              <p className="text-[13px] font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
+              <ul className="text-[13px] text-muted-foreground space-y-1">
                 <li>• {t('settings.channels.nextStepConnect', 'Enable the gateway toggle to connect')}</li>
                 <li>• {t('settings.channels.wechat.nextStepMessage', 'Send a message in WeChat to test the connection!')}</li>
               </ul>
@@ -469,11 +469,11 @@ export function WeChatChannel() {
         status={wechatGatewayStatus.status}
         statusDetail={
           wechatGatewayStatus.accountId ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               Account: {wechatGatewayStatus.accountId}
             </p>
           ) : localConfig.accountId ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               Account: {localConfig.accountId}
             </p>
           ) : undefined
@@ -504,7 +504,7 @@ export function WeChatChannel() {
                 <h4 className="font-semibold text-green-900 dark:text-green-100">
                   {t('settings.channels.wechat.setupTitle', 'Set up WeChat Integration')}
                 </h4>
-                <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                <p className="text-[13px] text-green-700 dark:text-green-300 mt-1">
                   {t('settings.channels.wechat.setupDesc', 'Connect your WeChat account by scanning a QR code.')}
                 </p>
               </div>
@@ -520,18 +520,18 @@ export function WeChatChannel() {
         {localConfig.botToken && (
           <div className="space-y-3">
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Shield className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.wechat.connectionInfo', 'Connection Info')}
               </label>
               <div className="p-3 rounded-lg bg-muted/50 space-y-1">
                 {localConfig.accountId && (
-                  <p className="text-sm">
+                  <p className="text-[13px]">
                     <span className="text-muted-foreground">{t('settings.channels.wechat.accountId', 'Account ID')}:</span>{' '}
                     <span className="font-mono text-xs">{localConfig.accountId}</span>
                   </p>
                 )}
-                <p className="text-sm">
+                <p className="text-[13px]">
                   <span className="text-muted-foreground">{t('settings.channels.wechat.baseUrl', 'Base URL')}:</span>{' '}
                   <span className="font-mono text-xs">{localConfig.baseUrl}</span>
                 </p>
@@ -548,7 +548,7 @@ export function WeChatChannel() {
                 <div className="flex items-center gap-3">
                   <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                    <p className="text-[13px] font-medium text-amber-900 dark:text-amber-100">
                       {t('settings.channels.wechat.authExpired', 'Login session expired')}
                     </p>
                     <p className="text-xs text-amber-700 dark:text-amber-300">
@@ -567,7 +567,7 @@ export function WeChatChannel() {
 
         {/* Error message */}
         {wechatGatewayStatus.errorMessage && !isAuthError && (
-          <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-2 text-[13px] text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
             {wechatGatewayStatus.errorMessage}
           </div>

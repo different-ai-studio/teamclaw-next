@@ -186,7 +186,7 @@ export function EmailChannel() {
                 <StatusBadge status={emailGatewayStatus.status} />
               </div>
               {emailGatewayStatus.email && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   {emailGatewayStatus.email}
                 </p>
               )}
@@ -274,7 +274,7 @@ export function EmailChannel() {
               <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                 <GmailIcon className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{t('settings.channels.email.noCredentials', 'No Gmail credentials configured')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.email.noCredentials', 'No Gmail credentials configured')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.email.noCredentialsHint', 'Use the setup wizard to configure Gmail OAuth2 access.')}</p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => setEmailWizardOpen(true)}>
@@ -286,7 +286,7 @@ export function EmailChannel() {
 
             {/* Provider Selection */}
             <div>
-              <label className="text-sm font-medium mb-2 block">{t('settings.channels.email.provider', 'Provider')}</label>
+              <label className="text-[13px] font-medium mb-2 block">{t('settings.channels.email.provider', 'Provider')}</label>
               <div className="flex gap-3">
                 <button
                   className={cn(
@@ -298,7 +298,7 @@ export function EmailChannel() {
                   onClick={() => updateEmailLocalConfig({ provider: 'gmail' })}
                 >
                   <GmailIcon className="h-4 w-4" />
-                  <span className="text-sm font-medium">{t('settings.channels.email.gmailOAuth', 'Gmail (OAuth2)')}</span>
+                  <span className="text-[13px] font-medium">{t('settings.channels.email.gmailOAuth', 'Gmail (OAuth2)')}</span>
                 </button>
                 <button
                   className={cn(
@@ -310,7 +310,7 @@ export function EmailChannel() {
                   onClick={() => updateEmailLocalConfig({ provider: 'custom' })}
                 >
                   <Globe className="h-4 w-4" />
-                  <span className="text-sm font-medium">{t('settings.channels.email.imapSmtp', 'IMAP/SMTP')}</span>
+                  <span className="text-[13px] font-medium">{t('settings.channels.email.imapSmtp', 'IMAP/SMTP')}</span>
                 </button>
               </div>
             </div>
@@ -319,7 +319,7 @@ export function EmailChannel() {
             {emailLocalConfig.provider === 'gmail' && (
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
+                  <label className="text-[13px] font-medium mb-1 block">
                     <Key className="h-3.5 w-3.5 inline mr-1" />
                     {t('settings.channels.email.gmailClientId', 'Gmail Client ID')}
                   </label>
@@ -330,7 +330,7 @@ export function EmailChannel() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
+                  <label className="text-[13px] font-medium mb-1 block">
                     <Shield className="h-3.5 w-3.5 inline mr-1" />
                     {t('settings.channels.email.gmailClientSecret', 'Gmail Client Secret')}
                   </label>
@@ -342,7 +342,7 @@ export function EmailChannel() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
+                  <label className="text-[13px] font-medium mb-1 block">
                     <GmailIcon className="h-3.5 w-3.5 inline mr-1" />
                     {t('settings.channels.email.gmailAddress', 'Gmail Address')}
                   </label>
@@ -368,7 +368,7 @@ export function EmailChannel() {
                     {emailLocalConfig.gmailAuthorized ? t('settings.channels.email.reauthorize', 'Re-authorize') : t('settings.channels.email.authorizeGmail', 'Authorize Gmail')}
                   </Button>
                   {emailLocalConfig.gmailAuthorized && (
-                    <span className="flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+                    <span className="flex items-center gap-1 text-[13px] text-emerald-600 dark:text-emerald-400">
                       <CheckCircle2 className="h-4 w-4" />
                       {t('settings.channels.email.authorized', 'Authorized')}
                     </span>
@@ -396,7 +396,7 @@ export function EmailChannel() {
                 )}
                 {emailTestResult && (
                   <div className={cn(
-                    'flex items-center gap-2 text-sm p-2 rounded',
+                    'flex items-center gap-2 text-[13px] p-2 rounded',
                     emailTestResult?.success
                       ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
                       : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
@@ -417,7 +417,7 @@ export function EmailChannel() {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.imapHost', 'IMAP Host')}</label>
+                    <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.imapHost', 'IMAP Host')}</label>
                     <Input
                       placeholder="imap.example.com"
                       value={emailLocalConfig.imapServer}
@@ -425,7 +425,7 @@ export function EmailChannel() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.imapPort', 'IMAP Port')}</label>
+                    <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.imapPort', 'IMAP Port')}</label>
                     <Input
                       type="number"
                       placeholder="993"
@@ -436,7 +436,7 @@ export function EmailChannel() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.smtpHost', 'SMTP Host')}</label>
+                    <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.smtpHost', 'SMTP Host')}</label>
                     <Input
                       placeholder="smtp.example.com"
                       value={emailLocalConfig.smtpServer}
@@ -444,7 +444,7 @@ export function EmailChannel() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.smtpPort', 'SMTP Port')}</label>
+                    <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.smtpPort', 'SMTP Port')}</label>
                     <Input
                       type="number"
                       placeholder="587"
@@ -454,7 +454,7 @@ export function EmailChannel() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
+                  <label className="text-[13px] font-medium mb-1 block">
                     <Users className="h-3.5 w-3.5 inline mr-1" />
                     {t('settings.channels.email.username', 'Username')}
                   </label>
@@ -465,7 +465,7 @@ export function EmailChannel() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
+                  <label className="text-[13px] font-medium mb-1 block">
                     <Key className="h-3.5 w-3.5 inline mr-1" />
                     {t('settings.channels.email.password', 'Password')}
                   </label>
@@ -493,7 +493,7 @@ export function EmailChannel() {
                 </div>
                 {emailTestResult && (
                   <div className={cn(
-                    'flex items-center gap-2 text-sm p-2 rounded',
+                    'flex items-center gap-2 text-[13px] p-2 rounded',
                     emailTestResult?.success
                       ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
                       : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
@@ -511,7 +511,7 @@ export function EmailChannel() {
 
             {/* Bot Display Name */}
             <div className="space-y-2">
-              <label className="text-sm font-medium mb-1 block">
+              <label className="text-[13px] font-medium mb-1 block">
                 {t('settings.channels.email.displayName', 'Bot Display Name')}
               </label>
               <Input
@@ -537,7 +537,7 @@ export function EmailChannel() {
 
             {/* Filter Settings */}
             <div className="space-y-4">
-              <h4 className="text-sm font-semibold flex items-center gap-2">
+              <h4 className="text-[13px] font-semibold flex items-center gap-2">
                 <Shield className="h-4 w-4" />
                 {t('settings.channels.email.filterSettings', 'Filter Settings')}
               </h4>
@@ -545,7 +545,7 @@ export function EmailChannel() {
               {/* Recipient Alias (optional) */}
               <div className="p-3 rounded-lg bg-muted/30 space-y-3">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
+                  <label className="text-[13px] font-medium mb-1 block">
                     {t('settings.channels.email.recipientAlias', 'Recipient Alias (optional)')}
                   </label>
                   <Input
@@ -580,7 +580,7 @@ export function EmailChannel() {
 
               {/* Allowed Senders */}
               <div>
-                <label className="text-sm font-medium mb-2 block">
+                <label className="text-[13px] font-medium mb-2 block">
                   {t('settings.channels.email.allowedSenders', 'Allowed Senders')}
                   <span className="text-xs text-muted-foreground ml-1">({t('settings.channels.email.senderPatternHint', 'email or pattern like *@company.com')})</span>
                 </label>
@@ -602,7 +602,7 @@ export function EmailChannel() {
                 {emailLocalConfig.allowedSenders.length > 0 && (
                   <div className="space-y-1">
                     {emailLocalConfig.allowedSenders.map((sender) => (
-                      <div key={sender} className="flex items-center justify-between p-2 rounded bg-muted/30 text-sm">
+                      <div key={sender} className="flex items-center justify-between p-2 rounded bg-muted/30 text-[13px]">
                         <span className="font-mono text-xs">{sender}</span>
                         <Button
                           variant="ghost"
@@ -621,7 +621,7 @@ export function EmailChannel() {
               {/* Labels (Gmail only) */}
               {emailLocalConfig.provider === 'gmail' && (
                 <div>
-                  <label className="text-sm font-medium mb-2 block">
+                  <label className="text-[13px] font-medium mb-2 block">
                     {t('settings.channels.email.gmailLabels', 'Gmail Labels')}
                     <span className="text-xs text-muted-foreground ml-1">({t('settings.channels.email.gmailLabelsHint', 'only process emails with these labels')})</span>
                   </label>
@@ -640,7 +640,7 @@ export function EmailChannel() {
                   {emailLocalConfig.labels.length > 0 && (
                     <div className="space-y-1">
                       {emailLocalConfig.labels.map((label) => (
-                        <div key={label} className="flex items-center justify-between p-2 rounded bg-muted/30 text-sm">
+                        <div key={label} className="flex items-center justify-between p-2 rounded bg-muted/30 text-[13px]">
                           <span className="font-mono text-xs">{label}</span>
                           <Button
                             variant="ghost"

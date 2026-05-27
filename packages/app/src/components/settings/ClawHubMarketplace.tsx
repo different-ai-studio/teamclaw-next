@@ -383,7 +383,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">{slug}</p>
             {summary && (
-              <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{summary}</p>
+              <p className="text-[13px] text-muted-foreground mt-2 line-clamp-2">{summary}</p>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {parsed.stars != null && parsed.stars > 0 && (
@@ -480,7 +480,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
               placeholder={t("clawhub.searchPlaceholder", "Search ClawHub skills...")}
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="pl-9 h-9"
+              className="pl-9 h-8"
             />
           </div>
           <Button
@@ -511,8 +511,8 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
           <div className="flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-destructive">{t("common.error", "Error")}</p>
-              <p className="text-sm text-destructive/80 mt-1">{error}</p>
+              <p className="text-[13px] font-medium text-destructive">{t("common.error", "Error")}</p>
+              <p className="text-[13px] text-destructive/80 mt-1">{error}</p>
             </div>
             <Button
               size="sm"
@@ -552,7 +552,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
                     <Skeleton className="h-4 w-12" />
                   </div>
                 </div>
-                <Skeleton className="h-9 w-24 rounded-lg" />
+                <Skeleton className="h-8 w-24 rounded-lg" />
               </div>
             </SettingCard>
           ))}
@@ -565,7 +565,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
                 <div className="text-center py-6 text-muted-foreground">
                   <Search className="h-8 w-8 mx-auto mb-3 opacity-50" />
                   <p className="font-medium">{t("clawhub.noResults", "No skills found")}</p>
-                  <p className="text-sm mt-1">{t("clawhub.noResultsHint", "Try different search terms")}</p>
+                  <p className="text-[13px] mt-1">{t("clawhub.noResultsHint", "Try different search terms")}</p>
                 </div>
               </SettingCard>
             ) : (
@@ -585,7 +585,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
               <div className="text-center py-6 text-muted-foreground">
                 <Search className="h-8 w-8 mx-auto mb-3 opacity-50" />
                 <p className="font-medium">{t("clawhub.empty", "No skills available")}</p>
-                <p className="text-sm mt-1">{t("clawhub.emptyHint", "Check back later for new skills")}</p>
+                <p className="text-[13px] mt-1">{t("clawhub.emptyHint", "Check back later for new skills")}</p>
               </div>
             </SettingCard>
           ) : (
@@ -639,13 +639,13 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
             <div className="flex-1 overflow-y-auto space-y-4 py-2">
               {/* Moderation warnings */}
               {detail.moderation?.isMalwareBlocked && (
-                <div className="flex items-center gap-2 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-700 dark:text-red-300">
+                <div className="flex items-center gap-2 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-3 text-[13px] text-red-700 dark:text-red-300">
                   <Ban className="h-4 w-4 shrink-0" />
                   {t("clawhub.malwareBlocked", "This skill is flagged as malware and cannot be installed.")}
                 </div>
               )}
               {detail.moderation?.isSuspicious && !detail.moderation?.isMalwareBlocked && (
-                <div className="flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-700 dark:text-amber-300">
+                <div className="flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-[13px] text-amber-700 dark:text-amber-300">
                   <ShieldAlert className="h-4 w-4 shrink-0" />
                   {t("clawhub.suspicious", "This skill is flagged as suspicious. Review carefully before installing.")}
                 </div>
@@ -653,11 +653,11 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
 
               {/* Summary */}
               {detail.skill?.summary && (
-                <p className="text-sm text-muted-foreground">{detail.skill.summary}</p>
+                <p className="text-[13px] text-muted-foreground">{detail.skill.summary}</p>
               )}
 
               {/* Meta */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-2 gap-3 text-[13px]">
                 {detail.owner?.handle && (
                   <div>
                     <span className="text-muted-foreground">{t("clawhub.author", "Author")}: </span>
@@ -700,8 +700,8 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
               {/* Changelog */}
               {detail.latestVersion?.changelog && (
                 <div>
-                  <h4 className="text-sm font-medium mb-1">{t("clawhub.changelog", "Changelog")}</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  <h4 className="text-[13px] font-medium mb-1">{t("clawhub.changelog", "Changelog")}</h4>
+                  <p className="text-[13px] text-muted-foreground whitespace-pre-wrap">
                     {detail.latestVersion.changelog}
                   </p>
                 </div>
@@ -710,7 +710,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
               {/* ClawHub link */}
               <button
                 onClick={() => openExternalUrl(`https://cn.clawhub-mirror.com/${detail?.owner?.handle ?? ''}/${detailSlug}`)}
-                className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                className="inline-flex items-center gap-1.5 text-[13px] text-primary hover:underline"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 {t("clawhub.viewOnClawHub", "View on ClawHub")}
@@ -769,7 +769,7 @@ export const ClawHubMarketplace = React.memo(function ClawHubMarketplace({
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.skills.installLocation', 'Install Location')}</label>
+              <label className="text-[13px] font-medium">{t('settings.skills.installLocation', 'Install Location')}</label>
               <Select value={installLocation} onValueChange={(v) => setInstallLocation(v as 'workspace' | 'global')}>
                 <SelectTrigger>
                   <SelectValue>

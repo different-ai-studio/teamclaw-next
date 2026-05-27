@@ -253,7 +253,7 @@ export function DiscordChannel() {
                 <StatusBadge status={gatewayStatus.status} />
               </div>
               {gatewayStatus.botUsername && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   {t('settings.channels.connectedAs', { name: gatewayStatus.botUsername, defaultValue: 'Connected as @{{name}}' })}
                 </p>
               )}
@@ -351,7 +351,7 @@ export function DiscordChannel() {
                     <h4 className="font-semibold text-indigo-900 dark:text-indigo-100">
                       {t('settings.channels.discord.setupTitle', 'Set up Discord Integration')}
                     </h4>
-                    <p className="text-sm text-indigo-700 dark:text-indigo-300 mt-1">
+                    <p className="text-[13px] text-indigo-700 dark:text-indigo-300 mt-1">
                       {t('settings.channels.discord.setupDesc', 'Connect a Discord bot to interact with AI from Discord channels and DMs.')}
                     </p>
                   </div>
@@ -365,7 +365,7 @@ export function DiscordChannel() {
 
             {/* Bot Token */}
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Key className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.discord.botToken', 'Bot Token')}
               </label>
@@ -394,7 +394,7 @@ export function DiscordChannel() {
               </div>
               {testResult && (
                 <div className={cn(
-                  "flex items-center gap-2 text-sm",
+                  "flex items-center gap-2 text-[13px]",
                   testResult.success ? "text-emerald-600" : "text-red-600"
                 )}>
                   {testResult.success ? (
@@ -416,14 +416,14 @@ export function DiscordChannel() {
 
             {/* DM Settings */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium flex items-center gap-2">
+              <h4 className="text-[13px] font-medium flex items-center gap-2">
                 <Users className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.directMessages', 'Direct Messages')}
               </h4>
               <div className="space-y-3 pl-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-sm font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
+                    <label className="text-[13px] font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
                     <p className="text-xs text-muted-foreground">
                       {t('settings.channels.enableDMsDesc', 'Allow users to message the bot directly')}
                     </p>
@@ -437,7 +437,7 @@ export function DiscordChannel() {
                 {localConfig.dm.enabled && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
+                      <label className="text-[13px] font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
                       <Select
                         value={localConfig.dm.policy}
                         onValueChange={(policy: DmConfig['policy']) => updateDmConfig({ policy })}
@@ -454,7 +454,7 @@ export function DiscordChannel() {
 
                     {localConfig.dm.policy === 'allowlist' && (
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
+                        <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
                         <Input
                           value={localConfig.dm.allowFrom.join(', ')}
                           onChange={(e) =>
@@ -477,7 +477,7 @@ export function DiscordChannel() {
             {/* Guild Settings */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium flex items-center gap-2">
+                <h4 className="text-[13px] font-medium flex items-center gap-2">
                   <Server className="h-4 w-4 text-muted-foreground" />
                   {t('settings.channels.serverSettings', 'Server Settings')}
                 </h4>
@@ -499,7 +499,7 @@ export function DiscordChannel() {
                 {Object.keys(localConfig.guilds).length === 0 ? (
                   <div className="text-center py-4 text-muted-foreground">
                     <Server className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
+                    <p className="text-[13px] font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
                     <p className="text-xs">{t('settings.channels.noServersHint', 'Add a server to allow the bot to respond in server channels')}</p>
                   </div>
                 ) : (
@@ -520,7 +520,7 @@ export function DiscordChannel() {
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
                             <Hash className="h-4 w-4 text-indigo-500" />
-                            <span className="text-sm font-medium">{config.slug || guildId}</span>
+                            <span className="text-[13px] font-medium">{config.slug || guildId}</span>
                             {guildId === '*' && (
                               <span className="text-xs bg-muted px-2 py-0.5 rounded">{t('common.default', 'Default')}</span>
                             )}

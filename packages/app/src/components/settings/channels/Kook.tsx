@@ -214,7 +214,7 @@ export function KookChannel() {
                 <StatusBadge status={kookGatewayStatus.status} />
               </div>
               {kookGatewayStatus.botUsername && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   @{kookGatewayStatus.botUsername}
                 </p>
               )}
@@ -310,7 +310,7 @@ export function KookChannel() {
               <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                 <KookIcon className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{t('settings.channels.kook.noToken', 'No KOOK bot token configured')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.kook.noToken', 'No KOOK bot token configured')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.kook.noTokenHint', 'Use the setup wizard to configure your KOOK bot.')}</p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => setKookWizardOpen(true)}>
@@ -321,7 +321,7 @@ export function KookChannel() {
 
             {/* Bot Token */}
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Key className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.kook.botToken', 'Bot Token')}
               </label>
@@ -354,7 +354,7 @@ export function KookChannel() {
               </div>
               {kookTestResult && (
                 <div className={cn(
-                  "flex items-center gap-2 text-sm",
+                  "flex items-center gap-2 text-[13px]",
                   kookTestResult.success ? "text-emerald-600" : "text-red-600"
                 )}>
                   {kookTestResult.success ? (
@@ -376,7 +376,7 @@ export function KookChannel() {
 
             {/* DM Configuration */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium flex items-center gap-2">
+              <h4 className="text-[13px] font-medium flex items-center gap-2">
                 <Users className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.directMessages', 'Direct Messages')}
               </h4>
@@ -384,7 +384,7 @@ export function KookChannel() {
               <div className="pl-6 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-sm font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
+                    <label className="text-[13px] font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
                     <p className="text-xs text-muted-foreground">
                       {t('settings.channels.enableDMsDesc', 'Allow users to message the bot directly')}
                     </p>
@@ -402,7 +402,7 @@ export function KookChannel() {
                 {kookLocalConfig.dm.enabled && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
+                      <label className="text-[13px] font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
                       <Select
                         value={kookLocalConfig.dm.policy}
                         onValueChange={(policy: 'open' | 'allowlist') => {
@@ -423,7 +423,7 @@ export function KookChannel() {
 
                     {kookLocalConfig.dm.policy === 'allowlist' && (
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
+                        <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
                         <Input
                           value={kookLocalConfig.dm.allowFrom.join(', ')}
                           onChange={(e) => {
@@ -450,7 +450,7 @@ export function KookChannel() {
             {/* Server Settings */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium flex items-center gap-2">
+                <h4 className="text-[13px] font-medium flex items-center gap-2">
                   <Server className="h-4 w-4 text-muted-foreground" />
                   {t('settings.channels.serverSettings', 'Server Settings')}
                 </h4>
@@ -472,7 +472,7 @@ export function KookChannel() {
                 {Object.keys(kookLocalConfig.guilds).length === 0 ? (
                   <div className="text-center py-4 text-muted-foreground">
                     <Server className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
+                    <p className="text-[13px] font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
                     <p className="text-xs">{t('settings.channels.noServersHint', 'Add a server to allow the bot to respond in server channels')}</p>
                   </div>
                 ) : (
@@ -493,7 +493,7 @@ export function KookChannel() {
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
                             <Hash className="h-4 w-4 text-orange-500" />
-                            <span className="text-sm font-medium">{guild.slug || guildId}</span>
+                            <span className="text-[13px] font-medium">{guild.slug || guildId}</span>
                             {guildId === '*' && (
                               <span className="text-xs bg-muted px-2 py-0.5 rounded">{t('common.default', 'Default')}</span>
                             )}
