@@ -6,12 +6,13 @@
 use axum::{
     extract::State,
     middleware,
-    routing::{get, post, MethodRouter},
+    routing::{delete, get, post, MethodRouter},
     Json, Router,
 };
 
 use super::auth;
 use super::observ::request_id_layer;
+use super::sessions;
 use super::state::HttpState;
 
 pub fn build(state: HttpState) -> Router {
@@ -21,6 +22,18 @@ pub fn build(state: HttpState) -> Router {
         .route("/v1/auth/exchange", post(auth::exchange_handler))
         .route("/v1/auth/revoke", post(auth::revoke_handler))
         .route("/v1/auth/tokens", get(auth::list_tokens_handler))
+        .route(
+            "/v1/sessions",
+            post(sessions::create_session).get(sessions::list_sessions),
+        )
+        .route(
+            "/v1/sessions/:id",
+            get(sessions::get_session).merge(delete(sessions::delete_session)),
+        )
+        .route("/v1/sessions/:id/prompt", post(sessions::send_prompt))
+        .route("/v1/sessions/:id/cancel", post(sessions::cancel))
+        .route("/v1/sessions/:id/events", get(sessions::replay_events))
+        .route("/v1/sessions/:id/stream", get(sessions::stream))
         .layer(middleware::from_fn(request_id_layer))
         .with_state(state)
 }

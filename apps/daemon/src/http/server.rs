@@ -18,6 +18,7 @@ use crate::config::{DaemonConfig, HttpConfig};
 
 use super::cors;
 use super::routes;
+use super::runtime_adapter::RuntimeAdapter;
 use super::state::{DaemonMetadata, HttpState};
 use super::tokens::{self, TokenStore};
 
@@ -52,7 +53,11 @@ impl Drop for HttpHandle {
 /// Spawn the HTTP listener. Errors surface as `anyhow::Result` because
 /// the daemon's startup path uses that as the lingua franca for early
 /// bring-up failures.
-pub async fn spawn(http: HttpConfig, meta: DaemonMetadata) -> anyhow::Result<HttpHandle> {
+pub async fn spawn(
+    http: HttpConfig,
+    meta: DaemonMetadata,
+    runtime: Arc<dyn RuntimeAdapter>,
+) -> anyhow::Result<HttpHandle> {
     // Resolve token + port files (defaults live in DaemonConfig::config_dir).
     let token_path = http
         .token_file
@@ -89,7 +94,9 @@ pub async fn spawn(http: HttpConfig, meta: DaemonMetadata) -> anyhow::Result<Htt
     let cors_layer = cors::build(&http.allowed_origins)
         .map_err(|e| anyhow::anyhow!("cors build: {}", e.detail))?;
 
-    let state = HttpState::new(http, tokens.clone(), meta);
+    let state = HttpState::new(http, tokens.clone(), meta, runtime);
+
+    spawn_reapers(state.clone());
     let mut app: Router = routes::build(state);
     if let Some(layer) = cors_layer {
         app = app.layer(layer);
@@ -114,6 +121,23 @@ pub async fn spawn(http: HttpConfig, meta: DaemonMetadata) -> anyhow::Result<Htt
         join,
         shutdown_tx: Some(shutdown_tx),
     })
+}
+
+/// Background reaper: prunes expired session tokens every minute.
+/// Idle-session eviction is the runtime adapter's responsibility (the
+/// adapter owns the session table); this only handles the auth side.
+fn spawn_reapers(state: HttpState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            let pruned = state.tokens.sweep_expired();
+            if pruned > 0 {
+                tracing::debug!(pruned, "expired session tokens swept");
+            }
+        }
+    });
 }
 
 /// Convenience helper: capture the metadata most callers want without
@@ -151,10 +175,249 @@ mod tests {
             ..HttpConfig::default()
         };
         let meta = metadata("actor-test".into(), "test");
-        let handle = spawn(cfg, meta).await.unwrap();
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
+        let handle = spawn(cfg, meta, runtime).await.unwrap();
         let url = format!("http://{}/v1/healthz", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["status"], "ok");
+        handle.shutdown().await;
+    }
+
+    /// Helper: spawn a server + mint a session token with all scopes.
+    async fn boot() -> (HttpHandle, reqwest::Client, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("token");
+        let cfg = HttpConfig {
+            bind: "127.0.0.1:0".into(),
+            token_file: Some(token_path.clone()),
+            port_file: Some(dir.path().join("port")),
+            heartbeat_interval: std::time::Duration::from_secs(5),
+            ..HttpConfig::default()
+        };
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
+        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime)
+            .await
+            .unwrap();
+        let base = format!("http://{}", handle.local_addr);
+        let root = std::fs::read_to_string(&token_path).unwrap().trim().to_owned();
+        let client = reqwest::Client::new();
+        let resp: serde_json::Value = client
+            .post(format!("{base}/v1/auth/exchange"))
+            .bearer_auth(&root)
+            .json(&serde_json::json!({"ttl_seconds": 3600}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let session_token = resp["token"].as_str().unwrap().to_string();
+        std::mem::forget(dir); // keep tempdir alive for the duration of the test
+        (handle, client, base, session_token)
+    }
+
+    #[tokio::test]
+    async fn create_session_and_stream_tokens() {
+        let (handle, client, base, session_token) = boot().await;
+
+        let resp: serde_json::Value = client
+            .post(format!("{base}/v1/sessions"))
+            .bearer_auth(&session_token)
+            .json(&serde_json::json!({"agent_type": "stub"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let session_id = resp["session_id"].as_str().unwrap().to_string();
+
+        // Send a prompt.
+        let ack = client
+            .post(format!("{base}/v1/sessions/{session_id}/prompt"))
+            .bearer_auth(&session_token)
+            .header("idempotency-key", "k1")
+            .json(&serde_json::json!({"text": "hi"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ack.status().as_u16(), 202);
+
+        // Replay events — should include the token deltas plus
+        // turn.finished.
+        let mut saw_finished = false;
+        for _ in 0..20 {
+            let page: serde_json::Value = client
+                .get(format!("{base}/v1/sessions/{session_id}/events?since=0"))
+                .bearer_auth(&session_token)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if page["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == "turn_finished")
+            {
+                saw_finished = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(saw_finished, "stub agent should publish turn_finished");
+
+        // Idempotent prompt re-submit returns the same ack.
+        let ack2: serde_json::Value = client
+            .post(format!("{base}/v1/sessions/{session_id}/prompt"))
+            .bearer_auth(&session_token)
+            .header("idempotency-key", "k1")
+            .json(&serde_json::json!({"text": "hi"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let prompt_id = ack2["prompt_id"].as_str().unwrap();
+        assert!(!prompt_id.is_empty());
+
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn sse_stream_yields_frames() {
+        let (handle, client, base, session_token) = boot().await;
+        let resp: serde_json::Value = client
+            .post(format!("{base}/v1/sessions"))
+            .bearer_auth(&session_token)
+            .json(&serde_json::json!({"agent_type":"stub"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let session_id = resp["session_id"].as_str().unwrap().to_string();
+
+        // Open the SSE stream BEFORE sending the prompt so the live
+        // events arrive on the wire, not just through the backlog.
+        let mut stream_resp = client
+            .get(format!(
+                "{base}/v1/sessions/{session_id}/stream?access_token={session_token}"
+            ))
+            .send()
+            .await
+            .unwrap();
+        // Give the server a beat to wire up the broadcast receiver.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = client
+            .post(format!("{base}/v1/sessions/{session_id}/prompt"))
+            .bearer_auth(&session_token)
+            .json(&serde_json::json!({"text":"yo"}))
+            .send()
+            .await
+            .unwrap();
+        assert!(stream_resp
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/event-stream"));
+
+        // Read until we see a turn_finished frame or the connection
+        // closes. 2 second budget is enough for the stub's 5ms-per-char
+        // emitter to finish "yo" (2 chars) plus session bookkeeping.
+        let mut buf = Vec::<u8>::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut saw_finished = false;
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                stream_resp.chunk(),
+            )
+            .await
+            {
+                Ok(Ok(Some(chunk))) => {
+                    buf.extend_from_slice(&chunk);
+                    let s = String::from_utf8_lossy(&buf);
+                    if s.contains("event: turn.finished") {
+                        saw_finished = true;
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        assert!(saw_finished, "SSE stream must publish turn_finished");
+        drop(stream_resp);
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn last_event_id_below_window_returns_410() {
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("token");
+        let cfg = HttpConfig {
+            bind: "127.0.0.1:0".into(),
+            token_file: Some(token_path.clone()),
+            port_file: Some(dir.path().join("port")),
+            max_event_backlog: 2, // tiny window so we fall off quickly
+            heartbeat_interval: std::time::Duration::from_secs(5),
+            ..HttpConfig::default()
+        };
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(2);
+        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime)
+            .await
+            .unwrap();
+        let base = format!("http://{}", handle.local_addr);
+        let root = std::fs::read_to_string(&token_path).unwrap().trim().to_owned();
+        let client = reqwest::Client::new();
+        let exchange: serde_json::Value = client
+            .post(format!("{base}/v1/auth/exchange"))
+            .bearer_auth(&root)
+            .json(&serde_json::json!({"ttl_seconds":3600}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let session_token = exchange["token"].as_str().unwrap().to_string();
+
+        let snap: serde_json::Value = client
+            .post(format!("{base}/v1/sessions"))
+            .bearer_auth(&session_token)
+            .json(&serde_json::json!({
+                "agent_type":"stub",
+                "initial_prompt":"abcdefghij"
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let session_id = snap["session_id"].as_str().unwrap().to_string();
+
+        // Wait for the stub to publish enough events to push seq 1 out of
+        // the 2-slot ring.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let resp = client
+            .get(format!("{base}/v1/sessions/{session_id}/stream"))
+            .bearer_auth(&session_token)
+            .header("last-event-id", "1")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 410);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["code"], "event_gone");
+
         handle.shutdown().await;
     }
 
@@ -169,7 +432,8 @@ mod tests {
             ..HttpConfig::default()
         };
         let meta = metadata("actor-x".into(), "test");
-        let handle = spawn(cfg, meta).await.unwrap();
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
+        let handle = spawn(cfg, meta, runtime).await.unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root_token = std::fs::read_to_string(&token_path).unwrap();
         let root_token = root_token.trim();
@@ -237,7 +501,8 @@ mod tests {
             ..HttpConfig::default()
         };
         let meta = metadata("actor-abc".into(), "pocketbase");
-        let handle = spawn(cfg, meta).await.unwrap();
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
+        let handle = spawn(cfg, meta, runtime).await.unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["actor_id"], "actor-abc");

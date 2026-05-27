@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use crate::config::HttpConfig;
 
+use super::runtime_adapter::RuntimeAdapter;
+use super::sessions::{IdempotencyCache, SessionOwnerIndex};
 use super::tokens::TokenStore;
 
 /// Process metadata surfaced via `/v1/info`. Filled in at startup and
@@ -26,14 +28,25 @@ pub struct HttpState {
     pub config: Arc<HttpConfig>,
     pub tokens: TokenStore,
     pub meta: Arc<DaemonMetadata>,
+    pub runtime: Arc<dyn RuntimeAdapter>,
+    pub session_index: Arc<SessionOwnerIndex>,
+    pub idempotency: Arc<IdempotencyCache>,
 }
 
 impl HttpState {
-    pub fn new(config: HttpConfig, tokens: TokenStore, meta: DaemonMetadata) -> Self {
+    pub fn new(
+        config: HttpConfig,
+        tokens: TokenStore,
+        meta: DaemonMetadata,
+        runtime: Arc<dyn RuntimeAdapter>,
+    ) -> Self {
         Self {
             config: Arc::new(config),
             tokens,
             meta: Arc::new(meta),
+            runtime,
+            session_index: SessionOwnerIndex::new(),
+            idempotency: IdempotencyCache::new(),
         }
     }
 }
