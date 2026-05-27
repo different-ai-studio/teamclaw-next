@@ -58,6 +58,15 @@ test("golden response: GET /v1/ideas", async () => {
 });
 
 function contractRepo() {
+  const shortcutStore = [
+    { id: "shortcut-1", teamId: "team-1", parentId: null, kind: "link", label: "Home", payload: null, position: 0, visibleRoleIds: [], createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+  ];
+  const roleStore = [
+    { id: "role-1", teamId: "team-1", code: "admin", name: "Admin" },
+  ];
+  const permissionStore = [
+    { resourceId: "resource-1", roleIds: ["role-1"] },
+  ];
   const workspaceStore = [
     { id: "workspace-1", teamId: "team-1", name: "Alpha", slug: null, archived: false, metadata: null, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
   ];
@@ -360,6 +369,51 @@ function contractRepo() {
         metadata: body.metadata ?? null,
         createdAt: "2026-05-27T01:00:00Z",
       };
+    },
+    async listShortcuts(teamId, { parentId } = {}) {
+      let items = shortcutStore.filter(s => s.teamId === teamId);
+      if (parentId !== undefined) {
+        items = items.filter(s => s.parentId === parentId);
+      }
+      return items;
+    },
+    async createShortcut(body) {
+      const s = {
+        id: body.id ?? "shortcut-new",
+        teamId: body.teamId,
+        parentId: body.parentId ?? null,
+        kind: body.kind,
+        label: body.label,
+        payload: body.payload ?? null,
+        position: body.position ?? 0,
+        visibleRoleIds: body.visibleRoleIds ?? [],
+        createdAt: "2026-05-27T01:00:00Z",
+        updatedAt: "2026-05-27T01:00:00Z",
+      };
+      shortcutStore.push(s);
+      return s;
+    },
+    async updateShortcut(shortcutId, patch) {
+      const s = shortcutStore.find(s => s.id === shortcutId);
+      if (!s) return null;
+      if (patch.label !== undefined) s.label = patch.label;
+      if (patch.payload !== undefined) s.payload = patch.payload;
+      if (patch.parentId !== undefined) s.parentId = patch.parentId;
+      if (patch.position !== undefined) s.position = patch.position;
+      s.updatedAt = "2026-05-27T02:00:00Z";
+      return s;
+    },
+    async deleteShortcut(shortcutId) {
+      const idx = shortcutStore.findIndex(s => s.id === shortcutId);
+      if (idx >= 0) shortcutStore.splice(idx, 1);
+    },
+    async batchMoveShortcuts({ moves }) {},
+    async setShortcutVisibleRoles(shortcutId, { roleIds }) {},
+    async listTeamRoles(teamId) {
+      return roleStore.filter(r => r.teamId === teamId);
+    },
+    async listTeamPermissions(teamId) {
+      return permissionStore;
     },
   };
 }

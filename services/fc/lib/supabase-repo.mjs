@@ -530,6 +530,114 @@ async heartbeat() {
       if (error) throw error;
     },
 
+    async listShortcuts(teamId, { parentId } = {}) {
+      let query = supabase
+        .from("shortcuts")
+        .select("*")
+        .eq("team_id", teamId)
+        .order("position", { ascending: true });
+      if (parentId !== undefined) {
+        if (parentId === null) {
+          query = query.is("parent_id", null);
+        } else {
+          query = query.eq("parent_id", parentId);
+        }
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []).map(mapShortcutRow);
+    },
+
+    async getShortcut(shortcutId) {
+      const { data, error } = await supabase
+        .from("shortcuts")
+        .select("*")
+        .eq("id", shortcutId)
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapShortcutRow(data);
+    },
+
+    async createShortcut(body) {
+      const args = {
+        p_team_id: body.teamId,
+        p_kind: body.kind,
+        p_label: body.label,
+        p_parent_id: body.parentId ?? null,
+        p_payload: body.payload ?? null,
+        p_position: body.position ?? 0,
+        p_visible_role_ids: body.visibleRoleIds ?? [],
+      };
+      if (body.id !== undefined) args.p_id = body.id;
+      const { data, error } = await supabase.rpc("shortcut_create", args);
+      if (error) throw error;
+      const id = requiredString(data, "shortcuts.createShortcut", "id");
+      return this.getShortcut(id);
+    },
+
+    async updateShortcut(shortcutId, patch) {
+      const body = {};
+      if (patch.label !== undefined) body.label = patch.label;
+      if (patch.payload !== undefined) body.payload = patch.payload;
+      if (patch.parentId !== undefined) body.parent_id = patch.parentId;
+      if (patch.position !== undefined) body.position = patch.position;
+      const { data, error } = await supabase
+        .from("shortcuts")
+        .update(body)
+        .eq("id", shortcutId)
+        .select("*")
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapShortcutRow(data);
+    },
+
+    async deleteShortcut(shortcutId) {
+      const { error } = await supabase
+        .from("shortcuts")
+        .delete()
+        .eq("id", shortcutId);
+      if (error) throw error;
+    },
+
+    async batchMoveShortcuts({ moves }) {
+      const { error } = await supabase.rpc("shortcut_batch_move", {
+        p_moves: moves.map((m) => ({ shortcut_id: m.shortcutId, parent_id: m.parentId, position: m.position })),
+      });
+      if (error) throw error;
+    },
+
+    async setShortcutVisibleRoles(shortcutId, { roleIds }) {
+      const { error } = await supabase.rpc("shortcut_set_visible_roles", {
+        p_shortcut_id: shortcutId,
+        p_role_ids: roleIds,
+      });
+      if (error) throw error;
+    },
+
+    async listTeamRoles(teamId) {
+      const { data, error } = await supabase
+        .from("team_roles")
+        .select("id, team_id, code, name")
+        .eq("team_id", teamId);
+      if (error) throw error;
+      return (data ?? []).map((r) => ({ id: r.id, teamId: r.team_id, code: r.code, name: r.name }));
+    },
+
+    async listTeamPermissions(teamId) {
+      const { data, error } = await supabase
+        .from("permissions")
+        .select("resource_id, permission_roles(role_id)")
+        .eq("team_id", teamId);
+      if (error) throw error;
+      return (data ?? []).map((r) => ({ resourceId: r.resource_id, roleIds: (r.permission_roles ?? []).map((x) => x.role_id) }));
+    },
+
     async createIdeaActivity(ideaId, body) {
       const { data, error } = await supabase.rpc("create_idea_activity", {
         p_idea_id: ideaId,
@@ -732,6 +840,21 @@ function mapIdeaRow(row) {
     archived: row?.archived === true,
     authorActorId: row?.author_actor_id ?? null,
     actorIds: row?.actor_ids ?? [],
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function mapShortcutRow(row) {
+  return {
+    id: requiredString(row?.id, "shortcuts.mapShortcutRow", "id"),
+    teamId: requiredString(row?.team_id, "shortcuts.mapShortcutRow", "team_id"),
+    parentId: row?.parent_id ?? null,
+    kind: requiredString(row?.kind, "shortcuts.mapShortcutRow", "kind"),
+    label: requiredString(row?.label, "shortcuts.mapShortcutRow", "label"),
+    payload: row?.payload ?? null,
+    position: row?.position ?? 0,
+    visibleRoleIds: row?.visible_role_ids ?? [],
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };

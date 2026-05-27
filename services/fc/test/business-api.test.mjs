@@ -1118,5 +1118,13 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async updateIdea(ideaId, patch) { calls.push({ method: "updateIdea", ideaId, patch }); if (error) throw error; const i = ideaStore.find(i => i.id === ideaId); if (!i) return null; if (patch.title !== undefined) i.title = patch.title; if (patch.description !== undefined) i.description = patch.description; return i; },
     async archiveIdea(ideaId) { calls.push({ method: "archiveIdea", ideaId }); if (error) throw error; const i = ideaStore.find(i => i.id === ideaId); if (i) i.archived = true; },
     async createIdeaActivity(ideaId, input) { calls.push({ method: "createIdeaActivity", ideaId, input }); if (error) throw error; return { id: "activity-1", ideaId, kind: input.kind, content: input.content ?? null, actorId: input.actorId, metadata: input.metadata ?? null, createdAt: "2026-05-27T01:00:00Z" }; },
+    async listShortcuts(teamId, args) { calls.push({ method: "listShortcuts", teamId, args }); if (error) throw error; return [{ id: "shortcut-1", teamId, parentId: null, kind: "link", label: "Home", payload: null, position: 0, visibleRoleIds: [], createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" }]; },
+    async createShortcut(input) { calls.push({ method: "createShortcut", input }); if (error) throw error; return { id: input.id ?? "shortcut-new", teamId: input.teamId, parentId: input.parentId ?? null, kind: input.kind, label: input.label, payload: input.payload ?? null, position: input.position ?? 0, visibleRoleIds: input.visibleRoleIds ?? [], createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }; },
+    async updateShortcut(shortcutId, patch) { calls.push({ method: "updateShortcut", shortcutId, patch }); if (error) throw error; return { id: shortcutId, teamId: "team-1", parentId: null, kind: "link", label: patch.label ?? "Home", payload: null, position: 0, visibleRoleIds: [], createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-27T02:00:00Z" }; },
+    async deleteShortcut(shortcutId) { calls.push({ method: "deleteShortcut", shortcutId }); if (error) throw error; },
+    async batchMoveShortcuts(input) { calls.push({ method: "batchMoveShortcuts", input }); if (error) throw error; },
+    async setShortcutVisibleRoles(shortcutId, input) { calls.push({ method: "setShortcutVisibleRoles", shortcutId, input }); if (error) throw error; },
+    async listTeamRoles(teamId) { calls.push({ method: "listTeamRoles", teamId }); if (error) throw error; return [{ id: "role-1", teamId, code: "admin", name: "Admin" }]; },
+    async listTeamPermissions(teamId) { calls.push({ method: "listTeamPermissions", teamId }); if (error) throw error; return [{ resourceId: "resource-1", roleIds: ["role-1"] }]; },
   };
 }

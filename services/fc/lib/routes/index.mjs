@@ -8,6 +8,7 @@ import { registerSystem } from "./system.mjs";
 import { registerActors } from "./actors.mjs";
 import { registerNotifications } from "./notifications.mjs";
 import { registerIdeas } from "./ideas.mjs";
+import { registerShortcuts } from "./shortcuts.mjs";
 
 export function registerAllRoutes(router) {
   registerAuth(router);
@@ -20,6 +21,7 @@ export function registerAllRoutes(router) {
   registerActors(router);
   registerNotifications(router);
   registerIdeas(router);
+  registerShortcuts(router);
 }
 
-export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas };
+export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas, registerShortcuts };
