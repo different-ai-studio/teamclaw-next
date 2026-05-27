@@ -17,6 +17,7 @@ public struct SessionsTab: View {
     let connectedAgentsStore: ConnectedAgentsStore?
     let actorStore: ActorStore?
     let shortcutsStore: ShortcutsStore?
+    let messagesRepository: (any MessagesRepository)?
     var onReconnect: (() -> Void)?
     var onSignOut: (() -> Void)?
     let preferencesAPI: (any PushPreferencesAPI)?
@@ -46,6 +47,7 @@ public struct SessionsTab: View {
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 actorStore: ActorStore? = nil,
                 shortcutsStore: ShortcutsStore? = nil,
+                messagesRepository: (any MessagesRepository)? = nil,
                 onReconnect: (() -> Void)? = nil,
                 onSignOut: (() -> Void)? = nil,
                 preferencesAPI: (any PushPreferencesAPI)? = nil) {
@@ -61,6 +63,7 @@ public struct SessionsTab: View {
         self.connectedAgentsStore = connectedAgentsStore
         self.actorStore = actorStore
         self.shortcutsStore = shortcutsStore
+        self.messagesRepository = messagesRepository
         self.onReconnect = onReconnect
         self.onSignOut = onSignOut
         self.preferencesAPI = preferencesAPI
@@ -121,6 +124,7 @@ public struct SessionsTab: View {
                         refreshSessionsFromBackend: refreshSessionsFromBackend,
                         navigationPath: $navigationPath,
                         connectedAgentsStore: connectedAgentsStore,
+                        messagesRepository: messagesRepository,
                         preferencesAPI: preferencesAPI
                     )
                 }
@@ -219,6 +223,7 @@ private struct SessionDestinationView: View {
     let refreshSessionsFromBackend: () async -> Void
     @Binding var navigationPath: [String]
     let connectedAgentsStore: ConnectedAgentsStore?
+    let messagesRepository: (any MessagesRepository)?
     let preferencesAPI: (any PushPreferencesAPI)?
 
     @Environment(\.modelContext) private var modelContext
@@ -243,6 +248,7 @@ private struct SessionDestinationView: View {
                     peerId: "ios-\(pairing.authToken.prefix(6))",
                     teamclawService: teamclawService,
                     connectedAgentsStore: connectedAgentsStore,
+                    messagesRepository: messagesRepository,
                     pushPrefs: preferencesAPI
                 )
                 .id("session:\(session.sessionId)")

@@ -128,6 +128,7 @@ public final class SessionDetailViewModel {
     private let connectedAgentsStore: ConnectedAgentsStore?
     private let sessionsRepository: SessionRepository?
     private let agentRuntimesRepository: AgentRuntimesRepository?
+    private let messagesRepository: MessagesRepository?
     /// `nonisolated(unsafe)` so the deinit (which runs in a nonisolated
     /// context) can cancel the MQTT subscription task on VM teardown.
     /// Writes happen only from main-actor methods (`start`, `stop`); the
@@ -228,12 +229,14 @@ public final class SessionDetailViewModel {
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 sessionsRepository: SessionRepository? = nil,
                 agentRuntimesRepository: AgentRuntimesRepository? = nil,
+                messagesRepository: MessagesRepository? = nil,
                 outboxSender: OutboxSender? = nil) {
         self.runtime = runtime; self.mqtt = mqtt; self.hub = hub; self.teamID = teamID; self.peerId = peerId
         self.session = session; self.teamclawService = teamclawService
         self.connectedAgentsStore = connectedAgentsStore
         self.sessionsRepository = sessionsRepository
         self.agentRuntimesRepository = agentRuntimesRepository
+        self.messagesRepository = messagesRepository
         self.outboxSender = outboxSender
     }
 
@@ -1928,7 +1931,7 @@ public final class SessionDetailViewModel {
     /// represented; only `user_*` and `agent_reply` kinds become AgentEvents.
     public func seedFromSupabaseMessages(modelContext: ModelContext) async {
         guard let session else { return }
-        guard let repo = try? SupabaseMessagesRepository() else { return }
+        guard let repo = messagesRepository ?? (try? SupabaseMessagesRepository()) else { return }
         let messages: [MessageRecord]
         do {
             messages = try await repo.listForSession(sessionID: session.sessionId)

@@ -1,0 +1,108 @@
+import Foundation
+
+public enum CloudAPIError: LocalizedError, Sendable {
+    case missingAccessToken
+    case invalidResponse
+    case requestFailed(status: Int, code: String?, message: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingAccessToken:
+            return "Missing Cloud API bearer token."
+        case .invalidResponse:
+            return "Cloud API returned an invalid response."
+        case let .requestFailed(_, _, message):
+            return message
+        }
+    }
+}
+
+public typealias CloudAPISend = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
+
+public struct CloudAPIClient: Sendable {
+    public let baseURL: URL
+    private let accessToken: @Sendable () async throws -> String
+    private let send: CloudAPISend
+
+    public init(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String,
+        send: @escaping CloudAPISend = CloudAPIClient.urlSessionSend
+    ) {
+        self.baseURL = configuration.baseURL
+        self.accessToken = accessToken
+        self.send = send
+    }
+
+    public func get<T: Decodable & Sendable>(_ path: String, as type: T.Type = T.self) async throws -> T {
+        try await request("GET", path: path, body: Optional<Data>.none, idempotencyKey: nil, as: type)
+    }
+
+    public func post<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        idempotencyKey: String? = nil,
+        as type: T.Type = T.self
+    ) async throws -> T {
+        let data = try JSONEncoder().encode(body)
+        return try await request("POST", path: path, body: data, idempotencyKey: idempotencyKey, as: type)
+    }
+
+    private func request<T: Decodable & Sendable>(
+        _ method: String,
+        path: String,
+        body: Data?,
+        idempotencyKey: String?,
+        as type: T.Type
+    ) async throws -> T {
+        let token = try await accessToken().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw CloudAPIError.missingAccessToken }
+
+        let normalizedBase = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        guard let url = URL(string: "\(normalizedBase)\(normalizedPath)") else {
+            throw CloudAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(Self.requestID(), forHTTPHeaderField: "X-Request-Id")
+        if let idempotencyKey {
+            request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        let (data, response) = try await send(request)
+        guard (200..<300).contains(response.statusCode) else {
+            let envelope = try? JSONDecoder().decode(CloudAPIErrorEnvelope.self, from: data)
+            throw CloudAPIError.requestFailed(
+                status: response.statusCode,
+                code: envelope?.error.code,
+                message: envelope?.error.message ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+            )
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    public static let urlSessionSend: CloudAPISend = { request in
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw CloudAPIError.invalidResponse }
+        return (data, http)
+    }
+
+    private static func requestID() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+}
+
+private struct CloudAPIErrorEnvelope: Decodable {
+    let error: CloudAPIErrorBody
+}
+
+private struct CloudAPIErrorBody: Decodable {
+    let code: String
+    let message: String
+}

@@ -23,6 +23,7 @@ public final class TeamclawService {
     private var teamId: String = ""
     private var peerId: String = ""
     private var connectedAgentsStore: ConnectedAgentsStore?
+    private var messagesRepository: (any MessagesRepository)?
     /// Daemon device-ids whose `rpc/res` and `notify` topics are currently
     /// subscribed. Kept in sync with `connectedAgentsStore.agents` via the
     /// observer task that `start()` launches.
@@ -61,7 +62,8 @@ public final class TeamclawService {
         peerId: String,
         modelContext: ModelContext,
         connectedAgentsStore: ConnectedAgentsStore?,
-        currentActorID: String? = nil
+        currentActorID: String? = nil,
+        messagesRepository: (any MessagesRepository)? = nil
     ) {
         listenerTask?.cancel()
         agentObserverTask?.cancel()
@@ -72,7 +74,8 @@ public final class TeamclawService {
             teamId: teamId,
             peerId: peerId,
             modelContainer: container,
-            connectedAgentsStore: connectedAgentsStore
+            connectedAgentsStore: connectedAgentsStore,
+            messagesRepository: messagesRepository
         )
         // Seed the human actor_id from Supabase auth (passed in by
         // ContentView via onboarding.currentContext.memberActorID).
@@ -648,7 +651,7 @@ public final class TeamclawService {
         sidPrefix: String,
         msgIdPrefix: String
     ) async throws {
-        guard let repo = try? SupabaseMessagesRepository() else {
+        guard let repo = resolveMessagesRepository() else {
             teamclawLogger.warning("sendMessage[\(sidPrefix, privacy: .public)] msgId=\(msgIdPrefix, privacy: .public) supabase persist skipped: repo init failed")
             throw SendMessageError.persistFailed("repo init failed")
         }
@@ -688,7 +691,7 @@ public final class TeamclawService {
         sidPrefix: String,
         msgIdPrefix: String
     ) async {
-        guard let repo = try? SupabaseMessagesRepository() else {
+        guard let repo = resolveMessagesRepository() else {
             teamclawLogger.warning("sendMessage[\(sidPrefix, privacy: .public)] msgId=\(msgIdPrefix, privacy: .public) supabase persist skipped: repo init failed")
             return
         }
@@ -719,6 +722,10 @@ public final class TeamclawService {
     private func isDuplicateMessageKeyError(_ error: Error) -> Bool {
         let description = String(describing: error)
         return description.contains("23505") && description.contains("messages_pkey")
+    }
+
+    private func resolveMessagesRepository() -> (any MessagesRepository)? {
+        messagesRepository ?? (try? SupabaseMessagesRepository())
     }
 
     public func makeCreateSessionRequest(
@@ -1285,7 +1292,8 @@ public final class TeamclawService {
         teamId: String,
         peerId: String,
         modelContainer: ModelContainer,
-        connectedAgentsStore: ConnectedAgentsStore?
+        connectedAgentsStore: ConnectedAgentsStore?,
+        messagesRepository: (any MessagesRepository)? = nil
     ) {
         self.mqtt = mqtt
         self.hub = hub
@@ -1294,6 +1302,7 @@ public final class TeamclawService {
         self.peerId = peerId
         self.modelContainer = modelContainer
         self.connectedAgentsStore = connectedAgentsStore
+        self.messagesRepository = messagesRepository
     }
 
     /// Resolves `agents.device_id` for `primaryAgentId` against the in-memory

@@ -17,6 +17,8 @@ use std::time::Instant;
 pub mod error;
 pub use error::{BackendError, BackendResult};
 
+pub mod cloud_api;
+
 pub mod records;
 pub use records::{
     AgentRuntimeRow, AgentRuntimeUpsert, BackendParticipantRow, BackendSessionAndParticipants,
