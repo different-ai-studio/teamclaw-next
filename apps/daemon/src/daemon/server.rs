@@ -255,6 +255,10 @@ fn load_provider_config_from_default_paths() -> crate::error::Result<ProviderCon
 fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<Arc<dyn Backend>> {
     match config {
         ProviderConfig::Supabase(config) => {
+            tracing::warn!(
+                "The Supabase provider is deprecated and will be removed in a future release. \
+                 Migrate to the CloudApi provider (backendKind = \"cloud_api\")."
+            );
             let backend = SupabaseBackend::new(config).map_err(|e| {
                 crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
             })?;
