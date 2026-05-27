@@ -6,10 +6,11 @@
 use axum::{
     extract::State,
     middleware,
-    routing::{get, MethodRouter},
+    routing::{get, post, MethodRouter},
     Json, Router,
 };
 
+use super::auth;
 use super::observ::request_id_layer;
 use super::state::HttpState;
 
@@ -17,6 +18,9 @@ pub fn build(state: HttpState) -> Router {
     Router::new()
         .route("/v1/healthz", healthz_route())
         .route("/v1/info", info_route())
+        .route("/v1/auth/exchange", post(auth::exchange_handler))
+        .route("/v1/auth/revoke", post(auth::revoke_handler))
+        .route("/v1/auth/tokens", get(auth::list_tokens_handler))
         .layer(middleware::from_fn(request_id_layer))
         .with_state(state)
 }

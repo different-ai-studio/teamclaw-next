@@ -159,6 +159,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_exchange_requires_root_and_returns_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("token");
+        let cfg = HttpConfig {
+            bind: "127.0.0.1:0".into(),
+            token_file: Some(token_path.clone()),
+            port_file: Some(dir.path().join("port")),
+            ..HttpConfig::default()
+        };
+        let meta = metadata("actor-x".into(), "test");
+        let handle = spawn(cfg, meta).await.unwrap();
+        let base = format!("http://{}", handle.local_addr);
+        let root_token = std::fs::read_to_string(&token_path).unwrap();
+        let root_token = root_token.trim();
+        let client = reqwest::Client::new();
+
+        // Without auth → 401.
+        let resp = client
+            .post(format!("{base}/v1/auth/exchange"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/problem+json"
+        );
+
+        // With root token → 200 + session token.
+        let resp: serde_json::Value = client
+            .post(format!("{base}/v1/auth/exchange"))
+            .bearer_auth(root_token)
+            .json(&serde_json::json!({"scopes":["sessions:read"], "ttl_seconds": 600}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let session_token = resp["token"].as_str().unwrap().to_string();
+        assert!(!session_token.is_empty());
+        assert_eq!(resp["scopes"][0], "sessions:read");
+
+        // Session token is rejected by the root-protected endpoint.
+        let resp = client
+            .get(format!("{base}/v1/auth/tokens"))
+            .bearer_auth(&session_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401);
+
+        // But the listing succeeds with the root token.
+        let listed: serde_json::Value = client
+            .get(format!("{base}/v1/auth/tokens"))
+            .bearer_auth(root_token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(listed["tokens"].as_array().unwrap().len(), 1);
+
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn info_endpoint_includes_actor() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = HttpConfig {
