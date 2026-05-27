@@ -327,7 +327,33 @@ The user-facing rule is "适度区分 — 清晰但不抢眼". Concretely:
 
 ---
 
-## 7. Out-of-scope (yet)
+## 7. Backend access boundary — Cloud API over direct Supabase
+
+**All business data operations must go through the TeamClaw Cloud API (`/v1`) rather than direct Supabase client calls.**
+
+The Cloud API facade (`services/fc/lib/business-api.mjs`) is the canonical entry point for teams, sessions, messages, and invite operations. Clients (Tauri, Expo, iOS, daemon) should use their respective Cloud API providers:
+
+- **Web/Desktop** (`packages/app/`): `CloudApiProvider` in `packages/app/src/lib/backend/provider.ts`
+- **Expo** (`apps/expo/`): `createCloudSessionsApi` in `apps/expo/src/features/sessions/cloud-api.ts`
+- **iOS** (`apps/ios/`): `CloudAPIClient` / `CloudAPIRepositories` in `apps/ios/Packages/AMUXCore/Sources/AMUXCore/CloudAPI/`
+- **daemon** (`apps/daemon/`): `cloud_api` backend module in `apps/daemon/src/backend/cloud_api.rs`
+
+Direct Supabase client usage (e.g. `supabase.from('sessions').select()`) is **reserved for internal FC repository implementation only** (`services/fc/lib/supabase-repo.mjs`). The FC facade forwards caller bearer tokens to Supabase, preserving RLS and auth semantics.
+
+**When adding new business endpoints:**
+
+1. Define the endpoint in `docs/openapi/teamclaw-api.v1.yaml` first.
+2. Implement the repository contract in `services/fc/lib/repository-contract.mjs`.
+3. Add the route handler in `services/fc/lib/business-api.mjs`.
+4. Implement the Supabase passthrough in `services/fc/lib/supabase-repo.mjs`.
+5. Add tests in `services/fc/test/` (route, repository, contract).
+6. Wire the endpoint into client Cloud API providers.
+
+Do not bypass the Cloud API and call Supabase directly from client code. The facade exists so future backend replacements (MySQL, other storage) happen inside FC without client rewrites.
+
+---
+
+## 8. Out-of-scope (yet)
 
 These were prototyped but explicitly removed by the user. Keep the code
 paths in place but do not render them in the main thread:
