@@ -1,6 +1,6 @@
 begin;
 
-select plan(34);
+select plan(42);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -418,6 +418,171 @@ select throws_ok(
   null,
   'authenticated cannot DELETE from amuxc_blobs');
 deallocate alice_delete_blob;
+
+-- ---------------------------------------------------------------------------
+-- §8: actor_id_for_user_in_team helper
+-- ---------------------------------------------------------------------------
+
+-- 9a. alice in her own team → returns alice's actor id
+set local role postgres;
+set local row_security = off;
+select is(
+  public.actor_id_for_user_in_team(
+    (select alice from ctx),
+    (select team_id from ctx)
+  ),
+  (select id from public.actors
+    where user_id = (select alice from ctx)
+      and team_id = (select team_id from ctx)),
+  'actor_id_for_user_in_team: alice in her team returns her actor id'
+);
+
+-- 9b. alice with cara's team (stranger) → returns null
+-- cara's team doesn't exist in this fixture, so we use a random uuid.
+select is(
+  public.actor_id_for_user_in_team(
+    (select alice from ctx),
+    gen_random_uuid()
+  ),
+  null::uuid,
+  'actor_id_for_user_in_team: user not in team returns null'
+);
+
+-- 9c. authenticated role cannot call the function
+set local row_security = on;
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'a1111111-1111-1111-1111-111111111111', 'role', 'authenticated')::text,
+  true);
+prepare auth_calls_helper as
+  select public.actor_id_for_user_in_team(
+    'a1111111-1111-1111-1111-111111111111'::uuid,
+    (select id from public.teams where slug = 'oss-team')
+  );
+select throws_ok(
+  'execute auth_calls_helper',
+  '42501',
+  null,
+  'authenticated cannot call actor_id_for_user_in_team'
+);
+deallocate auth_calls_helper;
+
+-- ---------------------------------------------------------------------------
+-- §9: amuxc_complete_upload RPC (basic smoke — full CAS tested in FC integration)
+-- ---------------------------------------------------------------------------
+set local role postgres;
+set local row_security = off;
+
+-- The RPC requires a team_workspace_config row with sync_mode='oss'.
+-- The row was inserted in the guard-trigger test above; update sync_mode now.
+-- (service_role mock: use the GUC we already set in the trigger tests)
+select set_config('role', 'service_role', true);
+
+-- Insert a minimal upload session and call the RPC.
+do $$
+declare
+  v_actor   uuid;
+  v_session uuid;
+begin
+  v_actor := (select id from public.actors
+               where user_id = 'a1111111-1111-1111-1111-111111111111'::uuid
+                 and team_id = (select id from public.teams where slug = 'oss-team')
+               limit 1);
+
+  -- Ensure team_workspace_config has sync_mode='oss' and oss_change_seq=0
+  update public.team_workspace_config
+     set sync_mode = 'oss', oss_change_seq = 0
+   where team_id = (select id from public.teams where slug = 'oss-team');
+
+  -- Seed blob
+  insert into public.amuxc_blobs (team_id, content_hash, oss_key, size)
+    values ((select id from public.teams where slug = 'oss-team'),
+            'rpc-test-hash', 'teams/x/blobs/sha256/rp/ct/esthash', 100)
+  on conflict do nothing;
+
+  -- Create upload session
+  insert into public.amuxc_upload_sessions
+    (team_id, actor_id, path, parent_version, content_hash, size, oss_key, expires_at)
+  values
+    ((select id from public.teams where slug = 'oss-team'),
+     v_actor,
+     'skills/rpc-test.md', 0,
+     'rpc-test-hash', 100,
+     'teams/x/blobs/sha256/rp/ct/esthash',
+     now() + interval '1 hour')
+  returning id into v_session;
+
+  -- Call the RPC and verify it returns version=1, change_seq=1
+  perform public.amuxc_complete_upload(v_session, v_actor);
+end $$;
+
+select is(
+  (select current_version from public.amuxc_files
+    where path = 'skills/rpc-test.md'
+      and team_id = (select id from public.teams where slug = 'oss-team')),
+  1,
+  'amuxc_complete_upload: file pointer advanced to version 1'
+);
+
+select is(
+  (select oss_change_seq from public.team_workspace_config
+    where team_id = (select id from public.teams where slug = 'oss-team')),
+  1::bigint,
+  'amuxc_complete_upload: oss_change_seq advanced to 1 (waterline invariant)'
+);
+
+select is(
+  (select verified from public.amuxc_blobs
+    where content_hash = 'rpc-test-hash'
+      and team_id = (select id from public.teams where slug = 'oss-team')),
+  true,
+  'amuxc_complete_upload: blob.verified flipped to true'
+);
+
+-- CAS conflict: calling complete_upload again with parent_version=0 must raise P0409
+prepare cas_conflict as
+  select public.amuxc_complete_upload(
+    (select id from public.amuxc_upload_sessions
+      where path = 'skills/rpc-test.md'
+        and status = 'completed' limit 1),
+    (select id from public.actors
+      where user_id = 'a1111111-1111-1111-1111-111111111111'::uuid
+        and team_id = (select id from public.teams where slug = 'oss-team') limit 1)
+  );
+select throws_ok(
+  'execute cas_conflict',
+  null,
+  null,
+  'amuxc_complete_upload: re-completing a completed session raises an error'
+);
+deallocate cas_conflict;
+
+-- amuxc_complete_delete: delete the file we just created and verify tombstone
+do $$
+declare
+  v_actor uuid;
+begin
+  v_actor := (select id from public.actors
+               where user_id = 'a1111111-1111-1111-1111-111111111111'::uuid
+                 and team_id = (select id from public.teams where slug = 'oss-team')
+               limit 1);
+  -- current_version is 1 from the upload above, so parent_version=1
+  perform public.amuxc_complete_delete(
+    (select id from public.teams where slug = 'oss-team'),
+    'skills/rpc-test.md',
+    1,
+    v_actor,
+    null
+  );
+end $$;
+
+select is(
+  (select deleted from public.amuxc_files
+    where path = 'skills/rpc-test.md'
+      and team_id = (select id from public.teams where slug = 'oss-team')),
+  true,
+  'amuxc_complete_delete: file marked deleted'
+);
 
 select * from finish();
 rollback;

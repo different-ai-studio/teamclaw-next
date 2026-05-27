@@ -221,4 +221,243 @@ grant all on public.amuxc_blobs, public.amuxc_files,
              public.amuxc_file_versions, public.amuxc_upload_sessions
   to service_role;
 
+-- ===========================================================================
+-- 8. Helper: actor_id_for_user_in_team
+--    FC auth middleware calls this (via service-role) to resolve the caller's
+--    actor_id for a given (user_id, team_id) pair without using auth.uid().
+-- ===========================================================================
+create or replace function public.actor_id_for_user_in_team(
+  p_user_id uuid,
+  p_team_id uuid
+)
+returns uuid
+language sql
+security definer
+set search_path = public
+as $$
+  select id
+    from public.actors
+   where user_id  = p_user_id
+     and team_id  = p_team_id
+   limit 1;
+$$;
+
+comment on function public.actor_id_for_user_in_team(uuid, uuid) is
+  'Resolves actor.id for a (user_id, team_id) pair. Used by FC /sync/* auth middleware (service_role) where auth.uid() is not available. Returns NULL if the user is not a member of the team.';
+
+-- Grant execution to service_role only; authenticated callers should use
+-- app.current_actor_id_for_team() which relies on auth.uid().
+revoke all on function public.actor_id_for_user_in_team(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.actor_id_for_user_in_team(uuid, uuid) to service_role;
+
+-- ===========================================================================
+-- 9. amuxc_complete_upload — atomic CAS upload-complete transaction
+--
+-- Implements spec §3.3 waterline invariant:
+--   team_workspace_config update MUST be the first write in the transaction.
+--
+-- Returns: TABLE(version int, content_hash text, change_seq bigint)
+-- Raises:
+--   P0409 with hint JSON { remote_version, remote_hash } on CAS mismatch
+--   P0403 on actor/session ownership mismatch
+--   P0410 on expired or non-pending session
+-- ===========================================================================
+create or replace function public.amuxc_complete_upload(
+  p_session_id uuid,
+  p_actor_id   uuid
+)
+returns table(version int, content_hash text, change_seq bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session   public.amuxc_upload_sessions%rowtype;
+  v_file      public.amuxc_files%rowtype;
+  v_seq       bigint;
+  v_new_ver   int;
+begin
+  -- Lock and read session
+  select * into v_session
+    from public.amuxc_upload_sessions
+   where id = p_session_id
+   for update;
+
+  if not found then
+    raise exception 'session not found' using errcode = 'P0404';
+  end if;
+  if v_session.actor_id <> p_actor_id then
+    raise exception 'session does not belong to caller' using errcode = 'P0403';
+  end if;
+  if v_session.status <> 'pending' then
+    raise exception 'session is %', v_session.status using errcode = 'P0410';
+  end if;
+  if v_session.expires_at < now() then
+    raise exception 'session has expired' using errcode = 'P0410';
+  end if;
+
+  -- WATERLINE INVARIANT (§2.6): push seq FIRST, before any amuxc_files write.
+  -- Any snapshot that can see oss_change_seq=N is guaranteed to also see
+  -- all amuxc_files rows with change_seq<=N because they are committed in
+  -- the same atomic transaction.
+  update public.team_workspace_config
+     set oss_change_seq = oss_change_seq + 1
+   where team_id = v_session.team_id
+  returning oss_change_seq into v_seq;
+
+  if not found then
+    raise exception 'team_workspace_config row missing for team %', v_session.team_id;
+  end if;
+
+  -- Ensure file row exists (upsert the pointer row)
+  insert into public.amuxc_files (team_id, path, updated_by)
+    values (v_session.team_id, v_session.path, p_actor_id)
+  on conflict (team_id, path) do nothing;
+
+  -- Lock file row
+  select * into v_file
+    from public.amuxc_files
+   where team_id = v_session.team_id
+     and path    = v_session.path
+   for update;
+
+  -- CAS check
+  if v_file.current_version <> v_session.parent_version then
+    raise exception 'cas-mismatch'
+      using errcode = 'P0409',
+            hint    = json_build_object(
+                        'remote_version', v_file.current_version,
+                        'remote_hash',    v_file.content_hash
+                      )::text;
+  end if;
+
+  v_new_ver := v_file.current_version + 1;
+
+  -- Mark blob verified (table-qualify to avoid PL/pgSQL ambiguity with local var)
+  update public.amuxc_blobs b
+     set verified = true
+   where b.team_id      = v_session.team_id
+     and b.content_hash = v_session.content_hash;
+
+  -- Append version record
+  insert into public.amuxc_file_versions
+    (file_id, version, parent_version, content_hash, size, deleted,
+     created_by, created_by_node_id)
+  values
+    (v_file.id, v_new_ver, v_session.parent_version, v_session.content_hash,
+     v_session.size, false, p_actor_id, v_session.node_id);
+
+  -- Advance file pointer
+  update public.amuxc_files
+     set current_version = v_new_ver,
+         content_hash    = v_session.content_hash,
+         size            = v_session.size,
+         deleted         = false,
+         change_seq      = v_seq,
+         updated_by      = p_actor_id,
+         updated_at      = now()
+   where id = v_file.id;
+
+  -- Mark session completed
+  update public.amuxc_upload_sessions
+     set status = 'completed'
+   where id = p_session_id;
+
+  return query select v_new_ver, v_session.content_hash, v_seq;
+end;
+$$;
+
+comment on function public.amuxc_complete_upload(uuid, uuid) is
+  'Atomic CAS upload-complete per spec §3.3. Waterline invariant: team_workspace_config.oss_change_seq is incremented BEFORE any amuxc_files write. Raises P0409 on CAS conflict, P0403 on ownership mismatch, P0410 on expired/non-pending session.';
+
+revoke all on function public.amuxc_complete_upload(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.amuxc_complete_upload(uuid, uuid) to service_role;
+
+-- ===========================================================================
+-- 10. amuxc_complete_delete — atomic delete tombstone transaction
+--
+-- Same waterline invariant as amuxc_complete_upload.
+-- Writes a tombstone version (content_hash=null, deleted=true).
+--
+-- Returns: TABLE(version int, change_seq bigint)
+-- Raises:  P0409 on CAS mismatch, P0404 if file not found
+-- ===========================================================================
+create or replace function public.amuxc_complete_delete(
+  p_team_id        uuid,
+  p_path           text,
+  p_parent_version int,
+  p_actor_id       uuid,
+  p_node_id        text default null
+)
+returns table(version int, change_seq bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_file    public.amuxc_files%rowtype;
+  v_seq     bigint;
+  v_new_ver int;
+begin
+  -- WATERLINE INVARIANT (§2.6): push seq FIRST.
+  update public.team_workspace_config
+     set oss_change_seq = oss_change_seq + 1
+   where team_id = p_team_id
+  returning oss_change_seq into v_seq;
+
+  if not found then
+    raise exception 'team_workspace_config row missing for team %', p_team_id;
+  end if;
+
+  -- Lock file row
+  select * into v_file
+    from public.amuxc_files
+   where team_id = p_team_id
+     and path    = p_path
+   for update;
+
+  if not found then
+    raise exception 'file not found: %', p_path using errcode = 'P0404';
+  end if;
+
+  -- CAS check
+  if v_file.current_version <> p_parent_version then
+    raise exception 'cas-mismatch'
+      using errcode = 'P0409',
+            hint    = json_build_object(
+                        'remote_version', v_file.current_version,
+                        'remote_hash',    v_file.content_hash
+                      )::text;
+  end if;
+
+  v_new_ver := v_file.current_version + 1;
+
+  -- Append tombstone version record
+  insert into public.amuxc_file_versions
+    (file_id, version, parent_version, content_hash, size, deleted,
+     created_by, created_by_node_id)
+  values
+    (v_file.id, v_new_ver, p_parent_version, null, 0, true, p_actor_id, p_node_id);
+
+  -- Mark file as deleted and advance pointer
+  update public.amuxc_files
+     set current_version = v_new_ver,
+         content_hash    = null,
+         size            = 0,
+         deleted         = true,
+         change_seq      = v_seq,
+         updated_by      = p_actor_id,
+         updated_at      = now()
+   where id = v_file.id;
+
+  return query select v_new_ver, v_seq;
+end;
+$$;
+
+comment on function public.amuxc_complete_delete(uuid, text, int, uuid, text) is
+  'Atomic delete tombstone per spec §3.5. Same waterline invariant as amuxc_complete_upload. Raises P0409 on CAS conflict, P0404 if file not found.';
+
+revoke all on function public.amuxc_complete_delete(uuid, text, int, uuid, text) from public, anon, authenticated;
+grant execute on function public.amuxc_complete_delete(uuid, text, int, uuid, text) to service_role;
+
 commit;
