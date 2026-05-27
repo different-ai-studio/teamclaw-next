@@ -359,9 +359,23 @@ impl Backend for CloudApiBackend {
 
     async fn get_gateway_session_by_acp_id(
         &self,
-        _acp_session_id: &str,
+        acp_session_id: &str,
     ) -> BackendResult<Option<(String, Option<String>)>> {
-        self.unsupported("get_gateway_session_by_acp_id")
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            #[serde(rename = "sessionId")]
+            session_id: String,
+            #[serde(rename = "gatewaySessionId")]
+            gateway_session_id: Option<String>,
+        }
+        match self
+            .get::<Resp>(&format!("/v1/sessions/by-acp/{acp_session_id}"))
+            .await
+        {
+            Ok(r) => Ok(Some((r.session_id, r.gateway_session_id))),
+            Err(BackendError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     async fn rpc_ensure_gateway_session(
@@ -612,6 +626,45 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn get_gateway_session_by_acp_id_returns_none_on_404() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/by-acp/acp-missing"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "not_found", "message": "not found" }
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let result = backend
+            .get_gateway_session_by_acp_id("acp-missing")
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_gateway_session_by_acp_id_returns_ids() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/by-acp/acp-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sessionId": "session-1",
+                "gatewaySessionId": "gw-1"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let result = backend
+            .get_gateway_session_by_acp_id("acp-1")
+            .await
+            .unwrap();
+        assert_eq!(result, Some(("session-1".to_string(), Some("gw-1".to_string()))));
     }
 
     #[tokio::test]
