@@ -1,4 +1,3 @@
-mod auth;
 mod client;
 mod gateway;
 mod messages;
@@ -155,13 +154,7 @@ impl CloudApiBackend {
         cloud_url(&self.cfg, path)
     }
 
-    fn unsupported<T>(&self, operation: &str) -> BackendResult<T> {
-        Err(BackendError::Provider {
-            provider: "cloud_api",
-            code: Some("not_implemented".to_string()),
-            message: format!("{operation} is not covered by the Phase 1 Cloud API contract"),
-        })
-    }
+
 }
 
 #[async_trait]
@@ -183,7 +176,33 @@ impl Backend for CloudApiBackend {
     }
 
     async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult> {
-        self.claim_invite_impl(token).await
+        #[derive(serde::Serialize)]
+        struct ClaimInviteRequest<'a> {
+            token: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        struct CloudClaimResult {
+            #[serde(rename = "actorId")]
+            actor_id: String,
+            #[serde(rename = "teamId")]
+            team_id: String,
+            #[serde(rename = "actorType")]
+            actor_type: String,
+            #[serde(rename = "displayName")]
+            display_name: String,
+            #[serde(rename = "refreshToken")]
+            refresh_token: Option<String>,
+        }
+        let row: CloudClaimResult = self
+            .post("/v1/invites/claim", &ClaimInviteRequest { token }, None)
+            .await?;
+        Ok(ClaimResult {
+            actor_id: row.actor_id,
+            team_id: row.team_id,
+            actor_type: row.actor_type,
+            display_name: row.display_name,
+            refresh_token: row.refresh_token,
+        })
     }
 
     async fn upsert_agent_runtime(
