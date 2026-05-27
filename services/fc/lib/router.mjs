@@ -1,6 +1,7 @@
 import {
   ApiError,
   getHeader,
+  normalizeHeaders,
   parseJsonBody,
 } from "./http-utils.mjs";
 
@@ -41,6 +42,12 @@ export function createRouter({ repository }) {
         : [optionsOrHandler, handlerMaybe];
       routes.push({ method: "DELETE", pattern, handler, auth: options.auth ?? "bearer" });
     },
+    postRaw(pattern, optionsOrHandler, handlerMaybe) {
+      const [options, handler] = typeof optionsOrHandler === "function"
+        ? [{}, optionsOrHandler]
+        : [optionsOrHandler, handlerMaybe];
+      routes.push({ method: "POST", pattern, handler, auth: options.auth ?? "bearer", rawBody: true });
+    },
     checkRoute({ method, path }) {
       const parts = path.split("/").filter(Boolean);
       for (const route of routes) {
@@ -58,16 +65,7 @@ export function createRouter({ repository }) {
         const match = matchRoute(route.pattern, parts);
         if (!match) continue;
 
-        const ctx = {
-          repository,
-          event,
-          parts,
-          params: match.params,
-          query: queryParams(event),
-          json: parseJsonBody(event),
-          getHeader: (name) => getHeader(event.headers, name),
-        };
-
+        const ctx = buildCtx({ repository, event, parts, params: match.params, rawBody: route.rawBody });
         const result = await route.handler(ctx);
         return { ...result, authRequired: route.auth !== "none" };
       }
@@ -80,21 +78,32 @@ export function createRouter({ repository }) {
         const match = matchRoute(route.pattern, parts);
         if (!match) continue;
 
-        const ctx = {
-          repository,
-          event,
-          parts,
-          params: match.params,
-          query: queryParams(event),
-          json: parseJsonBody(event),
-          getHeader: (name) => getHeader(event.headers, name),
-        };
-
+        const ctx = buildCtx({ repository, event, parts, params: match.params, rawBody: route.rawBody });
         const result = await route.handler(ctx);
         return result;
       }
       return null;
     },
+  };
+}
+
+function decodeRawBody(event) {
+  if (event.body === undefined || event.body === null || event.body === "") return Buffer.alloc(0);
+  if (event.isBase64Encoded) return Buffer.from(event.body, "base64");
+  return Buffer.from(event.body, "utf8");
+}
+
+function buildCtx({ repository, event, parts, params, rawBody: isRaw }) {
+  return {
+    repository,
+    event,
+    parts,
+    params,
+    query: queryParams(event),
+    headers: normalizeHeaders(event.headers),
+    json: isRaw ? undefined : parseJsonBody(event),
+    rawBody: isRaw ? decodeRawBody(event) : undefined,
+    getHeader: (name) => getHeader(event.headers, name),
   };
 }
 

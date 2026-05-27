@@ -1389,6 +1389,72 @@ paths:
           description: OK
         "401":
           $ref: "#/components/responses/Error"
+  /v1/attachments:
+    post:
+      operationId: uploadAttachment
+      summary: Upload a binary attachment to storage
+      tags: [Attachments]
+      parameters:
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+          description: Storage path for the attachment (e.g. team-id/file.png)
+        - in: header
+          name: Content-Type
+          required: true
+          schema:
+            type: string
+          description: MIME type of the attachment
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Attachment uploaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, url]
+                properties:
+                  path:
+                    type: string
+                  url:
+                    type: string
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/attachments/{path}:
+    get:
+      operationId: downloadAttachment
+      summary: Download a binary attachment from storage
+      tags: [Attachments]
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema:
+            type: string
+          description: Storage path of the attachment
+      responses:
+        "200":
+          description: Attachment bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /v1/teams/{teamId}/directory:
     get:
       operationId: getTeamDirectory

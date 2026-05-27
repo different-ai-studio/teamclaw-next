@@ -1174,6 +1174,69 @@ test("PUT /v1/agents/:agentActorId/device sets device id", async () => {
   assert.deepEqual(repo.calls[0], { method: "setAgentDeviceId", agentActorId: "actor-1", input: { deviceId: "device-abc" } });
 });
 
+test("POST /v1/attachments uploads binary body and returns path + url", async () => {
+  const repo = fakeRepo();
+  const body = Buffer.from("png-bytes");
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/attachments",
+    headers: { Authorization: "Bearer token", "Content-Type": "image/png" },
+    queryStringParameters: { path: "foo/bar.png" },
+    body: body.toString("base64"),
+    isBase64Encoded: true,
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.path, "foo/bar.png");
+  assert.ok(typeof parsed.url === "string");
+  assert.deepEqual(repo.calls[0], {
+    method: "uploadAttachment",
+    input: { path: "foo/bar.png", mime: "image/png", bytes: body },
+  });
+});
+
+test("POST /v1/attachments returns 400 when path query param is missing", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/attachments",
+    headers: { Authorization: "Bearer token", "Content-Type": "image/png" },
+    queryStringParameters: {},
+    body: Buffer.from("bytes").toString("base64"),
+    isBase64Encoded: true,
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
+});
+
+test("GET /v1/attachments/:path returns binary response", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/attachments/foo%2Fbar.png",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.isBase64Encoded, true);
+  assert.equal(response.headers["Content-Type"], "image/png");
+  const decoded = Buffer.from(response.body, "base64");
+  assert.deepEqual(decoded, Buffer.from("fake-image-bytes"));
+  assert.deepEqual(repo.calls[0], { method: "downloadAttachment", path: "foo%2Fbar.png" });
+});
+
+test("GET /v1/attachments/:path returns 404 when attachment missing", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/attachments/missing%2Ffile.bin",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 404);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "not_found");
+});
+
 function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, workspaces = [], ideas = null } = {}) {
   const calls = [];
   const configs = { ...teamWorkspaceConfigs };
@@ -1245,5 +1308,7 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async updateRuntimeCursor(runtimeRowId, input) { calls.push({ method: "updateRuntimeCursor", runtimeRowId, input }); if (error) throw error; },
     async ensureAgentTypes(input) { calls.push({ method: "ensureAgentTypes", input }); if (error) throw error; },
     async setAgentDeviceId(agentActorId, input) { calls.push({ method: "setAgentDeviceId", agentActorId, input }); if (error) throw error; },
+    async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/attachments/${input.path}` }; },
+    async downloadAttachment(path) { calls.push({ method: "downloadAttachment", path }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
   };
 }

@@ -29,6 +29,17 @@ export async function handleBusinessApiRequest(event, deps) {
       : deps.createAuthRepository();
 
     const result = await router.dispatchWithRepository({ method, path, event, repository });
+    if (result.binary) {
+      return {
+        statusCode: result.statusCode ?? 200,
+        headers: {
+          "Content-Type": result.binary.mime,
+          "X-Request-Id": requestId,
+        },
+        body: result.binary.bytes.toString("base64"),
+        isBase64Encoded: true,
+      };
+    }
     return jsonResponse(result.statusCode ?? 200, result.body, requestId);
   } catch (error) {
     return errorResponse(error, requestId);

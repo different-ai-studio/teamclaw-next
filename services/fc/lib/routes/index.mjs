@@ -10,6 +10,7 @@ import { registerNotifications } from "./notifications.mjs";
 import { registerIdeas } from "./ideas.mjs";
 import { registerShortcuts } from "./shortcuts.mjs";
 import { registerRuntime } from "./runtime.mjs";
+import { registerAttachments } from "./attachments.mjs";
 
 export function registerAllRoutes(router) {
   registerAuth(router);
@@ -24,6 +25,7 @@ export function registerAllRoutes(router) {
   registerIdeas(router);
   registerShortcuts(router);
   registerRuntime(router);
+  registerAttachments(router);
 }
 
-export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas, registerShortcuts, registerRuntime };
+export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas, registerShortcuts, registerRuntime, registerAttachments };

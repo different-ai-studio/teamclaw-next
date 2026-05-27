@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient as defaultCreateClient } from "@supabase/supabase-js";
 import { ApiError } from "./http-utils.mjs";
 
+const ATTACHMENTS_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
@@ -722,6 +723,32 @@ async heartbeat() {
         .update({ device_id: deviceId })
         .eq("actor_id", agentActorId);
       if (error) throw error;
+    },
+
+    async uploadAttachment({ path, mime, bytes }) {
+      const { error } = await supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .upload(path, bytes, { contentType: mime, upsert: true });
+      if (error) throw error;
+      return {
+        path,
+        url: `${supabaseUrl}/storage/v1/object/public/${ATTACHMENTS_BUCKET}/${path}`,
+      };
+    },
+
+    async downloadAttachment(path) {
+      const { data, error } = await supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .download(path);
+      if (error) {
+        const status = Number(error?.status || error?.statusCode || 0);
+        if (status === 404 || error?.message?.includes("not found") || error?.error === "not_found") return null;
+        throw error;
+      }
+      if (!data) return null;
+      const arrayBuffer = await data.arrayBuffer();
+      const mime = data.type || "application/octet-stream";
+      return { mime, bytes: Buffer.from(arrayBuffer) };
     },
   };
 }

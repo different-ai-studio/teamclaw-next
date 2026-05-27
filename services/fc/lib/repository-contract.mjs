@@ -617,6 +617,31 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.equal(activity.kind, "comment");
     assert.equal(activity.actorId, "actor-1");
   });
+
+  test("repository contract: uploadAttachment returns path and url", async () => {
+    const repo = createRepository();
+    const bytes = Buffer.from("hello attachment");
+    const out = await repo.uploadAttachment({ path: "contract/test.txt", mime: "text/plain", bytes });
+    assert.ok(out, "result must be returned");
+    assert.equal(out.path, "contract/test.txt");
+    assert.ok(typeof out.url === "string" && out.url.length > 0, "url must be a non-empty string");
+  });
+
+  test("repository contract: downloadAttachment returns bytes for existing path", async () => {
+    const repo = createRepository();
+    const bytes = Buffer.from("roundtrip content");
+    await repo.uploadAttachment({ path: "contract/roundtrip.txt", mime: "text/plain", bytes });
+    const out = await repo.downloadAttachment("contract/roundtrip.txt");
+    assert.ok(out, "download result must be returned");
+    assert.ok(out.bytes instanceof Buffer, "bytes must be a Buffer");
+    assert.ok(typeof out.mime === "string", "mime must be a string");
+  });
+
+  test("repository contract: downloadAttachment returns null for missing path", async () => {
+    const repo = createRepository();
+    const out = await repo.downloadAttachment("contract/does-not-exist-xyz.bin");
+    assert.equal(out, null);
+  });
 }
 
 export function runAuthRepositoryContract({ test, assert, createAuthRepository }) {

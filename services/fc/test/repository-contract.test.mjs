@@ -75,6 +75,8 @@ function contractRepo() {
   const messageStore = fixture("message-list.json").items.slice();
   const sessionStore = fixture("session-list.json").items.slice().map(s => ({ ...s, participants: [{ sessionId: s.id, actorId: "actor-1", role: "owner", joinedAt: s.createdAt }] }));
   const gatewayBindings = {};
+  const attachmentStore = {};
+  const runtimeStore = {};
   return {
     async listSessions() {
       return fixture("session-list.json").items;
@@ -415,6 +417,34 @@ function contractRepo() {
     async listTeamPermissions(teamId) {
       return permissionStore;
     },
+    async uploadAttachment({ path, mime, bytes }) {
+      attachmentStore[path] = { mime, bytes };
+      return { path, url: `https://supabase.example.com/storage/v1/object/public/attachments/${path}` };
+    },
+    async downloadAttachment(path) {
+      const entry = attachmentStore[path];
+      if (!entry) return null;
+      return { mime: entry.mime, bytes: entry.bytes };
+    },
+    async upsertAgentRuntime(body) {
+      const id = body.id ?? "runtime-new";
+      runtimeStore[id] = body;
+      return { id };
+    },
+    async getAgentRuntime({ sessionId, runtimeId, backendSessionId }) {
+      const entry = Object.values(runtimeStore).find(r =>
+        r.sessionId === sessionId &&
+        (runtimeId === undefined || r.runtimeId === runtimeId) &&
+        (backendSessionId === undefined || r.backendSessionId === backendSessionId)
+      );
+      return entry ? { ...entry, id: entry.id ?? "runtime-1" } : null;
+    },
+    async getLatestAgentRuntime({ agentId, sessionId }) {
+      return null;
+    },
+    async updateRuntimeCursor(runtimeRowId, { lastProcessedMessageId }) {},
+    async ensureAgentTypes({ supportedTypes, defaultAgentType }) {},
+    async setAgentDeviceId(agentActorId, { deviceId }) {},
   };
 }
 
