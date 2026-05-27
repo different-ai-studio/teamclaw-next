@@ -423,10 +423,23 @@ impl Backend for CloudApiBackend {
 
     async fn upsert_session_participant(
         &self,
-        _session_id: &str,
-        _actor_id: &str,
+        session_id: &str,
+        actor_id: &str,
     ) -> BackendResult<()> {
-        self.unsupported("upsert_session_participant")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "actorId")]
+            actor_id: &'a str,
+            role: &'a str,
+        }
+        let _: serde_json::Value = self
+            .post(
+                &format!("/v1/sessions/{session_id}/participants"),
+                &Body { actor_id, role: "member" },
+                None,
+            )
+            .await?;
+        Ok(())
     }
 
     async fn create_cron_session(
@@ -599,6 +612,24 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn upsert_session_participant_posts_to_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/sessions/session-1/participants"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "actorId": "actor-2", "role": "member"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        backend
+            .upsert_session_participant("session-1", "actor-2")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
