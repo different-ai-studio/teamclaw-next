@@ -15,7 +15,6 @@
     "uiVariant": "default"
   },
   "features": {
-    "advancedMode": true,
     "teamMode": true,
     "updater": true,
     "channels": {

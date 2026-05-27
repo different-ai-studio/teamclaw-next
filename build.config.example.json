@@ -22,7 +22,6 @@
     }
   },
   "features": {
-    "advancedMode": true,
     "teamMode": false,
     "updater": true,
     "channels": {

@@ -48,7 +48,7 @@ function RuntimeCard({ runtime, liveState }: { runtime: DaemonRuntime; liveState
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium">{runtime.agentName}</p>
+            <p className="text-[13px] font-medium">{runtime.agentName}</p>
             <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium', statusClass(runtime.status))}>
               {runtime.status}
             </span>
@@ -122,7 +122,7 @@ export function DaemonRuntimesSection() {
           iconColor="text-emerald-500"
         />
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.daemonRuntimes.noTeam', 'Join or create a team before viewing daemon runtimes.')}
           </p>
         </SettingCard>
@@ -150,8 +150,8 @@ export function DaemonRuntimesSection() {
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div>
-              <p className="text-sm font-medium text-destructive">{t('common.error', 'Error')}</p>
-              <p className="mt-1 break-words text-sm text-destructive/80">{error}</p>
+              <p className="text-[13px] font-medium text-destructive">{t('common.error', 'Error')}</p>
+              <p className="mt-1 break-words text-[13px] text-destructive/80">{error}</p>
             </div>
           </div>
         </SettingCard>
@@ -163,7 +163,7 @@ export function DaemonRuntimesSection() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : runtimes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('settings.daemonRuntimes.empty', 'No runtimes reported yet.')}</p>
+          <p className="text-[13px] text-muted-foreground">{t('settings.daemonRuntimes.empty', 'No runtimes reported yet.')}</p>
         ) : (
           <div className="space-y-2">
             {runtimes.map((runtime) => (

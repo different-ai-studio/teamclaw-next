@@ -25,6 +25,7 @@ import {
   FolderOpen,
   Activity,
   Bot,
+  Laptop,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -32,9 +33,7 @@ import { Button } from '@/components/ui/button'
 import { useAppVersion } from '@/lib/version'
 import { useUpdaterStore } from '@/stores/updater'
 import { buildConfig, hasAnyChannel } from '@/lib/build-config'
-import { useTeamModeStore } from '@/stores/team-mode'
 import { useUIStore, type SettingsSection } from '@/stores/ui'
-import { TeamRankingCard } from './TeamRankingCard'
 import { SettingsSectionBody } from './section-registry'
 
 interface SettingsProps {
@@ -136,10 +135,7 @@ export function Settings(_props?: SettingsProps) {
   const { t } = useTranslation()
   const settingsInitialSection = useUIStore(s => s.settingsInitialSection)
   const [activeView, setActiveView] = React.useState<SettingsSection>(settingsInitialSection ?? 'general')
-  const [daemonExpanded, setDaemonExpanded] = React.useState(false)
-  const [localAgentExpanded, setLocalAgentExpanded] = React.useState(false)
   const appVersion = useAppVersion()
-  const teamMode = useTeamModeStore(s => s.teamMode)
 
   // Filter sections based on build config feature flags
   const filteredPrimarySections = primarySections
@@ -152,24 +148,22 @@ export function Settings(_props?: SettingsProps) {
     []
   )
 
-  // Check if current view is a Daemon section
-  const isDaemonSection = filteredDaemonSections.some(s => s.id === activeView)
-  // Check if current view is a Local Agent section
-  const isLocalAgentSection = filteredLocalAgentSections.some(s => s.id === activeView)
+  type AccordionGroup = 'client' | 'daemon' | 'localAgent'
+  const groupForSection = (id: SettingsSection): AccordionGroup => {
+    if (filteredDaemonSections.some(s => s.id === id)) return 'daemon'
+    if (filteredLocalAgentSections.some(s => s.id === id)) return 'localAgent'
+    return 'client'
+  }
+  const [expandedGroup, setExpandedGroup] = React.useState<AccordionGroup | null>(() => groupForSection(activeView))
+  const toggleGroup = (group: AccordionGroup) => {
+    setExpandedGroup(prev => (prev === group ? null : group))
+  }
 
-  // Auto-expand Daemon when a nested section is active
+  // Keep accordion in sync when active section changes (e.g. via deep link)
   React.useEffect(() => {
-    if (isDaemonSection) {
-      setDaemonExpanded(true)
-    }
-  }, [isDaemonSection])
-
-  // Auto-expand Local Agent when a nested section is active
-  React.useEffect(() => {
-    if (isLocalAgentSection) {
-      setLocalAgentExpanded(true)
-    }
-  }, [isLocalAgentSection])
+    setExpandedGroup(groupForSection(activeView))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView])
 
   return (
     <div className="flex h-full bg-background text-foreground">
@@ -177,133 +171,69 @@ export function Settings(_props?: SettingsProps) {
       <div className="flex w-60 flex-col border-r border-border bg-background">
         <ScrollArea className="flex-1 overflow-hidden py-3">
           <div className="space-y-0.5 px-2">
-            {filteredPrimarySections.map((section) => {
-              const Icon = section.icon
-              const isActive = activeView === section.id
+            {([
+              { id: 'client', label: 'Client', labelKey: 'settings.nav.client', icon: Laptop, sections: filteredPrimarySections, testid: 'client-subnav' },
+              { id: 'daemon', label: 'Daemon', labelKey: 'settings.nav.daemon', icon: Server, sections: filteredDaemonSections, testid: 'daemon-subnav' },
+              { id: 'localAgent', label: 'Local Agent', labelKey: 'settings.nav.localAgent', icon: SlidersHorizontal, sections: filteredLocalAgentSections, testid: 'local-agent-subnav' },
+            ] as const).map((group) => {
+              const GroupIcon = group.icon
+              const isExpanded = expandedGroup === group.id
               return (
-                <button
-                  key={section.id}
-                  onClick={() => {
-                    setActiveView(section.id)
-                    setDaemonExpanded(false)
-                    setLocalAgentExpanded(false)
-                  }}
-                  className={cn(
-                    'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
-                    isActive
-                      ? 'bg-selected text-foreground font-semibold'
-                      : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
-                  )}
-                >
-                  <Icon className={cn("h-4 w-4 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
-                  {t(section.labelKey, section.label)}
-                </button>
+                <React.Fragment key={group.id}>
+                  <button
+                    onClick={() => toggleGroup(group.id)}
+                    className={cn(
+                      'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
+                      isExpanded
+                        ? 'bg-selected text-foreground font-semibold'
+                        : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
+                    )}
+                  >
+                    <GroupIcon className={cn(
+                      "h-4 w-4 transition-colors",
+                      isExpanded ? 'text-foreground' : 'text-muted-foreground'
+                    )} />
+                    {t(group.labelKey, group.label)}
+                    <ChevronDown className={cn(
+                      "h-4 w-4 ml-auto transition-transform duration-200",
+                      isExpanded ? "rotate-180" : ""
+                    )} />
+                  </button>
+                  <div
+                    className={cn(
+                      "grid transition-[grid-template-rows] duration-200 ease-out",
+                      isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    )}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="mt-1 space-y-0.5 pl-6" data-testid={group.testid}>
+                        {group.sections.map((section) => {
+                          const Icon = section.icon
+                          const isActive = activeView === section.id
+                          return (
+                            <button
+                              key={section.id}
+                              onClick={() => setActiveView(section.id)}
+                              className={cn(
+                                'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition-colors',
+                                isActive
+                                  ? 'bg-selected text-foreground font-semibold'
+                                  : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
+                              )}
+                            >
+                              <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
+                              <span>{t(section.labelKey, section.label)}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </React.Fragment>
               )
             })}
-
-            {/* Divider */}
-            <div className="!my-2 mx-3 border-t border-border-soft" />
-
-            {/* Daemon category */}
-            <button
-              onClick={() => setDaemonExpanded(!daemonExpanded)}
-              className={cn(
-                'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
-                (daemonExpanded || isDaemonSection)
-                  ? 'bg-selected text-foreground font-semibold'
-                  : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
-              )}
-            >
-              <Server className={cn(
-                "h-4 w-4 transition-colors",
-                (daemonExpanded || isDaemonSection) ? 'text-foreground' : 'text-muted-foreground'
-              )} />
-              {t('settings.nav.daemon', 'Daemon')}
-              <ChevronDown className={cn(
-                "h-4 w-4 ml-auto transition-transform",
-                daemonExpanded ? "rotate-180" : ""
-              )} />
-            </button>
-
-            {/* Daemon sub-sections */}
-            {daemonExpanded && (
-              <div className="mt-1 space-y-0.5 pl-6" data-testid="daemon-subnav">
-                {filteredDaemonSections.map((section) => {
-                  const Icon = section.icon
-                  const isActive = activeView === section.id
-                  return (
-                    <button
-                      key={section.id}
-                      onClick={() => setActiveView(section.id)}
-                      className={cn(
-                        'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition-colors',
-                        isActive
-                          ? 'bg-selected text-foreground font-semibold'
-                          : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
-                      )}
-                    >
-                      <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
-                      <span>{t(section.labelKey, section.label)}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Local Agent category */}
-            <button
-              onClick={() => setLocalAgentExpanded(!localAgentExpanded)}
-              className={cn(
-                'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
-                (localAgentExpanded || isLocalAgentSection)
-                  ? 'bg-selected text-foreground font-semibold'
-                  : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
-              )}
-            >
-              <SlidersHorizontal className={cn(
-                "h-4 w-4 transition-colors",
-                (localAgentExpanded || isLocalAgentSection) ? 'text-foreground' : 'text-muted-foreground'
-              )} />
-              {t('settings.nav.localAgent', 'Local Agent')}
-              <ChevronDown className={cn(
-                "h-4 w-4 ml-auto transition-transform",
-                localAgentExpanded ? "rotate-180" : ""
-              )} />
-            </button>
-
-            {/* Local Agent sub-sections */}
-            {localAgentExpanded && (
-              <div className="mt-1 space-y-0.5 pl-6" data-testid="local-agent-subnav">
-                {filteredLocalAgentSections.map((section) => {
-                  const Icon = section.icon
-                  const isActive = activeView === section.id
-                  return (
-                    <button
-                      key={section.id}
-                      onClick={() => setActiveView(section.id)}
-                      className={cn(
-                        'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition-colors',
-                        isActive
-                          ? 'bg-selected text-foreground font-semibold'
-                          : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
-                      )}
-                    >
-                      <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
-                      <span>{t(section.labelKey, section.label)}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
           </div>
         </ScrollArea>
-
-        {/* Team Ranking Card */}
-        {teamMode && (
-          <div className="px-3 pb-2">
-            <TeamRankingCard onClick={() => setActiveView('leaderboard')} />
-          </div>
-        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-border px-4 py-3">

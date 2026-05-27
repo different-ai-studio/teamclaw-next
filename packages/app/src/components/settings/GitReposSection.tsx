@@ -43,7 +43,7 @@ export const GitReposSection = React.memo(function GitReposSection() {
       <SettingCard>
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Checking git availability...</span>
+          <span className="text-[13px]">Checking git availability...</span>
         </div>
       </SettingCard>
     )
@@ -57,7 +57,7 @@ export const GitReposSection = React.memo(function GitReposSection() {
             <AlertCircle className="h-4 w-4 text-yellow-500" />
             Git Not Available
           </h4>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             Git CLI is not installed or not in PATH. Install git to enable repository management:
           </p>
           <div className="bg-muted rounded-md p-3 font-mono text-xs">
@@ -106,14 +106,14 @@ export const GitReposSection = React.memo(function GitReposSection() {
       {/* Personal Skills Repo */}
       <SettingCard>
         <div className="space-y-3">
-          <label className="text-sm font-medium">{t('settings.git.personalSkills', 'Personal Skills Repository')}</label>
+          <label className="text-[13px] font-medium">{t('settings.git.personalSkills', 'Personal Skills Repository')}</label>
           <div className="flex gap-2">
             <input
               type="text"
               placeholder={t('settings.git.personalSkillsPlaceholder', 'https://github.com/user/my-skills.git')}
               value={personalSkillsInput}
               onChange={(e) => setPersonalSkillsInput(e.target.value)}
-              className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+              className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-[13px]"
             />
             <Button
               size="sm"
@@ -131,14 +131,14 @@ export const GitReposSection = React.memo(function GitReposSection() {
       {/* Personal Documents Repo */}
       <SettingCard>
         <div className="space-y-3">
-          <label className="text-sm font-medium">{t('settings.git.personalDocs', 'Personal Documents Repository')}</label>
+          <label className="text-[13px] font-medium">{t('settings.git.personalDocs', 'Personal Documents Repository')}</label>
           <div className="flex gap-2">
             <input
               type="text"
               placeholder={t('settings.git.personalDocsPlaceholder', 'https://github.com/user/my-documents.git')}
               value={personalDocsInput}
               onChange={(e) => setPersonalDocsInput(e.target.value)}
-              className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+              className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-[13px]"
             />
             <Button
               size="sm"
@@ -158,7 +158,7 @@ export const GitReposSection = React.memo(function GitReposSection() {
         <SettingCard>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium">{t('settings.git.managedRepos', 'Managed Repositories')}</h4>
+              <h4 className="text-[13px] font-medium">{t('settings.git.managedRepos', 'Managed Repositories')}</h4>
               <Button
                 size="sm"
                 variant="outline"
@@ -177,7 +177,7 @@ export const GitReposSection = React.memo(function GitReposSection() {
                     {getSyncStatusIcon(repo.syncStatus)}
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium truncate">{repo.id}</span>
+                        <span className="text-[13px] font-medium truncate">{repo.id}</span>
                         <span className={cn(
                           "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
                           repo.source === 'personal'

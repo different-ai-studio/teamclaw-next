@@ -12,8 +12,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Play,
-  Square,
   RefreshCw,
   X,
   ChevronDown,
@@ -198,23 +196,23 @@ export function KookChannel() {
 
   return (
     <>
-      <SettingCard>
+      <SettingCard className="!p-3">
         {/* Header Row - always visible */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => setKookExpanded(!kookExpanded)}
-            className="flex items-center gap-4 flex-1 text-left"
+            className="flex items-center gap-3 flex-1 text-left"
           >
-            <div className="rounded-lg p-2 bg-blue-100 dark:bg-blue-900/50">
-              <KookIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <div className="rounded-md p-1.5 bg-blue-100 dark:bg-blue-900/50">
+              <KookIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-medium">{t('settings.channels.kook.gateway', 'KOOK Gateway')}</span>
+                <span className="text-[13px] font-medium">{t('settings.channels.kook.gateway', 'KOOK Gateway')}</span>
                 <StatusBadge status={kookGatewayStatus.status} />
               </div>
               {kookGatewayStatus.botUsername && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   @{kookGatewayStatus.botUsername}
                 </p>
               )}
@@ -228,23 +226,30 @@ export function KookChannel() {
               <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             )}
           </button>
-          <div className="flex items-center gap-2 ml-3">
+          <div className="flex items-center gap-1.5 ml-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setKookWizardOpen(true)}
-              className="h-8 w-8 p-0"
+              className="h-7 w-7 p-0"
               title={t('settings.channels.startSetup', 'Start Setup')}
             >
               <BookOpen className="h-4 w-4 text-muted-foreground" />
             </Button>
             <ToggleSwitch
               enabled={kookLocalConfig.enabled}
-              onChange={(enabled) => {
+              onChange={async (enabled) => {
                 updateKookLocalConfig({ enabled })
+                if (enabled && !kookIsRunning) {
+                  await saveKookConfig({ ...kookLocalConfig, enabled })
+                  await startKookGateway()
+                } else if (!enabled && kookIsRunning) {
+                  await stopKookGateway()
+                }
               }}
+              disabled={kookIsLoading || kookIsConnecting}
             />
-            {kookHasChanges && kookIsRunning ? (
+            {kookHasChanges && kookIsRunning && (
               <Button
                 variant="default"
                 size="sm"
@@ -255,46 +260,14 @@ export function KookChannel() {
                   setKookHasChanges(false)
                 }}
                 disabled={kookIsLoading || kookIsConnecting}
-                className="gap-2"
+                className="h-7 gap-1.5 px-2.5 text-[12px]"
               >
                 {kookIsLoading || kookIsConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <>
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.channels.restart', 'Restart')}
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                variant={kookIsRunning ? "destructive" : "default"}
-                size="sm"
-                onClick={async () => {
-                  if (kookIsRunning) {
-                    await stopKookGateway()
-                  } else {
-                    await saveKookConfig(kookLocalConfig)
-                    await startKookGateway()
-                  }
-                }}
-                disabled={kookIsLoading || kookIsConnecting || (!kookIsRunning && (!kookLocalConfig.enabled || !kookLocalConfig.token))}
-                className="gap-2"
-              >
-                {kookIsLoading || kookIsConnecting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {kookIsConnecting ? t('settings.channels.connecting', 'Connecting...') : t('common.loading', 'Loading...')}
-                  </>
-                ) : kookIsRunning ? (
-                  <>
-                    <Square className="h-4 w-4" />
-                    {t('settings.channels.stop', 'Stop')}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    {t('settings.channels.start', 'Start')}
                   </>
                 )}
               </Button>
@@ -310,7 +283,7 @@ export function KookChannel() {
               <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                 <KookIcon className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{t('settings.channels.kook.noToken', 'No KOOK bot token configured')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.kook.noToken', 'No KOOK bot token configured')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.kook.noTokenHint', 'Use the setup wizard to configure your KOOK bot.')}</p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => setKookWizardOpen(true)}>
@@ -321,7 +294,7 @@ export function KookChannel() {
 
             {/* Bot Token */}
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Key className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.kook.botToken', 'Bot Token')}
               </label>
@@ -354,7 +327,7 @@ export function KookChannel() {
               </div>
               {kookTestResult && (
                 <div className={cn(
-                  "flex items-center gap-2 text-sm",
+                  "flex items-center gap-2 text-[13px]",
                   kookTestResult.success ? "text-emerald-600" : "text-red-600"
                 )}>
                   {kookTestResult.success ? (
@@ -376,7 +349,7 @@ export function KookChannel() {
 
             {/* DM Configuration */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium flex items-center gap-2">
+              <h4 className="text-[13px] font-medium flex items-center gap-2">
                 <Users className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.directMessages', 'Direct Messages')}
               </h4>
@@ -384,7 +357,7 @@ export function KookChannel() {
               <div className="pl-6 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-sm font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
+                    <label className="text-[13px] font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
                     <p className="text-xs text-muted-foreground">
                       {t('settings.channels.enableDMsDesc', 'Allow users to message the bot directly')}
                     </p>
@@ -402,7 +375,7 @@ export function KookChannel() {
                 {kookLocalConfig.dm.enabled && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
+                      <label className="text-[13px] font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
                       <Select
                         value={kookLocalConfig.dm.policy}
                         onValueChange={(policy: 'open' | 'allowlist') => {
@@ -423,7 +396,7 @@ export function KookChannel() {
 
                     {kookLocalConfig.dm.policy === 'allowlist' && (
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
+                        <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
                         <Input
                           value={kookLocalConfig.dm.allowFrom.join(', ')}
                           onChange={(e) => {
@@ -450,7 +423,7 @@ export function KookChannel() {
             {/* Server Settings */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium flex items-center gap-2">
+                <h4 className="text-[13px] font-medium flex items-center gap-2">
                   <Server className="h-4 w-4 text-muted-foreground" />
                   {t('settings.channels.serverSettings', 'Server Settings')}
                 </h4>
@@ -472,7 +445,7 @@ export function KookChannel() {
                 {Object.keys(kookLocalConfig.guilds).length === 0 ? (
                   <div className="text-center py-4 text-muted-foreground">
                     <Server className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
+                    <p className="text-[13px] font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
                     <p className="text-xs">{t('settings.channels.noServersHint', 'Add a server to allow the bot to respond in server channels')}</p>
                   </div>
                 ) : (
@@ -493,7 +466,7 @@ export function KookChannel() {
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
                             <Hash className="h-4 w-4 text-orange-500" />
-                            <span className="text-sm font-medium">{guild.slug || guildId}</span>
+                            <span className="text-[13px] font-medium">{guild.slug || guildId}</span>
                             {guildId === '*' && (
                               <span className="text-xs bg-muted px-2 py-0.5 rounded">{t('common.default', 'Default')}</span>
                             )}

@@ -554,7 +554,7 @@ export const LLMSection = React.memo(function LLMSection() {
               <Shield className="h-4.5 w-4.5" />
             </div>
             <div className="flex-1">
-              <p className="text-sm font-medium">{t('settings.llm.managedByTeam', 'Managed by team')}</p>
+              <p className="text-[13px] font-medium">{t('settings.llm.managedByTeam', 'Managed by team')}</p>
               {hasMultipleModels ? (
                 <div className="flex items-center gap-1.5 mt-2">
                   {teamModelOptions.map((option) => {
@@ -642,7 +642,7 @@ export const LLMSection = React.memo(function LLMSection() {
 
       {/* Provider List */}
       {!providersLoading || providers.length > 0 ? (
-        <div className="space-y-3">
+        <div className="space-y-1.5">
           {visibleProviders.map((p) => {
             const isConnected = p.configured
             const isExpanded = selectedProviderId === p.id
@@ -650,16 +650,16 @@ export const LLMSection = React.memo(function LLMSection() {
 
             return (
               <SettingCard key={p.id} className={cn(
-                "cursor-pointer hover:border-primary/30 transition-all",
+                "!p-3 cursor-pointer hover:border-primary/30 transition-all",
                 isExpanded && "border-primary/40"
               )}>
                 <div
                   className="flex items-center justify-between"
                   onClick={() => handleProviderClick(p.id, isConnected, p.name)}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     <div className={cn(
-                      "h-9 w-9 rounded-lg flex items-center justify-center text-sm font-medium",
+                      "h-7 w-7 rounded-md flex items-center justify-center text-[12px] font-medium",
                       isConnected
                         ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
                         : "bg-muted text-muted-foreground"
@@ -668,7 +668,7 @@ export const LLMSection = React.memo(function LLMSection() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium">{p.name}</p>
+                        <p className="text-[13px] font-medium">{p.name}</p>
                         {isCustomProvider(p.id) && (
                           <span className="inline-flex items-center rounded-full bg-purple-100 dark:bg-purple-900/30 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-400">
                             {t('settings.llm.custom', 'Custom')}
@@ -771,7 +771,7 @@ export const LLMSection = React.memo(function LLMSection() {
                   <div className="mt-4 pt-4 border-t space-y-1.5">
                     <p className="text-xs font-medium text-muted-foreground mb-2">{t('settings.llm.availableModels', 'Available Models')}</p>
                     {models.map((m) => (
-                      <div key={m.id} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 text-sm">
+                      <div key={m.id} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 text-[13px]">
                         <Zap className="h-3.5 w-3.5 text-muted-foreground" />
                         <span>{m.name}</span>
                         <span className="text-xs text-muted-foreground ml-auto">{m.id}</span>
@@ -799,7 +799,7 @@ export const LLMSection = React.memo(function LLMSection() {
             <SettingCard>
               <div className="text-center py-6 text-muted-foreground">
                 <Plug className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">{t('settings.llm.noProviders', 'No providers available')}</p>
+                <p className="text-[13px]">{t('settings.llm.noProviders', 'No providers available')}</p>
                 <p className="text-xs mt-1">{t('settings.llm.noProvidersHint', 'Make sure OpenCode is running and connected.')}</p>
               </div>
             </SettingCard>
@@ -834,7 +834,7 @@ export const LLMSection = React.memo(function LLMSection() {
             /* OAuth Device Flow — waiting for user to complete in browser */
             <div className="space-y-4 py-2">
               <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
-                <p className="text-sm font-medium">{oauthInstructions}</p>
+                <p className="text-[13px] font-medium">{oauthInstructions}</p>
                 {/[A-Z0-9]{4}-[A-Z0-9]{4}/.test(oauthInstructions) && (
                   <Button variant="outline" size="sm" className="gap-2" onClick={handleCopyOAuthCode}>
                     {oauthCodeCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
@@ -844,7 +844,7 @@ export const LLMSection = React.memo(function LLMSection() {
               </div>
               {oauthMethodType === 'code' ? (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">{t('settings.llm.authorizationCode', 'Authorization code')}</label>
+                  <label className="text-[13px] font-medium">{t('settings.llm.authorizationCode', 'Authorization code')}</label>
                   <Input
                     value={oauthCodeInput}
                     onChange={(e) => setOAuthCodeInput(e.target.value)}
@@ -901,7 +901,7 @@ export const LLMSection = React.memo(function LLMSection() {
               )}
               {/* API Key input */}
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
+                <label className="text-[13px] font-medium flex items-center gap-2">
                   <Key className="h-4 w-4 text-muted-foreground" />
                   {t('settings.llm.apiKey', 'API Key')}
                 </label>
@@ -1003,7 +1003,7 @@ export const LLMSection = React.memo(function LLMSection() {
           </DialogHeader>
           <div className="space-y-4 py-2 overflow-y-auto flex-1">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.llm.providerName', 'Provider Name')}</label>
+              <label className="text-[13px] font-medium">{t('settings.llm.providerName', 'Provider Name')}</label>
               <Input
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
@@ -1012,7 +1012,7 @@ export const LLMSection = React.memo(function LLMSection() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.llm.baseUrl', 'Base URL')}</label>
+              <label className="text-[13px] font-medium">{t('settings.llm.baseUrl', 'Base URL')}</label>
               <Input
                 value={customBaseURL}
                 onChange={(e) => setCustomBaseURL(e.target.value)}
@@ -1025,7 +1025,7 @@ export const LLMSection = React.memo(function LLMSection() {
             </div>
             {!editingProviderId && (
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
+                <label className="text-[13px] font-medium flex items-center gap-2">
                   <Key className="h-4 w-4 text-muted-foreground" />
                   {t('settings.llm.apiKey', 'API Key')}
                 </label>
@@ -1045,7 +1045,7 @@ export const LLMSection = React.memo(function LLMSection() {
             {/* Models Section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">{t('settings.llm.models', 'Models')}</label>
+                <label className="text-[13px] font-medium">{t('settings.llm.models', 'Models')}</label>
                 <Button
                   type="button"
                   variant="ghost"
@@ -1084,7 +1084,7 @@ export const LLMSection = React.memo(function LLMSection() {
                         value={model.modelId}
                         onChange={(e) => handleModelChange(index, 'modelId', e.target.value)}
                         placeholder={t('settings.llm.modelIdPlaceholder', 'e.g. gpt-4o')}
-                        className="h-9"
+                        className="h-8"
                       />
                     </div>
 
@@ -1094,7 +1094,7 @@ export const LLMSection = React.memo(function LLMSection() {
                         value={model.modelName}
                         onChange={(e) => handleModelChange(index, 'modelName', e.target.value)}
                         placeholder={t('settings.llm.modelNamePlaceholder', 'e.g. GPT-4o')}
-                        className="h-9"
+                        className="h-8"
                       />
                     </div>
 
@@ -1106,7 +1106,7 @@ export const LLMSection = React.memo(function LLMSection() {
                           value={model.contextLimit}
                           onChange={(e) => handleModelChange(index, 'contextLimit', e.target.value)}
                           placeholder={t('settings.llm.contextLimitPlaceholder', 'e.g. 128000')}
-                          className="h-9"
+                          className="h-8"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1116,7 +1116,7 @@ export const LLMSection = React.memo(function LLMSection() {
                           value={model.outputLimit}
                           onChange={(e) => handleModelChange(index, 'outputLimit', e.target.value)}
                           placeholder={t('settings.llm.outputLimitPlaceholder', 'e.g. 4096')}
-                          className="h-9"
+                          className="h-8"
                         />
                       </div>
                     </div>

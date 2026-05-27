@@ -528,9 +528,9 @@ ${skillContent.trim()}`
 
   const renderInstallLocationField = () => (
     <div className="space-y-2">
-      <label className="text-sm font-medium">{t('settings.skills.installLocation', 'Install Location')}</label>
+      <label className="text-[13px] font-medium">{t('settings.skills.installLocation', 'Install Location')}</label>
       <Select value={installLocation} onValueChange={(v) => setInstallLocation(v as 'workspace' | 'global')}>
-        <SelectTrigger className="h-9">
+        <SelectTrigger className="h-8">
           <SelectValue>
             {installLocation === 'workspace'
               ? t('settings.skills.locationWorkspace', 'Workspace')
@@ -641,7 +641,7 @@ ${skillContent.trim()}`
               placeholder={t('settings.skills.searchPlaceholder', 'Search skills...')}
               value={effectiveSearchQuery}
               onChange={(e) => handleEmbeddedSearchChange(e.target.value)}
-              className="pl-9 h-9"
+              className="pl-9 h-8"
             />
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -690,7 +690,7 @@ ${skillContent.trim()}`
                 onClick={() => switchTab('installed')}
                 onKeyDown={handleTabKeyDown}
                 className={cn(
-                  "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors",
+                  "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors",
                   activeTab === 'installed'
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -710,7 +710,7 @@ ${skillContent.trim()}`
                 onClick={() => switchTab('marketplace')}
                 onKeyDown={handleTabKeyDown}
                 className={cn(
-                  "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors",
+                  "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors",
                   activeTab === 'marketplace'
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -725,7 +725,7 @@ ${skillContent.trim()}`
             <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
               <span>{t('settings.skills.sourceLabel', 'Source')}</span>
               <Select value={marketplaceSource} onValueChange={(value) => switchMarketplaceSource(value as 'clawhub' | 'skillssh')}>
-                <SelectTrigger className="h-8 min-w-[11rem] rounded-md border-border/70 bg-background px-2.5 text-sm shadow-none">
+                <SelectTrigger className="h-8 min-w-[11rem] rounded-md border-border/70 bg-background px-2.5 text-[13px] shadow-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -790,7 +790,7 @@ ${skillContent.trim()}`
           <button
             onClick={() => switchTab('installed')}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors",
+              "flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium transition-colors",
               activeTab === 'installed'
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50"
@@ -805,7 +805,7 @@ ${skillContent.trim()}`
           <button
             onClick={() => switchTab('marketplace')}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors",
+              "flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium transition-colors",
               activeTab === 'marketplace'
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50"
@@ -855,11 +855,11 @@ ${skillContent.trim()}`
               <p className="font-medium text-amber-900 dark:text-amber-100">
                 {t('settings.skills.configChanged', 'Skill Permission Changed')}
               </p>
-              <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+              <p className="text-[13px] text-amber-700 dark:text-amber-300 mt-1">
                 {t('settings.skills.restartToApply', 'Restart OpenCode to apply the new skill permission configuration.')}
               </p>
               {restartError && (
-                <p className="text-sm text-red-600 dark:text-red-400 mt-2">
+                <p className="text-[13px] text-red-600 dark:text-red-400 mt-2">
                   {t('common.error', 'Error')}: {restartError}
                 </p>
               )}
@@ -894,11 +894,11 @@ ${skillContent.trim()}`
               <p className="font-medium text-sky-900 dark:text-sky-100">
                 {t('settings.skills.runtimeChanged', 'Detected Skill Changes')}
               </p>
-              <p className="text-sm text-sky-700 dark:text-sky-300 mt-1">
+              <p className="text-[13px] text-sky-700 dark:text-sky-300 mt-1">
                 {t('settings.skills.restartToLoadNewSkills', 'New or updated skills were detected. Restart OpenCode to load them in the current runtime.')}
               </p>
               {restartError && (
-                <p className="text-sm text-red-600 dark:text-red-400 mt-2">
+                <p className="text-[13px] text-red-600 dark:text-red-400 mt-2">
                   {t('common.error', 'Error')}: {restartError}
                 </p>
               )}
@@ -926,7 +926,7 @@ ${skillContent.trim()}`
       )}
 
       {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-[13px] text-destructive">
           {error}
         </div>
       )}
@@ -937,7 +937,7 @@ ${skillContent.trim()}`
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <Shield className="h-5 w-5 text-muted-foreground shrink-0" />
             <div className="min-w-0">
-              <p className="text-sm font-medium">{t('settings.skills.defaultPermission', 'Default Permission')}</p>
+              <p className="text-[13px] font-medium">{t('settings.skills.defaultPermission', 'Default Permission')}</p>
               <p className="text-xs text-muted-foreground">{t('settings.skills.defaultPermissionHint', 'Controls the wildcard (*) rule for all skills without a specific override')}</p>
             </div>
           </div>
@@ -994,7 +994,7 @@ ${skillContent.trim()}`
             <div className="text-center py-6 text-muted-foreground">
               <Sparkles className="h-10 w-10 mx-auto mb-3 opacity-50" />
               <p className="font-medium">{t('settings.skills.noSkills', 'No skills yet')}</p>
-              <p className="text-sm">{t('settings.skills.noSkillsHint', 'Create your first skill to enhance AI capabilities')}</p>
+              <p className="text-[13px]">{t('settings.skills.noSkillsHint', 'Create your first skill to enhance AI capabilities')}</p>
             </div>
           </SettingCard>
         ) : filteredSkills.length === 0 ? (
@@ -1002,7 +1002,7 @@ ${skillContent.trim()}`
             <div className="text-center py-6 text-muted-foreground">
               <Search className="h-10 w-10 mx-auto mb-3 opacity-50" />
               <p className="font-medium">{t('settings.skills.noMatchingSkills', 'No matching skills')}</p>
-              <p className="text-sm">{t('settings.skills.noMatchingSkillsHint', 'Try a different search term')}</p>
+              <p className="text-[13px]">{t('settings.skills.noMatchingSkillsHint', 'Try a different search term')}</p>
             </div>
           </SettingCard>
         ) : (
@@ -1172,7 +1172,7 @@ ${skillContent.trim()}`
                           {skill.invocationName}
                         </p>
                       )}
-                      <p className={cn("mt-2 text-sm text-muted-foreground line-clamp-2", embeddedConsole && "line-clamp-2 leading-6")}>
+                      <p className={cn("mt-2 text-[13px] text-muted-foreground line-clamp-2", embeddedConsole && "line-clamp-2 leading-6")}>
                         {skill.content.split('\n').slice(1).join(' ').slice(0, 150)}...
                       </p>
                       <div className={cn("mt-3 flex flex-wrap items-center gap-1.5", embeddedConsole && "mt-3 border-t border-border/60 pt-2.5")}>
@@ -1327,7 +1327,7 @@ ${skillContent.trim()}`
                 {renderInstallLocationField()}
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">{t('settings.skills.name', 'Skill Name')}</label>
+                  <label className="text-[13px] font-medium">{t('settings.skills.name', 'Skill Name')}</label>
                   <Input
                     placeholder={t('settings.skills.namePlaceholder', 'e.g., Git Workflow Guide')}
                     value={skillName}
@@ -1335,9 +1335,9 @@ ${skillContent.trim()}`
                   />
                 </div>
                 <div className="space-y-2 flex-1 min-h-[300px]">
-                  <label className="text-sm font-medium">{t('settings.skills.content', 'Content (Markdown)')}</label>
+                  <label className="text-[13px] font-medium">{t('settings.skills.content', 'Content (Markdown)')}</label>
                   <div className="h-[400px] rounded-md border border-input overflow-hidden">
-                    <Suspense fallback={<div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading editor...</div>}>
+                    <Suspense fallback={<div className="h-full flex items-center justify-center text-muted-foreground text-[13px]">Loading editor...</div>}>
                       <CodeEditor
                         content={skillContent}
                         filename="SKILL.md"
@@ -1355,13 +1355,13 @@ ${skillContent.trim()}`
               <>
                 {renderInstallLocationField()}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">{t('settings.skills.skillArchive', 'Skill archive (.zip)')}</label>
+                  <label className="text-[13px] font-medium">{t('settings.skills.skillArchive', 'Skill archive (.zip)')}</label>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={pickImportZip}>
                       <Upload className="h-4 w-4" />
                       {t('settings.skills.chooseZip', 'Choose ZIP…')}
                     </Button>
-                    <span className="text-sm text-muted-foreground truncate min-w-0 flex-1">
+                    <span className="text-[13px] text-muted-foreground truncate min-w-0 flex-1">
                       {importZipLabel ?? t('settings.skills.noZipSelected', 'No file selected')}
                     </span>
                   </div>
@@ -1382,7 +1382,7 @@ ${skillContent.trim()}`
                       {metadata && (
                         <div className="rounded-lg border border-border overflow-hidden">
                           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 px-4 py-2 border-b border-border">
-                            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                            <h3 className="text-[13px] font-semibold text-foreground flex items-center gap-2">
                               <Package className="h-4 w-4 text-primary" />
                               {t("skillssh.metadata", "Skill Metadata")}
                             </h3>
@@ -1391,10 +1391,10 @@ ${skillContent.trim()}`
                             <tbody className="divide-y divide-border">
                               {Object.entries(metadata).map(([key, value]) => (
                                 <tr key={key} className="hover:bg-muted/30 transition-colors">
-                                  <td className="px-4 py-3 text-sm font-medium text-muted-foreground bg-muted/20 w-1/4">
+                                  <td className="px-4 py-3 text-[13px] font-medium text-muted-foreground bg-muted/20 w-1/4">
                                     {key}
                                   </td>
-                                  <td className="px-4 py-3 text-sm text-foreground">
+                                  <td className="px-4 py-3 text-[13px] text-foreground">
                                     {value}
                                   </td>
                                 </tr>

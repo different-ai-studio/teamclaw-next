@@ -25,7 +25,7 @@ export function ChannelsSection() {
   }, [])
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-2">
       <SectionHeader
         icon={MessageSquare}
         title={t('settings.channels.title', 'Channels')}
@@ -40,7 +40,7 @@ export function ChannelsSection() {
             <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
             <div className="flex-1">
               <p className="font-medium text-red-900 dark:text-red-100">{t('common.error', 'Error')}</p>
-              <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
+              <p className="text-[13px] text-red-700 dark:text-red-300 mt-1">{error}</p>
             </div>
             <Button variant="ghost" size="sm" onClick={clearError}>
               <X className="h-4 w-4" />

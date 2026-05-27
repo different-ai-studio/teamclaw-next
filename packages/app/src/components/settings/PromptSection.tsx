@@ -80,12 +80,12 @@ export const PromptSection = React.memo(function PromptSection() {
 
       <SettingCard>
         <div className="space-y-4">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label className="text-[13px] font-medium flex items-center gap-2">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             {t('settings.prompt.systemPrompt', 'System Prompt')}
           </label>
           <textarea
-            className="flex min-h-[200px] w-full rounded-xl border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+            className="flex min-h-[200px] w-full rounded-xl border border-input bg-background px-4 py-3 text-[13px] ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             placeholder={t('settings.prompt.systemPromptPlaceholder', 'You are a helpful AI assistant that specializes in...')}
@@ -101,7 +101,7 @@ export const PromptSection = React.memo(function PromptSection() {
           <Sparkles className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
           <div>
             <p className="font-medium text-green-900 dark:text-green-100">{t('settings.prompt.proTip', 'Pro Tip')}</p>
-            <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+            <p className="text-[13px] text-green-700 dark:text-green-300 mt-1">
               {t('settings.prompt.proTipDesc', 'A good system prompt includes your preferred response style, any domain expertise needed, and specific guidelines for the AI to follow.')}
             </p>
           </div>

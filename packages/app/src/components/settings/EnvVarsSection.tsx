@@ -151,7 +151,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.envVars.key', 'Key')}
             </label>
             <Input
@@ -164,7 +164,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.envVars.value', 'Value')}
             </label>
             <div className="relative">
@@ -191,7 +191,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.envVars.description', 'Description')}
               <span className="text-muted-foreground font-normal ml-1">
                 ({t('settings.envVars.optional', 'optional')})
@@ -216,7 +216,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
                   onCheckedChange={(checked) => setShared(checked === true)}
                   disabled={isEditing || isPlaceholder}
                 />
-                <label htmlFor="shared" className="text-sm font-medium cursor-pointer select-none flex items-center gap-1.5">
+                <label htmlFor="shared" className="text-[13px] font-medium cursor-pointer select-none flex items-center gap-1.5">
                   <Users className="h-3.5 w-3.5 text-blue-500" />
                   {t('settings.envVars.shareWithTeam', 'Share with team')}
                 </label>
@@ -230,7 +230,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
           )}
 
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-[13px] text-destructive">{error}</p>
           )}
         </div>
 
@@ -343,7 +343,7 @@ function EnvVarRow({ entry, canDelete, onEdit, onDelete }: EnvVarRowProps) {
     <div className="flex items-center justify-between py-3 px-1 group">
       <div className="flex-1 min-w-0 mr-4">
         <div className="flex items-center gap-2">
-          <code className="text-sm font-mono font-medium bg-muted px-2 py-0.5 rounded">
+          <code className="text-[13px] font-mono font-medium bg-muted px-2 py-0.5 rounded">
             {entry.key}
           </code>
           {isSystemShared ? (
@@ -610,7 +610,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
 
       {/* Action bar */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           {unifiedEntries.length > 0
             ? t('settings.envVars.count', '{{count}} variable(s) stored', { count: unifiedEntries.length })
             : ''}
@@ -626,7 +626,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
       {/* List or empty state */}
       {isLoading && unifiedEntries.length === 0 ? (
         <SettingCard>
-          <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+          <div className="flex items-center justify-center py-8 text-muted-foreground text-[13px]">
             {t('common.loading', 'Loading...')}
           </div>
         </SettingCard>
@@ -637,7 +637,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
             <h4 className="font-medium mb-1">
               {t('settings.envVars.emptyTitle', 'No environment variables yet')}
             </h4>
-            <p className="text-sm text-muted-foreground max-w-sm">
+            <p className="text-[13px] text-muted-foreground max-w-sm">
               {t('settings.envVars.emptyDescription', 'Store your API keys and passwords securely. Values are encrypted using your system keychain (macOS Keychain / Windows Credential Manager).')}
             </p>
             <Button size="sm" className="mt-4" onClick={() => setAddDialogOpen(true)}>
@@ -666,7 +666,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
       <SettingCard>
         <div className="flex items-start gap-3">
           <ShieldCheck className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
-          <div className="text-sm text-muted-foreground">
+          <div className="text-[13px] text-muted-foreground">
             <p className="font-medium text-foreground mb-1">
               {t('settings.envVars.hintTitle', 'How it works')}
             </p>

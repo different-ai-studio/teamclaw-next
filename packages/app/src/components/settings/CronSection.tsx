@@ -79,7 +79,7 @@ function JobCard({
 
       {/* Description */}
       {job.description && (
-        <p className="text-sm text-muted-foreground mb-2">{job.description}</p>
+        <p className="text-[13px] text-muted-foreground mb-2">{job.description}</p>
       )}
 
       {/* Info row */}
@@ -225,7 +225,7 @@ export function CronSection() {
 
       {/* Error */}
       {error && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-[13px]">
           <AlertCircle className="h-4 w-4" />
           <span className="flex-1">{error}</span>
           <Button variant="ghost" size="sm" onClick={clearError} className="h-6 w-6 p-0">

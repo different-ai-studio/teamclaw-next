@@ -20,7 +20,7 @@ function FormRow({ children, label, description }: {
   return (
     <div className="flex items-center justify-between gap-6">
       <div className="space-y-0.5 min-w-0">
-        <Label className="text-sm">{label}</Label>
+        <Label className="text-[13px]">{label}</Label>
         {description && (
           <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
         )}
@@ -39,7 +39,7 @@ function FormField({ children, label, description, htmlFor }: {
 }) {
   return (
     <div className="space-y-2">
-      <Label htmlFor={htmlFor} className="text-sm">{label}</Label>
+      <Label htmlFor={htmlFor} className="text-[13px]">{label}</Label>
       {children}
       {description && (
         <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
@@ -117,7 +117,7 @@ export const KnowledgeConfigPanel = React.memo(function KnowledgeConfigPanel() {
             <div className="flex items-start gap-3">
               <Sparkles className="h-5 w-5 text-purple-500 dark:text-purple-400 mt-0.5 shrink-0" />
               <div>
-                <p className="font-medium text-sm text-purple-900 dark:text-purple-100">
+                <p className="font-medium text-[13px] text-purple-900 dark:text-purple-100">
                   {t('settings.knowledge.config.autoInject.banner', 'RAG V2: Pre-inference Auto Inject')}
                 </p>
                 <p className="text-xs text-purple-700 dark:text-purple-300 mt-1 leading-relaxed">

@@ -121,7 +121,7 @@ export function SetupWizard({
 
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.discord.connectTitle', { defaultValue: 'Connect Discord to {{appName}}', appName: buildConfig.app.name })}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {`This wizard will guide you through creating a Discord bot and connecting it to ${buildConfig.app.name}.`}
                 You'll be able to interact with AI directly from Discord channels and DMs.
               </p>
@@ -133,7 +133,7 @@ export function SetupWizard({
                   <Zap className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.quickSetupDesc', 'Complete in about 5 minutes')}</p>
                 </div>
               </div>
@@ -142,7 +142,7 @@ export function SetupWizard({
                   <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.securePrivate', 'Secure & Private')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.securePrivate', 'Secure & Private')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.securePrivateDesc', 'Your token stays on your device')}</p>
                 </div>
               </div>
@@ -157,7 +157,7 @@ export function SetupWizard({
               <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
                 <div className="flex items-start gap-3">
                   <BookOpen className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
-                  <div className="space-y-2 text-sm">
+                  <div className="space-y-2 text-[13px]">
                     <p className="font-medium text-blue-900 dark:text-blue-100">{t('settings.channels.discord.createBotStepsTitle', 'Steps to create your bot:')}</p>
                     <ol className="list-decimal list-inside space-y-2 text-blue-800 dark:text-blue-200">
                       <li>{t('settings.channels.discord.createBotStep1', 'Go to the Discord Developer Portal')}</li>
@@ -180,10 +180,10 @@ export function SetupWizard({
               </Button>
 
               <div className="pt-2 space-y-2">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   <strong>{t('settings.channels.discord.importantSettings', 'Important Bot Settings:')}</strong>
                 </p>
-                <div className="grid gap-2 text-sm">
+                <div className="grid gap-2 text-[13px]">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Check className="h-4 w-4 text-emerald-500" />
                     {t('settings.channels.discord.enableMessageIntent', 'Enable "Message Content Intent" in Bot settings')}
@@ -204,7 +204,7 @@ export function SetupWizard({
             <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div className="text-sm">
+                <div className="text-[13px]">
                   <p className="font-medium text-amber-900 dark:text-amber-100">{t('settings.channels.tokenSecretWarning', 'Keep your token secret!')}</p>
                   <p className="text-amber-800 dark:text-amber-200">
                     {t('settings.channels.tokenSecretDesc', 'Never share your bot token. If leaked, regenerate it immediately.')}
@@ -214,10 +214,10 @@ export function SetupWizard({
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.discord.tokenPortalHint', 'In the Discord Developer Portal:')}
               </p>
-              <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+              <ol className="list-decimal list-inside space-y-2 text-[13px] text-muted-foreground">
                 <li>{t('settings.channels.discord.tokenStep1', 'Go to your application\'s "Bot" section')}</li>
                 <li>{t('settings.channels.discord.tokenStep2', 'Click "Reset Token" or "View Token"')}</li>
                 <li>{t('settings.channels.discord.tokenStep3', 'Copy the token and paste it below')}</li>
@@ -225,7 +225,7 @@ export function SetupWizard({
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.discord.botToken', 'Bot Token')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.discord.botToken', 'Bot Token')}</label>
               <div className="relative">
                 <Input
                   type="password"
@@ -239,7 +239,7 @@ export function SetupWizard({
             </div>
 
             {token && (
-              <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <div className="flex items-center gap-2 text-[13px] text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" />
                 {t('settings.channels.tokenEntered', 'Token entered')}
               </div>
@@ -250,7 +250,7 @@ export function SetupWizard({
       case 'permissions':
         return (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t('settings.channels.discord.permissionsIntro', 'Your bot needs these permissions to work properly:')}
             </p>
 
@@ -267,14 +267,14 @@ export function SetupWizard({
                 <div key={perm.name} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
                   <Check className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-medium">{perm.name}</p>
+                    <p className="text-[13px] font-medium">{perm.name}</p>
                     <p className="text-xs text-muted-foreground">{perm.desc}</p>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="p-3 rounded-lg bg-muted/50 text-sm text-muted-foreground">
+            <div className="p-3 rounded-lg bg-muted/50 text-[13px] text-muted-foreground">
               {t('settings.channels.discord.permissionsAutoInclude', 'These permissions will be automatically included in the invite link on the next step.')}
             </div>
           </div>
@@ -284,10 +284,10 @@ export function SetupWizard({
         return (
           <div className="space-y-4 overflow-hidden">
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.discord.inviteIntro', 'To generate an invite link, we need your Application ID (Client ID):')}
               </p>
-              <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+              <ol className="list-decimal list-inside space-y-1 text-[13px] text-muted-foreground">
                 <li>{t('settings.channels.discord.inviteStep1', 'Go to your application in the Developer Portal')}</li>
                 <li>{t('settings.channels.discord.inviteStep2', 'Find "Application ID" in General Information')}</li>
                 <li>{t('settings.channels.discord.inviteStep3', 'Copy and paste it below')}</li>
@@ -295,7 +295,7 @@ export function SetupWizard({
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.discord.applicationId', 'Application ID (Client ID)')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.discord.applicationId', 'Application ID (Client ID)')}</label>
               <Input
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
@@ -306,7 +306,7 @@ export function SetupWizard({
             {clientId && (
               <div className="space-y-3">
                 <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-                  <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100 mb-2">
+                  <p className="text-[13px] font-medium text-emerald-900 dark:text-emerald-100 mb-2">
                     {t('settings.channels.discord.inviteLinkReady', 'Your invite link is ready!')}
                   </p>
                   <div className="flex items-center gap-2">
@@ -358,14 +358,14 @@ export function SetupWizard({
 
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.allSet', "You're all set!")}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.discord.completeMessage', 'Your Discord bot is now configured. Click "Finish" to save your settings and start using the bot.')}
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-muted/50 text-left space-y-2">
-              <p className="text-sm font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
+              <p className="text-[13px] font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
+              <ul className="text-[13px] text-muted-foreground space-y-1">
                 <li>• {t('settings.channels.nextStepConnect', 'Enable the gateway toggle to connect')}</li>
                 <li>• {t('settings.channels.discord.nextStepConfigure', 'Configure DM and server settings')}</li>
                 <li>• {t('settings.channels.nextStepTest', 'Send a message to your bot to test!')}</li>
@@ -499,7 +499,7 @@ export function ChannelConfigDialog({
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.channelId', 'Channel ID')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.channelId', 'Channel ID')}</label>
             <Input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -513,7 +513,7 @@ export function ChannelConfigDialog({
 
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium">{t('settings.channels.channelAllow', 'Allow')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.channelAllow', 'Allow')}</label>
               <p className="text-xs text-muted-foreground">
                 {t('settings.channels.channelAllowDesc', 'Enable bot responses in this channel')}
               </p>
@@ -523,7 +523,7 @@ export function ChannelConfigDialog({
 
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium">{t('settings.channels.requireMention', 'Require @mention')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.requireMention', 'Require @mention')}</label>
               <p className="text-xs text-muted-foreground">
                 {t('settings.channels.requireMentionDesc', 'Bot only responds when mentioned')}
               </p>
@@ -535,7 +535,7 @@ export function ChannelConfigDialog({
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')} ({t('settings.channels.optional', 'optional')})</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')} ({t('settings.channels.optional', 'optional')})</label>
             <Input
               value={users}
               onChange={(e) => setUsers(e.target.value)}
@@ -609,7 +609,7 @@ export function GuildConfigDialog({
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.serverId', 'Server ID')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.serverId', 'Server ID')}</label>
             <Input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -622,7 +622,7 @@ export function GuildConfigDialog({
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.serverName', 'Name (optional)')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.serverName', 'Name (optional)')}</label>
             <Input
               value={slug}
               onChange={(e) => setSlug(e.target.value)}

@@ -15,10 +15,6 @@ const teamModeState = vi.hoisted(() => ({
   teamModeType: null as string | null,
 }))
 
-const uiState = vi.hoisted(() => ({
-  advancedMode: false,
-}))
-
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (_key: string, fallback: string) => fallback,
@@ -54,10 +50,6 @@ vi.mock('@/stores/team-mode', () => ({
   ),
 }))
 
-vi.mock('@/stores/ui', () => ({
-  useUIStore: (selector: (state: typeof uiState) => unknown) => selector(uiState),
-}))
-
 vi.mock('@/lib/utils', () => ({
   isTauri: () => false,
 }))
@@ -74,7 +66,6 @@ describe('KnowledgeBrowser', () => {
     workspaceState.workspacePath = '/workspace'
     teamModeState.teamMode = true
     teamModeState.teamModeType = null
-    uiState.advancedMode = false
   })
 
   it('does not render team/personal virtual document roots in basic mode', () => {

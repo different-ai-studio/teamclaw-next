@@ -113,7 +113,7 @@ function SecretDialog({ open, onOpenChange, editingEntry, nodeId, onSave }: Secr
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.sharedSecrets.keyId', 'Key ID')}
             </label>
             <Input
@@ -126,7 +126,7 @@ function SecretDialog({ open, onOpenChange, editingEntry, nodeId, onSave }: Secr
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.sharedSecrets.value', 'Value')}
             </label>
             <Input
@@ -139,7 +139,7 @@ function SecretDialog({ open, onOpenChange, editingEntry, nodeId, onSave }: Secr
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.sharedSecrets.category', 'Category')}
             </label>
             <Select value={category} onValueChange={setCategory}>
@@ -157,7 +157,7 @@ function SecretDialog({ open, onOpenChange, editingEntry, nodeId, onSave }: Secr
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.sharedSecrets.description', 'Description')}
               <span className="text-muted-foreground font-normal ml-1">
                 ({t('settings.sharedSecrets.optional', 'optional')})
@@ -171,7 +171,7 @@ function SecretDialog({ open, onOpenChange, editingEntry, nodeId, onSave }: Secr
           </div>
 
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-[13px] text-destructive">{error}</p>
           )}
         </div>
 
@@ -255,7 +255,7 @@ function SecretRow({ entry, onEdit, onDelete }: SecretRowProps) {
     <div className="flex items-center justify-between py-3 px-1 group">
       <div className="flex-1 min-w-0 mr-4">
         <div className="flex items-center gap-2">
-          <code className="text-sm font-mono font-medium bg-muted px-2 py-0.5 rounded">
+          <code className="text-[13px] font-mono font-medium bg-muted px-2 py-0.5 rounded">
             {entry.keyId}
           </code>
           {entry.category && (
@@ -342,7 +342,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
 
       {/* Action bar */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           {secrets.length > 0
             ? t('settings.sharedSecrets.count', '{{count}} secret(s) stored', { count: secrets.length })
             : ''}
@@ -356,7 +356,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
       {/* List or empty state */}
       {isLoading && secrets.length === 0 ? (
         <SettingCard>
-          <div className="flex items-center justify-center py-8 text-muted-foreground text-sm gap-2">
+          <div className="flex items-center justify-center py-8 text-muted-foreground text-[13px] gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
             {t('common.loading', 'Loading...')}
           </div>
@@ -368,7 +368,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
             <h4 className="font-medium mb-1">
               {t('settings.sharedSecrets.emptyTitle', 'No shared secrets yet')}
             </h4>
-            <p className="text-sm text-muted-foreground max-w-sm">
+            <p className="text-[13px] text-muted-foreground max-w-sm">
               {t('settings.sharedSecrets.emptyDescription', 'Share encrypted secrets with your team. Values are encrypted using the team key.')}
             </p>
             <Button size="sm" className="mt-4" onClick={() => setAddDialogOpen(true)}>
@@ -396,7 +396,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
       <SettingCard>
         <div className="flex items-start gap-3">
           <ShieldCheck className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-          <div className="text-sm text-muted-foreground">
+          <div className="text-[13px] text-muted-foreground">
             <p className="font-medium text-foreground mb-1">
               {t('settings.sharedSecrets.hintTitle', 'How it works')}
             </p>

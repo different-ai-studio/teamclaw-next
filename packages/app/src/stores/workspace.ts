@@ -376,7 +376,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     try {
       const { useUIStore } = await import("./ui");
       useUIStore.setState({
-        advancedMode: false,
         currentView: 'chat',
         layoutMode: 'task',
         settingsInitialSection: null,
@@ -457,14 +456,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         loadLocalStatsForWorkspace(expandedPath);
       } catch (error) {
         console.warn("[Workspace] Failed to load local stats:", error);
-      }
-
-      // Load advanced mode setting for this workspace
-      try {
-        const { useUIStore } = await import("./ui");
-        await useUIStore.getState().loadAdvancedMode(expandedPath);
-      } catch (error) {
-        console.warn("[Workspace] Failed to load advanced mode:", error);
       }
 
       set({ isLoadingWorkspace: false });

@@ -50,7 +50,7 @@ function StatusDot({ status }: { status?: MCPServerStatus }) {
 function ServerAvatar({ name }: { name: string }) {
   const initial = name.charAt(0).toUpperCase()
   return (
-    <div className="flex items-center justify-center h-10 w-10 rounded-full bg-muted text-muted-foreground text-sm font-semibold shrink-0">
+    <div className="flex items-center justify-center h-10 w-10 rounded-full bg-muted text-muted-foreground text-[13px] font-semibold shrink-0">
       {initial}
     </div>
   )
@@ -178,7 +178,7 @@ function MCPServerRow({
         {/* Server info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">{name}</span>
+            <span className="font-medium text-[13px]">{name}</span>
             {isInherent && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 border border-blue-200/60 dark:border-blue-700/50">
                 <Shield className="h-2.5 w-2.5" />
@@ -334,7 +334,7 @@ export const MCPSection = React.memo(function MCPSection() {
             <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
             <div className="flex-1">
               <p className="font-medium text-red-900 dark:text-red-100">{t('common.error', 'Error')}</p>
-              <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
+              <p className="text-[13px] text-red-700 dark:text-red-300 mt-1">{error}</p>
             </div>
             <Button variant="ghost" size="sm" onClick={clearError}>
               <X className="h-4 w-4" />
@@ -358,7 +358,7 @@ export const MCPSection = React.memo(function MCPSection() {
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <Plug className="h-10 w-10 text-orange-500 mb-3" />
             <h4 className="font-medium mb-1">{t('settings.mcp.noServers', 'No MCP servers configured')}</h4>
-            <p className="text-sm text-muted-foreground max-w-sm">
+            <p className="text-[13px] text-muted-foreground max-w-sm">
               {t('settings.mcp.addServerHint', "Add an MCP server to extend OpenCode's capabilities")}
             </p>
             <Button size="sm" className="mt-4" onClick={() => { setEditingServer(null); setDialogOpen(true) }}>

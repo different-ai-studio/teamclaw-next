@@ -106,7 +106,7 @@ export function TeamMemberList() {
   return (
     <div className="space-y-4">
       {loading && (
-        <p className="text-sm text-muted-foreground">Loading members...</p>
+        <p className="text-[13px] text-muted-foreground">Loading members...</p>
       )}
       {error && (
         <p className="text-xs text-destructive">{error}</p>
@@ -134,7 +134,7 @@ export function TeamMemberList() {
                     if (member.nodeId === currentNodeId) return <LocalDeviceBadge />
                     return null
                   })()}
-                  <p className="text-sm font-medium truncate">
+                  <p className="text-[13px] font-medium truncate">
                     {member.name || member.hostname}
                   </p>
                   <RoleBadge role={member.role} />
@@ -207,7 +207,7 @@ export function TeamMemberList() {
         <div className="pt-2 border-t border-border">
           <div className="flex items-center gap-1.5 mb-2">
             <UserPlus className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Add Member</span>
+            <span className="text-[13px] font-medium">Add Member</span>
           </div>
           <AddMemberInput onAdd={handleAdd} error={error} myRole={myRole} />
         </div>

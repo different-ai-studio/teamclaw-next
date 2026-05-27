@@ -15,7 +15,6 @@ import {
   MessageSquareText,
   Plus,
   X,
-  SlidersHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -30,8 +29,6 @@ import { Input } from '@/components/ui/input'
 import { SettingCard, SectionHeader, ToggleSwitch } from './shared'
 import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
 import { useSuggestionsStore } from '@/stores/suggestions'
-import { useUIStore } from '@/stores/ui'
-import { useWorkspaceStore } from '@/stores/workspace'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
 
@@ -175,7 +172,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
       {!import.meta.env.VITE_LOCALE || import.meta.env.VITE_LOCALE === 'all' ? (
         <SettingCard>
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
+            <label className="text-[13px] font-medium flex items-center gap-2">
               <Languages className="h-4 w-4 text-muted-foreground" />
               {t('settings.general.language', 'Language')}
             </label>
@@ -203,7 +200,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Save className="h-4 w-4 text-muted-foreground" />
                 {t('settings.general.autoSave', 'Auto Save')}
               </label>
@@ -216,7 +213,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
           
           <div className="border-t pt-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Bell className="h-4 w-4 text-muted-foreground" />
                 {t('settings.general.notifications', 'Notifications')}
               </label>
@@ -238,7 +235,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
 
           <div className="border-t pt-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Shield className="h-4 w-4 text-muted-foreground" />
                 {t('permission.policy', 'Permission Policy')}
               </label>
@@ -269,55 +266,9 @@ export const GeneralSection = React.memo(function GeneralSection() {
       </SettingCard>
 
       <ChatSuggestionsCard />
-
-      <AdvancedModeCard />
     </div>
   )
 })
-
-function AdvancedModeCard() {
-  const { t } = useTranslation()
-  const advancedMode = useUIStore(s => s.advancedMode)
-  const setAdvancedMode = useUIStore(s => s.setAdvancedMode)
-  const workspacePath = useWorkspaceStore(s => s.workspacePath)
-  const refreshFileTree = useWorkspaceStore(s => s.refreshFileTree)
-  const [saving, setSaving] = React.useState(false)
-
-  const handleAdvancedModeChange = React.useCallback((enabled: boolean) => {
-    if (!workspacePath || saving) return
-
-    setSaving(true)
-    void (async () => {
-      try {
-        await setAdvancedMode(enabled, workspacePath)
-        await refreshFileTree()
-      } finally {
-        setSaving(false)
-      }
-    })()
-  }, [refreshFileTree, saving, setAdvancedMode, workspacePath])
-
-  return (
-    <SettingCard>
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-1">
-          <label className="text-sm font-medium flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-            {t('settings.general.advancedMode', 'Advanced Mode')}
-          </label>
-          <p className="text-xs text-muted-foreground">
-            {t('settings.general.advancedModeDesc', 'Show system and team internal files in the file tree and enable Code mode')}
-          </p>
-        </div>
-        <ToggleSwitch
-          enabled={advancedMode}
-          onChange={handleAdvancedModeChange}
-          disabled={!workspacePath || saving}
-        />
-      </div>
-    </SettingCard>
-  )
-}
 
 function ChatSuggestionsCard() {
   const { t } = useTranslation()
@@ -402,12 +353,12 @@ function ChatSuggestionsCard() {
             onChange={(e) => setNewSuggestion(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={t('settings.general.suggestionPlaceholder', 'Enter a suggestion text...')}
-            className="h-9 text-sm"
+            className="h-8 text-[13px]"
           />
           <Button
             variant="outline"
             size="sm"
-            className="h-9 shrink-0"
+            className="h-8 shrink-0"
             onClick={handleAdd}
             disabled={!newSuggestion.trim()}
           >

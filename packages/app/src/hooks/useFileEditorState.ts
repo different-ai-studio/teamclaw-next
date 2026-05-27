@@ -9,7 +9,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useSessionStore } from "@/stores/session";
-import { useUIStore } from "@/stores/ui";
 import { useTabsStore, selectActiveTab } from "@/stores/tabs";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,19 +18,14 @@ import { useTabsStore, selectActiveTab } from "@/stores/tabs";
 export function usePanelAutoOpen() {
   const sessionDiff = useSessionStore((s) => s.sessionDiff);
   const openPanel = useWorkspaceStore((s) => s.openPanel);
-  const advancedMode = useUIStore((s) => s.advancedMode);
   const prevDiffCount = useRef(0);
 
   useEffect(() => {
-    if (!advancedMode) {
-      prevDiffCount.current = sessionDiff.length;
-      return;
-    }
     if (sessionDiff.length > 0 && prevDiffCount.current === 0) {
       openPanel("diff");
     }
     prevDiffCount.current = sessionDiff.length;
-  }, [sessionDiff.length, openPanel, advancedMode]);
+  }, [sessionDiff.length, openPanel]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

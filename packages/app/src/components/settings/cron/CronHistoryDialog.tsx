@@ -67,7 +67,7 @@ export function RunRecordCard({ run, onViewSession }: { run: CronRunRecord; onVi
           {run.status === 'stale' && (
             <AlertCircle className="h-4 w-4 text-yellow-500" />
           )}
-          <span className={cn('text-sm font-medium capitalize', statusColor)}>
+          <span className={cn('text-[13px] font-medium capitalize', statusColor)}>
             {run.status}
           </span>
         </div>
@@ -186,7 +186,7 @@ export function CronHistoryDialog({
           ) : runs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">{t('settings.cron.noRunHistory', 'No run history yet')}</p>
+              <p className="text-[13px]">{t('settings.cron.noRunHistory', 'No run history yet')}</p>
             </div>
           ) : (
             <div className="space-y-3">

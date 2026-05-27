@@ -288,7 +288,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
           iconColor="text-emerald-500"
         />
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.permissions.noWorkspace', 'No workspace selected. Please select a workspace first.')}
           </p>
         </SettingCard>
@@ -309,7 +309,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
       <SettingCard>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h4 className="text-sm font-semibold flex items-center gap-2">
+            <h4 className="text-[13px] font-semibold flex items-center gap-2">
               <Database className="h-4 w-4 text-amber-500" />
               {t('settings.permissions.allowlist', 'Command Allowlist')}
             </h4>
@@ -336,7 +336,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : allRules.length === 0 ? (
-          <div className="text-center py-8 text-sm text-muted-foreground">
+          <div className="text-center py-8 text-[13px] text-muted-foreground">
             {t('settings.permissions.noAllowlist', 'No commands have been allowlisted yet')}
           </div>
         ) : (
@@ -349,7 +349,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
                 >
                   <Terminal className="h-4 w-4 text-amber-500 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <code className="text-sm font-mono">{entry.rule.permission}: {entry.rule.pattern}</code>
+                    <code className="text-[13px] font-mono">{entry.rule.permission}: {entry.rule.pattern}</code>
                   </div>
                   <Badge
                     variant={entry.rule.action === 'allow' ? 'default' : 'destructive'}
@@ -382,7 +382,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
       <SettingCard>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h4 className="text-sm font-semibold flex items-center gap-2">
+            <h4 className="text-[13px] font-semibold flex items-center gap-2">
               <Shield className="h-4 w-4 text-emerald-500" />
               {t('settings.permissions.config', 'Permission Configuration')}
             </h4>
@@ -441,7 +441,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{label}</p>
+                      <p className="text-[13px] font-medium">{label}</p>
                       <p className="text-xs text-muted-foreground">{desc}</p>
                     </div>
                   </div>

@@ -560,7 +560,7 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
               <p className="font-medium text-amber-900 dark:text-amber-100">
                 {t('settings.knowledge.configChanged', 'Index configuration changed')}
               </p>
-              <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+              <p className="text-[13px] text-amber-700 dark:text-amber-300 mt-1">
                 {t('settings.knowledge.needsReindex', 'Configuration changes detected (embedding model or chunking parameters). A full re-index is required for changes to take effect.')}
               </p>
             </div>
@@ -601,7 +601,7 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
       <KnowledgeConfigPanel />
       
       {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-[13px] text-destructive">
           {error}
         </div>
       )}
@@ -614,7 +614,7 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
             placeholder={t('settings.knowledge.searchPlaceholder', 'Search files...')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 h-9"
+            className="pl-9 h-8"
           />
         </div>
         <Button 
@@ -655,7 +655,7 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
       {selectedCount > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-selected p-3">
           <CheckboxIcon className="h-4 w-4 text-foreground" />
-          <span className="text-sm font-medium">
+          <span className="text-[13px] font-medium">
             {t('settings.knowledge.selectedCount', `Selected ${selectedCount} item(s)`, { count: selectedCount })}
           </span>
           <div className="flex-1" />
@@ -693,7 +693,7 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
           <SettingCard>
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <BookOpen className="h-12 w-12 text-muted-foreground/50 mb-3" />
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {searchQuery.trim() 
                   ? t('settings.knowledge.noResults', 'No files match your search')
                   : t('settings.knowledge.empty', 'No documents yet. Upload some files to get started.')}
@@ -719,7 +719,7 @@ export const KnowledgeSection = React.memo(function KnowledgeSection() {
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-48 overflow-y-auto">
-            <ul className="list-disc list-inside text-sm space-y-1">
+            <ul className="list-disc list-inside text-[13px] space-y-1">
               {itemsToDelete.map(path => (
                 <li key={path} className="text-muted-foreground">
                   {path.replace(`${workspacePath}/knowledge/`, '')}

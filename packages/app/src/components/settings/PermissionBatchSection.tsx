@@ -167,7 +167,7 @@ export const PermissionBatchSection = React.memo(function PermissionBatchSection
               <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium">{t(item.nameKey, item.nameFallback)}</p>
+                  <p className="text-[13px] font-medium">{t(item.nameKey, item.nameFallback)}</p>
                   {item.manual && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium">
                       {t('permission.manualLabel', 'Manual')}
@@ -196,7 +196,7 @@ export const PermissionBatchSection = React.memo(function PermissionBatchSection
       <div className="mt-4 flex items-center gap-3">
         {batchDone ? (
           <>
-            <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+            <div className="flex items-center gap-2 text-[13px] text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-4 w-4" />
               {t('permission.batchCompleted', 'Completed')}
             </div>
