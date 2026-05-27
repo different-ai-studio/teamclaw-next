@@ -1,0 +1,432 @@
+openapi: 3.1.0
+info:
+  title: TeamClaw Cloud API
+  version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://api.teamclaw.local
+security:
+  - bearerAuth: []
+tags:
+  - name: Teams
+    description: Team membership and team metadata.
+  - name: Sessions
+    description: Conversation session list and detail surfaces.
+  - name: Messages
+    description: Session message read and write operations.
+  - name: Invites
+    description: Team invite claim operations.
+paths:
+  /v1/teams:
+    get:
+      operationId: listTeams
+      summary: List teams
+      tags: [Teams]
+      responses:
+        "200":
+          description: Current user's teams.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Team"
+                  nextCursor:
+                    type:
+                      - string
+                      - "null"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createTeam
+      summary: Create team
+      tags: [Teams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                slug:
+                  type:
+                    - string
+                    - "null"
+      responses:
+        "200":
+          description: Created team.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}:
+    get:
+      operationId: getTeam
+      summary: Get team
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Team.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/sessions:
+    get:
+      operationId: listSessions
+      summary: List sessions
+      tags: [Sessions]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current actor sessions.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Session"
+                  nextCursor:
+                    type:
+                      - string
+                      - "null"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/messages:
+    get:
+      operationId: listMessages
+      summary: List messages
+      tags: [Messages]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session messages.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Message"
+                  nextCursor:
+                    type:
+                      - string
+                      - "null"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: insertMessage
+      summary: Insert message
+      tags: [Messages]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InsertMessageRequest"
+      responses:
+        "200":
+          description: Inserted or replayed message.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/invites/claim:
+    post:
+      operationId: claimInvite
+      summary: Claim invite
+      tags: [Invites]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Claimed invite.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimInviteResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  headers:
+    RequestId:
+      schema:
+        type: string
+  parameters:
+    TeamId:
+      name: teamId
+      in: path
+      required: true
+      schema:
+        type: string
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Error:
+      description: Error response.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+              enum:
+                - missing_auth
+                - invalid_json
+                - validation_failed
+                - forbidden
+                - not_found
+                - conflict
+                - rate_limited
+                - upstream_unavailable
+                - internal
+            message:
+              type: string
+            requestId:
+              type: string
+    Team:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type:
+            - string
+            - "null"
+    Session:
+      type: object
+      required: [id, teamId, title, mode, hasUnread]
+      properties:
+        id:
+          type: string
+        teamId:
+          type: string
+        title:
+          type: string
+        mode:
+          type: string
+          enum: [solo, collab, control]
+        ideaId:
+          type:
+            - string
+            - "null"
+        lastMessageAt:
+          type:
+            - string
+            - "null"
+        lastMessagePreview:
+          type:
+            - string
+            - "null"
+        hasUnread:
+          type: boolean
+        createdAt:
+          type:
+            - string
+            - "null"
+        updatedAt:
+          type:
+            - string
+            - "null"
+    Message:
+      type: object
+      required: [id, teamId, sessionId, kind, content, createdAt]
+      properties:
+        id:
+          type: string
+        teamId:
+          type: string
+        sessionId:
+          type: string
+        turnId:
+          type:
+            - string
+            - "null"
+        senderActorId:
+          type:
+            - string
+            - "null"
+        replyToMessageId:
+          type:
+            - string
+            - "null"
+        kind:
+          type: string
+        content:
+          type: string
+        metadata:
+          type:
+            - object
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+        updatedAt:
+          type:
+            - string
+            - "null"
+    InsertMessageRequest:
+      type: object
+      required: [id, teamId, senderActorId, content]
+      properties:
+        id:
+          type: string
+        teamId:
+          type: string
+        senderActorId:
+          type: string
+        content:
+          type: string
+        kind:
+          type: string
+          default: text
+        metadata:
+          type:
+            - object
+            - "null"
+        turnId:
+          type:
+            - string
+            - "null"
+        replyToMessageId:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type:
+            - string
+            - "null"
+    ClaimInviteResult:
+      type: object
+      required: [actorId, teamId, actorType, displayName]
+      properties:
+        actorId:
+          type: string
+        teamId:
+          type: string
+        actorType:
+          type: string
+        displayName:
+          type: string
+        refreshToken:
+          type:
+            - string
+            - "null"
