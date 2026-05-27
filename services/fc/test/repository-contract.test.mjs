@@ -48,9 +48,56 @@ function contractRepo() {
   ];
   const configStore = {};
   const messageStore = fixture("message-list.json").items.slice();
+  const sessionStore = fixture("session-list.json").items.slice().map(s => ({ ...s, participants: [{ sessionId: s.id, actorId: "actor-1", role: "owner", joinedAt: s.createdAt }] }));
+  const gatewayBindings = {};
   return {
     async listSessions() {
       return fixture("session-list.json").items;
+    },
+    async getSession(sessionId) {
+      return sessionStore.find(s => s.id === sessionId) ?? null;
+    },
+    async patchSession(sessionId, patch) {
+      const s = sessionStore.find(s => s.id === sessionId);
+      if (!s) return null;
+      if (patch.title !== undefined) s.title = patch.title;
+      return s;
+    },
+    async createSession(input) {
+      const id = input.id ?? "session-new";
+      const newS = { id, teamId: input.teamId, title: input.title, mode: input.mode, ideaId: null, lastMessageAt: null, lastMessagePreview: null, hasUnread: false, createdAt: "2026-05-27T03:00:00Z", updatedAt: "2026-05-27T03:00:00Z", participants: (input.participantActorIds ?? []).map(a => ({ sessionId: id, actorId: a, role: "member", joinedAt: null })) };
+      sessionStore.push(newS);
+      return newS;
+    },
+    async markSessionViewed(sessionId) {},
+    async listSessionParticipants(sessionId) {
+      const s = sessionStore.find(s => s.id === sessionId);
+      return { items: s?.participants ?? [] };
+    },
+    async upsertSessionParticipant(sessionId, input) {
+      const s = sessionStore.find(s => s.id === sessionId);
+      const existing = s?.participants?.find(p => p.actorId === input.actorId);
+      if (existing) { existing.role = input.role ?? existing.role; return existing; }
+      const newP = { sessionId, actorId: input.actorId, role: input.role ?? "member", joinedAt: null };
+      if (s) s.participants.push(newP);
+      return newP;
+    },
+    async removeSessionParticipant(sessionId, actorId) {
+      const s = sessionStore.find(s => s.id === sessionId);
+      if (s?.participants) s.participants = s.participants.filter(p => p.actorId !== actorId);
+    },
+    async getSessionByAcp(acpSessionId) {
+      return gatewayBindings[acpSessionId] ?? null;
+    },
+    async ensureGatewaySession(input) {
+      const b = input.binding;
+      if (gatewayBindings[b]) return { ...gatewayBindings[b], created: false };
+      const r = { sessionId: "gw-" + b, gatewaySessionId: b, created: true };
+      gatewayBindings[b] = r;
+      return r;
+    },
+    async createCronSession(input) {
+      return { sessionId: "cron-" + input.title };
     },
     async listMessages(sessionId) {
       assert.equal(sessionId, "session-1");
