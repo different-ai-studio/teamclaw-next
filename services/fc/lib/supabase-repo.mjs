@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createClient as defaultCreateClient } from "@supabase/supabase-js";
 import { ApiError } from "./http-utils.mjs";
 
@@ -649,6 +650,79 @@ async heartbeat() {
       if (error) throw error;
       return mapIdeaActivityRow(requiredRow(data, "ideas.createIdeaActivity"));
     },
+
+    async upsertAgentRuntime(body) {
+      const row = {
+        id: body.id ?? randomUUID(),
+        agent_actor_id: body.agentActorId,
+        session_id: body.sessionId,
+        runtime_id: body.runtimeId,
+        backend_session_id: body.backendSessionId,
+        metadata: body.metadata ?? null,
+      };
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .upsert(row, { onConflict: "session_id,runtime_id,backend_session_id" })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return { id: data?.id ?? null };
+    },
+
+    async getAgentRuntime({ sessionId, runtimeId, backendSessionId }) {
+      let query = supabase
+        .from("agent_runtimes")
+        .select("*")
+        .eq("session_id", sessionId);
+      if (runtimeId !== undefined && runtimeId !== null) {
+        query = query.eq("runtime_id", runtimeId);
+      }
+      if (backendSessionId !== undefined && backendSessionId !== null) {
+        query = query.eq("backend_session_id", backendSessionId);
+      }
+      const { data, error } = await query.limit(1).single();
+      if (error && error.code === "PGRST116") return null;
+      if (error) throw error;
+      return data ? mapAgentRuntimeRow(data) : null;
+    },
+
+    async getLatestAgentRuntime({ agentId, sessionId }) {
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("*")
+        .eq("agent_actor_id", agentId)
+        .eq("session_id", sessionId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .single();
+      if (error && error.code === "PGRST116") return null;
+      if (error) throw error;
+      return data ? mapAgentRuntimeRow(data) : null;
+    },
+
+    async updateRuntimeCursor(runtimeRowId, { lastProcessedMessageId }) {
+      const { error } = await supabase
+        .from("agent_runtimes")
+        .update({ last_processed_message_id: lastProcessedMessageId })
+        .eq("id", runtimeRowId);
+      if (error) throw error;
+    },
+
+    async ensureAgentTypes({ supportedTypes, defaultAgentType }) {
+      const { error } = await supabase.rpc("ensure_agent_types", {
+        p_supported_types: supportedTypes,
+        p_default_agent_type: defaultAgentType,
+      });
+      if (error) throw error;
+    },
+
+    async setAgentDeviceId(agentActorId, { deviceId }) {
+      const { error } = await supabase
+        .from("agents")
+        .update({ device_id: deviceId })
+        .eq("actor_id", agentActorId);
+      if (error) throw error;
+    },
   };
 }
 
@@ -855,6 +929,20 @@ function mapShortcutRow(row) {
     payload: row?.payload ?? null,
     position: row?.position ?? 0,
     visibleRoleIds: row?.visible_role_ids ?? [],
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function mapAgentRuntimeRow(row) {
+  return {
+    id: requiredString(row?.id, "agentRuntimes.mapAgentRuntimeRow", "id"),
+    agentActorId: requiredString(row?.agent_actor_id, "agentRuntimes.mapAgentRuntimeRow", "agent_actor_id"),
+    sessionId: requiredString(row?.session_id, "agentRuntimes.mapAgentRuntimeRow", "session_id"),
+    runtimeId: requiredString(row?.runtime_id, "agentRuntimes.mapAgentRuntimeRow", "runtime_id"),
+    backendSessionId: requiredString(row?.backend_session_id, "agentRuntimes.mapAgentRuntimeRow", "backend_session_id"),
+    lastProcessedMessageId: row?.last_processed_message_id ?? null,
+    metadata: row?.metadata ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };

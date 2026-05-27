@@ -628,6 +628,51 @@ export function runAuthRepositoryContract({ test, assert, createAuthRepository }
     assert.ok(out.refreshToken, "refreshToken must be present");
     assert.ok(Number.isInteger(out.expiresAt), "expiresAt must be an integer");
   });
+
+  test("repository contract: upsertAgentRuntime returns id", async () => {
+    const repo = createRepository();
+    const result = await repo.upsertAgentRuntime({
+      agentActorId: "actor-1",
+      sessionId: "session-1",
+      runtimeId: "runtime-abc",
+      backendSessionId: "backend-session-1",
+    });
+    assert.ok(result.id, "id must be present");
+  });
+
+  test("repository contract: getAgentRuntime returns null when absent", async () => {
+    const repo = createRepository();
+    const result = await repo.getAgentRuntime({
+      sessionId: "session-missing",
+      runtimeId: "runtime-missing",
+      backendSessionId: "backend-missing",
+    });
+    assert.equal(result, null);
+  });
+
+  test("repository contract: getLatestAgentRuntime returns null when absent", async () => {
+    const repo = createRepository();
+    const result = await repo.getLatestAgentRuntime({
+      agentId: "actor-missing",
+      sessionId: "session-missing",
+    });
+    assert.equal(result, null);
+  });
+
+  test("repository contract: updateRuntimeCursor succeeds", async () => {
+    const repo = createRepository();
+    await repo.updateRuntimeCursor("runtime-row-1", { lastProcessedMessageId: "message-1" });
+  });
+
+  test("repository contract: ensureAgentTypes succeeds", async () => {
+    const repo = createRepository();
+    await repo.ensureAgentTypes({ supportedTypes: ["openai", "claude"], defaultAgentType: "claude" });
+  });
+
+  test("repository contract: setAgentDeviceId succeeds", async () => {
+    const repo = createRepository();
+    await repo.setAgentDeviceId("actor-1", { deviceId: "device-abc" });
+  });
 }
 
 function compareSessionRows(left, right) {

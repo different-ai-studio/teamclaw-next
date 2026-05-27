@@ -1061,6 +1061,119 @@ function session(id, lastMessageAt) {
   };
 }
 
+// ─── /v1/agents/runtimes ───────────────────────────────────────────────────
+
+test("GET /v1/agents/runtimes returns 401 without bearer", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/agents/runtimes",
+    queryStringParameters: { sessionId: "session-1" },
+    headers: {},
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 401);
+});
+
+test("GET /v1/agents/runtimes returns runtime", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/agents/runtimes",
+    queryStringParameters: { sessionId: "session-1", runtimeId: "runtime-abc", backendSessionId: "backend-1" },
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.id, "runtime-row-1");
+  assert.deepEqual(repo.calls[0], { method: "getAgentRuntime", args: { sessionId: "session-1", runtimeId: "runtime-abc", backendSessionId: "backend-1" } });
+});
+
+test("GET /v1/agents/runtimes returns 404 for missing runtime", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/agents/runtimes",
+    queryStringParameters: { sessionId: "session-missing", runtimeId: "runtime-abc" },
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 404);
+});
+
+test("GET /v1/agents/runtimes/latest returns latest runtime", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/agents/runtimes/latest",
+    queryStringParameters: { agentId: "actor-1", sessionId: "session-1" },
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.agentActorId, "actor-1");
+  assert.deepEqual(repo.calls[0], { method: "getLatestAgentRuntime", args: { agentId: "actor-1", sessionId: "session-1" } });
+});
+
+test("GET /v1/agents/runtimes/latest returns 404 for missing", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/agents/runtimes/latest",
+    queryStringParameters: { agentId: "actor-missing", sessionId: "session-1" },
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 404);
+});
+
+test("POST /v1/agents/runtimes upserts runtime", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/agents/runtimes",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ agentActorId: "actor-1", sessionId: "session-1", runtimeId: "runtime-abc", backendSessionId: "backend-1" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(body.id);
+  assert.equal(repo.calls[0].method, "upsertAgentRuntime");
+});
+
+test("PATCH /v1/agents/runtimes/:runtimeRowId/cursor updates cursor", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/agents/runtimes/runtime-row-1/cursor",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ lastProcessedMessageId: "message-1" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "updateRuntimeCursor", runtimeRowId: "runtime-row-1", input: { lastProcessedMessageId: "message-1" } });
+});
+
+test("POST /v1/agents/types/ensure dispatches to repo.ensureAgentTypes", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/agents/types/ensure",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ supportedTypes: ["openai", "claude"], defaultAgentType: "claude" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "ensureAgentTypes", input: { supportedTypes: ["openai", "claude"], defaultAgentType: "claude" } });
+});
+
+test("PUT /v1/agents/:agentActorId/device sets device id", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PUT",
+    path: "/v1/agents/actor-1/device",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "device-abc" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "setAgentDeviceId", agentActorId: "actor-1", input: { deviceId: "device-abc" } });
+});
+
 function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, workspaces = [], ideas = null } = {}) {
   const calls = [];
   const configs = { ...teamWorkspaceConfigs };
@@ -1126,5 +1239,11 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async setShortcutVisibleRoles(shortcutId, input) { calls.push({ method: "setShortcutVisibleRoles", shortcutId, input }); if (error) throw error; },
     async listTeamRoles(teamId) { calls.push({ method: "listTeamRoles", teamId }); if (error) throw error; return [{ id: "role-1", teamId, code: "admin", name: "Admin" }]; },
     async listTeamPermissions(teamId) { calls.push({ method: "listTeamPermissions", teamId }); if (error) throw error; return [{ resourceId: "resource-1", roleIds: ["role-1"] }]; },
+    async upsertAgentRuntime(body) { calls.push({ method: "upsertAgentRuntime", body }); if (error) throw error; return { id: body.id ?? "runtime-row-1" }; },
+    async getAgentRuntime(args) { calls.push({ method: "getAgentRuntime", args }); if (error) throw error; if (args.sessionId === "session-missing") return null; return { id: "runtime-row-1", agentActorId: "actor-1", sessionId: args.sessionId, runtimeId: args.runtimeId ?? "runtime-abc", backendSessionId: args.backendSessionId ?? "backend-1", lastProcessedMessageId: null, metadata: null, createdAt: null, updatedAt: null }; },
+    async getLatestAgentRuntime(args) { calls.push({ method: "getLatestAgentRuntime", args }); if (error) throw error; if (args.agentId === "actor-missing") return null; return { id: "runtime-row-1", agentActorId: args.agentId, sessionId: args.sessionId, runtimeId: "runtime-abc", backendSessionId: "backend-1", lastProcessedMessageId: null, metadata: null, createdAt: null, updatedAt: null }; },
+    async updateRuntimeCursor(runtimeRowId, input) { calls.push({ method: "updateRuntimeCursor", runtimeRowId, input }); if (error) throw error; },
+    async ensureAgentTypes(input) { calls.push({ method: "ensureAgentTypes", input }); if (error) throw error; },
+    async setAgentDeviceId(agentActorId, input) { calls.push({ method: "setAgentDeviceId", agentActorId, input }); if (error) throw error; },
   };
 }
