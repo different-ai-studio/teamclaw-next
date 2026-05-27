@@ -74,11 +74,10 @@ pub(super) struct RefreshRequest<'a> {
     pub(super) refresh_token: &'a str,
 }
 
-/// Token response — accepts both Supabase snake_case (`access_token`) and
-/// Cloud API camelCase (`accessToken`) via serde aliases.
+/// Token response from `/v1/auth/refresh` (camelCase).
 #[derive(Deserialize)]
 pub(super) struct TokenResponse {
-    #[serde(alias = "accessToken")]
+    #[serde(rename = "accessToken")]
     pub(super) access_token: String,
 }
 

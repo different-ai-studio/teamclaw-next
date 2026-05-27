@@ -30,16 +30,15 @@ impl CloudApiBackend {
         }
     }
 
-    /// Obtain a fresh access token via the Cloud API (or Supabase for legacy configs).
+    /// Obtain a fresh access token via `/v1/auth/refresh`.
     pub(super) async fn access_token(&self) -> BackendResult<String> {
         let url = format!(
-            "{}/auth/v1/token?grant_type=refresh_token",
-            self.cfg.supabase_url.trim_end_matches('/')
+            "{}/v1/auth/refresh",
+            self.cfg.url.trim_end_matches('/')
         );
         let resp = self
             .http
             .post(url)
-            .header("apikey", &self.cfg.supabase_anon_key)
             .json(&RefreshRequest {
                 refresh_token: &self.cfg.refresh_token,
             })
@@ -385,7 +384,7 @@ impl Backend for CloudApiBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn config(server: &MockServer) -> CloudApiConfig {
@@ -400,18 +399,36 @@ mod tests {
     }
 
     fn refresh_ok() -> serde_json::Value {
-        serde_json::json!({ "access_token": "access-token" })
+        serde_json::json!({ "accessToken": "access-token", "refreshToken": "rt-2", "expiresAt": 9999999999_i64 })
+    }
+
+    async fn mount_refresh(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn access_token_calls_cloud_api_refresh() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .and(wiremock::matchers::body_json(serde_json::json!({ "refreshToken": "refresh" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        let tok = backend.access_token().await.unwrap();
+        assert_eq!(tok, "access-token");
     }
 
     #[tokio::test]
     async fn claim_invite_uses_refreshed_bearer_against_cloud_api() {
         let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/auth/v1/token"))
-            .and(query_param("grant_type", "refresh_token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
-            .mount(&server)
-            .await;
+        mount_refresh(&server).await;
         Mock::given(method("POST"))
             .and(path("/v1/invites/claim"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -449,11 +466,7 @@ mod tests {
     async fn messages_after_cursor_maps_cloud_messages() {
         use chrono::DateTime;
         let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/auth/v1/token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
-            .mount(&server)
-            .await;
+        mount_refresh(&server).await;
         Mock::given(method("GET"))
             .and(path("/v1/sessions/session-1/messages"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
