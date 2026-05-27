@@ -1,6 +1,6 @@
 begin;
 
-select plan(26);
+select plan(34);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -313,6 +313,111 @@ select lives_ok(
 -- restore alice for subsequent tests
 set local row_security = on;
 select pg_temp.as_user('a1111111-1111-1111-1111-111111111111'::uuid);
+
+-- ---------------------------------------------------------------------------
+-- §2.7: RLS — team members SELECT, no client INSERT/UPDATE/DELETE.
+-- ---------------------------------------------------------------------------
+
+-- Insert a blob row as service_role so we have something to read.
+set local role postgres;
+set local row_security = off;
+insert into public.amuxc_blobs (team_id, content_hash, oss_key, size)
+  values ((select team_id from ctx),
+          'rls-fixture-hash',
+          'teams/oss-team/blobs/sha256/rl/sf/ixture',
+          7);
+
+-- 8a. RLS is enabled on all four tables.
+select is(
+  (select bool_and(relrowsecurity) from pg_class
+    where relname in ('amuxc_blobs','amuxc_files','amuxc_file_versions','amuxc_upload_sessions')),
+  true,
+  'RLS is enabled on all amuxc_* tables');
+
+-- 8b. Alice (team member) can SELECT her team's blob.
+-- Switch session role to authenticated so RLS policies fire.
+-- Re-enable row_security (earlier blocks used set local row_security = off).
+set local row_security = on;
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'a1111111-1111-1111-1111-111111111111', 'role', 'authenticated')::text,
+  true);
+select set_config('role', 'authenticated', true);
+select isnt_empty(
+  $$select 1 from public.amuxc_blobs
+     where content_hash = 'rls-fixture-hash'$$,
+  'alice can SELECT her team blob');
+
+-- 8c. Bob (same team) can SELECT.
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'b2222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text,
+  true);
+select isnt_empty(
+  $$select 1 from public.amuxc_blobs
+     where content_hash = 'rls-fixture-hash'$$,
+  'bob can SELECT same-team blob');
+
+-- 8d. Cara (stranger) cannot SELECT.
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'c3333333-3333-3333-3333-333333333333', 'role', 'authenticated')::text,
+  true);
+select is_empty(
+  $$select 1 from public.amuxc_blobs
+     where content_hash = 'rls-fixture-hash'$$,
+  'stranger cara cannot SELECT another team blob');
+
+-- 8e. Anon cannot SELECT (no grant → permission denied).
+set local role anon;
+select set_config('request.jwt.claims',
+  json_build_object('role', 'anon')::text,
+  true);
+select set_config('role', 'anon', true);
+prepare anon_select_blob as
+  select 1 from public.amuxc_blobs where content_hash = 'rls-fixture-hash';
+select throws_ok(
+  'execute anon_select_blob',
+  '42501',
+  null,
+  'anon cannot SELECT amuxc_blobs');
+deallocate anon_select_blob;
+
+-- 8f. Authenticated (alice) cannot INSERT.
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'a1111111-1111-1111-1111-111111111111', 'role', 'authenticated')::text,
+  true);
+select set_config('role', 'authenticated', true);
+prepare alice_insert_blob as
+  insert into public.amuxc_blobs (team_id, content_hash, oss_key, size)
+  values ((select id from public.teams where slug = 'oss-team'), 'pwn', 'teams/x/blobs/sha256/pw/n/x', 1);
+select throws_ok(
+  'execute alice_insert_blob',
+  '42501',
+  null,
+  'authenticated cannot INSERT into amuxc_blobs');
+deallocate alice_insert_blob;
+
+-- 8g. Authenticated (alice) cannot UPDATE.
+prepare alice_update_blob as
+  update public.amuxc_blobs set verified = true
+   where content_hash = 'rls-fixture-hash';
+select throws_ok(
+  'execute alice_update_blob',
+  '42501',
+  null,
+  'authenticated cannot UPDATE amuxc_blobs');
+deallocate alice_update_blob;
+
+-- 8h. Authenticated (alice) cannot DELETE.
+prepare alice_delete_blob as
+  delete from public.amuxc_blobs
+   where content_hash = 'rls-fixture-hash';
+select throws_ok(
+  'execute alice_delete_blob',
+  '42501',
+  null,
+  'authenticated cannot DELETE from amuxc_blobs');
+deallocate alice_delete_blob;
 
 select * from finish();
 rollback;

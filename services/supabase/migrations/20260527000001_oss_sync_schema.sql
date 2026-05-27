@@ -168,4 +168,57 @@ create trigger trg_team_workspace_config_guard
 comment on function app.guard_team_workspace_sync_fields() is
   'Enforces the §2.6 waterline invariant: sync_mode / oss_change_seq / litellm_team_id are mutable only by service_role (FC). Authenticated team members can update other columns.';
 
+-- ===========================================================================
+-- 7. RLS: team members SELECT only, all writes are service_role only
+-- ===========================================================================
+alter table public.amuxc_blobs           enable row level security;
+alter table public.amuxc_files           enable row level security;
+alter table public.amuxc_file_versions   enable row level security;
+alter table public.amuxc_upload_sessions enable row level security;
+
+-- Force RLS on table owner too, so service_role policies (and lack of write
+-- policies for authenticated) are honored when running migrations/tests as
+-- postgres.
+alter table public.amuxc_blobs           force row level security;
+alter table public.amuxc_files           force row level security;
+alter table public.amuxc_file_versions   force row level security;
+alter table public.amuxc_upload_sessions force row level security;
+
+-- ---- SELECT: team members of the row's team -------------------------------
+create policy amuxc_blobs_select_team_member
+  on public.amuxc_blobs           for select to authenticated
+  using (app.is_team_member(team_id));
+
+create policy amuxc_files_select_team_member
+  on public.amuxc_files           for select to authenticated
+  using (app.is_team_member(team_id));
+
+-- amuxc_file_versions has no team_id column; route through file_id.
+create policy amuxc_file_versions_select_team_member
+  on public.amuxc_file_versions   for select to authenticated
+  using (exists (
+    select 1 from public.amuxc_files f
+     where f.id = amuxc_file_versions.file_id
+       and app.is_team_member(f.team_id)
+  ));
+
+create policy amuxc_upload_sessions_select_team_member
+  on public.amuxc_upload_sessions for select to authenticated
+  using (app.is_team_member(team_id));
+
+-- ---- service_role: bypass everything --------------------------------------
+-- Authenticated has no INSERT/UPDATE/DELETE policy → all writes denied for
+-- that role. service_role bypasses RLS, so it can do everything.
+
+-- ---- Grants ---------------------------------------------------------------
+revoke all on public.amuxc_blobs, public.amuxc_files,
+              public.amuxc_file_versions, public.amuxc_upload_sessions
+  from public, anon, authenticated;
+grant select on public.amuxc_blobs, public.amuxc_files,
+                public.amuxc_file_versions, public.amuxc_upload_sessions
+  to authenticated;
+grant all on public.amuxc_blobs, public.amuxc_files,
+             public.amuxc_file_versions, public.amuxc_upload_sessions
+  to service_role;
+
 commit;
