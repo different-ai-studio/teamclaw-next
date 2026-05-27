@@ -178,52 +178,57 @@ export function Settings(_props?: SettingsProps) {
             ] as const).map((group) => {
               const GroupIcon = group.icon
               const isExpanded = expandedGroup === group.id
-              const hasActive = group.sections.some(s => s.id === activeView)
-              const highlight = isExpanded || hasActive
               return (
                 <React.Fragment key={group.id}>
                   <button
                     onClick={() => toggleGroup(group.id)}
                     className={cn(
                       'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors',
-                      highlight
+                      isExpanded
                         ? 'bg-selected text-foreground font-semibold'
                         : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
                     )}
                   >
                     <GroupIcon className={cn(
                       "h-4 w-4 transition-colors",
-                      highlight ? 'text-foreground' : 'text-muted-foreground'
+                      isExpanded ? 'text-foreground' : 'text-muted-foreground'
                     )} />
                     {t(group.labelKey, group.label)}
                     <ChevronDown className={cn(
-                      "h-4 w-4 ml-auto transition-transform",
+                      "h-4 w-4 ml-auto transition-transform duration-200",
                       isExpanded ? "rotate-180" : ""
                     )} />
                   </button>
-                  {isExpanded && (
-                    <div className="mt-1 space-y-0.5 pl-6" data-testid={group.testid}>
-                      {group.sections.map((section) => {
-                        const Icon = section.icon
-                        const isActive = activeView === section.id
-                        return (
-                          <button
-                            key={section.id}
-                            onClick={() => setActiveView(section.id)}
-                            className={cn(
-                              'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition-colors',
-                              isActive
-                                ? 'bg-selected text-foreground font-semibold'
-                                : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
-                            )}
-                          >
-                            <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
-                            <span>{t(section.labelKey, section.label)}</span>
-                          </button>
-                        )
-                      })}
+                  <div
+                    className={cn(
+                      "grid transition-[grid-template-rows] duration-200 ease-out",
+                      isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    )}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="mt-1 space-y-0.5 pl-6" data-testid={group.testid}>
+                        {group.sections.map((section) => {
+                          const Icon = section.icon
+                          const isActive = activeView === section.id
+                          return (
+                            <button
+                              key={section.id}
+                              onClick={() => setActiveView(section.id)}
+                              className={cn(
+                                'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition-colors',
+                                isActive
+                                  ? 'bg-selected text-foreground font-semibold'
+                                  : 'text-muted-foreground hover:bg-selected/60 hover:text-foreground'
+                              )}
+                            >
+                              <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-foreground" : "text-muted-foreground")} />
+                              <span>{t(section.labelKey, section.label)}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </React.Fragment>
               )
             })}
