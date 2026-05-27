@@ -7,6 +7,8 @@
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use tauri::{Emitter, Manager};
+
 use super::{
     conflict::write_conflict_sidecar,
     crypto::{decrypt_blob, encrypt_blob, sha256_hex},
@@ -32,6 +34,7 @@ pub async fn tick(
     workspace_path: &str,
     team_id: &str,
     fc: &FcClient,
+    app: &tauri::AppHandle,
 ) -> Result<TickResult, SyncError> {
     let team_secret = load_team_secret(workspace_path, team_id)
         .map_err(|e| SyncError::State(format!("load team_secret: {e}")))?;
@@ -228,10 +231,24 @@ pub async fn tick(
         .save(workspace_path)
         .map_err(|e| SyncError::State(e))?;
 
+    let dirty_count = state.files.values().filter(|f| f.dirty).count();
+    let conflict_count = pull_conflicts + push_conflicts;
+
+    let _ = app.emit(
+        "oss-sync-status",
+        serde_json::json!({
+            "teamId": team_id,
+            "lastSyncAt": chrono::Utc::now().to_rfc3339(),
+            "syncing": false,
+            "dirtyCount": dirty_count,
+            "conflicts": conflict_count,
+        }),
+    );
+
     Ok(TickResult {
         pulled,
         pushed,
-        conflicts: pull_conflicts + push_conflicts,
+        conflicts: conflict_count,
     })
 }
 

@@ -15,7 +15,7 @@ pub async fn sync_all(app: &AppHandle, workspace: &str) -> SyncAllResult {
     let status = check_team_status(workspace);
     match status.mode.as_deref() {
         Some("git") => sync_git(app, workspace).await,
-        Some("oss") => sync_oss(workspace).await,
+        Some("oss") => sync_oss(app, workspace).await,
         _ => SyncAllResult {
             mode: "none".to_string(),
             success: false,
@@ -25,7 +25,7 @@ pub async fn sync_all(app: &AppHandle, workspace: &str) -> SyncAllResult {
     }
 }
 
-async fn sync_oss(workspace: &str) -> SyncAllResult {
+async fn sync_oss(app: &AppHandle, workspace: &str) -> SyncAllResult {
     use crate::commands::oss_sync::{engine, fc_client::FcClient};
     use crate::commands::team_secret_store;
 
@@ -81,7 +81,7 @@ async fn sync_oss(workspace: &str) -> SyncAllResult {
     };
 
     let fc = FcClient::new(base_url, jwt);
-    match engine::tick(workspace, &team_id, &fc).await {
+    match engine::tick(workspace, &team_id, &fc, app).await {
         Ok(r) => SyncAllResult {
             mode: "oss".to_string(),
             success: true,
