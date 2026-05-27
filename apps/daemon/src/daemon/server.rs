@@ -2529,6 +2529,16 @@ impl DaemonServer {
         }
     }
 
+    fn session_title_for_log(&self, session_id: &str) -> String {
+        self.teamclaw
+            .as_ref()
+            .and_then(|tc| tc.sessions.find_by_id(session_id))
+            .map(|session| session.title.trim())
+            .filter(|title| !title.is_empty())
+            .unwrap_or("<unknown>")
+            .to_string()
+    }
+
     async fn handle_incoming(&mut self, msg: subscriber::IncomingMessage) {
         use prost::Message as ProstMessage;
         match msg {
@@ -2545,19 +2555,39 @@ impl DaemonServer {
                 session_id,
                 payload,
             } => {
+                let session_title = self.session_title_for_log(&session_id);
+                let daemon_device_id = self.config.device.id.as_str();
+                let daemon_actor_id = self.actor_id.as_str();
+                let daemon_team_id = self.config.team_id.as_deref().unwrap_or("<none>");
                 info!(
                     session_id = %session_id,
+                    session_title = %session_title,
+                    daemon_device_id = %daemon_device_id,
+                    daemon_actor_id = %daemon_actor_id,
+                    daemon_team_id = %daemon_team_id,
                     payload_bytes = payload.len(),
                     "session/live message received"
                 );
                 let envelope_res =
                     crate::proto::teamclaw::LiveEventEnvelope::decode(payload.as_slice());
                 if let Err(e) = &envelope_res {
-                    warn!(session_id = %session_id, err = %e, "LiveEventEnvelope decode FAILED");
+                    warn!(
+                        session_id = %session_id,
+                        session_title = %session_title,
+                        daemon_device_id = %daemon_device_id,
+                        daemon_actor_id = %daemon_actor_id,
+                        daemon_team_id = %daemon_team_id,
+                        err = %e,
+                        "LiveEventEnvelope decode FAILED"
+                    );
                 }
                 if let Ok(envelope) = envelope_res {
                     info!(
                         session_id = %session_id,
+                        session_title = %session_title,
+                        daemon_device_id = %daemon_device_id,
+                        daemon_actor_id = %daemon_actor_id,
+                        daemon_team_id = %daemon_team_id,
                         event_type = %envelope.event_type,
                         event_id = %envelope.event_id,
                         body_bytes = envelope.body.len(),
@@ -2570,12 +2600,27 @@ impl DaemonServer {
                             ) {
                                 Ok(e) => e,
                                 Err(e) => {
-                                    warn!(session_id = %session_id, err = %e, "SessionMessageEnvelope decode failed");
+                                    warn!(
+                                        session_id = %session_id,
+                                        session_title = %session_title,
+                                        daemon_device_id = %daemon_device_id,
+                                        daemon_actor_id = %daemon_actor_id,
+                                        daemon_team_id = %daemon_team_id,
+                                        err = %e,
+                                        "SessionMessageEnvelope decode failed"
+                                    );
                                     return;
                                 }
                             };
                             let Some(msg) = env.message.as_ref() else {
-                                warn!(session_id = %session_id, "SessionMessageEnvelope without inner message; dropping");
+                                warn!(
+                                    session_id = %session_id,
+                                    session_title = %session_title,
+                                    daemon_device_id = %daemon_device_id,
+                                    daemon_actor_id = %daemon_actor_id,
+                                    daemon_team_id = %daemon_team_id,
+                                    "SessionMessageEnvelope without inner message; dropping"
+                                );
                                 return;
                             };
                             if !msg.message_id.is_empty() {
@@ -2583,6 +2628,10 @@ impl DaemonServer {
                                     if !tc.should_process_message(&session_id, &msg.message_id) {
                                         info!(
                                             session_id = %session_id,
+                                            session_title = %session_title,
+                                            daemon_device_id = %daemon_device_id,
+                                            daemon_actor_id = %daemon_actor_id,
+                                            daemon_team_id = %daemon_team_id,
                                             message_id = %msg.message_id,
                                             "duplicate session/live message.created dropped"
                                         );
@@ -4343,11 +4392,42 @@ fn not_yet_implemented(
 mod tests {
     use super::*;
     use rumqttc::{AsyncClient, MqttOptions};
+    use std::io;
     use tempfile::TempDir;
 
     struct TestServer {
         server: DaemonServer,
         _tmp: TempDir,
+    }
+
+    #[derive(Clone, Default)]
+    struct LogCapture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    struct CapturedLogWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCapture {
+        type Writer = CapturedLogWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            CapturedLogWriter(self.0.clone())
+        }
+    }
+
+    impl io::Write for CapturedLogWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl LogCapture {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
     }
 
     fn test_config() -> DaemonConfig {
@@ -4572,6 +4652,59 @@ mod tests {
 
             assert!(load_team_shared_config_for_workspace(tmp.path()).is_none());
         }
+    }
+
+    fn seed_teamclaw_session(server: &mut DaemonServer, session_id: &str, title: &str) {
+        let session = crate::teamclaw::StoredSession {
+            session_id: session_id.to_string(),
+            team_id: "team-test".to_string(),
+            title: title.to_string(),
+            created_by: "human-actor".to_string(),
+            created_at: chrono::Utc::now(),
+            summary: String::new(),
+            idea_id: String::new(),
+            participants: vec![],
+            primary_agent_id: String::new(),
+        };
+        server.teamclaw.as_mut().unwrap().sessions.upsert(session);
+    }
+
+    #[tokio::test]
+    async fn incoming_live_event_log_includes_cached_session_and_daemon_info() {
+        let mut fixture = test_server();
+        seed_teamclaw_session(&mut fixture.server, "session-title-test", "Launch Plan");
+
+        let live = crate::proto::teamclaw::LiveEventEnvelope {
+            event_id: "event-session-title".to_string(),
+            event_type: "unknown.test".to_string(),
+            session_id: "session-title-test".to_string(),
+            actor_id: "human-actor".to_string(),
+            sent_at: 1,
+            body: vec![],
+        };
+        let capture = LogCapture::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(capture.clone())
+            .with_ansi(false)
+            .without_time()
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        fixture
+            .server
+            .handle_incoming(subscriber::IncomingMessage::TeamclawSessionLive {
+                session_id: "session-title-test".to_string(),
+                payload: live.encode_to_vec(),
+            })
+            .await;
+
+        let logs = capture.text();
+        assert!(logs.contains("LiveEventEnvelope decoded"), "{logs}");
+        assert!(logs.contains("session_title=Launch Plan"), "{logs}");
+        assert!(logs.contains("daemon_device_id=device-test"), "{logs}");
+        assert!(logs.contains("daemon_actor_id=agent-actor"), "{logs}");
+        assert!(logs.contains("daemon_team_id=team-test"), "{logs}");
     }
 
     #[tokio::test]
