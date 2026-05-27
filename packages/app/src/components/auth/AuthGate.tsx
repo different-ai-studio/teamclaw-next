@@ -61,6 +61,14 @@ export function AuthGate({ children }: AuthGateProps) {
 
     void (async () => {
       try {
+        // If the user just joined a team via invite (or any other flow already
+        // populated current-team), don't probe the team list — skip straight to
+        // ready so we never race into auto-creating a duplicate team when the
+        // freshly-added membership isn't yet visible to RLS.
+        if (useCurrentTeamStore.getState().team) {
+          return;
+        }
+
         const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
         const existingTeamId = teams[0]?.id;
         if (existingTeamId) {
