@@ -642,7 +642,7 @@ export const LLMSection = React.memo(function LLMSection() {
 
       {/* Provider List */}
       {!providersLoading || providers.length > 0 ? (
-        <div className="space-y-3">
+        <div className="space-y-1.5">
           {visibleProviders.map((p) => {
             const isConnected = p.configured
             const isExpanded = selectedProviderId === p.id
@@ -650,16 +650,16 @@ export const LLMSection = React.memo(function LLMSection() {
 
             return (
               <SettingCard key={p.id} className={cn(
-                "cursor-pointer hover:border-primary/30 transition-all",
+                "!p-3 cursor-pointer hover:border-primary/30 transition-all",
                 isExpanded && "border-primary/40"
               )}>
                 <div
                   className="flex items-center justify-between"
                   onClick={() => handleProviderClick(p.id, isConnected, p.name)}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     <div className={cn(
-                      "h-9 w-9 rounded-lg flex items-center justify-center text-[13px] font-medium",
+                      "h-7 w-7 rounded-md flex items-center justify-center text-[12px] font-medium",
                       isConnected
                         ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
                         : "bg-muted text-muted-foreground"
