@@ -1,6 +1,7 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
-import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb, ChevronDown, Mail, CalendarDays, LogOut, Users } from "lucide-react"
+import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb, ChevronUp, Mail, CalendarDays, LogOut, Users, Trophy } from "lucide-react"
+import { useTeamModeStore } from "@/stores/team-mode"
 import { isWorkspaceUIVariant } from "@/lib/ui-variant"
 
 import { useSessionStore } from "@/stores/session"
@@ -337,10 +338,13 @@ function SidebarUserAccountMenu() {
   const signOut = useAuthStore((s) => s.signOut)
   const currentTeam = useCurrentTeamStore((s) => s.team)
   const currentMember = useCurrentTeamStore((s) => s.currentMember)
+  const teamMode = useTeamModeStore((s) => s.teamMode)
+  const openSettings = useUIStore((s) => s.openSettings)
 
   if (!authSession) return null
 
   const meta = authSession.user.user_metadata as Record<string, unknown> | undefined
+  const avatarUrl = typeof meta?.avatar_url === 'string' ? meta.avatar_url : null
   const email = authSession.user.email || ""
   const fallbackName =
     (typeof meta?.full_name === 'string' && meta.full_name) ||
@@ -369,8 +373,15 @@ function SidebarUserAccountMenu() {
           className="h-7 min-w-0 max-w-[150px] gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
           data-testid="sidebar-user-menu-trigger"
         >
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" />
+          ) : (
+            <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-foreground">
+              {(userName?.[0] || "?").toUpperCase()}
+            </div>
+          )}
           <span className="truncate">{userName}</span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+          <ChevronUp className="h-3.5 w-3.5 shrink-0" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top" className="w-72 p-2">
@@ -410,6 +421,15 @@ function SidebarUserAccountMenu() {
             </div>
           </div>
         </div>
+        {teamMode && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => openSettings('leaderboard')}>
+              <Trophy className="mr-2 h-4 w-4" />
+              {t('settings.nav.leaderboard', 'Team Leaderboard')}
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => { void signOut() }} variant="destructive">
           <LogOut className="mr-2 h-4 w-4" />

@@ -32,9 +32,7 @@ import { Button } from '@/components/ui/button'
 import { useAppVersion } from '@/lib/version'
 import { useUpdaterStore } from '@/stores/updater'
 import { buildConfig, hasAnyChannel } from '@/lib/build-config'
-import { useTeamModeStore } from '@/stores/team-mode'
 import { useUIStore, type SettingsSection } from '@/stores/ui'
-import { TeamRankingCard } from './TeamRankingCard'
 import { SettingsSectionBody } from './section-registry'
 
 interface SettingsProps {
@@ -139,7 +137,6 @@ export function Settings(_props?: SettingsProps) {
   const [daemonExpanded, setDaemonExpanded] = React.useState(false)
   const [localAgentExpanded, setLocalAgentExpanded] = React.useState(false)
   const appVersion = useAppVersion()
-  const teamMode = useTeamModeStore(s => s.teamMode)
 
   // Filter sections based on build config feature flags
   const filteredPrimarySections = primarySections
@@ -297,13 +294,6 @@ export function Settings(_props?: SettingsProps) {
             )}
           </div>
         </ScrollArea>
-
-        {/* Team Ranking Card */}
-        {teamMode && (
-          <div className="px-3 pb-2">
-            <TeamRankingCard onClick={() => setActiveView('leaderboard')} />
-          </div>
-        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-border px-4 py-3">
