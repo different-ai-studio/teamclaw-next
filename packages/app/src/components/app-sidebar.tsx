@@ -344,8 +344,6 @@ function SidebarUserAccountMenu() {
 
   const [upgradeOpen, setUpgradeOpen] = React.useState(false)
 
-  const [upgradeOpen, setUpgradeOpen] = React.useState(false)
-
   if (!authSession) return null
 
   const meta = authSession.user.user_metadata as Record<string, unknown> | undefined
