@@ -31,6 +31,8 @@ pnpm-debug.log*
 .env.release
 config.json
 build.config.local.json
+
+services/pocketbase/pb_data/
 build.config.production.json
 
 

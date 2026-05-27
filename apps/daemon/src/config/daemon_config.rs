@@ -34,6 +34,10 @@ pub struct DeviceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MqttConfig {
     pub broker_url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 /// Top-level transport switch. When present and `kind = "nats"`, the

@@ -23,13 +23,12 @@ use crate::daemon::runtime_resolution::{
 use crate::daemon::session_events::{format_idea_prompt, parse_mention_actor_ids};
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
+use crate::pocketbase::PocketBaseBackend;
 use crate::proto::amux;
+use crate::provider_config::ProviderConfig;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
 use crate::supabase::{SupabaseBackend, SupabaseConfig};
 use crate::team_shared_git::TeamSharedGitConfig;
-// SupabaseConfig + SupabaseBackend stay imported: the daemon boot path constructs
-// the concrete impl from `supabase.toml`, then hands out `Arc<dyn Backend>` to
-// the rest of the daemon.
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
 /// Outcome of apply_start_runtime. Success path returns the allocated
@@ -219,32 +218,48 @@ enum SockCommand {
     Unknown(String),
 }
 
+fn load_provider_config_from_default_paths() -> crate::error::Result<ProviderConfig> {
+    let backend_path = ProviderConfig::default_path()
+        .map_err(|e| crate::error::AmuxError::Config(format!("backend config path failed: {e}")))?;
+    let legacy_supabase_path = SupabaseConfig::default_path().map_err(|e| {
+        crate::error::AmuxError::Config(format!("legacy supabase config path failed: {e}"))
+    })?;
+
+    ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path)
+        .map_err(|e| crate::error::AmuxError::Config(format!("backend config init failed: {e}")))
+}
+
+fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<Arc<dyn Backend>> {
+    match config {
+        ProviderConfig::Supabase(config) => {
+            let backend = SupabaseBackend::new(config).map_err(|e| {
+                crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
+            })?;
+            Ok(Arc::new(backend))
+        }
+        ProviderConfig::PocketBase(config) => {
+            let backend = PocketBaseBackend::new(config).map_err(|e| {
+                crate::error::AmuxError::Config(format!("pocketbase init failed: {e}"))
+            })?;
+            Ok(Arc::new(backend))
+        }
+    }
+}
+
 impl DaemonServer {
     pub async fn new(
         config: DaemonConfig,
         config_path: &std::path::Path,
     ) -> crate::error::Result<Self> {
-        // Supabase is required — fail fast with a clear message if absent.
-        let backend: Arc<dyn Backend> = match SupabaseConfig::default_path() {
-            Ok(path) if path.exists() => {
-                let concrete = SupabaseConfig::load(&path)
-                    .and_then(SupabaseBackend::new)
-                    .map_err(|e| {
-                        crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
-                    })?;
-                Arc::new(concrete)
-            }
-            _ => {
-                return Err(crate::error::AmuxError::Config(
-                    "supabase.toml not found — run `amuxd init` to configure".into(),
-                ))
-            }
-        };
+        let provider_config = load_provider_config_from_default_paths()?;
+        let provider_kind = provider_config.kind();
+        let backend = backend_from_provider_config(provider_config)?;
 
         info!(
+            backend_kind = ?provider_kind,
             actor_id = %backend.actor_id(),
             team_id  = %backend.team_id(),
-            "Supabase client initialised"
+            "backend client initialised"
         );
 
         let actor_id = backend.actor_id().to_string();
@@ -858,10 +873,18 @@ impl DaemonServer {
             };
 
             // ── 2. Rebuild MqttClient ──
+            let credential_mode = if self.config.mqtt.username.is_some()
+                && self.config.mqtt.password.is_some()
+            {
+                "configured"
+            } else {
+                "backend_token"
+            };
             info!(
                 actor_id = %self.actor_id,
                 broker   = %self.config.mqtt.broker_url,
-                "MQTT connecting with access_token"
+                credential_mode,
+                "MQTT connecting"
             );
             self.mqtt = match MqttClient::new(&self.config, &self.actor_id, &token) {
                 Ok(c) => c,
@@ -4335,6 +4358,8 @@ mod tests {
             },
             mqtt: crate::config::MqttConfig {
                 broker_url: "mqtt://localhost:1883".to_string(),
+                username: None,
+                password: None,
             },
             agents: crate::config::AgentsConfig::default(),
             transport: None,
@@ -4359,6 +4384,39 @@ mod tests {
             })
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn backend_from_provider_config_initializes_supabase_backend() {
+        let config = crate::provider_config::ProviderConfig::Supabase(SupabaseConfig {
+            url: "http://localhost".to_string(),
+            anon_key: "anon".to_string(),
+            refresh_token: "refresh".to_string(),
+            team_id: "team-test".to_string(),
+            actor_id: "agent-actor".to_string(),
+        });
+
+        let backend = backend_from_provider_config(config).unwrap();
+
+        assert_eq!(backend.team_id(), "team-test");
+        assert_eq!(backend.actor_id(), "agent-actor");
+    }
+
+    #[test]
+    fn backend_from_provider_config_initializes_pocketbase_backend() {
+        let config = crate::provider_config::ProviderConfig::PocketBase(
+            crate::provider_config::PocketBaseConfig {
+                url: "http://127.0.0.1:8090".to_string(),
+                refresh_token: "pb-token".to_string(),
+                team_id: "team-test".to_string(),
+                actor_id: "agent-actor".to_string(),
+            },
+        );
+
+        let backend = backend_from_provider_config(config).unwrap();
+
+        assert_eq!(backend.team_id(), "team-test");
+        assert_eq!(backend.actor_id(), "agent-actor");
     }
 
     fn test_mqtt(device_id: &str) -> MqttClient {

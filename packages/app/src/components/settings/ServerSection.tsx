@@ -90,11 +90,15 @@ function StatusPill({
 
 function trimConfig(config: ServerConfig): ServerConfig {
   return {
+    backendKind: config.backendKind,
     supabaseUrl: config.supabaseUrl?.trim() || undefined,
     supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
+    pocketbaseUrl: config.pocketbaseUrl?.trim() || undefined,
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
     mqttUseTls: config.mqttUseTls,
+    mqttUsername: config.mqttUsername?.trim() || undefined,
+    mqttPassword: config.mqttPassword?.trim() || undefined,
   };
 }
 
@@ -204,11 +208,14 @@ export function ServerSection() {
       }
 
       const useTls = config.mqttUseTls ?? false;
+      const configuredMqttUsername = config.mqttUsername?.trim();
+      const configuredMqttPassword = config.mqttPassword?.trim();
+      const useConfiguredMqttCredentials = Boolean(configuredMqttUsername && configuredMqttPassword);
       await mqttConnect({
         brokerHost: config.mqttHost,
         brokerPort: config.mqttPort ?? 1883,
-        username: actorId,
-        password: accessToken,
+        username: useConfiguredMqttCredentials ? configuredMqttUsername! : actorId,
+        password: useConfiguredMqttCredentials ? configuredMqttPassword! : accessToken,
         clientId: `teamclaw-settings-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
         teamId,
         useTls,

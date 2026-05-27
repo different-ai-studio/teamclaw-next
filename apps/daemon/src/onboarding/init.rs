@@ -115,6 +115,8 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
         },
         mqtt: MqttConfig {
             broker_url: default_mqtt_broker_url(),
+            username: None,
+            password: None,
         },
         agents: AgentsConfig::default(),
         transport: None,
@@ -266,6 +268,8 @@ mod tests {
                 },
                 mqtt: MqttConfig {
                     broker_url: "mqtts://old.example.com:8883".into(),
+                    username: None,
+                    password: None,
                 },
                 agents: AgentsConfig::default(),
                 transport: None,

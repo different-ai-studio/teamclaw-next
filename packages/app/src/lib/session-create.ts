@@ -46,10 +46,10 @@ export interface CreateSessionShellResult {
 export async function createSessionShell(
   args: CreateSessionShellArgs,
 ): Promise<CreateSessionShellResult> {
-  const sessionId = crypto.randomUUID()
+  const requestedSessionId: string = crypto.randomUUID()
   const trimmedTitle = (args.title.split('\n')[0] || args.title).trim().slice(0, 80) || 'New chat'
   sessionFlowLog('session_shell.begin', {
-    sessionId,
+    requestedSessionId,
     teamId: args.teamId,
     creatorActorId: args.creatorActorId,
     additionalActorCount: args.additionalActorIds.length,
@@ -58,18 +58,20 @@ export async function createSessionShell(
   })
 
   const participantActorIds = Array.from(new Set([args.creatorActorId, ...args.additionalActorIds]))
+  let sessionId = requestedSessionId
   try {
-    await getBackend().sessions.createSessionShell({
-      id: sessionId,
+    const created = await getBackend().sessions.createSessionShell({
+      id: requestedSessionId,
       teamId: args.teamId,
       createdByActorId: args.creatorActorId,
       title: trimmedTitle,
       additionalActorIds: args.additionalActorIds,
       ideaId: args.ideaId ?? null,
     })
+    sessionId = created.sessionId
   } catch (error) {
     sessionFlowError('session_shell.create_backend.failed', error, {
-      sessionId,
+      requestedSessionId,
       teamId: args.teamId,
       participantCount: participantActorIds.length,
     })
@@ -77,6 +79,7 @@ export async function createSessionShell(
   }
   sessionFlowLog('session_shell.create_backend.ok', {
     sessionId,
+    requestedSessionId,
     teamId: args.teamId,
     participantCount: participantActorIds.length,
   })

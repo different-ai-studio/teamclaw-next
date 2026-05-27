@@ -66,6 +66,25 @@ describe('startAgentRuntimesAsync', () => {
     backendMocks.listAgentDefaults.mockResolvedValue(opts.actors ?? [])
   }
 
+  it('returns the backend session id after creating a shell', async () => {
+    backendMocks.createSessionShell.mockResolvedValueOnce({ sessionId: 'pb_session_1' })
+
+    const { createSessionShell } = await import('../session-create')
+    const result = await createSessionShell({
+      teamId: 'team-1',
+      creatorActorId: 'member-1',
+      title: 'hello',
+      additionalActorIds: ['agent-1'],
+    })
+
+    expect(result.sessionId).toBe('pb_session_1')
+    expect(backendMocks.createSessionShell).toHaveBeenCalledWith(expect.objectContaining({
+      teamId: 'team-1',
+      createdByActorId: 'member-1',
+      additionalActorIds: ['agent-1'],
+    }))
+  })
+
   it('sends opencode runtimeStart requests for prior opencode agent runtimes', async () => {
     mockTables({
       runtimes: [{ agent_id: 'agent-1', workspace_id: 'ws-opencode', backend_type: 'opencode' }],

@@ -34,6 +34,7 @@ vi.mock("@/lib/server-config", () => ({
 
 vi.mock("@/lib/backend", () => ({
   hasBackendConfig: () => hasConfig.value,
+  getBackendKind: () => "supabase",
 }));
 
 vi.mock("@/lib/version", () => ({

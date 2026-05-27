@@ -1,12 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "@/lib/utils";
+import type { BackendKind } from "@/lib/backend/types";
 
 export interface ServerConfig {
+  backendKind?: BackendKind;
   supabaseUrl?: string;
   supabaseAnonKey?: string;
+  pocketbaseUrl?: string;
   mqttHost?: string;
   mqttPort?: number;
   mqttUseTls?: boolean;
+  mqttUsername?: string;
+  mqttPassword?: string;
 }
 
 const STORAGE_KEY = "teamclaw.serverConfig";
@@ -38,11 +43,50 @@ function envConfig(): ServerConfig {
         ? false
         : undefined;
   return {
+    backendKind: normalizeBackendKind(import.meta.env.VITE_BACKEND_KIND),
     supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
     supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+    pocketbaseUrl: import.meta.env.VITE_POCKETBASE_URL,
     mqttHost: import.meta.env.VITE_MQTT_HOST,
     mqttPort: Number.isFinite(mqttPort) ? mqttPort : undefined,
     mqttUseTls,
+    mqttUsername: import.meta.env.VITE_MQTT_USERNAME,
+    mqttPassword: import.meta.env.VITE_MQTT_PASSWORD,
+  };
+}
+
+function normalizeBackendKind(kind: unknown): BackendKind | undefined {
+  if (kind === "supabase" || kind === "pocketbase" || kind === "local") return kind;
+  return undefined;
+}
+
+function normalizeServerConfig(config: ServerConfig): ServerConfig {
+  return {
+    backendKind: normalizeBackendKind(config.backendKind),
+    supabaseUrl: config.supabaseUrl?.trim() || undefined,
+    supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
+    pocketbaseUrl: config.pocketbaseUrl?.trim() || undefined,
+    mqttHost: config.mqttHost?.trim() || undefined,
+    mqttPort: config.mqttPort,
+    mqttUseTls: config.mqttUseTls,
+    mqttUsername: config.mqttUsername?.trim() || undefined,
+    mqttPassword: config.mqttPassword?.trim() || undefined,
+  };
+}
+
+export function getEffectiveServerConfigSync(): ServerConfig {
+  const saved = normalizeServerConfig(readLocalConfig());
+  const env = envConfig();
+  return {
+    backendKind: saved.backendKind ?? env.backendKind ?? "supabase",
+    supabaseUrl: saved.supabaseUrl ?? env.supabaseUrl,
+    supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
+    pocketbaseUrl: saved.pocketbaseUrl ?? env.pocketbaseUrl,
+    mqttHost: saved.mqttHost ?? env.mqttHost,
+    mqttPort: saved.mqttPort ?? env.mqttPort,
+    mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
+    mqttUsername: saved.mqttUsername ?? env.mqttUsername,
+    mqttPassword: saved.mqttPassword ?? env.mqttPassword,
   };
 }
 
@@ -58,13 +102,7 @@ export async function getSavedServerConfig(): Promise<ServerConfig> {
 }
 
 export async function saveServerConfig(config: ServerConfig): Promise<ServerConfig> {
-  const normalized: ServerConfig = {
-    supabaseUrl: config.supabaseUrl?.trim() || undefined,
-    supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
-    mqttHost: config.mqttHost?.trim() || undefined,
-    mqttPort: config.mqttPort,
-    mqttUseTls: config.mqttUseTls,
-  };
+  const normalized = normalizeServerConfig(config);
 
   writeLocalConfig(normalized);
   if (!isTauri()) return normalized;
@@ -74,13 +112,17 @@ export async function saveServerConfig(config: ServerConfig): Promise<ServerConf
 }
 
 export async function getEffectiveServerConfig(): Promise<ServerConfig> {
-  const saved = await getSavedServerConfig();
+  const saved = normalizeServerConfig(await getSavedServerConfig());
   const env = envConfig();
   return {
+    backendKind: saved.backendKind ?? env.backendKind ?? "supabase",
     supabaseUrl: saved.supabaseUrl ?? env.supabaseUrl,
     supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
+    pocketbaseUrl: saved.pocketbaseUrl ?? env.pocketbaseUrl,
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
+    mqttUsername: saved.mqttUsername ?? env.mqttUsername,
+    mqttPassword: saved.mqttPassword ?? env.mqttPassword,
   };
 }
