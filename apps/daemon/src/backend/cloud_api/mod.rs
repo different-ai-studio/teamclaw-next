@@ -224,10 +224,20 @@ impl Backend for CloudApiBackend {
 
     async fn check_agent_permission(
         &self,
-        _agent_id: &str,
-        _actor_id: &str,
+        agent_id: &str,
+        actor_id: &str,
     ) -> BackendResult<Option<String>> {
-        self.unsupported("check_agent_permission")
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            allowed: bool,
+            role: Option<String>,
+        }
+        let r: Resp = self
+            .get(&format!(
+                "/v1/agents/{agent_id}/permission?actorId={actor_id}"
+            ))
+            .await?;
+        Ok(if r.allowed { r.role } else { None })
     }
 
     async fn heartbeat(&self) -> BackendResult<()> {
@@ -703,6 +713,46 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn check_agent_permission_returns_role_when_allowed() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/agent-1/permission"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "allowed": true,
+                "role": "admin"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let role = backend
+            .check_agent_permission("agent-1", "actor-1")
+            .await
+            .unwrap();
+        assert_eq!(role, Some("admin".to_string()));
+    }
+
+    #[tokio::test]
+    async fn check_agent_permission_returns_none_when_denied() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/agent-1/permission"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "allowed": false,
+                "role": null
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let role = backend
+            .check_agent_permission("agent-1", "actor-no-access")
+            .await
+            .unwrap();
+        assert!(role.is_none());
     }
 
     #[tokio::test]
