@@ -26,6 +26,14 @@ export function createCloudApiBackend(
   config: ServerConfig,
   options: { delegate?: TeamClawBackend; client?: CloudApiClient } = {},
 ): TeamClawBackend {
+  // delegate is kept for domains not yet covered by /v1 endpoints:
+  // - sync (no FC route)
+  // - directory (no FC route)
+  // - teamWorkspaceConfig (schema mismatch)
+  // - actors.listActorDirectoryByIds (no bulk endpoint)
+  // - actors.removeAgentAccess (accessId vs actorId mismatch)
+  // - teams.removeTeamActor (no teamId in interface)
+  // These will be removed in Phase D once FC routes are expanded.
   const delegate = options.delegate ?? createSupabaseBackend();
   const client = options.client ?? createCloudApiClient({
     baseUrl: requiredCloudApiUrl(config),
@@ -33,7 +41,6 @@ export function createCloudApiBackend(
   });
 
   return {
-    ...delegate,
     kind: "cloud_api",
     auth: createAuthModule(client, delegate.auth),
     teams: createTeamsModule(client, delegate.teams),
@@ -50,6 +57,8 @@ export function createCloudApiBackend(
     runtime: createRuntimeModule(client, delegate.runtime),
     attachments: createAttachmentsModule(client, delegate.attachments),
     telemetry: createTelemetryModule(client, delegate.telemetry),
+    // sync has no /v1 endpoint yet; keep Supabase passthrough
+    sync: delegate.sync,
   };
 }
 
