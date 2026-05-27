@@ -19,7 +19,7 @@ import { createOutboxSender } from "../../../../src/features/sessions/outbox-sen
 import type { OutboxSqliteDb } from "../../../../src/features/sessions/outbox-db";
 import { publishOutboxRowViaOptionalMqtt } from "../../../../src/features/sessions/session-outbox-publish";
 import { resetOutbox, syncOutboxFromDao } from "../../../../src/features/sessions/outbox-store";
-import { createSessionsApi } from "../../../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../../../src/features/sessions/api-provider";
 import { createSessionDetailController } from "../../../../src/features/sessions/session-detail-controller";
 import { emptyTimelineState } from "../../../../src/features/sessions/timeline-reducer";
 import { createSessionDetailCache } from "../../../../src/features/sessions/session-detail-cache";
@@ -126,7 +126,7 @@ export default function SessionDetailRoute() {
     // next time the list reloads. Failures are silent — the list re-derives
     // unread state from the (unchanged) read marker anyway.
     if (state.currentMemberActorId) {
-      void createSessionsApi(supabase).markSessionRead(
+      void createConfiguredSessionsApi(supabase).markSessionRead(
         sessionId,
         state.currentMemberActorId,
         null,
@@ -167,7 +167,7 @@ export default function SessionDetailRoute() {
       };
 
       const nextController = createSessionDetailController({
-        api: createSessionsApi(supabase),
+        api: createConfiguredSessionsApi(supabase),
         cache: createSessionDetailCache(),
         currentMemberActorId: state.currentMemberActorId,
         getAuth: async () => {
@@ -294,7 +294,7 @@ export default function SessionDetailRoute() {
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
-    void createSessionsApi(supabase)
+    void createConfiguredSessionsApi(supabase)
       .loadRuntime(sessionId)
       .then((row) => {
         if (cancelled) return;
@@ -702,7 +702,7 @@ export default function SessionDetailRoute() {
           setIsModelPromptOpen(false);
           if (!trimmed || !runtimeInfo) return;
           try {
-            await createSessionsApi(supabase).updateRuntimeModel(
+            await createConfiguredSessionsApi(supabase).updateRuntimeModel(
               runtimeInfo.dbRuntimeId,
               trimmed,
             );
@@ -730,7 +730,7 @@ export default function SessionDetailRoute() {
           setEditingMessage(null);
           if (!target || !trimmed || trimmed === target.content.trim()) return;
           try {
-            await createSessionsApi(supabase).updateMessageContent(
+            await createConfiguredSessionsApi(supabase).updateMessageContent(
               target.messageId,
               trimmed,
             );

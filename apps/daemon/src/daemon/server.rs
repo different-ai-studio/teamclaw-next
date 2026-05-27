@@ -266,6 +266,9 @@ fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<
             })?;
             Ok(Arc::new(backend))
         }
+        ProviderConfig::CloudApi(_) => Err(crate::error::AmuxError::Config(
+            "cloud_api daemon backend is configured but not implemented yet".to_string(),
+        )),
     }
 }
 

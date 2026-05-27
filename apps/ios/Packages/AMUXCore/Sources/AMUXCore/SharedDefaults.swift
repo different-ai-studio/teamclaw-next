@@ -3,6 +3,7 @@ import Foundation
 public struct ServicesDefaults: Codable {
     public let supabaseUrl: String
     public let supabaseAnonKey: String
+    public let cloudApiUrl: String?
     public let mqttHost: String
     public let mqttPort: Int
     public let mqttUseTls: Bool

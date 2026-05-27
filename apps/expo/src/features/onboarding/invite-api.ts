@@ -53,6 +53,41 @@ export function createInviteApi(client: SupabaseClient): InviteApi {
   };
 }
 
+export function createConfiguredInviteApi(client: SupabaseClient): InviteApi {
+  const baseUrl = process.env.EXPO_PUBLIC_CLOUD_API_URL?.trim();
+  if (process.env.EXPO_PUBLIC_BACKEND_KIND !== "cloud_api" || !baseUrl) {
+    return createInviteApi(client);
+  }
+
+  return {
+    async claim(token) {
+      const trimmed = token.trim();
+      if (!trimmed) {
+        throw new Error("Invite token is empty.");
+      }
+      const { data } = await client.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Missing auth session access token.");
+      }
+      const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/v1/invites/claim`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "X-Request-Id": Math.random().toString(36).slice(2).padEnd(12, "0").slice(0, 12),
+        },
+        body: JSON.stringify({ token: trimmed }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body?.error?.message ?? "Couldn't claim invite.");
+      }
+      return body as InviteClaimResult;
+    },
+  };
+}
+
 /**
  * Pulls the invite token out of a `teamclaw://invite/...` or
  * `teamclaw://invite?token=...` deep link. Returns null when the URL is for

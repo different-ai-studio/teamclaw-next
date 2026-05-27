@@ -44,4 +44,26 @@ describe("server config", () => {
       mqttPassword: "preview-secret",
     });
   });
+
+  it("persists Cloud API provider fields in browser mode", async () => {
+    const { getEffectiveServerConfig, saveServerConfig } = await import("../server-config");
+
+    const saved = await saveServerConfig({
+      backendKind: "cloud_api",
+      cloudApiUrl: " https://fc.example.com ",
+      supabaseUrl: " https://project.supabase.co ",
+      supabaseAnonKey: " anon ",
+    });
+
+    expect(saved).toMatchObject({
+      backendKind: "cloud_api",
+      cloudApiUrl: "https://fc.example.com",
+      supabaseUrl: "https://project.supabase.co",
+      supabaseAnonKey: "anon",
+    });
+    expect(await getEffectiveServerConfig()).toMatchObject({
+      backendKind: "cloud_api",
+      cloudApiUrl: "https://fc.example.com",
+    });
+  });
 });

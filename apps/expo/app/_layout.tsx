@@ -19,7 +19,7 @@ import { AppState, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ToastHost, showToast } from "../src/ui/Toast";
-import { createInviteApi, parseInviteToken } from "../src/features/onboarding/invite-api";
+import { createConfiguredInviteApi, parseInviteToken } from "../src/features/onboarding/invite-api";
 import { createOnboardingController } from "../src/features/onboarding/onboarding-store";
 import type {
   OnboardingRoute,
@@ -166,7 +166,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
       if (token === lastClaimedTokenRef.current) return;
       lastClaimedTokenRef.current = token;
       try {
-        const result = await createInviteApi(supabase).claim(token);
+        const result = await createConfiguredInviteApi(supabase).claim(token);
         if (cancelled) return;
         showToast(
           "success",

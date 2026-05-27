@@ -33,6 +33,32 @@ vi.mock("../supabase", () => ({
   }),
 }));
 
+vi.mock("../cloud-api", () => ({
+  hasCloudApiBackendConfig: (config: { cloudApiUrl?: string; supabaseUrl?: string; supabaseAnonKey?: string }) =>
+    Boolean(config.cloudApiUrl && config.supabaseUrl && config.supabaseAnonKey),
+  createCloudApiBackend: () => ({
+    kind: "cloud_api",
+    auth: {},
+    directory: {},
+    sessions: {
+      listCurrentActorSessions: () => Promise.resolve({ rows: [] }),
+    },
+    messages: {},
+    runtime: {},
+    attachments: {},
+    teams: {},
+    ideas: {},
+    actors: {},
+    sessionMembers: {},
+    shortcuts: {},
+    notifications: {},
+    teamWorkspaceConfig: {},
+    workspaces: {},
+    sync: {},
+    telemetry: {},
+  }),
+}));
+
 describe("backend provider facade", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -105,5 +131,23 @@ describe("backend provider facade", () => {
       category: "Unsupported",
       operation: "pocketbase.telemetry.listLeaderboard",
     });
+  });
+
+  it("selects Cloud API when saved server config requests it", async () => {
+    localStorage.setItem(
+      "teamclaw.serverConfig",
+      JSON.stringify({
+        backendKind: "cloud_api",
+        cloudApiUrl: "https://fc.example.com",
+        supabaseUrl: "https://project.supabase.co",
+        supabaseAnonKey: "anon",
+      }),
+    );
+
+    const { getBackend, getBackendKind, hasBackendConfig } = await import("../provider");
+
+    expect(getBackendKind()).toBe("cloud_api");
+    expect(hasBackendConfig()).toBe(true);
+    expect(getBackend().kind).toBe("cloud_api");
   });
 });

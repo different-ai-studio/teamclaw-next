@@ -19,6 +19,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
     #[serde(default)]
+    pub cloud_api_url: Option<String>,
+    #[serde(default)]
     pub pocketbase_url: Option<String>,
     #[serde(default)]
     pub mqtt_host: Option<String>,
@@ -78,6 +80,7 @@ fn default_server_config() -> ServerConfig {
         backend_kind: Some("supabase".to_string()),
         supabase_url: Some(d.supabase_url.clone()),
         supabase_anon_key: Some(d.supabase_anon_key.clone()),
+        cloud_api_url: None,
         pocketbase_url: None,
         mqtt_host: Some(d.mqtt_host.clone()),
         mqtt_port: Some(d.mqtt_port),
@@ -100,6 +103,7 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
         config.backend_kind = defaults.backend_kind;
     }
     let is_pocketbase = config.backend_kind.as_deref() == Some("pocketbase");
+    let is_cloud_api = config.backend_kind.as_deref() == Some("cloud_api");
     if is_pocketbase {
         if config
             .supabase_url
@@ -138,6 +142,18 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
         {
             config.supabase_anon_key = defaults.supabase_anon_key;
         }
+    }
+    if config
+        .cloud_api_url
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        config.cloud_api_url = None;
+    }
+    if is_cloud_api {
+        config.backend_kind = Some("cloud_api".to_string());
     }
     if config
         .pocketbase_url
@@ -281,6 +297,7 @@ mod tests {
             backend_kind: Some("pocketbase".to_string()),
             supabase_url: Some("https://project.supabase.co".to_string()),
             supabase_anon_key: Some("anon-key".to_string()),
+            cloud_api_url: Some("https://fc.example.com".to_string()),
             pocketbase_url: Some("http://127.0.0.1:8090".to_string()),
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
@@ -349,6 +366,7 @@ mod tests {
                 backend_kind: None,
                 supabase_url: Some("https://custom.supabase.co".to_string()),
                 supabase_anon_key: None,
+                cloud_api_url: None,
                 pocketbase_url: None,
                 mqtt_host: None,
                 mqtt_port: Some(1883),
@@ -383,6 +401,7 @@ mod tests {
             backend_kind: Some("pocketbase".to_string()),
             supabase_url: None,
             supabase_anon_key: None,
+            cloud_api_url: None,
             pocketbase_url: Some("http://127.0.0.1:8090".to_string()),
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
@@ -400,5 +419,32 @@ mod tests {
         );
         assert_eq!(config.mqtt_username.as_deref(), Some("mqtt-user"));
         assert_eq!(config.mqtt_password.as_deref(), Some("mqtt-password"));
+    }
+
+    #[test]
+    fn preserves_cloud_api_provider_fields() {
+        let config = merge_with_defaults(ServerConfig {
+            backend_kind: Some("cloud_api".to_string()),
+            supabase_url: Some("https://project.supabase.co".to_string()),
+            supabase_anon_key: Some("anon-key".to_string()),
+            cloud_api_url: Some("https://fc.example.com".to_string()),
+            pocketbase_url: None,
+            mqtt_host: Some("mqtt.example.com".to_string()),
+            mqtt_port: Some(1883),
+            mqtt_use_tls: Some(false),
+            mqtt_username: None,
+            mqtt_password: None,
+        });
+
+        assert_eq!(config.backend_kind.as_deref(), Some("cloud_api"));
+        assert_eq!(
+            config.cloud_api_url.as_deref(),
+            Some("https://fc.example.com")
+        );
+        assert_eq!(
+            config.supabase_url.as_deref(),
+            Some("https://project.supabase.co")
+        );
+        assert_eq!(config.supabase_anon_key.as_deref(), Some("anon-key"));
     }
 }

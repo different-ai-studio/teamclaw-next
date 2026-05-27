@@ -1,4 +1,4 @@
-export type BackendKind = "supabase" | "pocketbase" | "local";
+export type BackendKind = "supabase" | "pocketbase" | "cloud_api" | "local";
 
 export interface AuthUser {
   id: string;
