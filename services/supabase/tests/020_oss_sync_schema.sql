@@ -1,6 +1,6 @@
 begin;
 
-select plan(5);
+select plan(10);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -102,6 +102,35 @@ select throws_ok(
   null,
   'sync_mode check constraint rejects unknown values');
 deallocate bad_sync_mode;
+select pg_temp.as_user((select alice from ctx));
+
+-- ---------------------------------------------------------------------------
+-- §2.2: amuxc_blobs
+-- ---------------------------------------------------------------------------
+select has_table('public', 'amuxc_blobs', 'amuxc_blobs table exists');
+select col_is_pk('public', 'amuxc_blobs',
+                 array['team_id', 'content_hash'],
+                 'amuxc_blobs PK is (team_id, content_hash)');
+select col_not_null('public', 'amuxc_blobs', 'oss_key',
+                    'amuxc_blobs.oss_key is NOT NULL');
+select col_default_is('public', 'amuxc_blobs', 'verified', 'false',
+                      'amuxc_blobs.verified defaults to false');
+
+-- Deleting the team cascades into amuxc_blobs.
+set local role postgres;
+set local row_security = off;
+do $$
+declare v_team uuid;
+begin
+  insert into public.teams (slug, name) values ('blob-cascade', 'Blob Cascade')
+    returning id into v_team;
+  insert into public.amuxc_blobs (team_id, content_hash, oss_key, size)
+    values (v_team, 'deadbeef', 'teams/x/blobs/sha256/de/ad/beef', 42);
+  delete from public.teams where id = v_team;
+end $$;
+select is_empty(
+  'select 1 from public.amuxc_blobs where content_hash = ''deadbeef''',
+  'amuxc_blobs cascades on team delete');
 select pg_temp.as_user((select alice from ctx));
 
 select * from finish();

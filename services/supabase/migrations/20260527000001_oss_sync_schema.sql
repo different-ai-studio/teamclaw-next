@@ -26,4 +26,23 @@ comment on column public.team_workspace_config.oss_change_seq is
 comment on column public.team_workspace_config.litellm_team_id is
   'LiteLLM team id provisioned for this team during /sync/create-team.';
 
+-- ===========================================================================
+-- 2. amuxc_blobs: content-addressed blob registry, per-team isolated
+-- ===========================================================================
+create table public.amuxc_blobs (
+  team_id      uuid        not null references public.teams(id) on delete cascade,
+  content_hash text        not null,
+  oss_key      text        not null,
+  size         bigint      not null check (size >= 0),
+  verified     boolean     not null default false,
+  created_at   timestamptz not null default now(),
+  primary key (team_id, content_hash)
+);
+
+create index idx_amuxc_blobs_verified_created
+  on public.amuxc_blobs (created_at) where verified = false;
+
+comment on table public.amuxc_blobs is
+  'OSS blob registry. (team_id, content_hash) PK acts as a per-team dedup key. verified=false means prepare-stage placeholder, flipped true by /sync/upload/complete.';
+
 commit;
