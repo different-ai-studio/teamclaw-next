@@ -1591,30 +1591,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SessionParticipant"
-    Actor:
-      type: object
-      required: [id, teamId, kind, displayName]
-      properties:
-        id:
-          type: string
-          format: uuid
-        teamId:
-          type: string
-          format: uuid
-        kind:
-          type: string
-          enum: [agent, user, external]
-        displayName:
-          type: string
-        avatarUrl:
-          type:
-            - string
-            - "null"
-        metadata:
-          type:
-            - object
-            - "null"
-          additionalProperties: true
     TeamMember:
       type: object
       required: [actorId, teamId, role]
