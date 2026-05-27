@@ -1,6 +1,6 @@
 begin;
 
-select plan(10);
+select plan(15);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -131,6 +131,51 @@ end $$;
 select is_empty(
   'select 1 from public.amuxc_blobs where content_hash = ''deadbeef''',
   'amuxc_blobs cascades on team delete');
+select pg_temp.as_user((select alice from ctx));
+
+-- ---------------------------------------------------------------------------
+-- §2.3: amuxc_files — unique on (team_id, path) full (not partial), to
+-- preserve the soft-delete-then-revive invariant.
+-- ---------------------------------------------------------------------------
+select has_table('public', 'amuxc_files', 'amuxc_files table exists');
+select col_default_is('public', 'amuxc_files', 'deleted', 'false',
+                      'amuxc_files.deleted defaults to false');
+select col_default_is('public', 'amuxc_files', 'current_version', '0',
+                      'amuxc_files.current_version defaults to 0');
+
+-- Unique (team_id, path) — not partial. Tombstone + revive must update the
+-- existing row, never insert a second one.
+select indexes_are('public', 'amuxc_files',
+  array['amuxc_files_pkey', 'uniq_amuxc_path',
+        'idx_amuxc_files_team_updated', 'idx_amuxc_files_team_seq'],
+  'amuxc_files has expected indexes');
+
+-- Same path can be inserted only once even when first row is deleted=true.
+set local role postgres;
+set local row_security = off;
+create temp table _files_uniq_result (got_unique_violation boolean) on commit drop;
+do $$
+declare v_team uuid; v_actor uuid; v_file uuid; v_err text;
+begin
+  insert into public.teams (slug, name) values ('files-uniq', 'Files Uniq')
+    returning id into v_team;
+  insert into public.actors (team_id, actor_type, display_name, user_id)
+    values (v_team, 'member', 'X', 'a1111111-1111-1111-1111-111111111111')
+    returning id into v_actor;
+  insert into public.amuxc_files (team_id, path, deleted, updated_by)
+    values (v_team, 'skills/x.md', true, v_actor) returning id into v_file;
+  begin
+    insert into public.amuxc_files (team_id, path, deleted, updated_by)
+      values (v_team, 'skills/x.md', false, v_actor);
+    v_err := 'no-error';
+  exception when unique_violation then
+    v_err := 'unique_violation';
+  end;
+  insert into _files_uniq_result values (v_err = 'unique_violation');
+  delete from public.teams where id = v_team;
+end $$;
+select ok((select got_unique_violation from _files_uniq_result),
+          'amuxc_files rejects duplicate (team_id, path) even when soft-deleted');
 select pg_temp.as_user((select alice from ctx));
 
 select * from finish();

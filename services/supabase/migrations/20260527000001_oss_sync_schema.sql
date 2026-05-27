@@ -45,4 +45,36 @@ create index idx_amuxc_blobs_verified_created
 comment on table public.amuxc_blobs is
   'OSS blob registry. (team_id, content_hash) PK acts as a per-team dedup key. verified=false means prepare-stage placeholder, flipped true by /sync/upload/complete.';
 
+-- ===========================================================================
+-- 3. amuxc_files: current pointer per path
+-- ===========================================================================
+create table public.amuxc_files (
+  id              uuid        primary key default gen_random_uuid(),
+  team_id         uuid        not null references public.teams(id) on delete cascade,
+  path            text        not null,
+  current_version int         not null default 0,
+  content_hash    text,                            -- cipher_hash; null only when deleted
+  size            bigint      not null default 0 check (size >= 0),
+  deleted         boolean     not null default false,
+  change_seq      bigint      not null default 0,
+  row_version     int         not null default 0,
+  updated_by      uuid        not null references public.actors(id) on delete restrict,
+  updated_at      timestamptz not null default now(),
+  created_at      timestamptz not null default now()
+);
+
+create unique index uniq_amuxc_path
+  on public.amuxc_files (team_id, path);
+create index idx_amuxc_files_team_updated
+  on public.amuxc_files (team_id, updated_at);
+create index idx_amuxc_files_team_seq
+  on public.amuxc_files (team_id, change_seq);
+
+comment on table public.amuxc_files is
+  'Current pointer per (team, path). Soft-delete keeps the same row (deleted=true) so revival increments current_version on the existing row and preserves the immutable version chain in amuxc_file_versions.';
+comment on column public.amuxc_files.content_hash is
+  'Ciphertext sha256 (see design §3.-1). Null iff deleted=true.';
+comment on column public.amuxc_files.change_seq is
+  'Per-team manifest sequence, assigned by /sync/upload/complete. See team_workspace_config.oss_change_seq.';
+
 commit;
