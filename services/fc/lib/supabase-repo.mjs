@@ -89,6 +89,31 @@ export function createSupabaseBusinessRepository(options) {
       return mapMessage(data);
     },
 
+    async patchMessage(messageId, patch) {
+      const row = {};
+      if (patch.content !== undefined) row.content = patch.content;
+      if (patch.metadata !== undefined) row.metadata = patch.metadata;
+      const { data, error } = await supabase
+        .from("messages")
+        .update(row)
+        .eq("id", messageId)
+        .select(MESSAGE_COLUMNS)
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapMessage(data);
+    },
+
+    async deleteMessage(messageId) {
+      const { error } = await supabase
+        .from("messages")
+        .delete()
+        .eq("id", messageId);
+      if (error) throw error;
+    },
+
     async claimInvite(token) {
       const { data, error } = await supabase.rpc("claim_team_invite", { p_token: token });
       if (error) throw error;

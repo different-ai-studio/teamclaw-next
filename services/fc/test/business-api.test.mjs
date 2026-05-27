@@ -126,6 +126,40 @@ test("insert message calls repository when idempotency key matches message id", 
   });
 });
 
+test("PATCH /v1/messages/:messageId updates message", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/messages/message-1",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ content: "updated content" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.content, "updated content");
+  assert.deepEqual(repo.calls[0], {
+    method: "patchMessage",
+    messageId: "message-1",
+    patch: { content: "updated content" },
+  });
+});
+
+test("DELETE /v1/messages/:messageId removes message", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/messages/message-1",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "deleteMessage",
+    messageId: "message-1",
+  });
+});
+
 test("claim invite maps body token to repository", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({
@@ -383,6 +417,25 @@ test("PATCH /v1/workspaces/:workspaceId updates workspace", async () => {
   });
 });
 
+test("GET /v1/teams/:teamId/directory returns actors and members", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/directory",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(Array.isArray(body.actors));
+  assert.ok(Array.isArray(body.members));
+  assert.equal(body.actors.length, 1);
+  assert.equal(body.actors[0].displayName, "Alice");
+  assert.equal(body.members.length, 1);
+  assert.equal(body.members[0].role, "member");
+  assert.deepEqual(repo.calls[0], { method: "getTeamDirectory", teamId: "team-1" });
+});
+
 function session(id, lastMessageAt) {
   return {
     id,
@@ -448,6 +501,28 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
         createdAt: "2026-05-27T01:00:00Z",
         updatedAt: null,
       };
+    },
+    async patchMessage(messageId, patch) {
+      calls.push({ method: "patchMessage", messageId, patch });
+      if (error) throw error;
+      return {
+        id: messageId,
+        teamId: "team-1",
+        sessionId: "session-1",
+        turnId: null,
+        senderActorId: "actor-1",
+        replyToMessageId: null,
+        kind: "text",
+        content: patch.content ?? "hello",
+        metadata: patch.metadata ?? null,
+        model: null,
+        createdAt: "2026-05-27T01:00:00Z",
+        updatedAt: "2026-05-27T02:00:00Z",
+      };
+    },
+    async deleteMessage(messageId) {
+      calls.push({ method: "deleteMessage", messageId });
+      if (error) throw error;
     },
     async claimInvite(token) {
       calls.push({ method: "claimInvite", token });
@@ -520,6 +595,30 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
       if (patch.archived !== undefined) w.archived = patch.archived;
       if (patch.metadata !== undefined) w.metadata = patch.metadata;
       return w;
+    },
+    async getTeamDirectory(teamId) {
+      calls.push({ method: "getTeamDirectory", teamId });
+      if (error) throw error;
+      return {
+        actors: [
+          {
+            id: "actor-1",
+            teamId: "team-1",
+            kind: "user",
+            displayName: "Alice",
+            avatarUrl: null,
+            metadata: null,
+          },
+        ],
+        members: [
+          {
+            actorId: "actor-1",
+            teamId: "team-1",
+            role: "member",
+            joinedAt: "2026-05-27T01:00:00Z",
+          },
+        ],
+      };
     },
   };
 }

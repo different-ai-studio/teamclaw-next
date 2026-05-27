@@ -20,4 +20,9 @@ export function registerTeams(router) {
     const team = await ctx.repository.getTeam(decodeURIComponent(ctx.params.id));
     return { body: team };
   });
+
+  router.get("/v1/teams/:teamId/directory", async (ctx) => {
+    const result = await ctx.repository.getTeamDirectory(ctx.params.teamId);
+    return { body: result };
+  });
 }

@@ -68,6 +68,21 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     );
   });
 
+  test("repository contract: patchMessage updates content", async () => {
+    const repo = createRepository();
+    const patched = await repo.patchMessage("message-1", { content: "updated content" });
+    assert.ok(patched, "patched message should exist");
+    assert.equal(patched.content, "updated content");
+    assert.equal(patched.id, "message-1");
+  });
+
+  test("repository contract: deleteMessage removes row", async () => {
+    const repo = createRepository();
+    await repo.deleteMessage("message-1");
+    const messages = await repo.listMessages("session-1");
+    assert.ok(messages.every(m => m.id !== "message-1"), "message should be deleted");
+  });
+
   test("repository contract: listWorkspaces returns paged team workspaces", async () => {
     const repo = createRepository();
     const page = await repo.listWorkspaces({ teamId: "team-1", limit: 50, cursor: null });
@@ -131,6 +146,150 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     const cfg = await repo.getTeamWorkspaceConfig(teamId);
     assert.ok(cfg, "config should exist after put");
     assert.deepEqual(cfg.defaultWorkspaceId, "workspace-1");
+  });
+
+  test("repository contract: listTeamActors returns paged team actors", async () => {
+    const repo = createRepository();
+    const page = await repo.listTeamActors("team-1", { kind: null, limit: 200 });
+
+    assert.ok(Array.isArray(page.items));
+    assert.ok(page.items.length >= 1, "contract fixture must include at least one actor");
+    assert.deepEqual(Object.keys(page.items[0]).sort(), [
+      "avatarUrl",
+      "displayName",
+      "id",
+      "kind",
+      "metadata",
+      "teamId",
+    ].sort());
+  });
+
+  test("repository contract: getActor returns single actor", async () => {
+    const repo = createRepository();
+    const actor = await repo.getActor("actor-1");
+    assert.ok(actor, "actor should exist");
+    assert.equal(actor.displayName, "Test Actor");
+  });
+
+  test("repository contract: getActor returns null for missing actor", async () => {
+    const repo = createRepository();
+    const actor = await repo.getActor("actor-missing");
+    assert.equal(actor, null);
+  });
+
+  test("repository contract: upsertExternalActor returns actorId", async () => {
+    const repo = createRepository();
+    const result = await repo.upsertExternalActor({
+      teamId: "team-1",
+      source: "wecom",
+      sourceId: "external-1",
+      displayName: "External User",
+    });
+    assert.ok(result.actorId, "actorId must be present");
+  });
+
+  test("repository contract: listConnectedAgents returns agent list", async () => {
+    const repo = createRepository();
+    const result = await repo.listConnectedAgents("team-1");
+    assert.ok(Array.isArray(result.items));
+    assert.ok(result.items.length >= 1, "contract fixture must include at least one connected agent");
+    assert.equal(result.items[0].kind, "agent");
+  });
+
+  test("repository contract: updateOwnedAgentProfile succeeds", async () => {
+    const repo = createRepository();
+    await repo.updateOwnedAgentProfile("agent-1", {
+      displayName: "Updated Agent",
+      avatarUrl: null,
+      description: null,
+    });
+  });
+
+  test("repository contract: updateAgentDefaults succeeds", async () => {
+    const repo = createRepository();
+    await repo.updateAgentDefaults("agent-1", {
+      defaultAgentType: "claude",
+      supportedAgentTypes: ["claude", "gpt"],
+    });
+  });
+
+  test("repository contract: checkAgentPermission returns allowed when access exists", async () => {
+    const repo = createRepository();
+    const result = await repo.checkAgentPermission("agent-1", "actor-1");
+    assert.equal(result.allowed, true);
+    assert.ok(result.role, "role must be present when allowed");
+  });
+
+  test("repository contract: checkAgentPermission returns not allowed when no access", async () => {
+    const repo = createRepository();
+    const result = await repo.checkAgentPermission("agent-1", "actor-no-access");
+    assert.equal(result.allowed, false);
+    assert.equal(result.role, null);
+  });
+
+  test("repository contract: listAgentAccess returns access list", async () => {
+    const repo = createRepository();
+    const result = await repo.listAgentAccess("agent-1");
+    assert.ok(Array.isArray(result.items));
+    assert.ok(result.items.length >= 1, "contract fixture must include at least one access entry");
+    assert.deepEqual(Object.keys(result.items[0]).sort(), [
+      "actorId",
+      "agentActorId",
+      "role",
+    ].sort());
+  });
+
+  test("repository contract: grantAgentAccess upserts access", async () => {
+    const repo = createRepository();
+    const result = await repo.grantAgentAccess("agent-1", {
+      actorId: "actor-new",
+      role: "view",
+    });
+    assert.equal(result.actorId, "actor-new");
+    assert.equal(result.role, "view");
+  });
+
+  test("repository contract: revokeAgentAccess removes access", async () => {
+    const repo = createRepository();
+    await repo.revokeAgentAccess("agent-1", "actor-to-remove");
+  });
+
+  test("repository contract: listAgentAdminMembers returns admin actor IDs", async () => {
+    const repo = createRepository();
+    const result = await repo.listAgentAdminMembers("agent-1");
+    assert.ok(Array.isArray(result.items));
+    assert.ok(result.items.length >= 1, "contract fixture must include at least one admin");
+    for (const id of result.items) {
+      assert.ok(typeof id === "string", "admin member IDs must be strings");
+    }
+  });
+
+  test("repository contract: getTeamDirectory returns actors and members", async () => {
+    const repo = createRepository();
+    const result = await repo.getTeamDirectory("team-1");
+
+    assert.ok(Array.isArray(result.actors), "actors must be an array");
+    assert.ok(Array.isArray(result.members), "members must be an array");
+    assert.ok(result.actors.length >= 1, "contract fixture must include at least one actor");
+    assert.ok(result.members.length >= 1, "contract fixture must include at least one member");
+
+    const actor = result.actors[0];
+    assert.deepEqual(Object.keys(actor).sort(), [
+      "avatarUrl",
+      "displayName",
+      "id",
+      "kind",
+      "metadata",
+      "teamId",
+    ].sort());
+
+    const member = result.members[0];
+    assert.deepEqual(Object.keys(member).sort(), [
+      "actorId",
+      "joinedAt",
+      "role",
+      "teamId",
+    ].sort());
   });
 }
 

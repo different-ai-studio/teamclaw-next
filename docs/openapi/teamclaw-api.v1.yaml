@@ -20,6 +20,8 @@ tags:
     description: Team invite claim operations.
   - name: Workspaces
     description: Workspace CRUD operations.
+  - name: Actors
+    description: Actor directory and agent access management.
 paths:
   /v1/auth/refresh:
     post:
@@ -172,6 +174,304 @@ paths:
                       - "null"
         "401":
           $ref: "#/components/responses/Error"
+    post:
+      operationId: createSession
+      summary: Create session
+      tags: [Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCreate"
+      responses:
+        "201":
+          description: Created session with participants.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionWithParticipants"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}:
+    get:
+      operationId: getSession
+      summary: Get session with participants
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session with participants.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionWithParticipants"
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: patchSession
+      summary: Update session
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                mode:
+                  type: string
+                  enum: [solo, collab, control]
+                ideaId:
+                  type:
+                    - string
+                    - "null"
+                  format: uuid
+                archived:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated session.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/mark-viewed:
+    post:
+      operationId: markSessionViewed
+      summary: Mark session viewed
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/participants:
+    get:
+      operationId: listSessionParticipants
+      summary: List session participants
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session participants.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionParticipantList"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: upsertSessionParticipant
+      summary: Add or update session participant
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId]
+              properties:
+                actorId:
+                  type: string
+                  format: uuid
+                role:
+                  type: string
+      responses:
+        "200":
+          description: Upserted participant.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionParticipant"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/participants/{actorId}:
+    delete:
+      operationId: removeSessionParticipant
+      summary: Remove session participant
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: actorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/by-acp/{acpSessionId}:
+    get:
+      operationId: getSessionByAcp
+      summary: Get session by ACP session ID
+      tags: [Sessions]
+      parameters:
+        - name: acpSessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session ACP binding.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId]
+                properties:
+                  sessionId:
+                    type: string
+                    format: uuid
+                  gatewaySessionId:
+                    type:
+                      - string
+                      - "null"
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/gateway/ensure:
+    post:
+      operationId: ensureGatewaySession
+      summary: Ensure gateway session
+      tags: [Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, binding, title, primaryAgentActorId]
+              properties:
+                teamId:
+                  type: string
+                  format: uuid
+                binding:
+                  type: string
+                title:
+                  type: string
+                primaryAgentActorId:
+                  type: string
+                  format: uuid
+                ownerMemberActorIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                participantActorIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Gateway session result.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId, gatewaySessionId, created]
+                properties:
+                  sessionId:
+                    type: string
+                    format: uuid
+                  gatewaySessionId:
+                    type: string
+                  created:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/cron:
+    post:
+      operationId: createCronSession
+      summary: Create cron session
+      tags: [Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, primaryAgentActorId, title]
+              properties:
+                teamId:
+                  type: string
+                  format: uuid
+                primaryAgentActorId:
+                  type: string
+                  format: uuid
+                title:
+                  type: string
+      responses:
+        "200":
+          description: Cron session result.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId]
+                properties:
+                  sessionId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/sessions/{sessionId}/messages:
     get:
       operationId: listMessages
@@ -235,6 +535,62 @@ paths:
         "400":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+  /v1/messages/{messageId}:
+    patch:
+      operationId: patchMessage
+      summary: Update message content or metadata
+      tags: [Messages]
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                metadata:
+                  type:
+                    - object
+                    - "null"
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Updated message.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteMessage
+      summary: Delete message
+      tags: [Messages]
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: OK
+        "401":
           $ref: "#/components/responses/Error"
   /v1/invites/claim:
     post:
@@ -445,6 +801,360 @@ paths:
               schema:
                 $ref: "#/components/schemas/TeamWorkspaceConfig"
         "400":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/actors:
+    get:
+      operationId: listTeamActors
+      summary: List team actors
+      tags: [Actors]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [agent, user, external]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+      responses:
+        "200":
+          description: Actor page.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActorPage"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/actors/{actorId}:
+    get:
+      operationId: getActor
+      summary: Get single actor
+      tags: [Actors]
+      parameters:
+        - name: actorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Actor.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Actor"
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/actors/external:
+    post:
+      operationId: upsertExternalActor
+      summary: Upsert external actor
+      tags: [Actors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, source, sourceId, displayName]
+              properties:
+                teamId:
+                  type: string
+                  format: uuid
+                source:
+                  type: string
+                sourceId:
+                  type: string
+                displayName:
+                  type: string
+      responses:
+        "200":
+          description: Upserted actor.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [actorId]
+                properties:
+                  actorId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/agents/connected:
+    get:
+      operationId: listConnectedAgents
+      summary: List connected agents
+      tags: [Actors]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Connected agents.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ConnectedAgent"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/agents/{agentActorId}:
+    patch:
+      operationId: updateOwnedAgentProfile
+      summary: Update owned agent profile
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentProfilePatch"
+      responses:
+        "204":
+          description: OK
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/agents/{agentActorId}/defaults:
+    patch:
+      operationId: updateAgentDefaults
+      summary: Update agent defaults
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentDefaultsPatch"
+      responses:
+        "204":
+          description: OK
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/agents/{agentActorId}/permission:
+    get:
+      operationId: checkAgentPermission
+      summary: Check agent permission
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: actorId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Permission check result.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allowed]
+                properties:
+                  allowed:
+                    type: boolean
+                  role:
+                    type:
+                      - string
+                      - "null"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/agents/{agentActorId}/access:
+    get:
+      operationId: listAgentAccess
+      summary: List agent access
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Agent access list.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentAccess"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: grantAgentAccess
+      summary: Grant agent access
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, role]
+              properties:
+                actorId:
+                  type: string
+                  format: uuid
+                role:
+                  type: string
+      responses:
+        "200":
+          description: Granted access.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentAccess"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/agents/{agentActorId}/access/{actorId}:
+    delete:
+      operationId: revokeAgentAccess
+      summary: Revoke agent access
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: actorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/agents/{agentActorId}/admin-members:
+    get:
+      operationId: listAgentAdminMembers
+      summary: List agent admin member actor IDs
+      tags: [Actors]
+      parameters:
+        - name: agentActorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Admin member IDs.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/directory:
+    get:
+      operationId: getTeamDirectory
+      summary: Get team directory (actors + members)
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Team directory.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamDirectory"
+        "401":
           $ref: "#/components/responses/Error"
 components:
   securitySchemes:
@@ -731,3 +1441,206 @@ components:
             - object
             - "null"
           additionalProperties: true
+    Actor:
+      type: object
+      required: [id, teamId, kind, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [agent, user, external]
+        displayName:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - "null"
+        metadata:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+    ActorPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Actor"
+        nextCursor:
+          type:
+            - string
+            - "null"
+    ConnectedAgent:
+      allOf:
+        - $ref: "#/components/schemas/Actor"
+        - type: object
+          properties:
+            deviceId:
+              type:
+                - string
+                - "null"
+            lastSeenAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+            agentType:
+              type: string
+    AgentProfilePatch:
+      type: object
+      properties:
+        displayName:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - "null"
+        description:
+          type:
+            - string
+            - "null"
+    AgentDefaultsPatch:
+      type: object
+      properties:
+        defaultAgentType:
+          type: string
+        supportedAgentTypes:
+          type: array
+          items:
+            type: string
+    AgentAccess:
+      type: object
+      required: [agentActorId, actorId, role]
+      properties:
+        agentActorId:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+        role:
+          type: string
+    SessionCreate:
+      type: object
+      required: [teamId, title, mode]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        mode:
+          type: string
+          enum: [solo, collab, control]
+        ideaId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        primaryAgentActorId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        participantActorIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    SessionWithParticipants:
+      allOf:
+        - $ref: "#/components/schemas/Session"
+        - type: object
+          properties:
+            participants:
+              type: array
+              items:
+                $ref: "#/components/schemas/SessionParticipant"
+    SessionParticipant:
+      type: object
+      required: [sessionId, actorId, role]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+        role:
+          type: string
+        joinedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    SessionParticipantList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionParticipant"
+    Actor:
+      type: object
+      required: [id, teamId, kind, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [agent, user, external]
+        displayName:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - "null"
+        metadata:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+    TeamMember:
+      type: object
+      required: [actorId, teamId, role]
+      properties:
+        actorId:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        role:
+          type: string
+        joinedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    TeamDirectory:
+      type: object
+      required: [actors, members]
+      properties:
+        actors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Actor"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamMember"

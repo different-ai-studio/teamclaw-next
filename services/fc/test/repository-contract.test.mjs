@@ -47,19 +47,20 @@ function contractRepo() {
     { id: "workspace-1", teamId: "team-1", name: "Alpha", slug: null, archived: false, metadata: null, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
   ];
   const configStore = {};
+  const messageStore = fixture("message-list.json").items.slice();
   return {
     async listSessions() {
       return fixture("session-list.json").items;
     },
     async listMessages(sessionId) {
       assert.equal(sessionId, "session-1");
-      return fixture("message-list.json").items;
+      return messageStore;
     },
     async insertMessage(_sessionId, input) {
       if (input.id === "duplicate-message") {
         throw { code: "23505", message: "duplicate key value violates unique constraint" };
       }
-      return {
+      const msg = {
         id: input.id,
         teamId: input.teamId,
         sessionId: "session-1",
@@ -73,6 +74,20 @@ function contractRepo() {
         createdAt: input.createdAt ?? "2026-05-27T01:00:00Z",
         updatedAt: null,
       };
+      messageStore.push(msg);
+      return msg;
+    },
+    async patchMessage(messageId, patch) {
+      const msg = messageStore.find(m => m.id === messageId);
+      if (!msg) return null;
+      if (patch.content !== undefined) msg.content = patch.content;
+      if (patch.metadata !== undefined) msg.metadata = patch.metadata;
+      msg.updatedAt = "2026-05-27T02:00:00Z";
+      return msg;
+    },
+    async deleteMessage(messageId) {
+      const idx = messageStore.findIndex(m => m.id === messageId);
+      if (idx >= 0) messageStore.splice(idx, 1);
     },
     async listWorkspaces(args) {
       assert.equal(args.teamId, "team-1");
@@ -119,6 +134,98 @@ function contractRepo() {
         updatedAt: "2026-05-27T01:00:00Z",
       };
       return configStore[teamId];
+    },
+    async getTeamDirectory(teamId) {
+      assert.equal(teamId, "team-1");
+      return {
+        actors: [
+          {
+            id: "actor-1",
+            teamId: "team-1",
+            kind: "user",
+            displayName: "Alice",
+            avatarUrl: null,
+            metadata: null,
+          },
+          {
+            id: "actor-2",
+            teamId: "team-1",
+            kind: "agent",
+            displayName: "Bot",
+            avatarUrl: "https://example.com/avatar.png",
+            metadata: { type: "assistant" },
+          },
+        ],
+        members: [
+          {
+            actorId: "actor-1",
+            teamId: "team-1",
+            role: "member",
+            joinedAt: "2026-05-27T01:00:00Z",
+          },
+          {
+            actorId: "actor-2",
+            teamId: "team-1",
+            role: "admin",
+            joinedAt: "2026-05-27T02:00:00Z",
+          },
+        ],
+      };
+    },
+    async listTeamActors(teamId, { kind, limit }) {
+      assert.equal(teamId, "team-1");
+      return {
+        items: [
+          { id: "actor-1", teamId: "team-1", kind: "user", displayName: "Test Actor", avatarUrl: null, metadata: null },
+          { id: "actor-2", teamId: "team-1", kind: "agent", displayName: "Test Agent", avatarUrl: null, metadata: null },
+        ],
+      };
+    },
+    async getActor(actorId) {
+      if (actorId === "actor-missing") return null;
+      return { id: actorId, teamId: "team-1", kind: "user", displayName: "Test Actor", avatarUrl: null, metadata: null };
+    },
+    async upsertExternalActor(input) {
+      assert.equal(input.teamId, "team-1");
+      return { actorId: "actor-new" };
+    },
+    async listConnectedAgents(teamId) {
+      assert.equal(teamId, "team-1");
+      return {
+        items: [
+          { id: "agent-1", teamId: "team-1", kind: "agent", displayName: "Test Agent", avatarUrl: null, metadata: null, deviceId: "device-1", lastSeenAt: "2026-05-27T01:00:00Z", agentType: "claude" },
+        ],
+      };
+    },
+    async updateOwnedAgentProfile(agentActorId, patch) {
+      assert.equal(agentActorId, "agent-1");
+    },
+    async updateAgentDefaults(agentActorId, patch) {
+      assert.equal(agentActorId, "agent-1");
+    },
+    async checkAgentPermission(agentActorId, actorId) {
+      assert.equal(agentActorId, "agent-1");
+      if (actorId === "actor-no-access") return { allowed: false, role: null };
+      return { allowed: true, role: "admin" };
+    },
+    async listAgentAccess(agentActorId) {
+      assert.equal(agentActorId, "agent-1");
+      return {
+        items: [
+          { agentActorId: "agent-1", actorId: "actor-1", role: "admin" },
+        ],
+      };
+    },
+    async grantAgentAccess(agentActorId, { actorId, role }) {
+      assert.equal(agentActorId, "agent-1");
+      return { agentActorId, actorId, role };
+    },
+    async revokeAgentAccess(agentActorId, actorId) {
+      assert.equal(agentActorId, "agent-1");
+    },
+    async listAgentAdminMembers(agentActorId) {
+      assert.equal(agentActorId, "agent-1");
+      return { items: ["actor-1"] };
     },
   };
 }
