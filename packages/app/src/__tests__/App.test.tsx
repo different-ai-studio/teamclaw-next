@@ -17,7 +17,6 @@ const uiStoreState = vi.hoisted(() => ({
   fileModeRightTab: 'agent',
   setFileModeRightTab: vi.fn(),
   toggleLayoutMode: vi.fn(),
-  advancedMode: false,
   openSettings: vi.fn(),
 }))
 
@@ -75,7 +74,7 @@ vi.mock('@/lib/build-config', () => ({
   TEAM_REPO_DIR: 'teamclaw-team',
   buildConfig: {
     app: { name: 'TeamClaw' },
-    features: { advancedMode: true },
+    features: {},
   },
 }))
 vi.mock('@/components/FileEditor', () => ({ FileContentViewer: () => <div data-testid="file-content-viewer" /> }))

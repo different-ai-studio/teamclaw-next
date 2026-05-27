@@ -5,7 +5,6 @@ import React from 'react'
 const uiVariantMocks = vi.hoisted(() => ({ workspaceShell: false }))
 
 const uiStoreMocks = vi.hoisted(() => ({
-  advancedMode: true,
   defaultNavTab: 'session',
   switchToSession: vi.fn(() => Promise.resolve()),
   openSettings: vi.fn(),

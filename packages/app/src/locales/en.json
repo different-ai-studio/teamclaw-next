@@ -807,8 +807,6 @@
       "suggestionPlaceholder": "Enter a suggestion text...",
       "noCustomSuggestions": "No custom suggestions yet",
       "builtInSuggestions": "Built-in Suggestions",
-      "advancedMode": "Advanced Mode",
-      "advancedModeDesc": "Show system and team internal files in the file tree and enable Code mode",
       "notifAll": "All",
       "notifImportant": "Important only",
       "notifMute": "Mute"
