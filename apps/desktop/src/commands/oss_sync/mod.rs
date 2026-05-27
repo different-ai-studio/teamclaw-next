@@ -77,6 +77,33 @@ fn get_team_id(workspace_path: &str) -> Result<String, String> {
         .ok_or_else(|| "oss_team_id not found in teamclaw.json".to_string())
 }
 
+/// Write (or refresh) the Supabase JWT into teamclaw.json so that the OSS sync
+/// commands (`oss_sync_now`, `oss_sync_create_team`, etc.) can authenticate
+/// against FC. Call this from the frontend whenever the Supabase session
+/// changes (`onAuthStateChange` / hydrate).
+#[tauri::command]
+pub async fn oss_sync_set_jwt(workspace_path: String, jwt: String) -> Result<(), String> {
+    let config_path = std::path::Path::new(&workspace_path)
+        .join(crate::commands::TEAMCLAW_DIR)
+        .join(crate::commands::CONFIG_FILE_NAME);
+
+    let mut json: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    json["supabase_jwt"] = serde_json::Value::String(jwt);
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
+    }
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("write teamclaw.json: {e}"))
+}
+
 fn write_oss_team_config(
     workspace_path: &str,
     team_id: &str,

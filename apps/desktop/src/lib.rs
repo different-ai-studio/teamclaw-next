@@ -530,6 +530,7 @@ pub fn run() {
             commands::oss_sync::oss_sync_list_versions,
             commands::oss_sync::oss_sync_restore_version,
             commands::oss_sync::oss_sync_resolve_conflict,
+            commands::oss_sync::oss_sync_set_jwt,
         ])
         .setup(|app| {
             let setup_t0 = std::time::Instant::now();
