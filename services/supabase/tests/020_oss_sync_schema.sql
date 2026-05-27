@@ -83,8 +83,8 @@ select pg_temp.as_user((select alice from ctx));
 -- ---------------------------------------------------------------------------
 select has_column('public', 'team_workspace_config', 'sync_mode',
                   'team_workspace_config.sync_mode exists');
-select col_default_is('public', 'team_workspace_config', 'sync_mode', 'git',
-                  'sync_mode defaults to git');
+select col_default_is('public', 'team_workspace_config', 'sync_mode', 'oss',
+                  'sync_mode defaults to oss (flipped in 20260527000005)');
 select has_column('public', 'team_workspace_config', 'oss_change_seq',
                   'team_workspace_config.oss_change_seq exists');
 select has_column('public', 'team_workspace_config', 'litellm_team_id',
@@ -261,9 +261,11 @@ set local row_security = on;
 -- 7a. As alice (team owner, authenticated): updating sync_mode must fail.
 select pg_temp.as_user((select alice from ctx));
 
+-- Force a distinct value: post-flip the existing row defaults to 'oss',
+-- so attempting to set it back to 'oss' would no-op and not fire the guard.
 prepare alice_change_sync_mode as
   update public.team_workspace_config
-     set sync_mode = 'oss'
+     set sync_mode = 'git'
    where team_id = (select team_id from ctx);
 select throws_like(
   'execute alice_change_sync_mode',
