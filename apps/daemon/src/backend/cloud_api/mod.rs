@@ -497,9 +497,16 @@ impl Backend for CloudApiBackend {
 
     async fn list_agent_admin_member_actor_ids(
         &self,
-        _agent_actor_id: &str,
+        agent_actor_id: &str,
     ) -> BackendResult<Vec<String>> {
-        self.unsupported("list_agent_admin_member_actor_ids")
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            items: Vec<String>,
+        }
+        let r: Resp = self
+            .get(&format!("/v1/agents/{agent_actor_id}/admin-members"))
+            .await?;
+        Ok(r.items)
     }
 
     async fn upsert_session_participant(
@@ -713,6 +720,25 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn list_agent_admin_member_actor_ids_returns_items() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/agent-1/admin-members"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": ["actor-admin-1", "actor-admin-2"]
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let ids = backend
+            .list_agent_admin_member_actor_ids("agent-1")
+            .await
+            .unwrap();
+        assert_eq!(ids, vec!["actor-admin-1", "actor-admin-2"]);
     }
 
     #[tokio::test]
