@@ -1379,6 +1379,36 @@ impl DaemonServer {
                                 };
                                 let _ = reply_tx.send(resp.to_string());
                             }
+                            Some(SockCommand::WechatQrStart { reply_tx }) => {
+                                let base_url = teamclaw_gateway::wechat_config::default_ilink_base_url();
+                                let resp = match teamclaw_gateway::wechat::fetch_qr_code(&base_url).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WechatQrPoll { qrcode, reply_tx }) => {
+                                let base_url = teamclaw_gateway::wechat_config::default_ilink_base_url();
+                                let resp = match teamclaw_gateway::wechat::poll_qr_status(&base_url, &qrcode).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WecomQrStart { reply_tx }) => {
+                                let resp = match teamclaw_gateway::wecom::fetch_wecom_qr_code().await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WecomQrPoll { scode, reply_tx }) => {
+                                let resp = match teamclaw_gateway::wecom::poll_wecom_qr_result(&scode).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
                             Some(SockCommand::Unknown(line)) => warn!("amuxd.sock: unknown control command: {line:?}"),
                             None => warn!("amuxd.sock: listener channel closed; control commands unavailable until restart"),
                         }
