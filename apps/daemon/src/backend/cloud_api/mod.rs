@@ -250,8 +250,28 @@ impl Backend for CloudApiBackend {
         }
     }
 
-    async fn upsert_workspace(&self, _row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow> {
-        self.unsupported("upsert_workspace")
+    async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "teamId")]
+            team_id: &'a str,
+            name: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            slug: Option<&'a str>,
+            archived: bool,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            id: String,
+        }
+        let body = Body {
+            team_id: row.team_id,
+            name: row.name,
+            slug: row.path, // path used as slug identifier
+            archived: row.archived,
+        };
+        let r: Resp = self.post("/v1/workspaces", &body, None).await?;
+        Ok(WorkspaceRow { id: r.id })
     }
 
     async fn fetch_session_with_participants(
@@ -529,6 +549,37 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn upsert_workspace_posts_to_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/workspaces"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "ws-1",
+                "teamId": "team-1",
+                "name": "My Workspace",
+                "slug": null,
+                "archived": false,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let row = backend
+            .upsert_workspace(&WorkspaceUpsert {
+                team_id: "team-1",
+                agent_id: "agent-1",
+                name: "My Workspace",
+                path: None,
+                archived: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(row.id, "ws-1");
     }
 
     #[tokio::test]
