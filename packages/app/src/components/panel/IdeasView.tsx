@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { CreateIdeaDialog } from '@/components/sidebar/CreateIdeaDialog'
 import { IdeaDetailDialog } from '@/components/sidebar/IdeaDetailDialog'
+import { SidebarCollapseToggle } from '@/components/app-sidebar'
+import { TrafficLights } from '@/components/ui/traffic-lights'
+import { useSidebar } from '@/components/ui/sidebar'
 import { getBackend } from '@/lib/backend'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { formatRelativeTime } from '@/lib/date-format'
@@ -273,6 +276,8 @@ function FilterRow({
 
 export function IdeasView() {
   const { t } = useTranslation()
+  const { state: sidebarState } = useSidebar()
+  const sidebarCollapsed = sidebarState === 'collapsed'
   const { ideas, creators, loading, error, teamId, refetch } = useIdeasForTeam()
   const [orderedIdeas, setOrderedIdeas] = React.useState<IdeaRow[]>([])
   const [query, setQuery] = React.useState('')
@@ -473,8 +478,14 @@ export function IdeasView() {
 
   return (
     <div className="flex h-full min-w-0 flex-col border-r border-border bg-background">
-      <div className="border-b border-border px-4 py-3">
+      <div className="border-b border-border px-4 py-3" data-tauri-drag-region>
         <div className="flex items-center gap-2">
+          {sidebarCollapsed && (
+            <div className="flex items-center gap-1 shrink-0">
+              <TrafficLights />
+              <SidebarCollapseToggle />
+            </div>
+          )}
           <h2 className="min-w-0 flex-1 truncate text-[15px] font-bold leading-7 text-foreground">
             {t('ideas.allTitle', 'Ideas')}
             <span className="ml-2 font-mono text-[12.5px] font-normal text-faint">· {visibleIdeas.length}</span>

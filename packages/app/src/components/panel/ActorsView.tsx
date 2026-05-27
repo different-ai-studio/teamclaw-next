@@ -4,6 +4,9 @@ import { Check, Filter, Loader2, Plus, Search, Sparkles, User as UserIcon, Users
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
+import { SidebarCollapseToggle } from '@/components/app-sidebar'
+import { TrafficLights } from '@/components/ui/traffic-lights'
+import { useSidebar } from '@/components/ui/sidebar'
 import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatRelativeTime } from '@/lib/date-format'
@@ -240,6 +243,8 @@ function FilterRow({
 
 export function ActorsView() {
   const { t } = useTranslation()
+  const { state: sidebarState } = useSidebar()
+  const sidebarCollapsed = sidebarState === 'collapsed'
   const { actors, loading, error, teamId } = useActorsForTeam()
   const [query, setQuery] = React.useState('')
   const [searchOpen, setSearchOpen] = React.useState(false)
@@ -303,8 +308,14 @@ export function ActorsView() {
 
   return (
     <div className="flex h-full min-w-0 flex-col border-r border-border bg-background">
-      <div className="border-b border-border px-4 py-3">
+      <div className="border-b border-border px-4 py-3" data-tauri-drag-region>
         <div className="flex items-center gap-2">
+          {sidebarCollapsed && (
+            <div className="flex items-center gap-1 shrink-0">
+              <TrafficLights />
+              <SidebarCollapseToggle />
+            </div>
+          )}
           <h2 className="min-w-0 flex-1 truncate text-[15px] font-bold leading-7 text-foreground">
             {t('actors.allTitle', 'All actors')}
             <span className="ml-2 font-mono text-[12.5px] font-normal text-faint">· {visibleActors.length}</span>
