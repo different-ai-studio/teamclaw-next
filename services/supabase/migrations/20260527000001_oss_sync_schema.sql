@@ -101,4 +101,31 @@ create index idx_amuxc_file_versions_file
 comment on table public.amuxc_file_versions is
   'Append-only version chain. parent_version=current_version at time of complete, so cas conflicts surface as a 409 before this row is written.';
 
+-- ===========================================================================
+-- 5. amuxc_upload_sessions: prepare/complete bridge
+-- ===========================================================================
+create table public.amuxc_upload_sessions (
+  id              uuid        primary key default gen_random_uuid(),
+  team_id         uuid        not null references public.teams(id) on delete cascade,
+  actor_id        uuid        not null references public.actors(id) on delete cascade,
+  node_id         text,
+  path            text        not null,
+  parent_version  int         not null,
+  content_hash    text        not null,
+  size            bigint      not null check (size >= 0),
+  oss_key         text        not null,
+  status          text        not null default 'pending'
+    check (status in ('pending', 'completed', 'abandoned')),
+  created_at      timestamptz not null default now(),
+  expires_at      timestamptz not null
+);
+
+create index idx_amuxc_sessions_expires
+  on public.amuxc_upload_sessions (expires_at);
+create index idx_amuxc_sessions_team_status
+  on public.amuxc_upload_sessions (team_id, status);
+
+comment on table public.amuxc_upload_sessions is
+  'Tracks in-flight uploads between /prepare and /complete. actor_id is the creator; /complete must verify caller.actor_id == session.actor_id.';
+
 commit;

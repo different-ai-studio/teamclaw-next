@@ -1,6 +1,6 @@
 begin;
 
-select plan(18);
+select plan(21);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -211,6 +211,34 @@ end $$;
 select is_empty(
   'select 1 from public.amuxc_file_versions where content_hash = ''abc''',
   'amuxc_file_versions cascades when parent amuxc_files row is deleted');
+select pg_temp.as_user((select alice from ctx));
+
+-- ---------------------------------------------------------------------------
+-- §2.5: amuxc_upload_sessions
+-- ---------------------------------------------------------------------------
+select has_table('public', 'amuxc_upload_sessions',
+                 'amuxc_upload_sessions table exists');
+select col_default_is('public', 'amuxc_upload_sessions', 'status', 'pending',
+                      'amuxc_upload_sessions.status defaults to pending');
+
+-- Status check constraint rejects unknown values.
+set local role postgres;
+set local row_security = off;
+prepare bad_status as
+  insert into public.amuxc_upload_sessions
+    (team_id, actor_id, path, parent_version, content_hash, size,
+     oss_key, status, expires_at)
+  values ((select team_id from ctx),
+          (select id from public.actors where user_id = (select alice from ctx)
+                                          and team_id = (select team_id from ctx)),
+          'skills/x.md', 0, 'abc', 1,
+          'teams/x/blobs/sha256/ab/c', 'lolwhat', now() + interval '1 hour');
+select throws_ok(
+  'execute bad_status',
+  '23514',
+  null,
+  'amuxc_upload_sessions.status rejects unknown values');
+deallocate bad_status;
 select pg_temp.as_user((select alice from ctx));
 
 select * from finish();
