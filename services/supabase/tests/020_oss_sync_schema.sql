@@ -1,6 +1,6 @@
 begin;
 
-select plan(1);
+select plan(5);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -78,9 +78,31 @@ insert into public.team_members (id, team_id, member_id, role)
 -- Return to the default test identity (alice) for the assertions below.
 select pg_temp.as_user((select alice from ctx));
 
--- Sanity placeholder assertion (replaced by later tasks once we have real
--- expectations). Keeps plan() count honest while we're red.
-select pass('fixtures loaded');
+-- ---------------------------------------------------------------------------
+-- §2.1: team_workspace_config gains sync_mode / oss_change_seq / litellm_team_id
+-- ---------------------------------------------------------------------------
+select has_column('public', 'team_workspace_config', 'sync_mode',
+                  'team_workspace_config.sync_mode exists');
+select col_default_is('public', 'team_workspace_config', 'sync_mode', 'git',
+                  'sync_mode defaults to git');
+select has_column('public', 'team_workspace_config', 'oss_change_seq',
+                  'team_workspace_config.oss_change_seq exists');
+select has_column('public', 'team_workspace_config', 'litellm_team_id',
+                  'team_workspace_config.litellm_team_id exists');
+
+-- Check constraint rejects unknown sync_mode values (run as postgres to bypass RLS).
+set local role postgres;
+set local row_security = off;
+prepare bad_sync_mode as
+  insert into public.team_workspace_config (team_id, sync_mode)
+  values ((select team_id from ctx), 'lolwhat');
+select throws_ok(
+  'execute bad_sync_mode',
+  '23514',  -- check_violation
+  null,
+  'sync_mode check constraint rejects unknown values');
+deallocate bad_sync_mode;
+select pg_temp.as_user((select alice from ctx));
 
 select * from finish();
 rollback;
