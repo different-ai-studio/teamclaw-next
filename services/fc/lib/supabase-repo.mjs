@@ -4,6 +4,7 @@ import { ApiError } from "./http-utils.mjs";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
+const WORKSPACE_COLUMNS = "id, team_id, name, slug, archived, metadata, created_at, updated_at";
 
 export function createSupabaseBusinessRepository(options) {
   const {
@@ -100,11 +101,114 @@ export function createSupabaseBusinessRepository(options) {
         refreshToken: row.refresh_token ?? null,
       };
     },
+
+    async listWorkspaces({ teamId, limit = 50, cursor = null } = {}) {
+      let query = supabase
+        .from("workspaces")
+        .select(WORKSPACE_COLUMNS)
+        .eq("team_id", teamId)
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(limit + 1);
+      if (cursor?.updatedAt) {
+        query = query.lt("updated_at", cursor.updatedAt);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = (data ?? []).slice(0, limit);
+      return { items: rows.map(mapWorkspace) };
+    },
+
+    async upsertWorkspace(input) {
+      const row = {
+        id: input.id,
+        team_id: input.teamId,
+        name: input.name,
+        slug: input.slug ?? null,
+        archived: input.archived ?? false,
+        metadata: input.metadata ?? null,
+      };
+      const { data, error } = await supabase
+        .from("workspaces")
+        .upsert(row, { onConflict: "id" })
+        .select(WORKSPACE_COLUMNS)
+        .single();
+      if (error) throw error;
+      return mapWorkspace(data);
+    },
+
+    async getWorkspace(workspaceId) {
+      const { data, error } = await supabase
+        .from("workspaces")
+        .select(WORKSPACE_COLUMNS)
+        .eq("id", workspaceId)
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapWorkspace(data);
+    },
+
+    async patchWorkspace(workspaceId, patch) {
+      const row = {};
+      if (patch.name !== undefined) row.name = patch.name;
+      if (patch.archived !== undefined) row.archived = patch.archived;
+      if (patch.metadata !== undefined) row.metadata = patch.metadata;
+      const { data, error } = await supabase
+        .from("workspaces")
+        .update(row)
+        .eq("id", workspaceId)
+        .select(WORKSPACE_COLUMNS)
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapWorkspace(data);
+    },
   };
 }
 
 export function publishableKeyFromEnv(env = process.env) {
   return env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || "";
+}
+
+export function createSupabaseAuthRepository(options) {
+  const {
+    supabaseUrl,
+    publishableKey,
+    fetchImpl = globalThis.fetch,
+  } = options;
+
+  if (!supabaseUrl) throw new Error("SUPABASE_URL is required");
+  if (!publishableKey) throw new Error("SUPABASE_PUBLISHABLE_KEY is required");
+
+  return {
+    async refreshAccessToken({ refreshToken }) {
+      const url = `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`;
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: publishableKey,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new ApiError(401, "missing_auth", `Token refresh failed: ${text}`);
+      }
+
+      const body = await res.json();
+      return {
+        accessToken: requiredString(body.access_token, "auth.refreshAccessToken", "access_token"),
+        refreshToken: requiredString(body.refresh_token, "auth.refreshAccessToken", "refresh_token"),
+        expiresAt: requiredInteger(body.expires_at, "auth.refreshAccessToken", "expires_at"),
+      };
+    },
+  };
 }
 
 function outgoingMessageRow(sessionId, input) {
@@ -173,5 +277,23 @@ function requiredRow(data, operation) {
 
 function requiredString(value, operation, field) {
   if (typeof value === "string" && value.length > 0) return value;
+  throw new ApiError(502, "upstream_unavailable", `${operation} returned invalid ${field}`);
+}
+
+function mapWorkspace(row) {
+  return {
+    id: requiredString(row?.id, "workspaces.mapWorkspace", "id"),
+    teamId: requiredString(row?.team_id, "workspaces.mapWorkspace", "team_id"),
+    name: requiredString(row?.name, "workspaces.mapWorkspace", "name"),
+    slug: row?.slug ?? null,
+    archived: row?.archived === true,
+    metadata: row?.metadata ?? null,
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function requiredInteger(value, operation, field) {
+  if (Number.isInteger(value)) return value;
   throw new ApiError(502, "upstream_unavailable", `${operation} returned invalid ${field}`);
 }

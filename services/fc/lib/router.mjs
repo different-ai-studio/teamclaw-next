@@ -11,13 +11,63 @@ export function createRouter({ repository }) {
   const routes = [];
 
   return {
-    get(pattern, handler) {
-      routes.push({ method: "GET", pattern, handler });
+    get(pattern, optionsOrHandler, handlerMaybe) {
+      const [options, handler] = typeof optionsOrHandler === "function"
+        ? [{}, optionsOrHandler]
+        : [optionsOrHandler, handlerMaybe];
+      routes.push({ method: "GET", pattern, handler, auth: options.auth ?? "bearer" });
     },
-    post(pattern, handler) {
-      routes.push({ method: "POST", pattern, handler });
+    post(pattern, optionsOrHandler, handlerMaybe) {
+      const [options, handler] = typeof optionsOrHandler === "function"
+        ? [{}, optionsOrHandler]
+        : [optionsOrHandler, handlerMaybe];
+      routes.push({ method: "POST", pattern, handler, auth: options.auth ?? "bearer" });
+    },
+    put(pattern, optionsOrHandler, handlerMaybe) {
+      const [options, handler] = typeof optionsOrHandler === "function"
+        ? [{}, optionsOrHandler]
+        : [optionsOrHandler, handlerMaybe];
+      routes.push({ method: "PUT", pattern, handler, auth: options.auth ?? "bearer" });
+    },
+    patch(pattern, optionsOrHandler, handlerMaybe) {
+      const [options, handler] = typeof optionsOrHandler === "function"
+        ? [{}, optionsOrHandler]
+        : [optionsOrHandler, handlerMaybe];
+      routes.push({ method: "PATCH", pattern, handler, auth: options.auth ?? "bearer" });
+    },
+    checkRoute({ method, path }) {
+      const parts = path.split("/").filter(Boolean);
+      for (const route of routes) {
+        if (route.method !== method) continue;
+        const match = matchRoute(route.pattern, parts);
+        if (!match) continue;
+        return { authRequired: route.auth !== "none" };
+      }
+      return null;
     },
     async dispatch({ method, path, event }) {
+      const parts = path.split("/").filter(Boolean);
+      for (const route of routes) {
+        if (route.method !== method) continue;
+        const match = matchRoute(route.pattern, parts);
+        if (!match) continue;
+
+        const ctx = {
+          repository,
+          event,
+          parts,
+          params: match.params,
+          query: queryParams(event),
+          json: parseJsonBody(event),
+          getHeader: (name) => getHeader(event.headers, name),
+        };
+
+        const result = await route.handler(ctx);
+        return { ...result, authRequired: route.auth !== "none" };
+      }
+      return null;
+    },
+    async dispatchWithRepository({ method, path, event, repository }) {
       const parts = path.split("/").filter(Boolean);
       for (const route of routes) {
         if (route.method !== method) continue;

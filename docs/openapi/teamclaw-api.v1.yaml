@@ -18,7 +18,42 @@ tags:
     description: Session message read and write operations.
   - name: Invites
     description: Team invite claim operations.
+  - name: Workspaces
+    description: Workspace CRUD operations.
 paths:
+  /v1/auth/refresh:
+    post:
+      operationId: refreshAccessToken
+      summary: Exchange a refresh token for a new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, refreshToken, expiresAt]
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+                  expiresAt:
+                    type: integer
+                    format: int64
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/teams:
     get:
       operationId: listTeams
@@ -201,7 +236,7 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /v1/invites/claim:
+/v1/invites/claim:
     post:
       operationId: claimInvite
       summary: Claim invite
@@ -229,6 +264,15 @@ paths:
                 $ref: "#/components/schemas/ClaimInviteResult"
         "400":
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/heartbeat:
+    post:
+      operationId: heartbeat
+      summary: Daemon liveness ping (updates last_seen)
+      responses:
+        "204":
+          description: OK
         "401":
           $ref: "#/components/responses/Error"
 components:
@@ -430,3 +474,89 @@ components:
           type:
             - string
             - "null"
+    TeamWorkspaceConfig:
+      type: object
+      required: [teamId, defaultWorkspaceId]
+      properties:
+        teamId:
+          type: string
+        defaultWorkspaceId:
+          type:
+            - string
+            - "null"
+        pinnedWorkspaceIds:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type:
+            - string
+            - "null"
+    Workspace:
+      type: object
+      required: [id, teamId, name, archived, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type:
+            - string
+            - "null"
+        archived:
+          type: boolean
+        metadata:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        createdAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        updatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    WorkspacePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workspace"
+        nextCursor:
+          type:
+            - string
+            - "null"
+    WorkspaceUpsert:
+      type: object
+      required: [teamId, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type:
+            - string
+            - "null"
+        archived:
+          type: boolean
+        metadata:
+          type:
+            - object
+            - "null"
+          additionalProperties: true

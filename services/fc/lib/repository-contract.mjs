@@ -8,7 +8,6 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     assert.deepEqual(Object.keys(rows[0]).sort(), [
       "createdAt",
       "hasUnread",
-      "id",
       "ideaId",
       "lastMessageAt",
       "lastMessagePreview",
@@ -16,6 +15,7 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
       "teamId",
       "title",
       "updatedAt",
+      "id",
     ].sort());
 
     for (let i = 1; i < rows.length; i++) {
@@ -66,6 +66,82 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
       }),
       (error) => error?.code === "23505" || error?.code === "conflict",
     );
+  });
+
+  test("repository contract: listWorkspaces returns paged team workspaces", async () => {
+    const repo = createRepository();
+    const page = await repo.listWorkspaces({ teamId: "team-1", limit: 50, cursor: null });
+
+    assert.ok(Array.isArray(page.items));
+    assert.ok(page.items.length >= 1, "contract fixture must include at least one workspace");
+    assert.deepEqual(Object.keys(page.items[0]).sort(), [
+      "archived",
+      "createdAt",
+      "id",
+      "metadata",
+      "name",
+      "slug",
+      "teamId",
+      "updatedAt",
+    ].sort());
+  });
+
+  test("repository contract: upsertWorkspace returns inserted row", async () => {
+    const repo = createRepository();
+    const w = await repo.upsertWorkspace({
+      id: "workspace-new",
+      teamId: "team-1",
+      name: "New Workspace",
+    });
+    assert.equal(w.id, "workspace-new");
+    assert.equal(w.archived, false);
+  });
+
+  test("repository contract: getWorkspace returns single workspace", async () => {
+    const repo = createRepository();
+    const w = await repo.getWorkspace("workspace-1");
+    assert.ok(w, "workspace should exist");
+    assert.equal(w.name, "Alpha");
+  });
+
+  test("repository contract: patchWorkspace mutates name / archived", async () => {
+    const repo = createRepository();
+    const w = await repo.patchWorkspace("workspace-1", { archived: true });
+    assert.equal(w.archived, true);
+  });
+
+  test("repository contract: getTeamWorkspaceConfig returns null when absent", async () => {
+    const repo = createRepository();
+    const cfg = await repo.getTeamWorkspaceConfig("team-no-config");
+    assert.equal(cfg, null);
+  });
+
+  test("repository contract: putTeamWorkspaceConfig upserts row", async () => {
+    const repo = createRepository();
+    const teamId = "team-1";
+    const next = {
+      teamId,
+      defaultWorkspaceId: "workspace-1",
+      pinnedWorkspaceIds: [],
+    };
+    const out = await repo.putTeamWorkspaceConfig(teamId, next);
+    assert.deepEqual(out.defaultWorkspaceId, "workspace-1");
+    assert.deepEqual(out.pinnedWorkspaceIds, []);
+
+    const cfg = await repo.getTeamWorkspaceConfig(teamId);
+    assert.ok(cfg, "config should exist after put");
+    assert.deepEqual(cfg.defaultWorkspaceId, "workspace-1");
+  });
+}
+
+export function runAuthRepositoryContract({ test, assert, createAuthRepository }) {
+  test("repository contract: refreshAccessToken returns new token pair", async () => {
+    const repo = createAuthRepository();
+    const out = await repo.refreshAccessToken({ refreshToken: "test-refresh-token" });
+
+    assert.ok(out.accessToken, "accessToken must be present");
+    assert.ok(out.refreshToken, "refreshToken must be present");
+    assert.ok(Number.isInteger(out.expiresAt), "expiresAt must be an integer");
   });
 }
 
