@@ -773,6 +773,7 @@
       "privacy": "Privacy & Telemetry",
       "cache": "Local Cache",
       "advanced": "Advanced",
+      "client": "Client",
       "daemon": "Daemon",
       "daemonGeneral": "General",
       "daemonWorkspaces": "Workspace",

@@ -773,6 +773,7 @@
       "privacy": "隐私与遥测",
       "cache": "本地缓存",
       "advanced": "高级",
+      "client": "客户端",
       "daemon": "Daemon",
       "daemonGeneral": "通用",
       "daemonWorkspaces": "Workspace",
