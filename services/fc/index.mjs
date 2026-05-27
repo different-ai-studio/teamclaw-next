@@ -13,6 +13,7 @@ import { createApnsClient, createHttp2Transport } from './lib/apns.mjs';
 import { dispatchPush } from './lib/push-dispatch.mjs';
 import { createMqttPublisher } from './lib/mqtt-client.mjs';
 import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.mjs';
+import { logSyncEvent } from './lib/sync-log.mjs';
 import {
   handleSyncCreateTeam,
   handleSyncManifest,
@@ -971,22 +972,59 @@ export async function handler(event, context) {
       const auth = await authenticateSyncCall({ headers, teamId });
       if (!auth.ok) return json(auth.status, { error: auth.error });
 
-      switch (path) {
-        case "/sync/manifest":
-          return await handleSyncManifest(auth, body);
-        case "/sync/upload/prepare":
-          return await handleSyncUploadPrepare(auth, body);
-        case "/sync/upload/complete":
-          return await handleSyncUploadComplete(auth, body);
-        case "/sync/download":
-          return await handleSyncDownload(auth, body);
-        case "/sync/delete":
-          return await handleSyncDelete(auth, body);
-        case "/sync/versions":
-          return await handleSyncVersions(auth, body);
-        default:
-          return json(404, { error: "Not found" });
+      const startedAt = Date.now();
+      let result, errorCode;
+      try {
+        switch (path) {
+          case "/sync/manifest":
+            result = await handleSyncManifest(auth, body);
+            break;
+          case "/sync/upload/prepare":
+            result = await handleSyncUploadPrepare(auth, body);
+            break;
+          case "/sync/upload/complete":
+            result = await handleSyncUploadComplete(auth, body);
+            break;
+          case "/sync/download":
+            result = await handleSyncDownload(auth, body);
+            break;
+          case "/sync/delete":
+            result = await handleSyncDelete(auth, body);
+            break;
+          case "/sync/versions":
+            result = await handleSyncVersions(auth, body);
+            break;
+          default:
+            result = json(404, { error: "Not found" });
+        }
+      } catch (e) {
+        errorCode = e.code || 'unhandled';
+        throw e;
+      } finally {
+        // Parse body to extract actorId for observability, then strip __actorId.
+        let parsedBody = null;
+        let actorId;
+        try {
+          parsedBody = result && typeof result.body === 'string' ? JSON.parse(result.body) : (result?.body ?? null);
+          actorId = parsedBody?.__actorId;
+          if (parsedBody && '__actorId' in parsedBody) {
+            delete parsedBody.__actorId;
+            if (result) result = { ...result, body: JSON.stringify(parsedBody) };
+          }
+        } catch { /* ignore parse errors */ }
+        logSyncEvent({
+          endpoint: path,
+          teamId: body?.teamId,
+          actorId,
+          latencyMs: Date.now() - startedAt,
+          result: result?.statusCode ?? (errorCode ? 'error' : 'ok'),
+          changeSeq: parsedBody?.changeSeq,
+          contentHash: body?.contentHash,
+          sizeBytes: body?.size,
+          errorCode,
+        });
       }
+      return result;
     }
 
     switch (path) {
