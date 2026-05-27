@@ -286,8 +286,17 @@ impl Backend for CloudApiBackend {
         }
     }
 
-    async fn set_agent_device_id(&self, _device_id: &str) -> BackendResult<()> {
-        self.unsupported("set_agent_device_id")
+    async fn set_agent_device_id(&self, device_id: &str) -> BackendResult<()> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "deviceId")]
+            device_id: &'a str,
+        }
+        self.put_no_content(
+            &format!("/v1/agents/{}/device", self.cfg.actor_id),
+            &Body { device_id },
+        )
+        .await
     }
 
     async fn check_agent_permission(
@@ -820,6 +829,19 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn set_agent_device_id_puts_to_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("PUT"))
+            .and(path("/v1/agents/agent-1/device"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        backend.set_agent_device_id("device-abc").await.unwrap();
     }
 
     #[tokio::test]
