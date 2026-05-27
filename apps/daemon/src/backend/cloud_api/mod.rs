@@ -380,14 +380,49 @@ impl Backend for CloudApiBackend {
 
     async fn rpc_ensure_gateway_session(
         &self,
-        _team_id: &str,
-        _binding: &str,
-        _title: &str,
-        _primary_agent_actor_id: &str,
-        _owner_member_actor_ids: &[String],
-        _participant_actor_ids: &[String],
+        team_id: &str,
+        binding: &str,
+        title: &str,
+        primary_agent_actor_id: &str,
+        owner_member_actor_ids: &[String],
+        participant_actor_ids: &[String],
     ) -> BackendResult<(String, String, bool)> {
-        self.unsupported("rpc_ensure_gateway_session")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "teamId")]
+            team_id: &'a str,
+            binding: &'a str,
+            title: &'a str,
+            #[serde(rename = "primaryAgentActorId")]
+            primary_agent_actor_id: &'a str,
+            #[serde(rename = "ownerMemberActorIds")]
+            owner_member_actor_ids: &'a [String],
+            #[serde(rename = "participantActorIds")]
+            participant_actor_ids: &'a [String],
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            #[serde(rename = "sessionId")]
+            session_id: String,
+            #[serde(rename = "gatewaySessionId")]
+            gateway_session_id: String,
+            created: bool,
+        }
+        let r: Resp = self
+            .post(
+                "/v1/sessions/gateway/ensure",
+                &Body {
+                    team_id,
+                    binding,
+                    title,
+                    primary_agent_actor_id,
+                    owner_member_actor_ids,
+                    participant_actor_ids,
+                },
+                None,
+            )
+            .await?;
+        Ok((r.session_id, r.gateway_session_id, r.created))
     }
 
     async fn insert_gateway_message(
@@ -626,6 +661,29 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn rpc_ensure_gateway_session_posts_to_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/sessions/gateway/ensure"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sessionId": "session-1",
+                "gatewaySessionId": "gw-1",
+                "created": true
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let (session_id, gw_id, created) = backend
+            .rpc_ensure_gateway_session("team-1", "wecom:room#1", "Stand-up", "agent-1", &[], &[])
+            .await
+            .unwrap();
+        assert_eq!(session_id, "session-1");
+        assert_eq!(gw_id, "gw-1");
+        assert!(created);
     }
 
     #[tokio::test]
