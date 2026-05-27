@@ -22,6 +22,10 @@ tags:
     description: Workspace CRUD operations.
   - name: Actors
     description: Actor directory and agent access management.
+  - name: Notifications
+    description: Notification preferences and session mute management.
+  - name: Shortcuts
+    description: Shortcut management and visibility control.
 paths:
   /v1/auth/refresh:
     post:
@@ -134,6 +138,109 @@ paths:
               schema:
                 $ref: "#/components/schemas/Team"
         "404":
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: renameTeam
+      summary: Rename team
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Renamed team.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/invites:
+    post:
+      operationId: createTeamInvite
+      summary: Create team invite
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorType, displayName]
+              properties:
+                actorType:
+                  type: string
+                  enum: [agent, user, external]
+                displayName:
+                  type: string
+                  minLength: 1
+                role:
+                  type: string
+                expiresAt:
+                  type:
+                    - string
+                    - "null"
+                  format: date-time
+      responses:
+        "201":
+          description: Created invite.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, inviteId, expiresAt]
+                properties:
+                  token:
+                    type: string
+                  inviteId:
+                    type: string
+                    format: uuid
+                  expiresAt:
+                    type:
+                      - string
+                      - "null"
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/members/{actorId}:
+    delete:
+      operationId: removeTeamActor
+      summary: Remove team actor
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - name: actorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: OK
+        "401":
           $ref: "#/components/responses/Error"
   /v1/sessions:
     get:
@@ -1156,6 +1263,337 @@ paths:
                 $ref: "#/components/schemas/TeamDirectory"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/notifications/prefs:
+    get:
+      operationId: getNotificationPrefs
+      summary: Get notification preferences
+      tags: [Notifications]
+      responses:
+        "200":
+          description: Notification preferences.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefs"
+        "401":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putNotificationPrefs
+      summary: Update notification preferences
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPrefs"
+      responses:
+        "200":
+          description: Updated notification preferences.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefs"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/mute:
+    post:
+      operationId: muteSession
+      summary: Mute session notifications
+      tags: [Notifications]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                until:
+                  type:
+                    - string
+                    - "null"
+                  format: date-time
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: unmuteSession
+      summary: Unmute session notifications
+      tags: [Notifications]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/muted:
+    get:
+      operationId: listMutedSessions
+      summary: List muted session IDs
+      tags: [Notifications]
+      responses:
+        "200":
+          description: Muted session IDs.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/shortcuts:
+    get:
+      operationId: listShortcuts
+      summary: List team shortcuts
+      tags: [Shortcuts]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - name: parentId
+          in: query
+          schema:
+            type:
+              - string
+              - "null"
+            format: uuid
+      responses:
+        "200":
+          description: Team shortcuts.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Shortcut"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/shortcuts:
+    post:
+      operationId: createShortcut
+      summary: Create shortcut
+      tags: [Shortcuts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShortcutCreate"
+      responses:
+        "201":
+          description: Created shortcut.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shortcut"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/shortcuts/{shortcutId}:
+    patch:
+      operationId: updateShortcut
+      summary: Update shortcut
+      tags: [Shortcuts]
+      parameters:
+        - name: shortcutId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShortcutPatch"
+      responses:
+        "200":
+          description: Updated shortcut.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shortcut"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteShortcut
+      summary: Delete shortcut
+      tags: [Shortcuts]
+      parameters:
+        - name: shortcutId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Shortcut deleted.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/shortcuts/batch-move:
+    post:
+      operationId: batchMoveShortcuts
+      summary: Batch move shortcuts
+      tags: [Shortcuts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [moves]
+              properties:
+                moves:
+                  type: array
+                  items:
+                    type: object
+                    required: [shortcutId, parentId, position]
+                    properties:
+                      shortcutId:
+                        type: string
+                        format: uuid
+                      parentId:
+                        type:
+                          - string
+                          - "null"
+                        format: uuid
+                      position:
+                        type: integer
+      responses:
+        "204":
+          description: Shortcuts moved.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/shortcuts/{shortcutId}/visible-roles:
+    put:
+      operationId: setShortcutVisibleRoles
+      summary: Set shortcut visible roles
+      tags: [Shortcuts]
+      parameters:
+        - name: shortcutId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roleIds]
+              properties:
+                roleIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "204":
+          description: Visible roles set.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/roles:
+    get:
+      operationId: listTeamRoles
+      summary: List team roles
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Team roles.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TeamRole"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/permissions:
+    get:
+      operationId: listTeamPermissions
+      summary: List team permissions
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Team permissions.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Permission"
+        "401":
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -1620,3 +2058,136 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TeamMember"
+    NotificationPrefs:
+      type: object
+      required: [userId, pushEnabled, emailEnabled, digestFrequency]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        pushEnabled:
+          type: boolean
+        emailEnabled:
+          type: boolean
+        digestFrequency:
+          type: string
+          enum: [off, daily, weekly]
+    Shortcut:
+      type: object
+      required: [id, teamId, kind, label, position]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        parentId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        kind:
+          type: string
+        label:
+          type: string
+        payload:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        position:
+          type: integer
+        visibleRoleIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        createdAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        updatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    ShortcutCreate:
+      type: object
+      required: [teamId, kind, label]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        parentId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        kind:
+          type: string
+        label:
+          type: string
+        payload:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        position:
+          type: integer
+        visibleRoleIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    ShortcutPatch:
+      type: object
+      properties:
+        parentId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        label:
+          type: string
+        payload:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        position:
+          type: integer
+        visibleRoleIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    TeamRole:
+      type: object
+      required: [id, teamId, code, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        teamId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+    Permission:
+      type: object
+      required: [resourceId, roleIds]
+      properties:
+        resourceId:
+          type: string
+        roleIds:
+          type: array
+          items:
+            type: string
+            format: uuid

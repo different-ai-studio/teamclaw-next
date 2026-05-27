@@ -274,6 +274,33 @@ function contractRepo() {
       assert.equal(agentActorId, "agent-1");
       return { items: ["actor-1"] };
     },
+    async getNotificationPrefs() {
+      return { userId: null, pushEnabled: true, emailEnabled: false, digestFrequency: "off" };
+    },
+    async putNotificationPrefs(input) {
+      return {
+        userId: input.userId ?? "user-1",
+        pushEnabled: input.pushEnabled ?? true,
+        emailEnabled: input.emailEnabled ?? false,
+        digestFrequency: input.digestFrequency ?? "off",
+      };
+    },
+    async muteSession(sessionId, input) {},
+    async unmuteSession(sessionId) {},
+    async listMutedSessions() {
+      return { items: [] };
+    },
+    async renameTeam(teamId, input) {
+      assert.equal(teamId, "team-1");
+      return { id: teamId, name: input.name, slug: null, createdAt: null };
+    },
+    async createTeamInvite(teamId, input) {
+      assert.equal(teamId, "team-1");
+      return { token: "invite-token", inviteId: "invite-1", expiresAt: input.expiresAt ?? null };
+    },
+    async removeTeamActor(teamId, actorId) {
+      assert.equal(teamId, "team-1");
+    },
   };
 }
 

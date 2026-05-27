@@ -358,7 +358,7 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     }
   });
 
-  test("repository contract: getTeamDirectory returns actors and members", async () => {
+test("repository contract: getTeamDirectory returns actors and members", async () => {
     const repo = createRepository();
     const result = await repo.getTeamDirectory("team-1");
 
@@ -384,6 +384,154 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
       "role",
       "teamId",
     ].sort());
+  });
+
+  test("repository contract: renameTeam updates team name", async () => {
+    const repo = createRepository();
+    const team = await repo.renameTeam("team-1", { name: "Updated Team Name" });
+    assert.ok(team, "team should exist");
+    assert.equal(team.id, "team-1");
+    assert.equal(team.name, "Updated Team Name");
+  });
+
+  test("repository contract: createTeamInvite returns invite details", async () => {
+    const repo = createRepository();
+    const result = await repo.createTeamInvite("team-1", {
+      actorType: "user",
+      displayName: "New User",
+      role: "member",
+      expiresAt: null,
+    });
+    assert.ok(result.token, "token must be present");
+    assert.ok(result.inviteId, "inviteId must be present");
+    assert.equal(result.expiresAt, null);
+  });
+
+  test("repository contract: removeTeamActor succeeds", async () => {
+    const repo = createRepository();
+    await repo.removeTeamActor("team-1", "actor-to-remove");
+  });
+
+  test("repository contract: getNotificationPrefs returns defaults when absent", async () => {
+    const repo = createRepository();
+    const prefs = await repo.getNotificationPrefs();
+    assert.ok(prefs.userId === null || typeof prefs.userId === "string");
+    assert.equal(typeof prefs.pushEnabled, "boolean");
+    assert.equal(typeof prefs.emailEnabled, "boolean");
+    assert.ok(["off", "daily", "weekly"].includes(prefs.digestFrequency));
+  });
+
+  test("repository contract: putNotificationPrefs upserts prefs", async () => {
+    const repo = createRepository();
+    const input = {
+      userId: "user-1",
+      pushEnabled: false,
+      emailEnabled: true,
+      digestFrequency: "daily",
+    };
+    const out = await repo.putNotificationPrefs(input);
+    assert.deepEqual(out.userId, "user-1");
+    assert.equal(out.pushEnabled, false);
+    assert.equal(out.emailEnabled, true);
+    assert.equal(out.digestFrequency, "daily");
+  });
+
+  test("repository contract: muteSession succeeds", async () => {
+    const repo = createRepository();
+    await repo.muteSession("session-1", { until: null });
+  });
+
+  test("repository contract: unmuteSession succeeds", async () => {
+    const repo = createRepository();
+    await repo.unmuteSession("session-1");
+  });
+
+  test("repository contract: listMutedSessions returns items", async () => {
+    const repo = createRepository();
+    const out = await repo.listMutedSessions();
+    assert.ok(Array.isArray(out.items), "items must be an array");
+    for (const id of out.items) {
+      assert.ok(typeof id === "string", "muted session IDs must be strings");
+    }
+  });
+
+  test("repository contract: listShortcuts returns items", async () => {
+    const repo = createRepository();
+    const result = await repo.listShortcuts("team-1", {});
+    assert.ok(Array.isArray(result), "result must be an array");
+    assert.ok(result.length >= 1, "contract fixture must include at least one shortcut");
+    const shortcut = result[0];
+    assert.deepEqual(Object.keys(shortcut).sort(), [
+      "createdAt",
+      "id",
+      "kind",
+      "label",
+      "parentId",
+      "payload",
+      "position",
+      "teamId",
+      "updatedAt",
+      "visibleRoleIds",
+    ].sort());
+  });
+
+  test("repository contract: createShortcut returns shortcut", async () => {
+    const repo = createRepository();
+    const shortcut = await repo.createShortcut({
+      teamId: "team-1",
+      kind: "link",
+      label: "New Shortcut",
+      position: 100,
+    });
+    assert.ok(shortcut.id, "shortcut must have id");
+    assert.equal(shortcut.teamId, "team-1");
+    assert.equal(shortcut.kind, "link");
+    assert.equal(shortcut.label, "New Shortcut");
+  });
+
+  test("repository contract: updateShortcut mutates label", async () => {
+    const repo = createRepository();
+    const shortcut = await repo.updateShortcut("shortcut-1", { label: "Updated Label" });
+    assert.ok(shortcut, "shortcut should exist");
+    assert.equal(shortcut.label, "Updated Label");
+  });
+
+  test("repository contract: deleteShortcut succeeds", async () => {
+    const repo = createRepository();
+    await repo.deleteShortcut("shortcut-1");
+  });
+
+  test("repository contract: batchMoveShortcuts succeeds", async () => {
+    const repo = createRepository();
+    await repo.batchMoveShortcuts({
+      moves: [
+        { shortcutId: "shortcut-1", parentId: null, position: 0 },
+      ],
+    });
+  });
+
+  test("repository contract: setShortcutVisibleRoles succeeds", async () => {
+    const repo = createRepository();
+    await repo.setShortcutVisibleRoles("shortcut-1", { roleIds: ["role-1"] });
+  });
+
+  test("repository contract: listTeamRoles returns items", async () => {
+    const repo = createRepository();
+    const result = await repo.listTeamRoles("team-1");
+    assert.ok(Array.isArray(result), "result must be an array");
+    assert.ok(result.length >= 1, "contract fixture must include at least one role");
+    const role = result[0];
+    assert.deepEqual(Object.keys(role).sort(), ["code", "id", "name", "teamId"].sort());
+  });
+
+  test("repository contract: listTeamPermissions returns items", async () => {
+    const repo = createRepository();
+    const result = await repo.listTeamPermissions("team-1");
+    assert.ok(Array.isArray(result), "result must be an array");
+    assert.ok(result.length >= 1, "contract fixture must include at least one permission");
+    const perm = result[0];
+    assert.ok(perm.resourceId, "permission must have resourceId");
+    assert.ok(Array.isArray(perm.roleIds), "roleIds must be an array");
   });
 }
 

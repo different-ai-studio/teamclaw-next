@@ -21,6 +21,31 @@ export function registerTeams(router) {
     return { body: team };
   });
 
+  router.patch("/v1/teams/:teamId", async (ctx) => {
+    const body = ctx.json;
+    requireString(body.name, "name");
+    const team = await ctx.repository.renameTeam(ctx.params.teamId, { name: body.name });
+    return { body: team };
+  });
+
+  router.post("/v1/teams/:teamId/invites", async (ctx) => {
+    const body = ctx.json;
+    requireString(body.actorType, "actorType");
+    requireString(body.displayName, "displayName");
+    const result = await ctx.repository.createTeamInvite(ctx.params.teamId, {
+      actorType: body.actorType,
+      displayName: body.displayName,
+      role: body.role,
+      expiresAt: optionalStringOrNull(body.expiresAt, "expiresAt"),
+    });
+    return { statusCode: 201, body: result };
+  });
+
+  router.delete("/v1/teams/:teamId/members/:actorId", async (ctx) => {
+    await ctx.repository.removeTeamActor(ctx.params.teamId, ctx.params.actorId);
+    return { statusCode: 204 };
+  });
+
   router.get("/v1/teams/:teamId/directory", async (ctx) => {
     const result = await ctx.repository.getTeamDirectory(ctx.params.teamId);
     return { body: result };

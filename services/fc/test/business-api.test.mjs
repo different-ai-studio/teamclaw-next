@@ -631,6 +631,275 @@ test("POST /v1/sessions/cron returns 400 without required fields", async () => {
   assert.equal(JSON.parse(response.body).error.code, "validation_failed");
 });
 
+test("GET /v1/notifications/prefs returns defaults", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/notifications/prefs",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(typeof body.pushEnabled, "boolean");
+  assert.deepEqual(repo.calls[0], { method: "getNotificationPrefs" });
+});
+
+test("PUT /v1/notifications/prefs upserts prefs", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PUT",
+    path: "/v1/notifications/prefs",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({
+      userId: "user-1",
+      pushEnabled: false,
+      emailEnabled: true,
+      digestFrequency: "daily",
+    }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.pushEnabled, false);
+  assert.equal(body.emailEnabled, true);
+  assert.equal(body.digestFrequency, "daily");
+  assert.deepEqual(repo.calls[0], {
+    method: "putNotificationPrefs",
+    input: {
+      userId: "user-1",
+      pushEnabled: false,
+      emailEnabled: true,
+      digestFrequency: "daily",
+    },
+  });
+});
+
+test("POST /v1/sessions/:sessionId/mute mutes session", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/sessions/session-1/mute",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ until: null }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "muteSession",
+    sessionId: "session-1",
+    input: { until: null },
+  });
+});
+
+test("DELETE /v1/sessions/:sessionId/mute unmutes session", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/sessions/session-1/mute",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "unmuteSession",
+    sessionId: "session-1",
+  });
+});
+
+test("PATCH /v1/teams/:teamId renames team", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/teams/team-1",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ name: "Updated Team Name" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.id, "team-1");
+  assert.equal(body.name, "Updated Team Name");
+  assert.deepEqual(repo.calls[0], { method: "renameTeam", teamId: "team-1", input: { name: "Updated Team Name" } });
+});
+
+test("PATCH /v1/teams/:teamId returns 400 without name", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/teams/team-1",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({}),
+  }, { createRepository: () => fakeRepo() });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error.code, "validation_failed");
+});
+
+test("POST /v1/teams/:teamId/invites creates invite", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/teams/team-1/invites",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ actorType: "user", displayName: "New User", role: "member" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 201);
+  const body = JSON.parse(response.body);
+  assert.equal(body.token, "invite-token");
+  assert.equal(body.inviteId, "invite-1");
+  assert.deepEqual(repo.calls[0], { method: "createTeamInvite", teamId: "team-1", input: { actorType: "user", displayName: "New User", role: "member", expiresAt: null } });
+});
+
+test("POST /v1/teams/:teamId/invites returns 400 without required fields", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/teams/team-1/invites",
+    headers: { Authorization: "Bearer token" },
+    body: JSON.stringify({ displayName: "New User" }),
+  }, { createRepository: () => fakeRepo() });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error.code, "validation_failed");
+});
+
+test("DELETE /v1/teams/:teamId/members/:actorId removes team actor", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/teams/team-1/members/actor-1",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "removeTeamActor", teamId: "team-1", actorId: "actor-1" });
+});
+
+test("GET /v1/sessions/muted returns muted session IDs", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/sessions/muted",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(Array.isArray(body.items));
+  assert.deepEqual(repo.calls[0], { method: "listMutedSessions" });
+});
+
+test("GET /v1/teams/:teamId/shortcuts calls repo.listShortcuts", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/shortcuts",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(Array.isArray(body.items));
+  assert.deepEqual(repo.calls[0], { method: "listShortcuts", teamId: "team-1", args: {} });
+});
+
+test("POST /v1/shortcuts calls repo.createShortcut", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/shortcuts",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId: "team-1", kind: "link", label: "New Shortcut", position: 100 }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 201);
+  const body = JSON.parse(response.body);
+  assert.ok(body.id);
+  assert.equal(body.teamId, "team-1");
+  assert.deepEqual(repo.calls[0], { method: "createShortcut", input: { teamId: "team-1", kind: "link", label: "New Shortcut", position: 100 } });
+});
+
+test("PATCH /v1/shortcuts/:shortcutId calls repo.updateShortcut", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/shortcuts/shortcut-1",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ label: "Updated Label" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.label, "Updated Label");
+  assert.deepEqual(repo.calls[0], { method: "updateShortcut", shortcutId: "shortcut-1", patch: { label: "Updated Label" } });
+});
+
+test("DELETE /v1/shortcuts/:shortcutId calls repo.deleteShortcut", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/shortcuts/shortcut-1",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "deleteShortcut", shortcutId: "shortcut-1" });
+});
+
+test("POST /v1/shortcuts/batch-move calls repo.batchMoveShortcuts", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/shortcuts/batch-move",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ moves: [{ shortcutId: "shortcut-1", parentId: null, position: 0 }] }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "batchMoveShortcuts", input: { moves: [{ shortcutId: "shortcut-1", parentId: null, position: 0 }] } });
+});
+
+test("PUT /v1/shortcuts/:shortcutId/visible-roles calls repo.setShortcutVisibleRoles", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PUT",
+    path: "/v1/shortcuts/shortcut-1/visible-roles",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ roleIds: ["role-1"] }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "setShortcutVisibleRoles", shortcutId: "shortcut-1", input: { roleIds: ["role-1"] } });
+});
+
+test("GET /v1/teams/:teamId/roles calls repo.listTeamRoles", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/roles",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(Array.isArray(body.items));
+  assert.deepEqual(repo.calls[0], { method: "listTeamRoles", teamId: "team-1" });
+});
+
+test("GET /v1/teams/:teamId/permissions calls repo.listTeamPermissions", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/permissions",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.ok(Array.isArray(body.items));
+  assert.deepEqual(repo.calls[0], { method: "listTeamPermissions", teamId: "team-1" });
+});
+
 function session(id, lastMessageAt) {
   return {
     id,
@@ -686,5 +955,13 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async getWorkspace(workspaceId) { calls.push({ method: "getWorkspace", workspaceId }); if (error) throw error; return workspaceStore.find(w => w.id === workspaceId) ?? null; },
     async patchWorkspace(workspaceId, patch) { calls.push({ method: "patchWorkspace", workspaceId, patch }); if (error) throw error; const w = workspaceStore.find(w => w.id === workspaceId); if (!w) return null; if (patch.name !== undefined) w.name = patch.name; if (patch.archived !== undefined) w.archived = patch.archived; return w; },
     async getTeamDirectory(teamId) { calls.push({ method: "getTeamDirectory", teamId }); if (error) throw error; return { actors: [{ id: "actor-1", teamId: "team-1", kind: "user", displayName: "Alice", avatarUrl: null, metadata: null }], members: [{ actorId: "actor-1", teamId: "team-1", role: "member", joinedAt: "2026-05-27T01:00:00Z" }] }; },
+    async renameTeam(teamId, input) { calls.push({ method: "renameTeam", teamId, input }); if (error) throw error; return { id: teamId, name: input.name, slug: null, createdAt: null }; },
+    async createTeamInvite(teamId, input) { calls.push({ method: "createTeamInvite", teamId, input }); if (error) throw error; return { token: "invite-token", inviteId: "invite-1", expiresAt: input.expiresAt ?? null }; },
+    async removeTeamActor(teamId, actorId) { calls.push({ method: "removeTeamActor", teamId, actorId }); if (error) throw error; },
+    async getNotificationPrefs() { calls.push({ method: "getNotificationPrefs" }); if (error) throw error; return { userId: null, pushEnabled: true, emailEnabled: false, digestFrequency: "off" }; },
+    async putNotificationPrefs(input) { calls.push({ method: "putNotificationPrefs", input }); if (error) throw error; return { userId: input.userId ?? "user-1", pushEnabled: input.pushEnabled ?? true, emailEnabled: input.emailEnabled ?? false, digestFrequency: input.digestFrequency ?? "off" }; },
+    async muteSession(sessionId, input) { calls.push({ method: "muteSession", sessionId, input }); if (error) throw error; },
+    async unmuteSession(sessionId) { calls.push({ method: "unmuteSession", sessionId }); if (error) throw error; },
+    async listMutedSessions() { calls.push({ method: "listMutedSessions" }); if (error) throw error; return { items: [] }; },
   };
 }

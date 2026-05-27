@@ -56,6 +56,54 @@ export function createSupabaseBusinessRepository(options) {
       return mapTeam(data);
     },
 
+    async renameTeam(teamId, { name }) {
+      const { data, error } = await supabase.rpc("rename_team", { p_team_id: teamId, p_name: name });
+      if (error) throw error;
+      return mapTeam(requiredRow(data, "teams.renameTeam"));
+    },
+
+    async createTeamInvite(teamId, input) {
+      const args = {
+        p_team_id: teamId,
+        p_actor_type: input.actorType,
+        p_display_name: input.displayName,
+      };
+      if (input.role !== undefined) args.p_role = input.role;
+      if (input.expiresAt !== undefined) args.p_expires_at = input.expiresAt;
+      const { data, error } = await supabase.rpc("create_team_invite", args);
+      if (error) throw error;
+      const row = requiredRow(data, "teams.createTeamInvite");
+      return {
+        token: requiredString(row.token, "teams.createTeamInvite", "token"),
+        inviteId: requiredString(row.invite_id, "teams.createTeamInvite", "invite_id"),
+        expiresAt: row.expires_at ?? null,
+      };
+    },
+
+    async removeTeamActor(teamId, actorId) {
+      const { error } = await supabase.rpc("remove_team_actor", { p_team_id: teamId, p_actor_id: actorId });
+      if (error) throw error;
+    },
+
+    async getTeamDirectory(teamId) {
+      const [actorsRes, membersRes] = await Promise.all([
+        supabase
+          .from("actor_directory")
+          .select("id, team_id, kind, display_name, avatar_url, metadata")
+          .eq("team_id", teamId),
+        supabase
+          .from("team_members")
+          .select("actor_id, team_id, role, joined_at")
+          .eq("team_id", teamId),
+      ]);
+      if (actorsRes.error) throw actorsRes.error;
+      if (membersRes.error) throw membersRes.error;
+      return {
+        actors: (actorsRes.data ?? []).map(mapActor),
+        members: (membersRes.data ?? []).map(mapTeamMember),
+      };
+    },
+
     async listSessions({ limit = 50, cursor = null } = {}) {
       const { data, error } = await supabase.rpc("list_current_actor_sessions", {
         p_limit: limit,
@@ -230,9 +278,194 @@ export function createSupabaseBusinessRepository(options) {
       };
     },
 
-    async heartbeat() {
+async heartbeat() {
       const { error } = await supabase.rpc("heartbeat");
       if (error) throw error;
+    },
+
+    async listShortcuts(teamId, { parentId } = {}) {
+      let query = supabase
+        .from("shortcuts")
+        .select("*")
+        .eq("team_id", teamId)
+        .order("position", { ascending: true });
+      if (parentId !== undefined) {
+        if (parentId === null) {
+          query = query.is("parent_id", null);
+        } else {
+          query = query.eq("parent_id", parentId);
+        }
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []).map(mapShortcut);
+    },
+
+    async createShortcut(input) {
+      const args = {
+        p_team_id: input.teamId,
+        p_kind: input.kind,
+        p_label: input.label,
+      };
+      if (input.id !== undefined) args.p_id = input.id;
+      if (input.parentId !== undefined) args.p_parent_id = input.parentId;
+      if (input.payload !== undefined) args.p_payload = input.payload;
+      if (input.position !== undefined) args.p_position = input.position;
+      if (input.visibleRoleIds !== undefined) args.p_visible_role_ids = input.visibleRoleIds;
+      const { data, error } = await supabase.rpc("shortcut_create", args);
+      if (error) throw error;
+      const id = requiredString(data, "shortcuts.createShortcut", "id");
+      return this.getShortcut(id);
+    },
+
+    async getShortcut(shortcutId) {
+      const { data, error } = await supabase
+        .from("shortcuts")
+        .select("*")
+        .eq("id", shortcutId)
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapShortcut(data);
+    },
+
+    async updateShortcut(shortcutId, patch) {
+      const row = {};
+      if (patch.parentId !== undefined) row.parent_id = patch.parentId;
+      if (patch.label !== undefined) row.label = patch.label;
+      if (patch.payload !== undefined) row.payload = patch.payload;
+      if (patch.position !== undefined) row.position = patch.position;
+      if (patch.visibleRoleIds !== undefined) row.visible_role_ids = patch.visibleRoleIds;
+      const { data, error } = await supabase
+        .from("shortcuts")
+        .update(row)
+        .eq("id", shortcutId)
+        .select("*")
+        .single();
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return mapShortcut(data);
+    },
+
+    async deleteShortcut(shortcutId) {
+      const { error } = await supabase
+        .from("shortcuts")
+        .delete()
+        .eq("id", shortcutId);
+      if (error) throw error;
+    },
+
+    async batchMoveShortcuts({ moves }) {
+      const formattedMoves = moves.map((m) => ({
+        shortcut_id: m.shortcutId,
+        parent_id: m.parentId,
+        position: m.position,
+      }));
+      const { error } = await supabase.rpc("shortcut_batch_move", {
+        p_moves: formattedMoves,
+      });
+      if (error) throw error;
+    },
+
+    async setShortcutVisibleRoles(shortcutId, { roleIds }) {
+      const { error } = await supabase.rpc("shortcut_set_visible_roles", {
+        p_shortcut_id: shortcutId,
+        p_role_ids: roleIds,
+      });
+      if (error) throw error;
+    },
+
+    async listTeamRoles(teamId) {
+      const { data, error } = await supabase
+        .from("team_roles")
+        .select("id, team_id, code, name")
+        .eq("team_id", teamId);
+      if (error) throw error;
+      return (data ?? []).map(mapTeamRole);
+    },
+
+    async listTeamPermissions(teamId) {
+      const { data, error } = await supabase
+        .from("permissions")
+        .select("resource_id, permission_roles(role_id)")
+        .eq("team_id", teamId);
+      if (error) throw error;
+      return (data ?? []).map(mapPermission);
+    },
+
+    async getNotificationPrefs() {
+      const { data, error } = await supabase
+        .from("notification_prefs")
+        .select("user_id, push_enabled, email_enabled, digest_frequency")
+        .limit(1);
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) {
+        return {
+          userId: null,
+          pushEnabled: true,
+          emailEnabled: false,
+          digestFrequency: "off",
+        };
+      }
+      return {
+        userId: requiredString(row.user_id, "notifications.getNotificationPrefs", "user_id"),
+        pushEnabled: row.push_enabled ?? true,
+        emailEnabled: row.email_enabled ?? false,
+        digestFrequency: row.digest_frequency ?? "off",
+      };
+    },
+
+    async putNotificationPrefs(input) {
+      const row = {
+        user_id: input.userId,
+        push_enabled: input.pushEnabled,
+        email_enabled: input.emailEnabled,
+        digest_frequency: input.digestFrequency,
+      };
+      const { data, error } = await supabase
+        .from("notification_prefs")
+        .upsert(row, { onConflict: "user_id" })
+        .select("user_id, push_enabled, email_enabled, digest_frequency")
+        .single();
+      if (error) throw error;
+      return {
+        userId: requiredString(data.user_id, "notifications.putNotificationPrefs", "user_id"),
+        pushEnabled: data.push_enabled ?? true,
+        emailEnabled: data.email_enabled ?? false,
+        digestFrequency: data.digest_frequency ?? "off",
+      };
+    },
+
+    async muteSession(sessionId, input) {
+      const row = {
+        session_id: sessionId,
+        until: input.until ?? null,
+      };
+      const { error } = await supabase
+        .from("session_mutes")
+        .upsert(row, { onConflict: "user_id,session_id" });
+      if (error) throw error;
+    },
+
+    async unmuteSession(sessionId) {
+      const { error } = await supabase
+        .from("session_mutes")
+        .delete()
+        .eq("session_id", sessionId);
+      if (error) throw error;
+    },
+
+    async listMutedSessions() {
+      const { data, error } = await supabase
+        .from("session_mutes")
+        .select("session_id");
+      if (error) throw error;
+      return { items: (data ?? []).map((r) => r.session_id) };
     },
   };
 }
@@ -363,4 +596,55 @@ function mapWorkspace(row) {
 function requiredInteger(value, operation, field) {
   if (Number.isInteger(value)) return value;
   throw new ApiError(502, "upstream_unavailable", `${operation} returned invalid ${field}`);
+}
+
+function mapShortcut(row) {
+  return {
+    id: requiredString(row?.id, "shortcuts.mapShortcut", "id"),
+    teamId: requiredString(row?.team_id, "shortcuts.mapShortcut", "team_id"),
+    parentId: row?.parent_id ?? null,
+    kind: requiredString(row?.kind, "shortcuts.mapShortcut", "kind"),
+    label: requiredString(row?.label, "shortcuts.mapShortcut", "label"),
+    payload: row?.payload ?? null,
+    position: row?.position ?? 0,
+    visibleRoleIds: row?.visible_role_ids ?? [],
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function mapTeamRole(row) {
+  return {
+    id: requiredString(row?.id, "roles.mapTeamRole", "id"),
+    teamId: requiredString(row?.team_id, "roles.mapTeamRole", "team_id"),
+    code: requiredString(row?.code, "roles.mapTeamRole", "code"),
+    name: requiredString(row?.name, "roles.mapTeamRole", "name"),
+  };
+}
+
+function mapPermission(row) {
+  return {
+    resourceId: requiredString(row?.resource_id, "permissions.mapPermission", "resource_id"),
+    roleIds: (row?.permission_roles ?? []).map((x) => requiredString(x?.role_id, "permissions.mapPermission", "role_id")),
+  };
+}
+
+function mapActor(row) {
+  return {
+    id: requiredString(row?.id, "actors.mapActor", "id"),
+    teamId: requiredString(row?.team_id, "actors.mapActor", "team_id"),
+    kind: row?.kind ?? "user",
+    displayName: row?.display_name ?? "",
+    avatarUrl: row?.avatar_url ?? null,
+    metadata: row?.metadata ?? null,
+  };
+}
+
+function mapTeamMember(row) {
+  return {
+    actorId: requiredString(row?.actor_id, "teamMembers.mapTeamMember", "actor_id"),
+    teamId: requiredString(row?.team_id, "teamMembers.mapTeamMember", "team_id"),
+    role: row?.role ?? "member",
+    joinedAt: row?.joined_at ?? null,
+  };
 }
