@@ -1,6 +1,6 @@
 begin;
 
-select plan(21);
+select plan(26);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -240,6 +240,79 @@ select throws_ok(
   'amuxc_upload_sessions.status rejects unknown values');
 deallocate bad_status;
 select pg_temp.as_user((select alice from ctx));
+
+-- ---------------------------------------------------------------------------
+-- §2.7: guard trigger — authenticated callers cannot mutate the sync
+-- waterline / sync_mode / litellm_team_id.
+-- ---------------------------------------------------------------------------
+
+-- Insert a team_workspace_config row for the test team so the trigger fires.
+-- (create_team does not insert one automatically.)
+set local role postgres;
+set local row_security = off;
+insert into public.team_workspace_config (team_id)
+  values ((select team_id from ctx))
+  on conflict do nothing;
+
+-- Re-enable row_security before authenticated-role assertions (earlier blocks
+-- used set local row_security = off; that persists until another set local).
+set local row_security = on;
+
+-- 7a. As alice (team owner, authenticated): updating sync_mode must fail.
+select pg_temp.as_user((select alice from ctx));
+
+prepare alice_change_sync_mode as
+  update public.team_workspace_config
+     set sync_mode = 'oss'
+   where team_id = (select team_id from ctx);
+select throws_like(
+  'execute alice_change_sync_mode',
+  '%sync_mode%service-role only%',
+  'authenticated cannot change sync_mode');
+deallocate alice_change_sync_mode;
+
+prepare alice_change_seq as
+  update public.team_workspace_config
+     set oss_change_seq = 999
+   where team_id = (select team_id from ctx);
+select throws_like(
+  'execute alice_change_seq',
+  '%oss_change_seq%service-role only%',
+  'authenticated cannot change oss_change_seq');
+deallocate alice_change_seq;
+
+prepare alice_change_litellm as
+  update public.team_workspace_config
+     set litellm_team_id = 'pwned'
+   where team_id = (select team_id from ctx);
+select throws_like(
+  'execute alice_change_litellm',
+  '%litellm_team_id%service-role only%',
+  'authenticated cannot change litellm_team_id');
+deallocate alice_change_litellm;
+
+-- 7b. Authenticated may still touch other columns (git_url is a non-guarded column).
+select lives_ok(
+  $$update public.team_workspace_config
+       set git_url = 'https://example.com/repo.git'
+     where team_id = (select team_id from ctx)$$,
+  'authenticated can still update non-guarded columns');
+
+-- 7c. service_role may change guarded columns freely.
+-- Use postgres role with RLS off to avoid ctx temp table permission issues,
+-- and set the role GUC to service_role so the trigger sees 'service_role'.
+set local role postgres;
+set local row_security = off;
+select set_config('role', 'service_role', true);
+select lives_ok(
+  $$update public.team_workspace_config
+       set sync_mode = 'oss', oss_change_seq = 1, litellm_team_id = 'svc'
+     where team_id = (select id from public.teams where slug = 'oss-team')$$,
+  'service_role can update guarded columns');
+
+-- restore alice for subsequent tests
+set local row_security = on;
+select pg_temp.as_user('a1111111-1111-1111-1111-111111111111'::uuid);
 
 select * from finish();
 rollback;

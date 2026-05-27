@@ -128,4 +128,44 @@ create index idx_amuxc_sessions_team_status
 comment on table public.amuxc_upload_sessions is
   'Tracks in-flight uploads between /prepare and /complete. actor_id is the creator; /complete must verify caller.actor_id == session.actor_id.';
 
+-- ===========================================================================
+-- 6. Guard trigger: lock down sync waterline against authenticated writes
+-- ===========================================================================
+create or replace function app.guard_team_workspace_sync_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  -- service_role can do anything; everything else is restricted.
+  if current_setting('role', true) = 'service_role' then
+    return new;
+  end if;
+
+  if new.sync_mode is distinct from old.sync_mode then
+    raise exception 'team_workspace_config.sync_mode is service-role only'
+      using errcode = '42501';
+  end if;
+  if new.oss_change_seq is distinct from old.oss_change_seq then
+    raise exception 'team_workspace_config.oss_change_seq is service-role only'
+      using errcode = '42501';
+  end if;
+  if new.litellm_team_id is distinct from old.litellm_team_id then
+    raise exception 'team_workspace_config.litellm_team_id is service-role only'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end
+$$;
+
+create trigger trg_team_workspace_config_guard
+  before update on public.team_workspace_config
+  for each row
+  execute function app.guard_team_workspace_sync_fields();
+
+comment on function app.guard_team_workspace_sync_fields() is
+  'Enforces the §2.6 waterline invariant: sync_mode / oss_change_seq / litellm_team_id are mutable only by service_role (FC). Authenticated team members can update other columns.';
+
 commit;
