@@ -9,9 +9,12 @@ import { isTauri } from '@/lib/utils'
 
 export interface VersionInfo {
   version: number
+  parentVersion: number
   contentHash: string | null
   size: number
   deleted: boolean
+  createdBy: string | null
+  createdByNodeId: string | null
   createdAt: string
   message: string | null
 }

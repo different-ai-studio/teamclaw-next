@@ -68,9 +68,12 @@ pub struct DownloadResult {
 #[serde(rename_all = "camelCase")]
 pub struct VersionInfo {
     pub version: i32,
+    pub parent_version: i32,
     pub content_hash: Option<String>,
     pub size: i64,
     pub deleted: bool,
+    pub created_by: Option<String>,
+    pub created_by_node_id: Option<String>,
     pub created_at: String,
     pub message: Option<String>,
 }

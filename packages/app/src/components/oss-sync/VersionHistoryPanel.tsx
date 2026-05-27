@@ -35,6 +35,12 @@ export function VersionHistoryPanel({ workspacePath, path }: Props) {
               v{v.version} &middot;{' '}
               {new Date(v.createdAt).toLocaleString()}{' '}
               {v.message ? <em>({v.message})</em> : null}
+              {(v.createdBy || v.createdByNodeId) ? (
+                <span className="oss-sync-version-author">
+                  {' · by '}
+                  {v.createdBy ?? v.createdByNodeId}
+                </span>
+              ) : null}
             </span>
             <button
               disabled={!v.contentHash}

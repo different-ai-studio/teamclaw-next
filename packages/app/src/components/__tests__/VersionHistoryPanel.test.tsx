@@ -29,17 +29,23 @@ const { VersionHistoryPanel } = await import(
 const VERSIONS: VersionInfo[] = [
   {
     version: 2,
+    parentVersion: 1,
     contentHash: 'hash-v2',
     size: 512,
     deleted: false,
+    createdBy: 'actor-uuid-alice',
+    createdByNodeId: null,
     createdAt: '2026-05-27T12:00:00Z',
     message: 'second edit',
   },
   {
     version: 1,
+    parentVersion: 0,
     contentHash: 'hash-v1',
     size: 480,
     deleted: false,
+    createdBy: null,
+    createdByNodeId: 'node-abc',
     createdAt: '2026-05-26T10:00:00Z',
     message: null,
   },
@@ -121,9 +127,12 @@ describe('VersionHistoryPanel', () => {
     const nullHashVersions: VersionInfo[] = [
       {
         version: 1,
+        parentVersion: 0,
         contentHash: null,
         size: 0,
         deleted: true,
+        createdBy: null,
+        createdByNodeId: null,
         createdAt: '2026-05-26T10:00:00Z',
         message: null,
       },
