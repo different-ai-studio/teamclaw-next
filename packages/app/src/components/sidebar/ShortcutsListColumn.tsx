@@ -18,6 +18,9 @@ import { cn } from '@/lib/utils'
 import { useShortcutsStore, buildTree, type ShortcutNode } from '@/stores/shortcuts'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { selectActiveTab, useTabsStore } from '@/stores/tabs'
+import { SidebarCollapseToggle } from '@/components/app-sidebar'
+import { TrafficLights } from '@/components/ui/traffic-lights'
+import { useSidebar } from '@/components/ui/sidebar'
 import { useUIStore } from '@/stores/ui'
 
 function resolveIcon(node: ShortcutNode): LucideIcon {
@@ -125,6 +128,8 @@ function SectionDivider({ label, count }: { label: string; count: number }) {
 
 export function ShortcutsListColumn() {
   const { t } = useTranslation()
+  const { state: sidebarState } = useSidebar()
+  const sidebarCollapsed = sidebarState === 'collapsed'
   const personalNodes = useShortcutsStore((s) => s.personalNodes)
   const teamNodes = useShortcutsStore((s) => s.teamNodes)
   const loadTeamForCurrentTeam = useShortcutsStore((s) => s.loadTeamForCurrentTeam)
@@ -193,6 +198,12 @@ export function ShortcutsListColumn() {
   return (
     <div className="flex h-full min-w-0 flex-col border-r border-border bg-background">
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3" data-tauri-drag-region>
+        {sidebarCollapsed && (
+          <div className="flex items-center gap-1 shrink-0">
+            <TrafficLights />
+            <SidebarCollapseToggle />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] font-bold tracking-tight text-foreground">
             {t('common.shortcuts', 'Shortcuts')}
