@@ -43,6 +43,10 @@ test("golden response: GET /v1/sessions/{id}/messages", async () => {
 });
 
 function contractRepo() {
+  const workspaceStore = [
+    { id: "workspace-1", teamId: "team-1", name: "Alpha", slug: null, archived: false, metadata: null, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+  ];
+  const configStore = {};
   return {
     async listSessions() {
       return fixture("session-list.json").items;
@@ -69,6 +73,52 @@ function contractRepo() {
         createdAt: input.createdAt ?? "2026-05-27T01:00:00Z",
         updatedAt: null,
       };
+    },
+    async listWorkspaces(args) {
+      assert.equal(args.teamId, "team-1");
+      return { items: workspaceStore };
+    },
+    async upsertWorkspace(input) {
+      const existing = workspaceStore.find(w => w.id === input.id);
+      if (existing) {
+        Object.assign(existing, input);
+        return existing;
+      }
+      const newW = {
+        id: input.id ?? "workspace-new",
+        teamId: input.teamId,
+        name: input.name,
+        slug: input.slug ?? null,
+        archived: input.archived ?? false,
+        metadata: input.metadata ?? null,
+        createdAt: "2026-05-27T01:00:00Z",
+        updatedAt: "2026-05-27T01:00:00Z",
+      };
+      workspaceStore.push(newW);
+      return newW;
+    },
+    async getWorkspace(workspaceId) {
+      return workspaceStore.find(w => w.id === workspaceId) ?? null;
+    },
+    async patchWorkspace(workspaceId, patch) {
+      const w = workspaceStore.find(w => w.id === workspaceId);
+      if (!w) return null;
+      if (patch.name !== undefined) w.name = patch.name;
+      if (patch.archived !== undefined) w.archived = patch.archived;
+      if (patch.metadata !== undefined) w.metadata = patch.metadata;
+      return w;
+    },
+    async getTeamWorkspaceConfig(teamId) {
+      return configStore[teamId] ?? null;
+    },
+    async putTeamWorkspaceConfig(teamId, input) {
+      configStore[teamId] = {
+        teamId,
+        defaultWorkspaceId: input.defaultWorkspaceId ?? null,
+        pinnedWorkspaceIds: input.pinnedWorkspaceIds ?? [],
+        updatedAt: "2026-05-27T01:00:00Z",
+      };
+      return configStore[teamId];
     },
   };
 }

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createSupabaseBusinessRepository,
+  createSupabaseAuthRepository,
   publishableKeyFromEnv,
 } from "../lib/supabase-repo.mjs";
 
@@ -165,6 +166,50 @@ test("repository throws upstream errors without hiding Supabase error codes", as
     assert.equal(err.code, "42501");
     return true;
   });
+});
+
+test("createSupabaseAuthRepository refreshAccessToken calls Supabase auth endpoint", async () => {
+  const fetchCalls = [];
+  const repo = createSupabaseAuthRepository({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "anon-key",
+    async fetchImpl(url, options) {
+      fetchCalls.push({ url, options });
+      return new Response(JSON.stringify({
+        access_token: "new-at",
+        refresh_token: "new-rt",
+        expires_at: 1234567890,
+      }), { status: 200 });
+    },
+  });
+
+  const result = await repo.refreshAccessToken({ refreshToken: "old-rt" });
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, "https://example.supabase.co/auth/v1/token?grant_type=refresh_token");
+  assert.equal(fetchCalls[0].options.method, "POST");
+  assert.equal(fetchCalls[0].options.headers.apikey, "anon-key");
+  assert.deepEqual(JSON.parse(fetchCalls[0].options.body), { refresh_token: "old-rt" });
+  assert.deepEqual(result, { accessToken: "new-at", refreshToken: "new-rt", expiresAt: 1234567890 });
+});
+
+test("createSupabaseAuthRepository refreshAccessToken throws on auth failure", async () => {
+  const repo = createSupabaseAuthRepository({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "anon-key",
+    async fetchImpl() {
+      return new Response("Invalid refresh token", { status: 401 });
+    },
+  });
+
+  await assert.rejects(
+    () => repo.refreshAccessToken({ refreshToken: "bad-rt" }),
+    (err) => {
+      assert.equal(err.statusCode, 401);
+      assert.equal(err.code, "missing_auth");
+      return true;
+    },
+  );
 });
 
 function createRepo(supabase) {

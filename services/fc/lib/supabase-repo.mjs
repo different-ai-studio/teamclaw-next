@@ -167,6 +167,48 @@ export function createSupabaseBusinessRepository(options) {
       }
       return mapWorkspace(data);
     },
+
+    async getTeamWorkspaceConfig(teamId) {
+      const { data, error } = await supabase
+        .from("team_workspace_config")
+        .select("team_id, default_workspace_id, pinned_workspace_ids, updated_at")
+        .eq("team_id", teamId)
+        .limit(1);
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) return null;
+      return {
+        teamId: requiredString(row.team_id, "workspaces.getTeamWorkspaceConfig", "team_id"),
+        defaultWorkspaceId: row.default_workspace_id ?? null,
+        pinnedWorkspaceIds: row.pinned_workspace_ids ?? [],
+        updatedAt: row.updated_at ?? null,
+      };
+    },
+
+    async putTeamWorkspaceConfig(teamId, input) {
+      const row = {
+        team_id: teamId,
+        default_workspace_id: input.defaultWorkspaceId ?? null,
+        pinned_workspace_ids: input.pinnedWorkspaceIds ?? [],
+      };
+      const { data, error } = await supabase
+        .from("team_workspace_config")
+        .upsert(row, { onConflict: "team_id" })
+        .select("team_id, default_workspace_id, pinned_workspace_ids, updated_at")
+        .single();
+      if (error) throw error;
+      return {
+        teamId: requiredString(data.team_id, "workspaces.putTeamWorkspaceConfig", "team_id"),
+        defaultWorkspaceId: data.default_workspace_id ?? null,
+        pinnedWorkspaceIds: data.pinned_workspace_ids ?? [],
+        updatedAt: data.updated_at ?? null,
+      };
+    },
+
+    async heartbeat() {
+      const { error } = await supabase.rpc("heartbeat");
+      if (error) throw error;
+    },
   };
 }
 

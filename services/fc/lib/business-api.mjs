@@ -13,14 +13,22 @@ export async function handleBusinessApiRequest(event, deps) {
   try {
     const method = event.httpMethod || event.requestContext?.http?.method || "GET";
     const path = normalizePath(event.path || event.rawPath || "/");
-    const token = extractBearerToken(event.headers);
-    const repository = deps.createRepository({ accessToken: token });
-    const router = createRouter({ repository });
+
+    const router = createRouter({ repository: null });
     registerAllRoutes(router);
-    const result = await router.dispatch({ method, path, event });
-    if (!result) {
+
+    const routeCheck = router.checkRoute({ method, path });
+    if (!routeCheck) {
       throw new ApiError(404, "not_found", "Route not found");
     }
+
+    const requiresAuth = routeCheck.authRequired;
+    const token = requiresAuth ? extractBearerToken(event.headers) : null;
+    const repository = requiresAuth 
+      ? deps.createRepository({ accessToken: token })
+      : deps.createAuthRepository();
+
+    const result = await router.dispatchWithRepository({ method, path, event, repository });
     return jsonResponse(result.statusCode ?? 200, result.body, requestId);
   } catch (error) {
     return errorResponse(error, requestId);
