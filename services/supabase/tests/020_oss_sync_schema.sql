@@ -1,6 +1,6 @@
 begin;
 
-select plan(46);
+select plan(54);
 
 -- ---------------------------------------------------------------------------
 -- Test helpers (copied from tests/007 for self-containment)
@@ -707,6 +707,106 @@ begin
 end $$;
 
 select pass('oss_sync_gc_orphan_blobs: referenced blob 8 days old → preserved');
+
+-- ---------------------------------------------------------------------------
+-- Tests 47-54: set_team_sync_mode + get_team_sync_mode (migration 20260527000004)
+-- ---------------------------------------------------------------------------
+
+-- Test 47: set_team_sync_mode rejects bad mode (22023)
+select pg_temp.as_user((select alice from ctx));
+select throws_ok(
+  $$select public.set_team_sync_mode((select team_id from ctx), 'invalid')$$,
+  '22023',
+  null,
+  'set_team_sync_mode rejects unknown mode with 22023'
+);
+
+-- Test 48: set_team_sync_mode from non-member (cara) → 42501
+select pg_temp.as_user((select cara from ctx));
+select throws_ok(
+  $$select public.set_team_sync_mode((select team_id from ctx), 'oss')$$,
+  '42501',
+  null,
+  'set_team_sync_mode blocks non-member with 42501'
+);
+
+-- Test 49: set_team_sync_mode from member-but-not-owner (bob) → 42501
+select pg_temp.as_user((select bob from ctx));
+select throws_ok(
+  $$select public.set_team_sync_mode((select team_id from ctx), 'oss')$$,
+  '42501',
+  null,
+  'set_team_sync_mode blocks non-owner member with 42501'
+);
+
+-- Test 50: set_team_sync_mode from owner (alice) → returns 'oss', column updated
+select pg_temp.as_user((select alice from ctx));
+select is(
+  public.set_team_sync_mode((select team_id from ctx), 'oss'),
+  'oss',
+  'set_team_sync_mode owner switch to oss returns oss'
+);
+-- Read back via postgres role (avoids RLS × row_security=off interaction from earlier blocks).
+set local role postgres;
+set local row_security = on;
+select is(
+  (select sync_mode from public.team_workspace_config where team_id = (select team_id from ctx)),
+  'oss',
+  'set_team_sync_mode: column is updated in DB after owner switch to oss'
+);
+set local row_security = off;
+select pg_temp.as_user((select alice from ctx));
+
+-- Test 52: owner can flip back to git
+select is(
+  public.set_team_sync_mode((select team_id from ctx), 'git'),
+  'git',
+  'set_team_sync_mode owner switch back to git returns git'
+);
+
+-- Test 53: get_team_sync_mode returns current value for member
+select pg_temp.as_user((select bob from ctx));
+-- Read via postgres role for the same reason.
+set local role postgres;
+set local row_security = on;
+select is(
+  public.get_team_sync_mode((select team_id from ctx)),
+  'git',
+  'get_team_sync_mode returns current sync_mode for authenticated member'
+);
+set local row_security = off;
+
+-- Test 54: direct authenticated UPDATE on sync_mode still blocked by guard trigger.
+-- We use a postgres-role DO block (bypassing RLS) to set the role to 'authenticated'
+-- and verify the trigger fires. We can't use throws_ok at the top level because
+-- RLS errors surface differently; instead we catch the exception in a DO block.
+do $$
+declare v_caught_code text := 'no-error';
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('app.allow_sync_mode_switch', 'off', true);
+  begin
+    update public.team_workspace_config
+       set sync_mode = 'oss'
+     where team_id = (select team_id from ctx);
+  exception
+    when sqlstate '42501' then
+      v_caught_code := '42501';
+    when others then
+      v_caught_code := sqlstate;
+  end;
+  -- Reset to postgres role for remaining assertions
+  perform set_config('role', 'postgres', true);
+  if v_caught_code <> '42501' then
+    raise exception 'expected 42501 from guard trigger but got %', v_caught_code;
+  end if;
+end $$;
+
+select pass('direct authenticated UPDATE on sync_mode still blocked by guard trigger');
+
+-- Reset to alice context for safety.
+set local role postgres;
+select pg_temp.as_user((select alice from ctx));
 
 select * from finish();
 rollback;
