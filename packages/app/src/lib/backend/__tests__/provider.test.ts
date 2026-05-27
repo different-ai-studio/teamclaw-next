@@ -34,8 +34,8 @@ vi.mock("../supabase", () => ({
 }));
 
 vi.mock("../cloud-api", () => ({
-  hasCloudApiBackendConfig: (config: { cloudApiUrl?: string; supabaseUrl?: string; supabaseAnonKey?: string }) =>
-    Boolean(config.cloudApiUrl && config.supabaseUrl && config.supabaseAnonKey),
+  hasCloudApiBackendConfig: (config: { cloudApiUrl?: string }) =>
+    Boolean(config.cloudApiUrl),
   createCloudApiBackend: () => ({
     kind: "cloud_api",
     auth: {},
@@ -67,14 +67,19 @@ describe("backend provider facade", () => {
     mocks.hasSupabaseBackendConfig = true;
   });
 
-  it("defaults to a Supabase backend singleton", async () => {
+  it("defaults to a Cloud API backend singleton", async () => {
+    localStorage.setItem(
+      "teamclaw.serverConfig",
+      JSON.stringify({ backendKind: "cloud_api", cloudApiUrl: "https://cloud.ucar.cc" }),
+    );
+
     const { getBackend } = await import("../provider");
 
     const first = getBackend();
     const second = getBackend();
 
     expect(first).toBe(second);
-    expect(first.kind).toBe("supabase");
+    expect(first.kind).toBe("cloud_api");
     expect(first.auth).toBeDefined();
     expect(first.directory).toBeDefined();
     expect(first.sessions).toBeDefined();
@@ -93,7 +98,12 @@ describe("backend provider facade", () => {
     expect(first.telemetry).toBeDefined();
   });
 
-  it("keeps placeholder backend methods promise-rejecting", async () => {
+  it("keeps placeholder backend methods promise-rejecting for supabase", async () => {
+    localStorage.setItem(
+      "teamclaw.serverConfig",
+      JSON.stringify({ backendKind: "supabase" }),
+    );
+
     const { getBackend } = await import("../provider");
 
     const first = getBackend();
@@ -104,6 +114,11 @@ describe("backend provider facade", () => {
   });
 
   it("reports backend config status using existing Supabase config", async () => {
+    localStorage.setItem(
+      "teamclaw.serverConfig",
+      JSON.stringify({ backendKind: "supabase" }),
+    );
+
     const { hasBackendConfig, BACKEND_CONFIG_MISSING_MESSAGE } = await import("../provider");
 
     expect(hasBackendConfig()).toBe(true);
@@ -139,8 +154,6 @@ describe("backend provider facade", () => {
       JSON.stringify({
         backendKind: "cloud_api",
         cloudApiUrl: "https://fc.example.com",
-        supabaseUrl: "https://project.supabase.co",
-        supabaseAnonKey: "anon",
       }),
     );
 

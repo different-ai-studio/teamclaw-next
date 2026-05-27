@@ -19,7 +19,7 @@ import { createAttachmentsModule } from "./attachments";
 import { createTelemetryModule } from "./telemetry";
 
 export function hasCloudApiBackendConfig(config: ServerConfig): boolean {
-  return Boolean(config.cloudApiUrl && config.supabaseUrl && config.supabaseAnonKey);
+  return Boolean(config.cloudApiUrl);
 }
 
 export function createCloudApiBackend(

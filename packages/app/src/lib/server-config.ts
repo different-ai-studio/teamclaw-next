@@ -80,8 +80,15 @@ function normalizeServerConfig(config: ServerConfig): ServerConfig {
 export function getEffectiveServerConfigSync(): ServerConfig {
   const saved = normalizeServerConfig(readLocalConfig());
   const env = envConfig();
+  const effectiveKind = saved.backendKind ?? env.backendKind ?? "cloud_api";
+  if (effectiveKind === "supabase") {
+    console.warn(
+      '[ServerConfig] backendKind="supabase" is deprecated and will be removed in a future release. ' +
+        'Migrate to backendKind="cloud_api" with a cloudApiUrl.',
+    );
+  }
   return {
-    backendKind: saved.backendKind ?? env.backendKind ?? "supabase",
+    backendKind: effectiveKind,
     supabaseUrl: saved.supabaseUrl ?? env.supabaseUrl,
     supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
     cloudApiUrl: saved.cloudApiUrl ?? env.cloudApiUrl,
@@ -118,8 +125,15 @@ export async function saveServerConfig(config: ServerConfig): Promise<ServerConf
 export async function getEffectiveServerConfig(): Promise<ServerConfig> {
   const saved = normalizeServerConfig(await getSavedServerConfig());
   const env = envConfig();
+  const effectiveKind = saved.backendKind ?? env.backendKind ?? "cloud_api";
+  if (effectiveKind === "supabase") {
+    console.warn(
+      '[ServerConfig] backendKind="supabase" is deprecated and will be removed in a future release. ' +
+        'Migrate to backendKind="cloud_api" with a cloudApiUrl.',
+    );
+  }
   return {
-    backendKind: saved.backendKind ?? env.backendKind ?? "supabase",
+    backendKind: effectiveKind,
     supabaseUrl: saved.supabaseUrl ?? env.supabaseUrl,
     supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
     cloudApiUrl: saved.cloudApiUrl ?? env.cloudApiUrl,
