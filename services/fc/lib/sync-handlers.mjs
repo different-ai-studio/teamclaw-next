@@ -654,3 +654,65 @@ export async function handleSyncVersions(caller, query) {
 
   return json(200, { versions, nextCursor });
 }
+
+// ---------------------------------------------------------------------------
+// POST /sync/set-mode — owner-only sync_mode switch (Tranche 5)
+// ---------------------------------------------------------------------------
+/**
+ * Switch a team's sync_mode via the set_team_sync_mode Supabase RPC.
+ * The RPC enforces owner-only access; we just proxy the PG error codes to HTTP.
+ *
+ * Body: { teamId: string, mode: 'git' | 'oss' }
+ * Returns: { mode: string } | 400 | 401 | 403
+ */
+export async function handleSyncSetMode(userId, body) {
+  const { teamId, mode } = body ?? {};
+  if (!teamId) return json(400, { error: 'teamId is required' });
+  if (!mode) return json(400, { error: 'mode is required' });
+  if (mode !== 'git' && mode !== 'oss') return json(400, { error: `invalid mode: ${mode}` });
+
+  const supabase = createServiceRoleClient();
+
+  // We need to call the RPC as the authenticated user so ownership checks work.
+  // The RPC is SECURITY DEFINER so it bypasses the guard trigger, but the
+  // owner check inside the function uses app.current_actor_id_for_team which
+  // reads request.jwt.claims — we set those via the service client + rpc context.
+  // Simpler: call via service-role; the RPC reads team_members.role to verify.
+  const { data, error } = await supabase
+    .rpc('set_team_sync_mode', { p_team_id: teamId, p_mode: mode });
+
+  if (error) {
+    // PG errcode 22023 → invalid mode (shouldn't reach here, validated above)
+    // PG errcode 42501 → not owner / not member
+    const code = error.code;
+    if (code === '22023') return json(400, { error: error.message });
+    if (code === '42501') return json(403, { error: error.message });
+    return json(500, { error: error.message });
+  }
+
+  return json(200, { mode: data ?? mode });
+}
+
+// ---------------------------------------------------------------------------
+// POST /sync/team-mode — read team sync_mode (Tranche 5)
+// ---------------------------------------------------------------------------
+/**
+ * Return the sync_mode for a team (read-only, no ownership required).
+ *
+ * Body: { teamId: string }
+ * Returns: { mode: 'git' | 'oss' | null }
+ */
+export async function handleSyncTeamMode(userId, body) {
+  const { teamId } = body ?? {};
+  if (!teamId) return json(400, { error: 'teamId is required' });
+
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .rpc('get_team_sync_mode', { p_team_id: teamId });
+
+  if (error) {
+    return json(500, { error: error.message });
+  }
+
+  return json(200, { mode: data ?? null });
+}

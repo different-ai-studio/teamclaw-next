@@ -22,6 +22,8 @@ import {
   handleSyncDownload,
   handleSyncDelete,
   handleSyncVersions,
+  handleSyncSetMode,
+  handleSyncTeamMode,
 } from './lib/sync-handlers.mjs';
 
 // ---------------------------------------------------------------------------
@@ -963,6 +965,18 @@ export async function handler(event, context) {
       const auth = await authenticateJwtOnly({ headers });
       if (!auth.ok) return json(auth.status, { error: auth.error });
       return await handleSyncCreateTeam(auth.userId, body);
+    }
+
+    if (path === "/sync/set-mode") {
+      const auth = await authenticateJwtOnly({ headers });
+      if (!auth.ok) return json(auth.status, { error: auth.error });
+      return await handleSyncSetMode(auth.userId, body);
+    }
+
+    if (path === "/sync/team-mode") {
+      const auth = await authenticateJwtOnly({ headers });
+      if (!auth.ok) return json(auth.status, { error: auth.error });
+      return await handleSyncTeamMode(auth.userId, body);
     }
 
     if (path.startsWith("/sync/")) {
