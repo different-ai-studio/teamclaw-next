@@ -13,6 +13,7 @@ import {
   reloadChannels,
   AmuxdUnreachableError,
 } from '@/lib/amuxd-channels'
+import { invoke } from '@tauri-apps/api/core'
 
 type ChannelsSet = (fn: ((state: ChannelsState) => Partial<ChannelsState>) | Partial<ChannelsState>) => void
 
@@ -125,11 +126,11 @@ export function createWecomActions(set: ChannelsSet) {
     clearWecomTestResult: () => set({ wecomTestResult: null }),
 
     startWecomQrAuth: async (): Promise<WeComQrAuthStart> => {
-      throw new Error('QR auth is no longer supported via the desktop app; configure WeCom credentials manually.')
+      return await invoke<WeComQrAuthStart>('start_wecom_qr_auth')
     },
 
-    pollWecomQrAuth: async (_scode: string): Promise<WeComQrAuthPollResult> => {
-      throw new Error('QR auth is no longer supported via the desktop app.')
+    pollWecomQrAuth: async (scode: string): Promise<WeComQrAuthPollResult> => {
+      return await invoke<WeComQrAuthPollResult>('poll_wecom_qr_auth', { scode })
     },
 
     setWecomHasChanges: (hasChanges: boolean) => set({ wecomHasChanges: hasChanges }),

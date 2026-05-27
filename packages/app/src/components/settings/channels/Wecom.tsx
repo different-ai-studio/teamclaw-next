@@ -238,7 +238,7 @@ function WeComSetupWizard({
 
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.wecom.connectTitle', { defaultValue: 'Connect WeCom to {{appName}}', appName: buildConfig.app.name })}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.wecom.connectDesc', { defaultValue: "This wizard will guide you through creating a WeCom AI bot and connecting it to {{appName}}. You'll be able to interact with AI directly from WeCom chats.", appName: buildConfig.app.name })}
               </p>
             </div>
@@ -249,7 +249,7 @@ function WeComSetupWizard({
                   <Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.quickSetupDesc', 'Complete in about 5 minutes')}</p>
                 </div>
               </div>
@@ -258,7 +258,7 @@ function WeComSetupWizard({
                   <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.wecom.longConnection', 'Long Connection')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.wecom.longConnection', 'Long Connection')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.wecom.longConnectionDesc', 'No public server needed, runs locally via WebSocket')}</p>
                 </div>
               </div>
@@ -289,7 +289,7 @@ function WeComSetupWizard({
                       {t('settings.channels.wecom.qrScanRecommended', 'Recommended')}
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground">{t('settings.channels.wecom.qrScanDesc', 'Scan with WeCom to auto-create bot')}</p>
+                  <p className="text-[13px] text-muted-foreground">{t('settings.channels.wecom.qrScanDesc', 'Scan with WeCom to auto-create bot')}</p>
                 </div>
               </div>
             </div>
@@ -309,7 +309,7 @@ function WeComSetupWizard({
                 </div>
                 <div>
                   <p className="font-medium">{t('settings.channels.wecom.manualInput', 'Manual Input')}</p>
-                  <p className="text-sm text-muted-foreground">{t('settings.channels.wecom.manualInputDesc', 'Already have Bot ID and Secret')}</p>
+                  <p className="text-[13px] text-muted-foreground">{t('settings.channels.wecom.manualInputDesc', 'Already have Bot ID and Secret')}</p>
                 </div>
               </div>
             </div>
@@ -321,7 +321,7 @@ function WeComSetupWizard({
           <div className="space-y-4">
             {!qrAuthUrl && !qrLoading && !qrError && (
               <div className="text-center space-y-4">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   {t('settings.channels.wecom.scanInstructions', 'Open WeCom on your phone and scan this QR code to authorize.')}
                 </p>
                 <Button onClick={fetchQrCode} className="gap-2">
@@ -334,7 +334,7 @@ function WeComSetupWizard({
             {qrLoading && (
               <div className="flex flex-col items-center justify-center py-8 gap-3">
                 <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                <p className="text-sm text-muted-foreground">{t('settings.channels.wecom.loadingQr', 'Generating QR code...')}</p>
+                <p className="text-[13px] text-muted-foreground">{t('settings.channels.wecom.loadingQr', 'Generating QR code...')}</p>
               </div>
             )}
 
@@ -343,17 +343,17 @@ function WeComSetupWizard({
                 <div className="p-4 bg-white rounded-xl shadow-sm border">
                   <QRCodeSVG value={qrAuthUrl} size={200} level="M" />
                 </div>
-                <p className="text-sm text-muted-foreground text-center">
+                <p className="text-[13px] text-muted-foreground text-center">
                   {t('settings.channels.wecom.scanInstructions', 'Open WeCom on your phone and scan this QR code to authorize.')}
                 </p>
                 {scanStatus !== 'success' && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('settings.channels.wecom.waitingScan', 'Waiting for scan...')}
                   </div>
                 )}
                 {scanStatus === 'success' && (
-                  <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+                  <div className="flex items-center gap-2 text-[13px] text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 className="h-4 w-4" />
                     {t('settings.channels.wecom.scanSuccess', 'Authorization successful! Credentials obtained.')}
                   </div>
@@ -363,7 +363,7 @@ function WeComSetupWizard({
 
             {qrError && (
               <div className="text-center space-y-3">
-                <div className="flex items-center justify-center gap-2 text-sm text-red-600">
+                <div className="flex items-center justify-center gap-2 text-[13px] text-red-600">
                   <AlertCircle className="h-4 w-4" />
                   {qrError}
                 </div>
@@ -394,7 +394,7 @@ function WeComSetupWizard({
             <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div className="text-sm">
+                <div className="text-[13px]">
                   <p className="font-medium text-amber-900 dark:text-amber-100">{t('settings.channels.wecom.credentialsSecretWarning', 'Keep your credentials secret!')}</p>
                   <p className="text-amber-800 dark:text-amber-200">
                     {t('settings.channels.wecom.credentialsSecretDesc', 'Never share your Bot Secret. It is stored locally on your device.')}
@@ -404,13 +404,13 @@ function WeComSetupWizard({
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.wecom.credentialsPortalHint', 'In the WeCom Admin Console, go to your AI Bot settings:')}
               </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.wecom.botId', 'Bot ID')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.wecom.botId', 'Bot ID')}</label>
               <Input
                 value={botId}
                 onChange={(e) => setBotId(e.target.value)}
@@ -419,7 +419,7 @@ function WeComSetupWizard({
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.wecom.secret', 'Secret')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.wecom.secret', 'Secret')}</label>
               <div className="relative">
                 <Input
                   type="password"
@@ -433,7 +433,7 @@ function WeComSetupWizard({
             </div>
 
             {botId && secret && (
-              <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <div className="flex items-center gap-2 text-[13px] text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" />
                 {t('settings.channels.wecom.credentialsEntered', 'Credentials entered')}
               </div>
@@ -452,14 +452,14 @@ function WeComSetupWizard({
 
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.allSet', "You're all set!")}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.wecom.completeMessage', 'Your WeCom bot is now configured. Click "Finish" to save your settings and start using the bot.')}
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-muted/50 text-left space-y-2">
-              <p className="text-sm font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
+              <p className="text-[13px] font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
+              <ul className="text-[13px] text-muted-foreground space-y-1">
                 <li>• {t('settings.channels.nextStepConnect', 'Enable the gateway toggle to connect')}</li>
                 <li>• {t('settings.channels.wecom.nextStepMessage', 'Send a message to your bot in WeCom to test!')}</li>
               </ul>
@@ -570,7 +570,6 @@ export function WeComChannel() {
     isConnecting,
     isRunning,
     handleSave,
-    handleStartStop,
     handleRestart,
   } = useChannelConfig<WeComConfig>({
     storeConfig: wecom,
@@ -594,8 +593,8 @@ export function WeComChannel() {
     <>
       <GatewayStatusCard
         icon={
-          <div className="rounded-lg p-2 bg-blue-100 dark:bg-blue-900/50">
-            <WeComIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <div className="rounded-md p-1.5 bg-blue-100 dark:bg-blue-900/50">
+            <WeComIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           </div>
         }
         title={t('settings.channels.wecom.gateway', 'WeCom Gateway')}
@@ -603,7 +602,7 @@ export function WeComChannel() {
         statusDetail={
           wecomGatewayStatus.botId ? (
             <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Bot: {wecomGatewayStatus.botId}
               </p>
               {wecomGatewayStatus.activeSessions && wecomGatewayStatus.activeSessions.length > 0 && (
@@ -626,7 +625,8 @@ export function WeComChannel() {
         isConnecting={isConnecting}
         isRunning={isRunning}
         hasChanges={wecomHasChanges}
-        onStartStop={handleStartStop}
+        onStart={startWecomGateway}
+        onStop={stopWecomGateway}
         onRestart={handleRestart}
         startDisabled={!localConfig.botId || !localConfig.secret}
         onOpenWizard={() => setWizardOpen(true)}
@@ -640,7 +640,7 @@ export function WeComChannel() {
                 <h4 className="font-semibold text-blue-900 dark:text-blue-100">
                   {t('settings.channels.wecom.setupTitle', 'Set up WeCom Integration')}
                 </h4>
-                <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                <p className="text-[13px] text-blue-700 dark:text-blue-300 mt-1">
                   {t('settings.channels.wecom.setupDesc', 'Connect a WeCom AI bot to interact with AI from WeCom chats.')}
                 </p>
               </div>
@@ -654,7 +654,7 @@ export function WeComChannel() {
 
         {/* Bot Credentials */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label className="text-[13px] font-medium flex items-center gap-2">
             <Key className="h-4 w-4 text-muted-foreground" />
             {t('settings.channels.wecom.botCredentials', 'Bot Credentials')}
           </label>
@@ -689,7 +689,7 @@ export function WeComChannel() {
 
         {/* Encoding AES Key (optional) */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label className="text-[13px] font-medium flex items-center gap-2">
             <Key className="h-4 w-4 text-muted-foreground" />
             {t('settings.channels.wecom.encodingAesKey', 'Encoding AES Key')}
             <span className="text-xs text-muted-foreground font-normal">({t('settings.channels.optional', 'optional')})</span>
@@ -705,7 +705,7 @@ export function WeComChannel() {
         {/* Active Sessions */}
         {wecomGatewayStatus.activeSessions && wecomGatewayStatus.activeSessions.length > 0 && (
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
+            <label className="text-[13px] font-medium flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-muted-foreground" />
               {t('settings.channels.wecom.activeSessions', 'Active Sessions')}
               <span className="text-xs text-muted-foreground font-normal">({wecomGatewayStatus.activeSessions.length})</span>
@@ -717,7 +717,7 @@ export function WeComChannel() {
                 return (
                   <div
                     key={sessionKey}
-                    className="flex items-center gap-2 p-2 rounded-md bg-muted/50 text-sm group"
+                    className="flex items-center gap-2 p-2 rounded-md bg-muted/50 text-[13px] group"
                   >
                     {isDm ? (
                       <MessageSquare className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
@@ -742,7 +742,7 @@ export function WeComChannel() {
 
         {/* Error message */}
         {wecomGatewayStatus.errorMessage && (
-          <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-2 text-[13px] text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
             {wecomGatewayStatus.errorMessage}
           </div>

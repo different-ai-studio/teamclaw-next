@@ -215,6 +215,29 @@ enum SockCommand {
         payload: serde_json::Value,
         reply_tx: oneshot::Sender<String>,
     },
+    /// Fetch a fresh WeChat (iLink) bot QR code. One-shot HTTP call to the
+    /// ilink backend via `teamclaw_gateway::wechat::fetch_qr_code`. Reply is
+    /// `{ok, result?, error?}` where result is the raw `WeChatQrLoginResponse`.
+    WechatQrStart {
+        reply_tx: oneshot::Sender<String>,
+    },
+    /// Poll the status of a previously-started WeChat QR code.
+    /// Reply shape: `{ok, result?, error?}` with `WeChatQrStatusResponse`.
+    WechatQrPoll {
+        qrcode: String,
+        reply_tx: oneshot::Sender<String>,
+    },
+    /// Generate a WeCom QR auth start payload (scode + auth_url).
+    /// Reply shape: `{ok, result?, error?}` with `WeComQrAuthStart`.
+    WecomQrStart {
+        reply_tx: oneshot::Sender<String>,
+    },
+    /// Poll the status of a WeCom QR auth scode.
+    /// Reply shape: `{ok, result?, error?}` with `WeComQrAuthPollResult`.
+    WecomQrPoll {
+        scode: String,
+        reply_tx: oneshot::Sender<String>,
+    },
     Unknown(String),
 }
 
@@ -1051,6 +1074,36 @@ impl DaemonServer {
                                 };
                                 let _ = reply_tx.send(resp.to_string());
                             }
+                            Some(SockCommand::WechatQrStart { reply_tx }) => {
+                                let base_url = teamclaw_gateway::wechat_config::default_ilink_base_url();
+                                let resp = match teamclaw_gateway::wechat::fetch_qr_code(&base_url).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WechatQrPoll { qrcode, reply_tx }) => {
+                                let base_url = teamclaw_gateway::wechat_config::default_ilink_base_url();
+                                let resp = match teamclaw_gateway::wechat::poll_qr_status(&base_url, &qrcode).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WecomQrStart { reply_tx }) => {
+                                let resp = match teamclaw_gateway::wecom::fetch_wecom_qr_code().await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WecomQrPoll { scode, reply_tx }) => {
+                                let resp = match teamclaw_gateway::wecom::poll_wecom_qr_result(&scode).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
                             Some(SockCommand::Unknown(line)) => {
                                 warn!("amuxd.sock: unknown control command: {line:?}");
                             }
@@ -1323,6 +1376,36 @@ impl DaemonServer {
                                 let resp = match self.handle_prompt_await(&payload).await {
                                     Ok(v) => serde_json::json!({ "ok": true, "result": v }),
                                     Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WechatQrStart { reply_tx }) => {
+                                let base_url = teamclaw_gateway::wechat_config::default_ilink_base_url();
+                                let resp = match teamclaw_gateway::wechat::fetch_qr_code(&base_url).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WechatQrPoll { qrcode, reply_tx }) => {
+                                let base_url = teamclaw_gateway::wechat_config::default_ilink_base_url();
+                                let resp = match teamclaw_gateway::wechat::poll_qr_status(&base_url, &qrcode).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WecomQrStart { reply_tx }) => {
+                                let resp = match teamclaw_gateway::wecom::fetch_wecom_qr_code().await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                                };
+                                let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::WecomQrPoll { scode, reply_tx }) => {
+                                let resp = match teamclaw_gateway::wecom::poll_wecom_qr_result(&scode).await {
+                                    Ok(v) => serde_json::json!({ "ok": true, "result": v }),
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
                                 };
                                 let _ = reply_tx.send(resp.to_string());
                             }
@@ -4328,6 +4411,86 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                             Err(_) => {
                                                 warn!("amuxd.sock: channel-status reply dropped");
                                             }
+                                        }
+                                    }
+                                    "wechat-qr-start" => {
+                                        let (reply_tx, reply_rx) = oneshot::channel();
+                                        if tx
+                                            .send(SockCommand::WechatQrStart { reply_tx })
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        if let Ok(body) = reply_rx.await {
+                                            let mut stream = reader.into_inner();
+                                            let _ = stream.write_all(body.as_bytes()).await;
+                                            let _ = stream.write_all(b"\n").await;
+                                            let _ = stream.shutdown().await;
+                                        }
+                                    }
+                                    "wechat-qr-poll" => {
+                                        let mut qrcode = String::new();
+                                        if reader.read_line(&mut qrcode).await.is_err() {
+                                            warn!("amuxd.sock: wechat-qr-poll missing qrcode");
+                                            return;
+                                        }
+                                        let (reply_tx, reply_rx) = oneshot::channel();
+                                        if tx
+                                            .send(SockCommand::WechatQrPoll {
+                                                qrcode: qrcode.trim().to_string(),
+                                                reply_tx,
+                                            })
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        if let Ok(body) = reply_rx.await {
+                                            let mut stream = reader.into_inner();
+                                            let _ = stream.write_all(body.as_bytes()).await;
+                                            let _ = stream.write_all(b"\n").await;
+                                            let _ = stream.shutdown().await;
+                                        }
+                                    }
+                                    "wecom-qr-start" => {
+                                        let (reply_tx, reply_rx) = oneshot::channel();
+                                        if tx
+                                            .send(SockCommand::WecomQrStart { reply_tx })
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        if let Ok(body) = reply_rx.await {
+                                            let mut stream = reader.into_inner();
+                                            let _ = stream.write_all(body.as_bytes()).await;
+                                            let _ = stream.write_all(b"\n").await;
+                                            let _ = stream.shutdown().await;
+                                        }
+                                    }
+                                    "wecom-qr-poll" => {
+                                        let mut scode = String::new();
+                                        if reader.read_line(&mut scode).await.is_err() {
+                                            warn!("amuxd.sock: wecom-qr-poll missing scode");
+                                            return;
+                                        }
+                                        let (reply_tx, reply_rx) = oneshot::channel();
+                                        if tx
+                                            .send(SockCommand::WecomQrPoll {
+                                                scode: scode.trim().to_string(),
+                                                reply_tx,
+                                            })
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        if let Ok(body) = reply_rx.await {
+                                            let mut stream = reader.into_inner();
+                                            let _ = stream.write_all(body.as_bytes()).await;
+                                            let _ = stream.write_all(b"\n").await;
+                                            let _ = stream.shutdown().await;
                                         }
                                     }
                                     "channel-save" => {

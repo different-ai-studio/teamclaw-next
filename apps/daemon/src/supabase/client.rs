@@ -1246,8 +1246,12 @@ impl crate::backend::Backend for SupabaseBackend {
     }
 
     /// Add (or ignore-if-present) a participant on `session_participants`.
-    /// Idempotent — the unique `(session_id, actor_id)` index makes the
-    /// `on_conflict` UPSERT a no-op when the row already exists.
+    /// Routes through the `add_gateway_session_participant` SECURITY DEFINER
+    /// RPC instead of a direct REST INSERT — the RPC enforces that the
+    /// caller owns the session's primary-agent actor and that the target
+    /// actor is in the same team, avoiding RLS edge cases where the
+    /// daemon's resolved `current_actor_id()` doesn't line up with the
+    /// session's recorded `primary_agent_id`. Idempotent.
     async fn upsert_session_participant(
         &self,
         session_id: &str,
@@ -1255,18 +1259,18 @@ impl crate::backend::Backend for SupabaseBackend {
     ) -> crate::backend::BackendResult<()> {
         let token = self.access_token().await?;
         let url = format!(
-            "{}/rest/v1/session_participants?on_conflict=session_id,actor_id",
+            "{}/rest/v1/rpc/add_gateway_session_participant",
             self.cfg.url
         );
         let body = serde_json::json!({
-            "session_id": session_id,
-            "actor_id": actor_id,
+            "p_session_id": session_id,
+            "p_actor_id": actor_id,
         });
         let resp = self
             .http
             .post(&url)
             .header("apikey", &self.cfg.anon_key)
-            .header("Prefer", "resolution=ignore-duplicates,return=minimal")
+            .header("Prefer", "return=minimal")
             .bearer_auth(&token)
             .json(&body)
             .send()
@@ -2339,8 +2343,10 @@ mod tests {
     async fn upsert_session_participant_returns_ok() {
         let srv = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path_regex(r"^/rest/v1/session_participants$"))
-            .respond_with(ResponseTemplate::new(201))
+            .and(path_regex(
+                r"^/rest/v1/rpc/add_gateway_session_participant$",
+            ))
+            .respond_with(ResponseTemplate::new(204))
             .mount(&srv)
             .await;
         let client = make_client(&srv).await;

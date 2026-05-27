@@ -347,7 +347,7 @@ export const RolesSection = React.memo(function RolesSection({
       ) : null}
 
       {error ? (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/8 px-3 py-2.5 text-sm text-destructive">
+        <div className="rounded-xl border border-destructive/40 bg-destructive/8 px-3 py-2.5 text-[13px] text-destructive">
           {error}
         </div>
       ) : null}
@@ -359,7 +359,7 @@ export const RolesSection = React.memo(function RolesSection({
             placeholder={t("settings.roles.searchPlaceholder", "Search roles...")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-9 border-border/70 bg-background pl-9 shadow-none"
+            className="h-8 border-border/70 bg-background pl-9 shadow-none"
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -420,7 +420,7 @@ export const RolesSection = React.memo(function RolesSection({
             <div className="py-8 text-center text-muted-foreground">
               <UserRound className="mx-auto mb-3 h-9 w-9 opacity-45" />
               <p className="font-medium text-foreground/80">{t("settings.roles.noRoles", "No roles yet")}</p>
-              <p className="mt-1 text-sm">{t("settings.roles.noRolesHint", "Create your first role to group role-specific instructions and skills")}</p>
+              <p className="mt-1 text-[13px]">{t("settings.roles.noRolesHint", "Create your first role to group role-specific instructions and skills")}</p>
             </div>
           </SettingCard>
         ) : sortedRoles.length === 0 ? (
@@ -428,7 +428,7 @@ export const RolesSection = React.memo(function RolesSection({
             <div className="py-8 text-center text-muted-foreground">
               <Search className="mx-auto mb-3 h-9 w-9 opacity-45" />
               <p className="font-medium text-foreground/80">{t("settings.roles.noMatchingRoles", "No matching roles")}</p>
-              <p className="mt-1 text-sm">{t("settings.roles.noMatchingRolesHint", "Try a different search term")}</p>
+              <p className="mt-1 text-[13px]">{t("settings.roles.noMatchingRolesHint", "Try a different search term")}</p>
             </div>
           </SettingCard>
         ) : (
@@ -458,7 +458,7 @@ export const RolesSection = React.memo(function RolesSection({
                   <div className={cn("flex items-start justify-between gap-3", embeddedConsole && "min-h-[44px] gap-2")}>
                     <div className={cn("min-w-0 w-full", embeddedConsole && "pr-20")}>
                       <div className={cn("flex min-w-0 flex-wrap items-center gap-2", embeddedConsole && "min-h-[44px] content-start")}>
-                        <span className={cn("min-w-0 break-all text-sm font-medium text-foreground", embeddedConsole && "text-[1.05rem] leading-8")}>{role.slug}</span>
+                        <span className={cn("min-w-0 break-all text-[13px] font-medium text-foreground", embeddedConsole && "text-[1.05rem] leading-8")}>{role.slug}</span>
                         <span className="inline-flex max-w-full items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
                           {t("settings.roles.roleSkillsCount", "role skills {{count}}", { count: role.roleSkills.length })}
                         </span>
@@ -490,7 +490,7 @@ export const RolesSection = React.memo(function RolesSection({
                     </div>
                   </div>
                   <div className={cn(embeddedConsole && "mt-4 h-[108px] overflow-hidden")}>
-                    <p className={cn("text-sm text-muted-foreground line-clamp-2", embeddedConsole && "line-clamp-3 leading-7")}>
+                    <p className={cn("text-[13px] text-muted-foreground line-clamp-2", embeddedConsole && "line-clamp-3 leading-7")}>
                       {role.description || extractSkillDescription(role.rawMarkdown, role.slug)}
                     </p>
                   </div>
@@ -563,7 +563,7 @@ export const RolesSection = React.memo(function RolesSection({
               <button
                 onClick={() => switchEditorMode("structured")}
                 className={cn(
-                  "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                  "rounded-lg px-4 py-2 text-[13px] font-medium transition-colors",
                   editorMode === "structured"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
@@ -574,7 +574,7 @@ export const RolesSection = React.memo(function RolesSection({
               <button
                 onClick={() => switchEditorMode("markdown")}
                 className={cn(
-                  "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                  "rounded-lg px-4 py-2 text-[13px] font-medium transition-colors",
                   editorMode === "markdown"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
@@ -602,7 +602,7 @@ export const RolesSection = React.memo(function RolesSection({
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         {t("settings.roles.identity", "Role identity")}
                       </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <p className="mt-1 text-[13px] text-muted-foreground">
                         {t("settings.roles.identityHint", "Define the role name that will be routed by the model, and the short description exposed during progressive disclosure.")}
                       </p>
                     </div>
@@ -610,7 +610,7 @@ export const RolesSection = React.memo(function RolesSection({
 
                   <div className="mt-5 space-y-4">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">{t("settings.roles.name", "Role Name")}</label>
+                      <label className="text-[13px] font-medium">{t("settings.roles.name", "Role Name")}</label>
                       <Input
                         value={editor.slug}
                         onChange={(e) => updateEditor({ slug: e.target.value, name: e.target.value })}
@@ -622,7 +622,7 @@ export const RolesSection = React.memo(function RolesSection({
                       </p>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">{t("settings.roles.descriptionLabel", "Description")}</label>
+                      <label className="text-[13px] font-medium">{t("settings.roles.descriptionLabel", "Description")}</label>
                       <textarea
                         value={editor.description}
                         onChange={(e) => updateEditor({ description: e.target.value })}
@@ -666,7 +666,7 @@ export const RolesSection = React.memo(function RolesSection({
                 <div className="space-y-4 rounded-xl border bg-muted/15 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-medium">{t("settings.roles.availableRoleSkills", "Available role skills")}</p>
+                      <p className="text-[13px] font-medium">{t("settings.roles.availableRoleSkills", "Available role skills")}</p>
                       <p className="text-xs text-muted-foreground">
                         {t("settings.roles.availableRoleSkillsHint", "Attach local workspace skills and choose whether to copy or migrate them into .opencode/roles/skills")}
                       </p>
@@ -681,7 +681,7 @@ export const RolesSection = React.memo(function RolesSection({
                       {editor.roleSkills.map((skill) => (
                         <div key={skill.name} className="flex items-start justify-between gap-3 rounded-lg border bg-background px-3 py-2.5">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium">{skill.name}</div>
+                            <div className="text-[13px] font-medium">{skill.name}</div>
                             <div className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</div>
                           </div>
                           <Button
@@ -697,7 +697,7 @@ export const RolesSection = React.memo(function RolesSection({
                       ))}
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                    <div className="rounded-lg border border-dashed px-4 py-3 text-[13px] text-muted-foreground">
                       {t("settings.roles.noAttachedSkills", "No role skills attached yet")}
                     </div>
                   )}
@@ -707,7 +707,7 @@ export const RolesSection = React.memo(function RolesSection({
                       {t("settings.roles.attachFromSkills", "Attach from workspace skills")}
                     </div>
                     {availableAttachableSkills.length === 0 ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-[13px] text-muted-foreground">
                         {t("settings.roles.noAttachableSkills", "No local workspace skills are available to attach")}
                       </div>
                     ) : (
@@ -715,7 +715,7 @@ export const RolesSection = React.memo(function RolesSection({
                         {availableAttachableSkills.map((skill) => (
                           <div key={skill.filename} className="flex items-start justify-between gap-3 rounded-lg border bg-background px-3 py-2.5">
                             <div className="min-w-0">
-                              <div className="text-sm font-medium">{skill.filename}</div>
+                              <div className="text-[13px] font-medium">{skill.filename}</div>
                               <div className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</div>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
@@ -748,9 +748,9 @@ export const RolesSection = React.memo(function RolesSection({
               </div>
             ) : (
               <div className="flex h-full min-h-0 flex-col space-y-2 pb-1">
-                <label className="text-sm font-medium">{t("settings.roles.markdownContent", "ROLE.md Content")}</label>
+                <label className="text-[13px] font-medium">{t("settings.roles.markdownContent", "ROLE.md Content")}</label>
                 <div className="min-h-0 flex-1 rounded-lg border border-input bg-background px-4 py-3">
-                  <pre className="h-full min-h-0 overflow-y-auto whitespace-pre-wrap break-words pb-8 text-sm font-mono leading-6 text-foreground">
+                  <pre className="h-full min-h-0 overflow-y-auto whitespace-pre-wrap break-words pb-8 text-[13px] font-mono leading-6 text-foreground">
                     {editor.rawMarkdown}
                   </pre>
                 </div>
@@ -826,12 +826,12 @@ function EditorField({
   return (
     <section className="rounded-2xl border bg-muted/15 p-5">
       <div className="space-y-1">
-        <label className="text-sm font-medium">{title}</label>
+        <label className="text-[13px] font-medium">{title}</label>
         {hint ? <p className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
       </div>
       <textarea
         className={cn(
-          "mt-3 w-full resize-y rounded-xl border border-input bg-background px-3 py-3 text-sm leading-6 shadow-none focus:outline-none focus:ring-2 focus:ring-ring",
+          "mt-3 w-full resize-y rounded-xl border border-input bg-background px-3 py-3 text-[13px] leading-6 shadow-none focus:outline-none focus:ring-2 focus:ring-ring",
           minHeight,
         )}
         value={value}

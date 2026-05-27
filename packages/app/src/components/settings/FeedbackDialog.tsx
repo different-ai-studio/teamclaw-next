@@ -165,7 +165,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
 
           {/* Screenshot attachments */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.feedback.screenshotsLabel', 'Screenshots')}{' '}
               <span className="text-muted-foreground font-normal">({t('common.optional', 'Optional')})</span>
             </label>
@@ -197,7 +197,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
               onClick={() => fileInputRef.current?.click()}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
-              className="flex items-center justify-center gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground cursor-pointer hover:border-primary/50 hover:text-foreground transition-colors"
+              className="flex items-center justify-center gap-2 rounded-md border border-dashed p-3 text-[13px] text-muted-foreground cursor-pointer hover:border-primary/50 hover:text-foreground transition-colors"
             >
               <ImagePlus className="h-4 w-4" />
               {t('settings.feedback.screenshotsDrop', 'Paste, drag & drop, or click to add images')}
@@ -217,7 +217,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
 
           {/* Contact email */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            <label className="text-[13px] font-medium">
               {t('settings.feedback.contactLabel', 'Contact Info')}{' '}
               <span className="text-muted-foreground font-normal">({t('common.optional', 'Optional')})</span>
             </label>

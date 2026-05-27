@@ -62,7 +62,7 @@ export function VersionHistorySection() {
     <div className="rounded-xl border border-border/40 bg-card/30 p-5 backdrop-blur-sm">
       <div className="mb-4 flex items-center gap-2">
         <History className="h-4 w-4 text-muted-foreground" />
-        <h4 className="text-sm font-semibold text-foreground/90">{t('settings.team.versionHistory')}</h4>
+        <h4 className="text-[13px] font-semibold text-foreground/90">{t('settings.team.versionHistory')}</h4>
       </div>
 
       {/* Filter chips */}
@@ -104,7 +104,7 @@ export function VersionHistorySection() {
                     <div className="flex items-center gap-2">
                       <span
                         className={cn(
-                          'truncate text-sm font-medium',
+                          'truncate text-[13px] font-medium',
                           file.currentDeleted && 'line-through text-destructive'
                         )}
                       >

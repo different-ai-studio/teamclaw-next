@@ -162,7 +162,7 @@ export function EmailSetupWizard({
 
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.email.connectTitle', { defaultValue: 'Connect Email to {{appName}}', appName: buildConfig.app.name })}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.email.connectDesc', 'This wizard will guide you through setting up email as a communication channel. The bot will monitor your inbox, process incoming emails through AI, and send threaded replies.')}
               </p>
             </div>
@@ -173,7 +173,7 @@ export function EmailSetupWizard({
                   <Zap className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.email.realtimeMonitoring', 'Real-time Monitoring')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.email.realtimeMonitoring', 'Real-time Monitoring')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.email.realtimeMonitoringDesc', 'Uses IMAP IDLE for near-instant email detection')}</p>
                 </div>
               </div>
@@ -182,7 +182,7 @@ export function EmailSetupWizard({
                   <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.email.senderFiltering', 'Sender Filtering')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.email.senderFiltering', 'Sender Filtering')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.email.senderFilteringDesc', 'Control which emails get AI responses')}</p>
                 </div>
               </div>
@@ -191,7 +191,7 @@ export function EmailSetupWizard({
                   <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.email.threadedReplies', 'Threaded Replies')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.email.threadedReplies', 'Threaded Replies')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.email.threadedRepliesDesc', 'Maintains email conversation threads automatically')}</p>
                 </div>
               </div>
@@ -216,7 +216,7 @@ export function EmailSetupWizard({
                   <GmailIcon className="h-5 w-5 text-red-600 dark:text-red-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold">{t('settings.channels.email.gmailOAuth', 'Gmail (OAuth2)')}</p>
+                  <p className="text-[13px] font-semibold">{t('settings.channels.email.gmailOAuth', 'Gmail (OAuth2)')}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {t('settings.channels.email.gmailOAuthDesc', 'Secure OAuth2 authentication. Requires a Google Cloud project with Gmail API enabled. Best for Gmail accounts with 2FA.')}
                   </p>
@@ -236,7 +236,7 @@ export function EmailSetupWizard({
                   <Globe className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold">{t('settings.channels.email.imapSmtp', 'Custom IMAP/SMTP')}</p>
+                  <p className="text-[13px] font-semibold">{t('settings.channels.email.imapSmtp', 'Custom IMAP/SMTP')}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {t('settings.channels.email.imapSmtpDesc', 'Works with any email provider (Outlook, Yahoo, QQ, etc.). Uses standard username/password or app password authentication.')}
                   </p>
@@ -251,7 +251,7 @@ export function EmailSetupWizard({
           return (
             <div className="space-y-4">
               <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                <p className="text-sm font-medium text-blue-800 dark:text-blue-200">{t('settings.channels.email.gmailOAuthSetup', 'Gmail OAuth2 Setup')}</p>
+                <p className="text-[13px] font-medium text-blue-800 dark:text-blue-200">{t('settings.channels.email.gmailOAuthSetup', 'Gmail OAuth2 Setup')}</p>
                 <ol className="text-xs text-blue-700 dark:text-blue-300 mt-2 space-y-1 list-decimal ml-4">
                   <li>{t('settings.channels.email.gmailStep1', 'Go to')} <button className="underline" onClick={() => openExternalUrl('https://console.cloud.google.com/')}>Google Cloud Console</button></li>
                   <li>{t('settings.channels.email.gmailStep2', 'Create a new project (or select existing)')}</li>
@@ -262,7 +262,7 @@ export function EmailSetupWizard({
                 </ol>
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.clientId', 'Client ID')}</label>
+                <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.clientId', 'Client ID')}</label>
                 <Input
                   placeholder="your-client-id.apps.googleusercontent.com"
                   value={gmailClientId}
@@ -270,7 +270,7 @@ export function EmailSetupWizard({
                 />
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.clientSecret', 'Client Secret')}</label>
+                <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.clientSecret', 'Client Secret')}</label>
                 <Input
                   type="password"
                   placeholder="GOCSPX-..."
@@ -279,7 +279,7 @@ export function EmailSetupWizard({
                 />
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.gmailAddress', 'Gmail Address')}</label>
+                <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.gmailAddress', 'Gmail Address')}</label>
                 <Input
                   type="email"
                   placeholder="your-email@gmail.com"
@@ -299,7 +299,7 @@ export function EmailSetupWizard({
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.imapServer', 'IMAP Server')}</label>
+                  <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.imapServer', 'IMAP Server')}</label>
                   <Input
                     placeholder="imap.example.com"
                     value={imapServer}
@@ -307,7 +307,7 @@ export function EmailSetupWizard({
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.imapPort', 'IMAP Port')}</label>
+                  <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.imapPort', 'IMAP Port')}</label>
                   <Input
                     type="number"
                     placeholder="993"
@@ -318,7 +318,7 @@ export function EmailSetupWizard({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.smtpServer', 'SMTP Server')}</label>
+                  <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.smtpServer', 'SMTP Server')}</label>
                   <Input
                     placeholder="smtp.example.com"
                     value={smtpServer}
@@ -326,7 +326,7 @@ export function EmailSetupWizard({
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.smtpPort', 'SMTP Port')}</label>
+                  <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.smtpPort', 'SMTP Port')}</label>
                   <Input
                     type="number"
                     placeholder="587"
@@ -336,7 +336,7 @@ export function EmailSetupWizard({
                 </div>
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.username', 'Username (email address)')}</label>
+                <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.username', 'Username (email address)')}</label>
                 <Input
                   placeholder="your-email@example.com"
                   value={username}
@@ -344,7 +344,7 @@ export function EmailSetupWizard({
                 />
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">{t('settings.channels.email.password', 'Password / App Password')}</label>
+                <label className="text-[13px] font-medium mb-1 block">{t('settings.channels.email.password', 'Password / App Password')}</label>
                 <Input
                   type="password"
                   placeholder={t('settings.channels.email.passwordPlaceholder', 'Enter your password or app password')}
@@ -359,11 +359,11 @@ export function EmailSetupWizard({
       case 'filters':
         return (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t('settings.channels.email.filtersIntro', 'You can configure sender filters and labels later in the Email Gateway settings panel. By default, the bot will reply to all new emails.')}
             </p>
             <div className="p-3 rounded-lg bg-muted/50">
-              <p className="text-sm font-medium">{t('settings.channels.email.defaultSettings', 'Default Settings')}</p>
+              <p className="text-[13px] font-medium">{t('settings.channels.email.defaultSettings', 'Default Settings')}</p>
               <ul className="text-xs text-muted-foreground mt-2 space-y-1 list-disc ml-4">
                 <li>{t('settings.channels.email.defaultReply', 'Reply to all new emails: Enabled')}</li>
                 <li>{t('settings.channels.email.defaultSenderFilter', 'Sender filter: None (accepts all senders)')}</li>
@@ -383,7 +383,7 @@ export function EmailSetupWizard({
             </div>
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.allSet', "You're all set!")}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.email.completeMessage', 'Your email gateway configuration has been saved.')}
                 {provider === 'gmail' && (
                   <> {t('settings.channels.email.gmailAuthReminder', 'Don\'t forget to click "Authorize with Google" to complete the OAuth2 setup.')}</>
@@ -391,7 +391,7 @@ export function EmailSetupWizard({
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 text-center">
-              <p className="text-sm">{t('settings.channels.email.clickFinish', 'Click "Finish Setup" to save and close.')}</p>
+              <p className="text-[13px]">{t('settings.channels.email.clickFinish', 'Click "Finish Setup" to save and close.')}</p>
             </div>
           </div>
         )

@@ -156,7 +156,7 @@ export function DaemonGeneralSection() {
           iconColor="text-slate-500"
         />
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.daemonGeneral.noTeam', 'Join or create a team before configuring daemon agent settings.')}
           </p>
         </SettingCard>
@@ -184,8 +184,8 @@ export function DaemonGeneralSection() {
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div>
-              <p className="text-sm font-medium text-destructive">{t('common.error', 'Error')}</p>
-              <p className="mt-1 break-words text-sm text-destructive/80">{error}</p>
+              <p className="text-[13px] font-medium text-destructive">{t('common.error', 'Error')}</p>
+              <p className="mt-1 break-words text-[13px] text-destructive/80">{error}</p>
             </div>
           </div>
         </SettingCard>
@@ -199,7 +199,7 @@ export function DaemonGeneralSection() {
         </SettingCard>
       ) : !agent ? (
         <SettingCard>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {t('settings.daemonGeneral.noAgent', 'No daemon agent is associated with this machine yet.')}
           </p>
         </SettingCard>
@@ -212,7 +212,7 @@ export function DaemonGeneralSection() {
                   <Bot className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.daemonGeneral.basicInfo', 'Agent info')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.daemonGeneral.basicInfo', 'Agent info')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent matched to the local device id.')}</p>
                 </div>
               </div>
@@ -228,7 +228,7 @@ export function DaemonGeneralSection() {
                     value={visibility}
                     onChange={(event) => setVisibility(event.target.value as AgentVisibility)}
                     disabled={saving || !agent.isOwner}
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    className="h-8 w-full rounded-md border border-input bg-background px-3 text-[13px]"
                   >
                     {visibilityOptions.map((option) => (
                       <option key={option} value={option}>{option}</option>
@@ -269,7 +269,7 @@ export function DaemonGeneralSection() {
                   <Shield className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.daemonGeneral.accessTitle', 'Member access')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.daemonGeneral.accessTitle', 'Member access')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.daemonGeneral.accessDesc', 'Rows are read from agent_member_access for this daemon agent.')}</p>
                 </div>
               </div>
@@ -279,7 +279,7 @@ export function DaemonGeneralSection() {
                   value={memberId}
                   onChange={(event) => setMemberId(event.target.value)}
                   disabled={saving || !agent.isOwner || members.length === 0}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-8 rounded-md border border-input bg-background px-3 text-[13px]"
                 >
                   {members.map((member) => (
                     <option key={member.id} value={member.id}>{member.displayName}</option>
@@ -289,13 +289,13 @@ export function DaemonGeneralSection() {
                   value={permissionLevel}
                   onChange={(event) => setPermissionLevel(event.target.value as AgentPermissionLevel)}
                   disabled={saving || !agent.isOwner}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-8 rounded-md border border-input bg-background px-3 text-[13px]"
                 >
                   {permissionLevels.map((level) => (
                     <option key={level} value={level}>{level}</option>
                   ))}
                 </select>
-                <Button size="sm" className="h-9 gap-1.5" onClick={handleAddAccess} disabled={saving || !agent.isOwner || !memberId}>
+                <Button size="sm" className="h-8 gap-1.5" onClick={handleAddAccess} disabled={saving || !agent.isOwner || !memberId}>
                   <UserPlus className="h-3.5 w-3.5" />
                   {t('settings.daemonGeneral.addAccess', 'Add')}
                 </Button>
@@ -303,11 +303,11 @@ export function DaemonGeneralSection() {
 
               <div className="space-y-2">
                 {accessRows.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t('settings.daemonGeneral.noAccess', 'No member access rows yet.')}</p>
+                  <p className="text-[13px] text-muted-foreground">{t('settings.daemonGeneral.noAccess', 'No member access rows yet.')}</p>
                 ) : accessRows.map((row) => (
                   <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg border border-border-soft bg-background/50 p-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium">{row.memberName}</p>
+                      <p className="text-[13px] font-medium">{row.memberName}</p>
                       <code className="block truncate font-mono text-xs text-muted-foreground">{row.memberId}</code>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">

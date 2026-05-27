@@ -139,7 +139,7 @@ export function KookSetupWizard({
 
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.kook.connectTitle', { defaultValue: 'Connect KOOK to {{appName}}', appName: buildConfig.app.name })}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.kook.connectDesc', { defaultValue: "This wizard will guide you through creating a KOOK bot and connecting it to {{appName}}. You'll be able to interact with AI directly from KOOK servers and DMs.", appName: buildConfig.app.name })}
               </p>
             </div>
@@ -150,7 +150,7 @@ export function KookSetupWizard({
                   <Zap className="h-4 w-4 text-orange-600 dark:text-orange-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.quickSetup', 'Quick Setup')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.quickSetupDesc', 'Complete in about 5 minutes')}</p>
                 </div>
               </div>
@@ -159,7 +159,7 @@ export function KookSetupWizard({
                   <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{t('settings.channels.kook.websocket', 'WebSocket Long Connection')}</p>
+                  <p className="text-[13px] font-medium">{t('settings.channels.kook.websocket', 'WebSocket Long Connection')}</p>
                   <p className="text-xs text-muted-foreground">{t('settings.channels.kook.websocketDesc', 'No public server needed, runs locally')}</p>
                 </div>
               </div>
@@ -173,7 +173,7 @@ export function KookSetupWizard({
             <div className="p-4 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
               <div className="flex items-start gap-3">
                 <BookOpen className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5" />
-                <div className="space-y-2 text-sm">
+                <div className="space-y-2 text-[13px]">
                   <p className="font-medium text-orange-900 dark:text-orange-100">{t('settings.channels.kook.createBotStepsTitle', 'Steps to create your KOOK bot:')}</p>
                   <ol className="list-decimal list-inside space-y-2 text-orange-800 dark:text-orange-200">
                     <li>{t('settings.channels.kook.createBotStep1', 'Go to the KOOK Developer Portal')}</li>
@@ -203,7 +203,7 @@ export function KookSetupWizard({
             <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div className="text-sm">
+                <div className="text-[13px]">
                   <p className="font-medium text-amber-900 dark:text-amber-100">{t('settings.channels.tokenSecretWarning', 'Keep your token secret!')}</p>
                   <p className="text-amber-800 dark:text-amber-200">
                     {t('settings.channels.kook.tokenSecretDesc', 'Never share your Bot Token. It is stored locally on your device.')}
@@ -213,10 +213,10 @@ export function KookSetupWizard({
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.kook.tokenPortalHint', 'In the KOOK Developer Portal, go to your bot application and find the "Token" section:')}
               </p>
-              <ol className="list-decimal list-inside text-sm text-muted-foreground space-y-1">
+              <ol className="list-decimal list-inside text-[13px] text-muted-foreground space-y-1">
                 <li>{t('settings.channels.kook.tokenStep1', 'Navigate to "Bot" tab')}</li>
                 <li>{t('settings.channels.kook.tokenStep2', 'Click "Get Token" or copy the existing token')}</li>
                 <li>{t('settings.channels.kook.tokenStep3', 'Paste it below')}</li>
@@ -224,7 +224,7 @@ export function KookSetupWizard({
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings.channels.kook.botToken', 'Bot Token')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.kook.botToken', 'Bot Token')}</label>
               <div className="relative">
                 <Input
                   type="password"
@@ -238,7 +238,7 @@ export function KookSetupWizard({
             </div>
 
             {token && (
-              <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <div className="flex items-center gap-2 text-[13px] text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" />
                 {t('settings.channels.tokenEntered', 'Token entered')}
               </div>
@@ -249,7 +249,7 @@ export function KookSetupWizard({
       case 'permissions':
         return (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t('settings.channels.kook.permissionsIntro', 'Configure the following permissions for your bot:')}
             </p>
 
@@ -262,7 +262,7 @@ export function KookSetupWizard({
                 <div key={perm.name} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
                   <Check className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-medium">{perm.name}</p>
+                    <p className="text-[13px] font-medium">{perm.name}</p>
                     <p className="text-xs text-muted-foreground">{perm.desc}</p>
                   </div>
                 </div>
@@ -270,7 +270,7 @@ export function KookSetupWizard({
             </div>
 
             <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-              <p className="text-sm text-blue-900 dark:text-blue-100">
+              <p className="text-[13px] text-blue-900 dark:text-blue-100">
                 {t('settings.channels.kook.permissionsNote', 'Note: Make sure your bot has "Message Permissions" enabled in the Developer Portal.')}
               </p>
             </div>
@@ -280,12 +280,12 @@ export function KookSetupWizard({
       case 'invite':
         return (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {t('settings.channels.kook.inviteIntro', 'To use your bot, you need to invite it to a KOOK server:')}
             </p>
 
             <div className="space-y-3">
-              <div className="p-4 rounded-lg bg-muted/50 text-sm space-y-2">
+              <div className="p-4 rounded-lg bg-muted/50 text-[13px] space-y-2">
                 <p className="font-medium">{t('settings.channels.kook.inviteStepsTitle', 'Invite Steps:')}</p>
                 <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
                   <li>{t('settings.channels.kook.inviteStep1', 'Go to the KOOK Developer Portal')}</li>
@@ -297,7 +297,7 @@ export function KookSetupWizard({
               </div>
 
               <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
-                <p className="text-sm text-amber-900 dark:text-amber-100">
+                <p className="text-[13px] text-amber-900 dark:text-amber-100">
                   {t('settings.channels.kook.inviteAdminNote', 'You need server admin permissions to invite bots.')}
                 </p>
               </div>
@@ -316,14 +316,14 @@ export function KookSetupWizard({
 
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">{t('settings.channels.kook.complete', 'Setup Complete!')}</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {t('settings.channels.kook.completeMessage', 'Your KOOK bot is now configured. Click "Finish" to save your settings and start using the bot.')}
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-muted/50 text-left space-y-2">
-              <p className="text-sm font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
+              <p className="text-[13px] font-medium">{t('settings.channels.nextSteps', 'Next steps:')}</p>
+              <ul className="text-[13px] text-muted-foreground space-y-1">
                 <li>• {t('settings.channels.nextStepConnect', 'Enable the gateway toggle to connect')}</li>
                 <li>• {t('settings.channels.kook.nextStepConfigure', 'Configure server/channel settings if needed')}</li>
                 <li>• {t('settings.channels.nextStepTest', 'Send a message to your bot to test!')}</li>
@@ -438,7 +438,7 @@ export function KookGuildConfigDialog({
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.serverId', 'Server ID')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.serverId', 'Server ID')}</label>
             <Input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -451,7 +451,7 @@ export function KookGuildConfigDialog({
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.serverName', 'Name (optional)')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.serverName', 'Name (optional)')}</label>
             <Input
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
@@ -528,7 +528,7 @@ export function KookChannelConfigDialog({
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.channelId', 'Channel ID')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.channelId', 'Channel ID')}</label>
             <Input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -542,7 +542,7 @@ export function KookChannelConfigDialog({
 
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium">{t('settings.channels.channelEnabled', 'Enabled')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.channelEnabled', 'Enabled')}</label>
               <p className="text-xs text-muted-foreground">
                 {t('settings.channels.channelEnabledDesc', 'Enable bot responses in this channel')}
               </p>
@@ -552,7 +552,7 @@ export function KookChannelConfigDialog({
 
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium">{t('settings.channels.requireMention', 'Require @mention')}</label>
+              <label className="text-[13px] font-medium">{t('settings.channels.requireMention', 'Require @mention')}</label>
               <p className="text-xs text-muted-foreground">
                 {t('settings.channels.requireMentionDesc', 'Bot only responds when mentioned')}
               </p>
@@ -561,7 +561,7 @@ export function KookChannelConfigDialog({
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
+            <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
             <Input
               value={users}
               onChange={(e) => setUsers(e.target.value)}

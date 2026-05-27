@@ -231,7 +231,7 @@ export function CronJobDialog({
             {/* Section 1: Basic Info */}
             <div className="space-y-3">
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t('settings.cron.name', 'Name')} *</label>
+                <label className="text-[13px] font-medium">{t('settings.cron.name', 'Name')} *</label>
                 <Input
                   value={form.name}
                   onChange={(e) => update({ name: e.target.value })}
@@ -239,7 +239,7 @@ export function CronJobDialog({
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t('settings.cron.prompt', 'Prompt')} *</label>
+                <label className="text-[13px] font-medium">{t('settings.cron.prompt', 'Prompt')} *</label>
                 <div
                   className={cn(
                     'rounded-md border border-input bg-background shadow-xs overflow-hidden',
@@ -278,7 +278,7 @@ export function CronJobDialog({
                           </span>
                         </SelectItem>
                         {configuredProviders.length === 0 && (
-                          <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                          <div className="px-2 py-6 text-center text-[13px] text-muted-foreground">
                             {t('settings.cron.noModels', 'No models configured. Please configure providers in LLM Settings first.')}
                           </div>
                         )}
@@ -307,7 +307,7 @@ export function CronJobDialog({
 
             {/* Section 2: Schedule — type + mode fields on one row */}
             <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground uppercase tracking-wide">
+              <h4 className="text-[13px] font-semibold flex items-center gap-2 text-muted-foreground uppercase tracking-wide">
                 <Timer className="h-3.5 w-3.5" />
                 {t('settings.cron.schedule', 'Schedule')}
               </h4>
@@ -430,7 +430,7 @@ export function CronJobDialog({
                         onChange={(e) => update({ runImmediately: e.target.checked })}
                         className="rounded"
                       />
-                      <label htmlFor="runImmediatelyEvery" className="text-sm">
+                      <label htmlFor="runImmediatelyEvery" className="text-[13px]">
                         {t('settings.cron.runImmediately', 'Run immediately after creation')}
                       </label>
                     </div>
@@ -460,7 +460,7 @@ export function CronJobDialog({
                         onChange={(e) => update({ runImmediately: e.target.checked })}
                         className="rounded"
                       />
-                      <label htmlFor="runImmediatelyCron" className="text-sm">
+                      <label htmlFor="runImmediatelyCron" className="text-[13px]">
                         {t('settings.cron.runImmediately', 'Run immediately after creation')}
                       </label>
                     </div>
@@ -496,14 +496,14 @@ export function CronJobDialog({
                 <div ref={advancedScrollAnchorRef} className="scroll-mt-2 space-y-6">
             {/* Section 3: Execution */}
             <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground uppercase tracking-wide">
+              <h4 className="text-[13px] font-semibold flex items-center gap-2 text-muted-foreground uppercase tracking-wide">
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 {t('settings.cron.execution', 'Execution')}
               </h4>
               {/* Worktree isolation */}
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="text-sm font-medium">{t('settings.cron.useWorktree', 'Run in isolated worktree')}</label>
+                  <label className="text-[13px] font-medium">{t('settings.cron.useWorktree', 'Run in isolated worktree')}</label>
                   <p className="text-xs text-muted-foreground">
                     {t('settings.cron.useWorktreeDesc', 'Execute in a temporary git worktree copy')}
                   </p>
@@ -516,7 +516,7 @@ export function CronJobDialog({
 
               {form.useWorktree && (
                 <div className="space-y-2 pl-4 border-l-2 border-muted">
-                  <label className="text-sm font-medium flex items-center gap-1.5">
+                  <label className="text-[13px] font-medium flex items-center gap-1.5">
                     <GitBranch className="h-3.5 w-3.5" />
                     {t('settings.cron.worktreeBranch', 'Branch')}
                   </label>
@@ -532,13 +532,13 @@ export function CronJobDialog({
 
             {/* Section 4: Delivery */}
             <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground uppercase tracking-wide">
+              <h4 className="text-[13px] font-semibold flex items-center gap-2 text-muted-foreground uppercase tracking-wide">
                 <Send className="h-3.5 w-3.5" />
                 {t('settings.cron.delivery', 'Delivery')}
               </h4>
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="text-sm font-medium">{t('settings.cron.enableDelivery', 'Enable Delivery')}</label>
+                  <label className="text-[13px] font-medium">{t('settings.cron.enableDelivery', 'Enable Delivery')}</label>
                   <p className="text-xs text-muted-foreground">
                     {t('settings.cron.enableDeliveryDesc', 'Send results to a channel after execution')}
                   </p>
@@ -552,9 +552,9 @@ export function CronJobDialog({
               {form.deliveryEnabled && (
                 <div className="space-y-3 pl-4 border-l-2 border-muted">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">{t('settings.cron.channel', 'Channel')}</label>
+                    <label className="text-[13px] font-medium">{t('settings.cron.channel', 'Channel')}</label>
                     {availableChannels.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-[13px] text-muted-foreground">
                         {t('settings.cron.noChannels', 'No channels configured. Please set up a channel in the Channels section first.')}
                       </p>
                     ) : (
@@ -604,7 +604,7 @@ export function CronJobDialog({
                       <div className="space-y-3">
                         {hasModes && entry.modes && (
                           <div className="space-y-2">
-                            <label className="text-sm font-medium">{t('settings.cron.deliveryMode', 'Delivery Mode')}</label>
+                            <label className="text-[13px] font-medium">{t('settings.cron.deliveryMode', 'Delivery Mode')}</label>
                             <Select
                               value={currentMode}
                               onValueChange={(v) =>
@@ -626,7 +626,7 @@ export function CronJobDialog({
                         )}
                         {fieldDefs.map((field) => (
                           <div key={field.key} className="space-y-2">
-                            <label className="text-sm font-medium">
+                            <label className="text-[13px] font-medium">
                               {field.label} {field.required && '*'}
                             </label>
                             <Input
@@ -660,7 +660,7 @@ export function CronJobDialog({
                       }
                       className="rounded"
                     />
-                    <label htmlFor="bestEffort" className="text-sm">
+                    <label htmlFor="bestEffort" className="text-[13px]">
                       {t('settings.cron.bestEffort', "Best effort (don't fail job if delivery fails)")}
                     </label>
                   </div>
@@ -674,7 +674,7 @@ export function CronJobDialog({
         </ScrollArea>
 
         {error && (
-          <div className="flex items-center gap-2 text-sm text-destructive px-1">
+          <div className="flex items-center gap-2 text-[13px] text-destructive px-1">
             <AlertCircle className="h-4 w-4" />
             {error}
           </div>

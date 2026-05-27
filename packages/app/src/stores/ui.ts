@@ -1,7 +1,5 @@
 import { create } from 'zustand'
-import { isTauri } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { CONFIG_FILE_NAME, TEAMCLAW_DIR } from '@/lib/build-config'
 
 type View = 'chat' | 'settings'
 
@@ -75,37 +73,10 @@ interface UIState {
   toggleLayoutMode: () => void
   toggleMainContentLayout: () => void
   setFileModeRightTab: (tab: FileModeRightTab) => void
-  advancedMode: boolean
-  setAdvancedMode: (value: boolean, workspacePath: string | null) => Promise<void>
-  loadAdvancedMode: (workspacePath: string) => Promise<void>
   startNewChat: () => void
   switchToSession: (sessionId: string) => Promise<void>
   enterActorDraft: (actor: DraftActor) => void
   clearActorDraft: () => void
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-async function getWorkspaceConfigPath(workspacePath: string): Promise<{
-  dirPath: string
-  configPath: string
-}> {
-  const { join } = await import('@tauri-apps/api/path')
-  const dirPath = await join(workspacePath, TEAMCLAW_DIR)
-  const configPath = await join(dirPath, CONFIG_FILE_NAME)
-  return { dirPath, configPath }
-}
-
-async function readWorkspaceConfig(configPath: string): Promise<Record<string, unknown>> {
-  const { readTextFile } = await import('@tauri-apps/plugin-fs')
-  try {
-    const parsed = JSON.parse(await readTextFile(configPath))
-    return isRecord(parsed) ? parsed : {}
-  } catch {
-    return {}
-  }
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -305,53 +276,4 @@ export const useUIStore = create<UIState>((set, get) => ({
   })),
 
   setFileModeRightTab: (tab) => set({ fileModeRightTab: tab }),
-
-
-  advancedMode: false,
-
-  setAdvancedMode: async (value, workspacePath) => {
-    set({ advancedMode: value })
-    if (!workspacePath || !isTauri()) return
-
-    try {
-      const { exists, mkdir, writeTextFile } = await import('@tauri-apps/plugin-fs')
-      const { dirPath, configPath } = await getWorkspaceConfigPath(workspacePath)
-
-      if (!(await exists(dirPath))) {
-        await mkdir(dirPath, { recursive: true })
-      }
-
-      const config = (await exists(configPath))
-        ? await readWorkspaceConfig(configPath)
-        : {}
-      await writeTextFile(
-        configPath,
-        `${JSON.stringify({ ...config, advancedMode: value }, null, 2)}\n`,
-      )
-    } catch (error) {
-      console.warn('[UI] Failed to persist advanced mode:', error)
-    }
-  },
-
-  loadAdvancedMode: async (workspacePath) => {
-    if (!workspacePath || !isTauri()) {
-      set({ advancedMode: false })
-      return
-    }
-
-    try {
-      const { exists } = await import('@tauri-apps/plugin-fs')
-      const { configPath } = await getWorkspaceConfigPath(workspacePath)
-      if (!(await exists(configPath))) {
-        set({ advancedMode: false })
-        return
-      }
-
-      const config = await readWorkspaceConfig(configPath)
-      set({ advancedMode: config.advancedMode === true })
-    } catch (error) {
-      console.warn('[UI] Failed to load advanced mode:', error)
-      set({ advancedMode: false })
-    }
-  },
 }))

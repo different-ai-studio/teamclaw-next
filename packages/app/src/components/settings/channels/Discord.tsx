@@ -12,8 +12,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Play,
-  Square,
   RefreshCw,
   ChevronDown,
   ChevronRight,
@@ -129,20 +127,6 @@ export function DiscordChannel() {
     await testToken(localConfig.token)
   }
 
-  const handleStartStop = async () => {
-    try {
-      if (gatewayStatus.status === 'connected' || gatewayStatus.status === 'connecting') {
-        await stopGateway()
-      } else {
-        // Save config before starting to ensure backend has latest settings
-        await saveDiscordConfig(localConfig)
-        await startGateway()
-      }
-    } catch {
-      // Error is handled by the store
-    }
-  }
-
   const handleAddGuild = (guildId: string, config: GuildConfig) => {
     setLocalConfig(prev => ({
       ...prev,
@@ -237,23 +221,23 @@ export function DiscordChannel() {
 
   return (
     <>
-      <SettingCard>
+      <SettingCard className="!p-3">
         {/* Header Row - always visible */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => setDiscordExpanded(!discordExpanded)}
-            className="flex items-center gap-4 flex-1 text-left"
+            className="flex items-center gap-3 flex-1 text-left"
           >
-            <div className="rounded-lg p-2 bg-indigo-100 dark:bg-indigo-900/50">
-              <DiscordIcon className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+            <div className="rounded-md p-1.5 bg-indigo-100 dark:bg-indigo-900/50">
+              <DiscordIcon className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-medium">{t('settings.channels.discord.gateway', 'Discord Gateway')}</span>
+                <span className="text-[13px] font-medium">{t('settings.channels.discord.gateway', 'Discord Gateway')}</span>
                 <StatusBadge status={gatewayStatus.status} />
               </div>
               {gatewayStatus.botUsername && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {t('settings.channels.connectedAs', { name: gatewayStatus.botUsername, defaultValue: 'Connected as @{{name}}' })}
                 </p>
               )}
@@ -272,25 +256,30 @@ export function DiscordChannel() {
               <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             )}
           </button>
-          <div className="flex items-center gap-2 ml-3">
+          <div className="flex items-center gap-1.5 ml-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setWizardOpen(true)}
-              className="h-8 w-8 p-0"
+              className="h-7 w-7 p-0"
               title={t('settings.channels.startSetup', 'Start Setup')}
             >
               <BookOpen className="h-4 w-4 text-muted-foreground" />
             </Button>
             <ToggleSwitch
               enabled={localConfig.enabled}
-              onChange={(enabled) => {
+              onChange={async (enabled) => {
                 updateLocalConfig({ enabled })
-                toggleDiscordEnabled(enabled, { ...localConfig, enabled })
+                await toggleDiscordEnabled(enabled, { ...localConfig, enabled })
+                if (enabled && !isRunning) {
+                  await startGateway()
+                } else if (!enabled && isRunning) {
+                  await stopGateway()
+                }
               }}
-              disabled={isLoading}
+              disabled={isLoading || isConnecting}
             />
-            {isRunning && hasChanges ? (
+            {isRunning && hasChanges && (
               <Button
                 variant="default"
                 size="sm"
@@ -301,36 +290,14 @@ export function DiscordChannel() {
                   setHasChanges(false)
                 }}
                 disabled={isLoading || isConnecting}
-                className="gap-2"
+                className="h-7 gap-1.5 px-2.5 text-[12px]"
               >
                 {isLoading || isConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <>
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="h-3.5 w-3.5" />
                     {t('settings.mcp.restart', 'Restart')}
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                variant={isRunning ? 'destructive' : 'default'}
-                size="sm"
-                onClick={handleStartStop}
-                disabled={isLoading || isConnecting || (!isRunning && (!localConfig.enabled || !localConfig.token))}
-                className="gap-2"
-              >
-                {isLoading || isConnecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : isRunning ? (
-                  <>
-                    <Square className="h-4 w-4" />
-                    {t('settings.channels.stop', 'Stop')}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    {t('settings.channels.start', 'Start')}
                   </>
                 )}
               </Button>
@@ -351,7 +318,7 @@ export function DiscordChannel() {
                     <h4 className="font-semibold text-indigo-900 dark:text-indigo-100">
                       {t('settings.channels.discord.setupTitle', 'Set up Discord Integration')}
                     </h4>
-                    <p className="text-sm text-indigo-700 dark:text-indigo-300 mt-1">
+                    <p className="text-[13px] text-indigo-700 dark:text-indigo-300 mt-1">
                       {t('settings.channels.discord.setupDesc', 'Connect a Discord bot to interact with AI from Discord channels and DMs.')}
                     </p>
                   </div>
@@ -365,7 +332,7 @@ export function DiscordChannel() {
 
             {/* Bot Token */}
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label className="text-[13px] font-medium flex items-center gap-2">
                 <Key className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.discord.botToken', 'Bot Token')}
               </label>
@@ -394,7 +361,7 @@ export function DiscordChannel() {
               </div>
               {testResult && (
                 <div className={cn(
-                  "flex items-center gap-2 text-sm",
+                  "flex items-center gap-2 text-[13px]",
                   testResult.success ? "text-emerald-600" : "text-red-600"
                 )}>
                   {testResult.success ? (
@@ -416,14 +383,14 @@ export function DiscordChannel() {
 
             {/* DM Settings */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium flex items-center gap-2">
+              <h4 className="text-[13px] font-medium flex items-center gap-2">
                 <Users className="h-4 w-4 text-muted-foreground" />
                 {t('settings.channels.directMessages', 'Direct Messages')}
               </h4>
               <div className="space-y-3 pl-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-sm font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
+                    <label className="text-[13px] font-medium">{t('settings.channels.enableDMs', 'Enable DMs')}</label>
                     <p className="text-xs text-muted-foreground">
                       {t('settings.channels.enableDMsDesc', 'Allow users to message the bot directly')}
                     </p>
@@ -437,7 +404,7 @@ export function DiscordChannel() {
                 {localConfig.dm.enabled && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
+                      <label className="text-[13px] font-medium">{t('settings.channels.accessPolicy', 'Access Policy')}</label>
                       <Select
                         value={localConfig.dm.policy}
                         onValueChange={(policy: DmConfig['policy']) => updateDmConfig({ policy })}
@@ -454,7 +421,7 @@ export function DiscordChannel() {
 
                     {localConfig.dm.policy === 'allowlist' && (
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
+                        <label className="text-[13px] font-medium">{t('settings.channels.allowedUsers', 'Allowed Users')}</label>
                         <Input
                           value={localConfig.dm.allowFrom.join(', ')}
                           onChange={(e) =>
@@ -477,7 +444,7 @@ export function DiscordChannel() {
             {/* Guild Settings */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium flex items-center gap-2">
+                <h4 className="text-[13px] font-medium flex items-center gap-2">
                   <Server className="h-4 w-4 text-muted-foreground" />
                   {t('settings.channels.serverSettings', 'Server Settings')}
                 </h4>
@@ -499,7 +466,7 @@ export function DiscordChannel() {
                 {Object.keys(localConfig.guilds).length === 0 ? (
                   <div className="text-center py-4 text-muted-foreground">
                     <Server className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
+                    <p className="text-[13px] font-medium">{t('settings.channels.noServers', 'No servers configured')}</p>
                     <p className="text-xs">{t('settings.channels.noServersHint', 'Add a server to allow the bot to respond in server channels')}</p>
                   </div>
                 ) : (
@@ -520,7 +487,7 @@ export function DiscordChannel() {
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
                             <Hash className="h-4 w-4 text-indigo-500" />
-                            <span className="text-sm font-medium">{config.slug || guildId}</span>
+                            <span className="text-[13px] font-medium">{config.slug || guildId}</span>
                             {guildId === '*' && (
                               <span className="text-xs bg-muted px-2 py-0.5 rounded">{t('common.default', 'Default')}</span>
                             )}

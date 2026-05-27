@@ -66,10 +66,10 @@ export function CacheSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold mb-1">
+        <h2 className="text-base font-semibold mb-1">
           {t('settings.cache.title', 'Local Cache')}
         </h2>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           {t(
             'settings.cache.description',
             'Manage the local database that makes screens load instantly. Data is synced from the server in the background.',
@@ -81,7 +81,7 @@ export function CacheSection() {
         <div className="flex items-start gap-3">
           <Database className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-medium">
+            <p className="text-[13px] font-medium">
               {t('settings.cache.refreshAll', 'Refresh all data')}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">

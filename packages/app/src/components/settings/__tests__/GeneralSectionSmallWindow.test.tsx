@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const mockInvoke = vi.fn()
-const mockRefreshFileTree = vi.fn()
-const mockSetAdvancedMode = vi.fn()
 const mockAddSuggestion = vi.fn()
 const mockRemoveSuggestion = vi.fn()
 const mockPersistLanguage = vi.fn()
@@ -87,22 +85,6 @@ vi.mock('@/stores/suggestions', () => ({
       customSuggestions: [],
       addSuggestion: mockAddSuggestion,
       removeSuggestion: mockRemoveSuggestion,
-    }),
-}))
-
-vi.mock('@/stores/ui', () => ({
-  useUIStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      advancedMode: false,
-      setAdvancedMode: mockSetAdvancedMode,
-    }),
-}))
-
-vi.mock('@/stores/workspace', () => ({
-  useWorkspaceStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      workspacePath: '/tmp/teamclaw-workspace',
-      refreshFileTree: mockRefreshFileTree,
     }),
 }))
 

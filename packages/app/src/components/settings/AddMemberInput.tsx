@@ -42,7 +42,7 @@ export function AddMemberInput({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Alice"
-          className="h-9 text-sm"
+          className="h-8 text-[13px]"
         />
       </div>
       <div className="space-y-2">
@@ -51,7 +51,7 @@ export function AddMemberInput({
           value={nodeId}
           onChange={(e) => setNodeId(e.target.value)}
           placeholder="Paste member's Device ID"
-          className="h-9 font-mono text-xs"
+          className="h-8 font-mono text-xs"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && nodeId.trim()) handleSubmit()
           }}
@@ -63,13 +63,13 @@ export function AddMemberInput({
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="e.g. Backend team"
-          className="h-9 text-sm"
+          className="h-8 text-[13px]"
         />
       </div>
       <div className="space-y-2">
         <label className="text-xs font-medium text-muted-foreground">Role</label>
         <Select value={role} onValueChange={(v) => setRole(v as 'manager' | 'editor' | 'viewer')}>
-          <SelectTrigger className="h-9">
+          <SelectTrigger className="h-8">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

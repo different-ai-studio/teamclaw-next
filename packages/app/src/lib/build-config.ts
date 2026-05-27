@@ -34,7 +34,6 @@ export interface BuildConfig {
     shortName?: string
   }
   features: {
-    advancedMode: boolean
     teamMode: boolean
     updater: boolean
     channels: boolean | ChannelsFeatureConfig
@@ -82,7 +81,7 @@ const fallback: BuildConfig = {
     lockLlmConfig: false,
   },
   app: { name: 'TeamClaw', shortName: 'teamclaw' },
-  features: { advancedMode: true, teamMode: true, updater: true, channels: { ...allChannelsEnabled } },
+  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled } },
   defaults: { locale: 'zh-CN', theme: 'system' },
 }
 

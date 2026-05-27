@@ -186,6 +186,22 @@ impl RuntimeManager {
         )])
     }
 
+    /// Agent type used for sessions where the caller doesn't specify one
+    /// (currently the gateway path — WeCom/Discord/Feishu/etc.). Prefers
+    /// an explicitly-configured backend (`[agents.opencode]` or
+    /// `[agents.codex]` in `daemon.toml`) over the always-present
+    /// ClaudeCode fallback, so a daemon set up for opencode actually
+    /// routes inbound channel messages to opencode.
+    pub fn default_agent_type(&self) -> amux::AgentType {
+        if self.launch_configs.contains_key(&amux::AgentType::Opencode) {
+            amux::AgentType::Opencode
+        } else if self.launch_configs.contains_key(&amux::AgentType::Codex) {
+            amux::AgentType::Codex
+        } else {
+            amux::AgentType::ClaudeCode
+        }
+    }
+
     pub fn launch_config_for(&self, agent_type: amux::AgentType) -> AgentLaunchConfig {
         self.launch_configs
             .get(&agent_type)
@@ -1100,9 +1116,10 @@ impl RuntimeManager {
         };
 
         let workspace_id = format!("gateway:{binding}");
+        let agent_type = self.default_agent_type();
         let agent_id = self
             .spawn_agent_with_model(
-                amux::AgentType::ClaudeCode,
+                agent_type,
                 &worktree,
                 "",
                 &workspace_id,

@@ -240,7 +240,7 @@ export function LeaderboardSection() {
             <Trophy className="h-4.5 w-4.5 text-white" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">{t('settings.leaderboard.title', 'Team Leaderboard')}</h2>
+            <h2 className="text-base font-semibold">{t('settings.leaderboard.title', 'Team Leaderboard')}</h2>
             <p className="text-xs text-muted-foreground">
               {memberStats.length} {t('settings.leaderboard.members', 'members')}
             </p>
@@ -265,11 +265,11 @@ export function LeaderboardSection() {
       </div>
 
       {error && (
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-[13px] text-destructive">{error}</p>
       )}
 
       {memberStats.length === 0 && !loading && (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           {t('settings.leaderboard.noData', 'No leaderboard data yet. Your stats will be automatically synced when you complete sessions or provide feedback.')}
         </p>
       )}
@@ -354,7 +354,7 @@ export function LeaderboardSection() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <span className={cn(
-                          "text-sm truncate block",
+                          "text-[13px] truncate block",
                           member.isCurrentUser && "font-semibold"
                         )}>
                           {member.name}
@@ -378,7 +378,7 @@ export function LeaderboardSection() {
 
                     {/* Total Tokens */}
                     <div className="text-right">
-                      <span className="text-sm font-medium tabular-nums">
+                      <span className="text-[13px] font-medium tabular-nums">
                         {formatTokens(member.totalTokens)}
                       </span>
                       <div className="text-[10px] text-muted-foreground">
@@ -426,7 +426,7 @@ export function LeaderboardSection() {
                   <span className="text-xs text-muted-foreground font-medium tabular-nums text-center">
                     {idx + 1}
                   </span>
-                  <span className="text-sm truncate">{skill.name}</span>
+                  <span className="text-[13px] truncate">{skill.name}</span>
                   <span className="text-xs text-right tabular-nums">
                     {skill.count} {t('settings.leaderboard.calls', 'calls')}
                   </span>

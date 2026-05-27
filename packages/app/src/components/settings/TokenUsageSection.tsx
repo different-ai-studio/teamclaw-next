@@ -27,7 +27,7 @@ export function TokenUsageSection() {
 
       {/* Loading state */}
       {isLoading && (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-paper px-4 py-3 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-paper px-4 py-3 text-[13px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>{t('settings.tokenUsage.loading', 'Loading stats...')}</span>
         </div>
@@ -35,7 +35,7 @@ export function TokenUsageSection() {
 
       {/* Error warning */}
       {error && (
-        <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-4 py-3">
+        <div className="flex items-center gap-2 text-[13px] text-amber-600 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-4 py-3">
           <AlertTriangle className="h-4 w-4" />
           <span>{error}</span>
         </div>
@@ -98,7 +98,7 @@ export function TokenUsageSection() {
       )}
 
       {!stats && !isLoading && !error && (
-        <div className="text-center py-8 text-sm text-muted-foreground">
+        <div className="text-center py-8 text-[13px] text-muted-foreground">
           {t('settings.tokenUsage.noData', 'No stats available. Stats will be created automatically when you start working.')}
         </div>
       )}

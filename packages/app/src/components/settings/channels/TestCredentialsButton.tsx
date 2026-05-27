@@ -49,7 +49,7 @@ export function TestCredentialsButton({
       </Button>
       {testResult && (
         <div className={cn(
-          "flex items-start gap-2 text-sm mt-2 w-full basis-full",
+          "flex items-start gap-2 text-[13px] mt-2 w-full basis-full",
           testResult.success ? "text-emerald-600" : "text-red-600"
         )}>
           {testResult.success ? (

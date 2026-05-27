@@ -22,6 +22,7 @@ import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amu
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import { useSessionParticipantStore } from '@/stores/session-participant-store'
 import { actorAvatarColor } from '@/lib/actor-color'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -378,6 +379,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
   const [candidateActors, setCandidateActors] = React.useState<CandidateActor[]>([])
   const [addingActorId, setAddingActorId] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const runtimeStates = useRuntimeStateStore(s => s.byRuntimeId)
 
@@ -700,7 +702,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         const result = await runtimeStart({
           targetDeviceId: candidate.id,
           workspaceId,
-          worktree: '', // daemon falls back to '.' when empty
+          worktree: workspacePath ?? '',
           sessionId,
           agentType,
           initialPrompt: '',

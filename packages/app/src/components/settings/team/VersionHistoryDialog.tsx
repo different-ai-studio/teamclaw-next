@@ -72,7 +72,7 @@ export function VersionHistoryDialog({ file, onClose }: VersionHistoryDialogProp
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3 shrink-0">
           <div>
-            <h3 className="text-sm font-semibold">{fileName}</h3>
+            <h3 className="text-[13px] font-semibold">{fileName}</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               {t('settings.team.historicalVersions', { count: file.versionCount })}
             </p>

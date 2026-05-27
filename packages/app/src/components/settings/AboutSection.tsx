@@ -54,8 +54,8 @@ export const AboutSection = React.memo(function AboutSection() {
               className="h-14 w-14 object-contain"
             />
             <div>
-              <h4 className="font-semibold text-lg">{buildConfig.app.name}</h4>
-              <p className="text-sm text-muted-foreground">
+              <h4 className="font-semibold text-base">{buildConfig.app.name}</h4>
+              <p className="text-[13px] text-muted-foreground">
                 Version {appVersion}
               </p>
             </div>
@@ -107,7 +107,7 @@ export const AboutSection = React.memo(function AboutSection() {
                 {update.version}
               </p>
               {update.notes && (
-                <p className="text-sm text-blue-700 dark:text-blue-300">
+                <p className="text-[13px] text-blue-700 dark:text-blue-300">
                   {update.notes}
                 </p>
               )}
@@ -131,7 +131,7 @@ export const AboutSection = React.memo(function AboutSection() {
                   "Update installed successfully",
                 )}
               </p>
-              <p className="text-sm text-green-700 dark:text-green-300">
+              <p className="text-[13px] text-green-700 dark:text-green-300">
                 {t(
                   "settings.about.restartToApply",
                   "Restart the app to apply changes.",
@@ -158,7 +158,7 @@ export const AboutSection = React.memo(function AboutSection() {
               <p className="font-medium text-red-900 dark:text-red-100">
                 {t("settings.about.updateFailed", "Update check failed")}
               </p>
-              <p className="text-sm text-red-700 dark:text-red-300">
+              <p className="text-[13px] text-red-700 dark:text-red-300">
                 {update.errorMessage}
               </p>
             </div>
@@ -203,7 +203,7 @@ export const AboutSection = React.memo(function AboutSection() {
               className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors group cursor-pointer"
             >
               <link.icon className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+              <span className="text-[13px] text-muted-foreground group-hover:text-foreground transition-colors">
                 {link.label}
               </span>
               <ChevronRight className="h-3 w-3 ml-auto text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -213,7 +213,7 @@ export const AboutSection = React.memo(function AboutSection() {
       </SettingCard>
 
       <div className="text-center py-6">
-        <p className="text-sm text-muted-foreground flex items-center justify-center gap-1">
+        <p className="text-[13px] text-muted-foreground flex items-center justify-center gap-1">
           {t("settings.about.madeWith", "Made with")}{" "}
           <Heart className="h-4 w-4 text-red-500 fill-red-500" />{" "}
           {t("settings.about.byTeam", { defaultValue: "by {{appName}} Team", appName: buildConfig.app.name })}

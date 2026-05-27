@@ -58,7 +58,7 @@ export function SettingsSectionBody({ section }: { section: SettingsSection }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <ScrollArea className="h-full min-h-0 flex-1">
-        <div className={section === 'rolesSkills' ? "w-full max-w-[68rem] p-6" : "w-full max-w-[960px] p-8 pr-10"}>
+        <div className="w-full max-w-[960px] p-8 pr-10">
           {React.createElement(Component)}
         </div>
       </ScrollArea>

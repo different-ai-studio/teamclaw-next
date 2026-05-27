@@ -12,6 +12,8 @@
 
 pub use teamclaw_gateway::*;
 
+pub mod qr;
+
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
