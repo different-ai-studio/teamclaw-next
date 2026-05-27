@@ -496,7 +496,10 @@ mod tests {
 
         let mut sub = adapter.subscribe(snap.session_id, None).await.unwrap();
         // Backlog contains the session.created event.
-        assert!(sub.backlog.iter().any(|e| e.kind == EventKind::SessionCreated));
+        assert!(sub
+            .backlog
+            .iter()
+            .any(|e| e.kind == EventKind::SessionCreated));
 
         let ack = adapter
             .send_prompt(
@@ -546,7 +549,11 @@ mod tests {
             .unwrap();
         // Force the ring buffer past `session.created` (which is seq 1).
         for _ in 0..5 {
-            adapter.emit(snap.session_id, EventKind::TokenDelta, serde_json::json!({}));
+            adapter.emit(
+                snap.session_id,
+                EventKind::TokenDelta,
+                serde_json::json!({}),
+            );
         }
         let err = adapter
             .subscribe(snap.session_id, Some(1))

@@ -277,7 +277,7 @@ mod tests {
                 team_id: Some("team-old".into()),
                 channels: Default::default(),
                 idle_runtime_timeout_secs: None,
-            http: None,
+                http: None,
             }),
             "new-display-name",
             "team-2",

@@ -274,13 +274,12 @@ fn build_sse_response(
     );
 
     // 2. Live events
-    let live_stream =
-        BroadcastStream::new(live).filter_map(|res| async move {
-            match res {
-                Ok(ev) => Some(Ok::<_, std::io::Error>(ev.encode_sse().into_bytes())),
-                Err(_) => None, // slow subscriber lag — drop and continue
-            }
-        });
+    let live_stream = BroadcastStream::new(live).filter_map(|res| async move {
+        match res {
+            Ok(ev) => Some(Ok::<_, std::io::Error>(ev.encode_sse().into_bytes())),
+            Err(_) => None, // slow subscriber lag — drop and continue
+        }
+    });
 
     // 3. Heartbeat ticks interleaved with live (keeps idle connections
     // warm + lets the server notice TCP-level disconnects).
@@ -363,9 +362,7 @@ fn enforce_session_owner(
     }
     match state.session_index.owner_of(session_id) {
         Some(owner) if owner == principal.token_id => Ok(()),
-        Some(_) => Err(HttpError::forbidden(
-            "session belongs to a different token",
-        )),
+        Some(_) => Err(HttpError::forbidden("session belongs to a different token")),
         None => Err(HttpError::session_not_found(&session_id.to_string())),
     }
 }

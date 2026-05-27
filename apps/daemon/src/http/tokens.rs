@@ -128,11 +128,11 @@ impl TokenStore {
             label,
             created_at: SystemTime::now(),
         };
+        self.inner.by_id.write().insert(info.token_id, raw.clone());
         self.inner
-            .by_id
+            .sessions
             .write()
-            .insert(info.token_id, raw.clone());
-        self.inner.sessions.write().insert(raw.clone(), info.clone());
+            .insert(raw.clone(), info.clone());
         (raw, info)
     }
 

@@ -11,11 +11,13 @@ use axum::{
 };
 
 use super::auth;
+use super::limit::{body_limit_layer, rate_limit_layer};
 use super::observ::request_id_layer;
 use super::sessions;
 use super::state::HttpState;
 
 pub fn build(state: HttpState) -> Router {
+    let body_cap = state.config.max_body_bytes;
     Router::new()
         .route("/v1/healthz", healthz_route())
         .route("/v1/info", info_route())
@@ -34,6 +36,11 @@ pub fn build(state: HttpState) -> Router {
         .route("/v1/sessions/:id/cancel", post(sessions::cancel))
         .route("/v1/sessions/:id/events", get(sessions::replay_events))
         .route("/v1/sessions/:id/stream", get(sessions::stream))
+        .layer(body_limit_layer(body_cap))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_layer,
+        ))
         .layer(middleware::from_fn(request_id_layer))
         .with_state(state)
 }

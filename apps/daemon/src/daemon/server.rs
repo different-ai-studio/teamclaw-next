@@ -926,13 +926,12 @@ impl DaemonServer {
             };
 
             // ── 2. Rebuild MqttClient ──
-            let credential_mode = if self.config.mqtt.username.is_some()
-                && self.config.mqtt.password.is_some()
-            {
-                "configured"
-            } else {
-                "backend_token"
-            };
+            let credential_mode =
+                if self.config.mqtt.username.is_some() && self.config.mqtt.password.is_some() {
+                    "configured"
+                } else {
+                    "backend_token"
+                };
             info!(
                 actor_id = %self.actor_id,
                 broker   = %self.config.mqtt.broker_url,

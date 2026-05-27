@@ -147,7 +147,12 @@ mod tests {
     use super::*;
 
     fn ev(seq: u64) -> SessionEvent {
-        SessionEvent::new(Uuid::nil(), seq, EventKind::TokenDelta, serde_json::json!({}))
+        SessionEvent::new(
+            Uuid::nil(),
+            seq,
+            EventKind::TokenDelta,
+            serde_json::json!({}),
+        )
     }
 
     #[test]

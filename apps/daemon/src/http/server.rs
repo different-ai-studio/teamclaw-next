@@ -104,8 +104,8 @@ pub async fn spawn(
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let join = tokio::spawn(async move {
-        let server = axum::serve(listener, app.into_make_service())
-            .with_graceful_shutdown(async move {
+        let server =
+            axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             });
         if let Err(e) = server.await {
@@ -199,7 +199,10 @@ mod tests {
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
-        let root = std::fs::read_to_string(&token_path).unwrap().trim().to_owned();
+        let root = std::fs::read_to_string(&token_path)
+            .unwrap()
+            .trim()
+            .to_owned();
         let client = reqwest::Client::new();
         let resp: serde_json::Value = client
             .post(format!("{base}/v1/auth/exchange"))
@@ -214,6 +217,46 @@ mod tests {
         let session_token = resp["token"].as_str().unwrap().to_string();
         std::mem::forget(dir); // keep tempdir alive for the duration of the test
         (handle, client, base, session_token)
+    }
+
+    #[tokio::test]
+    async fn rate_limit_returns_429_with_retry_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("token");
+        let cfg = HttpConfig {
+            bind: "127.0.0.1:0".into(),
+            token_file: Some(token_path.clone()),
+            port_file: Some(dir.path().join("port")),
+            rate_limit_rps: 1,
+            rate_limit_burst: 2,
+            heartbeat_interval: std::time::Duration::from_secs(5),
+            ..HttpConfig::default()
+        };
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
+        let handle = spawn(cfg, metadata("a".into(), "test"), runtime)
+            .await
+            .unwrap();
+        let base = format!("http://{}", handle.local_addr);
+        let client = reqwest::Client::new();
+        let mut last_status = 0;
+        for _ in 0..10 {
+            let r = client
+                .get(format!("{base}/v1/healthz"))
+                .send()
+                .await
+                .unwrap();
+            last_status = r.status().as_u16();
+            if last_status == 429 {
+                assert!(r.headers().get("retry-after").is_some());
+                assert_eq!(
+                    r.headers().get("content-type").unwrap(),
+                    "application/problem+json"
+                );
+                handle.shutdown().await;
+                return;
+            }
+        }
+        panic!("expected 429 within 10 requests; last status was {last_status}");
     }
 
     #[tokio::test]
@@ -335,11 +378,8 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         let mut saw_finished = false;
         while std::time::Instant::now() < deadline {
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(200),
-                stream_resp.chunk(),
-            )
-            .await
+            match tokio::time::timeout(std::time::Duration::from_millis(200), stream_resp.chunk())
+                .await
             {
                 Ok(Ok(Some(chunk))) => {
                     buf.extend_from_slice(&chunk);
@@ -374,7 +414,10 @@ mod tests {
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
-        let root = std::fs::read_to_string(&token_path).unwrap().trim().to_owned();
+        let root = std::fs::read_to_string(&token_path)
+            .unwrap()
+            .trim()
+            .to_owned();
         let client = reqwest::Client::new();
         let exchange: serde_json::Value = client
             .post(format!("{base}/v1/auth/exchange"))

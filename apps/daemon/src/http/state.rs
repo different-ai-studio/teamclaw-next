@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use crate::config::HttpConfig;
 
+use super::limit::RateLimiter;
 use super::runtime_adapter::RuntimeAdapter;
 use super::sessions::{IdempotencyCache, SessionOwnerIndex};
 use super::tokens::TokenStore;
@@ -31,6 +32,7 @@ pub struct HttpState {
     pub runtime: Arc<dyn RuntimeAdapter>,
     pub session_index: Arc<SessionOwnerIndex>,
     pub idempotency: Arc<IdempotencyCache>,
+    pub limiter: Arc<RateLimiter>,
 }
 
 impl HttpState {
@@ -47,6 +49,7 @@ impl HttpState {
             runtime,
             session_index: SessionOwnerIndex::new(),
             idempotency: IdempotencyCache::new(),
+            limiter: RateLimiter::new(),
         }
     }
 }
