@@ -349,12 +349,34 @@ impl Backend for CloudApiBackend {
 
     async fn rpc_upsert_external_actor(
         &self,
-        _team_id: &str,
-        _source: &str,
-        _source_id: &str,
-        _display_name: &str,
+        team_id: &str,
+        source: &str,
+        source_id: &str,
+        display_name: &str,
     ) -> BackendResult<String> {
-        self.unsupported("rpc_upsert_external_actor")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "teamId")]
+            team_id: &'a str,
+            source: &'a str,
+            #[serde(rename = "sourceId")]
+            source_id: &'a str,
+            #[serde(rename = "displayName")]
+            display_name: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            #[serde(rename = "actorId")]
+            actor_id: String,
+        }
+        let r: Resp = self
+            .post(
+                "/v1/actors/external",
+                &Body { team_id, source, source_id, display_name },
+                None,
+            )
+            .await?;
+        Ok(r.actor_id)
     }
 
     async fn get_gateway_session_by_acp_id(
@@ -681,6 +703,25 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn rpc_upsert_external_actor_returns_actor_id() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/actors/external"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "actorId": "actor-ext-1"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let actor_id = backend
+            .rpc_upsert_external_actor("team-1", "wecom", "wecom-user-1", "Alice")
+            .await
+            .unwrap();
+        assert_eq!(actor_id, "actor-ext-1");
     }
 
     #[tokio::test]
