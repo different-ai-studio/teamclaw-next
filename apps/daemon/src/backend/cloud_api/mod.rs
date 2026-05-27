@@ -256,10 +256,34 @@ impl Backend for CloudApiBackend {
 
     async fn ensure_agent_types(
         &self,
-        _supported_types: &[String],
-        _default_agent_type: &str,
+        supported_types: &[String],
+        default_agent_type: &str,
     ) -> BackendResult<()> {
-        self.unsupported("ensure_agent_types")
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "supportedTypes")]
+            supported_types: &'a [String],
+            #[serde(rename = "defaultAgentType")]
+            default_agent_type: &'a str,
+        }
+        let token = self.access_token().await?;
+        let resp = self
+            .http
+            .post(self.cloud_url("/v1/agents/types/ensure"))
+            .bearer_auth(token)
+            .header("x-request-id", request_id())
+            .json(&Body { supported_types, default_agent_type })
+            .send()
+            .await
+            .map_err(network_error)?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let bytes = resp.bytes().await.map_err(network_error)?;
+            let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
+            Err(client::decode_error(status, envelope))
+        }
     }
 
     async fn set_agent_device_id(&self, _device_id: &str) -> BackendResult<()> {
@@ -796,6 +820,25 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[tokio::test]
+    async fn ensure_agent_types_posts_to_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/types/ensure"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        backend
+            .ensure_agent_types(
+                &["claude_code".to_string(), "shell".to_string()],
+                "claude_code",
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
