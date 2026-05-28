@@ -120,7 +120,10 @@ fn try_clone_team_repo(
         auth_kind,
         None,
     ) {
-        Ok(()) => None,
+        Ok(custom_git::CloneOutcome::Cloned) => None,
+        Ok(custom_git::CloneOutcome::InitFallback { reason }) => {
+            Some(format!("git clone failed, used local init: {reason}"))
+        }
         Err(e) => Some(format!("git clone deferred: {e}")),
     }
 }

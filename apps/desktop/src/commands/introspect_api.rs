@@ -545,6 +545,12 @@ async fn handle_channel_set(app: &AppHandle, body: &[u8]) -> Result<String, Stri
 /// Returns `{"ok":true,"authKind":"...","credential":"..."}`. Used by the
 /// `teamclaw-askpass` shell helper (via `teamclaw-introspect get-credential`)
 /// to provide credentials to `git clone` over HTTPS.
+//
+// TODO(security): /git-credential-get returns plaintext credentials over an
+// unauthenticated 127.0.0.1 socket. Any local process can call this and exfiltrate
+// HTTPS tokens or SSH key paths. Follow-up: introduce a per-launch shared secret
+// (file-mode 0600 under ~/.teamclaw/) that the introspect sidecar and askpass
+// helper both read, and require it as an X-Teamclaw-Token header.
 async fn handle_git_credential_get(_app: &AppHandle, body: &[u8]) -> Result<String, String> {
     let v: serde_json::Value =
         serde_json::from_slice(body).map_err(|e| format!("JSON parse error: {}", e))?;

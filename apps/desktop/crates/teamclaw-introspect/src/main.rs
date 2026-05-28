@@ -11,6 +11,7 @@ mod sync;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -492,7 +493,13 @@ async fn fetch_credential(
         "workspace_path": workspace,
         "credential_ref": credential_ref,
     });
-    let client = reqwest::Client::new();
+    // 10s timeout so a hung introspect API can't deadlock `git clone` (which
+    // blocks on GIT_ASKPASS) indefinitely. Applied at the client level so it
+    // covers connect + read.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("build http client failed: {e}"))?;
     let resp = client
         .post(&url)
         .json(&body)

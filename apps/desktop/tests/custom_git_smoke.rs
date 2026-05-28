@@ -175,7 +175,7 @@ fn clone_or_init_https_file_url_succeeds() {
         perms.set_mode(0o755);
         std::fs::set_permissions(&askpass, perms).unwrap();
     }
-    custom_git::clone_or_init(
+    let outcome = custom_git::clone_or_init(
         &dest,
         &remote_url,
         &workspace,
@@ -185,6 +185,7 @@ fn clone_or_init_https_file_url_succeeds() {
     )
     .expect("clone_or_init");
 
+    assert_eq!(outcome, custom_git::CloneOutcome::Cloned);
     assert!(
         dest.join(".git").exists(),
         ".git should exist after clone_or_init"
@@ -205,7 +206,7 @@ fn clone_or_init_falls_back_to_init_when_clone_fails() {
     let dest = tmp.path().join("init-fallback");
     let askpass = tmp.path().join("askpass.sh");
     std::fs::write(&askpass, "#!/bin/sh\necho stub\n").unwrap();
-    custom_git::clone_or_init(
+    let outcome = custom_git::clone_or_init(
         &dest,
         "file:///nonexistent/path/that/does/not/exist.git",
         &workspace,
@@ -214,6 +215,16 @@ fn clone_or_init_falls_back_to_init_when_clone_fails() {
         Some(askpass),
     )
     .expect("clone_or_init should fall back to git init");
+
+    match outcome {
+        custom_git::CloneOutcome::InitFallback { reason } => {
+            assert!(
+                !reason.is_empty(),
+                "InitFallback should carry a non-empty reason"
+            );
+        }
+        other => panic!("expected InitFallback, got {:?}", other),
+    }
 
     assert!(
         dest.join(".git").exists(),

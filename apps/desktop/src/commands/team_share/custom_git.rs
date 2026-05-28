@@ -149,6 +149,16 @@ pub fn build_clone_command(
     auth_kind: &str,
     askpass_override: Option<PathBuf>,
 ) -> Result<Command, String> {
+    // Windows guard: the askpass helper is a POSIX shell script and won't
+    // execute in a Windows environment. Refuse HTTPS clones here rather than
+    // silently falling back to `git init` and leaving the user confused.
+    #[cfg(windows)]
+    {
+        if auth_kind == "https_token" {
+            return Err("HTTPS custom_git clones via askpass are not yet supported on Windows. Use SSH auth_kind instead, or open the team in a managed-git mode.".into());
+        }
+    }
+
     let mut cmd = Command::new("git");
     cmd.arg("clone")
         .arg(remote_url)
@@ -196,9 +206,29 @@ fn shell_quote(s: &str) -> String {
     }
 }
 
+/// Outcome of [`clone_or_init`]. Distinguishes a real clone from the
+/// defensive `git init` fallback so callers can surface a warning to the
+/// user instead of silently pretending the remote was reachable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloneOutcome {
+    /// `git clone` succeeded.
+    Cloned,
+    /// `git clone` failed; we fell back to `git init` + `remote add`.
+    /// `reason` is the first non-empty trimmed line of the clone stderr
+    /// (or a synthetic reason if stderr was empty / capture failed).
+    InitFallback { reason: String },
+}
+
+// TODO(team-shared-git unification): apps/desktop/src/commands/team_shared_git.rs
+// has a parallel clone-or-init path that embeds tokens in the remote URL
+// (token persists in .git/config — security regression that this askpass-based
+// path was designed to fix). Migrate team_shared_git::setup_shared_git_repo to
+// delegate here in a follow-up PR.
+
 /// Clone `remote_url` into `dest` using the stored credential. Falls back
 /// to `git init` if the clone fails (defensive — handles empty/unreachable
-/// remotes that the user can push to later).
+/// remotes that the user can push to later). The fallback case is reported
+/// via [`CloneOutcome::InitFallback`] so callers can warn the user.
 pub fn clone_or_init(
     dest: &Path,
     remote_url: &str,
@@ -206,7 +236,7 @@ pub fn clone_or_init(
     credential_ref: &str,
     auth_kind: &str,
     askpass_override: Option<PathBuf>,
-) -> Result<(), String> {
+) -> Result<CloneOutcome, String> {
     if let Some(parent) = dest.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -221,12 +251,26 @@ pub fn clone_or_init(
     )?;
     let clone_result = cmd.output();
 
-    let clone_ok =
-        matches!(&clone_result, Ok(out) if out.status.success()) && dest.join(".git").exists();
+    let clone_ok = matches!(&clone_result, Ok(out) if out.status.success())
+        && dest.join(".git").exists();
 
     if clone_ok {
-        return Ok(());
+        return Ok(CloneOutcome::Cloned);
     }
+
+    // Capture a human-readable reason from the failed clone for the warning.
+    let reason = match &clone_result {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            stderr
+                .lines()
+                .map(|l| l.trim())
+                .find(|l| !l.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("git clone exited with status {}", out.status))
+        }
+        Err(e) => format!("git clone could not be spawned: {e}"),
+    };
 
     // Defensive fallback: `git init` + set remote so user can pull/push
     // once the remote is reachable.
@@ -250,5 +294,5 @@ pub fn clone_or_init(
         .arg(remote_url)
         .current_dir(dest)
         .output();
-    Ok(())
+    Ok(CloneOutcome::InitFallback { reason })
 }
