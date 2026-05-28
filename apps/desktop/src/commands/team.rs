@@ -869,6 +869,42 @@ pub fn get_team_status(
     Ok(check_team_status(&ws))
 }
 
+/// Read `teamclaw-team/_meta/team.json` from the given workspace, if present.
+/// Returns `None` when the directory or file doesn't exist or can't be parsed.
+/// Used by the workspace picker to detect mismatched team state before continuing.
+#[tauri::command]
+pub fn workspace_read_team_meta(workspace_path: String) -> Result<Option<TeamMeta>, String> {
+    let meta_path = Path::new(&workspace_path)
+        .join(TEAM_REPO_DIR)
+        .join("_meta")
+        .join("team.json");
+    if !meta_path.exists() {
+        return Ok(None);
+    }
+    let content = match std::fs::read_to_string(&meta_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    match serde_json::from_str::<TeamMeta>(&content) {
+        Ok(meta) => Ok(Some(meta)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Delete the `teamclaw-team/` directory inside `workspace_path`.
+/// Used when the user confirms (twice) that a workspace's stored team
+/// should be discarded after a mismatch with the currently-logged-in team.
+/// No-op when the directory doesn't exist.
+#[tauri::command]
+pub fn workspace_delete_team_repo(workspace_path: String) -> Result<(), String> {
+    let team_dir = Path::new(&workspace_path).join(TEAM_REPO_DIR);
+    if !team_dir.exists() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(&team_dir)
+        .map_err(|e| format!("Failed to remove {}: {}", team_dir.display(), e))
+}
+
 /// Update LLM config for an existing team.
 /// Called from the "服务配置" section in team settings.
 #[tauri::command]
