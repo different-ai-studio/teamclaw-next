@@ -15,6 +15,10 @@ import {
 function mapSession(session: Session | null): AuthSession | null {
   if (!session) return null;
   const user = session.user;
+  // Defensive: a partial session (no user, or user without id) is treated as
+  // signed-out rather than crashing the caller. This can happen with stale
+  // localStorage entries written by an earlier broken build.
+  if (!user || typeof user.id !== "string" || !user.id) return null;
   return {
     user: {
       id: user.id,

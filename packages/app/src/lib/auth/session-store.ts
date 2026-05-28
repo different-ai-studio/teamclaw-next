@@ -38,12 +38,32 @@ function safeLocalStorage(): Storage | null {
   }
 }
 
+function isValidSession(value: unknown): value is Session {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<Session> & { user?: { id?: unknown } };
+  return (
+    typeof v.access_token === "string" &&
+    typeof v.refresh_token === "string" &&
+    typeof v.expires_at === "number" &&
+    !!v.user &&
+    typeof v.user === "object" &&
+    typeof v.user.id === "string" &&
+    !!v.user.id
+  );
+}
+
 function readPersistedSession(): Session | null {
   const ls = safeLocalStorage();
   if (!ls) return null;
   try {
     const raw = ls.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Session;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (isValidSession(parsed)) return parsed;
+      // Stale/partial session from a previous broken build — drop it so we
+      // don't crash mapSession downstream.
+      try { ls.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    }
   } catch {
     // fall through to legacy migration
   }
