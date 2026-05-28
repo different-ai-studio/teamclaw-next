@@ -28,7 +28,6 @@ use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::provider_config::ProviderConfig;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
-use crate::supabase::{SupabaseBackend, SupabaseConfig};
 use crate::team_shared_git::TeamSharedGitConfig;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
@@ -245,26 +244,13 @@ enum SockCommand {
 fn load_provider_config_from_default_paths() -> crate::error::Result<ProviderConfig> {
     let backend_path = ProviderConfig::default_path()
         .map_err(|e| crate::error::AmuxError::Config(format!("backend config path failed: {e}")))?;
-    let legacy_supabase_path = SupabaseConfig::default_path().map_err(|e| {
-        crate::error::AmuxError::Config(format!("legacy supabase config path failed: {e}"))
-    })?;
 
-    ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path)
+    ProviderConfig::load_from_path(&backend_path)
         .map_err(|e| crate::error::AmuxError::Config(format!("backend config init failed: {e}")))
 }
 
 fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<Arc<dyn Backend>> {
     match config {
-        ProviderConfig::Supabase(config) => {
-            tracing::warn!(
-                "The Supabase provider is deprecated and will be removed in a future release. \
-                 Migrate to the CloudApi provider (backendKind = \"cloud_api\")."
-            );
-            let backend = SupabaseBackend::new(config).map_err(|e| {
-                crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
-            })?;
-            Ok(Arc::new(backend))
-        }
         ProviderConfig::CloudApi(config) => Ok(Arc::new(
             crate::backend::cloud_api::CloudApiBackend::new(config),
         )),
@@ -313,7 +299,7 @@ impl DaemonServer {
 
         let actor_id = backend.actor_id().to_string();
 
-        // Fetch first token — fails fast if Supabase is unreachable at startup.
+        // Fetch first token — fails fast if CloudApi is unreachable at startup.
         // Idea 5's outer loop handles retries on every subsequent reconnect.
         let token = backend.auth_token().await.map_err(|e| {
             crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
@@ -4694,32 +4680,31 @@ mod tests {
         }
     }
 
-    fn test_supabase() -> Arc<dyn Backend> {
-        test_supabase_with_url("http://localhost".to_string())
+    fn test_cloud_api() -> Arc<dyn Backend> {
+        test_cloud_api_with_url("http://localhost".to_string())
     }
 
-    fn test_supabase_with_url(url: String) -> Arc<dyn Backend> {
-        Arc::new(
-            SupabaseBackend::new_without_persistence(SupabaseConfig {
+    fn test_cloud_api_with_url(url: String) -> Arc<dyn Backend> {
+        Arc::new(crate::backend::cloud_api::CloudApiBackend::new(
+            crate::provider_config::CloudApiConfig {
                 url,
-                anon_key: "anon".to_string(),
                 refresh_token: "refresh".to_string(),
                 team_id: "team-test".to_string(),
                 actor_id: "agent-actor".to_string(),
-            })
-            .unwrap(),
-        )
+            },
+        ))
     }
 
     #[test]
-    fn backend_from_provider_config_initializes_supabase_backend() {
-        let config = crate::provider_config::ProviderConfig::Supabase(SupabaseConfig {
-            url: "http://localhost".to_string(),
-            anon_key: "anon".to_string(),
-            refresh_token: "refresh".to_string(),
-            team_id: "team-test".to_string(),
-            actor_id: "agent-actor".to_string(),
-        });
+    fn backend_from_provider_config_initializes_cloud_api_backend() {
+        let config = crate::provider_config::ProviderConfig::CloudApi(
+            crate::provider_config::CloudApiConfig {
+                url: "http://localhost".to_string(),
+                refresh_token: "refresh".to_string(),
+                team_id: "team-test".to_string(),
+                actor_id: "agent-actor".to_string(),
+            },
+        );
 
         let backend = backend_from_provider_config(config).unwrap();
 
@@ -4739,10 +4724,10 @@ mod tests {
     }
 
     fn test_server() -> TestServer {
-        test_server_with_supabase(test_supabase())
+        test_server_with_cloud_api(test_cloud_api())
     }
 
-    fn test_server_with_supabase(backend: Arc<dyn Backend>) -> TestServer {
+    fn test_server_with_cloud_api(backend: Arc<dyn Backend>) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
         let mqtt = test_mqtt(&config.device.id);
@@ -4939,8 +4924,8 @@ mod tests {
     async fn auto_restart_offline_sessions_is_noop_without_membership() {
         // The default test fixture has no teamclaw memberships (no
         // sessions.toml entries the actor is a participant in), so the
-        // method must return early before touching Supabase. A real
-        // Supabase call would fail because `test_supabase()` points at
+        // method must return early before touching the Cloud API. A real
+        // request would fail because `test_cloud_api()` points at
         // http://localhost with no server running, so a successful return
         // here implies the early-exit guard fired.
         let mut fixture = test_server();
@@ -4954,9 +4939,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_start_with_session_id_fails_when_supabase_lookup_fails() {
+    async fn runtime_start_with_session_id_fails_when_cloud_api_lookup_fails() {
         let mut fixture =
-            test_server_with_supabase(test_supabase_with_url("http://127.0.0.1:1".into()));
+            test_server_with_cloud_api(test_cloud_api_with_url("http://127.0.0.1:1".into()));
 
         let result = fixture
             .server
@@ -4991,51 +4976,77 @@ mod tests {
     //   - prior row exists, unread from someone else, no live runtime →
     //     keep with backend/workspace_id resolved from the prior row
     //   - prior row exists, but a live runtime is already serving → skip
-    use wiremock::matchers::{method, path_regex, query_param};
+    use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// Cloud API `/v1/auth/refresh` mock — every test calls
+    /// `access_token()` before any business request.
     async fn auth_token_mock(srv: &MockServer) {
         Mock::given(method("POST"))
-            .and(path_regex(r"^/auth/v1/token$"))
+            .and(path("/v1/auth/refresh"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+                "accessToken": "at",
+                "refreshToken": "rt",
+                "expiresAt": 9999999999_i64
             })))
             .mount(srv)
             .await;
     }
 
+    /// `fetch_latest_runtime_for_session` hits
+    /// `GET /v1/agents/runtimes/latest?agentId=...&sessionId=...` and expects
+    /// a single object (404 → None). Map the legacy PostgREST signature
+    /// onto the cloud_api shape.
     async fn mock_agent_runtime_row(
         srv: &MockServer,
         session_id: &str,
         last_processed_message_id: Option<&str>,
-        workspace_id: Option<&str>,
-        backend_type: &str,
+        _workspace_id: Option<&str>,
+        _backend_type: &str,
     ) {
         Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .and(query_param("session_id", format!("eq.{}", session_id)))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                    "id": format!("row-{}", session_id),
-                    "workspace_id": workspace_id,
-                    "backend_type": backend_type,
-                    "backend_session_id": format!("acp-{}", session_id),
-                    "status": "stopped",
-                    "last_processed_message_id": last_processed_message_id,
-                    "last_seen_at": "2025-05-22T01:00:00Z"
-                }
-            ])))
+            .and(path("/v1/agents/runtimes/latest"))
+            .and(query_param("sessionId", session_id))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": format!("row-{session_id}"),
+                "backendSessionId": format!("acp-{session_id}"),
+                "lastProcessedMessageId": last_processed_message_id,
+            })))
             .mount(srv)
             .await;
     }
 
+    /// `messages_after_cursor` hits `GET /v1/sessions/{id}/messages`. The
+    /// legacy PostgREST mocks returned a top-level array of rows in
+    /// snake_case; convert each row to the cloud_api camelCase envelope.
     async fn mock_messages_response(srv: &MockServer, session_id: &str, rows: serde_json::Value) {
+        let items: Vec<serde_json::Value> = rows
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(to_cloud_message)
+            .collect();
         Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/messages"))
-            .and(query_param("session_id", format!("eq.{}", session_id)))
-            .respond_with(ResponseTemplate::new(200).set_body_json(rows))
+            .and(path(format!("/v1/sessions/{session_id}/messages")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": items,
+                "nextCursor": null,
+            })))
             .mount(srv)
             .await;
+    }
+
+    fn to_cloud_message(row: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "id": row.get("id").cloned().unwrap_or_default(),
+            "sessionId": row.get("session_id").cloned().unwrap_or_default(),
+            "senderActorId": row.get("sender_actor_id").cloned().unwrap_or_default(),
+            "kind": row.get("kind").cloned().unwrap_or(serde_json::json!("text")),
+            "content": row.get("content").cloned().unwrap_or_default(),
+            "metadata": row.get("metadata").cloned().unwrap_or(serde_json::json!({})),
+            "createdAt": row.get("created_at").cloned().unwrap_or_default(),
+        })
     }
 
     async fn add_membership(fixture: &mut TestServer, session_id: &str) {
@@ -5054,14 +5065,16 @@ mod tests {
     async fn plan_skips_session_with_no_prior_runtime_row() {
         let srv = MockServer::start().await;
         auth_token_mock(&srv).await;
-        // Empty agent_runtimes response — no prior row.
+        // No prior row — Cloud API returns 404 for the "latest" lookup.
         Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .and(path("/v1/agents/runtimes/latest"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "not_found", "message": "no runtime row" }
+            })))
             .mount(&srv)
             .await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         add_membership(&mut fixture, "sess-no-row").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5073,12 +5086,12 @@ mod tests {
         let srv = MockServer::start().await;
         auth_token_mock(&srv).await;
         mock_agent_runtime_row(&srv, "sess-empty", Some("msg-9"), None, "claude").await;
-        // Supabase honours `messages_after_cursor` by returning an empty
+        // Cloud API honours `messages_after_cursor` by returning an empty
         // list (the drain-through-cursor logic happens client-side, but
         // here we simulate "no messages newer than the cursor").
         mock_messages_response(&srv, "sess-empty", serde_json::json!([])).await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         add_membership(&mut fixture, "sess-empty").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5113,7 +5126,7 @@ mod tests {
         )
         .await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         add_membership(&mut fixture, "sess-self").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5135,11 +5148,23 @@ mod tests {
             "claude_code",
         )
         .await;
-        // One self-authored row (filtered out) plus one human row (kept).
+        // Cloud API's `messages_after_cursor` trims past `after_id`
+        // client-side, so include msg-9 (the cursor) at the head of the
+        // response. After trimming: msg-10 (self-authored, filtered) +
+        // msg-11 (human, kept).
         mock_messages_response(
             &srv,
             "sess-mention",
             serde_json::json!([
+                {
+                    "id": "msg-9",
+                    "session_id": "sess-mention",
+                    "sender_actor_id": "agent-actor",
+                    "kind": "agent_reply",
+                    "content": "cursor row",
+                    "metadata": {},
+                    "created_at": "2025-05-22T00:29:00Z"
+                },
                 {
                     "id": "msg-10",
                     "session_id": "sess-mention",
@@ -5162,7 +5187,7 @@ mod tests {
         )
         .await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         add_membership(&mut fixture, "sess-mention").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5201,7 +5226,7 @@ mod tests {
         )
         .await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         add_membership(&mut fixture, "session-1").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5251,9 +5276,10 @@ mod tests {
         //     @-mention's content)
         //   - the silent queue holds msg-a only (msg-b is consumed by the
         //     real prompt; msg-c never @-mentions us, hence silent)
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+        mock_messages_response(
+            &srv,
+            "session-1",
+            serde_json::json!([
                 make_message_row(
                     "msg-a",
                     "session-1",
@@ -5278,11 +5304,11 @@ mod tests {
                     "drive-by chatter",
                     "2025-05-22T01:00:03Z",
                 ),
-            ])))
-            .mount(&srv)
-            .await;
+            ]),
+        )
+        .await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         fixture.server.catchup_runtime("rt1").await;
 
         // `send_prompt` (not raw) auto-drains the silent queue via
@@ -5324,9 +5350,10 @@ mod tests {
     async fn catchup_runtime_with_no_mentions_routes_everything_silent() {
         let srv = MockServer::start().await;
         auth_token_mock(&srv).await;
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+        mock_messages_response(
+            &srv,
+            "session-1",
+            serde_json::json!([
                 make_message_row(
                     "msg-a",
                     "session-1",
@@ -5343,11 +5370,11 @@ mod tests {
                     "second chatter",
                     "2025-05-22T01:00:02Z",
                 ),
-            ])))
-            .mount(&srv)
-            .await;
+            ]),
+        )
+        .await;
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
         fixture.server.catchup_runtime("rt1").await;
 
         let agents = fixture.server.agents.lock().await;

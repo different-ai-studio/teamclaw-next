@@ -15,10 +15,6 @@ pub struct ServerConfig {
     #[serde(default)]
     pub backend_kind: Option<String>,
     #[serde(default)]
-    pub supabase_url: Option<String>,
-    #[serde(default)]
-    pub supabase_anon_key: Option<String>,
-    #[serde(default)]
     pub cloud_api_url: Option<String>,
     #[serde(default)]
     pub mqtt_host: Option<String>,
@@ -78,8 +74,6 @@ fn default_server_config() -> ServerConfig {
     let d = services_defaults();
     ServerConfig {
         backend_kind: Some("cloud_api".to_string()),
-        supabase_url: None,
-        supabase_anon_key: None,
         cloud_api_url: Some(DEFAULT_CLOUD_API_URL.to_string()),
         mqtt_host: Some(d.mqtt_host.clone()),
         mqtt_port: Some(d.mqtt_port),
@@ -100,54 +94,6 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
         .is_empty()
     {
         config.backend_kind = defaults.backend_kind;
-    }
-    let is_cloud_api = config.backend_kind.as_deref() == Some("cloud_api");
-    // Emit a deprecation warning when the legacy Supabase provider is selected.
-    let is_supabase = config.backend_kind.as_deref() == Some("supabase");
-    if is_supabase {
-        eprintln!(
-            "[ServerConfig] WARNING: backendKind=\"supabase\" is deprecated and will be removed \
-             in a future release. Migrate to backendKind=\"cloud_api\" with a cloudApiUrl."
-        );
-    }
-    if is_cloud_api {
-        if config
-            .supabase_url
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        {
-            config.supabase_url = None;
-        }
-        if config
-            .supabase_anon_key
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        {
-            config.supabase_anon_key = None;
-        }
-    } else {
-        if config
-            .supabase_url
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        {
-            config.supabase_url = defaults.supabase_url;
-        }
-        if config
-            .supabase_anon_key
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        {
-            config.supabase_anon_key = defaults.supabase_anon_key;
-        }
     }
     if config
         .cloud_api_url
@@ -290,8 +236,6 @@ mod tests {
     fn sample_config() -> ServerConfig {
         ServerConfig {
             backend_kind: Some("cloud_api".to_string()),
-            supabase_url: Some("https://project.supabase.co".to_string()),
-            supabase_anon_key: Some("anon-key".to_string()),
             cloud_api_url: Some("https://fc.example.com".to_string()),
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
@@ -324,7 +268,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(loaded.supabase_url, legacy_config.supabase_url);
+        assert_eq!(loaded.cloud_api_url, legacy_config.cloud_api_url);
         assert!(current.exists());
         let migrated = read_config_file(&current).unwrap();
         assert_eq!(migrated.mqtt_host, legacy_config.mqtt_host);
@@ -345,8 +289,6 @@ mod tests {
             loaded.cloud_api_url.as_deref(),
             Some(DEFAULT_CLOUD_API_URL)
         );
-        assert_eq!(loaded.supabase_url, None);
-        assert_eq!(loaded.supabase_anon_key, None);
         assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
         assert_eq!(loaded.mqtt_port, Some(d.mqtt_port));
         assert_eq!(loaded.mqtt_use_tls, Some(d.mqtt_use_tls));
@@ -354,50 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn fills_missing_fields_without_overwriting_custom_values() {
-        let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join(".teamclaw").join(SERVER_CONFIG_FILE);
-        write_config_file(
-            &current,
-            &ServerConfig {
-                backend_kind: Some("supabase".to_string()),
-                supabase_url: Some("https://custom.supabase.co".to_string()),
-                supabase_anon_key: None,
-                cloud_api_url: None,
-                mqtt_host: None,
-                mqtt_port: Some(1883),
-                mqtt_use_tls: Some(false),
-                mqtt_username: None,
-                mqtt_password: None,
-            },
-        )
-        .unwrap();
-
-        let loaded = load_config_from_paths(current.clone(), vec![])
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(loaded.backend_kind.as_deref(), Some("supabase"));
-        assert_eq!(
-            loaded.supabase_url.as_deref(),
-            Some("https://custom.supabase.co")
-        );
-        let d = services_defaults();
-        assert_eq!(
-            loaded.supabase_anon_key.as_deref(),
-            Some(d.supabase_anon_key.as_str())
-        );
-        assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
-        assert_eq!(loaded.mqtt_port, Some(1883));
-        assert_eq!(loaded.mqtt_use_tls, Some(false));
-    }
-
-    #[test]
     fn preserves_cloud_api_provider_fields() {
         let config = merge_with_defaults(ServerConfig {
             backend_kind: Some("cloud_api".to_string()),
-            supabase_url: Some("https://project.supabase.co".to_string()),
-            supabase_anon_key: Some("anon-key".to_string()),
             cloud_api_url: Some("https://fc.example.com".to_string()),
             mqtt_host: Some("mqtt.example.com".to_string()),
             mqtt_port: Some(1883),
@@ -411,10 +312,5 @@ mod tests {
             config.cloud_api_url.as_deref(),
             Some("https://fc.example.com")
         );
-        assert_eq!(
-            config.supabase_url.as_deref(),
-            Some("https://project.supabase.co")
-        );
-        assert_eq!(config.supabase_anon_key.as_deref(), Some("anon-key"));
     }
 }

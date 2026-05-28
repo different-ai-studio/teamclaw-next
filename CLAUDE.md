@@ -54,8 +54,9 @@ Local files copied into new worktrees when present:
   MQTT, and other live/self-test workflows.
 - `packages/app/.env.development.local` — required for the web/desktop Vite
   preview to get `VITE_SUPABASE_*` and MQTT settings.
-- `apps/daemon/.env` — required by daemon onboarding/init fallback when
-  `SUPABASE_URL` and `SUPABASE_ANON_KEY` are not exported in the shell.
+- `apps/daemon/.env` — optional. Set `TEAMCLAW_CLOUD_API_URL` to override the
+  Cloud API endpoint that `amuxd init` POSTs `/v1/invites/claim` to (defaults
+  to the production `https://cloud.ucar.cc`).
 - `apps/expo/.env` — required for Expo when doing mobile work; the tracked
   `.env.example` is only a template.
 - `apps/android/local.properties` — required for Android builds to find the

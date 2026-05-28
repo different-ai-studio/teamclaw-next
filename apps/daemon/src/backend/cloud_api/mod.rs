@@ -779,8 +779,6 @@ mod tests {
     fn config(server: &MockServer) -> CloudApiConfig {
         CloudApiConfig {
             url: server.uri(),
-            supabase_url: server.uri(),
-            supabase_anon_key: "anon".to_string(),
             refresh_token: "refresh".to_string(),
             team_id: "team-1".to_string(),
             actor_id: "agent-1".to_string(),

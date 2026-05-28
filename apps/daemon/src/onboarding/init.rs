@@ -41,8 +41,6 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> Result<InitOutcom
 
     let cfg = CloudApiConfig {
         url: cloud_url,
-        supabase_url: String::new(),
-        supabase_anon_key: String::new(),
         refresh_token,
         team_id: claim.team_id.clone(),
         actor_id: claim.actor_id.clone(),
@@ -164,15 +162,11 @@ fn save_backend_toml(path: &Path, cfg: &CloudApiConfig) -> std::io::Result<()> {
 
 [cloud_api]
 url = {url}
-supabase_url = {supabase_url}
-supabase_anon_key = {supabase_anon_key}
 refresh_token = {refresh_token}
 team_id = {team_id}
 actor_id = {actor_id}
 "#,
         url = toml_quote(&cfg.url),
-        supabase_url = toml_quote(&cfg.supabase_url),
-        supabase_anon_key = toml_quote(&cfg.supabase_anon_key),
         refresh_token = toml_quote(&cfg.refresh_token),
         team_id = toml_quote(&cfg.team_id),
         actor_id = toml_quote(&cfg.actor_id),

@@ -1,5 +1,4 @@
 use crate::config::DaemonConfig;
-use crate::supabase::config::SupabaseConfig;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -49,14 +48,11 @@ pub fn run(force: bool) -> anyhow::Result<()> {
 
 fn candidate_paths() -> Vec<PathBuf> {
     let dir = DaemonConfig::config_dir();
-    let mut paths = vec![
+    vec![
         dir.join("daemon.toml"),
         dir.join("members.toml"),
         dir.join("sessions.toml"),
         dir.join("workspaces.toml"),
-    ];
-    if let Ok(p) = SupabaseConfig::default_path() {
-        paths.push(p);
-    }
-    paths
+        dir.join("backend.toml"),
+    ]
 }

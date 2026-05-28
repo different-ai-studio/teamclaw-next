@@ -13,7 +13,6 @@ mod onboarding;
 mod proto;
 mod provider_config;
 mod runtime;
-mod supabase;
 mod team_shared_env;
 mod team_shared_git;
 mod teamclaw;
@@ -33,7 +32,7 @@ fn main() -> anyhow::Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             let outcome = rt.block_on(onboarding::init::run(&url, None))?;
             println!(
-                "\n✓ Daemon onboarded.\n  actor_id      = {}\n  team_id       = {}\n  display_name  = {}\n  supabase.toml = {}\n\nNext: `amuxd start`",
+                "\n✓ Daemon onboarded.\n  actor_id      = {}\n  team_id       = {}\n  display_name  = {}\n  backend.toml  = {}\n\nNext: `amuxd start`",
                 outcome.actor_id,
                 outcome.team_id,
                 outcome.display_name,
@@ -237,7 +236,7 @@ async fn shutdown_signal() {
 fn prompt_for_invite_url() -> anyhow::Result<String> {
     use std::io::{BufRead, Write};
 
-    println!("amuxd onboarding — register this daemon as an agent on your Supabase team.");
+    println!("amuxd onboarding — register this daemon as an agent on your TeamClaw team.");
     println!();
     println!("  1. Install the AMUX iOS app and sign in.");
     println!("  2. Create a team (if you haven't already).");
