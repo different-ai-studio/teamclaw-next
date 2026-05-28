@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { createClient as defaultCreateClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
 import { ApiError } from "./http-utils.mjs";
+
+// FC runtime is Node 20 which lacks native WebSocket. supabase-js v2.45+ tries
+// to construct a RealtimeClient at createClient() time and throws without a
+// transport. We never use Realtime in FC; pass `ws` so the construction
+// succeeds. The transport is only opened lazily when realtime channels are
+// subscribed, which we never do.
+const REALTIME_TRANSPORT_OPTS = { transport: WebSocket };
 
 const ATTACHMENTS_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
@@ -22,6 +30,7 @@ export function createSupabaseBusinessRepository(options) {
 
   const supabase = createClient(supabaseUrl, publishableKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    realtime: REALTIME_TRANSPORT_OPTS,
     global: {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -1011,12 +1020,23 @@ export function createSupabaseAuthRepository(options) {
   // before it owns any auth token.
   const anonClient = createClient(supabaseUrl, publishableKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    realtime: REALTIME_TRANSPORT_OPTS,
   });
 
   return {
     async claimInvite(token) {
       const { data, error } = await anonClient.rpc("claim_team_invite", { p_token: token });
-      if (error) throw error;
+      if (error) {
+        const msg = error.message || "claim_team_invite failed";
+        const lower = msg.toLowerCase();
+        if (lower.includes("not found") || lower.includes("invite invalid") || lower.includes("invalid invite")) {
+          throw new ApiError(404, "not_found", `invite invalid or expired: ${msg}`);
+        }
+        if (lower.includes("already claimed") || lower.includes("claimed")) {
+          throw new ApiError(409, "conflict", `invite already claimed: ${msg}`);
+        }
+        throw new ApiError(400, "validation_failed", msg);
+      }
       const row = requiredRow(data, "auth.claimInvite");
       return {
         actorId: requiredString(row.actor_id, "auth.claimInvite", "actor_id"),

@@ -95,6 +95,10 @@ export function normalizeError(error) {
   const mapped = mapSupabaseError(error);
   if (mapped) return mapped;
 
+  // Log unclassified errors so they're diagnosable in FC logs instead of
+  // silently surfacing as opaque "internal" 500s.
+  try { console.error("[business-api] unclassified error:", error?.message, error?.name, error?.stack?.split("\n").slice(0,5).join(" | ")); } catch {}
+
   return new ApiError(500, "internal", "Internal server error", { cause: error });
 }
 
