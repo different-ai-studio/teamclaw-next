@@ -251,4 +251,44 @@ grant usage on type app.team_share_mode to service_role;
 revoke all on function app.enable_team_share(uuid, app.team_share_mode, text, text, text) from public;
 grant execute on function app.enable_team_share(uuid, app.team_share_mode, text, text, text) to service_role;
 
+-- ===========================================================================
+-- 7. app.update_team_litellm — owner-only LiteLLM credential writeback
+-- ===========================================================================
+-- team_workspace_config.litellm_team_id is guarded by
+-- app.guard_team_workspace_sync_fields() (see 20260527000004) which blocks
+-- direct UPDATEs from authenticated callers. The FC `setupLiteLlm(teamId)`
+-- repo method needs to persist the LiteLLM team id + AI gateway endpoint after
+-- calling out to LiteLLM. Reuse the same `app.allow_sync_mode_switch` GUC
+-- bypass that public.set_team_sync_mode uses, since the guard accepts that
+-- flag for all sync-related field updates.
+--
+-- We do NOT re-check ownership here because the FC layer is already trusted
+-- (caller's bearer is forwarded to PostgREST and the route handler validates
+-- the caller is a team owner before invoking this). If/when the RPC is
+-- exposed to authenticated callers directly, add an ownership check.
+create or replace function app.update_team_litellm(
+  p_team_id             uuid,
+  p_litellm_team_id     text,
+  p_ai_gateway_endpoint text
+) returns void
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  perform set_config('app.allow_sync_mode_switch', 'on', true);
+
+  insert into public.team_workspace_config (team_id, litellm_team_id, ai_gateway_endpoint)
+       values (p_team_id, p_litellm_team_id, p_ai_gateway_endpoint)
+  on conflict (team_id) do update
+       set litellm_team_id     = excluded.litellm_team_id,
+           ai_gateway_endpoint = excluded.ai_gateway_endpoint;
+
+  perform set_config('app.allow_sync_mode_switch', 'off', true);
+end
+$$;
+
+revoke all on function app.update_team_litellm(uuid, text, text) from public;
+grant execute on function app.update_team_litellm(uuid, text, text) to service_role;
+
 commit;

@@ -22,6 +22,7 @@ export function createSupabaseBusinessRepository(options) {
     publishableKey,
     accessToken,
     createClient = defaultCreateClient,
+    provisionLiteLlm,
   } = options;
 
   if (!supabaseUrl) throw new Error("SUPABASE_URL is required");
@@ -104,6 +105,104 @@ export function createSupabaseBusinessRepository(options) {
     async removeTeamActor(_teamId, actorId) {
       const { error } = await supabase.rpc("remove_team_actor", { p_actor_id: actorId });
       if (error) throw error;
+    },
+
+    // --- Team share mode (Task 3 of share-onboarding refactor) ---
+
+    async enableShareMode(teamId, mode, gitConfig) {
+      const args = {
+        p_team_id: teamId,
+        p_mode: mode,
+        p_git_remote_url: gitConfig?.remoteUrl ?? null,
+        p_git_auth_kind: gitConfig?.authKind ?? null,
+        p_git_credential_ref: gitConfig?.credentialRef ?? null,
+      };
+      const { data, error } = await supabase.rpc("enable_team_share", args);
+      if (error) throw error;
+      const row = requiredRow(data, "teams.enableShareMode");
+      return mapTeam(row);
+    },
+
+    async getShareMode(teamId) {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("share_mode, share_enabled_at, git_remote_url, git_auth_kind")
+        .eq("id", teamId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        return {
+          mode: null,
+          enabledAt: null,
+          gitRemoteUrl: null,
+          gitAuthKind: null,
+        };
+      }
+      return {
+        mode: data.share_mode ?? null,
+        enabledAt: data.share_enabled_at ?? null,
+        gitRemoteUrl: data.git_remote_url ?? null,
+        gitAuthKind: data.git_auth_kind ?? null,
+      };
+    },
+
+    async setupLiteLlm(teamId) {
+      // Lazy import keeps the LiteLLM client out of cold-path repo constructors
+      // and makes it trivial to inject in tests via options.provisionLiteLlm.
+      const provisioner = provisionLiteLlm ?? (await import("./team-provisioning.mjs")).provisionTeamLiteLLM;
+      // The provisioner uses the team name as an alias; we read the team row
+      // (already RLS-scoped to the caller) to pass a stable display name.
+      const { data: teamRow, error: teamErr } = await supabase
+        .from("teams")
+        .select("id, name")
+        .eq("id", teamId)
+        .single();
+      if (teamErr) throw teamErr;
+      const provisioning = await provisioner(teamRow?.name ?? teamId);
+      if (!provisioning) {
+        throw new ApiError(
+          503,
+          "litellm_unavailable",
+          "LiteLLM provisioning is not configured (LITELLM_MASTER_KEY missing)",
+        );
+      }
+      // Persist litellm_team_id + ai_gateway_endpoint via SECURITY DEFINER
+      // RPC because team_workspace_config.litellm_team_id is guarded against
+      // direct authenticated UPDATEs (see 20260527000004 guard trigger).
+      const { error: rpcErr } = await supabase.rpc("update_team_litellm", {
+        p_team_id: teamId,
+        p_litellm_team_id: provisioning.litellmTeamId,
+        p_ai_gateway_endpoint: provisioning.aiGatewayEndpoint,
+      });
+      if (rpcErr) throw rpcErr;
+      return {
+        aiGatewayEndpoint: provisioning.aiGatewayEndpoint,
+        litellmKey: provisioning.litellmKey,
+      };
+    },
+
+    async getWorkspaceConfig(teamId) {
+      const [teamRes, configRes] = await Promise.all([
+        supabase
+          .from("teams")
+          .select("share_mode, git_remote_url, git_auth_kind")
+          .eq("id", teamId)
+          .maybeSingle(),
+        supabase
+          .from("team_workspace_config")
+          .select("sync_mode, litellm_team_id")
+          .eq("team_id", teamId)
+          .maybeSingle(),
+      ]);
+      if (teamRes.error) throw teamRes.error;
+      if (configRes.error) throw configRes.error;
+      return {
+        shareMode: teamRes.data?.share_mode ?? null,
+        gitRemoteUrl: teamRes.data?.git_remote_url ?? null,
+        gitAuthKind: teamRes.data?.git_auth_kind ?? null,
+        syncMode: configRes.data?.sync_mode ?? null,
+        litellmTeamId: configRes.data?.litellm_team_id ?? null,
+      };
     },
 
     async listTeamActors(teamId, { kind = null, limit = 500 } = {}) {
@@ -1798,6 +1897,10 @@ function mapTeam(row) {
     name: requiredString(row?.name, "teams.mapTeam", "name"),
     slug: row?.slug ?? null,
     createdAt: row?.created_at ?? null,
+    shareMode: row?.share_mode ?? null,
+    shareEnabledAt: row?.share_enabled_at ?? null,
+    gitRemoteUrl: row?.git_remote_url ?? null,
+    gitAuthKind: row?.git_auth_kind ?? null,
   };
 }
 
