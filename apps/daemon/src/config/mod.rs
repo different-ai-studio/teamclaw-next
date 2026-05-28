@@ -5,8 +5,8 @@ mod workspace_store;
 
 pub use daemon_config::{
     AgentBackendConfig, AgentsConfig, ChannelsConfig, DaemonConfig, DeviceConfig, DiscordChannel,
-    EmailChannel, FeishuChannel, KookChannel, MqttConfig, TransportConfig, TransportKind,
-    WeChatChannel, WeComChannel,
+    EmailChannel, FeishuChannel, HttpConfig, KookChannel, MqttConfig, TransportConfig,
+    TransportKind, WeChatChannel, WeComChannel,
 };
 pub use member_store::{MemberStore, PendingInvite, StoredMember};
 pub use session_store::{SessionStore, StoredSession};

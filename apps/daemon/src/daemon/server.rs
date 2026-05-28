@@ -803,6 +803,36 @@ impl DaemonServer {
         self.start_channels().await;
         self.sync_team_shared_dirs_for_known_workspaces().await;
 
+        // Optional browser-facing HTTP+SSE listener. Skipped silently when
+        // `[http]` is absent from daemon.toml so existing deployments keep
+        // their current Unix-socket-only behaviour. Failure to bind here
+        // is logged but does NOT abort the daemon — the Unix socket path
+        // is still usable for desktop clients.
+        let _http_handle = match self.config.http.clone() {
+            Some(http_cfg) => {
+                let meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
+                // Until the RuntimeManager adapter ships, the HTTP layer
+                // runs against the StubRuntimeAdapter — useful for
+                // browser dev integration but does not drive real agent
+                // processes. The follow-up to PR8 replaces this with a
+                // real `RuntimeManagerAdapter::new(self.agents.clone())`.
+                let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(
+                    http_cfg.max_event_backlog,
+                );
+                match crate::http::spawn(http_cfg, meta, runtime).await {
+                    Ok(h) => {
+                        info!(addr = %h.local_addr, "http listener bound");
+                        Some(h)
+                    }
+                    Err(e) => {
+                        warn!("http listener failed to start: {e}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+
         // Bind the control socket and spawn a listener that funnels parsed
         // commands into the main loop via mpsc. Done after channel start so
         // any error in `start_channels` surfaces first; failure to bind the
@@ -896,13 +926,12 @@ impl DaemonServer {
             };
 
             // ── 2. Rebuild MqttClient ──
-            let credential_mode = if self.config.mqtt.username.is_some()
-                && self.config.mqtt.password.is_some()
-            {
-                "configured"
-            } else {
-                "backend_token"
-            };
+            let credential_mode =
+                if self.config.mqtt.username.is_some() && self.config.mqtt.password.is_some() {
+                    "configured"
+                } else {
+                    "backend_token"
+                };
             info!(
                 actor_id = %self.actor_id,
                 broker   = %self.config.mqtt.broker_url,
@@ -4609,6 +4638,7 @@ mod tests {
             team_id: Some("team-test".to_string()),
             channels: crate::config::ChannelsConfig::default(),
             idle_runtime_timeout_secs: None,
+            http: None,
         }
     }
 

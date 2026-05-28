@@ -45,6 +45,21 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 thiserror = "2"
+rand = "0.8"
+subtle = "2"
+humantime-serde = "1"
+parking_lot = "0.12"
+
+# HTTP / SSE (browser-facing daemon API)
+axum = { version = "0.7", features = ["macros"] }
+tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit", "request-id", "util"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+mime = "0.3"
 
 # TLS (match rumqttc 0.24's rustls version)
 rustls = "0.22"
