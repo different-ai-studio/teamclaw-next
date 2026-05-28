@@ -38,11 +38,13 @@ resources:
         MQTT_BROKER_URL: ${env('MQTT_BROKER_URL')}
         MQTT_USERNAME: ${env('MQTT_USERNAME')}
         MQTT_PASSWORD: ${env('MQTT_PASSWORD')}
+        MQTT_USE_TLS: ${env('MQTT_USE_TLS', '')}
       triggers:
         - triggerName: http-trigger
           triggerType: http
           triggerConfig:
             authType: anonymous
             methods:
+              - GET
               - POST
               - OPTIONS
