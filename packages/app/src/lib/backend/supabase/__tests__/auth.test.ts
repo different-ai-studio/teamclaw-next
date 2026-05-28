@@ -62,6 +62,7 @@ describe("Supabase auth backend", () => {
       user: {
         id: "user-1",
         email: "user@example.com",
+        isAnonymous: false,
         providerData: session.user,
       },
       accessToken: "access-1",

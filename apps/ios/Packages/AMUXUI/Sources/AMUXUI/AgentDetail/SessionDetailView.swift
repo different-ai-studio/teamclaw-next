@@ -42,10 +42,12 @@ public struct SessionDetailView: View {
 
     public init(runtime: Runtime, mqtt: MQTTService, hub: MQTTMessageHub, peerId: String,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
+                messagesRepository: (any MessagesRepository)? = nil,
                 pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: runtime, mqtt: mqtt, hub: hub, peerId: peerId,
-            connectedAgentsStore: connectedAgentsStore))
+            connectedAgentsStore: connectedAgentsStore,
+            messagesRepository: messagesRepository))
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = nil
         self.pushPrefs = pushPrefs
@@ -54,12 +56,14 @@ public struct SessionDetailView: View {
     public init(session: Session, mqtt: MQTTService, hub: MQTTMessageHub, peerId: String,
                 teamclawService: TeamclawService?,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
+                messagesRepository: (any MessagesRepository)? = nil,
                 pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: nil, mqtt: mqtt, hub: hub, teamID: session.teamId,
             peerId: peerId, session: session,
             teamclawService: teamclawService,
-            connectedAgentsStore: connectedAgentsStore))
+            connectedAgentsStore: connectedAgentsStore,
+            messagesRepository: messagesRepository))
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = teamclawService
         self.pushPrefs = pushPrefs

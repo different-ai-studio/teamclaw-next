@@ -12,6 +12,11 @@ import { createApnsJwtCache } from './lib/apns-jwt.mjs';
 import { createApnsClient, createHttp2Transport } from './lib/apns.mjs';
 import { dispatchPush } from './lib/push-dispatch.mjs';
 import { createMqttPublisher } from './lib/mqtt-client.mjs';
+import { handleBusinessApiRequest } from './lib/business-api.mjs';
+import {
+  createSupabaseBusinessRepository,
+  publishableKeyFromEnv,
+} from './lib/supabase-repo.mjs';
 import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.mjs';
 import { logSyncEvent } from './lib/sync-log.mjs';
 import {
@@ -51,6 +56,7 @@ const CODEUP_API_BASE = "https://openapi-rdc.aliyuncs.com";
 const PUSH_WEBHOOK_SECRET   = () => process.env.PUSH_WEBHOOK_SECRET || '';
 const SUPABASE_URL_FN       = () => process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE = () => process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_PUBLISHABLE_KEY = () => publishableKeyFromEnv(process.env);
 const APNS_PRIVATE_KEY_P8   = () => process.env.APNS_PRIVATE_KEY_P8 || '';
 const APNS_KEY_ID           = () => process.env.APNS_KEY_ID || '';
 const APNS_TEAM_ID          = () => process.env.APNS_TEAM_ID || '';
@@ -933,6 +939,18 @@ export async function handler(event, context) {
   // Handle CORS preflight (FC gateway adds CORS headers automatically)
   if (httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: {}, body: "" };
+  }
+
+  if (path?.startsWith("/v1/") || path === "/v1") {
+    return handleBusinessApiRequest(event, {
+      createRepository({ accessToken }) {
+        return createSupabaseBusinessRepository({
+          supabaseUrl: SUPABASE_URL_FN(),
+          publishableKey: SUPABASE_PUBLISHABLE_KEY(),
+          accessToken,
+        });
+      },
+    });
   }
 
   // GET is allowed only for /sync/versions; all others must be POST.

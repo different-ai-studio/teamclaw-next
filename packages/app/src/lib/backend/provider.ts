@@ -7,6 +7,10 @@ import {
   createPocketBaseBackend,
   hasPocketBaseBackendConfig,
 } from "./pocketbase";
+import {
+  createCloudApiBackend,
+  hasCloudApiBackendConfig,
+} from "./cloud-api";
 import { getEffectiveServerConfigSync } from "../server-config";
 import type { BackendKind, TeamClawBackend } from "./types";
 
@@ -15,8 +19,9 @@ export { BACKEND_CONFIG_MISSING_MESSAGE };
 let backend: TeamClawBackend | null = null;
 let backendCacheKey: string | null = null;
 
-export function getBackendKind(): Extract<BackendKind, "supabase" | "pocketbase"> {
+export function getBackendKind(): Extract<BackendKind, "supabase" | "pocketbase" | "cloud_api"> {
   const config = getEffectiveServerConfigSync();
+  if (config.backendKind === "cloud_api") return "cloud_api";
   return config.backendKind === "pocketbase" ? "pocketbase" : "supabase";
 }
 
@@ -24,6 +29,9 @@ export function hasBackendConfig(): boolean {
   const config = getEffectiveServerConfigSync();
   if (getBackendKind() === "pocketbase") {
     return hasPocketBaseBackendConfig(config);
+  }
+  if (getBackendKind() === "cloud_api") {
+    return hasCloudApiBackendConfig(config);
   }
   return hasSupabaseBackendConfig();
 }
@@ -34,13 +42,17 @@ export function getBackend(): TeamClawBackend {
   const cacheKey =
     kind === "pocketbase"
       ? `${kind}:${config.pocketbaseUrl ?? ""}`
-      : `${kind}:${config.supabaseUrl ?? ""}:${config.supabaseAnonKey ?? ""}`;
+      : kind === "cloud_api"
+        ? `${kind}:${config.cloudApiUrl ?? ""}:${config.supabaseUrl ?? ""}:${config.supabaseAnonKey ?? ""}`
+        : `${kind}:${config.supabaseUrl ?? ""}:${config.supabaseAnonKey ?? ""}`;
 
   if (!backend || backendCacheKey !== cacheKey) {
     backend =
       kind === "pocketbase"
         ? createPocketBaseBackend(config)
-        : createSupabaseBackend();
+        : kind === "cloud_api"
+          ? createCloudApiBackend(config)
+          : createSupabaseBackend();
     backendCacheKey = cacheKey;
   }
   return backend;

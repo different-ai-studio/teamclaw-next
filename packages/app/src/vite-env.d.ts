@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_BACKEND_KIND?: string;
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;
+  readonly VITE_CLOUD_API_URL?: string;
   readonly VITE_POCKETBASE_URL?: string;
   readonly VITE_POCKETBASE_PREVIEW_EMAIL?: string;
   readonly VITE_POCKETBASE_PREVIEW_PASSWORD?: string;
@@ -66,9 +67,10 @@ interface Window {
   SpeechRecognition?: typeof SpeechRecognition;
   webkitSpeechRecognition?: typeof webkitSpeechRecognition;
   __TEAMCLAW_SERVER_CONFIG__?: {
-    backendKind?: "supabase" | "pocketbase" | "local";
+    backendKind?: "supabase" | "pocketbase" | "cloud_api" | "local";
     supabaseUrl?: string;
     supabaseAnonKey?: string;
+    cloudApiUrl?: string;
     pocketbaseUrl?: string;
     mqttHost?: string;
     mqttPort?: number;

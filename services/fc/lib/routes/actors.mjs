@@ -1,0 +1,114 @@
+import { ApiError } from "../http-utils.mjs";
+import { requireString } from "../router.mjs";
+
+const DEFAULT_ACTOR_LIMIT = 200;
+const MAX_ACTOR_LIMIT = 500;
+
+function parseActorLimit(value) {
+  if (value === null || value === undefined || value === "") return DEFAULT_ACTOR_LIMIT;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ACTOR_LIMIT) {
+    throw new ApiError(400, "validation_failed", "limit must be an integer from 1 to 500");
+  }
+  return limit;
+}
+
+export function registerActors(router) {
+  router.get("/v1/teams/:teamId/actors", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const kind = ctx.query.get("kind") ?? null;
+    const limit = parseActorLimit(ctx.query.get("limit"));
+    const page = await ctx.repository.listTeamActors(teamId, { kind, limit });
+    return { body: { items: page.items, nextCursor: null } };
+  });
+
+  router.get("/v1/actors/:actorId", async (ctx) => {
+    const actorId = decodeURIComponent(ctx.params.actorId);
+    const actor = await ctx.repository.getActor(actorId);
+    if (!actor) throw new ApiError(404, "not_found", "actor not found");
+    return { body: actor };
+  });
+
+  router.post("/v1/actors/external", async (ctx) => {
+    const body = ctx.json;
+    if (!body) throw new ApiError(400, "validation_failed", "body is required");
+    requireString(body.teamId, "teamId");
+    requireString(body.source, "source");
+    requireString(body.sourceId, "sourceId");
+    requireString(body.displayName, "displayName");
+    const result = await ctx.repository.upsertExternalActor({
+      teamId: body.teamId,
+      source: body.source,
+      sourceId: body.sourceId,
+      displayName: body.displayName,
+    });
+    return { body: { actorId: result.actorId } };
+  });
+
+  router.get("/v1/teams/:teamId/agents/connected", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const result = await ctx.repository.listConnectedAgents(teamId);
+    return { body: { items: result.items } };
+  });
+
+  router.patch("/v1/agents/:agentActorId", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const body = ctx.json ?? {};
+    await ctx.repository.updateOwnedAgentProfile(agentActorId, {
+      displayName: body.displayName ?? null,
+      avatarUrl: body.avatarUrl ?? null,
+      description: body.description ?? null,
+    });
+    return { statusCode: 204, body: null };
+  });
+
+  router.patch("/v1/agents/:agentActorId/defaults", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const body = ctx.json ?? {};
+    await ctx.repository.updateAgentDefaults(agentActorId, {
+      defaultAgentType: body.defaultAgentType ?? null,
+      supportedAgentTypes: body.supportedAgentTypes ?? null,
+    });
+    return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/agents/:agentActorId/permission", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const actorId = ctx.query.get("actorId");
+    if (!actorId) throw new ApiError(400, "validation_failed", "actorId is required");
+    const result = await ctx.repository.checkAgentPermission(agentActorId, actorId);
+    return { body: { allowed: result.allowed, role: result.role ?? null } };
+  });
+
+  router.get("/v1/agents/:agentActorId/access", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const result = await ctx.repository.listAgentAccess(agentActorId);
+    return { body: { items: result.items } };
+  });
+
+  router.post("/v1/agents/:agentActorId/access", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const body = ctx.json;
+    if (!body) throw new ApiError(400, "validation_failed", "body is required");
+    requireString(body.actorId, "actorId");
+    requireString(body.role, "role");
+    const result = await ctx.repository.grantAgentAccess(agentActorId, {
+      actorId: body.actorId,
+      role: body.role,
+    });
+    return { body: result };
+  });
+
+  router.delete("/v1/agents/:agentActorId/access/:actorId", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const actorId = decodeURIComponent(ctx.params.actorId);
+    await ctx.repository.revokeAgentAccess(agentActorId, actorId);
+    return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/agents/:agentActorId/admin-members", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const result = await ctx.repository.listAgentAdminMembers(agentActorId);
+    return { body: { items: result.items } };
+  });
+}

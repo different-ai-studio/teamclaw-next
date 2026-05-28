@@ -114,7 +114,8 @@ struct ContentView: View {
                 peerId: "ios-\(pairing.authToken.prefix(6))",
                 modelContext: modelContext,
                 connectedAgentsStore: runtime.connectedAgentsStore,
-                currentActorID: runtime.memberActorID
+                currentActorID: runtime.memberActorID,
+                messagesRepository: runtime.messagesRepo
             )
         }
         .onReceive(NotificationCenter.default.publisher(for: .amuxAuthCallbackReceived)) { notification in

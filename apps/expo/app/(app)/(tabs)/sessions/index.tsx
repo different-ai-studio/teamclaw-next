@@ -10,7 +10,7 @@ import {
   togglePinnedSession,
 } from "../../../../src/features/sessions/pinned-sessions";
 import { successTone, selectionTick } from "../../../../src/lib/haptics";
-import { createSessionsApi } from "../../../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../../../src/features/sessions/api-provider";
 import { createSessionsCache } from "../../../../src/features/sessions/session-cache";
 import { createSessionsController } from "../../../../src/features/sessions/session-controller";
 import { SessionsListScreen } from "../../../../src/features/sessions/screens/SessionsListScreen";
@@ -35,7 +35,7 @@ export default function SessionsIndexRoute() {
 
   if (controllerRef.current === null || teamIdRef.current !== activeTeamId) {
     controllerRef.current = createSessionsController(
-      createSessionsApi(supabase),
+      createConfiguredSessionsApi(supabase),
       activeTeamId,
       state.currentMemberActorId,
       createSessionsCache(),
@@ -191,7 +191,7 @@ export default function SessionsIndexRoute() {
       onMarkBatchRead={async (sessionIds) => {
         const actorId = state.currentMemberActorId;
         if (!actorId) return;
-        const api = createSessionsApi(supabase);
+        const api = createConfiguredSessionsApi(supabase);
         for (const id of sessionIds) {
           try {
             await api.markSessionRead(id, actorId, null);
@@ -204,7 +204,7 @@ export default function SessionsIndexRoute() {
       onMarkBatchUnread={async (sessionIds) => {
         const actorId = state.currentMemberActorId;
         if (!actorId) return;
-        const api = createSessionsApi(supabase);
+        const api = createConfiguredSessionsApi(supabase);
         for (const id of sessionIds) {
           try {
             await api.markSessionUnread(id, actorId);

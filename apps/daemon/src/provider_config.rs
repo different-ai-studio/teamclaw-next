@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub enum ProviderKind {
     Supabase,
     PocketBase,
+    CloudApi,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -16,10 +17,21 @@ pub struct PocketBaseConfig {
     pub actor_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CloudApiConfig {
+    pub url: String,
+    pub supabase_url: String,
+    pub supabase_anon_key: String,
+    pub refresh_token: String,
+    pub team_id: String,
+    pub actor_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderConfig {
     Supabase(SupabaseConfig),
     PocketBase(PocketBaseConfig),
+    CloudApi(CloudApiConfig),
 }
 
 impl ProviderConfig {
@@ -27,6 +39,7 @@ impl ProviderConfig {
         match self {
             ProviderConfig::Supabase(_) => ProviderKind::Supabase,
             ProviderConfig::PocketBase(_) => ProviderKind::PocketBase,
+            ProviderConfig::CloudApi(_) => ProviderKind::CloudApi,
         }
     }
 
@@ -77,6 +90,11 @@ impl ProviderConfig {
                         "[pocketbase] section is required when kind = \"pocketbase\"".to_string(),
                     )
                 }),
+            "cloud_api" => file.cloud_api.map(ProviderConfig::CloudApi).ok_or_else(|| {
+                ProviderConfigError::Config(
+                    "[cloud_api] section is required when kind = \"cloud_api\"".to_string(),
+                )
+            }),
             other => Err(ProviderConfigError::Config(format!(
                 "unsupported backend kind: {other}"
             ))),
@@ -91,6 +109,8 @@ struct BackendConfigFile {
     supabase: Option<SupabaseConfig>,
     #[serde(default)]
     pocketbase: Option<PocketBaseConfig>,
+    #[serde(default)]
+    cloud_api: Option<CloudApiConfig>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -206,5 +226,40 @@ actor_id = "agent-new"
             .expect_err("missing pocketbase section should fail");
 
         assert!(err.to_string().contains("[pocketbase]"));
+    }
+
+    #[test]
+    fn loads_cloud_api_backend_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend_path = dir.path().join("backend.toml");
+        let legacy_supabase_path = dir.path().join("supabase.toml");
+        std::fs::write(
+            &backend_path,
+            r#"
+kind = "cloud_api"
+
+[cloud_api]
+url = "https://fc.example.com"
+supabase_url = "https://project.supabase.co"
+supabase_anon_key = "anon"
+refresh_token = "refresh"
+team_id = "team-1"
+actor_id = "agent-1"
+"#,
+        )
+        .unwrap();
+
+        let loaded = ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path).unwrap();
+
+        assert_eq!(loaded.kind(), ProviderKind::CloudApi);
+        let ProviderConfig::CloudApi(config) = loaded else {
+            panic!("expected cloud api provider config");
+        };
+        assert_eq!(config.url, "https://fc.example.com");
+        assert_eq!(config.supabase_url, "https://project.supabase.co");
+        assert_eq!(config.supabase_anon_key, "anon");
+        assert_eq!(config.refresh_token, "refresh");
+        assert_eq!(config.team_id, "team-1");
+        assert_eq!(config.actor_id, "agent-1");
     }
 }

@@ -22,11 +22,12 @@ public struct TeamRuntimeContext {
     public let connectedAgentsStore: ConnectedAgentsStore
     public let shortcutsStore: ShortcutsStore?
 
-    public let sessionIDsRepo: SupabaseSessionIDsRepository?
-    public let sessionsRepo: SupabaseSessionsRepository?
-    public let agentRuntimesRepo: SupabaseAgentRuntimesRepository?
-    public let workspacesRepo: SupabaseWorkspaceRepository?
-    public let agentAccessRepo: SupabaseAgentAccessRepository?
+    public let sessionIDsRepo: (any SessionIDsRepository)?
+    public let sessionsRepo: (any SessionsRepository)?
+    public let messagesRepo: (any MessagesRepository)?
+    public let agentRuntimesRepo: (any AgentRuntimesRepository)?
+    public let workspacesRepo: (any WorkspaceRepository)?
+    public let agentAccessRepo: (any AgentAccessRepository)?
 
     public init(
         team: TeamSummary,
@@ -34,11 +35,12 @@ public struct TeamRuntimeContext {
         actorStore: ActorStore,
         connectedAgentsStore: ConnectedAgentsStore,
         shortcutsStore: ShortcutsStore?,
-        sessionIDsRepo: SupabaseSessionIDsRepository?,
-        sessionsRepo: SupabaseSessionsRepository?,
-        agentRuntimesRepo: SupabaseAgentRuntimesRepository?,
-        workspacesRepo: SupabaseWorkspaceRepository?,
-        agentAccessRepo: SupabaseAgentAccessRepository?
+        sessionIDsRepo: (any SessionIDsRepository)?,
+        sessionsRepo: (any SessionsRepository)?,
+        messagesRepo: (any MessagesRepository)?,
+        agentRuntimesRepo: (any AgentRuntimesRepository)?,
+        workspacesRepo: (any WorkspaceRepository)?,
+        agentAccessRepo: (any AgentAccessRepository)?
     ) {
         self.team = team
         self.memberActorID = memberActorID
@@ -47,6 +49,7 @@ public struct TeamRuntimeContext {
         self.shortcutsStore = shortcutsStore
         self.sessionIDsRepo = sessionIDsRepo
         self.sessionsRepo = sessionsRepo
+        self.messagesRepo = messagesRepo
         self.agentRuntimesRepo = agentRuntimesRepo
         self.workspacesRepo = workspacesRepo
         self.agentAccessRepo = agentAccessRepo

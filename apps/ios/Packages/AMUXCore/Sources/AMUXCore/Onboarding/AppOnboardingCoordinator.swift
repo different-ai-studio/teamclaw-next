@@ -204,6 +204,18 @@ public final class AppOnboardingCoordinator {
         }()
         if let shortcutsStore { Task { await shortcutsStore.reload() } }
 
+        let cloudAPIConfig = CloudAPIConfigurationStore.configuration()
+        let cloudAPISessionsRepo: (any SessionsRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.sessionsRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+        }
+        let cloudAPIMessagesRepo: (any MessagesRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.messagesRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+        }
+
         teamRuntimeContext = TeamRuntimeContext(
             team: ctx.team,
             memberActorID: ctx.memberActorID,
@@ -211,7 +223,8 @@ public final class AppOnboardingCoordinator {
             connectedAgentsStore: connectedAgentsStore,
             shortcutsStore: shortcutsStore,
             sessionIDsRepo: try? SupabaseSessionIDsRepository(),
-            sessionsRepo: try? SupabaseSessionsRepository(),
+            sessionsRepo: cloudAPISessionsRepo ?? (try? SupabaseSessionsRepository()),
+            messagesRepo: cloudAPIMessagesRepo ?? (try? SupabaseMessagesRepository()),
             agentRuntimesRepo: try? SupabaseAgentRuntimesRepository(),
             workspacesRepo: try? SupabaseWorkspaceRepository(),
             agentAccessRepo: agentAccessRepo

@@ -91,8 +91,7 @@ function StatusPill({
 function trimConfig(config: ServerConfig): ServerConfig {
   return {
     backendKind: config.backendKind,
-    supabaseUrl: config.supabaseUrl?.trim() || undefined,
-    supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
+    cloudApiUrl: config.cloudApiUrl?.trim() || undefined,
     pocketbaseUrl: config.pocketbaseUrl?.trim() || undefined,
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
@@ -264,7 +263,7 @@ export function ServerSection() {
         title={t("settings.server.title", "Server")}
         description={t(
           "settings.server.description",
-          "Configure the Supabase project and MQTT broker used by the desktop app.",
+          "Configure the Cloud API endpoint and MQTT broker used by the desktop app.",
         )}
       />
 
@@ -277,37 +276,30 @@ export function ServerSection() {
       <SettingCard>
         <div className="mb-4 flex items-center gap-2">
           <Database className="h-4 w-4 text-muted-foreground" />
-          <h4 className="text-[13px] font-semibold">{t("settings.server.supabaseTitle", "Supabase")}</h4>
+          <h4 className="text-[13px] font-semibold">{t("settings.server.cloudApiTitle", "Cloud API")}</h4>
         </div>
         <div className="mb-4">
           <StatusPill
-            state={effective.supabaseUrl && effective.supabaseAnonKey ? "ok" : "error"}
+            state={effective.cloudApiUrl ? "ok" : "error"}
             label={
-              effective.supabaseUrl && effective.supabaseAnonKey
-                ? t("settings.server.supabaseConfigured", "Configured")
-                : t("settings.server.supabaseMissing", "Missing configuration")
+              effective.cloudApiUrl
+                ? t("settings.server.cloudApiConfigured", "Configured")
+                : t("settings.server.cloudApiMissing", "Missing configuration")
             }
-            detail={effective.supabaseUrl}
+            detail={effective.cloudApiUrl}
           />
         </div>
         <div className="space-y-4">
           <Field
-            label={t("settings.server.supabaseUrl", "Project URL")}
-            value={saved.supabaseUrl ?? ""}
-            onChange={(value) => updateSaved({ supabaseUrl: value })}
-            placeholder={effective.supabaseUrl || "https://xxxx.supabase.co"}
-          />
-          <Field
-            label={t("settings.server.supabaseAnonKey", "Anon key")}
-            value={saved.supabaseAnonKey ?? ""}
-            onChange={(value) => updateSaved({ supabaseAnonKey: value })}
-            placeholder={effective.supabaseAnonKey ? "••••••••" : "eyJ..."}
-            type="password"
+            label={t("settings.server.cloudApiUrl", "Cloud API URL")}
+            value={saved.cloudApiUrl ?? ""}
+            onChange={(value) => updateSaved({ cloudApiUrl: value })}
+            placeholder={effective.cloudApiUrl || "https://cloud.ucar.cc"}
           />
           <p className="text-[12px] leading-5 text-muted-foreground">
             {t(
-              "settings.server.supabaseHint",
-              "Saved values override build-time environment values after the app has loaded.",
+              "settings.server.cloudApiHint",
+              "Cloud API is the gateway for all business data operations. Saved values override build-time defaults.",
             )}
           </p>
         </div>

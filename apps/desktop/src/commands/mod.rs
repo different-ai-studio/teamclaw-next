@@ -21,7 +21,6 @@ pub mod shared_secrets;
 pub mod shared_secrets_crypto;
 pub mod skillssh;
 pub mod stt;
-pub mod supabase_auth_bridge;
 pub mod system_appearance;
 pub mod team;
 pub mod team_secret_store;
