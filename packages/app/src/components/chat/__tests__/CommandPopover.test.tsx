@@ -101,7 +101,7 @@ describe('CommandPopover', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('/superpowers/brainstorming')).toBeInTheDocument()
+      expect(screen.getByText('superpowers/brainstorming')).toBeInTheDocument()
     })
   })
 
@@ -137,6 +137,49 @@ describe('CommandPopover', () => {
       ],
       overrides: [],
     })
+
+    const onSelect = vi.fn()
+
+    render(
+      <CommandPopover
+        open={true}
+        activeSessionId="session-1"
+        onOpenChange={vi.fn()}
+        searchQuery=""
+        onSelect={onSelect}
+      />,
+    )
+
+    const item = await screen.findByText('superpowers/brainstorming')
+    fireEvent.click(item)
+
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'superpowers/brainstorming',
+        _type: 'skill',
+      }),
+    )
+  })
+
+  it('treats daemon-advertised namespaced skills as skill tokens even when local skill scan is empty', async () => {
+    mocks.runtimeRows = [
+      { runtime_id: 'rt-1', backend_type: 'opencode', current_model: null },
+    ]
+    mocks.runtimeStates = {
+      'rt-1': {
+        daemonDeviceId: 'agent-1',
+        lastUpdated: Date.now(),
+        info: {
+          availableCommands: [
+            {
+              name: 'superpowers/brainstorming',
+              description: 'Explore intent before coding',
+              inputHint: '',
+            },
+          ],
+        },
+      },
+    }
 
     const onSelect = vi.fn()
 
