@@ -164,19 +164,6 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
-    async claimInvite(token) {
-      const { data, error } = await supabase.rpc("claim_team_invite", { p_token: token });
-      if (error) throw error;
-      const row = requiredRow(data, "auth.claimInvite");
-      return {
-        actorId: requiredString(row.actor_id, "auth.claimInvite", "actor_id"),
-        teamId: requiredString(row.team_id, "auth.claimInvite", "team_id"),
-        actorType: requiredString(row.actor_type, "auth.claimInvite", "actor_type"),
-        displayName: requiredString(row.display_name, "auth.claimInvite", "display_name"),
-        refreshToken: row.refresh_token ?? null,
-      };
-    },
-
     async listWorkspaces({ teamId, limit = 50, cursor = null } = {}) {
       let query = supabase
         .from("workspaces")
@@ -809,12 +796,33 @@ export function createSupabaseAuthRepository(options) {
     supabaseUrl,
     publishableKey,
     fetchImpl = globalThis.fetch,
+    createClient = defaultCreateClient,
   } = options;
 
   if (!supabaseUrl) throw new Error("SUPABASE_URL is required");
   if (!publishableKey) throw new Error("SUPABASE_PUBLISHABLE_KEY is required");
 
+  // Anonymous Supabase client (no Authorization header). Used for the
+  // `claim_team_invite` SECURITY DEFINER RPC which the daemon must call
+  // before it owns any auth token.
+  const anonClient = createClient(supabaseUrl, publishableKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
   return {
+    async claimInvite(token) {
+      const { data, error } = await anonClient.rpc("claim_team_invite", { p_token: token });
+      if (error) throw error;
+      const row = requiredRow(data, "auth.claimInvite");
+      return {
+        actorId: requiredString(row.actor_id, "auth.claimInvite", "actor_id"),
+        teamId: requiredString(row.team_id, "auth.claimInvite", "team_id"),
+        actorType: requiredString(row.actor_type, "auth.claimInvite", "actor_type"),
+        displayName: requiredString(row.display_name, "auth.claimInvite", "display_name"),
+        refreshToken: row.refresh_token ?? null,
+      };
+    },
+
     async refreshAccessToken({ refreshToken }) {
       const url = `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`;
       const res = await fetchImpl(url, {

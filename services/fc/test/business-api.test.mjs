@@ -160,17 +160,34 @@ test("DELETE /v1/messages/:messageId removes message", async () => {
   });
 });
 
-test("claim invite maps body token to repository", async () => {
-  const repo = fakeRepo();
+test("claim invite is anonymous and routes to auth repository", async () => {
+  // No Authorization header — daemon's bootstrap `amuxd init` has no token
+  // yet. The route must dispatch to createAuthRepository(), not require auth.
+  const authCalls = [];
   const response = await handleBusinessApiRequest({
     httpMethod: "POST",
     path: "/v1/invites/claim",
-    headers: { Authorization: "Bearer token" },
+    headers: {},
     body: JSON.stringify({ token: "invite-token" }),
-  }, { createRepository: () => repo });
+  }, {
+    createRepository: () => fakeRepo(),
+    createAuthRepository: () => ({
+      async claimInvite(token) {
+        authCalls.push({ method: "claimInvite", token });
+        return {
+          actorId: "agent-1",
+          teamId: "team-1",
+          actorType: "agent",
+          displayName: "Agent",
+          refreshToken: "rt-1",
+        };
+      },
+    }),
+  });
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(repo.calls[0], { method: "claimInvite", token: "invite-token" });
+  assert.deepEqual(authCalls[0], { method: "claimInvite", token: "invite-token" });
+  assert.equal(JSON.parse(response.body).actorId, "agent-1");
 });
 
 test("missing bearer returns OpenAPI error envelope", async () => {

@@ -14,6 +14,7 @@ import { dispatchPush } from './lib/push-dispatch.mjs';
 import { createMqttPublisher } from './lib/mqtt-client.mjs';
 import { handleBusinessApiRequest } from './lib/business-api.mjs';
 import {
+  createSupabaseAuthRepository,
   createSupabaseBusinessRepository,
   publishableKeyFromEnv,
 } from './lib/supabase-repo.mjs';
@@ -948,6 +949,12 @@ export async function handler(event, context) {
           supabaseUrl: SUPABASE_URL_FN(),
           publishableKey: SUPABASE_PUBLISHABLE_KEY(),
           accessToken,
+        });
+      },
+      createAuthRepository() {
+        return createSupabaseAuthRepository({
+          supabaseUrl: SUPABASE_URL_FN(),
+          publishableKey: SUPABASE_PUBLISHABLE_KEY(),
         });
       },
     });
