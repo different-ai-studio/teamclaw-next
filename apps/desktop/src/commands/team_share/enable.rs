@@ -21,6 +21,7 @@ use serde_json::json;
 
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::team_share::custom_git;
 use crate::commands::{env_vars, team_secret_store, TEAM_REPO_DIR};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +29,12 @@ use crate::commands::{env_vars, team_secret_store, TEAM_REPO_DIR};
 pub struct EnableShareResult {
     pub team_id: String,
     pub share_mode: String,
+    /// Non-fatal warning surfaced when the share-mode POST succeeded but
+    /// the subsequent `git clone` did not. The team is enabled server-side;
+    /// the local checkout may be empty or absent. Frontend should surface
+    /// this so the user can retry the clone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clone_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,24 +88,41 @@ fn set_teamclaw_fields(
     env_vars::write_teamclaw_json(workspace_path, &json)
 }
 
-/// TODO(Task 7): replace with a clean `team_share::custom_git::store_credential`
-/// helper. For Task 6, just stash into env blob under a well-known key.
-fn stash_git_credential_into_env_blob(
+fn team_repo_path(workspace_path: &str) -> std::path::PathBuf {
+    std::path::Path::new(workspace_path).join(TEAM_REPO_DIR)
+}
+
+/// Run `clone_or_init` against the team repo dir. Clone failures are
+/// non-fatal: the share-mode POST has already committed server-side, so
+/// returning an error here would leave the team in a half-enabled state.
+/// Instead, surface the failure as `clone_warning`.
+fn try_clone_team_repo(
     workspace_path: &str,
-    cred_ref: &str,
+    remote_url: &str,
+    credential_ref: &str,
     auth_kind: &str,
-    credential: &str,
-) -> Result<(), String> {
-    let mut blob = env_vars::read_env_blob(workspace_path)?;
-    let key = format!("_git_credential.{}", cred_ref);
-    blob.insert(
-        key,
-        json!({
-            "authKind": auth_kind,
-            "credential": credential,
-        }),
-    );
-    env_vars::write_env_blob(&blob)
+) -> Option<String> {
+    let dir = team_repo_path(workspace_path);
+    // If a clone target already has .git we don't re-clone.
+    if dir.join(".git").exists() {
+        return None;
+    }
+    // The cloned target must be empty for `git clone` to succeed.
+    // Use a subdirectory that may or may not exist; create the parent.
+    if let Some(parent) = dir.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match custom_git::clone_or_init(
+        &dir,
+        remote_url,
+        workspace_path,
+        credential_ref,
+        auth_kind,
+        None,
+    ) {
+        Ok(()) => None,
+        Err(e) => Some(format!("git clone deferred: {e}")),
+    }
 }
 
 async fn post_share_mode(
@@ -109,9 +133,7 @@ async fn post_share_mode(
     let (base_url, jwt) = get_fc_endpoint_and_jwt(workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
     let path = format!("/v1/teams/{}/share-mode", team_id);
-    fc.post_json(&path, body)
-        .await
-        .map_err(|e| e.to_string())?;
+    fc.post_json(&path, body).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -132,6 +154,7 @@ pub async fn enable_oss_impl(
     Ok(EnableShareResult {
         team_id,
         share_mode: "oss".to_string(),
+        clone_warning: None,
     })
 }
 
@@ -174,12 +197,7 @@ pub async fn enable_managed_git_impl(
         .to_string();
 
     let cred_ref = format!("managed_git:{}", team_id);
-    stash_git_credential_into_env_blob(
-        &workspace_path,
-        &cred_ref,
-        "https_token",
-        &push_token,
-    )?;
+    custom_git::store_credential(&workspace_path, &cred_ref, "https_token", &push_token)?;
 
     let body = json!({
         "mode": "managed_git",
@@ -192,12 +210,13 @@ pub async fn enable_managed_git_impl(
     post_share_mode(&workspace_path, &team_id, &body).await?;
 
     ensure_team_repo_dir(&workspace_path)?;
-    // TODO(Task 7): `git clone` repo_url into TEAM_REPO_DIR using the push_token.
+    let clone_warning = try_clone_team_repo(&workspace_path, &repo_url, &cred_ref, "https_token");
     set_teamclaw_fields(&workspace_path, &team_id, "managed_git", Some(&repo_url))?;
 
     Ok(EnableShareResult {
         team_id,
         share_mode: "managed_git".to_string(),
+        clone_warning,
     })
 }
 
@@ -227,7 +246,7 @@ pub async fn enable_custom_git_impl(
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
     let cred_ref = format!("custom_git:{}", team_id);
-    stash_git_credential_into_env_blob(
+    custom_git::store_credential(
         &workspace_path,
         &cred_ref,
         &input.auth_kind,
@@ -255,7 +274,12 @@ pub async fn enable_custom_git_impl(
     post_share_mode(&workspace_path, &team_id, &body).await?;
 
     ensure_team_repo_dir(&workspace_path)?;
-    // TODO(Task 7): `git clone` input.remote_url into TEAM_REPO_DIR with provided credential.
+    let clone_warning = try_clone_team_repo(
+        &workspace_path,
+        &input.remote_url,
+        &cred_ref,
+        &input.auth_kind,
+    );
     set_teamclaw_fields(
         &workspace_path,
         &team_id,
@@ -266,6 +290,7 @@ pub async fn enable_custom_git_impl(
     Ok(EnableShareResult {
         team_id,
         share_mode: "custom_git".to_string(),
+        clone_warning,
     })
 }
 
