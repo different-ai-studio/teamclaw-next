@@ -1118,7 +1118,7 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
 
         let mut manager = self.manager.lock().await;
         manager
-            .resolve_permission(&runtime_id, &request_id, granted)
+            .reply_permission(&runtime_id, &request_id, granted)
             .await
             .map_err(|e| HttpError::internal(format!("reply permission: {e}")))
     }

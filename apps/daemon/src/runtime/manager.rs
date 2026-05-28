@@ -839,8 +839,8 @@ impl RuntimeManager {
         handle.cancel().await
     }
 
-    /// Resolve a permission request for an agent.
-    pub async fn resolve_permission(
+    /// Reply to a pending permission request for an agent.
+    pub async fn reply_permission(
         &mut self,
         agent_id: &str,
         request_id: &str,
@@ -865,6 +865,17 @@ impl RuntimeManager {
         })?;
         #[cfg(not(test))]
         handle.resolve_permission(request_id, granted).await
+    }
+
+    /// Backward-compatible alias for older call sites that still speak
+    /// in terms of permission resolution.
+    pub async fn resolve_permission(
+        &mut self,
+        agent_id: &str,
+        request_id: &str,
+        granted: bool,
+    ) -> crate::error::Result<()> {
+        self.reply_permission(agent_id, request_id, granted).await
     }
 
     pub async fn restart_session(&mut self, agent_id: &str) -> crate::error::Result<()> {
