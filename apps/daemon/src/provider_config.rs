@@ -5,16 +5,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
     Supabase,
-    PocketBase,
     CloudApi,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PocketBaseConfig {
-    pub url: String,
-    pub refresh_token: String,
-    pub team_id: String,
-    pub actor_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -30,7 +21,6 @@ pub struct CloudApiConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderConfig {
     Supabase(SupabaseConfig),
-    PocketBase(PocketBaseConfig),
     CloudApi(CloudApiConfig),
 }
 
@@ -38,7 +28,6 @@ impl ProviderConfig {
     pub fn kind(&self) -> ProviderKind {
         match self {
             ProviderConfig::Supabase(_) => ProviderKind::Supabase,
-            ProviderConfig::PocketBase(_) => ProviderKind::PocketBase,
             ProviderConfig::CloudApi(_) => ProviderKind::CloudApi,
         }
     }
@@ -82,14 +71,6 @@ impl ProviderConfig {
                     "[supabase] section is required when kind = \"supabase\"".to_string(),
                 )
             }),
-            "pocketbase" => file
-                .pocketbase
-                .map(ProviderConfig::PocketBase)
-                .ok_or_else(|| {
-                    ProviderConfigError::Config(
-                        "[pocketbase] section is required when kind = \"pocketbase\"".to_string(),
-                    )
-                }),
             "cloud_api" => file.cloud_api.map(ProviderConfig::CloudApi).ok_or_else(|| {
                 ProviderConfigError::Config(
                     "[cloud_api] section is required when kind = \"cloud_api\"".to_string(),
@@ -108,8 +89,6 @@ struct BackendConfigFile {
     #[serde(default)]
     supabase: Option<SupabaseConfig>,
     #[serde(default)]
-    pocketbase: Option<PocketBaseConfig>,
-    #[serde(default)]
     cloud_api: Option<CloudApiConfig>,
 }
 
@@ -127,37 +106,6 @@ pub enum ProviderConfigError {
 mod tests {
     use super::*;
     use crate::supabase::SupabaseConfig;
-
-    #[test]
-    fn loads_pocketbase_backend_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend_path = dir.path().join("backend.toml");
-        let legacy_supabase_path = dir.path().join("supabase.toml");
-        std::fs::write(
-            &backend_path,
-            r#"
-kind = "pocketbase"
-
-[pocketbase]
-url = "http://127.0.0.1:8090"
-refresh_token = "pb-refresh"
-team_id = "team-1"
-actor_id = "agent-1"
-"#,
-        )
-        .unwrap();
-
-        let loaded = ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path).unwrap();
-
-        assert_eq!(loaded.kind(), ProviderKind::PocketBase);
-        let ProviderConfig::PocketBase(config) = loaded else {
-            panic!("expected pocketbase provider config");
-        };
-        assert_eq!(config.url, "http://127.0.0.1:8090");
-        assert_eq!(config.refresh_token, "pb-refresh");
-        assert_eq!(config.team_id, "team-1");
-        assert_eq!(config.actor_id, "agent-1");
-    }
 
     #[test]
     fn falls_back_to_legacy_supabase_toml_when_backend_toml_is_missing() {
@@ -180,52 +128,6 @@ actor_id = "agent-1"
             panic!("expected supabase provider config");
         };
         assert_eq!(config, legacy);
-    }
-
-    #[test]
-    fn backend_toml_wins_over_legacy_supabase_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend_path = dir.path().join("backend.toml");
-        let legacy_supabase_path = dir.path().join("supabase.toml");
-        SupabaseConfig {
-            url: "https://project.supabase.co".to_string(),
-            anon_key: "anon".to_string(),
-            refresh_token: "refresh".to_string(),
-            team_id: "team-legacy".to_string(),
-            actor_id: "agent-legacy".to_string(),
-        }
-        .save(&legacy_supabase_path)
-        .unwrap();
-        std::fs::write(
-            &backend_path,
-            r#"
-kind = "pocketbase"
-
-[pocketbase]
-url = "http://127.0.0.1:8090"
-refresh_token = "pb-refresh"
-team_id = "team-new"
-actor_id = "agent-new"
-"#,
-        )
-        .unwrap();
-
-        let loaded = ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path).unwrap();
-
-        assert_eq!(loaded.kind(), ProviderKind::PocketBase);
-    }
-
-    #[test]
-    fn rejects_pocketbase_kind_without_pocketbase_section() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend_path = dir.path().join("backend.toml");
-        let legacy_supabase_path = dir.path().join("supabase.toml");
-        std::fs::write(&backend_path, r#"kind = "pocketbase""#).unwrap();
-
-        let err = ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path)
-            .expect_err("missing pocketbase section should fail");
-
-        assert!(err.to_string().contains("[pocketbase]"));
     }
 
     #[test]

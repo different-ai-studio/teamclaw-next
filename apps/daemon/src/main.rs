@@ -10,7 +10,6 @@ mod http;
 mod mqtt;
 mod nats;
 mod onboarding;
-mod pocketbase;
 mod proto;
 mod provider_config;
 mod runtime;

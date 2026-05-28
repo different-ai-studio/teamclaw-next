@@ -543,13 +543,13 @@ mod tests {
             port_file: Some(dir.path().join("port")),
             ..HttpConfig::default()
         };
-        let meta = metadata("actor-abc".into(), "pocketbase");
+        let meta = metadata("actor-abc".into(), "cloud_api");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
         let handle = spawn(cfg, meta, runtime).await.unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["actor_id"], "actor-abc");
-        assert_eq!(body["backend_kind"], "pocketbase");
+        assert_eq!(body["backend_kind"], "cloud_api");
         assert!(body["uptime_seconds"].as_i64().unwrap() >= 0);
         handle.shutdown().await;
     }
