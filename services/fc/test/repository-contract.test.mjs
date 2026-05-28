@@ -77,7 +77,48 @@ function contractRepo() {
   const gatewayBindings = {};
   const attachmentStore = {};
   const runtimeStore = {};
+  const shareModeStore = {};
   return {
+    async enableShareMode(teamId, mode, gitConfig) {
+      if (shareModeStore[teamId]?.shareMode) {
+        throw new Error(`team ${teamId} share_mode is locked once enabled`);
+      }
+      const row = {
+        id: teamId,
+        shareMode: mode,
+        shareEnabledAt: "2026-05-28T00:00:00Z",
+        gitRemoteUrl: gitConfig?.remoteUrl ?? null,
+        gitAuthKind: gitConfig?.authKind ?? null,
+        gitCredentialRef: gitConfig?.credentialRef ?? null,
+      };
+      shareModeStore[teamId] = row;
+      return row;
+    },
+    async getShareMode(teamId) {
+      const row = shareModeStore[teamId];
+      return {
+        mode: row?.shareMode ?? null,
+        enabledAt: row?.shareEnabledAt ?? null,
+        gitRemoteUrl: row?.gitRemoteUrl ?? null,
+        gitAuthKind: row?.gitAuthKind ?? null,
+      };
+    },
+    async setupLiteLlm(teamId) {
+      return {
+        aiGatewayEndpoint: `https://litellm.example.com/${teamId}`,
+        litellmKey: `sk-litellm-${teamId}`,
+      };
+    },
+    async getWorkspaceConfig(teamId) {
+      const row = shareModeStore[teamId];
+      return {
+        shareMode: row?.shareMode ?? null,
+        gitRemoteUrl: row?.gitRemoteUrl ?? null,
+        gitAuthKind: row?.gitAuthKind ?? null,
+        syncMode: row?.shareMode === "oss" ? "oss" : (row?.shareMode ? "git" : null),
+        litellmTeamId: null,
+      };
+    },
     async listSessions() {
       return fixture("session-list.json").items;
     },
