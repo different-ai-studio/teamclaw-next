@@ -12,8 +12,6 @@ mod proto;
 mod provider_config;
 #[path = "../src/runtime/mod.rs"]
 mod runtime;
-#[path = "../src/supabase/mod.rs"]
-mod supabase;
 
 use std::sync::Arc;
 use std::time::Duration;
