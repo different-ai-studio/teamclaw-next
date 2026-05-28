@@ -20,14 +20,14 @@ test("createSupabaseBusinessRepository creates caller-scoped Supabase client", a
 
   await repo.listSessions({ limit: 25 });
 
-  assert.deepEqual(calls, [{
-    url: "https://example.supabase.co",
-    key: "publishable-key",
-    options: {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: "Bearer caller-token" } },
-    },
-  }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://example.supabase.co");
+  assert.equal(calls[0].key, "publishable-key");
+  assert.deepEqual(calls[0].options.auth, { persistSession: false, autoRefreshToken: false });
+  assert.deepEqual(calls[0].options.global, { headers: { Authorization: "Bearer caller-token" } });
+  // realtime transport is wired so supabase-js doesn't crash on Node 20 (FC runtime);
+  // we don't assert on its identity, just that it's set.
+  assert.ok(calls[0].options.realtime?.transport, "expected realtime transport to be set");
 });
 
 test("publishableKeyFromEnv prefers publishable key and falls back to anon key", () => {
