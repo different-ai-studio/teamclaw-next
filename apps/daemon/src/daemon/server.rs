@@ -246,26 +246,13 @@ enum SockCommand {
 fn load_provider_config_from_default_paths() -> crate::error::Result<ProviderConfig> {
     let backend_path = ProviderConfig::default_path()
         .map_err(|e| crate::error::AmuxError::Config(format!("backend config path failed: {e}")))?;
-    let legacy_supabase_path = SupabaseConfig::default_path().map_err(|e| {
-        crate::error::AmuxError::Config(format!("legacy supabase config path failed: {e}"))
-    })?;
 
-    ProviderConfig::load_from_paths(&backend_path, &legacy_supabase_path)
+    ProviderConfig::load_from_paths(&backend_path)
         .map_err(|e| crate::error::AmuxError::Config(format!("backend config init failed: {e}")))
 }
 
 fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<Arc<dyn Backend>> {
     match config {
-        ProviderConfig::Supabase(config) => {
-            tracing::warn!(
-                "The Supabase provider is deprecated and will be removed in a future release. \
-                 Migrate to the CloudApi provider (backendKind = \"cloud_api\")."
-            );
-            let backend = SupabaseBackend::new(config).map_err(|e| {
-                crate::error::AmuxError::Config(format!("supabase init failed: {e}"))
-            })?;
-            Ok(Arc::new(backend))
-        }
         ProviderConfig::PocketBase(config) => {
             let backend = PocketBaseBackend::new(config).map_err(|e| {
                 crate::error::AmuxError::Config(format!("pocketbase init failed: {e}"))
@@ -4716,22 +4703,6 @@ mod tests {
             })
             .unwrap(),
         )
-    }
-
-    #[test]
-    fn backend_from_provider_config_initializes_supabase_backend() {
-        let config = crate::provider_config::ProviderConfig::Supabase(SupabaseConfig {
-            url: "http://localhost".to_string(),
-            anon_key: "anon".to_string(),
-            refresh_token: "refresh".to_string(),
-            team_id: "team-test".to_string(),
-            actor_id: "agent-actor".to_string(),
-        });
-
-        let backend = backend_from_provider_config(config).unwrap();
-
-        assert_eq!(backend.team_id(), "team-test");
-        assert_eq!(backend.actor_id(), "agent-actor");
     }
 
     #[test]
