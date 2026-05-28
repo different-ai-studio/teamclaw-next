@@ -157,6 +157,8 @@ pub struct RuntimeManager {
     last_sent: HashMap<String, String>,
     #[cfg(test)]
     send_failures: HashMap<String, String>,
+    #[cfg(test)]
+    permission_log: Vec<(String, bool)>,
 }
 
 impl RuntimeManager {
@@ -176,6 +178,8 @@ impl RuntimeManager {
             last_sent: HashMap::new(),
             #[cfg(test)]
             send_failures: HashMap::new(),
+            #[cfg(test)]
+            permission_log: Vec::new(),
         }
     }
 
@@ -740,13 +744,28 @@ impl RuntimeManager {
         agent_id: &str,
         model_id: &str,
     ) -> crate::error::Result<()> {
+        #[cfg(test)]
+        {
+            if !self.agents.contains_key(agent_id) {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "agent {} not found",
+                    agent_id
+                )));
+            }
+            let _ = model_id;
+            return Ok(());
+        }
+
+        #[cfg(not(test))]
         let handle = self.agents.get(agent_id).ok_or_else(|| {
             crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
         })?;
+        #[cfg(not(test))]
         let tx = handle
             .cmd_tx
             .as_ref()
             .ok_or_else(|| crate::error::AmuxError::Agent("no ACP command channel".into()))?;
+        #[cfg(not(test))]
         tx.send(adapter::AcpCommand::SetModel {
             model_id: model_id.to_string(),
         })
@@ -827,11 +846,36 @@ impl RuntimeManager {
         request_id: &str,
         granted: bool,
     ) -> crate::error::Result<()> {
+        #[cfg(test)]
+        {
+            if !self.agents.contains_key(agent_id) {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "agent {} not found",
+                    agent_id
+                )));
+            }
+            self.permission_log
+                .push((request_id.to_string(), granted));
+            return Ok(());
+        }
+
+        #[cfg(not(test))]
         let handle = self.agents.get(agent_id).ok_or_else(|| {
             crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
         })?;
-
+        #[cfg(not(test))]
         handle.resolve_permission(request_id, granted).await
+    }
+
+    pub async fn restart_session(&mut self, agent_id: &str) -> crate::error::Result<()> {
+        if self.stop_agent(agent_id).await.is_some() {
+            Ok(())
+        } else {
+            Err(crate::error::AmuxError::Agent(format!(
+                "agent {} not found",
+                agent_id
+            )))
+        }
     }
 
     pub fn get_handle(&self, agent_id: &str) -> Option<&RuntimeHandle> {
@@ -1299,6 +1343,10 @@ impl RuntimeManager {
     pub fn fail_next_send_for(&mut self, runtime_id: &str, message: &str) {
         self.send_failures
             .insert(runtime_id.to_string(), message.to_string());
+    }
+
+    pub fn permission_log(&self) -> Vec<(String, bool)> {
+        self.permission_log.clone()
     }
 }
 

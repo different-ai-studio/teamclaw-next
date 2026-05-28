@@ -56,6 +56,7 @@ pub struct SessionSnapshot {
     pub agent_type: String,
     pub runtime_id: String,
     pub workspace_id: Option<String>,
+    pub current_model: Option<String>,
     pub state: SessionState,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_activity: chrono::DateTime<chrono::Utc>,
@@ -117,6 +118,17 @@ pub trait RuntimeAdapter: Send + Sync {
         session_id: Uuid,
         params: PromptParams,
     ) -> Result<PromptAck, HttpError>;
+
+    async fn set_model(&self, session_id: Uuid, model_id: String) -> Result<(), HttpError>;
+
+    async fn reply_permission(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        granted: bool,
+    ) -> Result<(), HttpError>;
+
+    async fn restart_session(&self, session_id: Uuid) -> Result<SessionSnapshot, HttpError>;
 
     async fn cancel(&self, session_id: Uuid, turn_id: Option<Uuid>) -> Result<(), HttpError>;
 
@@ -239,6 +251,7 @@ impl RuntimeAdapter for StubRuntimeAdapter {
             agent_type: params.agent_type.clone(),
             runtime_id: format!("stub-rt-{}", &session_id.to_string()[..8]),
             workspace_id: params.workspace_id.clone(),
+            current_model: params.model.clone(),
             state: SessionState::Idle,
             created_at: now,
             last_activity: now,
@@ -394,6 +407,39 @@ impl RuntimeAdapter for StubRuntimeAdapter {
         });
 
         Ok(ack)
+    }
+
+    async fn set_model(&self, session_id: Uuid, model_id: String) -> Result<(), HttpError> {
+        let mut sessions = self.inner.sessions.write();
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+        session.snap.current_model = Some(model_id);
+        session.snap.last_activity = chrono::Utc::now();
+        Ok(())
+    }
+
+    async fn reply_permission(
+        &self,
+        session_id: Uuid,
+        _request_id: String,
+        _granted: bool,
+    ) -> Result<(), HttpError> {
+        let exists = self.inner.sessions.read().contains_key(&session_id);
+        if !exists {
+            return Err(HttpError::session_not_found(&session_id.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn restart_session(&self, session_id: Uuid) -> Result<SessionSnapshot, HttpError> {
+        let mut sessions = self.inner.sessions.write();
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+        session.snap.state = SessionState::Idle;
+        session.snap.last_activity = chrono::Utc::now();
+        Ok(session.snap.clone())
     }
 
     async fn cancel(&self, session_id: Uuid, turn_id: Option<Uuid>) -> Result<(), HttpError> {
@@ -765,6 +811,7 @@ impl RuntimeManagerAdapter {
             agent_type: params.agent_type.clone(),
             runtime_id: runtime_id.clone(),
             workspace_id: params.workspace_id.clone(),
+            current_model: params.model.clone(),
             state: SessionState::Idle,
             created_at: now,
             last_activity: now,
@@ -1035,6 +1082,92 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
         });
 
         Ok(PromptAck { prompt_id, turn_id })
+    }
+
+    async fn set_model(&self, session_id: Uuid, model_id: String) -> Result<(), HttpError> {
+        let runtime_id = {
+            let mut sessions = self.sessions.write();
+            let session = sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+            session.snapshot.current_model = Some(model_id.clone());
+            session.snapshot.last_activity = chrono::Utc::now();
+            session.runtime_id.clone()
+        };
+
+        let mut manager = self.manager.lock().await;
+        manager
+            .set_model(&runtime_id, &model_id)
+            .await
+            .map_err(|e| HttpError::internal(format!("set runtime model: {e}")))
+    }
+
+    async fn reply_permission(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        granted: bool,
+    ) -> Result<(), HttpError> {
+        let runtime_id = {
+            let sessions = self.sessions.read();
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+            session.runtime_id.clone()
+        };
+
+        let mut manager = self.manager.lock().await;
+        manager
+            .resolve_permission(&runtime_id, &request_id, granted)
+            .await
+            .map_err(|e| HttpError::internal(format!("reply permission: {e}")))
+    }
+
+    async fn restart_session(&self, session_id: Uuid) -> Result<SessionSnapshot, HttpError> {
+        let (agent_type, workspace_id, current_model, runtime_id) = {
+            let sessions = self.sessions.read();
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+            (
+                parse_agent_type(&session.snapshot.agent_type)?,
+                session.workspace_id.clone(),
+                session.snapshot.current_model.clone(),
+                session.runtime_id.clone(),
+            )
+        };
+
+        {
+            let mut manager = self.manager.lock().await;
+            manager
+                .restart_session(&runtime_id)
+                .await
+                .map_err(|e| HttpError::internal(format!("restart runtime: {e}")))?;
+        }
+
+        let new_runtime_id = self
+            .spawn_runtime(
+                session_id,
+                agent_type,
+                workspace_id.clone(),
+                current_model.clone(),
+                None,
+            )
+            .await?;
+
+        let mut sessions = self.sessions.write();
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+        session.runtime_id = new_runtime_id.clone();
+        session.snapshot.runtime_id = new_runtime_id;
+        session.snapshot.workspace_id = workspace_id;
+        session.snapshot.current_model = current_model;
+        session.snapshot.state = SessionState::Idle;
+        session.snapshot.last_activity = chrono::Utc::now();
+        session.active_turn_id = None;
+        session.buffered_output.clear();
+        Ok(session.snapshot.clone())
     }
 
     async fn cancel(&self, session_id: Uuid, turn_id: Option<Uuid>) -> Result<(), HttpError> {

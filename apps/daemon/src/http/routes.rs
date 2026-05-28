@@ -34,6 +34,12 @@ pub fn build(state: HttpState) -> Router {
         )
         .route("/v1/sessions/:id/prompt", post(sessions::send_prompt))
         .route("/v1/sessions/:id/cancel", post(sessions::cancel))
+        .route("/v1/sessions/:id/model", post(sessions::set_model))
+        .route(
+            "/v1/sessions/:id/permissions/:request_id",
+            post(sessions::reply_permission),
+        )
+        .route("/v1/sessions/:id/restart", post(sessions::restart))
         .route("/v1/sessions/:id/events", get(sessions::replay_events))
         .route("/v1/sessions/:id/stream", get(sessions::stream))
         .layer(body_limit_layer(body_cap))

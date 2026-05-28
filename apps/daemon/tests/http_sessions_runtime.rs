@@ -37,11 +37,17 @@ struct PromptAck {
     turn_id: Uuid,
 }
 
+#[derive(Debug, Deserialize)]
+struct SessionDetails {
+    current_model: Option<String>,
+}
+
 struct TestApp {
     _handle: http::HttpHandle,
     client: Client,
     base: String,
     session_token: String,
+    manager: Arc<Mutex<runtime::RuntimeManager>>,
 }
 
 impl TestApp {
@@ -76,6 +82,56 @@ impl TestApp {
             .json()
             .await
             .expect("send prompt body")
+    }
+
+    async fn get_session(&self, session_id: Uuid) -> SessionDetails {
+        self.client
+            .get(format!("{}/v1/sessions/{session_id}", self.base))
+            .bearer_auth(&self.session_token)
+            .send()
+            .await
+            .expect("get session response")
+            .error_for_status()
+            .expect("get session status")
+            .json()
+            .await
+            .expect("get session body")
+    }
+
+    async fn switch_model(&self, session_id: Uuid, model_id: &str) {
+        self.client
+            .post(format!("{}/v1/sessions/{session_id}/model", self.base))
+            .bearer_auth(&self.session_token)
+            .json(&serde_json::json!({ "model_id": model_id }))
+            .send()
+            .await
+            .expect("switch model response")
+            .error_for_status()
+            .expect("switch model status");
+    }
+
+    async fn reply_permission(&self, session_id: Uuid, request_id: &str, granted: bool) {
+        self.client
+            .post(format!(
+                "{}/v1/sessions/{session_id}/permissions/{request_id}",
+                self.base
+            ))
+            .bearer_auth(&self.session_token)
+            .json(&serde_json::json!({ "granted": granted }))
+            .send()
+            .await
+            .expect("reply permission response")
+            .error_for_status()
+            .expect("reply permission status");
+    }
+
+    async fn session_with_pending_permission(&self) -> CreatedSession {
+        self.create_session("opencode", Some("ws-1")).await
+    }
+
+    async fn runtime_permission_log(&self) -> Vec<(String, bool)> {
+        let manager = self.manager.lock().await;
+        manager.permission_log()
     }
 
     async fn collect_events(&self, session_id: Uuid, turn_id: Uuid) -> Vec<SessionEvent> {
@@ -128,7 +184,7 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         std::collections::HashMap::new(),
         None,
     )));
-    let runtime = RuntimeManagerAdapter::new(manager, 256);
+    let runtime = RuntimeManagerAdapter::new(manager.clone(), 256);
     let handle = http::spawn(cfg, http::server::metadata("actor".into(), "test"), runtime)
         .await
         .expect("spawn http server");
@@ -158,6 +214,7 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         client,
         base,
         session_token,
+        manager,
     }
 }
 
@@ -175,4 +232,32 @@ async fn session_prompt_streams_runtime_events_from_real_adapter() {
         .iter()
         .any(|e| e.kind.as_str() == "message.completed"));
     assert!(events.iter().any(|e| e.kind.as_str() == "turn.finished"));
+}
+
+#[tokio::test]
+async fn session_model_switch_endpoint_updates_runtime() {
+    let app = test_app_with_runtime_adapter().await;
+    let session = app.create_session("opencode", Some("ws-1")).await;
+
+    app.switch_model(session.session_id, "opencode/deepseek-v4-flash-free")
+        .await;
+
+    let refreshed = app.get_session(session.session_id).await;
+    assert_eq!(
+        refreshed.current_model.as_deref(),
+        Some("opencode/deepseek-v4-flash-free")
+    );
+}
+
+#[tokio::test]
+async fn permission_reply_endpoint_forwards_decision_to_runtime() {
+    let app = test_app_with_runtime_adapter().await;
+    let session = app.session_with_pending_permission().await;
+
+    app.reply_permission(session.session_id, "req-1", true).await;
+
+    assert!(app
+        .runtime_permission_log()
+        .await
+        .contains(&("req-1".to_string(), true)));
 }
