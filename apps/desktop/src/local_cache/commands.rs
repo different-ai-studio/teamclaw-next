@@ -3,18 +3,25 @@ use super::store::{
     LocalCacheStore, MessageRow, OutboxRow, SessionParticipantRow, SessionRow, SubmissionRow,
 };
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 // ─── Managed state ────────────────────────────────────────────────────────
+//
+// `current_team_id` is the "current-team gate": when Some(team), every
+// local-cache command must touch rows belonging to that team. The gate is
+// permissive when None (boot phase, sign-out) so initial hydration works.
+// Frontend wires `local_cache_set_current_team` into the team-switch flow.
 
 pub struct LocalCacheState {
     pub db: Arc<Mutex<Option<LocalCacheStore>>>,
+    pub current_team_id: Arc<RwLock<Option<String>>>,
 }
 
 impl Default for LocalCacheState {
     fn default() -> Self {
         Self {
             db: Arc::new(Mutex::new(None)),
+            current_team_id: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -52,6 +59,57 @@ fn dirs_next() -> Option<std::path::PathBuf> {
         })
 }
 
+// ─── Gate helpers ─────────────────────────────────────────────────────────
+
+async fn current_team(state: &LocalCacheState) -> Option<String> {
+    state.current_team_id.read().await.clone()
+}
+
+async fn assert_team(state: &LocalCacheState, team_id: &str) -> Result<(), String> {
+    if let Some(current) = current_team(state).await {
+        if current != team_id {
+            return Err(format!(
+                "local_cache: team gate mismatch (current={}, requested={})",
+                current, team_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn assert_team_opt(state: &LocalCacheState, looked_up: Option<&str>) -> Result<(), String> {
+    let Some(current) = current_team(state).await else {
+        return Ok(());
+    };
+    match looked_up {
+        None => Ok(()),
+        Some(t) if t == current => Ok(()),
+        Some(t) => Err(format!(
+            "local_cache: team gate mismatch (current={}, row_team={})",
+            current, t
+        )),
+    }
+}
+
+// ─── Gate config commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn local_cache_set_current_team(
+    state: tauri::State<'_, LocalCacheState>,
+    team_id: Option<String>,
+) -> Result<(), String> {
+    let mut guard = state.current_team_id.write().await;
+    *guard = team_id.filter(|s| !s.is_empty());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn local_cache_get_current_team(
+    state: tauri::State<'_, LocalCacheState>,
+) -> Result<Option<String>, String> {
+    Ok(state.current_team_id.read().await.clone())
+}
+
 // ─── actor commands ───────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -59,6 +117,14 @@ pub async fn local_cache_actor_upsert_batch(
     state: tauri::State<'_, LocalCacheState>,
     rows: Vec<ActorRow>,
 ) -> Result<(), String> {
+    if let Some(current) = current_team(&state).await {
+        if let Some(bad) = rows.iter().find(|r| r.team_id != current) {
+            return Err(format!(
+                "local_cache: team gate mismatch in actor batch (current={}, row_team={})",
+                current, bad.team_id
+            ));
+        }
+    }
     let db = get_db(&state).await?;
     db.actor_upsert_batch(&rows).await
 }
@@ -69,6 +135,7 @@ pub async fn local_cache_actor_load_team(
     team_id: String,
     include_deleted: Option<bool>,
 ) -> Result<Vec<ActorRow>, String> {
+    assert_team(&state, &team_id).await?;
     let db = get_db(&state).await?;
     db.actor_load_team(&team_id, include_deleted.unwrap_or(false))
         .await
@@ -81,6 +148,8 @@ pub async fn local_cache_actor_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_actor(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.actor_soft_delete(&id, &deleted_at).await
 }
 
@@ -90,7 +159,12 @@ pub async fn local_cache_actor_load_by_ids(
     ids: Vec<String>,
 ) -> Result<Vec<ActorRow>, String> {
     let db = get_db(&state).await?;
-    db.actor_load_by_ids(&ids).await
+    let result = db.actor_load_by_ids(&ids).await?;
+    if let Some(current) = current_team(&state).await {
+        Ok(result.into_iter().filter(|r| r.team_id == current).collect())
+    } else {
+        Ok(result)
+    }
 }
 
 // ─── session commands ─────────────────────────────────────────────────────
@@ -100,6 +174,14 @@ pub async fn local_cache_session_upsert_batch(
     state: tauri::State<'_, LocalCacheState>,
     rows: Vec<SessionRow>,
 ) -> Result<(), String> {
+    if let Some(current) = current_team(&state).await {
+        if let Some(bad) = rows.iter().find(|r| r.team_id != current) {
+            return Err(format!(
+                "local_cache: team gate mismatch in session batch (current={}, row_team={})",
+                current, bad.team_id
+            ));
+        }
+    }
     let db = get_db(&state).await?;
     db.session_upsert_batch(&rows).await
 }
@@ -110,6 +192,7 @@ pub async fn local_cache_session_load_team(
     team_id: String,
     include_deleted: Option<bool>,
 ) -> Result<Vec<SessionRow>, String> {
+    assert_team(&state, &team_id).await?;
     let db = get_db(&state).await?;
     db.session_load_team(&team_id, include_deleted.unwrap_or(false))
         .await
@@ -122,6 +205,8 @@ pub async fn local_cache_session_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_session(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.session_soft_delete(&id, &deleted_at).await
 }
 
@@ -133,6 +218,21 @@ pub async fn local_cache_session_participant_upsert_batch(
     rows: Vec<SessionParticipantRow>,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    if let Some(current) = current_team(&state).await {
+        let mut seen = std::collections::HashSet::new();
+        for r in &rows {
+            if seen.insert(r.session_id.clone()) {
+                if let Some(owner) = db.team_for_session(&r.session_id).await? {
+                    if owner != current {
+                        return Err(format!(
+                            "local_cache: team gate mismatch in participant batch (current={}, session_team={})",
+                            current, owner
+                        ));
+                    }
+                }
+            }
+        }
+    }
     db.session_participant_upsert_batch(&rows).await
 }
 
@@ -143,6 +243,8 @@ pub async fn local_cache_session_participant_load_session(
     include_deleted: Option<bool>,
 ) -> Result<Vec<SessionParticipantRow>, String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_session(&session_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.session_participant_load_session(&session_id, include_deleted.unwrap_or(false))
         .await
 }
@@ -154,6 +256,8 @@ pub async fn local_cache_session_participant_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_participant(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.session_participant_soft_delete(&id, &deleted_at).await
 }
 
@@ -164,6 +268,14 @@ pub async fn local_cache_message_upsert_batch(
     state: tauri::State<'_, LocalCacheState>,
     rows: Vec<MessageRow>,
 ) -> Result<(), String> {
+    if let Some(current) = current_team(&state).await {
+        if let Some(bad) = rows.iter().find(|r| r.team_id != current) {
+            return Err(format!(
+                "local_cache: team gate mismatch in message batch (current={}, row_team={})",
+                current, bad.team_id
+            ));
+        }
+    }
     let db = get_db(&state).await?;
     db.message_upsert_batch(&rows).await
 }
@@ -176,6 +288,8 @@ pub async fn local_cache_message_load_session(
     workspace_path: Option<String>,
 ) -> Result<Vec<MessageRow>, String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_session(&session_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.message_load_session(
         &session_id,
         include_deleted.unwrap_or(false),
@@ -191,6 +305,8 @@ pub async fn local_cache_message_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_message(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.message_soft_delete(&id, &deleted_at).await
 }
 
@@ -202,6 +318,8 @@ pub async fn local_cache_message_set_parts(
     workspace_path: Option<String>,
 ) -> Result<String, String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_message(&message_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.message_set_parts(&message_id, &parts_json, workspace_path.as_deref())
         .await
 }
@@ -221,6 +339,7 @@ pub async fn local_cache_outbox_upsert(
     state: tauri::State<'_, LocalCacheState>,
     row: OutboxRow,
 ) -> Result<(), String> {
+    assert_team(&state, &row.team_id).await?;
     let db = get_db(&state).await?;
     db.outbox_upsert(&row).await
 }
@@ -231,6 +350,8 @@ pub async fn local_cache_outbox_delete(
     message_id: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_outbox(&message_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.outbox_delete(&message_id).await
 }
 
@@ -239,7 +360,10 @@ pub async fn local_cache_outbox_list_all(
     state: tauri::State<'_, LocalCacheState>,
 ) -> Result<Vec<OutboxRow>, String> {
     let db = get_db(&state).await?;
-    db.outbox_list_all().await
+    match current_team(&state).await {
+        Some(t) => db.outbox_list_team(&t).await,
+        None => db.outbox_list_all().await,
+    }
 }
 
 // ─── idea commands ────────────────────────────────────────────────────────
@@ -249,6 +373,14 @@ pub async fn local_cache_idea_upsert_batch(
     state: tauri::State<'_, LocalCacheState>,
     rows: Vec<IdeaRow>,
 ) -> Result<(), String> {
+    if let Some(current) = current_team(&state).await {
+        if let Some(bad) = rows.iter().find(|r| r.team_id != current) {
+            return Err(format!(
+                "local_cache: team gate mismatch in idea batch (current={}, row_team={})",
+                current, bad.team_id
+            ));
+        }
+    }
     let db = get_db(&state).await?;
     db.idea_upsert_batch(&rows).await
 }
@@ -259,6 +391,7 @@ pub async fn local_cache_idea_load_team(
     team_id: String,
     include_deleted: Option<bool>,
 ) -> Result<Vec<IdeaRow>, String> {
+    assert_team(&state, &team_id).await?;
     let db = get_db(&state).await?;
     db.idea_load_team(&team_id, include_deleted.unwrap_or(false))
         .await
@@ -271,6 +404,8 @@ pub async fn local_cache_idea_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_idea(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.idea_soft_delete(&id, &deleted_at).await
 }
 
@@ -282,6 +417,21 @@ pub async fn local_cache_claim_upsert_batch(
     rows: Vec<ClaimRow>,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    if let Some(current) = current_team(&state).await {
+        let mut seen = std::collections::HashSet::new();
+        for r in &rows {
+            if seen.insert(r.idea_id.clone()) {
+                if let Some(owner) = db.team_for_idea(&r.idea_id).await? {
+                    if owner != current {
+                        return Err(format!(
+                            "local_cache: team gate mismatch in claim batch (current={}, idea_team={})",
+                            current, owner
+                        ));
+                    }
+                }
+            }
+        }
+    }
     db.claim_upsert_batch(&rows).await
 }
 
@@ -292,6 +442,8 @@ pub async fn local_cache_claim_load_idea(
     include_deleted: Option<bool>,
 ) -> Result<Vec<ClaimRow>, String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_idea(&idea_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.claim_load_idea(&idea_id, include_deleted.unwrap_or(false))
         .await
 }
@@ -303,6 +455,8 @@ pub async fn local_cache_claim_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_claim(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.claim_soft_delete(&id, &deleted_at).await
 }
 
@@ -314,6 +468,21 @@ pub async fn local_cache_submission_upsert_batch(
     rows: Vec<SubmissionRow>,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    if let Some(current) = current_team(&state).await {
+        let mut seen = std::collections::HashSet::new();
+        for r in &rows {
+            if seen.insert(r.idea_id.clone()) {
+                if let Some(owner) = db.team_for_idea(&r.idea_id).await? {
+                    if owner != current {
+                        return Err(format!(
+                            "local_cache: team gate mismatch in submission batch (current={}, idea_team={})",
+                            current, owner
+                        ));
+                    }
+                }
+            }
+        }
+    }
     db.submission_upsert_batch(&rows).await
 }
 
@@ -324,6 +493,8 @@ pub async fn local_cache_submission_load_idea(
     include_deleted: Option<bool>,
 ) -> Result<Vec<SubmissionRow>, String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_idea(&idea_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.submission_load_idea(&idea_id, include_deleted.unwrap_or(false))
         .await
 }
@@ -335,32 +506,35 @@ pub async fn local_cache_submission_soft_delete(
     deleted_at: String,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_submission(&id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.submission_soft_delete(&id, &deleted_at).await
 }
 
 // ─── agent_runtime_event commands ─────────────────────────────────────────
 
-/// Upsert a single agent runtime event (idempotent on duplicate id).
 #[tauri::command]
 pub async fn local_cache_agent_runtime_event_insert(
     state: tauri::State<'_, LocalCacheState>,
     record: AgentRuntimeEventRow,
 ) -> Result<(), String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_session(&record.session_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.agent_runtime_event_upsert(&record).await
 }
 
-/// Load all agent runtime events for a session, ordered by created_at ASC.
 #[tauri::command]
 pub async fn local_cache_agent_runtime_event_load(
     state: tauri::State<'_, LocalCacheState>,
     session_id: String,
 ) -> Result<Vec<AgentRuntimeEventRow>, String> {
     let db = get_db(&state).await?;
+    let owner = db.team_for_session(&session_id).await?;
+    assert_team_opt(&state, owner.as_deref()).await?;
     db.agent_runtime_event_load_session(&session_id).await
 }
 
-/// Prune oldest rows, keeping at most `max_rows` entries (default 5000).
 #[tauri::command]
 pub async fn local_cache_agent_runtime_event_prune(
     state: tauri::State<'_, LocalCacheState>,
@@ -378,6 +552,7 @@ pub async fn local_cache_watermark_get(
     table_name: String,
     team_id: String,
 ) -> Result<Option<String>, String> {
+    assert_team(&state, &team_id).await?;
     let db = get_db(&state).await?;
     db.watermark_get(&table_name, &team_id).await
 }
@@ -389,6 +564,7 @@ pub async fn local_cache_watermark_set(
     team_id: String,
     last_sync_at: String,
 ) -> Result<(), String> {
+    assert_team(&state, &team_id).await?;
     let db = get_db(&state).await?;
     db.watermark_set(&table_name, &team_id, &last_sync_at).await
 }
@@ -400,6 +576,8 @@ pub async fn local_cache_clear_team(
     state: tauri::State<'_, LocalCacheState>,
     team_id: String,
 ) -> Result<(), String> {
+    // Deliberately not gated: clear_team is invoked on team-switch / sign-out
+    // to wipe stale data, which may target a team other than the current one.
     let db = get_db(&state).await?;
     db.clear_team(&team_id).await
 }

@@ -487,6 +487,8 @@ pub fn run() {
             local_cache::commands::local_cache_watermark_get,
             local_cache::commands::local_cache_watermark_set,
             local_cache::commands::local_cache_clear_team,
+            local_cache::commands::local_cache_set_current_team,
+            local_cache::commands::local_cache_get_current_team,
             telemetry::commands::telemetry_get_consent,
             telemetry::commands::telemetry_set_consent,
             commands::webview::webview_eval_js,

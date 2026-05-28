@@ -2,6 +2,17 @@ import { create } from "zustand";
 import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "./auth-store";
 
+async function setLocalCacheTeamGate(teamId: string | null): Promise<void> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("local_cache_set_current_team", { teamId });
+  } catch (error) {
+    // Non-fatal: browser preview or missing tauri runtime. The gate is a
+    // defense-in-depth layer, not a correctness requirement.
+    console.debug("[CurrentTeam] local_cache_set_current_team unavailable", error);
+  }
+}
+
 export interface CurrentTeam {
   id: string;
   name: string;
@@ -36,6 +47,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
   load: async () => {
     const session = useAuthStore.getState().session;
     if (!session) {
+      await setLocalCacheTeamGate(null);
       set({ team: null, currentMember: null, loading: false, error: null });
       return;
     }
@@ -49,6 +61,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
       return;
     }
     const activeTeam = row ? { id: row.id, name: row.name, slug: row.slug ?? "" } : null;
+    await setLocalCacheTeamGate(activeTeam?.id ?? null);
     const currentMember = activeTeam
       ? await loadCurrentMember(activeTeam.id, session.user.id)
       : null;
@@ -62,9 +75,14 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
   reloadAndSwitchTo: async (teamId: string) => {
     const session = useAuthStore.getState().session;
     if (!session) {
+      await setLocalCacheTeamGate(null);
       set({ team: null, currentMember: null, loading: false, error: null });
       return;
     }
+
+    // Gate must be moved BEFORE any local_cache_* call for the new team so the
+    // backend accepts hydration loads for the team we're switching to.
+    await setLocalCacheTeamGate(teamId);
 
     set({ loading: true, error: null });
     let data;
