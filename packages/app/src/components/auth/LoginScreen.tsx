@@ -16,7 +16,8 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const { sendOtp, verifyOtp, resetOtp, otpEmail, loading, errorMessage } = useAuthStore();
+  const { sendOtp, verifyOtp, resetOtp, signInAnonymously, otpEmail, loading, errorMessage } =
+    useAuthStore();
   const appVersion = useAppVersion();
   const onSendEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +32,10 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const onUseDifferentEmail = () => {
     setCode("");
     resetOtp();
+  };
+
+  const onQuickTrial = async () => {
+    await signInAnonymously();
   };
   const cardClassName = embedded
     ? "w-full space-y-5 rounded-[16px] border border-border bg-paper p-5"
@@ -161,6 +166,16 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
           >
             {loading ? t("auth.sending", "Sending…") : t("auth.sendCode", "Send code")}
           </Button>
+          <button
+            type="button"
+            onClick={() => void onQuickTrial()}
+            disabled={serverConfigRequired || loading}
+            className="block w-full text-center text-[12px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {loading
+              ? t("auth.onboarding.startingTrial", "Preparing…")
+              : t("auth.onboarding.quickTrial", "Try anonymously")}
+          </button>
         </form>
       )}
 

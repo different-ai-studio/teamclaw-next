@@ -106,15 +106,19 @@ export function createSessionsModule(client: CloudApiClient): SessionsBackend {
         throw e;
       }
     },
-    async listSessionsForTeamSince(_teamId, _updatedAfter): Promise<SessionSyncRow[]> {
-      // FC endpoint not yet available — returning [] disables incremental
-      // session sync until a /v1/sync/sessions route is added server-side.
-      return [];
+    async listSessionsForTeamSince(teamId, updatedAfter): Promise<SessionSyncRow[]> {
+      const params = new URLSearchParams({ teamId });
+      if (updatedAfter) params.set("since", updatedAfter);
+      const out = await client.get<{ items: SessionSyncRow[] }>(`/v1/sync/sessions?${params.toString()}`);
+      return out.items ?? [];
     },
-    async listSessionDisplayRows(_teamId, _sessionIds): Promise<SessionDisplayRow[]> {
-      // FC endpoint not yet available — returns empty list so the runtime
-      // dashboard renders sessions with their IDs only.
-      return [];
+    async listSessionDisplayRows(teamId, sessionIds): Promise<SessionDisplayRow[]> {
+      if (sessionIds.length === 0) return [];
+      const out = await client.post<{ items: SessionDisplayRow[] }>(`/v1/sessions/display-rows`, {
+        teamId,
+        sessionIds,
+      });
+      return out.items ?? [];
     },
   };
 }

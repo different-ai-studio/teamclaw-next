@@ -76,10 +76,11 @@ export function createSessionMembersModule(client: CloudApiClient): SessionMembe
       const out = await client.get<{ items: CloudSessionParticipant[] }>(`/v1/sessions/${encodeURIComponent(sessionId)}/participants`);
       return out.items.map(mapParticipant);
     },
-    async listSessionIdsForActor(_actorId) {
-      // FC endpoint not yet available — returning [] disables the
-      // "continue prior session" suggestion for now.
-      return [];
+    async listSessionIdsForActor(actorId) {
+      const out = await client.get<{ items: string[] }>(
+        `/v1/actors/${encodeURIComponent(actorId)}/sessions`,
+      );
+      return out.items ?? [];
     },
     async listCandidateActors(teamId, presentActorIds) {
       // List all visible actors via /v1/teams/:teamId/actors and filter to

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { authState, backendConfig } = vi.hoisted(() => ({
@@ -56,5 +56,23 @@ describe("LoginScreen", () => {
     render(<LoginScreen />);
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send code/i })).toBeInTheDocument();
+  });
+
+  it("renders the anonymous trial button", () => {
+    render(<LoginScreen />);
+    expect(screen.getByRole("button", { name: /try anonymously/i })).toBeInTheDocument();
+  });
+
+  it("clicking trial button invokes signInAnonymously", async () => {
+    authState.signInAnonymously.mockResolvedValue(true);
+    render(<LoginScreen />);
+    fireEvent.click(screen.getByRole("button", { name: /try anonymously/i }));
+    await waitFor(() => expect(authState.signInAnonymously).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows error message when signInAnonymously fails", () => {
+    authState.errorMessage = "Anonymous sign in failed";
+    render(<LoginScreen />);
+    expect(screen.getByText(/anonymous sign in failed/i)).toBeInTheDocument();
   });
 });

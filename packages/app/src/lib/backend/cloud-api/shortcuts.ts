@@ -38,9 +38,11 @@ export function createShortcutsModule(client: CloudApiClient): ShortcutsBackend 
       const out = await client.get<{ items: Array<{ id: string; teamId: string; code: string; name: string }> }>(`/v1/teams/${encodeURIComponent(teamId)}/roles`);
       return out.items.map((r) => ({ id: r.id, team_id: r.teamId, code: r.code, name: r.name }));
     },
-    async listShortcutRoleBindings(_teamId) {
-      // FC endpoint /v1/teams/:teamId/shortcut-role-bindings not yet available.
-      return [];
+    async listShortcutRoleBindings(teamId) {
+      const out = await client.get<{
+        items: Array<{ resource_id: string; permission_roles: Array<{ role_id: string }> }>;
+      }>(`/v1/teams/${encodeURIComponent(teamId)}/shortcut-role-bindings`);
+      return out.items ?? [];
     },
   };
 }

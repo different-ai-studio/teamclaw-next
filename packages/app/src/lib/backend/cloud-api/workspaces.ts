@@ -31,20 +31,16 @@ function mapWorkspace(row: CloudWorkspace): DaemonWorkspaceBackendRow {
 
 export function createWorkspacesModule(client: CloudApiClient): WorkspacesBackend {
   return {
-    async listWorkspacesByIds(_teamId, workspaceIds) {
+    async listWorkspacesByIds(teamId, workspaceIds) {
       if (workspaceIds.length === 0) return [];
-      // FC endpoint not yet available — fetch individually.
-      const results = await Promise.all(
-        workspaceIds.map(async (id) => {
-          try {
-            const w = await client.get<CloudWorkspace>(`/v1/workspaces/${encodeURIComponent(id)}`);
-            return { id: w.id, name: w.name ?? null, path: w.path ?? null };
-          } catch {
-            return null;
-          }
-        }),
-      );
-      return results.filter((r): r is { id: string; name: string; path: string | null } => r !== null);
+      const out = await client.post<{
+        items: Array<{ id: string; name: string | null; path: string | null }>;
+      }>(`/v1/workspaces/by-ids`, { teamId, ids: workspaceIds });
+      return (out.items ?? []).map((r) => ({
+        id: r.id,
+        name: r.name ?? null,
+        path: r.path ?? null,
+      }));
     },
     async listDaemonWorkspaces(teamId, agentId) {
       const params = new URLSearchParams({ teamId, limit: "200" });

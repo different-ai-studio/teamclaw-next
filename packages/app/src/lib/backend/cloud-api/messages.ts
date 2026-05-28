@@ -65,10 +65,13 @@ export function createMessagesModule(client: CloudApiClient): MessagesBackend {
     async updateMessageContent(messageId: string, content: string): Promise<void> {
       await client.patch<CloudMessage>(`/v1/messages/${encodeURIComponent(messageId)}`, { content });
     },
-    async listMessagesForSessionSince(_sessionId, _updatedAfter) {
-      // FC endpoint not yet available — returning empty list disables incremental
-      // sync of messages until a /v1/sync/messages route is added server-side.
-      return [];
+    async listMessagesForSessionSince(sessionId, updatedAfter) {
+      const params = new URLSearchParams({ sessionId });
+      if (updatedAfter) params.set("since", updatedAfter);
+      const out = await client.get<{ items: import("../types").MessageSyncRow[] }>(
+        `/v1/sync/messages?${params.toString()}`,
+      );
+      return out.items ?? [];
     },
   };
 }
