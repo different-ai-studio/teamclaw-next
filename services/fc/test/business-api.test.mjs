@@ -257,11 +257,11 @@ test("repository Supabase errors are normalized", async () => {
   assert.equal(JSON.parse(response.body).error.code, "conflict");
 });
 
-test("GET /v1/teams/:teamId/workspace-config returns 404 when not set", async () => {
+test("GET /v1/teams/:teamId/workspace-defaults returns 404 when not set", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
-    path: "/v1/teams/team-1/workspace-config",
+    path: "/v1/teams/team-1/workspace-defaults",
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
 
@@ -270,7 +270,7 @@ test("GET /v1/teams/:teamId/workspace-config returns 404 when not set", async ()
   assert.deepEqual(repo.calls[0], { method: "getTeamWorkspaceConfig", teamId: "team-1" });
 });
 
-test("GET /v1/teams/:teamId/workspace-config returns config when set", async () => {
+test("GET /v1/teams/:teamId/workspace-defaults returns config when set", async () => {
   const repo = fakeRepo({
     teamWorkspaceConfigs: {
       "team-1": {
@@ -283,7 +283,7 @@ test("GET /v1/teams/:teamId/workspace-config returns config when set", async () 
   });
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
-    path: "/v1/teams/team-1/workspace-config",
+    path: "/v1/teams/team-1/workspace-defaults",
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
 
