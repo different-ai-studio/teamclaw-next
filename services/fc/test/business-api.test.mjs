@@ -723,6 +723,36 @@ test("DELETE /v1/sessions/:sessionId/mute unmutes session", async () => {
   });
 });
 
+test("POST /v1/teams creates team without LiteLLM when env unset", async () => {
+  // No LITELLM_MASTER_KEY in test env → provisioning is skipped, the route
+  // still calls repo.createTeam (with null litellm fields) and returns the
+  // team with null aiGatewayEndpoint / litellmKey.
+  const prevMaster = process.env.LITELLM_MASTER_KEY;
+  delete process.env.LITELLM_MASTER_KEY;
+  try {
+    const repo = fakeRepo();
+    const response = await handleBusinessApiRequest({
+      httpMethod: "POST",
+      path: "/v1/teams",
+      headers: { Authorization: "Bearer token" },
+      body: JSON.stringify({ name: "Acme" }),
+    }, { createRepository: () => repo });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.id, "team-1");
+    assert.equal(body.name, "Acme");
+    assert.equal(body.aiGatewayEndpoint, null);
+    assert.equal(body.litellmKey, null);
+    assert.deepEqual(repo.calls[0], {
+      method: "createTeam",
+      input: { name: "Acme", slug: null, litellmTeamId: null, aiGatewayEndpoint: null },
+    });
+  } finally {
+    if (prevMaster !== undefined) process.env.LITELLM_MASTER_KEY = prevMaster;
+  }
+});
+
 test("PATCH /v1/teams/:teamId renames team", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({

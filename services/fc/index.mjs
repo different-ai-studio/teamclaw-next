@@ -21,7 +21,6 @@ import {
 import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.mjs';
 import { logSyncEvent } from './lib/sync-log.mjs';
 import {
-  handleSyncCreateTeam,
   handleSyncManifest,
   handleSyncUploadPrepare,
   handleSyncUploadComplete,
@@ -990,11 +989,9 @@ export async function handler(event, context) {
     // ---------------------------------------------------------------------------
     // /sync/* routes — JWT auth required for all
     // ---------------------------------------------------------------------------
-    if (path === "/sync/create-team") {
-      const auth = await authenticateJwtOnly({ headers });
-      if (!auth.ok) return json(auth.status, { error: auth.error });
-      return await handleSyncCreateTeam(auth.userId, body);
-    }
+    // NOTE: /sync/create-team was removed in 2026-05; team creation now goes
+    // through POST /v1/teams (which provisions LiteLLM + seeds
+    // team_workspace_config in a single call).
 
     if (path === "/sync/set-mode") {
       const auth = await authenticateJwtOnly({ headers });

@@ -78,14 +78,22 @@ pub struct VersionInfo {
     pub message: Option<String>,
 }
 
-/// Result of /sync/create-team.
+/// Result of POST /v1/teams.
+///
+/// The Cloud API response shape: `{ id, name, slug, createdAt, aiGatewayEndpoint, litellmKey }`.
+/// `aiGatewayEndpoint` and `litellmKey` are nullable when LiteLLM provisioning
+/// is skipped (e.g. local dev with LITELLM_MASTER_KEY unset).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTeamResult {
+    #[serde(rename = "id")]
     pub team_id: String,
+    #[serde(rename = "slug")]
     pub team_slug: String,
-    pub ai_gateway_endpoint: String,
-    pub litellm_key: String,
+    #[serde(default)]
+    pub ai_gateway_endpoint: Option<String>,
+    #[serde(default)]
+    pub litellm_key: Option<String>,
 }
 
 pub struct FcClient {
@@ -103,19 +111,20 @@ impl FcClient {
         }
     }
 
-    /// POST /sync/create-team
+    /// POST /v1/teams — unified team creation. Provisions LiteLLM team + key
+    /// server-side and seeds team_workspace_config in one call. The legacy
+    /// `/sync/create-team` endpoint was removed in 2026-05.
+    ///
+    /// `node_id` is accepted for backward compatibility with the previous
+    /// signature but is no longer forwarded — the /v1/teams handler derives
+    /// the owning actor's node from the JWT-authenticated user.
     pub async fn create_team(
         &self,
         team_name: &str,
-        node_id: Option<&str>,
+        _node_id: Option<&str>,
     ) -> Result<CreateTeamResult, SyncError> {
-        let mut body = serde_json::json!({ "teamName": team_name });
-        if let Some(nid) = node_id {
-            body["nodeId"] = Value::String(nid.to_string());
-        }
-        let resp = self
-            .post("/sync/create-team", &body)
-            .await?;
+        let body = serde_json::json!({ "name": team_name });
+        let resp = self.post("/v1/teams", &body).await?;
         Ok(resp)
     }
 
