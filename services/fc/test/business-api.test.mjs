@@ -330,6 +330,51 @@ test("POST /v1/heartbeat calls repository.heartbeat", async () => {
   assert.deepEqual(repo.calls[0], { method: "heartbeat" });
 });
 
+test("POST /v1/presence/foreground upserts client_presence", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/presence/foreground",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "device-1", foregroundUntil: "2026-05-28T01:00:00Z" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "writeForegroundPresence",
+    input: { deviceId: "device-1", foregroundUntil: "2026-05-28T01:00:00Z" },
+  });
+});
+
+test("POST /v1/presence/foreground rejects missing deviceId with 400", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/presence/foreground",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ foregroundUntil: "2026-05-28T01:00:00Z" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
+  assert.equal(repo.calls.length, 0);
+});
+
+test("POST /v1/presence/foreground rejects non-ISO foregroundUntil with 400", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/presence/foreground",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "d", foregroundUntil: "not-a-date" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
+});
+
 test("GET /v1/workspaces returns 400 without teamId", async () => {
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
@@ -1423,6 +1468,7 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async getTeamWorkspaceConfig(teamId) { calls.push({ method: "getTeamWorkspaceConfig", teamId }); if (error) throw error; return configs[teamId] ?? null; },
     async putTeamWorkspaceConfig(teamId, input) { calls.push({ method: "putTeamWorkspaceConfig", teamId, input }); if (error) throw error; configs[teamId] = { teamId, defaultWorkspaceId: input.defaultWorkspaceId ?? null, pinnedWorkspaceIds: input.pinnedWorkspaceIds ?? [], updatedAt: "2026-05-27T01:00:00Z" }; return configs[teamId]; },
     async heartbeat() { calls.push({ method: "heartbeat" }); if (error) throw error; },
+    async writeForegroundPresence(input) { calls.push({ method: "writeForegroundPresence", input }); if (error) throw error; },
     async listWorkspaces(args) { calls.push({ method: "listWorkspaces", args }); if (error) throw error; return { items: workspaceStore }; },
     async upsertWorkspace(input) { calls.push({ method: "upsertWorkspace", input }); if (error) throw error; const existing = workspaceStore.find(w => w.id === input.id); if (existing) { Object.assign(existing, input); return existing; } const newW = { id: input.id ?? "workspace-new", teamId: input.teamId, name: input.name, slug: input.slug ?? null, archived: input.archived ?? false, metadata: input.metadata ?? null, createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }; workspaceStore.push(newW); return newW; },
     async getWorkspace(workspaceId) { calls.push({ method: "getWorkspace", workspaceId }); if (error) throw error; return workspaceStore.find(w => w.id === workspaceId) ?? null; },
