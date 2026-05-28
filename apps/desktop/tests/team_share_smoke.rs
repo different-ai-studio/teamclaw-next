@@ -249,6 +249,91 @@ async fn enable_custom_git_writes_git_config() {
     assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
 }
 
+// ─── Task 12 tests ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn join_existing_writes_config_when_share_enabled() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/teams/t1/workspace-config"))
+        .and(header("authorization", "Bearer test-jwt"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "shareMode": "oss",
+            "gitRemoteUrl": null,
+            "gitAuthKind": null,
+            "syncMode": null,
+            "litellmTeamId": "ll-1",
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, &server.uri());
+
+    let result = team_share::join::team_share_join_existing_impl(
+        "t1".to_string(),
+        workspace.clone(),
+    )
+    .await
+    .expect("join should succeed");
+    assert!(result.initialized);
+    assert_eq!(result.share_mode.as_deref(), Some("oss"));
+
+    let team_repo_dir = std::path::Path::new(&workspace).join("teamclaw-team");
+    assert!(team_repo_dir.is_dir(), "teamclaw-team dir should exist");
+
+    let cfg = read_cfg(&workspace);
+    let obj = cfg.as_object().expect("config is object");
+    assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
+    assert_eq!(obj.get("share_mode").and_then(|v| v.as_str()), Some("oss"));
+    assert_eq!(
+        obj.get("litellm_team_id").and_then(|v| v.as_str()),
+        Some("ll-1")
+    );
+}
+
+#[tokio::test]
+async fn join_existing_noop_when_share_not_opened() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/teams/t2/workspace-config"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "shareMode": null,
+            "gitRemoteUrl": null,
+            "gitAuthKind": null,
+            "syncMode": null,
+            "litellmTeamId": null,
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, &server.uri());
+
+    let result = team_share::join::team_share_join_existing_impl(
+        "t2".to_string(),
+        workspace.clone(),
+    )
+    .await
+    .expect("join should succeed");
+    assert!(!result.initialized);
+    assert!(result.share_mode.is_none());
+
+    // No teamclaw-team dir.
+    let team_repo_dir = std::path::Path::new(&workspace).join("teamclaw-team");
+    assert!(!team_repo_dir.exists(), "teamclaw-team dir should NOT exist");
+
+    // No share_mode/oss_team_id written.
+    let cfg = read_cfg(&workspace);
+    let obj = cfg.as_object().expect("config is object");
+    assert!(!obj.contains_key("share_mode"));
+    assert!(!obj.contains_key("oss_team_id"));
+}
+
 #[test]
 fn set_team_secret_rejects_non_hex() {
     let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());

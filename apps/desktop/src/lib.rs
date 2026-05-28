@@ -530,6 +530,7 @@ pub fn run() {
             commands::team_share::enable::team_share_enable_custom_git,
             commands::team_share::enable::team_share_set_team_secret,
             commands::team_share::enable::team_share_get_status,
+            commands::team_share::join::team_share_join_existing,
             commands::team_litellm::team_litellm_setup,
             commands::oss_sync::oss_sync_now,
             commands::oss_sync::oss_sync_status,

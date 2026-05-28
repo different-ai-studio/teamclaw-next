@@ -16,6 +16,7 @@
 
 pub mod custom_git;
 pub mod enable;
+pub mod join;
 
 #[allow(unused_imports)]
 pub use enable::{
@@ -24,6 +25,8 @@ pub use enable::{
     team_share_enable_oss, team_share_get_status, team_share_set_team_secret, EnableShareResult,
     GitEnableInput,
 };
+#[allow(unused_imports)]
+pub use join::{team_share_join_existing, team_share_join_existing_impl, JoinExistingResult};
 
 use serde::{Deserialize, Serialize};
 
