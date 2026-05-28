@@ -2129,6 +2129,370 @@ paths:
                       $ref: "#/components/schemas/LeaderboardEntry"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/directory/current-member-actor:
+    get:
+      operationId: resolveCurrentMemberActor
+      summary: Resolve current user's member actor in a team
+      tags: [Directory]
+      parameters:
+        - name: teamId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Member actor or null
+          content:
+            application/json:
+              schema:
+                type: [object, "null"]
+                properties:
+                  id: { type: string }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/directory/first-member-actor-for-user:
+    get:
+      operationId: resolveFirstMemberActorForUser
+      summary: Resolve first member actor for a user across teams
+      tags: [Directory]
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Member actor or null
+          content:
+            application/json:
+              schema:
+                type: [object, "null"]
+                properties:
+                  id: { type: string }
+                  team_id: { type: [string, "null"] }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/directory/current-team-member:
+    get:
+      operationId: getCurrentTeamMember
+      summary: Get the current user's team member summary
+      tags: [Directory]
+      parameters:
+        - name: teamId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Team member summary or null
+          content:
+            application/json:
+              schema:
+                type: [object, "null"]
+                properties:
+                  id: { type: string }
+                  displayName: { type: string }
+                  role: { type: [string, "null"] }
+                  joinedAt: { type: [string, "null"] }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/sync/actor-directory:
+    get:
+      operationId: listActorDirectoryForSync
+      summary: Incremental sync — actor directory rows
+      tags: [Sync]
+      parameters:
+        - name: teamId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Actor directory rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/sync/ideas:
+    get:
+      operationId: listIdeasForSync
+      summary: Incremental sync — ideas rows
+      tags: [Sync]
+      parameters:
+        - name: teamId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Idea rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/sync/session-participants:
+    get:
+      operationId: listSessionParticipantsForSync
+      summary: Incremental sync — session participants
+      tags: [Sync]
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Session participant rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/actors/by-ids:
+    post:
+      operationId: listActorDirectoryByIds
+      summary: Look up actor directory entries by id list
+      tags: [Actors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorIds]
+              properties:
+                actorIds:
+                  type: array
+                  items: { type: string }
+                teamId:
+                  type: [string, "null"]
+      responses:
+        "200":
+          description: Matching actor directory entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/actors/access/{accessId}:
+    delete:
+      operationId: removeAgentAccessById
+      summary: Remove an agent_member_access row by id
+      tags: [Actors]
+      parameters:
+        - name: accessId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/actors/{actorId}:
+    delete:
+      operationId: removeTeamActorScoped
+      summary: Remove team actor (teamId + actorId path)
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - name: actorId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/workspace-git-config:
+    get:
+      operationId: loadTeamWorkspaceGitConfig
+      summary: Load team workspace git/AI gateway config
+      tags: [Workspaces]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Config row or null
+          content:
+            application/json:
+              schema:
+                type: [object, "null"]
+                properties:
+                  team_id: { type: string }
+                  workspace_path: { type: [string, "null"] }
+                  git_url: { type: [string, "null"] }
+                  git_branch: { type: [string, "null"] }
+                  git_token: { type: [string, "null"] }
+                  ai_gateway_endpoint: { type: [string, "null"] }
+                  enabled: { type: boolean }
+                  metadata: { type: [object, "null"] }
+                  updated_at: { type: [string, "null"] }
+    put:
+      operationId: saveTeamWorkspaceGitConfig
+      summary: Upsert team workspace git/AI gateway config
+      tags: [Workspaces]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspace_path: { type: [string, "null"] }
+                git_url: { type: [string, "null"] }
+                git_branch: { type: [string, "null"] }
+                git_token: { type: [string, "null"] }
+                ai_gateway_endpoint: { type: [string, "null"] }
+                enabled: { type: boolean }
+                metadata: { type: [object, "null"] }
+      responses:
+        "204":
+          description: Saved
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/auth/signin-anonymous:
+    post:
+      operationId: signInAnonymous
+      summary: Proxy to Supabase GoTrue anonymous signup
+      tags: [Auth]
+      security: []
+      responses:
+        "200":
+          description: GoTrue session payload
+          content:
+            application/json:
+              schema: { type: object }
+        "422":
+          $ref: "#/components/responses/Error"
+  /v1/auth/signin-otp:
+    post:
+      operationId: signInOtp
+      summary: Proxy to Supabase GoTrue /auth/v1/otp (magic link)
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                options: { type: object }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+  /v1/auth/verify-otp:
+    post:
+      operationId: verifyOtp
+      summary: Proxy to Supabase GoTrue /auth/v1/verify
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, token]
+              properties:
+                email: { type: string, format: email }
+                token: { type: string }
+                type: { type: string, default: email }
+      responses:
+        "200":
+          description: GoTrue session payload
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/auth/signout:
+    post:
+      operationId: signOut
+      summary: Proxy to Supabase GoTrue /auth/v1/logout
+      tags: [Auth]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/auth/user:
+    patch:
+      operationId: updateAuthUser
+      summary: Proxy to Supabase GoTrue PUT /auth/v1/user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:

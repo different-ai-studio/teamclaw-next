@@ -846,7 +846,118 @@ export function createSupabaseAuthRepository(options) {
         expiresAt: requiredInteger(body.expires_at, "auth.refreshAccessToken", "expires_at"),
       };
     },
+
+    async signInAnonymous() {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/signup",
+        body: { data: {} },
+        operation: "auth.signInAnonymous",
+      });
+    },
+
+    async signInOtp({ email, options }) {
+      const body = { email };
+      if (options && typeof options === "object") {
+        Object.assign(body, options);
+      }
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/otp",
+        body,
+        operation: "auth.signInOtp",
+      });
+    },
+
+    async verifyOtp({ email, token, type = "email" }) {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/verify",
+        body: { email, token, type },
+        operation: "auth.verifyOtp",
+      });
+    },
+
+    async signOut({ accessToken }) {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/logout",
+        bearerToken: accessToken,
+        body: null,
+        operation: "auth.signOut",
+      });
+    },
+
+    async updateUser({ accessToken, body }) {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "PUT",
+        path: "/auth/v1/user",
+        bearerToken: accessToken,
+        body: body ?? {},
+        operation: "auth.updateUser",
+      });
+    },
   };
+}
+
+async function goTrueRequest({
+  fetchImpl,
+  supabaseUrl,
+  apiKey,
+  method,
+  path,
+  body,
+  bearerToken,
+  operation,
+}) {
+  const headers = {
+    "Content-Type": "application/json",
+    apikey: apiKey,
+  };
+  if (bearerToken) {
+    headers.Authorization = `Bearer ${bearerToken}`;
+  }
+  const init = { method, headers };
+  if (body !== undefined && body !== null) {
+    init.body = JSON.stringify(body);
+  } else if (method !== "GET" && method !== "HEAD") {
+    init.body = "{}";
+  }
+  const res = await fetchImpl(`${supabaseUrl}${path}`, init);
+
+  // Logout returns 204 No Content on success.
+  const text = await res.text();
+  let parsed = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text };
+    }
+  }
+
+  if (!res.ok) {
+    const message = parsed?.msg || parsed?.message || parsed?.error_description || parsed?.error || text || `GoTrue ${path} failed`;
+    const code = res.status === 401 ? "missing_auth" : res.status === 422 ? "validation_failed" : "upstream_unavailable";
+    throw new ApiError(res.status, code, `${operation}: ${message}`, { details: parsed });
+  }
+
+  return parsed ?? {};
 }
 
 function outgoingMessageRow(sessionId, input) {
