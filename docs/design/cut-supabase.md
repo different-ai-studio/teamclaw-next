@@ -99,17 +99,27 @@ CLAUDE.md 已声明 `cloud_api` 是 canonical backend，`supabase` kind "depreca
 
 通用依赖（reqwest/jsonwebtoken/base64/aes-gcm/hkdf/sha2/hex/url）都仍被 cloud_api 用，无 supabase 专属 crate，**Cargo.toml 不动**。
 
-## 5. MQTT JWT 链路验证（必须做的一项现网核查）
+## 5. MQTT JWT 链路验证（现网核查 — 已完成 ✅）
 
-设计假设：FC `/v1/auth/refresh` 返回的 access_token 已是 EMQX broker 接受的 JWT，包含正确的 ACL claim（`amux/{team}/device/{actor_id}/...`）。
+核查时间：2026-05-28，对生产 FC (`https://cloud.ucar.cc`) + 生产 broker (`mqtt://ai.ucar.cc:1883`)。
 
-需在动手 Step 1 前做一次端到端验证：
+| 检查项 | 结果 |
+|---|---|
+| `POST /v1/auth/refresh` 返回 access_token + expiresAt + 新 refreshToken | ✅ 注意请求体字段名是 camelCase `refreshToken`，不是 snake_case `refresh_token` |
+| JWT payload 含 `team_id` / `actor_id` / EMQX ACL claim | ✅ 13 条 `amux/{team}/device/{actor_id}/...` allow 规则 + 兜底 `#` deny |
+| 用 `actor_id` 作 username、JWT 作 password 连接 broker | ✅ CONNACK (0) |
+| SUBSCRIBE 允许的 topic | ✅ SUBACK code 0 |
+| SUBSCRIBE 不允许的 topic（如别的 team） | ✅ SUBACK code 0x80（拒绝） |
 
-1. 用一个测试团队的 cloud_api refresh_token 调 `/v1/auth/refresh` 拿 access_token
-2. 解码 JWT payload，确认 claim 中包含 `team_id` / `actor_id` 以及 EMQX ACL rule
-3. 用该 token 作为 MQTT password 连接生产 broker，订阅 `amux/{team}/device/{actor_id}/test`，确认 CONNACK 成功
+**意外发现 — 不阻塞但需记录**：
 
-若任一步失败 → 本设计阻塞，需要 FC 侧调整 access_token 的 claim 模板。**这是迁移的唯一外部依赖项。**
+返回的 JWT `iss` 仍然是 `https://srhaytajyfrniuvnkfpd.supabase.co/auth/v1`。FC `/v1/auth/refresh` 在内部把请求代理给 Supabase auth 签 token，不是 FC 自签。
+
+含义：
+
+- **不影响本设计目标**。daemon 只跟 FC 通信，看不到 Supabase 端点。"daemon 切断 Supabase 直连"这件事可以推进。
+- 但 "FC 内部彻底脱离 Supabase auth" 是另一个独立项目，不在本设计范围。
+- daemon 代码里如果有任何地方校验 token `iss` / `aud` 字段（比如 PSK / JWT 验证逻辑），需要保留对 Supabase 风格 claim 的兼容。Step 1 重写时顺手 grep 一遍 `iss\|aud\|supabase\\.co` 确认。
 
 ## 6. 现网用户过渡策略
 
