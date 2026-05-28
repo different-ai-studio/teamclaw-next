@@ -337,6 +337,29 @@ impl FcClient {
         Ok(resp.mode)
     }
 
+    /// Generic POST helper for ad-hoc endpoints (e.g. team_share enable flow).
+    /// Returns the raw JSON value on 2xx; surfaces FC error envelope on non-2xx.
+    pub async fn post_json(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, SyncError> {
+        self.post(path, body).await
+    }
+
+    /// Generic GET helper. Returns raw JSON value on 2xx.
+    pub async fn get_json(&self, path: &str) -> Result<Value, SyncError> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.jwt))
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+        map_fc_response(resp).await
+    }
+
     /// Internal POST helper with JWT injection and error mapping.
     async fn post<T: serde::de::DeserializeOwned>(
         &self,

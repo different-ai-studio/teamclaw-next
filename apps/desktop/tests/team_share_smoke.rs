@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 //! Smoke test for `team_share::create_team` (Task 5).
 //!
 //! Verifies that the slim create command:
@@ -13,10 +14,37 @@
 //! and stores secrets) will exercise that path under its own harness.
 
 use serde_json::json;
+use teamclaw_lib::commands::team_secret_store;
 use teamclaw_lib::commands::team_share;
 use tempfile::TempDir;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// Redirect $HOME to a tempdir so the `local_secret_store` backing the
+/// `team_secret_store` writes inside isolation. Note: env vars are
+/// process-global, so the Task 6 tests below must not run in parallel with
+/// each other if they need disjoint home stores. Cargo runs each integration
+/// test binary on multiple threads by default; the Task 6 tests synchronize
+/// through a single Mutex guard (`HOME_GUARD`).
+#[allow(deprecated)]
+fn isolate_home(tmp: &TempDir) {
+    std::env::set_var("HOME", tmp.path());
+    // Prime the legacy disk-fallback env-blob with a non-empty map so
+    // `read_legacy_keychain_blob` returns Ok(Some(..)) instead of bubbling up
+    // the platform-keychain failure surface (Linux/macOS sandboxes without a
+    // default keychain). The personal secret store will migrate this into
+    // its own encrypted blob on first read.
+    let fallback_dir = tmp.path().join(".teamclaw");
+    std::fs::create_dir_all(&fallback_dir).expect("mkdir ~/.teamclaw");
+    std::fs::write(
+        fallback_dir.join("env-blob.json"),
+        r#"{"_test_isolation_marker":"1"}"#,
+    )
+    .expect("write disk fallback env-blob.json");
+}
+
+/// Serialize Task 6 tests that mutate $HOME / global env state.
+static HOME_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Construct a workspace dir + write `.teamclaw/teamclaw.json` pointing at
 /// the mock FC endpoint, with a fake supabase_jwt.
@@ -93,4 +121,148 @@ async fn create_team_slim_only_calls_v1_teams_and_returns_id_slug() {
     // Pre-seeded keys preserved.
     assert_eq!(obj.get("supabase_jwt").and_then(|v| v.as_str()), Some("test-jwt"));
     assert_eq!(obj.get("fc_endpoint").and_then(|v| v.as_str()), Some(server.uri().as_str()));
+}
+
+// ─── Task 6 tests ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn enable_oss_provisions_secret_and_local_dir() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/teams/t1/share-mode"))
+        .and(header("authorization", "Bearer test-jwt"))
+        .and(body_partial_json(json!({ "mode": "oss" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "t1",
+            "share_mode": "oss",
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, &server.uri());
+
+    let result =
+        team_share::enable::enable_oss_impl("t1".to_string(), workspace.clone())
+            .await
+            .expect("enable_oss should succeed");
+    assert_eq!(result.team_id, "t1");
+    assert_eq!(result.share_mode, "oss");
+
+    // Secret persisted (64 lowercase hex chars).
+    let secret = team_secret_store::load_team_secret(&workspace, "t1")
+        .expect("secret should be readable after enable_oss");
+    assert_eq!(secret.len(), 64, "team secret must be 64 hex chars");
+    assert!(
+        secret.chars().all(|c| c.is_ascii_hexdigit()),
+        "secret should be hex"
+    );
+
+    // `teamclaw-team/` dir created.
+    let team_repo_dir = std::path::Path::new(&workspace).join("teamclaw-team");
+    assert!(team_repo_dir.is_dir(), "teamclaw-team dir should exist");
+
+    // teamclaw.json updated.
+    let cfg = read_cfg(&workspace);
+    let obj = cfg.as_object().expect("config is object");
+    assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
+    assert_eq!(obj.get("share_mode").and_then(|v| v.as_str()), Some("oss"));
+}
+
+#[tokio::test]
+async fn set_team_secret_validates_and_stores() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, "http://unused");
+
+    // 63 chars → reject.
+    let too_short = "a".repeat(63);
+    let err = team_share::enable::set_team_secret_impl(
+        "team-sst".to_string(),
+        too_short,
+        workspace.clone(),
+    )
+    .expect_err("should reject non-64-char secret");
+    assert!(err.contains("64 hex"), "unexpected error: {err}");
+
+    // 64 hex chars (uppercase accepted) → normalized to lowercase.
+    let mixed_case = "ABCDEF0123456789".repeat(4);
+    team_share::enable::set_team_secret_impl(
+        "team-sst".to_string(),
+        mixed_case.clone(),
+        workspace.clone(),
+    )
+    .expect("should accept valid hex");
+    let loaded = team_secret_store::load_team_secret(&workspace, "team-sst")
+        .expect("secret should be readable");
+    assert_eq!(loaded, mixed_case.to_ascii_lowercase());
+}
+
+#[tokio::test]
+async fn enable_custom_git_writes_git_config() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/teams/t1/share-mode"))
+        .and(header("authorization", "Bearer test-jwt"))
+        .and(body_partial_json(json!({
+            "mode": "custom_git",
+            "gitConfig": {
+                "remoteUrl": "https://x",
+                "authKind": "ssh_key",
+                "credentialRef": "custom_git:t1",
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "t1",
+            "share_mode": "custom_git",
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, &server.uri());
+
+    let input = team_share::enable::GitEnableInput {
+        remote_url: "https://x".to_string(),
+        auth_kind: "ssh_key".to_string(),
+        credential: "PRIVATE KEY BODY".to_string(),
+        branch: None,
+    };
+    let result = team_share::enable::enable_custom_git_impl(
+        "t1".to_string(),
+        workspace.clone(),
+        input,
+    )
+    .await
+    .expect("enable_custom_git should succeed");
+    assert_eq!(result.share_mode, "custom_git");
+
+    let cfg = read_cfg(&workspace);
+    let obj = cfg.as_object().expect("config is object");
+    assert_eq!(obj.get("share_mode").and_then(|v| v.as_str()), Some("custom_git"));
+    assert_eq!(obj.get("git_remote_url").and_then(|v| v.as_str()), Some("https://x"));
+    assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
+}
+
+#[test]
+fn set_team_secret_rejects_non_hex() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, "http://unused");
+    // 64 chars but contains a non-hex char.
+    let mut bad = "a".repeat(63);
+    bad.push('z');
+    let err = team_share::enable::set_team_secret_impl(
+        "team-x".to_string(),
+        bad,
+        workspace,
+    )
+    .expect_err("non-hex should be rejected");
+    assert!(err.contains("64 hex"), "unexpected error: {err}");
 }
