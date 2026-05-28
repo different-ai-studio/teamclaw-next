@@ -14,7 +14,6 @@ mod pocketbase;
 mod proto;
 mod provider_config;
 mod runtime;
-mod supabase;
 mod team_shared_env;
 mod team_shared_git;
 mod teamclaw;
