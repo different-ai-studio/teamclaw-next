@@ -1,6 +1,4 @@
 import { requireString, optionalStringOrNull } from "../router.mjs";
-import { provisionTeamLiteLLM } from "../team-provisioning.mjs";
-import { ApiError } from "../http-utils.mjs";
 
 export function registerTeams(router) {
   router.get("/v1/teams", async (ctx) => {
@@ -8,40 +6,30 @@ export function registerTeams(router) {
     return { body: { items, nextCursor: null } };
   });
 
-  // POST /v1/teams — unified team creation:
-  //   1. Provision LiteLLM team + default key (skipped when LITELLM_MASTER_KEY
-  //      is unset). On LiteLLM failure: 502, no DB writes.
-  //   2. Call public.create_team RPC, which also seeds team_workspace_config
-  //      with the LiteLLM team id + AI gateway endpoint.
-  //   3. Return the team plus aiGatewayEndpoint + litellmKey so the OSS sync
-  //      client can store the key locally (shown once).
+  // POST /v1/teams — slim team creation (Task 3 of share-onboarding refactor).
+  //
+  // LiteLLM provisioning is now an explicit second step that the client
+  // triggers via POST /v1/teams/:teamId/litellm/setup. This route only writes
+  // the teams row + the bare team_workspace_config row (sync_mode=NULL,
+  // litellm_team_id=NULL). The response still includes aiGatewayEndpoint and
+  // litellmKey as null fields for back-compat with the Rust client
+  // (`Option<String>` — see apps/desktop/src/commands/oss_sync/fc_client.rs).
   router.post("/v1/teams", async (ctx) => {
     const body = ctx.json;
     requireString(body.name, "name");
 
-    let provisioning;
-    try {
-      provisioning = await provisionTeamLiteLLM(body.name);
-    } catch (err) {
-      throw new ApiError(
-        502,
-        "litellm_provisioning_failed",
-        `LiteLLM provisioning failed: ${err.message}`,
-      );
-    }
-
     const team = await ctx.repository.createTeam({
       name: body.name,
       slug: optionalStringOrNull(body.slug, "slug"),
-      litellmTeamId: provisioning?.litellmTeamId ?? null,
-      aiGatewayEndpoint: provisioning?.aiGatewayEndpoint ?? null,
+      litellmTeamId: null,
+      aiGatewayEndpoint: null,
     });
 
     return {
       body: {
         ...team,
-        aiGatewayEndpoint: provisioning?.aiGatewayEndpoint ?? null,
-        litellmKey: provisioning?.litellmKey ?? null,
+        aiGatewayEndpoint: null,
+        litellmKey: null,
       },
     };
   });

@@ -257,11 +257,11 @@ test("repository Supabase errors are normalized", async () => {
   assert.equal(JSON.parse(response.body).error.code, "conflict");
 });
 
-test("GET /v1/teams/:teamId/workspace-config returns 404 when not set", async () => {
+test("GET /v1/teams/:teamId/workspace-defaults returns 404 when not set", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
-    path: "/v1/teams/team-1/workspace-config",
+    path: "/v1/teams/team-1/workspace-defaults",
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
 
@@ -270,7 +270,7 @@ test("GET /v1/teams/:teamId/workspace-config returns 404 when not set", async ()
   assert.deepEqual(repo.calls[0], { method: "getTeamWorkspaceConfig", teamId: "team-1" });
 });
 
-test("GET /v1/teams/:teamId/workspace-config returns config when set", async () => {
+test("GET /v1/teams/:teamId/workspace-defaults returns config when set", async () => {
   const repo = fakeRepo({
     teamWorkspaceConfigs: {
       "team-1": {
@@ -283,7 +283,7 @@ test("GET /v1/teams/:teamId/workspace-config returns config when set", async () 
   });
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
-    path: "/v1/teams/team-1/workspace-config",
+    path: "/v1/teams/team-1/workspace-defaults",
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
 
@@ -723,12 +723,14 @@ test("DELETE /v1/sessions/:sessionId/mute unmutes session", async () => {
   });
 });
 
-test("POST /v1/teams creates team without LiteLLM when env unset", async () => {
-  // No LITELLM_MASTER_KEY in test env → provisioning is skipped, the route
-  // still calls repo.createTeam (with null litellm fields) and returns the
-  // team with null aiGatewayEndpoint / litellmKey.
+test("POST /v1/teams creates team without LiteLLM (provisioning extracted)", async () => {
+  // Post Task 3 of the share-onboarding refactor: POST /v1/teams no longer
+  // provisions LiteLLM. The route just writes the teams row; the client must
+  // call POST /v1/teams/:id/litellm/setup explicitly to provision later.
+  // aiGatewayEndpoint + litellmKey are still in the response for back-compat
+  // with the Rust client (Option<String>) but are always null here.
   const prevMaster = process.env.LITELLM_MASTER_KEY;
-  delete process.env.LITELLM_MASTER_KEY;
+  process.env.LITELLM_MASTER_KEY = "would-have-provisioned-pre-refactor";
   try {
     const repo = fakeRepo();
     const response = await handleBusinessApiRequest({
@@ -749,7 +751,8 @@ test("POST /v1/teams creates team without LiteLLM when env unset", async () => {
       input: { name: "Acme", slug: null, litellmTeamId: null, aiGatewayEndpoint: null },
     });
   } finally {
-    if (prevMaster !== undefined) process.env.LITELLM_MASTER_KEY = prevMaster;
+    if (prevMaster === undefined) delete process.env.LITELLM_MASTER_KEY;
+    else process.env.LITELLM_MASTER_KEY = prevMaster;
   }
 });
 

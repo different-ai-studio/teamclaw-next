@@ -1680,6 +1680,11 @@ function App() {
         try {
           const claim = await claimInviteToken(token);
           await useCurrentTeamStore.getState().reloadAndSwitchTo(claim.teamId);
+          // TODO(Task 12): surface <JoinTeamFlow teamId={claim.teamId}
+          //   workspacePath={currentWorkspacePath} /> in an onboarding sheet
+          //   here so the joiner auto-pulls workspace config and enters the
+          //   team secret. Component lives at
+          //   packages/app/src/components/onboarding/JoinTeamFlow.tsx.
         } catch (err) {
           console.error('[invite] claim failed', err);
         }

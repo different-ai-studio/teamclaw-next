@@ -676,6 +676,95 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.ok(out, "result must be returned");
     assert.ok(Array.isArray(out.items), "items must be an array");
   });
+
+  test("repository contract: enableShareMode locks team to an oss share mode", async () => {
+    const repo = createRepository();
+    const out = await repo.enableShareMode("team-share-1", "oss", null);
+    assert.ok(out, "result must be returned");
+    assert.equal(out.id, "team-share-1");
+    assert.equal(out.shareMode, "oss");
+    assert.ok(out.shareEnabledAt, "shareEnabledAt must be set");
+  });
+
+  test("repository contract: enableShareMode accepts custom_git gitConfig", async () => {
+    const repo = createRepository();
+    const out = await repo.enableShareMode("team-share-2", "custom_git", {
+      remoteUrl: "git@example.com:team/repo.git",
+      authKind: "ssh_key",
+      credentialRef: "keychain://team-share-2/ssh",
+    });
+    assert.ok(out, "result must be returned");
+    assert.equal(out.shareMode, "custom_git");
+    assert.equal(out.gitRemoteUrl, "git@example.com:team/repo.git");
+    assert.equal(out.gitAuthKind, "ssh_key");
+  });
+
+  test("repository contract: enableShareMode rejects a second enable on the same team", async () => {
+    const repo = createRepository();
+    await repo.enableShareMode("team-share-3", "managed_git", null);
+    await assert.rejects(
+      () => repo.enableShareMode("team-share-3", "oss", null),
+      (error) => /share_mode|locked|already/i.test(error?.message ?? ""),
+    );
+  });
+
+  test("repository contract: getShareMode returns null mode for fresh team", async () => {
+    const repo = createRepository();
+    const out = await repo.getShareMode("team-share-fresh");
+    assert.ok(out, "result must be returned");
+    assert.equal(out.mode, null);
+    assert.equal(out.enabledAt, null);
+    assert.equal(out.gitRemoteUrl, null);
+    assert.equal(out.gitAuthKind, null);
+  });
+
+  test("repository contract: getShareMode reflects a previously enabled share mode", async () => {
+    const repo = createRepository();
+    await repo.enableShareMode("team-share-4", "managed_git", null);
+    const out = await repo.getShareMode("team-share-4");
+    assert.equal(out.mode, "managed_git");
+    assert.ok(out.enabledAt, "enabledAt must be set once mode is enabled");
+  });
+
+  test("repository contract: setupLiteLlm returns gateway endpoint and key", async () => {
+    const repo = createRepository();
+    const out = await repo.setupLiteLlm("team-share-1");
+    assert.ok(out, "result must be returned");
+    assert.equal(typeof out.aiGatewayEndpoint, "string");
+    assert.ok(out.aiGatewayEndpoint.length > 0, "aiGatewayEndpoint must be non-empty");
+    assert.equal(typeof out.litellmKey, "string");
+    assert.ok(out.litellmKey.length > 0, "litellmKey must be non-empty");
+  });
+
+  test("repository contract: getWorkspaceConfig merges share + workspace fields", async () => {
+    const repo = createRepository();
+    await repo.enableShareMode("team-share-5", "custom_git", {
+      remoteUrl: "https://example.com/team/repo.git",
+      authKind: "https_token",
+      credentialRef: "keychain://team-share-5/token",
+    });
+    const out = await repo.getWorkspaceConfig("team-share-5");
+    assert.ok(out, "result must be returned");
+    assert.deepEqual(Object.keys(out).sort(), [
+      "gitAuthKind",
+      "gitRemoteUrl",
+      "litellmTeamId",
+      "shareMode",
+      "syncMode",
+    ].sort());
+    assert.equal(out.shareMode, "custom_git");
+    assert.equal(out.gitRemoteUrl, "https://example.com/team/repo.git");
+    assert.equal(out.gitAuthKind, "https_token");
+  });
+
+  test("repository contract: getWorkspaceConfig returns null share for fresh team", async () => {
+    const repo = createRepository();
+    const out = await repo.getWorkspaceConfig("team-share-fresh-2");
+    assert.ok(out, "result must be returned");
+    assert.equal(out.shareMode, null);
+    assert.equal(out.gitRemoteUrl, null);
+    assert.equal(out.gitAuthKind, null);
+  });
 }
 
 export function runAuthRepositoryContract({ test, assert, createAuthRepository }) {

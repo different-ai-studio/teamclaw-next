@@ -46,10 +46,6 @@ export interface OssSyncState {
 
   refresh(workspacePath: string): Promise<void>
   syncNow(workspacePath: string): Promise<void>
-  createTeam(
-    name: string,
-    workspacePath: string,
-  ): Promise<{ teamSecret: string; teamId: string }>
   listVersions(workspacePath: string, path: string): Promise<VersionInfo[]>
   restoreVersion(
     workspacePath: string,
@@ -79,14 +75,6 @@ interface SyncNowResult {
   pulled: number
   pushed: number
   conflicts: number
-}
-
-interface CreateTeamResult {
-  teamId: string
-  teamSlug: string
-  aiGatewayEndpoint: string
-  litellmKey: string
-  teamSecret: string
 }
 
 // ---------------------------------------------------------------------------
@@ -128,15 +116,6 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
     } finally {
       set({ syncing: false })
     }
-  },
-
-  async createTeam(name: string, workspacePath: string) {
-    const r = await invoke<CreateTeamResult>('oss_sync_create_team', {
-      name,
-      workspacePath,
-    })
-    set({ teamId: r.teamId })
-    return { teamSecret: r.teamSecret, teamId: r.teamId }
   },
 
   async listVersions(workspacePath: string, path: string) {

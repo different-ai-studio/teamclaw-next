@@ -906,16 +906,22 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
-  /v1/teams/{teamId}/workspace-config:
+  /v1/teams/{teamId}/workspace-defaults:
     get:
-      operationId: getTeamWorkspaceConfig
-      summary: Get team workspace config
+      operationId: getTeamWorkspaceDefaults
+      summary: Get team workspace defaults (legacy default + pinned workspace list)
+      description: |
+        Returns the legacy team workspace defaults shape:
+        `{ defaultWorkspaceId, pinnedWorkspaceIds, updatedAt }`.
+        Distinct from `GET /v1/teams/{teamId}/workspace-config`, which returns
+        the merged share-mode + litellm shape introduced in the team-share
+        onboarding refactor.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamId"
       responses:
         "200":
-          description: Team workspace config.
+          description: Team workspace defaults.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
@@ -925,9 +931,40 @@ paths:
                 $ref: "#/components/schemas/TeamWorkspaceConfig"
         "404":
           $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/workspace-config:
+    get:
+      operationId: getTeamWorkspaceConfig
+      summary: Get merged team workspace config (share mode + litellm)
+      description: |
+        Returns the merged team workspace config introduced in the team-share
+        onboarding refactor: share mode, git remote/auth (when applicable),
+        sync mode, and the provisioned LiteLLM team id. The legacy default
+        workspace shape now lives at `GET /v1/teams/{teamId}/workspace-defaults`.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Merged team workspace config.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergedWorkspaceConfig"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
     put:
       operationId: putTeamWorkspaceConfig
-      summary: Put team workspace config
+      summary: Put team workspace config (legacy defaults shape)
+      description: |
+        Upserts the legacy team workspace defaults shape
+        (`defaultWorkspaceId`, `pinnedWorkspaceIds`). Does not modify
+        share-mode or litellm fields — those are managed via the
+        `/share-mode` and `/litellm/setup` endpoints.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamId"
@@ -948,6 +985,94 @@ paths:
               schema:
                 $ref: "#/components/schemas/TeamWorkspaceConfig"
         "400":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/share-mode:
+    post:
+      operationId: enableTeamShareMode
+      summary: Enable team share mode (one-shot lock)
+      description: |
+        Atomically locks the team's share mode to one of `oss`, `managed_git`,
+        or `custom_git`. Once locked, the mode cannot be changed — a second
+        call returns 409 `share_mode_locked`. For `managed_git` and
+        `custom_git`, a `gitConfig.remoteUrl` is required. For `custom_git`,
+        the caller must also supply `gitConfig.authKind` and
+        `gitConfig.credentialRef`.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnableShareModeRequest"
+      responses:
+        "200":
+          description: Team after share mode is enabled.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: getTeamShareMode
+      summary: Get team share mode status
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Current team share status. `mode` is null when share has not been opened.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareStatus"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/litellm/setup:
+    post:
+      operationId: setupTeamLiteLlm
+      summary: Provision LiteLLM team for AI gateway
+      description: |
+        Provisions a LiteLLM team for the given TeamClaw team and persists
+        the resulting `litellm_team_id` and `ai_gateway_endpoint` on the team
+        workspace config. Returns the `aiGatewayEndpoint` and the freshly
+        minted `litellmKey` (the caller is responsible for storing the key
+        securely on the device). Returns 503 `litellm_unavailable` when the
+        FC environment is not configured to talk to LiteLLM.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: LiteLLM provisioning result.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiteLlmSetupResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
           $ref: "#/components/responses/Error"
   /v1/teams/{teamId}/actors:
     get:
@@ -2948,6 +3073,90 @@ components:
           type:
             - string
             - "null"
+    TeamShareMode:
+      type: string
+      enum: [oss, managed_git, custom_git]
+      description: |
+        Team share mode. `oss` uses Alibaba OSS / WebDAV; `managed_git` uses a
+        TeamClaw-provisioned git remote; `custom_git` uses a caller-supplied
+        git remote with explicit credential metadata.
+    EnableShareModeRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          $ref: "#/components/schemas/TeamShareMode"
+        gitConfig:
+          type: object
+          description: |
+            Required when `mode` is `managed_git` or `custom_git`. For
+            `custom_git`, `authKind` and `credentialRef` are also required.
+            `credentialRef` references a device-local secret entry; the FC
+            never sees the raw credential material.
+          required: [remoteUrl]
+          properties:
+            remoteUrl:
+              type: string
+            authKind:
+              type: string
+              enum: [ssh_key, https_token]
+            credentialRef:
+              type: string
+    ShareStatus:
+      type: object
+      required: [mode, enabledAt, gitRemoteUrl, gitAuthKind]
+      properties:
+        mode:
+          oneOf:
+            - $ref: "#/components/schemas/TeamShareMode"
+            - type: "null"
+        enabledAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        gitRemoteUrl:
+          type:
+            - string
+            - "null"
+        gitAuthKind:
+          type:
+            - string
+            - "null"
+          enum: [ssh_key, https_token, null]
+    MergedWorkspaceConfig:
+      type: object
+      required: [shareMode, gitRemoteUrl, gitAuthKind, syncMode, litellmTeamId]
+      properties:
+        shareMode:
+          oneOf:
+            - $ref: "#/components/schemas/TeamShareMode"
+            - type: "null"
+        gitRemoteUrl:
+          type:
+            - string
+            - "null"
+        gitAuthKind:
+          type:
+            - string
+            - "null"
+          enum: [ssh_key, https_token, null]
+        syncMode:
+          type:
+            - string
+            - "null"
+        litellmTeamId:
+          type:
+            - string
+            - "null"
+    LiteLlmSetupResponse:
+      type: object
+      required: [aiGatewayEndpoint, litellmKey]
+      properties:
+        aiGatewayEndpoint:
+          type: string
+        litellmKey:
+          type: string
     Workspace:
       type: object
       required: [id, teamId, name, archived, createdAt, updatedAt]

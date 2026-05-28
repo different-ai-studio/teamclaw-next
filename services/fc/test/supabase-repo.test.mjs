@@ -224,14 +224,208 @@ test("createSupabaseAuthRepository refreshAccessToken throws on auth failure", a
   );
 });
 
-function createRepo(supabase) {
+function createRepo(supabase, extra = {}) {
   return createSupabaseBusinessRepository({
     supabaseUrl: "https://example.supabase.co",
     publishableKey: "publishable-key",
     accessToken: "caller-token",
     createClient: () => supabase,
+    ...extra,
   });
 }
+
+test("enableShareMode oss calls enable_team_share rpc with null git fields", async () => {
+  const rpcCalls = [];
+  const repo = createRepo(fakeSupabase({
+    rpcCalls,
+    rpcData: {
+      enable_team_share: [{
+        id: "team-1",
+        name: "Acme",
+        slug: "acme",
+        created_at: "2026-05-28T00:00:00Z",
+        share_mode: "oss",
+        share_enabled_at: "2026-05-28T01:00:00Z",
+        git_remote_url: null,
+        git_auth_kind: null,
+      }],
+    },
+  }));
+
+  const result = await repo.enableShareMode("team-1", "oss", null);
+
+  assert.deepEqual(rpcCalls[0], {
+    name: "enable_team_share",
+    args: {
+      p_team_id: "team-1",
+      p_mode: "oss",
+      p_git_remote_url: null,
+      p_git_auth_kind: null,
+      p_git_credential_ref: null,
+    },
+  });
+  assert.equal(result.id, "team-1");
+  assert.equal(result.shareMode, "oss");
+  assert.equal(result.shareEnabledAt, "2026-05-28T01:00:00Z");
+  assert.equal(result.gitRemoteUrl, null);
+});
+
+test("enableShareMode custom_git passes through git config", async () => {
+  const rpcCalls = [];
+  const repo = createRepo(fakeSupabase({
+    rpcCalls,
+    rpcData: {
+      enable_team_share: [{
+        id: "team-2",
+        name: "Beta",
+        slug: "beta",
+        created_at: "2026-05-28T00:00:00Z",
+        share_mode: "custom_git",
+        share_enabled_at: "2026-05-28T01:00:00Z",
+        git_remote_url: "git@example.com:beta/repo.git",
+        git_auth_kind: "ssh_key",
+      }],
+    },
+  }));
+
+  const result = await repo.enableShareMode("team-2", "custom_git", {
+    remoteUrl: "git@example.com:beta/repo.git",
+    authKind: "ssh_key",
+    credentialRef: "keychain://team-2/ssh",
+  });
+
+  assert.deepEqual(rpcCalls[0].args, {
+    p_team_id: "team-2",
+    p_mode: "custom_git",
+    p_git_remote_url: "git@example.com:beta/repo.git",
+    p_git_auth_kind: "ssh_key",
+    p_git_credential_ref: "keychain://team-2/ssh",
+  });
+  assert.equal(result.shareMode, "custom_git");
+  assert.equal(result.gitRemoteUrl, "git@example.com:beta/repo.git");
+  assert.equal(result.gitAuthKind, "ssh_key");
+});
+
+test("getShareMode returns nulls when team row absent", async () => {
+  const repo = createRepo(fakeSupabase({ tableData: { teams: [] } }));
+  const result = await repo.getShareMode("team-missing");
+  assert.deepEqual(result, {
+    mode: null,
+    enabledAt: null,
+    gitRemoteUrl: null,
+    gitAuthKind: null,
+  });
+});
+
+test("getShareMode maps team columns to camelCase", async () => {
+  const repo = createRepo(fakeSupabase({
+    tableData: {
+      teams: [{
+        share_mode: "managed_git",
+        share_enabled_at: "2026-05-28T03:00:00Z",
+        git_remote_url: "https://git.example.com/repo.git",
+        git_auth_kind: "https_token",
+      }],
+    },
+  }));
+  const result = await repo.getShareMode("team-3");
+  assert.deepEqual(result, {
+    mode: "managed_git",
+    enabledAt: "2026-05-28T03:00:00Z",
+    gitRemoteUrl: "https://git.example.com/repo.git",
+    gitAuthKind: "https_token",
+  });
+});
+
+test("setupLiteLlm persists via update_team_litellm RPC", async () => {
+  const rpcCalls = [];
+  let provisionCalls = 0;
+  const repo = createRepo(
+    fakeSupabase({
+      rpcCalls,
+      tableData: {
+        teams: [{ id: "team-4", name: "Gamma" }],
+      },
+    }),
+    {
+      provisionLiteLlm: async (name) => {
+        provisionCalls++;
+        assert.equal(name, "Gamma");
+        return {
+          litellmTeamId: "litellm-team-xyz",
+          litellmKey: "sk-litellm-xyz",
+          aiGatewayEndpoint: "https://ai.example.com/v1",
+        };
+      },
+    },
+  );
+
+  const result = await repo.setupLiteLlm("team-4");
+
+  assert.equal(provisionCalls, 1);
+  assert.deepEqual(result, {
+    aiGatewayEndpoint: "https://ai.example.com/v1",
+    litellmKey: "sk-litellm-xyz",
+  });
+  const rpc = rpcCalls.find((c) => c.name === "update_team_litellm");
+  assert.ok(rpc, "expected update_team_litellm RPC call");
+  assert.deepEqual(rpc.args, {
+    p_team_id: "team-4",
+    p_litellm_team_id: "litellm-team-xyz",
+    p_ai_gateway_endpoint: "https://ai.example.com/v1",
+  });
+});
+
+test("setupLiteLlm throws 503 when provisioner returns null", async () => {
+  const repo = createRepo(
+    fakeSupabase({ tableData: { teams: [{ id: "team-5", name: "Delta" }] } }),
+    { provisionLiteLlm: async () => null },
+  );
+  await assert.rejects(
+    () => repo.setupLiteLlm("team-5"),
+    (err) => err.code === "litellm_unavailable",
+  );
+});
+
+test("getWorkspaceConfig merges teams + team_workspace_config rows", async () => {
+  const repo = createRepo(fakeSupabase({
+    tableData: {
+      teams: [{
+        share_mode: "custom_git",
+        git_remote_url: "https://example.com/repo.git",
+        git_auth_kind: "https_token",
+      }],
+      team_workspace_config: [{
+        sync_mode: "git",
+        litellm_team_id: "litellm-team-zzz",
+      }],
+    },
+  }));
+
+  const result = await repo.getWorkspaceConfig("team-6");
+
+  assert.deepEqual(result, {
+    shareMode: "custom_git",
+    gitRemoteUrl: "https://example.com/repo.git",
+    gitAuthKind: "https_token",
+    syncMode: "git",
+    litellmTeamId: "litellm-team-zzz",
+  });
+});
+
+test("getWorkspaceConfig returns nulls when both rows absent", async () => {
+  const repo = createRepo(fakeSupabase({
+    tableData: { teams: [], team_workspace_config: [] },
+  }));
+  const result = await repo.getWorkspaceConfig("team-7");
+  assert.deepEqual(result, {
+    shareMode: null,
+    gitRemoteUrl: null,
+    gitAuthKind: null,
+    syncMode: null,
+    litellmTeamId: null,
+  });
+});
 
 function fakeSupabase({
   rpcCalls = [],
@@ -291,6 +485,10 @@ function createSelectableQuery(table, calls, data, error) {
     },
     single() {
       calls.push({ table, op: "single" });
+      return Promise.resolve({ data: data[0] ?? null, error });
+    },
+    maybeSingle() {
+      calls.push({ table, op: "maybeSingle" });
       return Promise.resolve({ data: data[0] ?? null, error });
     },
     then(resolve, reject) {

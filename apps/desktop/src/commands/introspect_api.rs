@@ -99,6 +99,9 @@ pub async fn start_introspect_api(app: AppHandle) -> anyhow::Result<()> {
                 ("POST", "/env-var-set") => handle_env_var_set(&app_clone, body_bytes).await,
                 ("POST", "/env-var-delete") => handle_env_var_delete(&app_clone, body_bytes).await,
                 ("POST", "/channel-set") => handle_channel_set(&app_clone, body_bytes).await,
+                ("POST", "/git-credential-get") => {
+                    handle_git_credential_get(&app_clone, body_bytes).await
+                }
                 _ => Err(format!("Not found: {} {}", method, path)),
             };
 
@@ -536,6 +539,39 @@ async fn handle_channel_set(app: &AppHandle, body: &[u8]) -> Result<String, Stri
     super::env_vars::write_teamclaw_json(&workspace, &json)?;
 
     Ok(format!(r#"{{"ok":true,"channel":"{}"}}"#, channel))
+}
+
+/// Fetch a stored Git credential by ref. Body: `{"workspace_path": "...", "credential_ref": "..."}`.
+/// Returns `{"ok":true,"authKind":"...","credential":"..."}`. Used by the
+/// `teamclaw-askpass` shell helper (via `teamclaw-introspect get-credential`)
+/// to provide credentials to `git clone` over HTTPS.
+//
+// TODO(security): /git-credential-get returns plaintext credentials over an
+// unauthenticated 127.0.0.1 socket. Any local process can call this and exfiltrate
+// HTTPS tokens or SSH key paths. Follow-up: introduce a per-launch shared secret
+// (file-mode 0600 under ~/.teamclaw/) that the introspect sidecar and askpass
+// helper both read, and require it as an X-Teamclaw-Token header.
+async fn handle_git_credential_get(_app: &AppHandle, body: &[u8]) -> Result<String, String> {
+    let v: serde_json::Value =
+        serde_json::from_slice(body).map_err(|e| format!("JSON parse error: {}", e))?;
+    let workspace_path = v
+        .get("workspace_path")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing field: workspace_path")?;
+    let credential_ref = v
+        .get("credential_ref")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing field: credential_ref")?;
+
+    let (auth_kind, credential) =
+        super::team_share::custom_git::load_credential(workspace_path, credential_ref)?;
+
+    let payload = serde_json::json!({
+        "ok": true,
+        "authKind": auth_kind,
+        "credential": credential,
+    });
+    serde_json::to_string(&payload).map_err(|e| format!("Serialization error: {e}"))
 }
 
 /// Find the position of `\r\n\r\n` in `data`, returning the index of the first `\r`.

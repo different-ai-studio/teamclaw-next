@@ -27,14 +27,14 @@ use tauri::AppHandle;
 
 use crate::commands::{shared_secrets_crypto::derive_key, team_secret_store};
 use engine::TickResult;
-use fc_client::{CreateTeamResult as FcCreateTeamResult, FcClient, VersionInfo};
+use fc_client::{FcClient, VersionInfo};
 use state::LocalSyncState;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, String), String> {
+pub(crate) fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, String), String> {
     // Read teamclaw.json to get fc_endpoint (falls back to default production URL).
     let config_path = std::path::Path::new(workspace_path)
         .join(crate::commands::TEAMCLAW_DIR)
@@ -104,55 +104,9 @@ pub async fn oss_sync_set_jwt(workspace_path: String, jwt: String) -> Result<(),
     .map_err(|e| format!("write teamclaw.json: {e}"))
 }
 
-fn write_oss_team_config(
-    workspace_path: &str,
-    team_id: &str,
-    team_slug: &str,
-    ai_gateway_endpoint: &str,
-    litellm_key: &str,
-) -> Result<(), String> {
-    let config_path = std::path::Path::new(workspace_path)
-        .join(crate::commands::TEAMCLAW_DIR)
-        .join(crate::commands::CONFIG_FILE_NAME);
-
-    let mut json: serde_json::Value = std::fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    json["team_mode"] = serde_json::Value::String("oss".to_string());
-    json["oss_team_id"] = serde_json::Value::String(team_id.to_string());
-    json["oss_team_slug"] = serde_json::Value::String(team_slug.to_string());
-    json["ai_gateway_endpoint"] =
-        serde_json::Value::String(ai_gateway_endpoint.to_string());
-    json["litellm_key"] = serde_json::Value::String(litellm_key.to_string());
-
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create config dir: {e}"))?;
-    }
-    std::fs::write(
-        &config_path,
-        serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("write teamclaw.json: {e}"))
-}
-
 // ---------------------------------------------------------------------------
 // Result types for Tauri commands
 // ---------------------------------------------------------------------------
-
-/// Returned by oss_sync_create_team — includes the team secret the user must share.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateTeamCommandResult {
-    pub team_id: String,
-    pub team_slug: String,
-    pub ai_gateway_endpoint: String,
-    pub litellm_key: String,
-    /// The raw 64-hex team_secret. Show to user ONCE; share with new members.
-    pub team_secret: String,
-}
 
 /// Current sync status for the workspace.
 #[derive(Debug, Serialize, Deserialize)]
@@ -179,77 +133,9 @@ pub enum ConflictChoice {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Create a new OSS sync team.
-///
-/// Flow:
-///   1. Generate 32 random bytes → hex team_secret.
-///   2. Save secret temporarily under key "PENDING".
-///   3. Call FC /sync/create-team.
-///   4. Rename keychain entry to real teamId.
-///   5. Write local team config (sync_mode=oss, teamId, etc.).
-///   6. Return CreateTeamCommandResult (includes team_secret for sharing).
-///
-/// TODO(join): joining an existing OSS team (user inputs team_secret) is out
-/// of scope for Tranche 2 — implement in frontend Tranche 3 when the join UI
-/// is designed.
-#[tauri::command]
-pub async fn oss_sync_create_team(
-    name: String,
-    workspace_path: String,
-    _app: AppHandle,
-) -> Result<CreateTeamCommandResult, String> {
-    // 1. Generate random team_secret (32 bytes → 64 hex).
-    let mut raw = [0u8; 32];
-    getrandom::getrandom(&mut raw).map_err(|e| format!("getrandom: {e}"))?;
-    let team_secret = hex::encode(raw);
-
-    // 2. Save temporarily under "PENDING".
-    team_secret_store::save_team_secret(&workspace_path, "PENDING", &team_secret)?;
-
-    // Derive key to validate it works (fail early before calling FC).
-    let _key = derive_key(&team_secret)?;
-
-    // 3. Get JWT and call FC.
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
-    let result: FcCreateTeamResult = fc
-        .create_team(&name, None)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // 4. Rename keychain entry to real teamId.
-    team_secret_store::save_team_secret(&workspace_path, &result.team_id, &team_secret)?;
-    let _ = team_secret_store::delete_team_secret(&workspace_path, "PENDING");
-
-    // 5. Write local config.
-    // ai_gateway_endpoint / litellm_key are nullable in /v1/teams response
-    // (skipped when LITELLM_MASTER_KEY is unset on the FC side). Fall back to
-    // empty strings so the local config file is well-formed in dev.
-    let ai_gateway_endpoint = result.ai_gateway_endpoint.unwrap_or_default();
-    let litellm_key = result.litellm_key.unwrap_or_default();
-    write_oss_team_config(
-        &workspace_path,
-        &result.team_id,
-        &result.team_slug,
-        &ai_gateway_endpoint,
-        &litellm_key,
-    )?;
-
-    Ok(CreateTeamCommandResult {
-        team_id: result.team_id,
-        team_slug: result.team_slug,
-        ai_gateway_endpoint,
-        litellm_key,
-        team_secret,
-    })
-}
-
 /// Run a full OSS sync tick (pull + push).
 #[tauri::command]
-pub async fn oss_sync_now(
-    workspace_path: String,
-    _app: AppHandle,
-) -> Result<TickResult, String> {
+pub async fn oss_sync_now(workspace_path: String, _app: AppHandle) -> Result<TickResult, String> {
     let team_id = get_team_id(&workspace_path)?;
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
@@ -267,7 +153,7 @@ pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, Strin
     let dirty_count = state.files.values().filter(|f| f.dirty).count();
     let total_files = state.files.len();
     Ok(SyncStatus {
-        team_id: team_id,
+        team_id,
         last_server_seq: state.last_server_seq,
         last_sync_at: state.last_sync_at.clone(),
         dirty_count,
@@ -316,8 +202,8 @@ pub async fn oss_sync_restore_version(
         .get_blob(&dl.download_url, &content_hash)
         .await
         .map_err(|e| e.to_string())?;
-    let plaintext = crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key)
-        .map_err(|e| e.to_string())?;
+    let plaintext =
+        crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key).map_err(|e| e.to_string())?;
     let plain_hash = crate::commands::oss_sync::crypto::sha256_hex(&plaintext);
 
     let abs_path = std::path::Path::new(&workspace_path).join(&path);
@@ -454,8 +340,7 @@ fn oss_sync_set_local_sync_mode_inner(workspace_path: &str, mode: &str) -> Resul
     json["team_mode"] = serde_json::Value::String(mode.to_string());
 
     if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create config dir: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
     }
     std::fs::write(
         &config_path,

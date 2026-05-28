@@ -118,32 +118,6 @@ describe('useOssSyncStore', () => {
     })
   })
 
-  // ── createTeam ───────────────────────────────────────────────────────────
-
-  describe('createTeam', () => {
-    it('returns teamSecret and updates teamId in store', async () => {
-      mockInvoke.mockResolvedValueOnce({
-        teamId: 'team-new',
-        teamSlug: 'my-team',
-        aiGatewayEndpoint: 'https://gw.example.com',
-        litellmKey: 'sk-test',
-        teamSecret: 'deadbeef1234',
-      })
-
-      const result = await useOssSyncStore
-        .getState()
-        .createTeam('My Team', '/workspace/path')
-
-      expect(mockInvoke).toHaveBeenCalledWith('oss_sync_create_team', {
-        name: 'My Team',
-        workspacePath: '/workspace/path',
-      })
-      expect(result.teamSecret).toBe('deadbeef1234')
-      expect(result.teamId).toBe('team-new')
-      expect(useOssSyncStore.getState().teamId).toBe('team-new')
-    })
-  })
-
   // ── listVersions ─────────────────────────────────────────────────────────
 
   describe('listVersions', () => {
