@@ -1,4 +1,22 @@
 import { AgentType } from "@/lib/proto/amux_pb"
+import type { AmuxAgentType } from "@/lib/amuxd-models"
+
+export function amuxAgentTypeFromBackend(
+  backendType: string | null | undefined,
+): AmuxAgentType | null {
+  switch (backendType) {
+    case "opencode":
+      return "opencode"
+    case "codex":
+      return "codex"
+    case "claude-code":
+    case "claude":
+    case "claude_code":
+      return "claude-code"
+    default:
+      return null
+  }
+}
 
 export function resolveAmuxAgentType(
   backendType: string | null | undefined,

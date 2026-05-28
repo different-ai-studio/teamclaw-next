@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getBackend } from '@/lib/backend'
 import { cn } from '@/lib/utils'
+import { useCurrentTeamStore } from '@/stores/current-team'
 
 type InviteKind = 'member' | 'agent'
 type TeamRole = 'member' | 'admin'
@@ -27,11 +28,13 @@ interface InviteCreated {
 interface InviteActorDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  teamId: string | null
+  teamId?: string | null
 }
 
 export function InviteActorDialog({ open, onOpenChange, teamId }: InviteActorDialogProps) {
   const { t } = useTranslation()
+  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const effectiveTeamId = currentTeamId ?? teamId ?? null
   const [kind, setKind] = React.useState<InviteKind>('member')
   const [name, setName] = React.useState('')
   const [teamRole, setTeamRole] = React.useState<TeamRole>('member')
@@ -52,15 +55,16 @@ export function InviteActorDialog({ open, onOpenChange, teamId }: InviteActorDia
   }, [open, reset])
 
   const trimmed = name.trim()
-  const canSubmit = !!trimmed && !!teamId && !submitting && invite == null
+  const canSubmit = !!trimmed && !!effectiveTeamId && !submitting && invite == null
 
   const submit = async () => {
     if (!canSubmit) return
+    if (!effectiveTeamId) return
     setSubmitting(true)
     try {
       const row = kind === 'member'
         ? await getBackend().teams.createTeamInvite({
-            teamId,
+            teamId: effectiveTeamId,
             kind: 'member',
             displayName: trimmed,
             teamRole,
@@ -68,7 +72,7 @@ export function InviteActorDialog({ open, onOpenChange, teamId }: InviteActorDia
             targetActorId: null,
           })
         : await getBackend().teams.createTeamInvite({
-            teamId,
+            teamId: effectiveTeamId,
             kind: 'agent',
             displayName: trimmed,
             agentKind,

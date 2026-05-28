@@ -350,7 +350,10 @@
       "noMatchingModels": "No matching models",
       "modelHeading": "Model",
       "removeMention": "Remove mention",
-      "modelChangeFailed": "Failed to change model"
+      "modelChangeFailed": "Failed to change model",
+      "modelChangeWillRetry": "Pick saved; will reapply on next send. Detail: {{message}}",
+      "modelPickSaved": "Model selected",
+      "modelPickSavedHint": "Will apply to the agent on next send or when its runtime is ready"
     },
     "newSessionDialog": {
       "title": "New session",

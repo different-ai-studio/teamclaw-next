@@ -11,6 +11,7 @@ import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatRelativeTime } from '@/lib/date-format'
 import { useSessionListStore } from '@/stores/session-list-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { useUIStore } from '@/stores/ui'
 import { cn, isTauri } from '@/lib/utils'
 import { loadActorsForTeam, upsertActorsBatch, type ActorRow as CachedActorRow } from '@/lib/local-cache'
@@ -40,28 +41,30 @@ export interface UseActorsForTeamResult {
 
 export function useActorsForTeam(): UseActorsForTeamResult {
   const sessionRows = useSessionListStore((s) => s.rows)
-  const [teamId, setTeamId] = React.useState<string | null>(null)
+  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const [fallbackTeamId, setFallbackTeamId] = React.useState<string | null>(null)
   const [actors, setActors] = React.useState<ActorRow[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(false)
   const [refreshTick, setRefreshTick] = React.useState(0)
+  const teamId = currentTeamId ?? fallbackTeamId
 
   React.useEffect(() => {
-    if (teamId) return
-    const fromSession = sessionRows[0]?.team_id
-    if (fromSession) {
-      setTeamId(fromSession)
+    if (currentTeamId) {
+      setFallbackTeamId(null)
       return
     }
+    const fromSession = sessionRows[0]?.team_id ?? null
+    if (fromSession) setFallbackTeamId(fromSession)
     let cancelled = false
     void (async () => {
       const session = await getBackend().auth.getSession()
       if (!session?.user || cancelled) return
       const actorRow = await getBackend().directory.resolveFirstMemberActorForUser(session.user.id)
-      if (!cancelled) setTeamId(actorRow?.team_id ?? null)
+      if (!cancelled && !fromSession) setFallbackTeamId(actorRow?.team_id ?? null)
     })()
     return () => { cancelled = true }
-  }, [sessionRows, teamId])
+  }, [sessionRows, currentTeamId])
 
   React.useEffect(() => {
     if (!teamId) return
@@ -370,7 +373,7 @@ export function ActorsView() {
         )}
       </div>
       {renderBody()}
-      <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} teamId={teamId} />
+      <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} />
     </div>
   )
 }

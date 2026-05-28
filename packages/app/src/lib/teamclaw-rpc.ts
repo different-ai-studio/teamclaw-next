@@ -34,6 +34,21 @@ const DEFAULT_TIMEOUT_MS = 30_000
 // Init / dispose
 // ---------------------------------------------------------------------------
 
+export function isTeamclawRpcReady(): boolean {
+  return initialized && teamId !== null
+}
+
+/** Poll until MQTT RPC listener is wired (App.tsx init), or timeout. */
+export async function waitForTeamclawRpcReady(timeoutMs = 15_000): Promise<boolean> {
+  if (isTeamclawRpcReady()) return true
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200))
+    if (isTeamclawRpcReady()) return true
+  }
+  return isTeamclawRpcReady()
+}
+
 export async function initTeamclawRpc(teamIdArg: string): Promise<void> {
   if (initialized) return
   teamId = teamIdArg
@@ -218,5 +233,9 @@ export async function setModel(args: SetModelArgs): Promise<SetModelResult> {
   if (response.result.case !== 'setModelResult') {
     throw new Error(`unexpected result variant: ${response.result.case}`)
   }
-  return response.result.value
+  const result = response.result.value
+  if (!result.success) {
+    throw new Error(result.error || 'setModel failed')
+  }
+  return result
 }

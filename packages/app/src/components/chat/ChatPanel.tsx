@@ -44,14 +44,24 @@ import { getFileName } from "./utils/fileUtils";
 import { MessageList, type MessageListHandle } from "./MessageList";
 import { SessionErrorAlert } from "./SessionErrorAlert";
 import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
+import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
+import { AcpStreamDebugPanel } from "./AcpStreamDebugPanel";
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
 import { SessionContinueBanner } from "./SessionContinueBanner";
-import { useV2StreamingStore } from "@/stores/v2-streaming-store";
+import {
+  useV2StreamingStore,
+  selectPersistedPlanForSession,
+  type StreamingPlanEntry,
+} from "@/stores/v2-streaming-store";
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
+import { ensureAgentRuntimesForSession } from "@/lib/teamclaw/ensure-agent-runtime";
+import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
+import { selectAgentModel } from "@/lib/runtime-state-resolve";
+import { useAgentModelPickStore } from "@/stores/agent-model-pick-store";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -87,8 +97,29 @@ async function resolveMentionActorIdsForSession(
   sessionId: string,
   memberIds: string[],
   agentIds: string[],
+  messageText = "",
 ): Promise<string[]> {
-  const explicit = Array.from(new Set([...memberIds, ...agentIds]));
+  const fromText = await resolveActorIdsFromAtText(sessionId, messageText);
+  if (fromText.agentIds.length > 0) {
+    const engaged = useEngagedAgentStore.getState();
+    let participants: Array<{ id: string; display_name?: string | null }> = [];
+    try {
+      participants = await getBackend().sessionMembers.listParticipants(sessionId);
+    } catch {
+      participants = [];
+    }
+    for (const agentId of fromText.agentIds) {
+      const row = participants.find((p) => p.id === agentId);
+      engaged.addAgent(sessionId, {
+        id: agentId,
+        displayName: row?.display_name || "AI",
+      });
+    }
+  }
+
+  const explicit = Array.from(
+    new Set([...memberIds, ...agentIds, ...fromText.memberIds, ...fromText.agentIds]),
+  );
   if (explicit.length > 0) return explicit;
 
   // No explicit mentions. If the user explicitly cleared the engaged agents
@@ -161,6 +192,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // doesn't render the reply twice.
   const v2StreamsByKey = useV2StreamingStore(s => s.byKey);
   const v2StreamsArchived = useV2StreamingStore(s => s.archived);
+  const persistedSessionPlan = useV2StreamingStore((s) =>
+    selectPersistedPlanForSession(s, activeSessionId),
+  );
   const v2Streams = React.useMemo(
     () => {
       const current = Object.values(v2StreamsByKey).filter(
@@ -181,15 +215,30 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // one planner at a time. Mapped to the Todo shape the TodoList consumes;
   // status/content carry over, priority is dropped (Todo has no slot).
   const planTodos = React.useMemo(() => {
-    if (v2Streams.length === 0) return [] as Array<{ id: string; status: string; content: string }>;
-    const latest = v2Streams[v2Streams.length - 1];
-    if (!latest.planEntries || latest.planEntries.length === 0) return [];
-    return latest.planEntries.map((e, i) => ({
-      id: `plan:${latest.actorId}:${i}`,
-      status: e.status,
-      content: e.content,
-    }));
-  }, [v2Streams]);
+    const mapPlan = (
+      entries: StreamingPlanEntry[],
+      actorId: string,
+    ): Array<{ id: string; status: string; content: string }> =>
+      entries.map((e, i) => ({
+        id: `plan:${actorId}:${i}`,
+        status: e.status,
+        content: e.content,
+      }));
+
+    const latestWithPlan = [...v2Streams]
+      .reverse()
+      .find((entry) => entry.planEntries.length > 0);
+    if (latestWithPlan) {
+      return mapPlan(latestWithPlan.planEntries, latestWithPlan.actorId);
+    }
+    if (persistedSessionPlan?.planEntries.length) {
+      return mapPlan(
+        persistedSessionPlan.planEntries,
+        persistedSessionPlan.actorId,
+      );
+    }
+    return [];
+  }, [v2Streams, persistedSessionPlan]);
 
   // ── Archived session viewing ────────────────────────────────────────
   const viewingArchivedSessionId = useSessionStore(s => s.viewingArchivedSessionId);
@@ -220,13 +269,33 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       : undefined
   );
   const isViewingChild = !!viewingChildSessionId && !isViewingArchived;
+  const streamByKey = useV2StreamingStore((s) => s.byKey);
+  const acpPendingForTodo = React.useMemo(
+    () => collectAcpStreamingPermissions(activeSessionId, streamByKey),
+    [activeSessionId, streamByKey],
+  );
   const showInlineTodo = React.useMemo(() => {
     if (isViewingArchived) return false;
     if (isViewingChild) return false;
     if (todos.length === 0 && messageQueue.length === 0 && planTodos.length === 0)
       return false;
-    return !hasVisiblePendingPermissions(activeSessionId, sessions, pendingPermissions);
-  }, [activeSessionId, isViewingArchived, isViewingChild, messageQueue.length, pendingPermissions, sessions, todos, planTodos.length]);
+    return !hasVisiblePendingPermissions(
+      activeSessionId,
+      sessions,
+      pendingPermissions,
+      acpPendingForTodo,
+    );
+  }, [
+    activeSessionId,
+    acpPendingForTodo,
+    isViewingArchived,
+    isViewingChild,
+    messageQueue.length,
+    pendingPermissions,
+    sessions,
+    todos,
+    planTodos.length,
+  ]);
 
   // Render order: planTodos first (live, being worked on) then static todos.
   // Dedup pass not needed — plan ids are namespaced `plan:` while todos use
@@ -388,8 +457,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       cancelled = true;
     };
   }, [activeSessionId, engagedAgents.length]);
-  // Dedupe runtimeStart RPCs across re-engages within the same session.
-  const ensuredRuntimesRef = React.useRef<Set<string>>(new Set());
+
+  const lastBootedAgentsRef = React.useRef<string>("");
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId));
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
   // When activeSessionId is null (brand-new chat), fall back to any row's
@@ -397,6 +466,22 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null);
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
   const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
+
+  // Boot daemon runtimes whenever engaged agents change (e.g. @-mention pill).
+  React.useEffect(() => {
+    if (!activeSessionId || !sheetTeamId || engagedAgents.length === 0) return;
+    const signature = engagedAgents.map((a) => a.id).sort().join(",");
+    if (signature === lastBootedAgentsRef.current) return;
+    lastBootedAgentsRef.current = signature;
+    void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
+      void ensureAgentRuntimesForSession({
+        sessionId: activeSessionId,
+        teamId: sheetTeamId,
+        agentActorIds: engagedAgents.map((a) => a.id),
+        reason: "engaged_agents_effect",
+      });
+    });
+  }, [activeSessionId, sheetTeamId, engagedAgents]);
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
   const [hasSkillRestartPrompt, setHasSkillRestartPrompt] = React.useState(false);
   const [isRestartingSkillsRuntime, setIsRestartingSkillsRuntime] = React.useState(false);
@@ -525,9 +610,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // engagedAgent is per-session now; no need to clear here — the
       // selector returns null for null sessionId automatically.
     }
-    // Switching session invalidates the runtime-ensured memo — different
-    // (session, agent) pairs should each get their own runtimeStart.
-    ensuredRuntimesRef.current = new Set();
+    lastBootedAgentsRef.current = "";
   }, [activeSessionId]);
 
   React.useEffect(() => {
@@ -885,6 +968,34 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       ...summarizeText(text),
     });
 
+    if (
+      !text &&
+      attachedFiles.length === 0 &&
+      mentions.length === 0 &&
+      imageFiles.length === 0 &&
+      engagedAgents.length === 0
+    ) {
+      return;
+    }
+
+    if (
+      !text.trim() &&
+      attachedFiles.length === 0 &&
+      imageFiles.length === 0 &&
+      engagedAgents.length > 0
+    ) {
+      sessionFlowLog("send.rejected_empty_with_engaged_agent", {
+        sessionId: sid,
+        engagedAgentIds: engagedAgents.map((a) => a.id),
+      }, "warn");
+      void import("sonner").then(({ toast }) => {
+        toast.warning("请输入消息内容", {
+          description: "已选择 Agent 时需要输入文字或附件才会发送。",
+        });
+      });
+      return;
+    }
+
     // Snapshot file state immediately so the UI clears at once, before any
     // async work. This prevents stale images from leaking into later sends
     // if the user types and submits again while the upload is in flight.
@@ -893,8 +1004,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     setInputValue("");
     setAttachedFiles([]);
     setImageFiles([]);
-
-    if (!text && currentAttachedFiles.length === 0 && mentions.length === 0 && currentImageFiles.length === 0) return;
 
     // Combine engaged agents + picker-supplied agents, dedup by id.
     const allAgents: AttachedAgent[] = [...engagedAgents];
@@ -908,6 +1017,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       sid,
       memberIds,
       agentIds,
+      text,
     );
     sessionFlowLog("send.mentions_resolved", {
       sessionId: sid,
@@ -936,6 +1046,39 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       hasAuthSession: !!authSession,
     });
 
+    let agentRuntimeIdsForSend: string[] = [];
+    if (teamIdForSend && mentionActorIds.length > 0) {
+      let participantsForRuntime: Array<{ id: string; actor_type?: string | null }> = [];
+      try {
+        participantsForRuntime = await getBackend().sessionMembers.listParticipants(sid);
+      } catch (runtimeParticipantError) {
+        console.warn("[ChatPanel] failed to load participants for runtime ensure:", runtimeParticipantError);
+      }
+      agentRuntimeIdsForSend = mentionActorIds.filter((id) => {
+        const row = participantsForRuntime.find((p) => p.id === id);
+        return row ? isAgentActorType(row.actor_type) : false;
+      });
+    }
+
+    // Diagnostic: when the user has agents engaged in the pill but the
+    // resolved mention list is empty (or contains no agent actors), no
+    // daemon will pick the message up — the daemon's
+    // `route_session_message` silent-queues every message whose
+    // `mention_actor_ids` does not include its own actor. Surface a
+    // visible warning so the "send → no reply" UX hangs less.
+    if (engagedAgents.length > 0 && agentRuntimeIdsForSend.length === 0) {
+      sessionFlowLog("send.no_agent_mentions_despite_engagement", {
+        sessionId: sid,
+        engagedAgentIds: engagedAgents.map((a) => a.id),
+        resolvedMentionActorIds: mentionActorIds,
+      }, "warn");
+      void import("sonner").then(({ toast }) => {
+        toast.warning("已 @Agent 但无法路由消息", {
+          description:
+            "消息未包含可解析的 Agent @-mention，daemon 不会回复。请确认 Agent 已加入此会话。",
+        });
+      });
+    }
 
     let finalContent: string;
     const personMentions: string[] = [];
@@ -1051,6 +1194,60 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             teamId: teamIdForSend,
           });
 
+          if (agentRuntimeIdsForSend.length > 0) {
+            const byRuntimeId = useRuntimeStateStore.getState().byRuntimeId;
+            const pickStore = useAgentModelPickStore.getState();
+            const modelIdByAgent: Record<string, string> = {};
+            for (const agentId of agentRuntimeIdsForSend) {
+              const pick = pickStore.getPick(sid, agentId);
+              if (pick) modelIdByAgent[agentId] = pick;
+            }
+            const primaryAgentId = agentRuntimeIdsForSend[0];
+            const runtimeModelId = selectAgentModel({
+              sessionId: sid,
+              agentId: primaryAgentId,
+              available: [],
+              byRuntimeId,
+              providerFallback: selectedModelOption?.id,
+            }).modelId || undefined;
+            sessionFlowLog("send.runtime_ensure.begin", {
+              sessionId: sid,
+              teamId: teamIdForSend,
+              agentActorIds: agentRuntimeIdsForSend,
+              modelId: runtimeModelId ?? null,
+              modelIdByAgent,
+            });
+            try {
+              await ensureAgentRuntimesForSession({
+                sessionId: sid,
+                teamId: teamIdForSend,
+                agentActorIds: agentRuntimeIdsForSend,
+                modelId: runtimeModelId,
+                modelIdByAgent,
+                reason: "send_message",
+              });
+              sessionFlowLog("send.runtime_ensure.ok", {
+                sessionId: sid,
+                teamId: teamIdForSend,
+                agentActorIds: agentRuntimeIdsForSend,
+              });
+            } catch (runtimeEnsureError) {
+              sessionFlowError("send.runtime_ensure.failed", runtimeEnsureError, {
+                sessionId: sid,
+                teamId: teamIdForSend,
+                agentActorIds: agentRuntimeIdsForSend,
+              });
+              const { toast } = await import("sonner");
+              toast.error("Agent runtime 未就绪", {
+                description:
+                  runtimeEnsureError instanceof Error
+                    ? runtimeEnsureError.message
+                    : String(runtimeEnsureError),
+              });
+              return;
+            }
+          }
+
           sessionFlowLog("send.resolve_sender.begin", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1070,7 +1267,16 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
           const messageId = crypto.randomUUID();
           const createdAt = BigInt(Math.floor(Date.now() / 1000));
-          const outgoingModel = selectedModelOption?.id ?? "";
+          const outgoingModel =
+            agentRuntimeIdsForSend.length > 0
+              ? selectAgentModel({
+                  sessionId: sid,
+                  agentId: agentRuntimeIdsForSend[0],
+                  available: [],
+                  byRuntimeId: useRuntimeStateStore.getState().byRuntimeId,
+                  providerFallback: selectedModelOption?.id,
+                }).modelId || ""
+              : selectedModelOption?.id ?? "";
           const outgoingMetadata = {
             mention_actor_ids: mentionActorIds,
             ...(displayMentionActorIds.length > 0
@@ -1343,24 +1549,20 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // Fire-and-forget runtime spawn — UI has already moved into the
       // session; status dots update via RuntimeInfo subscriptions.
       if (picks.agents.length > 0) {
-        // Mark these (session, agent) pairs as already-ensured so the
-        // user's next @-mention via the input doesn't re-fire runtimeStart
-        // (which would make the daemon create a second runtime for the
-        // same pair → duplicate replies).
-        for (const aid of agentIds) {
-          ensuredRuntimesRef.current.add(`${sessionId}:${aid}`);
-        }
+        lastBootedAgentsRef.current = agentIds.slice().sort().join(",");
         sessionFlowLog("session_create.runtime_start.begin", {
           teamId: teamIdForSend,
           sessionId,
           agentActorIds: agentIds,
         });
-        void startAgentRuntimesAsync({
-          sessionId,
-          teamId: teamIdForSend,
-          agentActorIds: agentIds,
-          agentType: selectedModelOption ? resolveAmuxAgentType(selectedModelOption.provider) : undefined,
-          modelId: selectedModelOption?.id,
+        void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
+          void ensureAgentRuntimesForSession({
+            sessionId,
+            teamId: teamIdForSend,
+            agentActorIds: agentIds,
+            modelId: selectedModelOption?.id,
+            reason: "session_create",
+          });
         });
       }
     } catch (e) {
@@ -1651,6 +1853,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         )}
         style={{ opacity: isViewingArchived || isViewingChild ? 1 : sessionFadeOpacity }}
       >
+        {!isViewingArchived && !isViewingChild ? (
+          <AcpStreamDebugPanel sessionId={displaySessionId} />
+        ) : null}
         {isViewingArchived ? (
           <MessageList
             ref={messageListRef}
@@ -1729,30 +1934,24 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onRemoveFile={removeFile}
             engagedAgents={engagedAgents}
             onEngageAgent={(a) => {
-              addAgentForSession(a);
-              // Bootstrap a runtime for this (session, agent) if we haven't
-              // already — otherwise the daemon has no process to deliver
-              // the mention to and AgentSelectorDock has no RuntimeInfo
-              // retain to read availableModels from.
-              const sid = activeSessionId;
-              const teamId = sheetTeamId;
-              if (!sid || !teamId) return;
-              const key = `${sid}:${a.id}`;
-              if (ensuredRuntimesRef.current.has(key)) return;
-              ensuredRuntimesRef.current.add(key);
-              void (async () => {
-                try {
-                  const { startAgentRuntimesAsync } = await import("@/lib/session-create");
-                  await startAgentRuntimesAsync({
-                    sessionId: sid,
-                    teamId,
-                    agentActorIds: [a.id],
+              if (!activeSessionId) {
+                void import("sonner").then(({ toast }) => {
+                  toast.info("请先发送一条消息创建会话", {
+                    description: "@ Agent 需要在已打开的会话中使用。",
                   });
-                } catch (e) {
-                  console.warn("[ChatPanel] ensureAgentRuntime failed", e);
-                  ensuredRuntimesRef.current.delete(key); // allow retry
-                }
-              })();
+                });
+                return;
+              }
+              addAgentForSession(a);
+              if (!sheetTeamId) return;
+              void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
+                void ensureAgentRuntimesForSession({
+                  sessionId: activeSessionId,
+                  teamId: sheetTeamId,
+                  agentActorIds: [a.id],
+                  reason: "mention_pill",
+                });
+              });
             }}
             onRemoveAgent={removeAgentForSession}
             imageFiles={imageFiles}

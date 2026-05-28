@@ -34,6 +34,13 @@ export interface ArchivedEntry extends AgentStreamEntry {
   archiveId: string;
 }
 
+/** Last non-empty agent plan for a session — survives `clearActor` after reply persist. */
+export interface PersistedSessionPlan {
+  actorId: string;
+  planEntries: StreamingPlanEntry[];
+  lastUpdate: number;
+}
+
 interface State {
   byKey: Record<string, AgentStreamEntry>;
   /** Prior-turn entries archived when the next turn starts. We keep these so
@@ -41,6 +48,8 @@ interface State {
    * daemon doesn't persist non-AgentReply kinds, so the bubble is the only
    * place they survive. Each entry has a unique `archiveId` for React keys. */
   archived: ArchivedEntry[];
+  /** Session-scoped plan snapshot for the inline Todo dock after a turn ends. */
+  persistedPlansBySession: Record<string, PersistedSessionPlan>;
   appendOutput: (sessionId: string, actorId: string, delta: string) => void;
   appendThinking: (sessionId: string, actorId: string, delta: string) => void;
   pushToolUse: (
@@ -91,6 +100,23 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
 }
 
 let archiveCounter = 0;
+
+function persistSessionPlan(
+  persisted: Record<string, PersistedSessionPlan>,
+  sessionId: string,
+  actorId: string,
+  entries: StreamingPlanEntry[],
+): Record<string, PersistedSessionPlan> {
+  if (entries.length === 0) return persisted;
+  return {
+    ...persisted,
+    [sessionId]: {
+      actorId,
+      planEntries: entries,
+      lastUpdate: Date.now(),
+    },
+  };
+}
 
 function entryParts(entry: AgentStreamEntry): MessagePart[] {
   return Array.isArray(entry.parts) ? entry.parts : [];
@@ -388,6 +414,7 @@ function prepareMutation(state: State, sessionId: string, actorId: string): Muta
 export const useV2StreamingStore = create<State>((set, get) => ({
   byKey: {},
   archived: [],
+  persistedPlansBySession: {},
 
   appendOutput: (sessionId, actorId, delta) => {
     if (!delta) return;
@@ -527,17 +554,32 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   setPlan: (sessionId, actorId, entries) => {
     const state = get();
     const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    // Some runtimes emit an empty plan update at turn completion.
+    // Keep the last non-empty plan so the inline Todo dock does not flash
+    // away right after the final reply lands.
+    const nextEntries =
+      entries.length > 0
+        ? entries
+        : entry.planEntries.length > 0
+          ? entry.planEntries
+          : entries;
     set({
       byKey: {
         ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
-          planEntries: entries,
+          planEntries: nextEntries,
           lastUpdate: Date.now(),
           active: true,
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      persistedPlansBySession: persistSessionPlan(
+        state.persistedPlansBySession,
+        sessionId,
+        actorId,
+        nextEntries,
+      ),
     });
   },
 
@@ -697,25 +739,49 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   },
 
   clearActor: (sessionId, actorId) => {
+    const state = get();
     const key = k(sessionId, actorId);
-    const next = { ...get().byKey };
+    const existing = state.byKey[key];
+    const next = { ...state.byKey };
     delete next[key];
+    const archivedPlan = [...state.archived]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.sessionId === sessionId &&
+          entry.actorId === actorId &&
+          entry.planEntries.length > 0,
+      );
+    const planEntries = existing?.planEntries.length
+      ? existing.planEntries
+      : (archivedPlan?.planEntries ?? []);
+    const persistedPlansBySession = persistSessionPlan(
+      state.persistedPlansBySession,
+      sessionId,
+      actorId,
+      planEntries,
+    );
     set({
       byKey: next,
-      archived: get().archived.filter(
+      archived: state.archived.filter(
         (e) => !(e.sessionId === sessionId && e.actorId === actorId),
       ),
+      persistedPlansBySession,
     });
   },
 
   clearSession: (sessionId) => {
+    const state = get();
     const next: Record<string, AgentStreamEntry> = {};
-    for (const [key, entry] of Object.entries(get().byKey)) {
+    for (const [key, entry] of Object.entries(state.byKey)) {
       if (entry.sessionId !== sessionId) next[key] = entry;
     }
+    const { [sessionId]: _removed, ...persistedPlansBySession } =
+      state.persistedPlansBySession;
     set({
       byKey: next,
-      archived: get().archived.filter((e) => e.sessionId !== sessionId),
+      archived: state.archived.filter((e) => e.sessionId !== sessionId),
+      persistedPlansBySession,
     });
   },
 }));
@@ -727,4 +793,12 @@ export function selectStreamsForSession(state: State, sessionId: string): AgentS
   const current = Object.values(state.byKey).filter((e) => e.sessionId === sessionId);
   const archived = state.archived.filter((e) => e.sessionId === sessionId);
   return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
+}
+
+export function selectPersistedPlanForSession(
+  state: State,
+  sessionId: string | null,
+): PersistedSessionPlan | null {
+  if (!sessionId) return null;
+  return state.persistedPlansBySession[sessionId] ?? null;
 }

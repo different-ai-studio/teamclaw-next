@@ -1,9 +1,11 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
+import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries"
 import { resolvePendingPermissionActivityOwner } from "@/lib/session-list-activity"
 import { useSessionStore } from "@/stores/session"
 import type { PendingPermissionEntry, Session, ToolCallPermission } from "@/stores/session-types"
+import { useV2StreamingStore } from "@/stores/v2-streaming-store"
 
 const STACK_STEP_PX = 12
 const MAX_BACKPLATES = 2
@@ -163,6 +165,7 @@ export function collectVisiblePermissions(
   activeSessionId: string | null,
   sessions: Session[],
   pendingPermissions: PendingPermissionEntry[],
+  acpStreamingPermissions: PendingPermissionEntry[] = [],
 ): PendingPermissionEntry[] {
   const activeSession = activeSessionId
     ? sessions.find((session) => session.id === activeSessionId) || null
@@ -174,7 +177,7 @@ export function collectVisiblePermissions(
         (entry) => resolvePendingPermissionActivityOwner(entry, sessions) === activeSessionId,
       )
     : pendingPermissions
-  const merged = [...toolPermissions, ...visiblePendingPermissions]
+  const merged = [...acpStreamingPermissions, ...toolPermissions, ...visiblePendingPermissions]
   const seen = new Set<string>()
 
   return merged.filter((entry) => {
@@ -188,8 +191,14 @@ export function hasVisiblePendingPermissions(
   activeSessionId: string | null,
   sessions: Session[],
   pendingPermissions: PendingPermissionEntry[],
+  acpStreamingPermissions: PendingPermissionEntry[] = [],
 ) {
-  return collectVisiblePermissions(activeSessionId, sessions, pendingPermissions).length > 0
+  return collectVisiblePermissions(
+    activeSessionId,
+    sessions,
+    pendingPermissions,
+    acpStreamingPermissions,
+  ).length > 0
 }
 
 function PermissionEntryCard({
@@ -316,11 +325,23 @@ export function PendingPermissionInline() {
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const sessions = useSessionStore((s) => s.sessions)
   const pendingPermissions = useSessionStore((s) => s.pendingPermissions)
+  const streamByKey = useV2StreamingStore((s) => s.byKey)
   const [dismissedIds, setDismissedIds] = React.useState<string[]>([])
 
+  const acpStreamingPermissions = React.useMemo(
+    () => collectAcpStreamingPermissions(activeSessionId, streamByKey),
+    [activeSessionId, streamByKey],
+  )
+
   const baseVisiblePermissions = React.useMemo(
-    () => collectVisiblePermissions(activeSessionId, sessions, pendingPermissions),
-    [activeSessionId, pendingPermissions, sessions],
+    () =>
+      collectVisiblePermissions(
+        activeSessionId,
+        sessions,
+        pendingPermissions,
+        acpStreamingPermissions,
+      ),
+    [activeSessionId, acpStreamingPermissions, pendingPermissions, sessions],
   )
 
   React.useEffect(() => {

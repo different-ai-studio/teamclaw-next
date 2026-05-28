@@ -2,6 +2,13 @@ import { create as createProtoMessage, toBinary } from '@bufbuild/protobuf'
 import { getBackend } from '@/lib/backend'
 import { runtimeStart, setModel } from '@/lib/teamclaw-rpc'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
+import { seedRuntimeStateAfterStart } from '@/lib/seed-runtime-state'
+import {
+  normalizeAgentModelId,
+  selectAgentModel,
+} from '@/lib/runtime-state-resolve'
+import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
+import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { mqttPublish } from '@/lib/mqtt-bridge'
 import {
   LiveEventEnvelopeSchema,
@@ -248,6 +255,28 @@ export async function createSessionWithFirstMessage(
     messageId,
   })
 
+  if (args.agentActorIds.length > 0) {
+    sessionFlowLog('session_with_first_message.runtime_start.begin', {
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      agentType: args.agentType,
+      modelId: args.modelId,
+    })
+    await startAgentRuntimesAsync({
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      agentType: args.agentType,
+      modelId: args.modelId,
+    })
+    sessionFlowLog('session_with_first_message.runtime_start.done', {
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+    })
+  }
+
   sessionFlowLog('session_with_first_message.mqtt_publish.begin', {
     sessionId,
     teamId: args.teamId,
@@ -272,23 +301,6 @@ export async function createSessionWithFirstMessage(
     messageId,
   })
 
-  if (args.agentActorIds.length > 0) {
-    sessionFlowLog('session_with_first_message.runtime_start.begin', {
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-      agentType: args.agentType,
-      modelId: args.modelId,
-    })
-    void startAgentRuntimesAsync({
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-      agentType: args.agentType,
-      modelId: args.modelId,
-    })
-  }
-
   sessionFlowLog('session_with_first_message.ok', {
     sessionId,
     teamId: args.teamId,
@@ -302,7 +314,9 @@ export interface StartAgentRuntimesArgs {
   teamId: string
   agentActorIds: string[]
   agentType?: number
+  /** Applied to every agent when `modelIdByAgent` has no entry for that id. */
   modelId?: string
+  modelIdByAgent?: Record<string, string>
 }
 
 function normalizeAgentTypes(value: unknown): string[] {
@@ -407,13 +421,23 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
       prior?.backend_type,
     )
     const agentType = args.agentType ?? resolveAmuxAgentType(backendType)
+    const byRuntimeId = useRuntimeStateStore.getState().byRuntimeId
+    const userPick = useAgentModelPickStore.getState().getPick(args.sessionId, agentActorId)
+    const resolvedModelId = selectAgentModel({
+      sessionId: args.sessionId,
+      agentId: agentActorId,
+      available: [],
+      byRuntimeId,
+      providerFallback: args.modelIdByAgent?.[agentActorId] ?? args.modelId,
+    }).modelId || undefined
     try {
       sessionFlowLog('runtime_start.request.begin', {
         sessionId: args.sessionId,
         teamId: args.teamId,
         agentActorId,
         agentType,
-        modelId: args.modelId,
+        modelId: resolvedModelId ?? null,
+        userPick: userPick ?? null,
         workspaceId: prior?.workspace_id ?? '',
       })
       // Current amuxd convention: daemon device_id == its actor_id, so the
@@ -426,7 +450,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         sessionId: args.sessionId,
         agentType,
         initialPrompt: '',
-        ...(args.modelId ? { modelId: args.modelId } : {}),
+        ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
       })
       if (!result.accepted) {
         sessionFlowLog('runtime_start.request.rejected', {
@@ -452,26 +476,37 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
           agentActorId,
           runtimeId: result.runtimeId,
         })
-        if (args.modelId) {
+        seedRuntimeStateAfterStart({
+          daemonDeviceId: agentActorId,
+          runtimeId: result.runtimeId,
+          agentType,
+        })
+        const normalizedModelId = resolvedModelId
+          ? normalizeAgentModelId(agentActorId, resolvedModelId, byRuntimeId) ??
+            resolvedModelId
+          : undefined
+        if (normalizedModelId) {
           sessionFlowLog('runtime_start.set_model.begin', {
             sessionId: args.sessionId,
             teamId: args.teamId,
             agentActorId,
             runtimeId: result.runtimeId,
-            modelId: args.modelId,
+            modelId: normalizedModelId,
+            requestedModelId: args.modelId ?? null,
+            userPick: userPick ?? null,
           })
           try {
             await setModel({
               targetDeviceId: agentActorId,
               runtimeId: result.runtimeId,
-              modelId: args.modelId,
+              modelId: normalizedModelId,
             })
             sessionFlowLog('runtime_start.set_model.ok', {
               sessionId: args.sessionId,
               teamId: args.teamId,
               agentActorId,
               runtimeId: result.runtimeId,
-              modelId: args.modelId,
+              modelId: normalizedModelId,
             })
           } catch (modelErr) {
             sessionFlowError('runtime_start.set_model.failed', modelErr, {
@@ -479,12 +514,12 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
               teamId: args.teamId,
               agentActorId,
               runtimeId: result.runtimeId,
-              modelId: args.modelId,
+              modelId: normalizedModelId,
             })
             console.warn('[session-create] setModel after runtimeStart failed', {
               agentActorId,
               runtimeId: result.runtimeId,
-              modelId: args.modelId,
+              modelId: normalizedModelId,
               reason: modelErr instanceof Error ? modelErr.message : String(modelErr),
             })
           }

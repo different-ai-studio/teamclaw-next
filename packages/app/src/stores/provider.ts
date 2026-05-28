@@ -556,6 +556,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Initialize all data at once
   initAll: async () => {
+    await get().refreshConfiguredProviders().catch(() => undefined)
+
     const workspacePath = useWorkspaceStore.getState().workspacePath
     const { _disconnectedIds } = get()
     const customProviderIds = workspacePath ? await getCustomProviderIds(workspacePath) : []

@@ -33,6 +33,21 @@ pub(crate) fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub(crate) fn parse_attachment_urls(metadata_json: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(metadata_json)
+        .ok()
+        .and_then(|v| v.get("attachment_urls").cloned())
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn message_attachment_urls(message: &crate::proto::teamclaw::Message) -> Vec<String> {
+    if !message.attachment_urls.is_empty() {
+        return message.attachment_urls.clone();
+    }
+    parse_attachment_urls(&message.metadata_json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

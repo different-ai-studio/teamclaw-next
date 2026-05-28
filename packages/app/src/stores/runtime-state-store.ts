@@ -4,6 +4,27 @@ import { RuntimeInfoSchema, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import { mqttSubscribe, listenForEnvelopes, type IncomingEnvelope } from '@/lib/mqtt-bridge'
 import { sessionFlowLog } from '@/lib/session-flow-log'
 
+/**
+ * MQTT `runtime/{spawnId}/state` retain cache.
+ *
+ * Storage shape:
+ *  - Primary key: the topic's `{runtimeId}` segment (8-char spawn id).
+ *  - Mirror key:  the topic's `{daemonDeviceId}` segment (agent actor UUID).
+ *    Resolvers look up by agent UUID first; without the mirror they'd
+ *    have to linear-scan every retain.
+ *
+ *  Both keys point to the SAME `RuntimeStateEntry` reference per upsert. The
+ *  mirror is freshness-guarded: a stale republished retain (e.g. broker
+ *  re-flushing prior retains on reconnect) will NOT overwrite a fresher entry
+ *  already under the agent UUID — that was the source of the "弹回" symptom
+ *  where an old spawn's `currentModel` ghost-overrode the live one.
+ *
+ *  This store is intentionally STATELESS about user picks. It only mirrors
+ *  what the daemon publishes. The agent-model-pick-store is the source of
+ *  truth for user-selected models; `selectAgentModel` (runtime-state-resolve)
+ *  is the only place that reconciles the two.
+ */
+
 export type RuntimeStateEntry = {
   info: RuntimeInfo
   daemonDeviceId: string
@@ -19,12 +40,36 @@ interface RuntimeStateState {
 export const useRuntimeStateStore = createZustand<RuntimeStateState>((set, get) => ({
   byRuntimeId: {},
   upsert: (runtimeId, daemonDeviceId, info) => {
-    set({
-      byRuntimeId: {
-        ...get().byRuntimeId,
-        [runtimeId]: { info, daemonDeviceId, lastUpdated: Date.now() },
-      },
-    })
+    const prev = get().byRuntimeId[runtimeId]
+    let merged = info
+    if (
+      prev &&
+      prev.info.availableModels.length > 0 &&
+      info.availableModels.length === 0
+    ) {
+      // Defensive: keep last-known model list when a partial retain (e.g.
+      // status-only delta) arrives without `available_models`.
+      merged = { ...info, availableModels: prev.info.availableModels }
+    }
+
+    const lastUpdated = Date.now()
+    const entry: RuntimeStateEntry = { info: merged, daemonDeviceId, lastUpdated }
+
+    const next = { ...get().byRuntimeId, [runtimeId]: entry }
+
+    // Mirror under the agent actor uuid so pills can resolve by agent id
+    // before the DB-side agent_runtimes row finishes loading. Only mirror
+    // if (a) the agent key is currently empty, or (b) the existing mirror
+    // points at a stale entry (older `lastUpdated`) — this prevents broker
+    // retain-flush re-ordering from regressing the live spawn's state.
+    const agentKey = daemonDeviceId.trim()
+    if (agentKey && agentKey !== runtimeId) {
+      const existingMirror = get().byRuntimeId[agentKey]
+      if (!existingMirror || existingMirror.lastUpdated <= lastUpdated) {
+        next[agentKey] = entry
+      }
+    }
+    set({ byRuntimeId: next })
   },
   clear: () => set({ byRuntimeId: {} }),
 }))
@@ -94,6 +139,21 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
       status: info.status,
     })
     useRuntimeStateStore.getState().upsert(parsed.runtimeId, parsed.daemonDeviceId, info)
+    void import('@/stores/acp-debug-store').then(({ useAcpDebugStore }) => {
+      useAcpDebugStore.getState().append({
+        topic: env.topic,
+        actorId: parsed.daemonDeviceId,
+        eventCase: 'runtime_state',
+        payload: {
+          runtimeId: info.runtimeId,
+          agentType: info.agentType,
+          state: info.state,
+          status: info.status,
+          currentModel: info.currentModel,
+          availableModels: info.availableModels,
+        },
+      })
+    })
   })
   initialized = true
 }

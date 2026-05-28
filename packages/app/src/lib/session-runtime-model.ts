@@ -1,5 +1,10 @@
 import { getBackend } from '@/lib/backend'
 import { setModel } from '@/lib/teamclaw-rpc'
+import {
+  resolveRuntimeIdForAgent,
+  resolveSetModelId,
+} from '@/lib/runtime-state-resolve'
+import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 
 export interface ApplySessionRuntimeModelArgs {
@@ -64,33 +69,40 @@ export async function applySessionRuntimeModel(args: ApplySessionRuntimeModelArg
     })),
   })
 
+  const byRuntimeId = useRuntimeStateStore.getState().byRuntimeId
+
   await Promise.all(
     validRuntimeRows.map(async (row) => {
+      const runtimeId =
+        resolveRuntimeIdForAgent(row.agent_id, byRuntimeId, row.runtime_id) ??
+        row.runtime_id
+      const modelId = resolveSetModelId(row.agent_id, args.modelId, byRuntimeId)
       sessionFlowLog('runtime_model.set_model.begin', {
         sessionId: args.sessionId,
         targetDeviceId: row.agent_id,
-        runtimeId: row.runtime_id,
-        modelId: args.modelId,
+        runtimeId,
+        dbRuntimeId: row.runtime_id,
+        modelId,
       })
       try {
         const result = await setModel({
           targetDeviceId: row.agent_id,
-          runtimeId: row.runtime_id,
-          modelId: args.modelId,
+          runtimeId,
+          modelId,
         })
         sessionFlowLog('runtime_model.set_model.ok', {
           sessionId: args.sessionId,
           targetDeviceId: row.agent_id,
-          runtimeId: row.runtime_id,
-          modelId: args.modelId,
+          runtimeId,
+          modelId,
           result,
         })
       } catch (error) {
         sessionFlowError('runtime_model.set_model.failed', error, {
           sessionId: args.sessionId,
           targetDeviceId: row.agent_id,
-          runtimeId: row.runtime_id,
-          modelId: args.modelId,
+          runtimeId,
+          modelId,
         })
         throw error
       }

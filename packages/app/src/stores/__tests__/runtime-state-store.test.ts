@@ -61,6 +61,27 @@ describe('runtime-state-store', () => {
     expect(entry.info.currentModel).toBe('claude-opus-4-7')
   })
 
+  it('mirrors retain under agent actor id when topic runtime id differs', async () => {
+    const { initRuntimeStateStore, useRuntimeStateStore } = await import('../runtime-state-store')
+    await initRuntimeStateStore('team-1')
+
+    const info = create(RuntimeInfoSchema, {
+      runtimeId: 'ff679fef',
+      agentType: AgentType.OPENCODE,
+      status: AgentStatus.IDLE,
+      state: RuntimeLifecycle.ACTIVE,
+      availableModels: [{ id: 'opencode/mimo-v2.5-free', displayName: 'Mimo' }],
+    })
+    envelopeHandler!({
+      topic: 'amux/team-1/device/b3cbc44e-92fc-46c3-a5d1-27fd70bc3d83/runtime/ff679fef/state',
+      bytes: Array.from(toBinary(RuntimeInfoSchema, info)),
+    })
+
+    const store = useRuntimeStateStore.getState().byRuntimeId
+    expect(store['ff679fef']?.info.availableModels).toHaveLength(1)
+    expect(store['b3cbc44e-92fc-46c3-a5d1-27fd70bc3d83']?.info.availableModels).toHaveLength(1)
+  })
+
   it('ignores envelopes with malformed topics', async () => {
     const { initRuntimeStateStore, useRuntimeStateStore } = await import('../runtime-state-store')
     await initRuntimeStateStore('team-1')
@@ -82,5 +103,55 @@ describe('runtime-state-store', () => {
     })
 
     expect(useRuntimeStateStore.getState().byRuntimeId['rt-other']).toBeUndefined()
+  })
+
+  it('upsert preserves entries under all spawn keys so resolver can pick newest by lastUpdated', async () => {
+    const { useRuntimeStateStore } = await import('../runtime-state-store')
+
+    const newer = create(RuntimeInfoSchema, {
+      runtimeId: 'spawn-new',
+      currentModel: 'mimo',
+      availableModels: [{ id: 'mimo', displayName: 'Mimo' }],
+    })
+    useRuntimeStateStore.getState().upsert('spawn-new', 'agent-uuid', newer)
+
+    await new Promise((r) => setTimeout(r, 5))
+
+    const older = create(RuntimeInfoSchema, {
+      runtimeId: 'spawn-old',
+      currentModel: 'big-pickle',
+      availableModels: [{ id: 'big-pickle', displayName: 'Big Pickle' }],
+    })
+    useRuntimeStateStore.getState().upsert('spawn-old', 'agent-uuid', older)
+
+    // Both spawn entries are preserved so the agent-uuid resolver can pick
+    // the newest by `lastUpdated` rather than depending on broker retain
+    // delivery order.
+    const map = useRuntimeStateStore.getState().byRuntimeId
+    expect(map['spawn-new']?.info.currentModel).toBe('mimo')
+    expect(map['spawn-old']?.info.currentModel).toBe('big-pickle')
+    expect(map['agent-uuid']).toBeDefined()
+  })
+
+  it('upsert no longer reaches into pick-store (no circular dependency)', async () => {
+    const { useRuntimeStateStore } = await import('../runtime-state-store')
+    const { useAgentModelPickStore } = await import('../agent-model-pick-store')
+    useAgentModelPickStore.getState().setPick('s-1', 'agent-uuid', 'mimo')
+
+    const info = create(RuntimeInfoSchema, {
+      runtimeId: 'spawn-1',
+      currentModel: 'big-pickle',
+      availableModels: [
+        { id: 'big-pickle', displayName: 'Big Pickle' },
+        { id: 'mimo', displayName: 'Mimo' },
+      ],
+    })
+    useRuntimeStateStore.getState().upsert('spawn-1', 'agent-uuid', info)
+
+    // The retain.currentModel in the store must reflect what the daemon
+    // sent, NOT the user pick — those are reconciled at READ time by
+    // selectAgentModel, never at upsert time.
+    expect(useRuntimeStateStore.getState().byRuntimeId['spawn-1'].info.currentModel).toBe('big-pickle')
+    expect(useRuntimeStateStore.getState().byRuntimeId['agent-uuid'].info.currentModel).toBe('big-pickle')
   })
 })

@@ -157,7 +157,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   // ── Phase 1E compat: pure stubs (no v2 implementation yet) ───────
   pollPermissions: stubAsync("pollPermissions"),
-  replyPermission: stubAsync("replyPermission"),
+  replyPermission: async (permissionId: string, decision: "allow" | "deny" | "always") => {
+    const { replyPermissionById } = await import("@/lib/teamclaw/reply-acp-permission");
+    await replyPermissionById(permissionId, decision);
+  },
   answerQuestion: stubAsync("answerQuestion"),
   skipQuestion: stubAsync("skipQuestion"),
   getSessionMessages: () => [],
