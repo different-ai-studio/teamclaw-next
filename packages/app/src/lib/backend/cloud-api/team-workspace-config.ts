@@ -25,7 +25,7 @@ export function createTeamWorkspaceConfigModule(client: CloudApiClient): TeamWor
         "enabled",
         "metadata",
       ] as const) {
-        const value = (input as Record<string, unknown>)[key];
+        const value = (input as unknown as Record<string, unknown>)[key];
         if (value !== undefined) body[key] = value;
       }
       await client.put(

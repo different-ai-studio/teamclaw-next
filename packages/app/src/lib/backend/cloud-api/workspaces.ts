@@ -44,7 +44,7 @@ export function createWorkspacesModule(client: CloudApiClient): WorkspacesBacken
           }
         }),
       );
-      return results.filter((r): r is { id: string; name: string | null; path: string | null } => r !== null);
+      return results.filter((r): r is { id: string; name: string; path: string | null } => r !== null);
     },
     async listDaemonWorkspaces(teamId, agentId) {
       const params = new URLSearchParams({ teamId, limit: "200" });

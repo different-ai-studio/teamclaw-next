@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { authState, backendConfig } = vi.hoisted(() => ({
@@ -13,7 +13,6 @@ const { authState, backendConfig } = vi.hoisted(() => ({
   },
   backendConfig: {
     hasConfig: true,
-    kind: "supabase" as "supabase" | "pocketbase",
   },
 }));
 
@@ -29,7 +28,6 @@ vi.mock("@/stores/auth-store", () => ({
 
 vi.mock("@/lib/backend", () => ({
   hasBackendConfig: () => backendConfig.hasConfig,
-  getBackendKind: () => backendConfig.kind,
 }));
 
 vi.mock("@/lib/version", () => ({
@@ -51,20 +49,12 @@ beforeEach(() => {
   authState.resetOtp.mockReset();
   authState.signInAnonymously.mockReset();
   backendConfig.hasConfig = true;
-  backendConfig.kind = "supabase";
 });
 
 describe("LoginScreen", () => {
-  it("uses quick trial instead of OTP for PocketBase preview", async () => {
-    backendConfig.kind = "pocketbase";
-    authState.signInAnonymously.mockResolvedValueOnce(true);
-
+  it("renders the email OTP form", () => {
     render(<LoginScreen />);
-
-    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /quick trial/i }));
-
-    await waitFor(() => expect(authState.signInAnonymously).toHaveBeenCalled());
-    expect(authState.sendOtp).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send code/i })).toBeInTheDocument();
   });
 });

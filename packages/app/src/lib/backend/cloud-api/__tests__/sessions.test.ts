@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSessionsModule } from "../sessions";
 import type { CloudApiClient } from "../http";
-import type { SessionsBackend } from "../../types";
 
 function mockClient(responses: Record<string, unknown>): CloudApiClient {
   return {
@@ -10,30 +9,18 @@ function mockClient(responses: Record<string, unknown>): CloudApiClient {
       if (key) return responses[key] as never;
       throw new Error(`unexpected GET ${path}`);
     },
-    async post(path, body) {
+    async post(path, _body) {
       const key = `POST ${path}`;
       if (key in responses) return responses[key] as never;
       throw new Error(`unexpected POST ${path}`);
     },
     async patch() { throw new Error("unexpected patch"); },
+    async put() { throw new Error("unexpected put"); },
     async delete() { throw new Error("unexpected delete"); },
     async postRaw() { throw new Error("not impl"); },
     async getRaw() { throw new Error("not impl"); },
   } as unknown as CloudApiClient;
 }
-
-const fakeDelegate = (): SessionsBackend => ({
-  listCurrentActorSessions: async () => ({ rows: [] }),
-  markCurrentActorSessionViewed: async () => {},
-  createSessionShell: async () => ({ sessionId: "s1" }),
-  addParticipants: async () => {},
-  updateSessionTitle: async () => {},
-  archiveSession: async () => {},
-  getSessionParticipants: async () => [],
-  getSessionTeamId: async () => null,
-  listSessionsForTeamSince: async () => [],
-  listSessionDisplayRows: async () => [],
-});
 
 const cloudSession = {
   id: "session-1",
@@ -51,7 +38,7 @@ const cloudSession = {
 describe("sessions module", () => {
   it("listCurrentActorSessions calls /v1/sessions and maps fields", async () => {
     const client = mockClient({ "GET /v1/sessions?limit=50": { items: [cloudSession], nextCursor: null } });
-    const mod = createSessionsModule(client, fakeDelegate());
+    const mod = createSessionsModule(client);
     const out = await mod.listCurrentActorSessions({ limit: 50, cursor: null });
     expect(out.rows[0].id).toBe("session-1");
     expect(out.rows[0].team_id).toBe("team-1");
@@ -64,23 +51,20 @@ describe("sessions module", () => {
       async get() { throw new Error("unexpected"); },
       async post(path: string) { called = true; expect(path).toBe("/v1/sessions/session-1/mark-viewed"); return null; },
       async patch() { throw new Error("unexpected"); },
+      async put() { throw new Error("unexpected"); },
       async delete() { throw new Error("unexpected"); },
       async postRaw() { throw new Error("unexpected"); },
       async getRaw() { throw new Error("unexpected"); },
     } as unknown as CloudApiClient;
-    const mod = createSessionsModule(client, fakeDelegate());
+    const mod = createSessionsModule(client);
     await mod.markCurrentActorSessionViewed("session-1");
     expect(called).toBe(true);
   });
 
-  it("delegates createSessionShell to supabase", async () => {
-    let delegateCalled = false;
-    const delegate = fakeDelegate();
-    delegate.createSessionShell = async () => { delegateCalled = true; return { sessionId: "s2" }; };
-    const client = mockClient({});
-    const mod = createSessionsModule(client, delegate);
-    const out = await mod.createSessionShell({ id: "s2", teamId: "t1", createdByActorId: "a1", title: "T", additionalActorIds: [] });
-    expect(delegateCalled).toBe(true);
-    expect(out.sessionId).toBe("s2");
+  it("createSessionShell POSTs /v1/sessions and returns sessionId", async () => {
+    const client = mockClient({ "POST /v1/sessions": cloudSession });
+    const mod = createSessionsModule(client);
+    const out = await mod.createSessionShell({ id: "session-1", teamId: "team-1", createdByActorId: "a1", title: "T", additionalActorIds: [] });
+    expect(out.sessionId).toBe("session-1");
   });
 });

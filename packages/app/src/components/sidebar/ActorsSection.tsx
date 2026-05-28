@@ -62,7 +62,7 @@ export function ActorsSection() {
   }
 
   const confirmRemove = async () => {
-    if (!removeFor) return
+    if (!removeFor || !teamId) return
     setRemoving(true)
     try {
       await getBackend().teams.removeTeamActor(teamId, removeFor.id)

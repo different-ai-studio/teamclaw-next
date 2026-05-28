@@ -181,9 +181,9 @@ bash .claude/skills/fc-deploy/deploy.sh
 
 **Editor system:** Markdown (Tiptap) / HTML (Tiptap + sandbox preview) / Code (CodeMirror 6 + Shiki)
 
-## Backend Access Boundary — Cloud API is the default backend
+## Backend Access Boundary — Cloud API is the only client backend
 
-**`cloud_api` is the default and canonical backend. The `supabase` backend kind is deprecated and will be removed in a future release.**
+**`cloud_api` is the only backend kind for clients. The `supabase` and `pocketbase` backend kinds have been removed from `packages/app/`. Direct `@supabase/supabase-js` usage in client code is forbidden and enforced by a guardrail test (`packages/app/src/lib/backend/__tests__/no-supabase-import.test.ts`).**
 
 The API contract is defined in `docs/openapi/teamclaw-api.v1.yaml`. All business data operations must go through the TeamClaw Cloud API (`/v1`) rather than direct Supabase client calls.
 
@@ -194,7 +194,7 @@ The Cloud API facade (`services/fc/lib/business-api.mjs`) is the canonical entry
 - **iOS** (`apps/ios/`): `CloudAPIClient` / `CloudAPIRepositories` in `apps/ios/Packages/AMUXCore/Sources/AMUXCore/CloudAPI/`
 - **daemon** (`apps/daemon/`): `cloud_api` backend module in `apps/daemon/src/backend/cloud_api.rs`
 
-Direct Supabase client usage (e.g. `supabase.from('sessions').select()`) is **reserved for internal FC repository implementation only** (`services/fc/lib/supabase-repo.mjs`). The FC facade forwards caller bearer tokens to Supabase, preserving RLS and auth semantics. The deprecated `supabase` backend kind in client config files is a legacy fallback — do not use it for new deployments.
+Direct Supabase client usage (e.g. `supabase.from('sessions').select()`) is **reserved for internal FC repository implementation only** (`services/fc/lib/supabase-repo.mjs`). The FC facade forwards caller bearer tokens to Supabase, preserving RLS and auth semantics.
 
 **When adding new business endpoints:**
 

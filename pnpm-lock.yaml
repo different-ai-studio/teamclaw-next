@@ -243,9 +243,6 @@ importers:
       '@sentry/react':
         specifier: ^10.53.1
         version: 10.53.1(react@19.2.6)
-      '@supabase/supabase-js':
-        specifier: ^2.105.3
-        version: 2.105.3
       '@tanstack/react-virtual':
         specifier: ^3.13.18
         version: 3.13.24(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
