@@ -1717,6 +1717,206 @@ impl LocalCacheStore {
         Ok(result)
     }
 
+    // ─── team-lookup helpers (used by the current-team gate) ──────────────
+    //
+    // Each helper resolves the `team_id` of a row identified by some non-team
+    // key (session_id, idea_id, etc). Returns Ok(None) if the row does not
+    // exist, so the caller can decide whether to fail open or closed.
+
+    pub async fn team_for_session(&self, session_id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT team_id FROM session WHERE id = ?1",
+                params![session_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_session: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_session row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_idea(&self, idea_id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT team_id FROM idea WHERE id = ?1",
+                params![idea_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_idea: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_idea row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_actor(&self, actor_id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT team_id FROM actor WHERE id = ?1",
+                params![actor_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_actor: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_actor row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_message(&self, message_id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT team_id FROM message WHERE id = ?1",
+                params![message_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_message: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_message row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_outbox(&self, message_id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT team_id FROM outbox WHERE message_id = ?1",
+                params![message_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_outbox: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_outbox row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_participant(&self, id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT s.team_id FROM session_participant sp \
+                 JOIN session s ON s.id = sp.session_id WHERE sp.id = ?1",
+                params![id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_participant: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_participant row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_claim(&self, id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT i.team_id FROM claim c JOIN idea i ON i.id = c.idea_id WHERE c.id = ?1",
+                params![id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_claim: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_claim row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    pub async fn team_for_submission(&self, id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT i.team_id FROM submission s JOIN idea i ON i.id = s.idea_id WHERE s.id = ?1",
+                params![id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("team_for_submission: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("team_for_submission row: {}", e))?
+        {
+            return Ok(row.get::<String>(0).ok());
+        }
+        Ok(None)
+    }
+
+    /// Variant of `outbox_list_all` that filters to a single team.
+    pub async fn outbox_list_team(&self, team_id: &str) -> Result<Vec<OutboxRow>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT message_id, team_id, session_id, sender_actor_id, content,
+                        mention_actor_ids_json, display_mention_actor_ids_json, attachment_urls_json,
+                        state, attempt_count, last_attempt_at, next_attempt_at, last_error,
+                        created_at, updated_at
+                 FROM outbox WHERE team_id = ?1 ORDER BY created_at ASC",
+                params![team_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("outbox_list_team: {}", e))?;
+        let mut result = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("outbox_list_team row: {}", e))?
+        {
+            result.push(OutboxRow {
+                message_id: row.get::<String>(0).unwrap_or_default(),
+                team_id: row.get::<String>(1).unwrap_or_default(),
+                session_id: row.get::<String>(2).unwrap_or_default(),
+                sender_actor_id: row.get::<String>(3).unwrap_or_default(),
+                content: row.get::<String>(4).unwrap_or_default(),
+                mention_actor_ids_json: row.get::<String>(5).ok().filter(|s| !s.is_empty()),
+                display_mention_actor_ids_json: row.get::<String>(6).ok().filter(|s| !s.is_empty()),
+                attachment_urls_json: row.get::<String>(7).ok().filter(|s| !s.is_empty()),
+                state: row.get::<String>(8).unwrap_or_default(),
+                attempt_count: row.get::<i64>(9).unwrap_or(0),
+                last_attempt_at: row.get::<String>(10).ok().filter(|s| !s.is_empty()),
+                next_attempt_at: row.get::<String>(11).ok().filter(|s| !s.is_empty()),
+                last_error: row.get::<String>(12).ok().filter(|s| !s.is_empty()),
+                created_at: row.get::<String>(13).unwrap_or_default(),
+                updated_at: row.get::<String>(14).unwrap_or_default(),
+            });
+        }
+        Ok(result)
+    }
+
     // ─── sync watermark ───────────────────────────────────────────────────
 
     pub async fn watermark_get(
@@ -1933,6 +2133,108 @@ mod tests {
 
         let after = store.watermark_get("actor", "team1").await.unwrap();
         assert_eq!(after.unwrap(), "2024-06-01T12:00:00Z");
+    }
+
+    fn session(id: &str, team: &str) -> SessionRow {
+        SessionRow {
+            id: id.to_string(),
+            team_id: team.to_string(),
+            title: None,
+            mode: None,
+            primary_agent_id: None,
+            idea_id: None,
+            summary: None,
+            last_message_preview: None,
+            last_message_at: None,
+            created_by: None,
+            metadata_json: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            deleted_at: None,
+            synced_at: "2024-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn idea(id: &str, team: &str) -> IdeaRow {
+        IdeaRow {
+            id: id.to_string(),
+            team_id: team.to_string(),
+            workspace_id: None,
+            parent_id: None,
+            title: "T".to_string(),
+            description: None,
+            status: None,
+            created_by: None,
+            archived: 0,
+            sort_order: Some(0),
+            metadata_json: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            deleted_at: None,
+            synced_at: "2024-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn outbox(message_id: &str, team: &str, session_id: &str) -> OutboxRow {
+        OutboxRow {
+            message_id: message_id.to_string(),
+            team_id: team.to_string(),
+            session_id: session_id.to_string(),
+            sender_actor_id: "actor1".to_string(),
+            content: "hi".to_string(),
+            mention_actor_ids_json: None,
+            display_mention_actor_ids_json: None,
+            attachment_urls_json: None,
+            state: "pending".to_string(),
+            attempt_count: 0,
+            last_attempt_at: None,
+            next_attempt_at: None,
+            last_error: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn team_for_lookups_resolve_owner() {
+        let (store, _dir) = new_store().await;
+        store
+            .actor_upsert_batch(&[actor("a1", "teamA", "2024-01-01T00:00:00Z")])
+            .await
+            .unwrap();
+        store
+            .session_upsert_batch(&[session("s1", "teamA")])
+            .await
+            .unwrap();
+        store.idea_upsert_batch(&[idea("i1", "teamB")]).await.unwrap();
+        store
+            .outbox_upsert(&outbox("m1", "teamA", "s1"))
+            .await
+            .unwrap();
+
+        assert_eq!(store.team_for_actor("a1").await.unwrap().as_deref(), Some("teamA"));
+        assert_eq!(store.team_for_session("s1").await.unwrap().as_deref(), Some("teamA"));
+        assert_eq!(store.team_for_idea("i1").await.unwrap().as_deref(), Some("teamB"));
+        assert_eq!(store.team_for_outbox("m1").await.unwrap().as_deref(), Some("teamA"));
+        assert!(store.team_for_session("does-not-exist").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn outbox_list_team_filters_by_team() {
+        let (store, _dir) = new_store().await;
+        store
+            .session_upsert_batch(&[session("s1", "teamA"), session("s2", "teamB")])
+            .await
+            .unwrap();
+        store.outbox_upsert(&outbox("m1", "teamA", "s1")).await.unwrap();
+        store.outbox_upsert(&outbox("m2", "teamB", "s2")).await.unwrap();
+
+        let only_a = store.outbox_list_team("teamA").await.unwrap();
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].message_id, "m1");
+
+        let all = store.outbox_list_all().await.unwrap();
+        assert_eq!(all.len(), 2);
     }
 
     #[tokio::test]
