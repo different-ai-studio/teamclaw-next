@@ -276,9 +276,33 @@ fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<
     }
 }
 
+async fn apply_bootstrap_overrides(backend: &Arc<dyn Backend>, config: &mut DaemonConfig) {
+    let mqtt = match backend.fetch_bootstrap_mqtt().await {
+        Ok(Some(mqtt)) => mqtt,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!(error = %e, "bootstrap fetch failed; keeping local mqtt config");
+            return;
+        }
+    };
+    let previous = config.mqtt.broker_url.clone();
+    config.mqtt.broker_url = mqtt.url;
+    if mqtt.username.is_some() {
+        config.mqtt.username = mqtt.username;
+    }
+    if mqtt.password.is_some() {
+        config.mqtt.password = mqtt.password;
+    }
+    info!(
+        previous_broker = %previous,
+        broker = %config.mqtt.broker_url,
+        "applied bootstrap mqtt override from cloud api"
+    );
+}
+
 impl DaemonServer {
     pub async fn new(
-        config: DaemonConfig,
+        mut config: DaemonConfig,
         config_path: &std::path::Path,
     ) -> crate::error::Result<Self> {
         let provider_config = load_provider_config_from_default_paths()?;
@@ -299,6 +323,11 @@ impl DaemonServer {
         let token = backend.auth_token().await.map_err(|e| {
             crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
         })?;
+
+        // Best-effort: pull MQTT broker config from /v1/config/bootstrap so
+        // operators can rotate the broker without redeploying daemons. Any
+        // failure falls through to the local mqtt.* config.
+        apply_bootstrap_overrides(&backend, &mut config).await;
 
         let mqtt = MqttClient::new(&config, &actor_id, &token)?;
 

@@ -4,7 +4,8 @@ mod messages;
 
 use super::{
     AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
-    BackendSessionAndParticipants, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
+    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, StoredMessage, WorkspaceRow,
+    WorkspaceUpsert,
 };
 use crate::provider_config::CloudApiConfig;
 use async_trait::async_trait;
@@ -14,6 +15,21 @@ use client::{
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
+
+#[derive(Debug, Deserialize)]
+struct BootstrapResponse {
+    #[serde(default)]
+    mqtt: Option<BootstrapMqttPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapMqttPayload {
+    url: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    password: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct CloudApiBackend {
@@ -169,6 +185,15 @@ impl Backend for CloudApiBackend {
 
     async fn auth_token(&self) -> BackendResult<String> {
         self.access_token().await
+    }
+
+    async fn fetch_bootstrap_mqtt(&self) -> BackendResult<Option<BootstrapMqttOverride>> {
+        let payload: BootstrapResponse = self.get("/v1/config/bootstrap").await?;
+        Ok(payload.mqtt.map(|m| BootstrapMqttOverride {
+            url: m.url,
+            username: m.username,
+            password: m.password,
+        }))
     }
 
     fn cached_credential_expiry(&self) -> Option<Instant> {

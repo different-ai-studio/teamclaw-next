@@ -25,6 +25,16 @@ pub use records::{
     BackendSessionRow, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 
+/// MQTT settings delivered by `/v1/config/bootstrap`. The full broker URL
+/// (with scheme + port) is the canonical field; credentials are optional and
+/// override the values from the local daemon config when present.
+#[derive(Debug, Clone)]
+pub struct BootstrapMqttOverride {
+    pub url: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
 #[cfg(test)]
 pub mod mock;
 
@@ -48,6 +58,13 @@ pub trait Backend: Send + Sync {
     /// on this value.
     fn cached_credential_expiry(&self) -> Option<Instant> {
         None
+    }
+
+    /// Fetch runtime MQTT broker overrides from the cloud backend. Default
+    /// implementation is a no-op for backends that have no remote config
+    /// surface (e.g. mock, Supabase).
+    async fn fetch_bootstrap_mqtt(&self) -> BackendResult<Option<BootstrapMqttOverride>> {
+        Ok(None)
     }
 
     // ── Business operations ───────────────────────────────────────────────
