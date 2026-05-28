@@ -183,7 +183,7 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         None,
     )));
     let runtime = RuntimeManagerAdapter::new(manager.clone(), 256);
-    let handle = http::spawn(cfg, http::server::metadata("actor".into(), "test"), runtime)
+    let handle = http::spawn(cfg, http::server::metadata("actor".into(), "test"), runtime, None)
         .await
         .expect("spawn http server");
     let base = format!("http://{}", handle.local_addr);

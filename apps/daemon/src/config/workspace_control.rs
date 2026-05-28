@@ -1,0 +1,724 @@
+//! Workspace configuration control — provider, permission, allowlist, runtime APIs.
+//!
+//! `WorkspaceControlStore` is the daemon-internal abstraction that owns
+//! all reads and writes to workspace-scoped settings. HTTP handlers call
+//! into this trait; they never touch `opencode.json` or the allowlist file
+//! directly. The single production implementation is `OpenCodeCompatStore`,
+//! which maps TeamClaw-native types to/from the on-disk formats OpenCode
+//! already uses. This keeps the compatibility surface below the daemon
+//! boundary so future replacements only require a new `WorkspaceControlStore`
+//! implementation.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use serde::{Deserialize, Serialize};
+
+// ── Error ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub enum WorkspaceControlError {
+    WorkspaceNotFound(String),
+    Io(String),
+    Parse(String),
+}
+
+impl std::fmt::Display for WorkspaceControlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkspaceNotFound(id) => write!(f, "workspace not found: {id}"),
+            Self::Io(e) => write!(f, "io error: {e}"),
+            Self::Parse(e) => write!(f, "parse error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for WorkspaceControlError {}
+
+// ── Apply outcome ─────────────────────────────────────────────────────────────
+
+/// What happened after a workspace config mutation. Clients use this to
+/// decide whether to surface a "restart required" banner.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyOutcome {
+    /// Change took effect immediately (no agent restart needed).
+    AppliedLive,
+    /// OpenCode will pick up the change on next workspace reload.
+    ReloadRequired,
+    /// The running agent must be restarted for the change to take effect.
+    RestartRequired,
+}
+
+// ── Provider types ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    pub id: String,
+    pub display_name: String,
+    /// True when an api_key (or ${ref}) is stored for this provider.
+    pub authenticated: bool,
+    pub base_url: Option<String>,
+    /// Model IDs advertised by this provider in opencode.json.
+    pub models: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProviderAuthRequest {
+    pub api_key: String,
+    pub base_url: Option<String>,
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub models: Vec<ProviderModelConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProviderModelConfig {
+    pub model_id: String,
+    pub model_name: Option<String>,
+}
+
+// ── Permission types ──────────────────────────────────────────────────────────
+
+/// Maps skill name / glob pattern to an allow/deny/ask action.
+/// Corresponds to `permission.skill` in opencode.json.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionAction {
+    Allow,
+    Deny,
+    Ask,
+}
+
+/// Skill permission configuration for a workspace. The `skills` map uses
+/// the same key format opencode.json uses: exact skill name or glob like
+/// `"myns/*"`. The special key `"*"` sets the default.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PermissionConfig {
+    #[serde(default)]
+    pub skills: HashMap<String, PermissionAction>,
+}
+
+// ── Allowlist types ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AllowlistDecision {
+    Allow,
+    Deny,
+}
+
+/// A permanently-remembered tool-call decision for a workspace project.
+/// Stored in `<workspace>/.teamclaw/allowlist.json` (daemon-owned).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllowlistRule {
+    pub project_id: String,
+    pub tool_call: String,
+    pub decision: AllowlistDecision,
+}
+
+// ── Runtime status ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct RuntimeStatus {
+    pub workspace_id: String,
+    /// Whether an agent runtime is currently running for this workspace.
+    pub ready: bool,
+    pub backend: String,
+    pub current_model: Option<String>,
+}
+
+// ── WorkspaceControlStore trait ───────────────────────────────────────────────
+
+pub trait WorkspaceControlStore: Send + Sync {
+    fn get_providers(&self, workspace_id: &str)
+        -> Result<Vec<ProviderInfo>, WorkspaceControlError>;
+
+    fn put_provider_auth(
+        &self,
+        workspace_id: &str,
+        provider_id: &str,
+        req: ProviderAuthRequest,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
+    fn delete_provider_auth(
+        &self,
+        workspace_id: &str,
+        provider_id: &str,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
+    fn get_permissions(
+        &self,
+        workspace_id: &str,
+    ) -> Result<PermissionConfig, WorkspaceControlError>;
+
+    fn put_permissions(
+        &self,
+        workspace_id: &str,
+        config: PermissionConfig,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
+    fn get_allowlist(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<AllowlistRule>, WorkspaceControlError>;
+
+    fn put_allowlist(
+        &self,
+        workspace_id: &str,
+        rules: Vec<AllowlistRule>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
+    fn get_runtime_status(
+        &self,
+        workspace_id: &str,
+    ) -> Result<RuntimeStatus, WorkspaceControlError>;
+
+    fn reload_runtime(&self, workspace_id: &str) -> Result<ApplyOutcome, WorkspaceControlError>;
+}
+
+// ── opencode.json internal schema ────────────────────────────────────────────
+
+/// The subset of opencode.json that WorkspaceControlStore reads and writes.
+/// Unknown fields are preserved via `extra` so round-trips don't lose data.
+#[derive(Debug, Deserialize, Serialize, Default)]
+struct OpencodeJson {
+    #[serde(default)]
+    provider: HashMap<String, OcProviderEntry>,
+    #[serde(default)]
+    permission: OcPermissionSection,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+struct OcProviderEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    /// npm package name (e.g. `@ai-sdk/openai-compatible`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    npm: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    options: HashMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    models: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+struct OcPermissionSection {
+    /// skill name / glob → "allow" | "deny" | "ask"
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    skill: HashMap<String, String>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
+}
+
+// ── OpenCodeCompatStore ───────────────────────────────────────────────────────
+
+/// Production implementation of `WorkspaceControlStore` that persists to the
+/// on-disk formats OpenCode already uses. The daemon owns reads/writes to:
+/// - `<workspace_path>/opencode.json` — providers, skill permissions
+/// - `<workspace_path>/.teamclaw/allowlist.json` — permanently-remembered
+///   tool-call decisions (daemon-owned sidecar; separate from OpenCode's
+///   SQLite allowlist DB)
+pub struct OpenCodeCompatStore {
+    /// workspace_id → absolute workspace_path
+    workspaces: HashMap<String, String>,
+    /// Coarse write mutex: one workspace write at a time per process.
+    /// Per-workspace locking is overkill for the current traffic model.
+    write_lock: Mutex<()>,
+}
+
+impl OpenCodeCompatStore {
+    pub fn new(workspaces: HashMap<String, String>) -> Self {
+        Self {
+            workspaces,
+            write_lock: Mutex::new(()),
+        }
+    }
+
+    /// Build from a `WorkspaceStore` slice (convenience constructor).
+    pub fn from_workspace_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self::new(pairs.into_iter().collect())
+    }
+
+    fn workspace_path(&self, workspace_id: &str) -> Result<&str, WorkspaceControlError> {
+        self.workspaces
+            .get(workspace_id)
+            .map(String::as_str)
+            .ok_or_else(|| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))
+    }
+
+    fn opencode_json_path(workspace_path: &str) -> PathBuf {
+        PathBuf::from(workspace_path).join("opencode.json")
+    }
+
+    fn allowlist_path(workspace_path: &str) -> PathBuf {
+        PathBuf::from(workspace_path)
+            .join(".teamclaw")
+            .join("allowlist.json")
+    }
+
+    fn read_opencode_json(workspace_path: &str) -> Result<OpencodeJson, WorkspaceControlError> {
+        let path = Self::opencode_json_path(workspace_path);
+        if !path.exists() {
+            return Ok(OpencodeJson::default());
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        serde_json::from_str(&content)
+            .map_err(|e| WorkspaceControlError::Parse(e.to_string()))
+    }
+
+    fn write_opencode_json(
+        workspace_path: &str,
+        cfg: &OpencodeJson,
+    ) -> Result<(), WorkspaceControlError> {
+        let path = Self::opencode_json_path(workspace_path);
+        let content = serde_json::to_string_pretty(cfg)
+            .map_err(|e| WorkspaceControlError::Parse(e.to_string()))?;
+        std::fs::write(&path, content).map_err(|e| WorkspaceControlError::Io(e.to_string()))
+    }
+
+    fn read_allowlist(workspace_path: &str) -> Result<Vec<AllowlistRule>, WorkspaceControlError> {
+        let path = Self::allowlist_path(workspace_path);
+        if !path.exists() {
+            return Ok(vec![]);
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        serde_json::from_str(&content)
+            .map_err(|e| WorkspaceControlError::Parse(e.to_string()))
+    }
+
+    fn write_allowlist(
+        workspace_path: &str,
+        rules: &[AllowlistRule],
+    ) -> Result<(), WorkspaceControlError> {
+        let path = Self::allowlist_path(workspace_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        }
+        let content = serde_json::to_string_pretty(rules)
+            .map_err(|e| WorkspaceControlError::Parse(e.to_string()))?;
+        std::fs::write(&path, content).map_err(|e| WorkspaceControlError::Io(e.to_string()))
+    }
+}
+
+impl WorkspaceControlStore for OpenCodeCompatStore {
+    fn get_providers(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<ProviderInfo>, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let cfg = Self::read_opencode_json(wpath)?;
+
+        let providers = cfg
+            .provider
+            .iter()
+            .map(|(id, entry)| {
+                let base_url = entry
+                    .options
+                    .get("baseURL")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                let authenticated = entry.options.contains_key("apiKey");
+                let models = entry.models.keys().cloned().collect();
+                ProviderInfo {
+                    id: id.clone(),
+                    display_name: entry.name.clone().unwrap_or_else(|| id.clone()),
+                    authenticated,
+                    base_url,
+                    models,
+                }
+            })
+            .collect();
+
+        Ok(providers)
+    }
+
+    fn put_provider_auth(
+        &self,
+        workspace_id: &str,
+        provider_id: &str,
+        req: ProviderAuthRequest,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        let mut cfg = Self::read_opencode_json(wpath)?;
+
+        let entry = cfg
+            .provider
+            .entry(provider_id.to_owned())
+            .or_insert_with(OcProviderEntry::default);
+
+        if let Some(name) = req.display_name {
+            entry.name = Some(name);
+        }
+        if entry.npm.is_none() {
+            entry.npm = Some("@ai-sdk/openai-compatible".to_owned());
+        }
+        entry
+            .options
+            .insert("apiKey".to_owned(), serde_json::Value::String(req.api_key));
+        if let Some(base_url) = req.base_url {
+            entry
+                .options
+                .insert("baseURL".to_owned(), serde_json::Value::String(base_url));
+        }
+        for model in req.models {
+            let model_val = serde_json::json!({
+                "name": model.model_name.unwrap_or_else(|| model.model_id.clone()),
+            });
+            entry.models.insert(model.model_id, model_val);
+        }
+
+        Self::write_opencode_json(wpath, &cfg)?;
+        Ok(ApplyOutcome::RestartRequired)
+    }
+
+    fn delete_provider_auth(
+        &self,
+        workspace_id: &str,
+        provider_id: &str,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        let mut cfg = Self::read_opencode_json(wpath)?;
+
+        cfg.provider.remove(provider_id);
+        Self::write_opencode_json(wpath, &cfg)?;
+        Ok(ApplyOutcome::RestartRequired)
+    }
+
+    fn get_permissions(
+        &self,
+        workspace_id: &str,
+    ) -> Result<PermissionConfig, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let cfg = Self::read_opencode_json(wpath)?;
+
+        let skills = cfg
+            .permission
+            .skill
+            .iter()
+            .filter_map(|(k, v)| {
+                let action = match v.as_str() {
+                    "allow" => PermissionAction::Allow,
+                    "deny" => PermissionAction::Deny,
+                    "ask" => PermissionAction::Ask,
+                    _ => return None,
+                };
+                Some((k.clone(), action))
+            })
+            .collect();
+
+        Ok(PermissionConfig { skills })
+    }
+
+    fn put_permissions(
+        &self,
+        workspace_id: &str,
+        config: PermissionConfig,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        let mut cfg = Self::read_opencode_json(wpath)?;
+
+        cfg.permission.skill = config
+            .skills
+            .into_iter()
+            .map(|(k, v)| {
+                let s = match v {
+                    PermissionAction::Allow => "allow",
+                    PermissionAction::Deny => "deny",
+                    PermissionAction::Ask => "ask",
+                }
+                .to_owned();
+                (k, s)
+            })
+            .collect();
+
+        Self::write_opencode_json(wpath, &cfg)?;
+        Ok(ApplyOutcome::RestartRequired)
+    }
+
+    fn get_allowlist(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<AllowlistRule>, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        Self::read_allowlist(wpath)
+    }
+
+    fn put_allowlist(
+        &self,
+        workspace_id: &str,
+        rules: Vec<AllowlistRule>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        Self::write_allowlist(wpath, &rules)?;
+        Ok(ApplyOutcome::AppliedLive)
+    }
+
+    fn get_runtime_status(
+        &self,
+        workspace_id: &str,
+    ) -> Result<RuntimeStatus, WorkspaceControlError> {
+        // Workspace path lookup validates the workspace exists.
+        let _wpath = self.workspace_path(workspace_id)?;
+        Ok(RuntimeStatus {
+            workspace_id: workspace_id.to_owned(),
+            // Runtime readiness is owned by RuntimeManager; the compat store
+            // reports a static view. Phase D wires in the real status.
+            ready: false,
+            backend: "opencode".to_owned(),
+            current_model: None,
+        })
+    }
+
+    fn reload_runtime(&self, workspace_id: &str) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let _wpath = self.workspace_path(workspace_id)?;
+        // Reload is driven by RuntimeManager; this stub records intent.
+        // Phase D wires in the real reload signal.
+        Ok(ApplyOutcome::ReloadRequired)
+    }
+}
+
+// ── NullWorkspaceControlStore ─────────────────────────────────────────────────
+
+/// Default no-op store used when no workspace control is configured (e.g.
+/// in tests that don't exercise workspace routes). Every method returns
+/// `WorkspaceNotFound` so workspace routes respond 404 gracefully.
+pub struct NullWorkspaceControlStore;
+
+impl WorkspaceControlStore for NullWorkspaceControlStore {
+    fn get_providers(&self, id: &str) -> Result<Vec<ProviderInfo>, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn put_provider_auth(
+        &self,
+        id: &str,
+        _: &str,
+        _: ProviderAuthRequest,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn delete_provider_auth(
+        &self,
+        id: &str,
+        _: &str,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_permissions(&self, id: &str) -> Result<PermissionConfig, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn put_permissions(
+        &self,
+        id: &str,
+        _: PermissionConfig,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_allowlist(&self, id: &str) -> Result<Vec<AllowlistRule>, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn put_allowlist(
+        &self,
+        id: &str,
+        _: Vec<AllowlistRule>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_runtime_status(&self, id: &str) -> Result<RuntimeStatus, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn reload_runtime(&self, id: &str) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn make_store(workspace_path: &str, workspace_id: &str) -> OpenCodeCompatStore {
+        OpenCodeCompatStore::new(HashMap::from([(
+            workspace_id.to_owned(),
+            workspace_path.to_owned(),
+        )]))
+    }
+
+    #[test]
+    fn get_providers_empty_workspace_returns_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+        let providers = store.get_providers("ws-1").unwrap();
+        assert!(providers.is_empty());
+    }
+
+    #[test]
+    fn put_provider_auth_creates_entry_and_get_returns_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+
+        let outcome = store
+            .put_provider_auth(
+                "ws-1",
+                "my-llm",
+                ProviderAuthRequest {
+                    api_key: "sk-test".to_owned(),
+                    base_url: Some("https://api.example.com/v1".to_owned()),
+                    display_name: Some("My LLM".to_owned()),
+                    models: vec![ProviderModelConfig {
+                        model_id: "my-llm/gpt-4".to_owned(),
+                        model_name: Some("GPT-4".to_owned()),
+                    }],
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(outcome, ApplyOutcome::RestartRequired));
+
+        let providers = store.get_providers("ws-1").unwrap();
+        assert_eq!(providers.len(), 1);
+        let p = &providers[0];
+        assert_eq!(p.id, "my-llm");
+        assert_eq!(p.display_name, "My LLM");
+        assert!(p.authenticated);
+        assert_eq!(p.base_url.as_deref(), Some("https://api.example.com/v1"));
+        assert!(p.models.contains(&"my-llm/gpt-4".to_owned()));
+    }
+
+    #[test]
+    fn delete_provider_auth_removes_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+
+        store
+            .put_provider_auth(
+                "ws-1",
+                "to-remove",
+                ProviderAuthRequest {
+                    api_key: "sk-x".to_owned(),
+                    base_url: None,
+                    display_name: None,
+                    models: vec![],
+                },
+            )
+            .unwrap();
+
+        store.delete_provider_auth("ws-1", "to-remove").unwrap();
+        let providers = store.get_providers("ws-1").unwrap();
+        assert!(providers.is_empty());
+    }
+
+    #[test]
+    fn put_and_get_permissions_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+
+        let config = PermissionConfig {
+            skills: HashMap::from([
+                ("*".to_owned(), PermissionAction::Ask),
+                ("bash".to_owned(), PermissionAction::Allow),
+                ("network/*".to_owned(), PermissionAction::Deny),
+            ]),
+        };
+
+        store.put_permissions("ws-1", config.clone()).unwrap();
+        let got = store.get_permissions("ws-1").unwrap();
+
+        assert_eq!(got.skills.get("*"), Some(&PermissionAction::Ask));
+        assert_eq!(got.skills.get("bash"), Some(&PermissionAction::Allow));
+        assert_eq!(got.skills.get("network/*"), Some(&PermissionAction::Deny));
+    }
+
+    #[test]
+    fn put_and_get_allowlist_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+
+        let rules = vec![
+            AllowlistRule {
+                project_id: "proj-1".to_owned(),
+                tool_call: "bash(rm -rf)".to_owned(),
+                decision: AllowlistDecision::Deny,
+            },
+            AllowlistRule {
+                project_id: "proj-1".to_owned(),
+                tool_call: "read_file(*)".to_owned(),
+                decision: AllowlistDecision::Allow,
+            },
+        ];
+
+        store.put_allowlist("ws-1", rules.clone()).unwrap();
+        let got = store.get_allowlist("ws-1").unwrap();
+
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].project_id, "proj-1");
+        assert_eq!(got[1].decision, AllowlistDecision::Allow);
+    }
+
+    #[test]
+    fn opencode_json_round_trip_preserves_unknown_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_path = dir.path().to_str().unwrap();
+
+        // Write an opencode.json with extra fields that the store doesn't know about.
+        let json = serde_json::json!({
+            "provider": {},
+            "someOtherKey": "preserved",
+            "mcp": { "server1": {} }
+        });
+        std::fs::write(
+            dir.path().join("opencode.json"),
+            serde_json::to_string_pretty(&json).unwrap(),
+        )
+        .unwrap();
+
+        let store = make_store(workspace_path, "ws-1");
+        store
+            .put_provider_auth(
+                "ws-1",
+                "p1",
+                ProviderAuthRequest {
+                    api_key: "sk".to_owned(),
+                    base_url: None,
+                    display_name: None,
+                    models: vec![],
+                },
+            )
+            .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("opencode.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["someOtherKey"], "preserved");
+        assert_eq!(parsed["mcp"]["server1"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn null_store_returns_workspace_not_found() {
+        let store: Arc<dyn WorkspaceControlStore> = Arc::new(NullWorkspaceControlStore);
+        assert!(matches!(
+            store.get_providers("any"),
+            Err(WorkspaceControlError::WorkspaceNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn unknown_workspace_returns_not_found() {
+        let store = make_store("/some/path", "ws-1");
+        assert!(matches!(
+            store.get_providers("ws-999"),
+            Err(WorkspaceControlError::WorkspaceNotFound(_))
+        ));
+    }
+}

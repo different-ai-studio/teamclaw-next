@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use crate::config::HttpConfig;
+use crate::config::workspace_control::WorkspaceControlStore;
 
 use super::limit::RateLimiter;
 use super::runtime_adapter::RuntimeAdapter;
@@ -33,6 +34,11 @@ pub struct HttpState {
     pub session_index: Arc<SessionOwnerIndex>,
     pub idempotency: Arc<IdempotencyCache>,
     pub limiter: Arc<RateLimiter>,
+    /// Workspace configuration control (providers, permissions, allowlist).
+    /// `None` when the HTTP server is started without a workspace control
+    /// store (e.g. in focused unit tests). Workspace routes return 404 in
+    /// that case.
+    pub workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
 }
 
 impl HttpState {
@@ -41,6 +47,7 @@ impl HttpState {
         tokens: TokenStore,
         meta: DaemonMetadata,
         runtime: Arc<dyn RuntimeAdapter>,
+        workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
     ) -> Self {
         Self {
             config: Arc::new(config),
@@ -50,6 +57,7 @@ impl HttpState {
             session_index: SessionOwnerIndex::new(),
             idempotency: IdempotencyCache::new(),
             limiter: RateLimiter::new(),
+            workspace_control,
         }
     }
 }

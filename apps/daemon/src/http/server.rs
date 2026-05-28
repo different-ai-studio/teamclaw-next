@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::config::workspace_control::WorkspaceControlStore;
 use crate::config::{DaemonConfig, HttpConfig};
 
 use super::cors;
@@ -53,10 +54,15 @@ impl Drop for HttpHandle {
 /// Spawn the HTTP listener. Errors surface as `anyhow::Result` because
 /// the daemon's startup path uses that as the lingua franca for early
 /// bring-up failures.
+///
+/// Pass `Some(store)` to enable the `/v1/workspaces/*` control-plane APIs.
+/// Pass `None` to disable them (workspace routes return 404). The latter is
+/// the default for tests that only exercise session/runtime behaviour.
 pub async fn spawn(
     http: HttpConfig,
     meta: DaemonMetadata,
     runtime: Arc<dyn RuntimeAdapter>,
+    workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
 ) -> anyhow::Result<HttpHandle> {
     // Resolve token + port files (defaults live in DaemonConfig::config_dir).
     let token_path = http
@@ -94,7 +100,7 @@ pub async fn spawn(
     let cors_layer = cors::build(&http.allowed_origins)
         .map_err(|e| anyhow::anyhow!("cors build: {}", e.detail))?;
 
-    let state = HttpState::new(http, tokens.clone(), meta, runtime);
+    let state = HttpState::new(http, tokens.clone(), meta, runtime, workspace_control);
 
     spawn_reapers(state.clone());
     let mut app: Router = routes::build(state);
@@ -176,7 +182,7 @@ mod tests {
         };
         let meta = metadata("actor-test".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime).await.unwrap();
+        let handle = spawn(cfg, meta, runtime, None).await.unwrap();
         let url = format!("http://{}/v1/healthz", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["status"], "ok");
@@ -195,7 +201,7 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime)
+        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
@@ -233,7 +239,7 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, metadata("a".into(), "test"), runtime)
+        let handle = spawn(cfg, metadata("a".into(), "test"), runtime, None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
@@ -410,7 +416,7 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(2);
-        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime)
+        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
@@ -476,7 +482,7 @@ mod tests {
         };
         let meta = metadata("actor-x".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime).await.unwrap();
+        let handle = spawn(cfg, meta, runtime, None).await.unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root_token = std::fs::read_to_string(&token_path).unwrap();
         let root_token = root_token.trim();
@@ -545,7 +551,7 @@ mod tests {
         };
         let meta = metadata("actor-abc".into(), "cloud_api");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime).await.unwrap();
+        let handle = spawn(cfg, meta, runtime, None).await.unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["actor_id"], "actor-abc");

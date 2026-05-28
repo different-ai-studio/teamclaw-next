@@ -836,7 +836,7 @@ impl DaemonServer {
                 let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(
                     http_cfg.max_event_backlog,
                 );
-                match crate::http::spawn(http_cfg, meta, runtime).await {
+                match crate::http::spawn(http_cfg, meta, runtime, None).await {
                     Ok(h) => {
                         info!(addr = %h.local_addr, "http listener bound");
                         Some(h)

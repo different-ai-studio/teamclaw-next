@@ -36,6 +36,7 @@ pub mod runtime_adapter;
 pub mod sessions;
 pub mod state;
 pub mod tokens;
+pub mod workspaces;
 
 mod routes;
 pub mod server;
