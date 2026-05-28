@@ -1,5 +1,5 @@
 use crate::config::DaemonConfig;
-use crate::supabase::config::SupabaseConfig;
+use crate::provider_config::ProviderConfig;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -55,7 +55,7 @@ fn candidate_paths() -> Vec<PathBuf> {
         dir.join("sessions.toml"),
         dir.join("workspaces.toml"),
     ];
-    if let Ok(p) = SupabaseConfig::default_path() {
+    if let Ok(p) = ProviderConfig::default_path() {
         paths.push(p);
     }
     paths
