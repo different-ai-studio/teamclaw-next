@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "./auth-store";
+import { useCurrentTeamStore } from "./current-team";
 import { isTauri } from "@/lib/utils";
 import { loadPinnedSessionIds, savePinnedSessionIds } from "./session-pins";
 import {
@@ -153,7 +154,12 @@ export const useSessionListStore = create<State>((set, get) => ({
     //      still gets phase-1 instant render before the Supabase RPC).
     // The Supabase RPC below populates either path going forward.
     const existingRows = useSessionListStore.getState().rows;
-    const teamId = existingRows[0]?.team_id ?? readLastTeamId();
+    // Prefer the active team from current-team store. Falling back to
+    // localStorage when it's still null lets phase-1 hydrate fire on cold
+    // boot, but using it once current-team is known would cause a
+    // local_cache team-gate mismatch panic after switching accounts/teams.
+    const activeTeamId = useCurrentTeamStore.getState().team?.id ?? null;
+    const teamId = activeTeamId ?? existingRows[0]?.team_id ?? readLastTeamId();
 
     // ── Phase 1: hydrate instantly from local cache (Tauri only) ──────────
     if (isTauri() && teamId) {
