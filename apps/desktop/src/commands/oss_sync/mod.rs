@@ -222,19 +222,24 @@ pub async fn oss_sync_create_team(
     let _ = team_secret_store::delete_team_secret(&workspace_path, "PENDING");
 
     // 5. Write local config.
+    // ai_gateway_endpoint / litellm_key are nullable in /v1/teams response
+    // (skipped when LITELLM_MASTER_KEY is unset on the FC side). Fall back to
+    // empty strings so the local config file is well-formed in dev.
+    let ai_gateway_endpoint = result.ai_gateway_endpoint.unwrap_or_default();
+    let litellm_key = result.litellm_key.unwrap_or_default();
     write_oss_team_config(
         &workspace_path,
         &result.team_id,
         &result.team_slug,
-        &result.ai_gateway_endpoint,
-        &result.litellm_key,
+        &ai_gateway_endpoint,
+        &litellm_key,
     )?;
 
     Ok(CreateTeamCommandResult {
         team_id: result.team_id,
         team_slug: result.team_slug,
-        ai_gateway_endpoint: result.ai_gateway_endpoint,
-        litellm_key: result.litellm_key,
+        ai_gateway_endpoint,
+        litellm_key,
         team_secret,
     })
 }

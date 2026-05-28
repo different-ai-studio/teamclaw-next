@@ -110,17 +110,38 @@ paths:
                     - "null"
       responses:
         "200":
-          description: Created team.
+          description: |
+            Created team. Server-side this provisions a LiteLLM team + default
+            key and seeds team_workspace_config in one call. When
+            LITELLM_MASTER_KEY is unset on the FC side (local dev / tests),
+            provisioning is skipped and `aiGatewayEndpoint` / `litellmKey` are
+            `null` in the response.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Team"
+                allOf:
+                  - $ref: "#/components/schemas/Team"
+                  - type: object
+                    properties:
+                      aiGatewayEndpoint:
+                        description: LiteLLM-fronted OpenAI-compatible gateway base URL (e.g. `https://ai.ucar.cc/v1`). Null when provisioning was skipped.
+                        type:
+                          - string
+                          - "null"
+                      litellmKey:
+                        description: One-shot default LiteLLM key for the new team. Returned only at creation time; store it locally on receipt. Null when provisioning was skipped.
+                        type:
+                          - string
+                          - "null"
         "400":
           $ref: "#/components/responses/Error"
         "401":
+          $ref: "#/components/responses/Error"
+        "502":
+          description: LiteLLM provisioning failed; no DB rows were written.
           $ref: "#/components/responses/Error"
   /v1/teams/{teamId}:
     get:
