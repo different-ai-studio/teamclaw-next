@@ -170,7 +170,45 @@ impl CloudApiBackend {
         cloud_url(&self.cfg, path)
     }
 
-
+    /// Anonymous `POST /v1/invites/claim`. The onboarding flow has no
+    /// refresh token yet, so this path skips the `bearer_auth` wrapper
+    /// that `post()` would add. FC accepts anon invite claims for the
+    /// agent-invite case (no caller identity required to mint a new agent).
+    pub async fn claim_team_invite_anon(&self, token: &str) -> BackendResult<ClaimResult> {
+        #[derive(serde::Serialize)]
+        struct ClaimInviteRequest<'a> {
+            token: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        struct CloudClaimResult {
+            #[serde(rename = "actorId")]
+            actor_id: String,
+            #[serde(rename = "teamId")]
+            team_id: String,
+            #[serde(rename = "actorType")]
+            actor_type: String,
+            #[serde(rename = "displayName")]
+            display_name: String,
+            #[serde(rename = "refreshToken")]
+            refresh_token: Option<String>,
+        }
+        let resp = self
+            .http
+            .post(self.cloud_url("/v1/invites/claim"))
+            .header("x-request-id", request_id())
+            .json(&ClaimInviteRequest { token })
+            .send()
+            .await
+            .map_err(network_error)?;
+        let row: CloudClaimResult = decode_response(resp).await?;
+        Ok(ClaimResult {
+            actor_id: row.actor_id,
+            team_id: row.team_id,
+            actor_type: row.actor_type,
+            display_name: row.display_name,
+            refresh_token: row.refresh_token,
+        })
+    }
 }
 
 #[async_trait]
@@ -779,8 +817,6 @@ mod tests {
     fn config(server: &MockServer) -> CloudApiConfig {
         CloudApiConfig {
             url: server.uri(),
-            supabase_url: server.uri(),
-            supabase_anon_key: "anon".to_string(),
             refresh_token: "refresh".to_string(),
             team_id: "team-1".to_string(),
             actor_id: "agent-1".to_string(),

@@ -1,4 +1,3 @@
-use crate::supabase::error::{SupabaseError, SupabaseResult};
 use url::Url;
 
 const INVITE_URL_SCHEMES: &[&str] = &["teamclaw", "amux"];
@@ -9,18 +8,27 @@ pub struct ParsedInvite {
     pub broker_url: Option<String>,
 }
 
-pub fn parse(raw: &str) -> SupabaseResult<ParsedInvite> {
-    let url =
-        Url::parse(raw).map_err(|e| SupabaseError::Config(format!("parse invite url: {e}")))?;
+#[derive(Debug, thiserror::Error)]
+#[error("invite url: {0}")]
+pub struct InviteUrlError(String);
+
+impl InviteUrlError {
+    fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+pub fn parse(raw: &str) -> Result<ParsedInvite, InviteUrlError> {
+    let url = Url::parse(raw).map_err(|e| InviteUrlError::new(format!("parse invite url: {e}")))?;
 
     if !INVITE_URL_SCHEMES.contains(&url.scheme()) {
-        return Err(SupabaseError::Config(format!(
+        return Err(InviteUrlError::new(format!(
             "invite url scheme must be 'teamclaw', got {}",
             url.scheme()
         )));
     }
     if url.host_str() != Some("invite") {
-        return Err(SupabaseError::Config(format!(
+        return Err(InviteUrlError::new(format!(
             "invite url host must be 'invite', got {:?}",
             url.host_str()
         )));
@@ -30,9 +38,9 @@ pub fn parse(raw: &str) -> SupabaseResult<ParsedInvite> {
         .query_pairs()
         .find(|(k, _)| k == "token")
         .map(|(_, v)| v.into_owned())
-        .ok_or_else(|| SupabaseError::Config("invite url missing 'token'".into()))?;
+        .ok_or_else(|| InviteUrlError::new("invite url missing 'token'"))?;
     if token.is_empty() {
-        return Err(SupabaseError::Config("invite token is empty".into()));
+        return Err(InviteUrlError::new("invite token is empty"));
     }
 
     let broker_url = url

@@ -1,7 +1,8 @@
+use crate::backend::cloud_api::CloudApiBackend;
+use crate::backend::{Backend, BackendError};
 use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
-use crate::onboarding::invite_url::{self, ParsedInvite};
-use crate::supabase::error::{SupabaseError, SupabaseResult};
-use crate::supabase::{SupabaseBackend, SupabaseConfig};
+use crate::onboarding::invite_url::{self, InviteUrlError, ParsedInvite};
+use crate::provider_config::{CloudApiConfig, ProviderConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use teamclaw_types::services_defaults::services_defaults;
@@ -17,52 +18,69 @@ pub struct InitOutcome {
     pub config_path: PathBuf,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum OnboardingError {
+    #[error("invite url: {0}")]
+    Invite(#[from] InviteUrlError),
+    #[error("backend: {0}")]
+    Backend(#[from] BackendError),
+    #[error("config: {0}")]
+    Config(String),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+}
+
 /// Execute `amuxd init <teamclaw://invite?token=...>`:
 ///  1. parse token
-///  2. anon-RPC `claim_team_invite` → mint daemon auth.users + refresh_token
+///  2. anon-POST `/v1/invites/claim` → mint daemon actor + refresh_token
 ///  3. verify by trading refresh_token for an access_token
-///  4. persist `supabase.toml`
+///  4. persist `backend.toml` with kind = "cloud_api"
 ///  5. write `daemon.toml` with the shared-broker defaults if absent, or
 ///     preserve the existing one's device.id while refreshing team_id
-pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<InitOutcome> {
+pub async fn run(raw_url: &str, config_path: Option<&Path>) -> Result<InitOutcome, OnboardingError> {
     let invite = invite_url::parse(raw_url)?;
 
-    let base_cfg = supabase_build_env_config_from_process()?;
-    let claim_client = SupabaseBackend::new_without_persistence(base_cfg.clone())?;
+    let cloud_url = cloud_api_url_from_env()?;
+
+    // Anon claim: we don't have a refresh_token yet, so the dedicated
+    // anon path POSTs without a bearer header.
+    let anon_cfg = CloudApiConfig {
+        url: cloud_url.clone(),
+        refresh_token: String::new(),
+        team_id: String::new(),
+        actor_id: String::new(),
+    };
+    let claim_client = CloudApiBackend::new(anon_cfg);
     let claim = claim_client
-        .claim_team_invite(&invite.token)
+        .claim_team_invite_anon(&invite.token)
         .await
         .map_err(actionable_invite_claim_error)?;
 
-    let refresh_token =
-        claim
-            .refresh_token
-            .clone()
-            .ok_or_else(|| crate::supabase::error::SupabaseError::Rpc {
-                code: None,
-                message: "claim_team_invite did not return a refresh token (kind=member?)".into(),
-            })?;
+    let refresh_token = claim.refresh_token.clone().ok_or_else(|| {
+        OnboardingError::Backend(BackendError::Provider {
+            provider: "cloud_api",
+            code: None,
+            message: "claim_team_invite did not return a refresh token (kind=member?)".into(),
+        })
+    })?;
 
-    let mut cfg = SupabaseConfig {
-        url: base_cfg.url,
-        anon_key: base_cfg.anon_key,
+    let cfg = CloudApiConfig {
+        url: cloud_url,
         refresh_token,
         team_id: claim.team_id.clone(),
         actor_id: claim.actor_id.clone(),
     };
 
-    let verify_client = SupabaseBackend::new_without_persistence(cfg.clone())?;
-    verify_client.access_token().await?;
-    cfg.refresh_token = verify_client.current_refresh_token();
+    // Verify refresh → access works before persisting.
+    let verify_client = CloudApiBackend::new(cfg.clone());
+    verify_client.auth_token().await?;
 
     let path = match config_path {
         Some(p) => p.to_path_buf(),
-        None => SupabaseConfig::default_path()?,
+        None => ProviderConfig::default_path()
+            .map_err(|e| OnboardingError::Config(format!("backend config path: {e}")))?,
     };
-    cfg.save(&path)?;
-    if config_path.is_none() {
-        save_legacy_supabase_config_if_present(&cfg)?;
-    }
+    save_backend_toml(&path, &cfg)?;
 
     let daemon_path = DaemonConfig::default_path();
     let existing_daemon_cfg = DaemonConfig::load(&daemon_path).ok();
@@ -73,9 +91,9 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
         &claim.actor_id,
         &invite,
     );
-    daemon_cfg.save(&daemon_path).map_err(|e| {
-        crate::supabase::error::SupabaseError::Config(format!("write daemon.toml: {e}"))
-    })?;
+    daemon_cfg
+        .save(&daemon_path)
+        .map_err(|e| OnboardingError::Config(format!("write daemon.toml: {e}")))?;
 
     Ok(InitOutcome {
         actor_id: claim.actor_id,
@@ -85,25 +103,40 @@ pub async fn run(raw_url: &str, config_path: Option<&Path>) -> SupabaseResult<In
     })
 }
 
-fn save_legacy_supabase_config_if_present(cfg: &SupabaseConfig) -> SupabaseResult<()> {
-    let legacy_path = SupabaseConfig::legacy_path()?;
-    if legacy_path.exists() {
-        cfg.save(&legacy_path)?;
+/// Serialize a `CloudApiConfig` into the `[cloud_api]` section of a
+/// `backend.toml` file at `path`.
+fn save_backend_toml(path: &Path, cfg: &CloudApiConfig) -> Result<(), OnboardingError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
+    let text = format!(
+        "kind = \"cloud_api\"\n\n[cloud_api]\n\
+         url = \"{}\"\n\
+         refresh_token = \"{}\"\n\
+         team_id = \"{}\"\n\
+         actor_id = \"{}\"\n",
+        cfg.url, cfg.refresh_token, cfg.team_id, cfg.actor_id,
+    );
+    std::fs::write(path, text)?;
     Ok(())
 }
 
-fn actionable_invite_claim_error(err: SupabaseError) -> SupabaseError {
+fn actionable_invite_claim_error(err: BackendError) -> OnboardingError {
     match err {
-        SupabaseError::Rpc { code, message } if message.contains("member claim requires authentication") => {
-            SupabaseError::Rpc {
+        BackendError::Provider {
+            provider,
+            code,
+            message,
+        } if message.contains("member claim requires authentication") => {
+            OnboardingError::Backend(BackendError::Provider {
+                provider,
                 code,
                 message: format!(
                     "{message}\nThis is a teammate/member invite. `amuxd init` requires an Agent invite; create one from the app's Invite dialog with Kind = Agent."
                 ),
-            }
+            })
         }
-        other => other,
+        other => OnboardingError::Backend(other),
     }
 }
 
@@ -127,38 +160,28 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
     }
 }
 
-fn supabase_build_env_config_from_process() -> SupabaseResult<SupabaseConfig> {
-    let url = std::env::var("SUPABASE_URL").ok();
-    let anon_key = std::env::var("SUPABASE_ANON_KEY").ok();
+fn cloud_api_url_from_env() -> Result<String, OnboardingError> {
+    let url = std::env::var("CLOUD_API_URL").ok();
     let dotenv = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".env")).ok();
-    supabase_build_env_config_with_dotenv(url.as_deref(), anon_key.as_deref(), dotenv.as_deref())
+    cloud_api_url_with_dotenv(url.as_deref(), dotenv.as_deref())
 }
 
 #[cfg(test)]
-fn supabase_build_env_config(
-    url: Option<&str>,
-    anon_key: Option<&str>,
-) -> SupabaseResult<SupabaseConfig> {
-    supabase_build_env_config_with_dotenv(url, anon_key, None)
+fn cloud_api_url_from_env_for_test(url: Option<&str>) -> Result<String, OnboardingError> {
+    cloud_api_url_with_dotenv(url, None)
 }
 
-fn supabase_build_env_config_with_dotenv(
+fn cloud_api_url_with_dotenv(
     url: Option<&str>,
-    anon_key: Option<&str>,
     dotenv: Option<&str>,
-) -> SupabaseResult<SupabaseConfig> {
+) -> Result<String, OnboardingError> {
     let dotenv = dotenv.map(parse_dotenv).unwrap_or_default();
-    let url = url.or_else(|| dotenv.get("SUPABASE_URL").map(String::as_str));
-    let anon_key = anon_key.or_else(|| dotenv.get("SUPABASE_ANON_KEY").map(String::as_str));
-    let url = required_supabase_env("SUPABASE_URL", url)?;
-    let anon_key = required_supabase_env("SUPABASE_ANON_KEY", anon_key)?;
-
-    Ok(SupabaseConfig {
-        url,
-        anon_key,
-        refresh_token: String::new(),
-        team_id: String::new(),
-        actor_id: String::new(),
+    let url = url
+        .or_else(|| dotenv.get("CLOUD_API_URL").map(String::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    url.map(str::to_string).ok_or_else(|| {
+        OnboardingError::Config("CLOUD_API_URL env var required for `amuxd init`".into())
     })
 }
 
@@ -192,13 +215,6 @@ fn unquote_dotenv_value(value: &str) -> String {
     value.to_string()
 }
 
-fn required_supabase_env(name: &str, value: Option<&str>) -> SupabaseResult<String> {
-    let value = value.map(str::trim).filter(|value| !value.is_empty());
-    value
-        .map(str::to_string)
-        .ok_or_else(|| SupabaseError::Config(format!("{name} env var required for `amuxd init`")))
-}
-
 fn daemon_config_for_invite(
     existing: Option<DaemonConfig>,
     display_name: &str,
@@ -207,9 +223,10 @@ fn daemon_config_for_invite(
     invite: &ParsedInvite,
 ) -> DaemonConfig {
     let mut daemon_cfg = existing.unwrap_or_else(|| default_daemon_config(display_name, actor_id));
-    // device.id must equal actor_id — the Supabase access-token hook embeds
-    // ACL rules under `amux/{team}/device/{actor_id}/...`, so any other
-    // value makes EMQX reject the daemon's CONNECT (LWT topic denied).
+    // device.id must equal actor_id — the broker's access-token hook
+    // embeds ACL rules under `amux/{team}/device/{actor_id}/...`, so any
+    // other value makes EMQX reject the daemon's CONNECT (LWT topic
+    // denied).
     daemon_cfg.device.id = actor_id.to_string();
     daemon_cfg.team_id = Some(team_id.to_string());
     daemon_cfg.mqtt.broker_url = invite
@@ -295,77 +312,72 @@ mod tests {
 
     #[test]
     fn member_invite_claim_error_explains_agent_invite_requirement() {
-        let err = actionable_invite_claim_error(SupabaseError::Rpc {
-            code: Some("401".to_string()),
-            message: r#"{"message":"member claim requires authentication"}"#.to_string(),
+        let err = actionable_invite_claim_error(BackendError::Provider {
+            provider: "cloud_api",
+            code: Some("401".into()),
+            message: r#"{"message":"member claim requires authentication"}"#.into(),
         });
 
         match err {
-            SupabaseError::Rpc { message, .. } => {
+            OnboardingError::Backend(BackendError::Provider { message, .. }) => {
                 assert!(message.contains("Kind = Agent"));
                 assert!(message.contains("member claim requires authentication"));
             }
-            other => panic!("expected rpc error, got {other:?}"),
+            other => panic!("expected backend/provider error, got {other:?}"),
         }
     }
 
     #[test]
-    fn supabase_build_env_reports_missing_url_at_runtime() {
-        let err = supabase_build_env_config(None, Some("anon")).unwrap_err();
-        assert!(err.to_string().contains("SUPABASE_URL"));
+    fn cloud_api_build_env_reports_missing_url_at_runtime() {
+        let err = cloud_api_url_from_env_for_test(None).unwrap_err();
+        assert!(err.to_string().contains("CLOUD_API_URL"));
     }
 
     #[test]
-    fn supabase_build_env_reports_missing_anon_key_at_runtime() {
-        let err = supabase_build_env_config(Some("https://example.supabase.co"), None).unwrap_err();
-        assert!(err.to_string().contains("SUPABASE_ANON_KEY"));
+    fn cloud_api_build_env_uses_supplied_value() {
+        let url = cloud_api_url_from_env_for_test(Some("https://fc.example.com")).unwrap();
+        assert_eq!(url, "https://fc.example.com");
     }
 
     #[test]
-    fn supabase_build_env_uses_supplied_values() {
-        let cfg = supabase_build_env_config(Some("https://example.supabase.co"), Some("anon-key"))
-            .unwrap();
-
-        assert_eq!(cfg.url, "https://example.supabase.co");
-        assert_eq!(cfg.anon_key, "anon-key");
-        assert!(cfg.refresh_token.is_empty());
-        assert!(cfg.team_id.is_empty());
-        assert!(cfg.actor_id.is_empty());
-    }
-
-    #[test]
-    fn supabase_build_env_loads_missing_values_from_dotenv_text() {
-        let cfg = supabase_build_env_config_with_dotenv(
-            None,
+    fn cloud_api_build_env_loads_missing_value_from_dotenv_text() {
+        let url = cloud_api_url_with_dotenv(
             None,
             Some(
                 r#"
-SUPABASE_URL=https://example.supabase.co
-SUPABASE_ANON_KEY=anon-key
+CLOUD_API_URL=https://fc.example.com
 "#,
             ),
         )
         .unwrap();
-
-        assert_eq!(cfg.url, "https://example.supabase.co");
-        assert_eq!(cfg.anon_key, "anon-key");
+        assert_eq!(url, "https://fc.example.com");
     }
 
     #[test]
-    fn supabase_build_env_prefers_process_values_over_dotenv_text() {
-        let cfg = supabase_build_env_config_with_dotenv(
-            Some("https://process.supabase.co"),
-            Some("process-key"),
+    fn cloud_api_build_env_prefers_process_value_over_dotenv_text() {
+        let url = cloud_api_url_with_dotenv(
+            Some("https://process.example.com"),
             Some(
                 r#"
-SUPABASE_URL=https://dotenv.supabase.co
-SUPABASE_ANON_KEY=dotenv-key
+CLOUD_API_URL=https://dotenv.example.com
 "#,
             ),
         )
         .unwrap();
+        assert_eq!(url, "https://process.example.com");
+    }
 
-        assert_eq!(cfg.url, "https://process.supabase.co");
-        assert_eq!(cfg.anon_key, "process-key");
+    #[test]
+    fn cloud_api_build_env_rejects_empty_dotenv_value() {
+        let err = cloud_api_url_with_dotenv(
+            None,
+            Some(
+                r#"
+CLOUD_API_URL=
+"#,
+            ),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("CLOUD_API_URL"));
     }
 }
