@@ -96,6 +96,22 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
+    async listTeamActors(teamId, { kind = null, limit = 500 } = {}) {
+      let query = supabase
+        .from("actor_directory")
+        .select(
+          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+        )
+        .eq("team_id", teamId);
+      if (kind) query = query.eq("actor_type", kind);
+      query = query.order("last_active_at", { ascending: false, nullsFirst: false })
+                   .order("display_name", { ascending: true })
+                   .limit(limit);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { items: data ?? [] };
+    },
+
     async getTeamDirectory(teamId) {
       const [actorsRes, membersRes] = await Promise.all([
         supabase
@@ -285,8 +301,9 @@ async heartbeat() {
       let query = supabase
         .from("shortcuts")
         .select("*")
+        .eq("scope", "team")
         .eq("team_id", teamId)
-        .order("position", { ascending: true });
+        .order("order", { ascending: true });
       if (parentId !== undefined) {
         if (parentId === null) {
           query = query.is("parent_id", null);
@@ -295,6 +312,19 @@ async heartbeat() {
         }
       }
       const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []).map(mapShortcut);
+    },
+
+    async listShortcutsByScope({ scope, teamId, parentId } = {}) {
+      let query = supabase.from("shortcuts").select("*").eq("scope", scope);
+      if (scope === "team" && teamId) query = query.eq("team_id", teamId);
+      // Personal scope is gated by RLS on owner_member_id; no extra filter here.
+      if (parentId !== undefined) {
+        if (parentId === null) query = query.is("parent_id", null);
+        else query = query.eq("parent_id", parentId);
+      }
+      const { data, error } = await query.order("order", { ascending: true });
       if (error) throw error;
       return (data ?? []).map(mapShortcut);
     },
@@ -398,45 +428,31 @@ async heartbeat() {
     async getNotificationPrefs() {
       const { data, error } = await supabase
         .from("notification_prefs")
-        .select("user_id, push_enabled, email_enabled, digest_frequency")
+        .select("user_id, enabled, dnd_start_min, dnd_end_min, dnd_tz, updated_at")
         .limit(1);
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) {
-        return {
-          userId: null,
-          pushEnabled: true,
-          emailEnabled: false,
-          digestFrequency: "off",
-        };
-      }
-      return {
-        userId: requiredString(row.user_id, "notifications.getNotificationPrefs", "user_id"),
-        pushEnabled: row.push_enabled ?? true,
-        emailEnabled: row.email_enabled ?? false,
-        digestFrequency: row.digest_frequency ?? "off",
-      };
+      // Frontend expects snake_case raw row shape; returns null when caller
+      // has no prefs row yet so it can fall back to DEFAULT_PREFS.
+      return row ?? null;
     },
 
     async putNotificationPrefs(input) {
+      // Accept snake_case from the frontend (matches the on-disk row shape).
       const row = {
-        user_id: input.userId,
-        push_enabled: input.pushEnabled,
-        email_enabled: input.emailEnabled,
-        digest_frequency: input.digestFrequency,
+        user_id: input.user_id,
+        enabled: input.enabled ?? true,
+        dnd_start_min: input.dnd_start_min ?? null,
+        dnd_end_min: input.dnd_end_min ?? null,
+        dnd_tz: input.dnd_tz ?? "Asia/Shanghai",
       };
       const { data, error } = await supabase
         .from("notification_prefs")
         .upsert(row, { onConflict: "user_id" })
-        .select("user_id, push_enabled, email_enabled, digest_frequency")
+        .select("user_id, enabled, dnd_start_min, dnd_end_min, dnd_tz, updated_at")
         .single();
       if (error) throw error;
-      return {
-        userId: requiredString(data.user_id, "notifications.putNotificationPrefs", "user_id"),
-        pushEnabled: data.push_enabled ?? true,
-        emailEnabled: data.email_enabled ?? false,
-        digestFrequency: data.digest_frequency ?? "off",
-      };
+      return data;
     },
 
     async muteSession(sessionId, input) {

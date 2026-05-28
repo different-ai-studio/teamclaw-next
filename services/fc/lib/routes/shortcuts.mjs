@@ -2,6 +2,27 @@ import { ApiError } from "../http-utils.mjs";
 import { requireString } from "../router.mjs";
 
 export function registerShortcuts(router) {
+  // Scope-based list: `?scope=personal` or `?scope=team&teamId=...`
+  // RLS gates personal shortcuts to the caller's member rows.
+  router.get("/v1/shortcuts", async (ctx) => {
+    const scope = ctx.query.get("scope");
+    if (scope !== "personal" && scope !== "team") {
+      throw new ApiError(400, "validation_failed", "scope must be 'personal' or 'team'");
+    }
+    const args = { scope };
+    if (scope === "team") {
+      const teamId = ctx.query.get("teamId");
+      if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required for team scope");
+      args.teamId = teamId;
+    }
+    const parentIdRaw = ctx.query.get("parentId");
+    if (parentIdRaw !== null && parentIdRaw !== undefined) {
+      args.parentId = parentIdRaw === "null" ? null : parentIdRaw;
+    }
+    const items = await ctx.repository.listShortcutsByScope(args);
+    return { body: { items } };
+  });
+
   router.get("/v1/teams/:teamId/shortcuts", async (ctx) => {
     const { teamId } = ctx.params;
     const args = {};

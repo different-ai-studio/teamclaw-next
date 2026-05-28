@@ -13,6 +13,19 @@ export function registerNotifications(router) {
     return { body: out };
   });
 
+  // Frontend client (cloud-api/notifications.ts) uses POST for save; mirror PUT.
+  router.post("/v1/notifications/prefs", async (ctx) => {
+    const body = ctx.json ?? {};
+    const out = await ctx.repository.putNotificationPrefs(body);
+    return { body: out };
+  });
+
+  router.get("/v1/notifications/muted-sessions", async (ctx) => {
+    // repo.listMutedSessions already returns { items: [...] }
+    const out = await ctx.repository.listMutedSessions();
+    return { body: out };
+  });
+
   router.post("/v1/sessions/:sessionId/mute", async (ctx) => {
     const sessionId = decodeURIComponent(ctx.params.sessionId);
     const body = ctx.json ?? {};
