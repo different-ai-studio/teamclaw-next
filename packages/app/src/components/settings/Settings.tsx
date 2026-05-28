@@ -203,9 +203,13 @@ export function Settings(_props?: SettingsProps) {
                       "grid transition-[grid-template-rows] duration-200 ease-out",
                       isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
                     )}
+                    aria-hidden={!isExpanded}
                   >
                     <div className="overflow-hidden">
-                      <div className="mt-1 space-y-0.5 pl-6" data-testid={group.testid}>
+                      <div
+                        className={cn("mt-1 space-y-0.5 pl-6", !isExpanded && "pointer-events-none")}
+                        data-testid={group.testid}
+                      >
                         {group.sections.map((section) => {
                           const Icon = section.icon
                           const isActive = activeView === section.id

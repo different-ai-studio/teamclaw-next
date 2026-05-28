@@ -11,12 +11,15 @@ export type Command = {
   _type?: 'role' | 'skill' | 'command';
 }
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { isTauri } from '@/lib/utils'
+import { getBackend } from '@/lib/backend'
 import { loadAllSkills } from '@/lib/git/skill-loader'
 import { readSkillPermissions, resolveSkillPermission } from '@/lib/teamclaw-config'
 import { loadAllRoles } from '@/lib/roles/loader'
 
 interface CommandPopoverProps {
+  activeSessionId: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
   searchQuery: string
@@ -49,6 +52,12 @@ function isRoleEntry(item: PickerItem): item is RoleEntry {
 type CommandOrSkill = Command | SkillEntry
 type PickerItem = Command | SkillEntry | RoleEntry
 
+type RuntimeCommandRow = {
+  runtime_id: string | null
+  backend_type: string | null
+  current_model: string | null
+}
+
 async function scanAvailableSkills(workspacePath: string): Promise<SkillEntry[]> {
   const { skills } = await loadAllSkills(workspacePath)
   return skills
@@ -79,6 +88,38 @@ async function scanAvailableRoles(workspacePath: string): Promise<RoleEntry[]> {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+async function loadSessionRuntimeCommands(
+  activeSessionId: string | null,
+  runtimeStates: Record<string, { info?: { availableCommands?: Array<{ name: string; description?: string; inputHint?: string }> } }>,
+): Promise<Command[]> {
+  if (!activeSessionId) return []
+
+  let runtimeRows: RuntimeCommandRow[] = []
+  try {
+    runtimeRows = await getBackend().runtime.listSessionRuntimeModels(activeSessionId) as RuntimeCommandRow[]
+  } catch (error) {
+    console.error('[CommandPopover] Failed to load session runtime rows:', error)
+    return []
+  }
+
+  const deduped = new Map<string, Command>()
+  for (const row of runtimeRows) {
+    if (!row.runtime_id) continue
+    const commands = runtimeStates[row.runtime_id]?.info?.availableCommands ?? []
+    for (const command of commands) {
+      if (!command?.name || deduped.has(command.name)) continue
+      deduped.set(command.name, {
+        name: command.name,
+        description: command.description || undefined,
+        template: command.inputHint?.trim() ? `${command.name} ${command.inputHint.trim()}` : command.name,
+        source: 'command',
+      })
+    }
+  }
+
+  return Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name))
+}
+
 // Filter items by search query
 function filterItems<T extends { name: string; description?: string }>(
   items: T[], 
@@ -98,6 +139,7 @@ function filterItems<T extends { name: string; description?: string }>(
 }
 
 export function CommandPopover({
+  activeSessionId,
   open,
   onOpenChange,
   searchQuery,
@@ -105,6 +147,7 @@ export function CommandPopover({
 }: CommandPopoverProps) {
   const { t } = useTranslation()
   const workspacePath = useWorkspaceStore(s => s.workspacePath)
+  const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
   const [commands, setCommands] = React.useState<Command[]>([])
   const [roles, setRoles] = React.useState<RoleEntry[]>([])
   const [skills, setSkills] = React.useState<CommandOrSkill[]>([])
@@ -117,8 +160,7 @@ export function CommandPopover({
     if (open) {
       setIsLoading(true)
       
-      // Only frontend-scanned skills/roles remain.
-      const commandsPromise: Promise<Command[]> = Promise.resolve([])
+      const commandsPromise = loadSessionRuntimeCommands(activeSessionId, runtimeStates)
       
       // Load skills from .claude/skills/ (only on Tauri)
       const skillsPromise = (isTauri() && workspacePath)
@@ -155,21 +197,35 @@ export function CommandPopover({
             (skill) => resolveSkillPermission(skill.permissionKey, permissions).permission !== 'deny'
           )
 
-          const sdkSkills = cmds.filter((cmd) => {
-            if ((cmd as Command & { source?: string }).source !== 'skill') return false
-            if (deniedSkillNames.has(cmd.name)) return false
-            return resolveSkillPermission(cmd.name, permissions).permission !== 'deny'
-          })
-          const sdkCommands = cmds.filter((cmd) => (cmd as Command & { source?: string }).source !== 'skill')
+          const skillByInvocation = new Map(
+            allowedFrontendSkills.map((skill) => [skill.invocationName, skill]),
+          )
+          const skillByFilename = new Map(
+            allowedFrontendSkills.map((skill) => [skill.path, skill]),
+          )
+
+          const runtimeSkills: SkillEntry[] = []
+          const runtimeCommands: Command[] = []
+
+          for (const cmd of cmds) {
+            const matchedSkill = skillByInvocation.get(cmd.name) ?? skillByFilename.get(cmd.name)
+            if (matchedSkill) {
+              if (deniedSkillNames.has(matchedSkill.name)) continue
+              runtimeSkills.push(matchedSkill)
+            } else {
+              runtimeCommands.push(cmd)
+            }
+          }
           
-          // Merge frontend-scanned skills with SDK skills
-          // Deduplicate: prefer SDK skills (they have more metadata like template)
-          const skillNameSet = new Set(sdkSkills.map(s => s.name))
-          const uniqueFrontendSkills = allowedFrontendSkills.filter(s => !skillNameSet.has(s.name))
+          // Merge frontend-scanned skills with runtime-advertised skills.
+          const skillInvocationSet = new Set(runtimeSkills.map((skill) => skill.invocationName))
+          const uniqueFrontendSkills = allowedFrontendSkills.filter(
+            (skill) => !skillInvocationSet.has(skill.invocationName),
+          )
           
-          setCommands(sdkCommands)
+          setCommands(runtimeCommands)
           setRoles(loadedRoles)
-          setSkills([...sdkSkills, ...uniqueFrontendSkills])
+          setSkills([...runtimeSkills, ...uniqueFrontendSkills])
           setIsLoading(false)
         })
     } else {
@@ -177,7 +233,7 @@ export function CommandPopover({
       setSkills([])
       setCommands([])
     }
-  }, [open, workspacePath])
+  }, [activeSessionId, open, runtimeStates, workspacePath])
   
   React.useEffect(() => {
     if (!open) {
