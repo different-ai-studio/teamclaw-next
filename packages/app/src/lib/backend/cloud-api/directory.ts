@@ -1,28 +1,40 @@
 import type { CurrentTeamMemberSummary, DirectoryBackend, DirectoryMemberActor } from "../types";
-import type { CloudApiClient } from "./http";
+import { CloudApiError, type CloudApiClient } from "./http";
 
-type CloudDirectoryMember = {
-  id: string;
-  teamId?: string;
-  displayName?: string;
-  role?: string | null;
-  joinedAt?: string | null;
-};
-
-export function createDirectoryModule(client: CloudApiClient, delegate: DirectoryBackend): DirectoryBackend {
+export function createDirectoryModule(client: CloudApiClient): DirectoryBackend {
   return {
-    // Directory resolution needs user-id-based lookup which requires Supabase auth context.
-    // The FC /v1/teams/:teamId/directory endpoint may not exist yet or may not cover all methods.
-    // Delegate all directory calls until /v1 endpoint is expanded.
-    ...delegate,
     async resolveCurrentMemberActor(teamId: string, userId: string): Promise<DirectoryMemberActor | null> {
-      return delegate.resolveCurrentMemberActor(teamId, userId);
+      try {
+        const out = await client.get<DirectoryMemberActor | null>(
+          `/v1/directory/current-member-actor?teamId=${encodeURIComponent(teamId)}&userId=${encodeURIComponent(userId)}`,
+        );
+        return out ?? null;
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
     },
     async resolveFirstMemberActorForUser(userId: string): Promise<DirectoryMemberActor | null> {
-      return delegate.resolveFirstMemberActorForUser(userId);
+      try {
+        const out = await client.get<DirectoryMemberActor | null>(
+          `/v1/directory/first-member-actor-for-user?userId=${encodeURIComponent(userId)}`,
+        );
+        return out ?? null;
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
     },
     async getCurrentTeamMember(teamId: string, userId: string): Promise<CurrentTeamMemberSummary | null> {
-      return delegate.getCurrentTeamMember(teamId, userId);
+      try {
+        const out = await client.get<CurrentTeamMemberSummary | null>(
+          `/v1/directory/current-team-member?teamId=${encodeURIComponent(teamId)}&userId=${encodeURIComponent(userId)}`,
+        );
+        return out ?? null;
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
     },
   };
 }

@@ -1,20 +1,37 @@
 import type { TeamWorkspaceConfigBackend, TeamWorkspaceConfigRow } from "../types";
-import type { CloudApiClient } from "./http";
+import { CloudApiError, type CloudApiClient } from "./http";
 
-// The FC /v1/teams/:teamId/workspace-config stores a subset of fields.
-// We delegate to Supabase for the full feature set as the FC endpoint
-// may not expose all legacy fields (git_token, ai_gateway_endpoint, etc.).
-// This module adds /v1 routing for the supported fields.
-
-export function createTeamWorkspaceConfigModule(
-  client: CloudApiClient,
-  delegate: TeamWorkspaceConfigBackend,
-): TeamWorkspaceConfigBackend {
-  // The TeamWorkspaceConfigRow shape (git_url, git_token, ai_gateway_endpoint) is
-  // not fully represented in the FC /v1 endpoint (which serves a different
-  // workspace-config schema focused on defaultWorkspaceId/pinnedWorkspaceIds).
-  // Until FC exposes all fields, delegate to Supabase for this domain.
+export function createTeamWorkspaceConfigModule(client: CloudApiClient): TeamWorkspaceConfigBackend {
   return {
-    ...delegate,
+    async load(teamId) {
+      try {
+        const out = await client.get<TeamWorkspaceConfigRow | null>(
+          `/v1/teams/${encodeURIComponent(teamId)}/workspace-git-config`,
+        );
+        return out ?? null;
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    async save(input) {
+      const body: Record<string, unknown> = {};
+      for (const key of [
+        "workspace_path",
+        "git_url",
+        "git_branch",
+        "git_token",
+        "ai_gateway_endpoint",
+        "enabled",
+        "metadata",
+      ] as const) {
+        const value = (input as Record<string, unknown>)[key];
+        if (value !== undefined) body[key] = value;
+      }
+      await client.put(
+        `/v1/teams/${encodeURIComponent(input.team_id)}/workspace-git-config`,
+        body,
+      );
+    },
   };
 }

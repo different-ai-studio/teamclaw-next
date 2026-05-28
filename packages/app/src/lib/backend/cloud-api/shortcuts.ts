@@ -1,9 +1,8 @@
 import type { ShortcutCreateArgs, ShortcutRow, ShortcutsBackend } from "../types";
 import type { CloudApiClient } from "./http";
 
-export function createShortcutsModule(client: CloudApiClient, delegate: ShortcutsBackend): ShortcutsBackend {
+export function createShortcutsModule(client: CloudApiClient): ShortcutsBackend {
   return {
-    ...delegate,
     async listShortcuts(scope, teamId) {
       const params = new URLSearchParams({ scope });
       if (teamId) params.set("teamId", teamId);
@@ -39,9 +38,9 @@ export function createShortcutsModule(client: CloudApiClient, delegate: Shortcut
       const out = await client.get<{ items: Array<{ id: string; teamId: string; code: string; name: string }> }>(`/v1/teams/${encodeURIComponent(teamId)}/roles`);
       return out.items.map((r) => ({ id: r.id, team_id: r.teamId, code: r.code, name: r.name }));
     },
-    async listShortcutRoleBindings(teamId) {
-      const out = await client.get<{ items: Array<{ resource_id: string; permission_roles: Array<{ role_id: string }> }> }>(`/v1/teams/${encodeURIComponent(teamId)}/shortcut-role-bindings`);
-      return out.items;
+    async listShortcutRoleBindings(_teamId) {
+      // FC endpoint /v1/teams/:teamId/shortcut-role-bindings not yet available.
+      return [];
     },
   };
 }

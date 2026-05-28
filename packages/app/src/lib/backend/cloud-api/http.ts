@@ -18,6 +18,7 @@ export type CloudApiClient = {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body: unknown, options?: { idempotencyKey?: string }): Promise<T>;
   patch<T>(path: string, body: unknown, options?: { idempotencyKey?: string }): Promise<T>;
+  put<T>(path: string, body: unknown, options?: { idempotencyKey?: string }): Promise<T>;
   delete<T>(path: string, options?: { idempotencyKey?: string }): Promise<T>;
   postRaw<T>(path: string, body: BodyInit, options?: { contentType?: string }): Promise<T>;
   getRaw(path: string): Promise<Response>;
@@ -32,7 +33,7 @@ export function createCloudApiClient(args: {
   const fetchImpl = args.fetchImpl ?? fetch;
 
   async function request<T>(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: string,
     body?: unknown,
     options: { idempotencyKey?: string } = {},
@@ -94,6 +95,7 @@ export function createCloudApiClient(args: {
     get: (path) => request("GET", path),
     post: (path, body, options) => request("POST", path, body, options),
     patch: (path, body, options) => request("PATCH", path, body, options),
+    put: (path, body, options) => request("PUT", path, body, options),
     delete: (path, options) => request("DELETE", path, undefined, options),
     postRaw: <T>(path: string, body: BodyInit, options?: { contentType?: string }) =>
       requestRaw("POST", path, body as BodyInit, options).then(async (res) => {

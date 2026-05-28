@@ -4,10 +4,7 @@ import type { BackendKind } from "@/lib/backend/types";
 
 export interface ServerConfig {
   backendKind?: BackendKind;
-  supabaseUrl?: string;
-  supabaseAnonKey?: string;
   cloudApiUrl?: string;
-  pocketbaseUrl?: string;
   mqttHost?: string;
   mqttPort?: number;
   mqttUseTls?: boolean;
@@ -44,11 +41,8 @@ function envConfig(): ServerConfig {
         ? false
         : undefined;
   return {
-    backendKind: normalizeBackendKind(import.meta.env.VITE_BACKEND_KIND),
-    supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
-    supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+    backendKind: "cloud_api",
     cloudApiUrl: import.meta.env.VITE_CLOUD_API_URL,
-    pocketbaseUrl: import.meta.env.VITE_POCKETBASE_URL,
     mqttHost: import.meta.env.VITE_MQTT_HOST,
     mqttPort: Number.isFinite(mqttPort) ? mqttPort : undefined,
     mqttUseTls,
@@ -57,18 +51,10 @@ function envConfig(): ServerConfig {
   };
 }
 
-function normalizeBackendKind(kind: unknown): BackendKind | undefined {
-  if (kind === "supabase" || kind === "pocketbase" || kind === "cloud_api" || kind === "local") return kind;
-  return undefined;
-}
-
 function normalizeServerConfig(config: ServerConfig): ServerConfig {
   return {
-    backendKind: normalizeBackendKind(config.backendKind),
-    supabaseUrl: config.supabaseUrl?.trim() || undefined,
-    supabaseAnonKey: config.supabaseAnonKey?.trim() || undefined,
+    backendKind: "cloud_api",
     cloudApiUrl: config.cloudApiUrl?.trim() || undefined,
-    pocketbaseUrl: config.pocketbaseUrl?.trim() || undefined,
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
     mqttUseTls: config.mqttUseTls,
@@ -85,19 +71,9 @@ export function getEffectiveServerConfigSync(): ServerConfig {
   const rawSaved = readLocalConfig();
   const saved = normalizeServerConfig(rawSaved);
   const env = envConfig();
-  const effectiveKind = saved.backendKind ?? env.backendKind ?? "cloud_api";
-  if (effectiveKind === "supabase") {
-    console.warn(
-      '[ServerConfig] backendKind="supabase" is deprecated and will be removed in a future release. ' +
-        'Migrate to backendKind="cloud_api" with a cloudApiUrl.',
-    );
-  }
   return {
-    backendKind: effectiveKind,
-    supabaseUrl: saved.supabaseUrl ?? env.supabaseUrl,
-    supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
+    backendKind: "cloud_api",
     cloudApiUrl: saved.cloudApiUrl ?? env.cloudApiUrl,
-    pocketbaseUrl: saved.pocketbaseUrl ?? env.pocketbaseUrl,
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
@@ -131,19 +107,9 @@ export async function getEffectiveServerConfig(): Promise<ServerConfig> {
   const rawSaved = await getSavedServerConfig();
   const saved = normalizeServerConfig(rawSaved);
   const env = envConfig();
-  const effectiveKind = saved.backendKind ?? env.backendKind ?? "cloud_api";
-  if (effectiveKind === "supabase") {
-    console.warn(
-      '[ServerConfig] backendKind="supabase" is deprecated and will be removed in a future release. ' +
-        'Migrate to backendKind="cloud_api" with a cloudApiUrl.',
-    );
-  }
   return {
-    backendKind: effectiveKind,
-    supabaseUrl: saved.supabaseUrl ?? env.supabaseUrl,
-    supabaseAnonKey: saved.supabaseAnonKey ?? env.supabaseAnonKey,
+    backendKind: "cloud_api",
     cloudApiUrl: saved.cloudApiUrl ?? env.cloudApiUrl,
-    pocketbaseUrl: saved.pocketbaseUrl ?? env.pocketbaseUrl,
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,

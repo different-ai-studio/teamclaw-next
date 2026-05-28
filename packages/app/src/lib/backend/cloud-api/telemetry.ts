@@ -1,9 +1,8 @@
 import type { TelemetryBackend, TelemetryFeedbackDeleteInput } from "../types";
 import type { CloudApiClient } from "./http";
 
-export function createTelemetryModule(client: CloudApiClient, delegate: TelemetryBackend): TelemetryBackend {
+export function createTelemetryModule(client: CloudApiClient): TelemetryBackend {
   return {
-    ...delegate,
     async insertFeedback(input) {
       await client.post<void>("/v1/telemetry/feedback", input);
     },

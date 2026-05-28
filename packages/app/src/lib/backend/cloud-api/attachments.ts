@@ -1,9 +1,8 @@
 import type { AttachmentRef, AttachmentsBackend, AttachmentUploadInput } from "../types";
 import type { CloudApiClient } from "./http";
 
-export function createAttachmentsModule(client: CloudApiClient, delegate: AttachmentsBackend): AttachmentsBackend {
+export function createAttachmentsModule(client: CloudApiClient): AttachmentsBackend {
   return {
-    ...delegate,
     async uploadAttachment(input: AttachmentUploadInput): Promise<AttachmentRef> {
       const attachmentId = crypto.randomUUID();
       const storagePath = `${input.teamId}/${input.sessionId}/${attachmentId}/${input.file.name}`;

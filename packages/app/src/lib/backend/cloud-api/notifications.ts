@@ -1,9 +1,8 @@
 import type { NotificationPrefs, NotificationsBackend } from "../types";
 import type { CloudApiClient } from "./http";
 
-export function createNotificationsModule(client: CloudApiClient, delegate: NotificationsBackend): NotificationsBackend {
+export function createNotificationsModule(client: CloudApiClient): NotificationsBackend {
   return {
-    ...delegate,
     async loadPreferences(userId) {
       try {
         return await client.get<NotificationPrefs>(`/v1/notifications/prefs?userId=${encodeURIComponent(userId)}`);
