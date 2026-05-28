@@ -145,7 +145,7 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
             // hostname, accept empty if both fail.
             let deviceName = ""
             try {
-              if (deviceNo && useTeamModeStore.getState().teamMode) {
+              if (deviceNo && useTeamModeStore.getState().teamModeType) {
                 const me = useTeamMembersStore
                   .getState()
                   .members.find((m) => m.nodeId === deviceNo)

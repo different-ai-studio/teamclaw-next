@@ -58,7 +58,7 @@ vi.mock('../TeamRankingCard', () => ({
 vi.mock('@/stores/team-mode', () => ({
   useTeamModeStore: (selector: (state: unknown) => unknown) =>
     selector({
-      teamMode: false,
+      teamModeType: null,
     }),
 }))
 

@@ -339,7 +339,7 @@ function SidebarUserAccountMenu() {
   const signOut = useAuthStore((s) => s.signOut)
   const currentTeam = useCurrentTeamStore((s) => s.team)
   const currentMember = useCurrentTeamStore((s) => s.currentMember)
-  const teamMode = useTeamModeStore((s) => s.teamMode)
+  const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const openSettings = useUIStore((s) => s.openSettings)
 
   const [upgradeOpen, setUpgradeOpen] = React.useState(false)
@@ -444,7 +444,7 @@ function SidebarUserAccountMenu() {
             </div>
           </div>
         </div>
-        {teamMode && (
+        {teamModeType && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => openSettings('leaderboard')}>

@@ -647,11 +647,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     const { loadTeamConfig, applyTeamModel } = useTeamModeStore.getState();
     loadTeamConfig(workspacePath).then(async () => {
-      if (useTeamModeStore.getState().teamMode) {
-        // Team mode: apply team config (restarts the agent), then init providers.
-        // applyTeamModel is idempotent — skips if config key unchanged.
-        await applyTeamModel(workspacePath);
-      }
+      // applyTeamModel is idempotent and self-noops when no team config is loaded.
+      await applyTeamModel(workspacePath);
       initProviderStore();
     });
   }, [workspaceReady, workspacePath, initProviderStore]);
@@ -705,17 +702,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         debounceTimer = setTimeout(async () => {
           console.log('[TeamMode] Team config changed, reloading team config');
           const store = useTeamModeStore.getState();
-          const wasTeamMode = store.teamMode;
+          const hadTeamConfig = store.teamModelConfig != null;
           await store.loadTeamConfig(workspacePath);
-          const isTeamMode = useTeamModeStore.getState().teamMode;
-          
-          if (isTeamMode) {
+          const hasTeamConfig = useTeamModeStore.getState().teamModelConfig != null;
+
+          if (hasTeamConfig) {
             await store.applyTeamModel(workspacePath);
-          } else if (wasTeamMode && !isTeamMode) {
-            // Ensure provider store is refreshed if team mode was cleared
+          } else if (hadTeamConfig) {
+            // Team config was cleared — refresh provider store so UI drops the team provider
             await useProviderStore.getState().initAll();
-            // Force a re-render by triggering a state update
-            useTeamModeStore.setState({ teamMode: false, teamModelConfig: null });
           }
         }, 1000);
       });

@@ -73,8 +73,7 @@ export interface TeamModelConfig {
 }
 
 interface TeamModeState {
-  teamMode: boolean
-  teamModeType: string | null // "git" | "webdav" — from teamclaw.json
+  teamModeType: string | null // "git" | "webdav" — from teamclaw.json, null when workspace has no team config
   teamModelConfig: TeamModelConfig | null
   teamModelOptions: TeamModelOption[] // available model choices from build config
   _appliedConfigKey: string | null // fingerprint of last applied config to avoid redundant apply
@@ -119,7 +118,6 @@ async function fetchTeamStatus(workspacePath?: string): Promise<TeamStatusRespon
 
 
 export const useTeamModeStore = create<TeamModeState>((set, get) => ({
-  teamMode: false,
   teamModeType: null,
   teamModelConfig: null,
   teamModelOptions: buildConfig.team.llm.models ?? [],
@@ -145,7 +143,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     const isTeamMode = !!status?.active
 
     if (isTeamMode) {
-      set({ teamMode: true, teamModeType: status?.mode ?? null })
+      set({ teamModeType: status?.mode ?? null })
       if (status?.mode === 'git' && _workspacePath) {
         // Fire-and-forget; errors swallowed inside action
         get().loadTeamGitFileSyncStatus(_workspacePath)
@@ -189,7 +187,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
         set({ teamModelConfig: null })
       }
     } else {
-      set({ teamMode: false, teamModeType: null, teamModelConfig: null })
+      set({ teamModeType: null, teamModelConfig: null })
     }
     // Load user's role (non-critical)
     try {
@@ -307,7 +305,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     if (buildConfig.team.lockLlmConfig) return
 
     // Set state immediately to trigger UI updates
-    set({ teamMode: false, teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, teamGitFileSyncStatusMap: {} })
+    set({ teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, teamGitFileSyncStatusMap: {} })
 
     // Remove team provider from teamclaw config
     if (workspacePath) {
