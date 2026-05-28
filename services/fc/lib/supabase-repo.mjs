@@ -667,11 +667,16 @@ async heartbeat() {
     async upsertAgentRuntime(body) {
       const row = {
         id: body.id ?? randomUUID(),
-        agent_actor_id: body.agentActorId,
+        team_id: body.teamId,
+        agent_id: body.agentActorId,
         session_id: body.sessionId,
         runtime_id: body.runtimeId,
+        backend_type: body.backendType ?? "claude",
         backend_session_id: body.backendSessionId,
-        metadata: body.metadata ?? null,
+        status: body.status ?? "running",
+        workspace_id: body.workspaceId ?? null,
+        current_model: body.currentModel ?? null,
+        updated_at: new Date().toISOString(),
       };
       const { data, error } = await supabase
         .from("agent_runtimes")
@@ -703,7 +708,7 @@ async heartbeat() {
       const { data, error } = await supabase
         .from("agent_runtimes")
         .select("*")
-        .eq("agent_actor_id", agentId)
+        .eq("agent_id", agentId)
         .eq("session_id", sessionId)
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -1786,12 +1791,17 @@ function mapShortcutRow(row) {
 function mapAgentRuntimeRow(row) {
   return {
     id: requiredString(row?.id, "agentRuntimes.mapAgentRuntimeRow", "id"),
-    agentActorId: requiredString(row?.agent_actor_id, "agentRuntimes.mapAgentRuntimeRow", "agent_actor_id"),
-    sessionId: requiredString(row?.session_id, "agentRuntimes.mapAgentRuntimeRow", "session_id"),
-    runtimeId: requiredString(row?.runtime_id, "agentRuntimes.mapAgentRuntimeRow", "runtime_id"),
-    backendSessionId: requiredString(row?.backend_session_id, "agentRuntimes.mapAgentRuntimeRow", "backend_session_id"),
+    agentActorId: requiredString(row?.agent_id, "agentRuntimes.mapAgentRuntimeRow", "agent_id"),
+    sessionId: row?.session_id ?? null,
+    runtimeId: row?.runtime_id ?? null,
+    backendSessionId: row?.backend_session_id ?? null,
+    teamId: row?.team_id ?? null,
+    backendType: row?.backend_type ?? null,
+    status: row?.status ?? null,
+    workspaceId: row?.workspace_id ?? null,
+    currentModel: row?.current_model ?? null,
+    lastSeenAt: row?.last_seen_at ?? null,
     lastProcessedMessageId: row?.last_processed_message_id ?? null,
-    metadata: row?.metadata ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };
