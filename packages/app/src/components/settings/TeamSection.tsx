@@ -4,6 +4,7 @@ import {
   Users,
 } from 'lucide-react'
 import { TeamGitConfig } from './team/TeamGitConfig'
+import { TeamSyncModeSection } from './team/TeamSyncModeSection'
 
 // ─── Section Header ──────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ export function TeamSection() {
         description={t('settings.team.description', 'Configure the team shared Git repository, local shared directory, and sync status')}
       />
 
+      <TeamSyncModeSection />
       <TeamGitConfig />
     </div>
   )

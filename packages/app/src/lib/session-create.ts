@@ -16,6 +16,7 @@ import {
   type SessionParticipantRow,
 } from '@/lib/local-cache'
 import { isTauri } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -335,6 +336,7 @@ function pickAgentBackend(
  */
 export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<void> {
   if (args.agentActorIds.length === 0) return
+  const currentWorkspacePath = useWorkspaceStore.getState().workspacePath ?? ''
   sessionFlowLog('runtime_start.batch.begin', {
     sessionId: args.sessionId,
     teamId: args.teamId,
@@ -420,7 +422,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
       const result = await runtimeStart({
         targetDeviceId: agentActorId,
         workspaceId: prior?.workspace_id ?? '',
-        worktree: '',
+        worktree: currentWorkspacePath,
         sessionId: args.sessionId,
         agentType,
         initialPrompt: '',

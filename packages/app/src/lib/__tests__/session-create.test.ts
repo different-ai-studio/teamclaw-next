@@ -16,6 +16,10 @@ const backendMocks = vi.hoisted(() => ({
   listAgentDefaults: vi.fn(),
 }))
 
+const workspaceStoreState = vi.hoisted(() => ({
+  workspacePath: '/Users/weigan.huang/copilot-ws-v2',
+}))
+
 vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
@@ -36,6 +40,12 @@ vi.mock('@/lib/backend', () => ({
   }),
 }))
 
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: {
+    getState: () => workspaceStoreState,
+  },
+}))
+
 describe('startAgentRuntimesAsync', () => {
   beforeEach(() => {
     mockRuntimeStart.mockClear()
@@ -46,6 +56,7 @@ describe('startAgentRuntimesAsync', () => {
     backendMocks.listAgentDefaults.mockReset()
     backendMocks.createSessionShell.mockResolvedValue({ sessionId: 'sess-1' })
     backendMocks.insertOutgoingMessage.mockResolvedValue({})
+    workspaceStoreState.workspacePath = '/Users/weigan.huang/copilot-ws-v2'
   })
 
   function mockTables(opts: {
@@ -102,6 +113,7 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-1',
         workspaceId: 'ws-opencode',
+        worktree: '/Users/weigan.huang/copilot-ws-v2',
         agentType: AgentType.OPENCODE,
       }),
     )
@@ -124,6 +136,7 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-2',
         workspaceId: '',
+        worktree: '/Users/weigan.huang/copilot-ws-v2',
         agentType: AgentType.CLAUDE_CODE,
       }),
     )
@@ -146,6 +159,7 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-daemon',
         workspaceId: '',
+        worktree: '/Users/weigan.huang/copilot-ws-v2',
         agentType: AgentType.OPENCODE,
       }),
     )

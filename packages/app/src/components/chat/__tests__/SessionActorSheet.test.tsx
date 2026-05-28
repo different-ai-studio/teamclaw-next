@@ -6,6 +6,10 @@ import { RuntimeInfoSchema, AgentStatus, AgentType, RuntimeLifecycle } from '@/l
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { SessionActorPanel } from '../SessionActorSheet'
 
+const workspaceStoreState = vi.hoisted(() => ({
+  workspacePath: '/Users/weigan.huang/copilot-ws-v2',
+}))
+
 const mockRuntimeStart = vi.fn().mockResolvedValue({ accepted: true, runtimeId: 'rt-new', sessionId: 'sess-1', rejectedReason: '' })
 vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
@@ -52,6 +56,15 @@ vi.mock('@/lib/local-cache', () => ({
   loadActorsByIds: (...args: unknown[]) => loadActorsByIdsMock(...args),
 }))
 
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof workspaceStoreState) => unknown) => selector(workspaceStoreState),
+    {
+      getState: () => workspaceStoreState,
+    },
+  ),
+}))
+
 vi.mock('@/lib/sync/actor-sync', () => ({
   syncActorsForTeam: (...args: unknown[]) => syncActorsForTeamMock(...args),
 }))
@@ -93,6 +106,7 @@ beforeEach(() => {
   syncParticipantsForSessionMock.mockClear()
   mockRuntimeStart.mockResolvedValue({ accepted: true, runtimeId: 'rt-new', sessionId: 'sess-1', rejectedReason: '' })
   useRuntimeStateStore.getState().clear()
+  workspaceStoreState.workspacePath = '/Users/weigan.huang/copilot-ws-v2'
 })
 
 function mockJoinedRows(participantActorIds: string[], actorRows: unknown[]) {
@@ -390,6 +404,7 @@ describe('SessionActorSheet', () => {
           expect.objectContaining({
             targetDeviceId: 'a-2',
             workspaceId: 'ws-open',
+            worktree: '/Users/weigan.huang/copilot-ws-v2',
             agentType: AgentType.OPENCODE,
           }),
         )
@@ -497,7 +512,10 @@ describe('SessionActorSheet', () => {
 
     // runtimeStart should have been called
     await waitFor(() => expect(mockRuntimeStart).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: 'sess-1' }),
+      expect.objectContaining({
+        sessionId: 'sess-1',
+        worktree: '/Users/weigan.huang/copilot-ws-v2',
+      }),
     ))
   })
 })

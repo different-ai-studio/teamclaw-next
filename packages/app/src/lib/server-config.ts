@@ -77,8 +77,13 @@ function normalizeServerConfig(config: ServerConfig): ServerConfig {
   };
 }
 
+function hasOwn(config: ServerConfig, key: keyof ServerConfig): boolean {
+  return Object.prototype.hasOwnProperty.call(config, key);
+}
+
 export function getEffectiveServerConfigSync(): ServerConfig {
-  const saved = normalizeServerConfig(readLocalConfig());
+  const rawSaved = readLocalConfig();
+  const saved = normalizeServerConfig(rawSaved);
   const env = envConfig();
   const effectiveKind = saved.backendKind ?? env.backendKind ?? "cloud_api";
   if (effectiveKind === "supabase") {
@@ -96,8 +101,8 @@ export function getEffectiveServerConfigSync(): ServerConfig {
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
-    mqttUsername: saved.mqttUsername ?? env.mqttUsername,
-    mqttPassword: saved.mqttPassword ?? env.mqttPassword,
+    mqttUsername: hasOwn(rawSaved, "mqttUsername") ? saved.mqttUsername : env.mqttUsername,
+    mqttPassword: hasOwn(rawSaved, "mqttPassword") ? saved.mqttPassword : env.mqttPassword,
   };
 }
 
@@ -123,7 +128,8 @@ export async function saveServerConfig(config: ServerConfig): Promise<ServerConf
 }
 
 export async function getEffectiveServerConfig(): Promise<ServerConfig> {
-  const saved = normalizeServerConfig(await getSavedServerConfig());
+  const rawSaved = await getSavedServerConfig();
+  const saved = normalizeServerConfig(rawSaved);
   const env = envConfig();
   const effectiveKind = saved.backendKind ?? env.backendKind ?? "cloud_api";
   if (effectiveKind === "supabase") {
@@ -141,7 +147,7 @@ export async function getEffectiveServerConfig(): Promise<ServerConfig> {
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
-    mqttUsername: saved.mqttUsername ?? env.mqttUsername,
-    mqttPassword: saved.mqttPassword ?? env.mqttPassword,
+    mqttUsername: hasOwn(rawSaved, "mqttUsername") ? saved.mqttUsername : env.mqttUsername,
+    mqttPassword: hasOwn(rawSaved, "mqttPassword") ? saved.mqttPassword : env.mqttPassword,
   };
 }
