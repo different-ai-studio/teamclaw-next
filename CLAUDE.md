@@ -253,3 +253,10 @@ Deploy: use the `fc-deploy` skill (`.claude/skills/fc-deploy/deploy.sh`).
 Production endpoint: `https://cloud.ucar.cc`
 
 FC endpoints: `/register`, `/token`, `/reset-secret`, `/apply`, `/ai/setup-team`, `/ai/add-member`, `/ai/remove-member`, `/ai/keys`, `/ai/usage`, `/ai/budget`, `/managed-git/create-repo`
+
+Team share onboarding endpoints (see `docs/openapi/teamclaw-api.v1.yaml`):
+
+- `POST /v1/teams/:id/share-mode` — one-shot lock to `oss` | `managed_git` | `custom_git` (409 once locked).
+- `GET  /v1/teams/:id/share-mode` — `{ mode, enabledAt, gitRemoteUrl, gitAuthKind }`; `mode: null` means team-share 未开通.
+- `GET  /v1/teams/:id/workspace-config` — merged shape `{ shareMode, gitRemoteUrl, gitAuthKind, syncMode, litellmTeamId }`. The legacy `{ defaultWorkspaceId, pinnedWorkspaceIds }` shape now lives at `GET /v1/teams/:id/workspace-defaults` (PUT path is unchanged).
+- `POST /v1/teams/:id/litellm/setup` — provisions LiteLLM and returns `{ aiGatewayEndpoint, litellmKey }`; 503 `litellm_unavailable` if FC is not configured.
