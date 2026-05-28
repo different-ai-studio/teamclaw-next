@@ -537,13 +537,30 @@ impl RuntimeManagerAdapter {
             let runtime_id = format!("rt-{}", &session_id.to_string()[..8]);
             let mut manager = self.manager.lock().await;
             manager.add_test_runtime(&runtime_id, &runtime_id, &session_id.to_string());
-            if let Some(handle) = manager.get_handle_mut(&runtime_id) {
+            let startup_prompt = initial_prompt.clone();
+            let event_tx = if let Some(handle) = manager.get_handle_mut(&runtime_id) {
                 handle.agent_type = agent_type;
                 handle.workspace_id = workspace_id.clone().unwrap_or_default();
-                handle.current_prompt = initial_prompt.unwrap_or_default();
-            }
+                handle.current_prompt = startup_prompt.clone().unwrap_or_default();
+                Some(handle.event_tx.clone())
+            } else {
+                None
+            };
             if let Some(model_id) = model {
                 manager.set_current_model(&runtime_id, &model_id);
+            }
+            if let (Some(event_tx), Some(text)) = (event_tx, startup_prompt) {
+                tokio::spawn(async move {
+                    let _ = event_tx
+                        .send(amux::AcpEvent {
+                            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                                text,
+                                is_complete: true,
+                            })),
+                            model: String::new(),
+                        })
+                        .await;
+                });
             }
             return Ok(runtime_id);
         }
@@ -873,7 +890,7 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
                 agent_type,
                 params.workspace_id.clone(),
                 params.model.clone(),
-                params.initial_prompt.clone(),
+                None,
             )
             .await?;
         let snapshot = self.insert_managed_session(owner_token_id, session_id, &params, runtime_id);
@@ -970,6 +987,25 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
             }
         }
 
+        let attachment_urls = params
+            .attachments
+            .into_iter()
+            .filter_map(|attachment| attachment.as_str().map(ToString::to_string))
+            .collect::<Vec<_>>();
+        let mut manager = self.manager.lock().await;
+        let dispatch = manager
+            .send_prompt(&runtime_id, &params.text, attachment_urls)
+            .await;
+        drop(manager);
+        if let Err(e) = dispatch {
+            let mut sessions = self.sessions.write();
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.active_turn_id = None;
+                session.buffered_output.clear();
+            }
+            return Err(HttpError::internal(format!("dispatch prompt: {e}")));
+        }
+
         self.emit(session_id, {
             let mut sessions = self.sessions.write();
             let session = sessions.get_mut(&session_id).expect("session exists");
@@ -998,27 +1034,19 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
             )
         });
 
-        let attachment_urls = params
-            .attachments
-            .into_iter()
-            .filter_map(|attachment| attachment.as_str().map(ToString::to_string))
-            .collect::<Vec<_>>();
-        let mut manager = self.manager.lock().await;
-        manager
-            .send_prompt(&runtime_id, &params.text, attachment_urls)
-            .await
-            .map_err(|e| HttpError::internal(format!("dispatch prompt: {e}")))?;
-
         Ok(PromptAck { prompt_id, turn_id })
     }
 
     async fn cancel(&self, session_id: Uuid, turn_id: Option<Uuid>) -> Result<(), HttpError> {
-        let runtime_id = {
-            let sessions = self.sessions.read();
+        let (runtime_id, resolved_turn_id) = {
+            let mut sessions = self.sessions.write();
             let session = sessions
-                .get(&session_id)
+                .get_mut(&session_id)
                 .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
-            session.runtime_id.clone()
+            let resolved_turn_id = turn_id.or(session.active_turn_id).unwrap_or_else(Uuid::new_v4);
+            session.active_turn_id = None;
+            session.buffered_output.clear();
+            (session.runtime_id.clone(), resolved_turn_id)
         };
         {
             let mut manager = self.manager.lock().await;
@@ -1031,7 +1059,7 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
         self.emit_next(
             session_id,
             RuntimeEnvelope::TurnFinished {
-                turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
+                turn_id: resolved_turn_id,
             },
         );
         self.set_state(session_id, SessionState::Idle, Some("cancelled"));
@@ -1091,6 +1119,18 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc;
+
+    fn test_manager_adapter(backlog_cap: usize) -> Arc<RuntimeManagerAdapter> {
+        Arc::new(RuntimeManagerAdapter {
+            manager: Arc::new(tokio::sync::Mutex::new(RuntimeManager::new(
+                std::collections::HashMap::new(),
+                None,
+            ))),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            backlog_cap,
+        })
+    }
 
     #[tokio::test]
     async fn stub_session_full_flow() {
@@ -1177,5 +1217,168 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, super::super::errors::ErrorCode::EventGone);
+    }
+
+    #[tokio::test]
+    async fn runtime_manager_adapter_initial_prompt_executes_once() {
+        let adapter = RuntimeManagerAdapter::new(
+            Arc::new(tokio::sync::Mutex::new(RuntimeManager::new(
+                std::collections::HashMap::new(),
+                None,
+            ))),
+            256,
+        );
+        let token_id = Uuid::new_v4();
+        let snap = adapter
+            .create_session(
+                token_id,
+                CreateSessionParams {
+                    agent_type: "opencode".into(),
+                    workspace_id: Some("ws-1".into()),
+                    model: None,
+                    initial_prompt: Some("hello once".into()),
+                    metadata: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let page = adapter.replay(snap.session_id, 0, 100).await.unwrap();
+        let completed = page
+            .events
+            .iter()
+            .filter(|event| event.kind == EventKind::MessageCompleted)
+            .count();
+        let finished = page
+            .events
+            .iter()
+            .filter(|event| event.kind == EventKind::TurnFinished)
+            .count();
+
+        assert_eq!(completed, 1, "initial prompt should complete exactly once");
+        assert_eq!(finished, 1, "initial prompt should finish exactly once");
+    }
+
+    #[tokio::test]
+    async fn runtime_manager_adapter_rolls_back_failed_dispatch() {
+        let adapter = test_manager_adapter(256);
+        let token_id = Uuid::new_v4();
+        let snap = adapter
+            .create_session(
+                token_id,
+                CreateSessionParams {
+                    agent_type: "opencode".into(),
+                    workspace_id: Some("ws-1".into()),
+                    model: None,
+                    initial_prompt: None,
+                    metadata: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        {
+            let mut manager = adapter.manager.lock().await;
+            manager.fail_next_send_for(&snap.runtime_id, "boom");
+        }
+
+        let err = adapter
+            .send_prompt(
+                snap.session_id,
+                PromptParams {
+                    text: "should fail".into(),
+                    attachments: vec![],
+                    mentions: vec![],
+                    metadata: None,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code, super::super::errors::ErrorCode::Internal);
+        let current = adapter.get_session(snap.session_id).await.unwrap();
+        assert_eq!(current.state, SessionState::Idle);
+
+        let page = adapter.replay(snap.session_id, 0, 100).await.unwrap();
+        assert_eq!(
+            page.events
+                .iter()
+                .filter(|event| event.kind == EventKind::PromptAccepted)
+                .count(),
+            0
+        );
+        assert_eq!(
+            page.events
+                .iter()
+                .filter(|event| event.kind == EventKind::TurnStarted)
+                .count(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_manager_adapter_cancel_clears_pending_turn_before_idle() {
+        let adapter = test_manager_adapter(256);
+        let token_id = Uuid::new_v4();
+        let snap = adapter
+            .create_session(
+                token_id,
+                CreateSessionParams {
+                    agent_type: "opencode".into(),
+                    workspace_id: Some("ws-1".into()),
+                    model: None,
+                    initial_prompt: None,
+                    metadata: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let (_cmd_tx, mut cmd_rx) = mpsc::channel(1);
+        let turn_id = Uuid::new_v4();
+        {
+            let mut manager = adapter.manager.lock().await;
+            let handle = manager.get_handle_mut(&snap.runtime_id).unwrap();
+            handle.cmd_tx = Some(_cmd_tx);
+        }
+        {
+            let mut sessions = adapter.sessions.write();
+            let session = sessions.get_mut(&snap.session_id).unwrap();
+            session.snapshot.state = SessionState::Running;
+            session.active_turn_id = Some(turn_id);
+            session.buffered_output = "partial".into();
+        }
+
+        adapter.cancel(snap.session_id, Some(turn_id)).await.unwrap();
+        let _ = cmd_rx.recv().await;
+
+        adapter.process_runtime_event(
+            &snap.runtime_id,
+            amux::AcpEvent {
+                event: Some(amux::acp_event::Event::StatusChange(amux::AcpStatusChange {
+                    old_status: amux::AgentStatus::Active as i32,
+                    new_status: amux::AgentStatus::Idle as i32,
+                })),
+                model: String::new(),
+            },
+        );
+
+        let page = adapter.replay(snap.session_id, 0, 100).await.unwrap();
+        assert_eq!(
+            page.events
+                .iter()
+                .filter(|event| event.kind == EventKind::TurnFinished)
+                .count(),
+            1
+        );
+        assert_eq!(
+            page.events
+                .iter()
+                .filter(|event| event.kind == EventKind::MessageCompleted)
+                .count(),
+            0
+        );
     }
 }
