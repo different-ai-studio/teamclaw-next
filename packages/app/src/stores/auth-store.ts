@@ -5,7 +5,7 @@ import {
   hasBackendConfig,
 } from "@/lib/backend";
 import type { AuthClaimResult, AuthSession } from "@/lib/backend";
-import { fetchAndApplyBootstrap } from "@/lib/bootstrap";
+import { clearBootstrapAppliedFields, fetchAndApplyBootstrap } from "@/lib/bootstrap";
 
 export type { AuthClaimResult } from "@/lib/backend";
 
@@ -214,6 +214,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await useWorkspaceStore.getState().clearWorkspace();
     } catch (error) {
       console.warn("[auth] clearWorkspace on signOut failed:", error);
+    }
+    try {
+      await clearBootstrapAppliedFields();
+    } catch (error) {
+      console.warn("[auth] clearBootstrapAppliedFields on signOut failed:", error);
     }
   },
 }));

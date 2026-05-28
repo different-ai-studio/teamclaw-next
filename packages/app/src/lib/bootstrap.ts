@@ -42,6 +42,22 @@ function patchFromPayload(mqtt: BootstrapMqttPayload | undefined): Partial<Serve
   };
 }
 
+// Drop every field that bootstrap may write so a different account
+// doesn't inherit the previous user's MQTT broker / credentials. Called
+// from auth-store.signOut. cloudApiUrl is left alone — it's user-supplied,
+// not bootstrap-delivered.
+export async function clearBootstrapAppliedFields(): Promise<void> {
+  const saved = await getSavedServerConfig();
+  await saveServerConfig({
+    ...saved,
+    mqttHost: undefined,
+    mqttPort: undefined,
+    mqttUseTls: undefined,
+    mqttUsername: undefined,
+    mqttPassword: undefined,
+  });
+}
+
 // Bootstrap is best-effort: any failure leaves the existing client config in
 // place. The function never throws so callers can fire-and-forget after sign-in.
 export async function fetchAndApplyBootstrap(args: {

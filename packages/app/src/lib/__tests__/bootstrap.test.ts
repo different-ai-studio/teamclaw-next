@@ -21,7 +21,7 @@ vi.mock("@/lib/server-config", () => ({
   saveServerConfig: saveSpy,
 }));
 
-import { fetchAndApplyBootstrap } from "../bootstrap";
+import { clearBootstrapAppliedFields, fetchAndApplyBootstrap } from "../bootstrap";
 
 beforeEach(() => {
   savedConfigRef.value = { cloudApiUrl: "https://cloud.example.com" };
@@ -84,6 +84,27 @@ describe("fetchAndApplyBootstrap", () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}));
     await fetchAndApplyBootstrap({ accessToken: "tok", fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("clearBootstrapAppliedFields wipes mqtt fields but keeps cloudApiUrl", async () => {
+    savedConfigRef.value = {
+      cloudApiUrl: "https://cloud.example.com",
+      mqttHost: "mqtt.old.example.com",
+      mqttPort: 8883,
+      mqttUseTls: true,
+      mqttUsername: "u",
+      mqttPassword: "p",
+    };
+    await clearBootstrapAppliedFields();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][0]).toEqual({
+      cloudApiUrl: "https://cloud.example.com",
+      mqttHost: undefined,
+      mqttPort: undefined,
+      mqttUseTls: undefined,
+      mqttUsername: undefined,
+      mqttPassword: undefined,
+    });
   });
 
   it("swallows network and HTTP errors", async () => {
