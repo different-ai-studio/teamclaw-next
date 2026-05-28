@@ -26,6 +26,8 @@ tags:
     description: Notification preferences and session mute management.
   - name: Shortcuts
     description: Shortcut management and visibility control.
+  - name: Config
+    description: Runtime configuration delivered to authenticated clients (MQTT broker, feature flags).
 paths:
   /v1/auth/refresh:
     post:
@@ -736,6 +738,23 @@ paths:
       responses:
         "204":
           description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/config/bootstrap:
+    get:
+      operationId: getBootstrapConfig
+      summary: Runtime configuration for authenticated clients (MQTT broker, feature flags, etc.)
+      tags: [Config]
+      responses:
+        "200":
+          description: Bootstrap configuration payload.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapConfig"
         "401":
           $ref: "#/components/responses/Error"
   /v1/workspaces:
@@ -2152,6 +2171,32 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
   schemas:
+    BootstrapConfig:
+      type: object
+      description: Runtime configuration delivered to authenticated clients on startup. Fields are optional; clients fall back to local defaults when omitted.
+      properties:
+        mqtt:
+          $ref: "#/components/schemas/BootstrapMqttConfig"
+      additionalProperties: true
+    BootstrapMqttConfig:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: Full broker URL including scheme (mqtt://, mqtts://, ws://, wss://) and port.
+        username:
+          type:
+            - string
+            - "null"
+        password:
+          type:
+            - string
+            - "null"
+        useTls:
+          type:
+            - boolean
+            - "null"
     ErrorEnvelope:
       type: object
       required: [error]

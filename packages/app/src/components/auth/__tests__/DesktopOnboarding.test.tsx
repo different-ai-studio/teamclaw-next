@@ -135,27 +135,23 @@ describe("DesktopOnboarding", () => {
     expect(screen.getByRole("button", { name: /send code/i })).toBeDisabled();
   });
 
-  it("self-hosted server saves config, updates injected config, and reloads", async () => {
+  it("self-hosted server saves the cloud api address and reloads", async () => {
     saveServerConfig.mockResolvedValueOnce({
-      supabaseUrl: "https://self.supabase.co",
-      supabaseAnonKey: "anon",
-      mqttHost: "mqtt.example.com",
-      mqttPort: 1883,
+      cloudApiUrl: "https://self.example.com",
     });
     render(<DesktopOnboarding />);
 
     fireEvent.click(screen.getByRole("button", { name: /get started/i }));
     fireEvent.click(screen.getByRole("button", { name: /self-hosted server/i }));
-    fireEvent.change(screen.getByLabelText(/supabase url/i), {
-      target: { value: "https://self.supabase.co" },
+    fireEvent.change(screen.getByLabelText(/server address/i), {
+      target: { value: "https://self.example.com" },
     });
-    fireEvent.change(screen.getByLabelText(/anon key/i), { target: { value: "anon" } });
-    fireEvent.change(screen.getByLabelText(/mqtt host/i), { target: { value: "mqtt.example.com" } });
-    fireEvent.change(screen.getByLabelText(/mqtt port/i), { target: { value: "1883" } });
     fireEvent.click(screen.getByRole("button", { name: /save and restart/i }));
 
-    await waitFor(() => expect(saveServerConfig).toHaveBeenCalled());
-    expect(window.__TEAMCLAW_SERVER_CONFIG__?.supabaseUrl).toBe("https://self.supabase.co");
+    await waitFor(() => expect(saveServerConfig).toHaveBeenCalledWith({
+      cloudApiUrl: "https://self.example.com",
+    }));
+    expect(window.__TEAMCLAW_SERVER_CONFIG__?.cloudApiUrl).toBe("https://self.example.com");
     expect(reload).toHaveBeenCalled();
   });
 });

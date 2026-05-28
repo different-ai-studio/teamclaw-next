@@ -14,8 +14,10 @@ import {
   AlertTriangle,
   MessageSquareText,
   Plus,
+  Server,
   X,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
   Select,
@@ -31,6 +33,12 @@ import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from 
 import { useSuggestionsStore } from '@/stores/suggestions'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
+import {
+  getEffectiveServerConfig,
+  getSavedServerConfig,
+  saveServerConfig,
+  type ServerConfig,
+} from '@/lib/server-config'
 
 // Theme helpers
 const THEME_STORAGE_KEY = `${buildConfig.app.shortName ?? 'teamclaw'}-theme`
@@ -139,7 +147,7 @@ export const GeneralSection = React.memo(function GeneralSection() {
         description={t('settings.general.description', 'Customize your application preferences')}
         iconColor="text-blue-500"
       />
-      
+
       <SettingCard>
         <h4 className="font-medium mb-4 flex items-center gap-2">
           <Monitor className="h-4 w-4 text-muted-foreground" />
@@ -266,6 +274,8 @@ export const GeneralSection = React.memo(function GeneralSection() {
       </SettingCard>
 
       <ChatSuggestionsCard />
+
+      <ServerAddressCard />
     </div>
   )
 })
@@ -366,6 +376,120 @@ function ChatSuggestionsCard() {
             {t('settings.general.addSuggestion', 'Add')}
           </Button>
         </div>
+      </div>
+    </SettingCard>
+  )
+}
+
+function ServerAddressCard() {
+  const { t } = useTranslation()
+  const [savedUrl, setSavedUrl] = React.useState('')
+  const [effective, setEffective] = React.useState<ServerConfig>({})
+  const [draft, setDraft] = React.useState('')
+  const [saving, setSaving] = React.useState(false)
+
+  const reload = React.useCallback(async () => {
+    const [saved, effectiveConfig] = await Promise.all([
+      getSavedServerConfig(),
+      getEffectiveServerConfig(),
+    ])
+    const savedValue = saved.cloudApiUrl?.trim() ?? ''
+    setSavedUrl(savedValue)
+    setEffective(effectiveConfig)
+    setDraft(savedValue)
+  }, [])
+
+  React.useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const dirty = draft.trim() !== savedUrl.trim()
+
+  const handleSave = React.useCallback(async () => {
+    setSaving(true)
+    try {
+      const next = await saveServerConfig({ cloudApiUrl: draft.trim() || undefined })
+      const nextValue = next.cloudApiUrl?.trim() ?? ''
+      setSavedUrl(nextValue)
+      setEffective((current) => ({ ...current, cloudApiUrl: nextValue || current.cloudApiUrl }))
+      toast.success(t('settings.general.serverSaved', 'Server address saved. Restart the app to apply.'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }, [draft, t])
+
+  const mqttBroker = React.useMemo(() => {
+    if (!effective.mqttHost) return null
+    const scheme = effective.mqttUseTls ? 'mqtts' : 'mqtt'
+    const port = effective.mqttPort ?? (effective.mqttUseTls ? 8883 : 1883)
+    return `${scheme}://${effective.mqttHost}:${port}`
+  }, [effective.mqttHost, effective.mqttPort, effective.mqttUseTls])
+
+  return (
+    <SettingCard>
+      <h4 className="font-medium mb-4 flex items-center gap-2">
+        <Server className="h-4 w-4 text-muted-foreground" />
+        {t('settings.general.server', 'Server')}
+      </h4>
+      <div className="space-y-2">
+        <label className="text-[12px] font-medium text-muted-foreground">
+          {t('settings.general.serverAddress', 'Server address')}
+        </label>
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={effective.cloudApiUrl || 'https://cloud.ucar.cc'}
+          className="font-mono text-[12.5px]"
+        />
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'settings.general.serverAddressHint',
+            'Gateway for all business data. Restart the app to apply changes.',
+          )}
+        </p>
+        <div className="flex justify-end pt-2">
+          <Button size="sm" disabled={!dirty || saving} onClick={handleSave}>
+            {saving ? t('settings.general.saving', 'Saving…') : t('settings.general.save', 'Save')}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-2 border-t border-border-soft pt-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] font-medium text-muted-foreground">
+            {t('settings.general.serverSynced', 'Synced from server')}
+          </span>
+          <span className="text-[11px] text-faint">
+            {t('settings.general.serverSyncedHint', 'Delivered on sign-in, read-only')}
+          </span>
+        </div>
+        {mqttBroker ? (
+          <dl className="grid grid-cols-[120px_1fr] gap-y-1.5 text-[12px]">
+            <dt className="text-muted-foreground">{t('settings.general.mqttBroker', 'MQTT broker')}</dt>
+            <dd className="font-mono text-foreground break-all">{mqttBroker}</dd>
+            {effective.mqttUsername ? (
+              <>
+                <dt className="text-muted-foreground">{t('settings.general.mqttUsername', 'Username')}</dt>
+                <dd className="font-mono text-foreground break-all">{effective.mqttUsername}</dd>
+              </>
+            ) : null}
+            {effective.mqttPassword ? (
+              <>
+                <dt className="text-muted-foreground">{t('settings.general.mqttPassword', 'Password')}</dt>
+                <dd className="font-mono text-foreground">••••••••</dd>
+              </>
+            ) : null}
+          </dl>
+        ) : (
+          <p className="text-[12px] text-muted-foreground italic">
+            {t(
+              'settings.general.serverSyncedEmpty',
+              'Not synced yet. Sign in once to fetch runtime configuration.',
+            )}
+          </p>
+        )}
       </div>
     </SettingCard>
   )

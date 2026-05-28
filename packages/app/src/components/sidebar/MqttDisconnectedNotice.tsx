@@ -22,7 +22,7 @@ export function MqttDisconnectedNotice() {
   return (
     <button
       type="button"
-      onClick={() => openSettings('server')}
+      onClick={() => openSettings('general')}
       className="flex w-full items-start gap-2 rounded-lg border border-[color:var(--coral-soft)] bg-paper px-2.5 py-2 text-left shadow-sm transition-colors hover:bg-[color:var(--coral-soft)]/40"
     >
       <span

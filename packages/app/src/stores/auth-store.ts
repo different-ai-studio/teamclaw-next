@@ -5,6 +5,7 @@ import {
   hasBackendConfig,
 } from "@/lib/backend";
 import type { AuthClaimResult, AuthSession } from "@/lib/backend";
+import { clearBootstrapAppliedFields, fetchAndApplyBootstrap } from "@/lib/bootstrap";
 
 export type { AuthClaimResult } from "@/lib/backend";
 
@@ -69,8 +70,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, authFlow: "idle", errorMessage: null });
     const session = await getBackend().auth.getSession();
     set({ session: storeSession(session), loading: false });
+    if (session) {
+      void fetchAndApplyBootstrap({ accessToken: session.accessToken });
+    }
     getBackend().auth.onAuthStateChange((session) => {
       set({ session: storeSession(session) });
+      if (session) {
+        void fetchAndApplyBootstrap({ accessToken: session.accessToken });
+      }
     });
   },
   sendOtp: async (email) => {
@@ -207,6 +214,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await useWorkspaceStore.getState().clearWorkspace();
     } catch (error) {
       console.warn("[auth] clearWorkspace on signOut failed:", error);
+    }
+    try {
+      await clearBootstrapAppliedFields();
+    } catch (error) {
+      console.warn("[auth] clearBootstrapAppliedFields on signOut failed:", error);
     }
   },
 }));

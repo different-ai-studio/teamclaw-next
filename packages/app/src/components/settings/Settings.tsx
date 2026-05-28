@@ -50,7 +50,6 @@ interface Section {
 // Primary sections shown directly in sidebar
 const primarySections: Section[] = [
   { id: 'general', label: 'General', labelKey: 'settings.nav.general', icon: Settings2 },
-  { id: 'server', label: 'Server', labelKey: 'settings.nav.server', icon: Server },
   { id: 'shortcuts', label: 'Shortcuts', labelKey: 'settings.nav.shortcuts', icon: Bookmark },
   { id: 'team', label: 'Team Shared', labelKey: 'settings.nav.team', icon: Users },
   { id: 'tokenUsage', label: 'Token Usage', labelKey: 'settings.nav.tokenUsage', icon: Coins },

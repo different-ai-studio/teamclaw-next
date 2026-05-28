@@ -17,7 +17,6 @@ const appAllowed = [
   "lib/supabase-client.ts",
   "lib/backend/supabase/",
   "lib/backend/__tests__/",
-  "components/settings/ServerSection.tsx",
   "components/auth/DesktopOnboarding.tsx",
   "lib/server-config.ts",
 ];
