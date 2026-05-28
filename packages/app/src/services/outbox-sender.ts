@@ -11,7 +11,9 @@
 // be called once on app boot after the outbox store is hydrated.
 
 import { create as createMessage, toBinary } from "@bufbuild/protobuf";
+import { isAgentActorType } from "@/lib/actor-type";
 import { BackendError, getBackend } from "@/lib/backend";
+import { ensureAgentRuntimesForSession } from "@/lib/teamclaw/ensure-agent-runtime";
 import {
   LiveEventEnvelopeSchema,
   MessageKind,
@@ -59,6 +61,25 @@ async function attempt(entry: OutboxEntry): Promise<void> {
   });
 
   try {
+    if (entry.mentionActorIds.length > 0) {
+      const participants = await getBackend().sessionMembers.listParticipants(
+        entry.sessionId,
+      );
+      const agentActorIds = entry.mentionActorIds.filter((id) => {
+        const row = participants.find((p) => p.id === id);
+        return row ? isAgentActorType(row.actor_type) : false;
+      });
+      if (agentActorIds.length > 0) {
+        await ensureAgentRuntimesForSession({
+          sessionId: entry.sessionId,
+          teamId: entry.teamId,
+          agentActorIds,
+          modelId: entry.model ?? undefined,
+          reason: "outbox_send",
+        });
+      }
+    }
+
     const createdAtSec = BigInt(
       Math.floor(new Date(entry.createdAt).getTime() / 1000),
     );

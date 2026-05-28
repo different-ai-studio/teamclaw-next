@@ -1,12 +1,11 @@
 import { getBackend } from "@/lib/backend";
 import { mqttPublish } from "@/lib/mqtt-bridge";
+import { resolvePermissionCommandTarget } from "@/lib/runtime-state-resolve";
+import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
-import {
-  createRuntimeCommandSender,
-  resolvePermissionRuntimeTarget,
-} from "@/lib/teamclaw/runtime-command";
+import { createRuntimeCommandSender } from "@/lib/teamclaw/runtime-command";
 
 export type AcpPermissionDecision = "allow" | "deny" | "always";
 
@@ -42,32 +41,6 @@ export async function replyAcpPermission(args: {
   const senderActorId = useCurrentTeamStore.getState().currentMember?.id?.trim() ?? "";
   const granted = args.decision !== "deny";
 
-  const runtimeInfoByAgentId = new Map<string, { runtimeId: string }>();
-  for (const [runtimeId, entry] of Object.entries(useRuntimeStateStore.getState().byRuntimeId)) {
-    const agentId = entry.daemonDeviceId?.trim() ?? "";
-    if (!agentId) continue;
-    runtimeInfoByAgentId.set(agentId, {
-      runtimeId: entry.info.runtimeId?.trim() || runtimeId,
-    });
-  }
-
-  let fallbackRuntime: { agentId: string; runtimeId: string } | null = null;
-  try {
-    const rows = await getBackend().runtime.listRuntimeTargetsForSession(
-      args.sessionId,
-      [args.agentActorId],
-    );
-    const row = rows.find((r) => r.agent_id === args.agentActorId);
-    if (row?.runtime_id?.trim()) {
-      fallbackRuntime = {
-        agentId: args.agentActorId,
-        runtimeId: row.runtime_id.trim(),
-      };
-    }
-  } catch (error) {
-    console.warn("[reply-acp-permission] runtime target lookup failed", error);
-  }
-
   let agentParticipantIds: string[] = [args.agentActorId];
   try {
     const participants = await getBackend().sessionMembers.listParticipants(args.sessionId);
@@ -82,22 +55,38 @@ export async function replyAcpPermission(args: {
     console.warn("[reply-acp-permission] participant lookup failed", error);
   }
 
-  const connectedAgents = agentParticipantIds.map((agentId) => ({
-    agentId,
-    deviceId: agentId,
-  }));
+  let sessionRuntimeRows: Array<{ agent_id: string | null; runtime_id: string | null }> = [];
+  try {
+    sessionRuntimeRows = await getBackend().runtime.listRuntimeTargetsForSession(
+      args.sessionId,
+      agentParticipantIds,
+    );
+  } catch (error) {
+    console.warn("[reply-acp-permission] runtime target lookup failed", error);
+  }
 
-  const target = resolvePermissionRuntimeTarget({
-    requestingActorId: args.agentActorId,
-    agentParticipantIds,
-    connectedAgents,
-    runtimeInfoByAgentId,
-    fallbackRuntime,
+  const byRuntimeId = useRuntimeStateStore.getState().byRuntimeId;
+  const target = resolvePermissionCommandTarget({
+    agentActorId: args.agentActorId,
+    sessionRuntimeRows,
+    byRuntimeId,
   });
 
   if (!target) {
     throw new Error("Could not resolve agent runtime for permission response");
   }
+
+  sessionFlowLog("permission.reply.begin", {
+    sessionId: args.sessionId,
+    agentActorId: args.agentActorId,
+    requestId: args.requestId,
+    granted,
+    targetDeviceId: target.deviceId,
+    runtimeId: target.runtimeId,
+    sessionRuntimeId:
+      sessionRuntimeRows.find((row) => row.agent_id?.trim() === args.agentActorId)?.runtime_id ??
+      null,
+  });
 
   const peerId = `teamclaw-desktop-${(senderActorId || "anon").slice(0, 8)}`;
   const sender = createRuntimeCommandSender({
@@ -107,11 +96,27 @@ export async function replyAcpPermission(args: {
     senderActorId,
   });
 
-  await sender.sendPermissionResponse({
-    targetDeviceId: target.deviceId,
-    runtimeId: target.runtimeId,
+  try {
+    await sender.sendPermissionResponse({
+      targetDeviceId: target.deviceId,
+      runtimeId: target.runtimeId,
+      requestId: args.requestId,
+      granted,
+    });
+  } catch (error) {
+    sessionFlowError("permission.reply.failed", error, {
+      sessionId: args.sessionId,
+      agentActorId: args.agentActorId,
+      requestId: args.requestId,
+      runtimeId: target.runtimeId,
+    });
+    throw error;
+  }
+
+  sessionFlowLog("permission.reply.ok", {
+    sessionId: args.sessionId,
     requestId: args.requestId,
-    granted,
+    runtimeId: target.runtimeId,
   });
 
   useV2StreamingStore.getState().clearPermissionRequest(args.sessionId, args.agentActorId);

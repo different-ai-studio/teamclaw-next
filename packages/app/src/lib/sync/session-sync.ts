@@ -58,7 +58,7 @@ export async function syncSessionsForTeam(
     console.warn("[session-sync] pull failed:", error);
     return 0;
   }
-  const rows = data.map(mapRow);
+  const rows = data.filter((row) => row.archived_at == null).map(mapRow);
   if (rows.length > 0) {
     await cache.upsertSessionsBatch(rows);
     const maxUpdated = rows.reduce(

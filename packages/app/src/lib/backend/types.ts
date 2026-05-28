@@ -65,6 +65,7 @@ export interface SessionSyncRow {
   created_by_actor_id?: string | null;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
 }
 
 export interface SessionListCursor {
