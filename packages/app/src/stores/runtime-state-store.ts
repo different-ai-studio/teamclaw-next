@@ -45,12 +45,24 @@ let unlisten: (() => void) | null = null
 let initialized = false
 
 export async function initRuntimeStateStore(teamId: string): Promise<void> {
-  if (initialized) return
-  await mqttSubscribe(`amux/${teamId}/device/+/runtime/+/state`)
+  if (initialized) {
+    console.info('[runtime-state] init skipped: already initialized', { teamId })
+    return
+  }
+  const topic = `amux/${teamId}/device/+/runtime/+/state`
+  await mqttSubscribe(topic)
+  console.info('[runtime-state] subscribed', { teamId, topic })
   unlisten = await listenForEnvelopes((env: IncomingEnvelope) => {
     const parsed = parseRuntimeStateTopic(env.topic)
     if (!parsed) return
-    if (parsed.teamId !== teamId) return // ignore other teams (shouldn't happen with scoped subscribe, defense in depth)
+    if (parsed.teamId !== teamId) {
+      console.info('[runtime-state] ignored envelope for another team', {
+        expectedTeamId: teamId,
+        topic: env.topic,
+        parsed,
+      })
+      return
+    }
     let info: RuntimeInfo
     try {
       info = fromBinary(RuntimeInfoSchema, new Uint8Array(env.bytes))
@@ -66,6 +78,18 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
       agentType: info.agentType,
       currentModel: info.currentModel,
       availableModelIds: info.availableModels.map((model) => model.id),
+      availableCommandNames: info.availableCommands.map((command) => command.name),
+      state: info.state,
+      status: info.status,
+    })
+    console.info('[runtime-state] retained RuntimeInfo received', {
+      topic: env.topic,
+      daemonDeviceId: parsed.daemonDeviceId,
+      runtimeIdFromTopic: parsed.runtimeId,
+      runtimeIdFromInfo: info.runtimeId,
+      commandCount: info.availableCommands.length,
+      commandNames: info.availableCommands.map((command) => command.name),
+      currentModel: info.currentModel,
       state: info.state,
       status: info.status,
     })
@@ -79,4 +103,5 @@ export function disposeRuntimeStateStore(): void {
   unlisten = null
   useRuntimeStateStore.getState().clear()
   initialized = false
+  console.info('[runtime-state] disposed')
 }

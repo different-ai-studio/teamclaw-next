@@ -11,12 +11,15 @@ export type Command = {
   _type?: 'role' | 'skill' | 'command';
 }
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { isTauri } from '@/lib/utils'
+import { getBackend } from '@/lib/backend'
 import { loadAllSkills } from '@/lib/git/skill-loader'
 import { readSkillPermissions, resolveSkillPermission } from '@/lib/teamclaw-config'
 import { loadAllRoles } from '@/lib/roles/loader'
 
 interface CommandPopoverProps {
+  activeSessionId: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
   searchQuery: string
@@ -49,6 +52,30 @@ function isRoleEntry(item: PickerItem): item is RoleEntry {
 type CommandOrSkill = Command | SkillEntry
 type PickerItem = Command | SkillEntry | RoleEntry
 
+type RuntimeCommandRow = {
+  runtime_id: string | null
+  backend_type: string | null
+  current_model: string | null
+}
+
+function looksLikeSkillInvocationName(name: string): boolean {
+  return /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/.test(name)
+}
+
+function summarizeRuntimeStates(
+  runtimeStates: Record<string, { info?: { availableCommands?: Array<{ name: string; description?: string; inputHint?: string }> } }>,
+) {
+  return Object.fromEntries(
+    Object.entries(runtimeStates).map(([runtimeId, state]) => [
+      runtimeId,
+      {
+        commandCount: state.info?.availableCommands?.length ?? 0,
+        commandNames: state.info?.availableCommands?.map((command) => command.name) ?? [],
+      },
+    ]),
+  )
+}
+
 async function scanAvailableSkills(workspacePath: string): Promise<SkillEntry[]> {
   const { skills } = await loadAllSkills(workspacePath)
   return skills
@@ -79,6 +106,66 @@ async function scanAvailableRoles(workspacePath: string): Promise<RoleEntry[]> {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+async function loadSessionRuntimeCommands(
+  activeSessionId: string | null,
+  runtimeStates: Record<string, { info?: { availableCommands?: Array<{ name: string; description?: string; inputHint?: string }> } }>,
+): Promise<Command[]> {
+  if (!activeSessionId) {
+    console.info('[CommandPopover] skip runtime command load: no active session')
+    return []
+  }
+
+  let runtimeRows: RuntimeCommandRow[] = []
+  try {
+    runtimeRows = await getBackend().runtime.listSessionRuntimeModels(activeSessionId) as RuntimeCommandRow[]
+  } catch (error) {
+    console.error('[CommandPopover] Failed to load session runtime rows:', error)
+    return []
+  }
+
+  console.info('[CommandPopover] session runtime rows loaded', {
+    activeSessionId,
+    runtimeRows,
+    runtimeStateIds: Object.keys(runtimeStates),
+    runtimeStateSummary: summarizeRuntimeStates(runtimeStates),
+  })
+
+  const deduped = new Map<string, Command>()
+  for (const row of runtimeRows) {
+    if (!row.runtime_id) {
+      console.info('[CommandPopover] runtime row without runtime_id', { activeSessionId, row })
+      continue
+    }
+    const commands = runtimeStates[row.runtime_id]?.info?.availableCommands ?? []
+    console.info('[CommandPopover] commands for runtime row', {
+      activeSessionId,
+      runtimeId: row.runtime_id,
+      backendType: row.backend_type,
+      currentModel: row.current_model,
+      commandCount: commands.length,
+      commandNames: commands.map((command) => command.name),
+      hasRuntimeState: Boolean(runtimeStates[row.runtime_id]),
+    })
+    for (const command of commands) {
+      if (!command?.name || deduped.has(command.name)) continue
+      deduped.set(command.name, {
+        name: command.name,
+        description: command.description || undefined,
+        template: command.inputHint?.trim() ? `${command.name} ${command.inputHint.trim()}` : command.name,
+        source: 'command',
+      })
+    }
+  }
+
+  const loadedCommands = Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name))
+  console.info('[CommandPopover] daemon command load result', {
+    activeSessionId,
+    commandCount: loadedCommands.length,
+    commandNames: loadedCommands.map((command) => command.name),
+  })
+  return loadedCommands
+}
+
 // Filter items by search query
 function filterItems<T extends { name: string; description?: string }>(
   items: T[], 
@@ -98,6 +185,7 @@ function filterItems<T extends { name: string; description?: string }>(
 }
 
 export function CommandPopover({
+  activeSessionId,
   open,
   onOpenChange,
   searchQuery,
@@ -105,6 +193,7 @@ export function CommandPopover({
 }: CommandPopoverProps) {
   const { t } = useTranslation()
   const workspacePath = useWorkspaceStore(s => s.workspacePath)
+  const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
   const [commands, setCommands] = React.useState<Command[]>([])
   const [roles, setRoles] = React.useState<RoleEntry[]>([])
   const [skills, setSkills] = React.useState<CommandOrSkill[]>([])
@@ -116,9 +205,16 @@ export function CommandPopover({
   React.useEffect(() => {
     if (open) {
       setIsLoading(true)
+      console.info('[CommandPopover] open: loading picker items', {
+        activeSessionId,
+        workspacePath,
+        isTauri: isTauri(),
+        searchQuery,
+        runtimeStateIds: Object.keys(runtimeStates),
+        runtimeStateSummary: summarizeRuntimeStates(runtimeStates),
+      })
       
-      // Only frontend-scanned skills/roles remain.
-      const commandsPromise: Promise<Command[]> = Promise.resolve([])
+      const commandsPromise = loadSessionRuntimeCommands(activeSessionId, runtimeStates)
       
       // Load skills from .claude/skills/ (only on Tauri)
       const skillsPromise = (isTauri() && workspacePath)
@@ -144,7 +240,15 @@ export function CommandPopover({
       
       Promise.all([commandsPromise, skillsPromise, rolesPromise, permissionsPromise])
         .then(([cmds, skls, loadedRoles, permissions]) => {
-          // Separate commands by source
+          console.info('[CommandPopover] picker sources loaded', {
+            activeSessionId,
+            daemonCommandCount: cmds.length,
+            daemonCommandNames: cmds.map((command) => command.name),
+            localSkillCount: skls.length,
+            localSkillInvocations: skls.map((skill) => skill.invocationName),
+            roleCount: loadedRoles.length,
+            permissionKeyCount: Object.keys(permissions).length,
+          })
           const deniedSkillNames = new Set(
             skls
               .filter((skill) => resolveSkillPermission(skill.permissionKey, permissions).permission === 'deny')
@@ -155,21 +259,65 @@ export function CommandPopover({
             (skill) => resolveSkillPermission(skill.permissionKey, permissions).permission !== 'deny'
           )
 
-          const sdkSkills = cmds.filter((cmd) => {
-            if ((cmd as Command & { source?: string }).source !== 'skill') return false
-            if (deniedSkillNames.has(cmd.name)) return false
-            return resolveSkillPermission(cmd.name, permissions).permission !== 'deny'
-          })
-          const sdkCommands = cmds.filter((cmd) => (cmd as Command & { source?: string }).source !== 'skill')
+          const skillByInvocation = new Map(
+            allowedFrontendSkills.map((skill) => [skill.invocationName, skill]),
+          )
+          const skillByFilename = new Map(
+            allowedFrontendSkills.map((skill) => [skill.path, skill]),
+          )
+
+          const runtimeSkills: SkillEntry[] = []
+          const runtimeCommands: Command[] = []
+
+          for (const cmd of cmds) {
+            const matchedSkill = skillByInvocation.get(cmd.name) ?? skillByFilename.get(cmd.name)
+            if (matchedSkill) {
+              if (deniedSkillNames.has(matchedSkill.name)) continue
+              console.info('[CommandPopover] classified daemon command as known skill', {
+                commandName: cmd.name,
+                skillName: matchedSkill.name,
+                invocationName: matchedSkill.invocationName,
+              })
+              runtimeSkills.push(matchedSkill)
+            } else if (looksLikeSkillInvocationName(cmd.name)) {
+              const daemonSkill: SkillEntry = {
+                name: cmd.name,
+                invocationName: cmd.name,
+                description: cmd.description ?? '',
+                path: '',
+                permissionKey: cmd.name,
+              }
+              if (resolveSkillPermission(daemonSkill.permissionKey, permissions).permission === 'deny') continue
+              console.info('[CommandPopover] classified daemon command as namespaced skill', {
+                commandName: cmd.name,
+              })
+              runtimeSkills.push(daemonSkill)
+            } else {
+              console.info('[CommandPopover] classified daemon command as command', {
+                commandName: cmd.name,
+              })
+              runtimeCommands.push(cmd)
+            }
+          }
           
-          // Merge frontend-scanned skills with SDK skills
-          // Deduplicate: prefer SDK skills (they have more metadata like template)
-          const skillNameSet = new Set(sdkSkills.map(s => s.name))
-          const uniqueFrontendSkills = allowedFrontendSkills.filter(s => !skillNameSet.has(s.name))
+          // Merge frontend-scanned skills with runtime-advertised skills.
+          const skillInvocationSet = new Set(runtimeSkills.map((skill) => skill.invocationName))
+          const uniqueFrontendSkills = allowedFrontendSkills.filter(
+            (skill) => !skillInvocationSet.has(skill.invocationName),
+          )
           
-          setCommands(sdkCommands)
+          setCommands(runtimeCommands)
           setRoles(loadedRoles)
-          setSkills([...sdkSkills, ...uniqueFrontendSkills])
+          setSkills([...runtimeSkills, ...uniqueFrontendSkills])
+          console.info('[CommandPopover] picker state set', {
+            activeSessionId,
+            runtimeSkillCount: runtimeSkills.length,
+            runtimeSkillNames: runtimeSkills.map((skill) => skill.invocationName),
+            localOnlySkillCount: uniqueFrontendSkills.length,
+            commandCount: runtimeCommands.length,
+            commandNames: runtimeCommands.map((command) => command.name),
+            roleCount: loadedRoles.length,
+          })
           setIsLoading(false)
         })
     } else {
@@ -177,7 +325,7 @@ export function CommandPopover({
       setSkills([])
       setCommands([])
     }
-  }, [open, workspacePath])
+  }, [activeSessionId, open, runtimeStates, workspacePath])
   
   React.useEffect(() => {
     if (!open) {

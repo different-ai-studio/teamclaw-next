@@ -1,8 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { SidebarSecondColumn } from '../SidebarSecondColumn'
+import { SidebarProvider } from '@/components/ui/sidebar'
 import { useUIStore } from '@/stores/ui'
 import { useShortcutsStore } from '@/stores/shortcuts'
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key,
+  }),
+}))
+
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => false,
+}))
 
 vi.mock('../SessionListColumn', () => ({
   SessionListColumn: () => <div data-testid="session-list-column" />,
@@ -49,6 +60,13 @@ vi.mock('@/stores/current-team', () => ({
 }))
 
 describe('SidebarSecondColumn', () => {
+  const renderWithSidebar = () =>
+    render(
+      <SidebarProvider>
+        <SidebarSecondColumn />
+      </SidebarProvider>,
+    )
+
   beforeEach(() => {
     useShortcutsStore.setState({
       personalNodes: [
@@ -77,13 +95,13 @@ describe('SidebarSecondColumn', () => {
 
   it('renders SessionListColumn for normal session filters', () => {
     useUIStore.setState({ sidebarFilter: { kind: 'all' } })
-    render(<SidebarSecondColumn />)
+    renderWithSidebar()
     expect(screen.getByTestId('session-list-column')).toBeInTheDocument()
   })
 
   it('renders shortcuts when the shortcuts filter is active', () => {
     useUIStore.setState({ sidebarFilter: { kind: 'shortcuts' } })
-    render(<SidebarSecondColumn />)
+    renderWithSidebar()
     expect(screen.getByText('Shortcuts')).toBeInTheDocument()
     expect(screen.getByText('Docs')).toBeInTheDocument()
     expect(screen.queryByTestId('session-list-column')).not.toBeInTheDocument()
@@ -91,14 +109,14 @@ describe('SidebarSecondColumn', () => {
 
   it('renders the full ideas list when the ideas filter is active', () => {
     useUIStore.setState({ sidebarFilter: { kind: 'ideas' } })
-    render(<SidebarSecondColumn />)
+    renderWithSidebar()
     expect(screen.getByTestId('ideas-list-column')).toBeInTheDocument()
     expect(screen.queryByTestId('session-list-column')).not.toBeInTheDocument()
   })
 
   it('renders the full actor list when the actors filter is active', () => {
     useUIStore.setState({ sidebarFilter: { kind: 'actors' } })
-    render(<SidebarSecondColumn />)
+    renderWithSidebar()
     expect(screen.getByTestId('actors-list-column')).toBeInTheDocument()
     expect(screen.queryByTestId('session-list-column')).not.toBeInTheDocument()
   })
