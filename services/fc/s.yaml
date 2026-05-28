@@ -30,6 +30,7 @@ resources:
         PUSH_WEBHOOK_SECRET: ${env('PUSH_WEBHOOK_SECRET')}
         SUPABASE_URL: ${env('SUPABASE_URL')}
         SUPABASE_SERVICE_ROLE_KEY: ${env('SUPABASE_SERVICE_ROLE_KEY')}
+        SUPABASE_ANON_KEY: ${env('SUPABASE_ANON_KEY')}
         APNS_PRIVATE_KEY_P8: ${env('APNS_PRIVATE_KEY_P8')}
         APNS_KEY_ID: ${env('APNS_KEY_ID')}
         APNS_TEAM_ID: ${env('APNS_TEAM_ID')}
