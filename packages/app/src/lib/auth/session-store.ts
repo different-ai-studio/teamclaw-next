@@ -43,11 +43,98 @@ function readPersistedSession(): Session | null {
   if (!ls) return null;
   try {
     const raw = ls.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as Session;
+    if (raw) return JSON.parse(raw) as Session;
+  } catch {
+    // fall through to legacy migration
+  }
+  // Attempt one-time migration from legacy supabase-js localStorage keys.
+  return migrateLegacySupabaseSession(ls);
+}
+
+/**
+ * One-time migration: pre-existing TeamClaw installs persisted their auth
+ * session via supabase-js under `sb-<project-ref>-auth-token`. We translate
+ * that to the new `teamclaw.session.v1` key (and remove all `sb-*` keys we
+ * find) so existing users are not silently signed out after this release.
+ */
+function migrateLegacySupabaseSession(ls: Storage): Session | null {
+  const legacyKeys: string[] = [];
+  let authKey: string | null = null;
+  try {
+    for (let i = 0; i < ls.length; i++) {
+      const key = ls.key(i);
+      if (!key) continue;
+      if (key.startsWith("sb-")) {
+        legacyKeys.push(key);
+        if (/^sb-.+-auth-token$/.test(key) && !authKey) authKey = key;
+      }
+    }
   } catch {
     return null;
   }
+  if (legacyKeys.length === 0) return null;
+
+  let migrated: Session | null = null;
+  if (authKey) {
+    try {
+      const raw = ls.getItem(authKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<Session> & {
+          currentSession?: Partial<Session>;
+        };
+        // supabase-js sometimes wraps under { currentSession, expiresAt }
+        const src: Partial<Session> & { user?: unknown } = parsed.currentSession
+          ? (parsed.currentSession as Partial<Session>)
+          : (parsed as Partial<Session>);
+        const accessToken = typeof src.access_token === "string" ? src.access_token : null;
+        const refreshToken = typeof src.refresh_token === "string" ? src.refresh_token : null;
+        const expiresAt =
+          typeof src.expires_at === "number"
+            ? src.expires_at
+            : typeof (src as { expiresAt?: unknown }).expiresAt === "number"
+              ? ((src as { expiresAt: number }).expiresAt)
+              : null;
+        const user = (src.user && typeof src.user === "object" ? src.user : null) as Session["user"] | null;
+        if (accessToken && refreshToken && expiresAt && user) {
+          migrated = {
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            expires_at: expiresAt,
+            token_type: typeof src.token_type === "string" ? src.token_type : "bearer",
+            expires_in: typeof src.expires_in === "number" ? src.expires_in : undefined,
+            user,
+          };
+        }
+      }
+    } catch {
+      migrated = null;
+    }
+  }
+
+  // Best-effort cleanup of all sb-* keys (auth token + provider token + any others).
+  for (const key of legacyKeys) {
+    try {
+      ls.removeItem(key);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (migrated) {
+    try {
+      ls.setItem(STORAGE_KEY, JSON.stringify(migrated));
+    } catch {
+      // ignore
+    }
+    if (import.meta.env?.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[auth] migrated legacy supabase-js session", { keys: legacyKeys });
+    }
+  } else if (import.meta.env?.DEV) {
+    // eslint-disable-next-line no-console
+    console.log("[auth] cleared legacy supabase-js keys (no valid session)", { keys: legacyKeys });
+  }
+  return migrated;
 }
 
 function writePersistedSession(session: Session | null) {

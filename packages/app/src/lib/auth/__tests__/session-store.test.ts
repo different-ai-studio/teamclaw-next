@@ -84,6 +84,41 @@ describe("session-store", () => {
     expect(getSession()).toBeNull();
   });
 
+  it("migrates legacy supabase-js auth-token into teamclaw.session.v1 and clears sb-* keys", () => {
+    const legacy = {
+      access_token: "legacy-atk",
+      refresh_token: "legacy-rtk",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      token_type: "bearer",
+      user: { id: "legacy-user", email: "legacy@example.com" },
+    };
+    window.localStorage.setItem("sb-abcdef-auth-token", JSON.stringify(legacy));
+    window.localStorage.setItem("sb-abcdef-provider-token", "provider-token-value");
+
+    const out = getSession();
+    expect(out).not.toBeNull();
+    expect(out?.access_token).toBe("legacy-atk");
+    expect(out?.refresh_token).toBe("legacy-rtk");
+    expect(out?.user.id).toBe("legacy-user");
+    // new key populated
+    const stored = window.localStorage.getItem("teamclaw.session.v1");
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored!).access_token).toBe("legacy-atk");
+    // legacy keys removed
+    expect(window.localStorage.getItem("sb-abcdef-auth-token")).toBeNull();
+    expect(window.localStorage.getItem("sb-abcdef-provider-token")).toBeNull();
+  });
+
+  it("clears malformed legacy supabase-js data and returns signed-out", () => {
+    window.localStorage.setItem("sb-bad-auth-token", "not json");
+    window.localStorage.setItem("sb-bad-provider-token", "x");
+    const out = getSession();
+    expect(out).toBeNull();
+    expect(window.localStorage.getItem("sb-bad-auth-token")).toBeNull();
+    expect(window.localStorage.getItem("sb-bad-provider-token")).toBeNull();
+    expect(window.localStorage.getItem("teamclaw.session.v1")).toBeNull();
+  });
+
   it("auto-refresh fires shortly before expires_at", async () => {
     vi.useFakeTimers();
     const next = makeSession({ access_token: "fresh" });
