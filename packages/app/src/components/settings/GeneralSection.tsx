@@ -14,8 +14,10 @@ import {
   AlertTriangle,
   MessageSquareText,
   Plus,
+  Server,
   X,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
   Select,
@@ -31,6 +33,11 @@ import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from 
 import { useSuggestionsStore } from '@/stores/suggestions'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
+import {
+  getEffectiveServerConfig,
+  getSavedServerConfig,
+  saveServerConfig,
+} from '@/lib/server-config'
 
 // Theme helpers
 const THEME_STORAGE_KEY = `${buildConfig.app.shortName ?? 'teamclaw'}-theme`
@@ -139,7 +146,9 @@ export const GeneralSection = React.memo(function GeneralSection() {
         description={t('settings.general.description', 'Customize your application preferences')}
         iconColor="text-blue-500"
       />
-      
+
+      <ServerAddressCard />
+
       <SettingCard>
         <h4 className="font-medium mb-4 flex items-center gap-2">
           <Monitor className="h-4 w-4 text-muted-foreground" />
@@ -364,6 +373,75 @@ function ChatSuggestionsCard() {
           >
             <Plus className="h-4 w-4 mr-1" />
             {t('settings.general.addSuggestion', 'Add')}
+          </Button>
+        </div>
+      </div>
+    </SettingCard>
+  )
+}
+
+function ServerAddressCard() {
+  const { t } = useTranslation()
+  const [savedUrl, setSavedUrl] = React.useState('')
+  const [effectiveUrl, setEffectiveUrl] = React.useState('')
+  const [draft, setDraft] = React.useState('')
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => {
+    void (async () => {
+      const [saved, effective] = await Promise.all([
+        getSavedServerConfig(),
+        getEffectiveServerConfig(),
+      ])
+      const savedValue = saved.cloudApiUrl?.trim() ?? ''
+      setSavedUrl(savedValue)
+      setEffectiveUrl(effective.cloudApiUrl?.trim() ?? '')
+      setDraft(savedValue)
+    })()
+  }, [])
+
+  const dirty = draft.trim() !== savedUrl.trim()
+
+  const handleSave = React.useCallback(async () => {
+    setSaving(true)
+    try {
+      const next = await saveServerConfig({ cloudApiUrl: draft.trim() || undefined })
+      const nextValue = next.cloudApiUrl?.trim() ?? ''
+      setSavedUrl(nextValue)
+      setEffectiveUrl(nextValue || effectiveUrl)
+      toast.success(t('settings.general.serverSaved', 'Server address saved. Restart the app to apply.'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }, [draft, effectiveUrl, t])
+
+  return (
+    <SettingCard>
+      <h4 className="font-medium mb-4 flex items-center gap-2">
+        <Server className="h-4 w-4 text-muted-foreground" />
+        {t('settings.general.server', 'Server')}
+      </h4>
+      <div className="space-y-2">
+        <label className="text-[12px] font-medium text-muted-foreground">
+          {t('settings.general.serverAddress', 'Server address')}
+        </label>
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={effectiveUrl || 'https://cloud.ucar.cc'}
+          className="font-mono text-[12.5px]"
+        />
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'settings.general.serverAddressHint',
+            'Gateway for all business data. Restart the app to apply changes.',
+          )}
+        </p>
+        <div className="flex justify-end pt-2">
+          <Button size="sm" disabled={!dirty || saving} onClick={handleSave}>
+            {saving ? t('settings.general.saving', 'Saving…') : t('settings.general.save', 'Save')}
           </Button>
         </div>
       </div>

@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { buildConfig } from "@/lib/build-config";
 import { parseInviteTokenInput } from "@/lib/invite-deeplink";
 import { saveServerConfig, type ServerConfig } from "@/lib/server-config";
@@ -257,37 +256,8 @@ function ServerStep({ onBack }: { onBack: () => void }) {
         </p>
         <div className="mt-5 grid gap-4">
           <label className="space-y-2">
-            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.cloudApiUrl", "Cloud API URL")}</span>
+            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.serverAddress", "Server address")}</span>
             <Input value={config.cloudApiUrl ?? ""} onChange={(event) => update({ cloudApiUrl: event.target.value })} placeholder="https://cloud.ucar.cc" />
-          </label>
-          <label className="space-y-2">
-            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.mqttHost", "MQTT host")}</span>
-            <Input value={config.mqttHost ?? ""} onChange={(event) => update({ mqttHost: event.target.value })} />
-          </label>
-          <label className="space-y-2">
-            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.mqttPort", "MQTT port")}</span>
-            <Input
-              type="number"
-              value={config.mqttPort == null ? "" : String(config.mqttPort)}
-              onChange={(event) => update({ mqttPort: event.target.value ? Number(event.target.value) : undefined })}
-            />
-          </label>
-          <label className="flex items-center justify-between gap-3 rounded-[10px] border border-border bg-background px-3 py-2">
-            <div className="min-w-0">
-              <div className="text-[12.5px] font-medium text-ink-2">
-                {t("auth.onboarding.mqttUseTls", "Use TLS (mqtts://)")}
-              </div>
-              <div className="text-[11.5px] text-muted-foreground">
-                {t(
-                  "auth.onboarding.mqttUseTlsHint",
-                  "Enable for brokers on port 8883. Disable for plain TCP on 1883.",
-                )}
-              </div>
-            </div>
-            <Switch
-              checked={config.mqttUseTls ?? false}
-              onCheckedChange={(checked) => update({ mqttUseTls: checked })}
-            />
           </label>
         </div>
         {error && <p className="mt-3 text-[12px] text-destructive">{error}</p>}
