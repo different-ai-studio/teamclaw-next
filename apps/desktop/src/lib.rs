@@ -40,7 +40,7 @@
 use tauri::Manager;
 use tauri_plugin_aptabase::EventTracker;
 
-mod commands;
+pub mod commands;
 mod local_cache;
 pub mod mqtt;
 pub mod process_util;
@@ -524,7 +524,7 @@ pub fn run() {
             commands::team_unified::unified_team_remove_member,
             commands::team_unified::unified_team_update_member_role,
             commands::team_unified::unified_team_get_my_role,
-            commands::oss_sync::oss_sync_create_team,
+            commands::team_share::team_share_create,
             commands::oss_sync::oss_sync_now,
             commands::oss_sync::oss_sync_status,
             commands::oss_sync::oss_sync_list_versions,
