@@ -69,6 +69,50 @@ export function resolveRuntimeStateEntryForAgent(
   return best;
 }
 
+export type PermissionCommandTarget = {
+  deviceId: string;
+  runtimeId: string;
+};
+
+/**
+ * Resolve MQTT grant/deny command target for an in-session agent.
+ * Session-bound `agent_runtimes` row wins over stale MQTT retains so we do
+ * not publish to a dead spawn (daemon: "agent ff679fef not found").
+ */
+export function resolvePermissionCommandTarget(args: {
+  agentActorId: string;
+  sessionRuntimeRows: ReadonlyArray<{
+    agent_id: string | null;
+    runtime_id: string | null;
+  }>;
+  byRuntimeId?: Record<string, RuntimeStateEntry>;
+}): PermissionCommandTarget | null {
+  const trimmedAgent = args.agentActorId.trim();
+  if (!trimmedAgent) return null;
+  const byRuntimeId = args.byRuntimeId ?? useRuntimeStateStore.getState().byRuntimeId;
+
+  const sessionRow = args.sessionRuntimeRows.find(
+    (row) => row.agent_id?.trim() === trimmedAgent && row.runtime_id?.trim(),
+  );
+  const sessionRuntimeId = sessionRow?.runtime_id?.trim();
+  if (sessionRuntimeId) {
+    const retain = byRuntimeId[sessionRuntimeId];
+    const runtimeId =
+      retain?.daemonDeviceId.trim() === trimmedAgent
+        ? retain.info.runtimeId?.trim() || sessionRuntimeId
+        : sessionRuntimeId;
+    return { deviceId: trimmedAgent, runtimeId };
+  }
+
+  const freshest = resolveRuntimeStateEntryForAgent(trimmedAgent, byRuntimeId, null);
+  const runtimeId = freshest?.info.runtimeId?.trim();
+  if (runtimeId) {
+    return { deviceId: trimmedAgent, runtimeId };
+  }
+
+  return null;
+}
+
 /** Short id for ACP ids (`opencode/foo` → `foo`). */
 export function shortAgentModelId(modelId: string): string {
   const trimmed = modelId.trim();

@@ -158,6 +158,27 @@ describe("session-list-store", () => {
     expect(useSessionListStore.getState().rows[0].title).toBe("Renamed");
   });
 
+  it("omits locally remembered archived ids from hydrated rows", async () => {
+    localStorage.setItem(
+      "teamclaw.sessionList.archivedIds",
+      JSON.stringify(["session-archived"]),
+    );
+    mocks.listCurrentActorSessions.mockResolvedValueOnce({
+      rows: [
+        sessionRow({ id: "session-archived" }),
+        sessionRow({ id: "session-active" }),
+      ],
+    });
+
+    const { useSessionListStore } = await import("./session-list-store");
+    await useSessionListStore.getState().loadFirstPage();
+
+    expect(useSessionListStore.getState().rows.map((row) => row.id)).toEqual([
+      "session-active",
+    ]);
+    localStorage.removeItem("teamclaw.sessionList.archivedIds");
+  });
+
   it("archives a session through the backend and removes the row", async () => {
     mocks.archiveSession.mockResolvedValueOnce(undefined);
 
@@ -168,5 +189,9 @@ describe("session-list-store", () => {
 
     expect(mocks.archiveSession).toHaveBeenCalledWith("session-1", expect.any(String));
     expect(useSessionListStore.getState().rows).toEqual([]);
+    expect(
+      JSON.parse(localStorage.getItem("teamclaw.sessionList.archivedIds") ?? "[]"),
+    ).toContain("session-1");
+    localStorage.removeItem("teamclaw.sessionList.archivedIds");
   });
 });

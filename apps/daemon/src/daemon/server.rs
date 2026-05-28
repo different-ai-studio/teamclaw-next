@@ -3232,13 +3232,26 @@ impl DaemonServer {
             amux::acp_command::Command::GrantPermission(grant) => {
                 if self.permissions.try_resolve_permission(&grant.request_id) {
                     // Resolve via ACP permission response
-                    let _ = self
+                    match self
                         .agents
                         .lock()
                         .await
-                        .resolve_permission(agent_id, &grant.request_id, true)
-                        .await;
-                    info!(request_id = %grant.request_id, peer_id, "permission granted via ACP");
+                        .resolve_permission_for_topic(agent_id, &grant.request_id, true)
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(request_id = %grant.request_id, peer_id, agent_id, "permission granted via ACP");
+                        }
+                        Err(e) => {
+                            warn!(
+                                request_id = %grant.request_id,
+                                peer_id,
+                                agent_id,
+                                error = %e,
+                                "resolve_permission failed after grant; ACP may stay blocked"
+                            );
+                        }
+                    }
                     self.publish_session_event(
                         agent_id,
                         amux::SessionEvent {
@@ -3258,13 +3271,26 @@ impl DaemonServer {
             amux::acp_command::Command::DenyPermission(deny) => {
                 if self.permissions.try_resolve_permission(&deny.request_id) {
                     // Resolve via ACP permission response
-                    let _ = self
+                    match self
                         .agents
                         .lock()
                         .await
-                        .resolve_permission(agent_id, &deny.request_id, false)
-                        .await;
-                    info!(request_id = %deny.request_id, peer_id, "permission denied via ACP");
+                        .resolve_permission_for_topic(agent_id, &deny.request_id, false)
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(request_id = %deny.request_id, peer_id, agent_id, "permission denied via ACP");
+                        }
+                        Err(e) => {
+                            warn!(
+                                request_id = %deny.request_id,
+                                peer_id,
+                                agent_id,
+                                error = %e,
+                                "resolve_permission failed after deny"
+                            );
+                        }
+                    }
                     self.publish_session_event(
                         agent_id,
                         amux::SessionEvent {

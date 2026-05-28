@@ -7,10 +7,11 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 import { useSessionStore, type Message } from "@/stores/session";
 import { useStreamingStore } from "@/stores/streaming";
-import { useV2StreamingStore, type AgentStreamEntry } from "@/stores/v2-streaming-store";
+import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "./ChatMessage";
-import { SAFE_BOTTOM_SPACING, NEAR_BOTTOM_THRESHOLD } from "./layout-constants";
+import { useChatStickToBottom } from "@/hooks/use-chat-stick-to-bottom";
+import { SAFE_BOTTOM_SPACING } from "./layout-constants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ export interface MessageListProps {
 export interface MessageListHandle {
   /** Notify the message list that the input area height changed (for bottom padding) */
   handleInputHeightChange: (height: number) => void;
+  /** Pin the viewport to the latest user message row (call right after optimistic append). */
+  scrollToLatestMessage: (messageId?: string) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -62,12 +65,40 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
     // ── Store selectors ──────────────────────────────────────────────────
     const isLoading = useSessionStore((s) => s.isLoading);
     const messageQueue = useSessionStore((s) => s.messageQueue);
-    const streamingContentLength = useStreamingStore(
-      (s) => s.streamingContent.length,
-    );
-    const streamingUpdateTrigger = useStreamingStore(
-      (s) => s.streamingUpdateTrigger,
-    );
+    const v2StreamScrollTrigger = useV2StreamingStore((s) => {
+      if (!activeSessionId) return 0;
+      let total = 0;
+      const bump = (sessionId: string, lastUpdate: number, size: number) => {
+        if (sessionId !== activeSessionId) return;
+        total += lastUpdate + size;
+      };
+      for (const entry of Object.values(s.byKey)) {
+        bump(
+          entry.sessionId,
+          entry.lastUpdate,
+          entry.outputText.length +
+            entry.thinkingText.length +
+            entry.parts.reduce(
+              (sum, part) => sum + (part.text || part.content || "").length,
+              0,
+            ),
+        );
+      }
+      for (const entry of s.archived) {
+        bump(
+          entry.sessionId,
+          entry.lastUpdate,
+          entry.outputText.length +
+            entry.thinkingText.length +
+            entry.parts.reduce(
+              (sum, part) => sum + (part.text || part.content || "").length,
+              0,
+            ),
+        );
+      }
+      return total;
+    });
+
     const childStreamingScrollTrigger = useStreamingStore((s) => {
       const cs = s.childSessionStreaming;
       let len = 0;
@@ -76,48 +107,6 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
       }
       return len;
     });
-    // v2 streaming bubbles render via bottomContent and grow as acp.event
-    // deltas arrive into useV2StreamingStore. The legacy streamingContent
-    // trigger stays 0 on the v2 path, so we need a dedicated trigger that
-    // follows both active streams and recently finalized streams whose tool
-    // results can still be enriched after terminal status.
-    const v2StreamScrollTrigger = useV2StreamingStore((s) => {
-      if (!activeSessionId) return 0;
-      let total = 0;
-      const addEntry = (entry: AgentStreamEntry) => {
-        if (entry.sessionId !== activeSessionId) return;
-        total +=
-          entry.lastUpdate +
-          entry.outputText.length +
-          entry.thinkingText.length +
-          entry.parts.reduce(
-            (sum, part) => sum + (part.text || part.content || "").length,
-            0,
-          ) +
-          entry.toolCalls.reduce(
-            (sum, toolCall) =>
-              sum +
-              toolCall.id.length +
-              toolCall.name.length +
-              toolCall.status.length +
-              String(toolCall.result || "").length,
-            0,
-          ) +
-          entry.planEntries.reduce(
-            (sum, item) => sum + item.content.length + item.status.length,
-            0,
-          ) +
-          (entry.pendingPermission ? 1 : 0) +
-          (entry.errorMessage?.length ?? 0) +
-          (entry.errorDetails?.length ?? 0);
-      };
-      for (const key in s.byKey) {
-        addEntry(s.byKey[key]);
-      }
-      for (const entry of s.archived) addEntry(entry);
-      return total;
-    });
-
     // PERF: Return primitive string instead of session object.
     // Object references from .find() change on every sessions update → unnecessary re-renders.
     // Use `activeSessionId` prop (may lag store during ChatPanel fade) so paths match shown messages.
@@ -234,37 +223,55 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [inputAreaHeight, setInputAreaHeight] = React.useState(160);
     const [messageAreaWidth, setMessageAreaWidth] = React.useState(0);
-    const hasBottomContent = Boolean(bottomContent);
-
     // ── Refs ─────────────────────────────────────────────────────────────
     const scrollRef = React.useRef<HTMLDivElement>(null);
     const messageAreaRef = React.useRef<HTMLDivElement>(null);
-    const userScrolledUpRef = React.useRef(false);
     const prevStreamingRef = React.useRef(false);
 
+    const {
+      scrollToBottom,
+      scrollToBottomIfAtBottom,
+      scrollToBottomAfterCommit,
+      observeContentResize,
+      onScroll,
+      enableAutoFollow,
+    } = useChatStickToBottom(scrollRef);
+
+    /**
+     * Called from ChatPanel right after optimistic append.
+     * Scrolls to `scrollHeight - clientHeight` after React commits the new
+     * message. The `messageArea` paddingBottom = `inputAreaHeight +
+     * SAFE_BOTTOM_SPACING` ensures the new bubble lands just above the
+     * floating chat input — not behind it.
+     */
+    const scrollToLatestMessage = React.useCallback(
+      (_messageId?: string) => {
+        scrollToBottomAfterCommit();
+      },
+      [scrollToBottomAfterCommit],
+    );
+
     // ── Imperative handle ────────────────────────────────────────────────
-    const handleInputHeightChange = React.useCallback((height: number) => {
-      setInputAreaHeight((prev) => {
-        if (prev === height) return prev;
-        // When input area grows, re-scroll after the DOM updates with new padding
-        if (height > prev && scrollRef.current && !userScrolledUpRef.current) {
-          requestAnimationFrame(() => {
-            scrollRef.current?.scrollTo({
-              top: scrollRef.current!.scrollHeight,
-              behavior: "instant",
-            });
-          });
-        }
-        return height;
-      });
-    }, []);
+    const handleInputHeightChange = React.useCallback(
+      (height: number) => {
+        setInputAreaHeight((prev) => {
+          if (prev === height) return prev;
+          if (height > prev) {
+            scrollToBottom();
+          }
+          return height;
+        });
+      },
+      [scrollToBottom],
+    );
 
     React.useImperativeHandle(
       ref,
       () => ({
         handleInputHeightChange,
+        scrollToLatestMessage,
       }),
-      [handleInputHeightChange],
+      [handleInputHeightChange, scrollToLatestMessage],
     );
 
     React.useLayoutEffect(() => {
@@ -307,172 +314,43 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
       return () => cancelAnimationFrame(raf);
     }, [useVirtualMessages, messageAreaWidth, messageVirtualizer]);
 
-    // ── Scroll management ────────────────────────────────────────────────
+    // ── Scroll management (stick-to-bottom + ResizeObserver) ─────────────
 
-    // Reset user scroll tracking when a new streaming session starts
-    // AND scroll to bottom to ensure thinking blocks are visible
+    // Primary auto-scroll driver: when content grows (messages or streaming),
+    // scroll to the absolute bottom if we're currently "at bottom".
+    React.useEffect(
+      () => observeContentResize(messageAreaRef),
+      [observeContentResize, activeSessionId],
+    );
+
+    // When v1 streaming starts, scroll to bottom if already following.
     React.useEffect(() => {
-      if (isStreaming && !prevStreamingRef.current) {
-        userScrolledUpRef.current = false;
-        // Scroll to bottom when streaming starts to show thinking blocks
-        // Use instant to ensure we reach the bottom even if content is growing rapidly
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (scrollRef.current) {
-              scrollRef.current.scrollTo({
-                top: scrollRef.current.scrollHeight,
-                behavior: "instant",
-              });
-            }
-          });
-        });
+      const wasStreaming = prevStreamingRef.current;
+      if (isStreaming && !wasStreaming) {
+        scrollToBottomIfAtBottom();
       }
       prevStreamingRef.current = isStreaming;
-    }, [isStreaming]);
+    }, [isStreaming, scrollToBottomIfAtBottom]);
 
-    // CRITICAL: Reset scroll lock when user sends a new message
-    // This ensures auto-scroll works even if user was viewing middle of chat
-    const lastMessageIdRef = React.useRef<string | null>(null);
+    // When v2 / child streaming content updates, scroll if following.
+    // ResizeObserver is the primary driver in real browsers; this is the
+    // fallback for JSDOM (tests) where ResizeObserver does not fire.
     React.useEffect(() => {
-      const lastMessage = messages[messages.length - 1];
-      if (
-        lastMessage?.role === "user" &&
-        lastMessage.id !== lastMessageIdRef.current
-      ) {
-        // New user message detected
-        userScrolledUpRef.current = false;
-        console.log("[MessageList] User sent new message, resetting scroll lock:", lastMessage.id);
+      if (v2StreamScrollTrigger > 0 || childStreamingScrollTrigger > 0) {
+        scrollToBottomIfAtBottom();
       }
-      lastMessageIdRef.current = lastMessage?.id || null;
-    }, [messages]);
+    }, [v2StreamScrollTrigger, childStreamingScrollTrigger, scrollToBottomIfAtBottom]);
 
-    // Auto-scroll to bottom when messages change, queue changes, or input area resizes
-    // Also scroll during streaming when content grows (streamingContentLength or streamingUpdateTrigger)
-    // streamingUpdateTrigger is critical for flush scenarios where content is dumped at once
-    React.useEffect(() => {
-      if (!scrollRef.current) return;
-
-      // User manually scrolled up: respect it unless it's a brand new user message
-      if (userScrolledUpRef.current) {
-        const lastMessage = messages[messages.length - 1];
-        const isUserMessageJustSent = lastMessage?.role === "user";
-        if (!isUserMessageJustSent) return;
-      }
-
-      const container = scrollRef.current;
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-      const lastMessage = messages[messages.length - 1];
-      const isUserMessageJustSent = lastMessage?.role === "user";
-
-      // Decide if we should scroll:
-      // 1. User just sent a message → Always scroll (override user scroll lock)
-      // 2. During streaming → Always scroll (content is growing)
-      // 3. Message queue has items → Scroll (new message coming)
-      // 4. Near bottom → Scroll (already at bottom)
-      const shouldScroll =
-        isUserMessageJustSent ||
-        isStreaming ||
-        messageQueue.length > 0 ||
-        distanceFromBottom < NEAR_BOTTOM_THRESHOLD ||
-        scrollTop === 0;
-
-      if (shouldScroll) {
-        // Use requestAnimationFrame to ensure DOM has rendered before scrolling
-        // Double rAF ensures layout is complete (critical for new messages)
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            // CRITICAL: Re-check userScrolledUpRef before executing scroll
-            // User may have started scrolling up between when we queued this and now
-            if (!scrollRef.current) return;
-            
-            // If user scrolled up in the meantime, respect it (unless it's a new user message)
-            const lastMsg = messages[messages.length - 1];
-            const isNewUserMsg = lastMsg?.role === "user";
-            if (userScrolledUpRef.current && !isNewUserMsg) {
-              return;
-            }
-
-            scrollRef.current.scrollTo({
-              top: scrollRef.current.scrollHeight,
-              behavior: "instant",
-            });
-          });
-        });
-      }
-    }, [
-      messages,
-      isStreaming,
-      messageQueue.length,
-      streamingContentLength,
-      streamingUpdateTrigger,
-      hasBottomContent,
-    ]);
-
-    // Auto-scroll when streaming ends (to show token usage and final content)
-    React.useEffect(() => {
-      if (
-        !isStreaming &&
-        prevStreamingRef.current &&
-        scrollRef.current &&
-        !userScrolledUpRef.current
-      ) {
-        // Delay scroll to ensure token usage is rendered
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (scrollRef.current && !userScrolledUpRef.current) {
-              scrollRef.current.scrollTo({
-                top: scrollRef.current.scrollHeight,
-                behavior: "instant",
-              });
-            }
-          });
-        });
-      }
-    }, [isStreaming]);
-
-    // Auto-scroll when child session (subagent) streaming content grows
-    React.useEffect(() => {
-      if (
-        scrollRef.current &&
-        childStreamingScrollTrigger > 0 &&
-        !userScrolledUpRef.current
-      ) {
-        scrollRef.current.scrollTo({
-          top: scrollRef.current.scrollHeight,
-          behavior: "instant",
-        });
-      }
-    }, [childStreamingScrollTrigger]);
-
-    // Auto-scroll when v2 streaming bubble content grows. Mirrors the child
-    // streaming effect: any growth in active v2 streams for this session
-    // pulls the viewport to the bottom unless the user scrolled up.
-    React.useEffect(() => {
-      if (
-        scrollRef.current &&
-        v2StreamScrollTrigger > 0 &&
-        !userScrolledUpRef.current
-      ) {
-        scrollRef.current.scrollTo({
-          top: scrollRef.current.scrollHeight,
-          behavior: "instant",
-        });
-      }
-    }, [v2StreamScrollTrigger]);
-
-    // Reset scroll state when switching sessions (prop tracks displayed session, may lag store during fade)
     const prevSessionIdRef = React.useRef(activeSessionId);
     const needsScrollAfterLoadRef = React.useRef(false);
     React.useEffect(() => {
       if (activeSessionId !== prevSessionIdRef.current) {
         prevSessionIdRef.current = activeSessionId;
-        userScrolledUpRef.current = false;
+        enableAutoFollow();
         setShowScrollButton(false);
         needsScrollAfterLoadRef.current = true;
       }
-    }, [activeSessionId]);
+    }, [activeSessionId, enableAutoFollow]);
 
     const storeActiveSessionId = useSessionStore((s) => s.activeSessionId);
 
@@ -501,61 +379,36 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
 
       if (shouldReveal) {
         needsScrollAfterLoadRef.current = false;
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (scrollRef.current) {
-              scrollRef.current.scrollTo({
-                top: scrollRef.current.scrollHeight,
-                behavior: "instant",
-              });
-            }
-          });
-        });
+        enableAutoFollow();
+        scrollToBottom();
       }
-    }, [isLoading, messages.length]);
+    }, [isLoading, messages.length, enableAutoFollow, scrollToBottom]);
 
-    // Initial mount scroll
     const hasInitialScrolled = React.useRef(false);
     React.useEffect(() => {
       if (
         !hasInitialScrolled.current &&
-        scrollRef.current &&
         messages.length > 0 &&
         !isLoading
       ) {
         hasInitialScrolled.current = true;
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (scrollRef.current) {
-              scrollRef.current.scrollTo({
-                top: scrollRef.current.scrollHeight,
-                behavior: "instant",
-              });
-            }
-          });
-        });
+        enableAutoFollow();
+        scrollToBottom();
       }
-    }, [messages.length, isLoading]);
+    }, [messages.length, isLoading, enableAutoFollow, scrollToBottom]);
 
-    // Track scroll position for scroll-to-bottom button
     const scrollRafRef = React.useRef<number | undefined>(undefined);
     React.useEffect(() => {
       const el = scrollRef.current;
       if (!el) return;
 
       const handleScroll = () => {
-        // CRITICAL: Update userScrolledUpRef IMMEDIATELY (synchronously) to prevent auto-scroll jank
-        // during streaming. If we delay this in rAF, auto-scroll effect may run before we detect
-        // user scroll, causing jarring scroll conflicts.
-        const isNearBottom =
-          el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD;
-        userScrolledUpRef.current = !isNearBottom;
+        const atBottom = onScroll();
 
-        // UI updates (scroll button) can be debounced in rAF for performance
         if (scrollRafRef.current != null)
           cancelAnimationFrame(scrollRafRef.current);
         scrollRafRef.current = requestAnimationFrame(() => {
-          setShowScrollButton(!isNearBottom && messages.length > 0);
+          setShowScrollButton(!atBottom && messages.length > 0);
           scrollRafRef.current = undefined;
         });
       };
@@ -566,19 +419,11 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
         if (scrollRafRef.current != null)
           cancelAnimationFrame(scrollRafRef.current);
       };
-    }, [messages.length, activeSessionId]);
+    }, [messages.length, activeSessionId, onScroll]);
 
-    // ── Scroll to bottom ─────────────────────────────────────────────────
-    const scrollToBottom = () => {
-      userScrolledUpRef.current = false;
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTo({
-            top: scrollRef.current.scrollHeight,
-            behavior: "instant",
-          });
-        }
-      });
+    const handleScrollToBottom = () => {
+      enableAutoFollow();
+      scrollToBottom();
     };
 
     // ── Render ───────────────────────────────────────────────────────────
@@ -696,7 +541,9 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
                           return (
                             <div
                               key={message.id}
-                              ref={messageVirtualizer.measureElement}
+                              ref={(el) => {
+                                if (el) messageVirtualizer.measureElement(el);
+                              }}
                               data-index={virtualItem.index}
                               style={{
                                 position: "absolute",
@@ -732,22 +579,23 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
                         isLastMessage && message.isStreaming;
 
                       return (
-                        <ErrorBoundary
+                        <div
                           key={message.id}
-                          scope="Message"
-                          inline
+                          data-message-id={message.id}
                         >
-                          <ChatMessage
-                            message={message}
-                            activeSessionId={activeSessionId}
-                            basePath={activeSessionDirectory}
-                            shouldShowThinking={shouldShowThinking}
-                            showStarRating={
-                              index === lastCompletedAssistantIdx
-                            }
-                            tokenGroupInfo={tokenGroupInfo.get(message.id)}
-                          />
-                        </ErrorBoundary>
+                          <ErrorBoundary scope="Message" inline>
+                            <ChatMessage
+                              message={message}
+                              activeSessionId={activeSessionId}
+                              basePath={activeSessionDirectory}
+                              shouldShowThinking={shouldShowThinking}
+                              showStarRating={
+                                index === lastCompletedAssistantIdx
+                              }
+                              tokenGroupInfo={tokenGroupInfo.get(message.id)}
+                            />
+                          </ErrorBoundary>
+                        </div>
                       );
                     })
                   );
@@ -771,7 +619,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
               size="icon"
               variant="outline"
               className="pointer-events-auto h-8 w-8 rounded-full shadow-md"
-              onClick={scrollToBottom}
+              onClick={handleScrollToBottom}
             >
               <ChevronDown className="h-4 w-4" />
             </Button>

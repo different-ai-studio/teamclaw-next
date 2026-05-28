@@ -5,6 +5,7 @@ import {
   agentModelIdsMatch,
   backendTypeFromRuntimeEntry,
   normalizeAgentModelId,
+  resolvePermissionCommandTarget,
   resolveRuntimeIdForAgent,
   resolveRuntimeStateEntryForAgent,
   resolveSetModelId,
@@ -196,6 +197,24 @@ describe("resolveSetModelId", () => {
     expect(resolveSetModelId("agent-mac", "opencode/big-pickle", byRuntimeId)).toBe(
       "big-pickle",
     );
+  });
+});
+
+describe("resolvePermissionCommandTarget", () => {
+  it("prefers session runtime row over fresher stale retain", () => {
+    const byRuntimeId = {
+      "stale-spawn": {
+        ...entry("agent-a", "stale-spawn"),
+        lastUpdated: Date.now() + 10_000,
+      },
+      "live-spawn": entry("agent-a", "live-spawn"),
+    };
+    const target = resolvePermissionCommandTarget({
+      agentActorId: "agent-a",
+      sessionRuntimeRows: [{ agent_id: "agent-a", runtime_id: "live-spawn" }],
+      byRuntimeId,
+    });
+    expect(target).toEqual({ deviceId: "agent-a", runtimeId: "live-spawn" });
   });
 });
 

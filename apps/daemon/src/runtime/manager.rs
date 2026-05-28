@@ -817,6 +817,52 @@ impl RuntimeManager {
         handle.resolve_permission(request_id, granted).await
     }
 
+    /// Map a command-topic runtime id to a live agent key. Desktop clients can
+    /// target a stale spawn id from an old MQTT retain; when exactly one
+    /// active runtime exists, route the grant/deny there instead.
+    pub fn resolve_permission_runtime_key(&self, topic_runtime_id: &str) -> Option<String> {
+        if self.agents.contains_key(topic_runtime_id) {
+            return Some(topic_runtime_id.to_string());
+        }
+        let active: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, h)| {
+                matches!(
+                    h.status,
+                    amux::AgentStatus::Starting
+                        | amux::AgentStatus::Active
+                        | amux::AgentStatus::Idle
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if active.len() == 1 {
+            return Some(active[0].clone());
+        }
+        None
+    }
+
+    /// Like [`resolve_permission`] but retargets stale topic runtime ids.
+    pub async fn resolve_permission_for_topic(
+        &mut self,
+        topic_runtime_id: &str,
+        request_id: &str,
+        granted: bool,
+    ) -> crate::error::Result<()> {
+        let agent_key = self.resolve_permission_runtime_key(topic_runtime_id).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!("agent {} not found", topic_runtime_id))
+        })?;
+        if agent_key != topic_runtime_id {
+            tracing::warn!(
+                requested_runtime_id = topic_runtime_id,
+                resolved_runtime_id = %agent_key,
+                "permission response retargeted to active runtime"
+            );
+        }
+        self.resolve_permission(&agent_key, request_id, granted).await
+    }
+
     pub fn get_handle(&self, agent_id: &str) -> Option<&RuntimeHandle> {
         self.agents.get(agent_id)
     }
@@ -1683,6 +1729,22 @@ mod tests {
         assert_eq!(ids, vec!["rt1", "rt2"]);
         assert_eq!(mgr.runtime_ids_for_session("session_OTHER"), vec!["rt3"]);
         assert!(mgr.runtime_ids_for_session("unknown").is_empty());
+    }
+
+    #[test]
+    fn resolve_permission_runtime_key_retargets_stale_topic_to_sole_active_runtime() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        mgr.add_test_runtime("cd073767", "agent-x", "session-s");
+        mgr.get_handle_mut("cd073767").unwrap().status = amux::AgentStatus::Active;
+
+        assert_eq!(
+            mgr.resolve_permission_runtime_key("ff679fef").as_deref(),
+            Some("cd073767")
+        );
+        assert_eq!(
+            mgr.resolve_permission_runtime_key("cd073767").as_deref(),
+            Some("cd073767")
+        );
     }
 
     #[test]
