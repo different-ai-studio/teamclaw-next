@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { createCloudApiBackend, hasCloudApiBackendConfig } from "../index";
-import type { TeamClawBackend } from "../../types";
 
 describe("cloud api backend", () => {
   it("requires only cloudApiUrl for config to be considered valid", () => {
@@ -12,12 +11,11 @@ describe("cloud api backend", () => {
     expect(hasCloudApiBackendConfig({})).toBe(false);
   });
 
-  it("routes Phase 1 sessions/messages/teams/invites through Cloud API", async () => {
+  it("routes Phase 1 sessions/messages/teams through Cloud API", async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; idempotencyKey?: string }> = [];
     const backend = createCloudApiBackend(
       { backendKind: "cloud_api", cloudApiUrl: "https://fc.example.com" },
       {
-        delegate: delegateBackend(),
         client: {
           async get(path) {
             calls.push({ method: "GET", path });
@@ -85,6 +83,11 @@ describe("cloud api backend", () => {
             }
             throw new Error(`unexpected POST ${path}`);
           },
+          async patch() { throw new Error("unexpected"); },
+          async put() { throw new Error("unexpected"); },
+          async delete() { throw new Error("unexpected"); },
+          async postRaw() { throw new Error("unexpected"); },
+          async getRaw() { throw new Error("unexpected"); },
         },
       },
     );
@@ -118,35 +121,3 @@ describe("cloud api backend", () => {
     expect(calls[2].idempotencyKey).toBe("message-2");
   });
 });
-
-function delegateBackend(): TeamClawBackend {
-  return {
-    kind: "supabase",
-    auth: {
-      getSession: async () => ({ user: { id: "user-1" }, accessToken: "token" }),
-      onAuthStateChange: () => () => {},
-      sendOtp: async () => {},
-      verifyOtp: async () => null,
-      signInAnonymously: async () => null,
-      signOut: async () => {},
-      claimInvite: async () => {
-        throw new Error("should use cloud api");
-      },
-    },
-    teams: {} as TeamClawBackend["teams"],
-    sessions: {} as TeamClawBackend["sessions"],
-    messages: {} as TeamClawBackend["messages"],
-    directory: {} as TeamClawBackend["directory"],
-    runtime: {} as TeamClawBackend["runtime"],
-    attachments: {} as TeamClawBackend["attachments"],
-    ideas: {} as TeamClawBackend["ideas"],
-    actors: {} as TeamClawBackend["actors"],
-    sessionMembers: {} as TeamClawBackend["sessionMembers"],
-    shortcuts: {} as TeamClawBackend["shortcuts"],
-    notifications: {} as TeamClawBackend["notifications"],
-    teamWorkspaceConfig: {} as TeamClawBackend["teamWorkspaceConfig"],
-    workspaces: {} as TeamClawBackend["workspaces"],
-    sync: {} as TeamClawBackend["sync"],
-    telemetry: {} as TeamClawBackend["telemetry"],
-  };
-}

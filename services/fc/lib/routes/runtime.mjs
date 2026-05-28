@@ -47,6 +47,45 @@ export function registerRuntime(router) {
     return { statusCode: 204, body: null };
   });
 
+  router.get("/v1/runtime/hints", async (ctx) => {
+    const teamId = ctx.query.get("teamId");
+    if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required");
+    const agentIds = ctx.query.getAll("agentId");
+    const items = await ctx.repository.listLatestAgentRuntimeHints(teamId, agentIds);
+    return { body: { items } };
+  });
+
+  router.get("/v1/runtime/agent-defaults", async (ctx) => {
+    const agentIds = ctx.query.getAll("agentId");
+    const items = await ctx.repository.listAgentDefaults(agentIds);
+    return { body: { items } };
+  });
+
+  router.patch("/v1/runtime/:runtimeId/model", async (ctx) => {
+    const body = ctx.json ?? {};
+    if (!body.model) throw new ApiError(400, "validation_failed", "model is required");
+    await ctx.repository.updateRuntimeModel(ctx.params.runtimeId, body.model);
+    return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/runtime", async (ctx) => {
+    const teamId = ctx.query.get("teamId");
+    if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required");
+    const items = await ctx.repository.listDaemonRuntimes(teamId);
+    return { body: { items } };
+  });
+
+  router.get("/v1/sessions/:sessionId/runtime-models", async (ctx) => {
+    const items = await ctx.repository.listSessionRuntimeModels(ctx.params.sessionId);
+    return { body: { items } };
+  });
+
+  router.get("/v1/sessions/:sessionId/runtime-targets", async (ctx) => {
+    const agentIds = ctx.query.getAll("agentId");
+    const items = await ctx.repository.listRuntimeTargetsForSession(ctx.params.sessionId, agentIds);
+    return { body: { items } };
+  });
+
   router.put("/v1/agents/:agentActorId/device", async (ctx) => {
     const body = ctx.json ?? {};
     if (!body.deviceId) throw new ApiError(400, "validation_failed", "deviceId is required");

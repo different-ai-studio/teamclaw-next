@@ -14,6 +14,7 @@ import { dispatchPush } from './lib/push-dispatch.mjs';
 import { createMqttPublisher } from './lib/mqtt-client.mjs';
 import { handleBusinessApiRequest } from './lib/business-api.mjs';
 import {
+  createSupabaseAuthRepository,
   createSupabaseBusinessRepository,
   publishableKeyFromEnv,
 } from './lib/supabase-repo.mjs';
@@ -927,18 +928,22 @@ export async function handler(event, context) {
   const rawBody = event.body;
   const headers = event.headers;
 
-  // Rate limiting
-  const ip =
-    headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    headers?.["x-real-ip"] ||
-    "unknown";
-  if (isRateLimited(ip)) {
-    return json(429, { error: "Too many requests" });
-  }
-
-  // Handle CORS preflight (FC gateway adds CORS headers automatically)
+  // Handle CORS preflight FIRST so rate limits never break CORS.
   if (httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: {}, body: "" };
+  }
+
+  // Rate limiting only applies to the legacy /sync* sync API; the /v1/ business
+  // API is called by the regular frontend and would be choked by the 10/min
+  // limit (which exists to throttle abusive sync clients, not normal use).
+  if (!(path?.startsWith("/v1/") || path === "/v1")) {
+    const ip =
+      headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
+      headers?.["x-real-ip"] ||
+      "unknown";
+    if (isRateLimited(ip)) {
+      return json(429, { error: "Too many requests" });
+    }
   }
 
   if (path?.startsWith("/v1/") || path === "/v1") {
@@ -948,6 +953,12 @@ export async function handler(event, context) {
           supabaseUrl: SUPABASE_URL_FN(),
           publishableKey: SUPABASE_PUBLISHABLE_KEY(),
           accessToken,
+        });
+      },
+      createAuthRepository() {
+        return createSupabaseAuthRepository({
+          supabaseUrl: SUPABASE_URL_FN(),
+          publishableKey: SUPABASE_PUBLISHABLE_KEY(),
         });
       },
     });

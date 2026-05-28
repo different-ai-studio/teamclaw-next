@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createActorsModule } from "../actors";
 import type { CloudApiClient } from "../http";
-import type { ActorsBackend } from "../../types";
 
 function mockClient(responses: Record<string, unknown>): CloudApiClient {
   return {
@@ -10,7 +9,7 @@ function mockClient(responses: Record<string, unknown>): CloudApiClient {
       if (key) return responses[key] as never;
       throw new Error(`unexpected GET ${path}`);
     },
-    async post(path, body) {
+    async post(path) {
       const key = `POST ${path}`;
       if (key in responses) return responses[key] as never;
       throw new Error(`unexpected POST ${path}`);
@@ -20,32 +19,19 @@ function mockClient(responses: Record<string, unknown>): CloudApiClient {
       if (key) return responses[key] as never;
       return undefined as never;
     },
-    async delete(path) { return undefined as never; },
+    async put() { throw new Error("unexpected put"); },
+    async delete() { return undefined as never; },
     async postRaw() { throw new Error("not impl"); },
     async getRaw() { throw new Error("not impl"); },
   } as unknown as CloudApiClient;
 }
-
-const fakeDelegate = (): ActorsBackend => ({
-  listActorDirectory: async () => [],
-  listActorDirectoryByIds: async () => [],
-  getActorDirectoryEntry: async () => null,
-  getDaemonAgentDirectoryEntry: async () => null,
-  listConnectedAgents: async () => [],
-  updateOwnedAgentProfile: async () => {},
-  updateAgentDefaults: async () => {},
-  listAgentAccess: async () => [],
-  listTeamMembersForAccess: async () => [],
-  upsertAgentAccess: async () => {},
-  removeAgentAccess: async () => {},
-});
 
 const cloudActor = { id: "actor-1", teamId: "team-1", kind: "member", displayName: "Alice", avatarUrl: null };
 
 describe("actors module", () => {
   it("listActorDirectory calls /v1/teams/:teamId/actors and maps fields", async () => {
     const client = mockClient({ "GET /v1/teams/team-1/actors?limit=500": { items: [cloudActor], nextCursor: null } });
-    const mod = createActorsModule(client, fakeDelegate());
+    const mod = createActorsModule(client);
     const out = await mod.listActorDirectory("team-1");
     expect(out[0].id).toBe("actor-1");
     expect(out[0].team_id).toBe("team-1");
@@ -56,16 +42,23 @@ describe("actors module", () => {
   it("listConnectedAgents calls /v1/teams/:teamId/agents/connected", async () => {
     const cloudAgent = { ...cloudActor, kind: "agent", agentId: "a-1", deviceId: "dev-1" };
     const client = mockClient({ "GET /v1/teams/team-1/agents/connected": { items: [cloudAgent] } });
-    const mod = createActorsModule(client, fakeDelegate());
+    const mod = createActorsModule(client);
     const out = await mod.listConnectedAgents("team-1");
     expect(out[0].id).toBe("actor-1");
     expect(out[0].agent_id).toBe("a-1");
   });
 
-  it("listActorDirectoryByIds delegates to supabase for empty list", async () => {
+  it("listActorDirectoryByIds returns [] for empty input", async () => {
     const client = mockClient({});
-    const mod = createActorsModule(client, fakeDelegate());
+    const mod = createActorsModule(client);
     const out = await mod.listActorDirectoryByIds([]);
     expect(out).toEqual([]);
+  });
+
+  it("listActorDirectoryByIds POSTs to /v1/actors/by-ids", async () => {
+    const client = mockClient({ "POST /v1/actors/by-ids": { items: [cloudActor] } });
+    const mod = createActorsModule(client);
+    const out = await mod.listActorDirectoryByIds(["actor-1"]);
+    expect(out[0].id).toBe("actor-1");
   });
 });

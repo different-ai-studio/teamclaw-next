@@ -37,9 +37,8 @@ function mapInvite(row: CloudInvite): TeamInviteResult {
 
 type Page<T> = { items: T[]; nextCursor: string | null };
 
-export function createTeamsModule(client: CloudApiClient, delegate: TeamsBackend): TeamsBackend {
+export function createTeamsModule(client: CloudApiClient): TeamsBackend {
   return {
-    ...delegate,
     async listCurrentUserTeams(args = {}) {
       const limit = args.limit ?? 50;
       const page = await client.get<Page<CloudTeam>>(`/v1/teams?limit=${encodeURIComponent(String(limit))}`);
@@ -67,10 +66,10 @@ export function createTeamsModule(client: CloudApiClient, delegate: TeamsBackend
       };
       return mapInvite(await client.post<CloudInvite>(`/v1/teams/${encodeURIComponent(input.teamId)}/invites`, body));
     },
-    async removeTeamActor(actorId: string) {
-      // The FC endpoint uses /v1/teams/:teamId/members/:actorId but we don't have teamId here.
-      // Fall back to delegate which has the RPC context.
-      return delegate.removeTeamActor(actorId);
+    async removeTeamActor(teamId: string, actorId: string) {
+      await client.delete<void>(
+        `/v1/teams/${encodeURIComponent(teamId)}/actors/${encodeURIComponent(actorId)}`,
+      );
     },
   };
 }

@@ -28,6 +28,8 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useMqttConnected } from '@/hooks/useMqttConnected'
+import { useMqttReconnectStore } from '@/stores/mqtt-reconnect'
 import { SettingCard, SectionHeader, ToggleSwitch } from './shared'
 import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
 import { useSuggestionsStore } from '@/stores/suggestions'
@@ -420,6 +422,9 @@ function ServerAddressCard() {
     }
   }, [draft, t])
 
+  const mqttConnected = useMqttConnected()
+  const bumpMqttReconnect = useMqttReconnectStore((s) => s.bump)
+
   const mqttBroker = React.useMemo(() => {
     if (!effective.mqttHost) return null
     const scheme = effective.mqttUseTls ? 'mqtts' : 'mqtt'
@@ -481,6 +486,40 @@ function ServerAddressCard() {
                 <dd className="font-mono text-foreground">••••••••</dd>
               </>
             ) : null}
+            <dt className="text-muted-foreground">{t('settings.general.mqttStatus', 'Status')}</dt>
+            <dd className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'inline-block h-2 w-2 rounded-full',
+                  mqttConnected === null
+                    ? 'bg-faint'
+                    : mqttConnected
+                      ? 'bg-emerald-500'
+                      : 'bg-red-500',
+                )}
+                aria-hidden
+              />
+              <span className="text-foreground">
+                {mqttConnected === null
+                  ? t('settings.general.mqttStatusUnknown', 'Unknown')
+                  : mqttConnected
+                    ? t('settings.general.mqttStatusConnected', 'Connected')
+                    : t('settings.general.mqttStatusDisconnected', 'Disconnected')}
+              </span>
+              {mqttConnected !== true ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto h-6 px-2 text-[11px]"
+                  onClick={() => {
+                    bumpMqttReconnect()
+                    toast.success(t('settings.general.mqttReconnecting', 'Reconnecting…'))
+                  }}
+                >
+                  {t('settings.general.mqttReconnect', 'Reconnect')}
+                </Button>
+              ) : null}
+            </dd>
           </dl>
         ) : (
           <p className="text-[12px] text-muted-foreground italic">

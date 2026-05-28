@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { buildConfig } from "@/lib/build-config";
-import { getBackendKind, hasBackendConfig } from "@/lib/backend";
+import { hasBackendConfig } from "@/lib/backend";
 import { useAppVersion } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,10 +16,9 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const { sendOtp, verifyOtp, resetOtp, signInAnonymously, otpEmail, loading, errorMessage } = useAuthStore();
+  const { sendOtp, verifyOtp, resetOtp, signInAnonymously, otpEmail, loading, errorMessage } =
+    useAuthStore();
   const appVersion = useAppVersion();
-  const isPocketBase = getBackendKind() === "pocketbase";
-
   const onSendEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     await sendOtp(email);
@@ -34,6 +33,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
     setCode("");
     resetOtp();
   };
+
   const onQuickTrial = async () => {
     await signInAnonymously();
   };
@@ -78,31 +78,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
         </button>
       )}
 
-      {isPocketBase ? (
-        <div className={cardClassName}>
-          <div className="space-y-1.5">
-            <h2 className="text-[17px] font-semibold text-foreground">
-              {t("auth.pocketbasePreview", "PocketBase preview")}
-            </h2>
-            <p className="text-[13px] text-muted-foreground">
-              {t("auth.pocketbasePreviewDesc", "Use the seeded local account to enter this preview.")}
-            </p>
-          </div>
-          {(serverConfigRequired || errorMessage) && (
-            <p className="text-[12px] text-destructive">
-              {serverConfigRequired ? serverConfigMessage : errorMessage}
-            </p>
-          )}
-          <Button
-            type="button"
-            onClick={() => void onQuickTrial()}
-            disabled={serverConfigRequired || loading}
-            className="h-10 w-full bg-coral text-paper hover:bg-coral/90 disabled:bg-coral/40 disabled:text-paper"
-          >
-            {loading ? t("auth.onboarding.startingTrial", "Preparing…") : t("auth.onboarding.quickTrial", "Quick trial")}
-          </Button>
-        </div>
-      ) : otpEmail ? (
+      {otpEmail ? (
         <form
           onSubmit={onVerify}
           className={cardClassName}
@@ -190,6 +166,16 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
           >
             {loading ? t("auth.sending", "Sending…") : t("auth.sendCode", "Send code")}
           </Button>
+          <button
+            type="button"
+            onClick={() => void onQuickTrial()}
+            disabled={serverConfigRequired || loading}
+            className="block w-full text-center text-[12px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {loading
+              ? t("auth.onboarding.startingTrial", "Preparing…")
+              : t("auth.onboarding.quickTrial", "Try anonymously")}
+          </button>
         </form>
       )}
 

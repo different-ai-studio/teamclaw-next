@@ -160,17 +160,34 @@ test("DELETE /v1/messages/:messageId removes message", async () => {
   });
 });
 
-test("claim invite maps body token to repository", async () => {
-  const repo = fakeRepo();
+test("claim invite is anonymous and routes to auth repository", async () => {
+  // No Authorization header — daemon's bootstrap `amuxd init` has no token
+  // yet. The route must dispatch to createAuthRepository(), not require auth.
+  const authCalls = [];
   const response = await handleBusinessApiRequest({
     httpMethod: "POST",
     path: "/v1/invites/claim",
-    headers: { Authorization: "Bearer token" },
+    headers: {},
     body: JSON.stringify({ token: "invite-token" }),
-  }, { createRepository: () => repo });
+  }, {
+    createRepository: () => fakeRepo(),
+    createAuthRepository: () => ({
+      async claimInvite(token) {
+        authCalls.push({ method: "claimInvite", token });
+        return {
+          actorId: "agent-1",
+          teamId: "team-1",
+          actorType: "agent",
+          displayName: "Agent",
+          refreshToken: "rt-1",
+        };
+      },
+    }),
+  });
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(repo.calls[0], { method: "claimInvite", token: "invite-token" });
+  assert.deepEqual(authCalls[0], { method: "claimInvite", token: "invite-token" });
+  assert.equal(JSON.parse(response.body).actorId, "agent-1");
 });
 
 test("missing bearer returns OpenAPI error envelope", async () => {
@@ -368,7 +385,6 @@ test("POST /v1/workspaces upserts workspace", async () => {
       name: "Beta",
       slug: null,
       archived: false,
-      metadata: null,
     },
   });
 });
@@ -741,14 +757,13 @@ test("POST /v1/teams/:teamId/invites creates invite", async () => {
     httpMethod: "POST",
     path: "/v1/teams/team-1/invites",
     headers: { Authorization: "Bearer token" },
-    body: JSON.stringify({ actorType: "user", displayName: "New User", role: "member" }),
+    body: JSON.stringify({ kind: "member", displayName: "New User", teamRole: "member" }),
   }, { createRepository: () => repo });
 
   assert.equal(response.statusCode, 201);
   const body = JSON.parse(response.body);
   assert.equal(body.token, "invite-token");
-  assert.equal(body.inviteId, "invite-1");
-  assert.deepEqual(repo.calls[0], { method: "createTeamInvite", teamId: "team-1", input: { actorType: "user", displayName: "New User", role: "member", expiresAt: null } });
+  assert.deepEqual(repo.calls[0], { method: "createTeamInvite", teamId: "team-1", input: { kind: "member", displayName: "New User", teamRole: "member", agentKind: null, ttlSeconds: null, targetActorId: null } });
 });
 
 test("POST /v1/teams/:teamId/invites returns 400 without required fields", async () => {
@@ -816,7 +831,7 @@ test("POST /v1/shortcuts calls repo.createShortcut", async () => {
   const body = JSON.parse(response.body);
   assert.ok(body.id);
   assert.equal(body.teamId, "team-1");
-  assert.deepEqual(repo.calls[0], { method: "createShortcut", input: { teamId: "team-1", kind: "link", label: "New Shortcut", position: 100 } });
+  assert.deepEqual(repo.calls[0], { method: "createShortcut", input: { teamId: "team-1", kind: "link", label: "New Shortcut", position: 100, scope: "team", nodeType: "link" } });
 });
 
 test("PATCH /v1/shortcuts/:shortcutId calls repo.updateShortcut", async () => {

@@ -66,7 +66,7 @@ mod tests {
 pub struct StoredSession {
     /// Daemon's 8-char runtime/spawn id. Pre-rename TOML files used
     /// `session_id` for this slot, but post-rename TOML carries both
-    /// `runtime_id` (the 8-char) and `session_id` (the Supabase UUID),
+    /// `runtime_id` (the 8-char) and `session_id` (the cloud session UUID),
     /// so a `session_id` alias here would collide with the real
     /// `session_id` field below. Old single-field TOML files now need
     /// a one-time migration if they exist; in practice the dual-field
@@ -74,7 +74,7 @@ pub struct StoredSession {
     pub runtime_id: String,
     #[serde(default)]
     pub acp_session_id: String,
-    /// Supabase `sessions.id` UUID this runtime is bound to. Old TOML used
+    /// Cloud `sessions.id` UUID this runtime is bound to. Old TOML used
     /// `collab_session_id`; alias preserves back-compat. Empty when the
     /// runtime is session-less (legacy bare-agent spawn).
     #[serde(default, alias = "collab_session_id")]

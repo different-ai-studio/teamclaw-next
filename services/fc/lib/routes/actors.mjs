@@ -111,4 +111,26 @@ export function registerActors(router) {
     const result = await ctx.repository.listAgentAdminMembers(agentActorId);
     return { body: { items: result.items } };
   });
+
+  router.post("/v1/actors/by-ids", async (ctx) => {
+    const body = ctx.json ?? {};
+    if (!Array.isArray(body.actorIds)) {
+      throw new ApiError(400, "validation_failed", "actorIds must be an array");
+    }
+    const teamId = typeof body.teamId === "string" && body.teamId.length > 0 ? body.teamId : null;
+    const items = await ctx.repository.listActorDirectoryByIds(body.actorIds, teamId);
+    return { body: { items } };
+  });
+
+  router.get("/v1/actors/:actorId/sessions", async (ctx) => {
+    const actorId = decodeURIComponent(ctx.params.actorId);
+    const items = await ctx.repository.listSessionIdsForActor(actorId);
+    return { body: { items } };
+  });
+
+  router.delete("/v1/actors/access/:accessId", async (ctx) => {
+    const accessId = decodeURIComponent(ctx.params.accessId);
+    await ctx.repository.removeAgentAccessById(accessId);
+    return { statusCode: 204, body: null };
+  });
 }

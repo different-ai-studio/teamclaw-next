@@ -103,7 +103,7 @@ impl<'a> Publisher<'a> {
 
     /// Publishes a Notify hint to the daemon's own device/{id}/notify topic.
     /// Ephemeral (no retain) — receivers react by re-fetching authoritative
-    /// state from Supabase or daemon RPC.
+    /// state from the cloud backend or daemon RPC.
     pub async fn publish_notify(
         &self,
         event_type: &str,

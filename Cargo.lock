@@ -339,7 +339,6 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "humantime-serde",
- "jsonwebtoken",
  "libc",
  "mime",
  "parking_lot",

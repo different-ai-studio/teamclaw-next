@@ -69,11 +69,10 @@ function isSortOrderUpdate(input: IdeaSortOrderUpdateInput | IdeaFullUpdateInput
   return Object.prototype.hasOwnProperty.call(input, "sortOrder");
 }
 
-export function createIdeasModule(client: CloudApiClient, delegate: IdeasBackend): IdeasBackend {
+export function createIdeasModule(client: CloudApiClient): IdeasBackend {
   return {
-    ...delegate,
     async listIdeas(teamId) {
-      const out = await client.get<{ items: CloudIdea[] }>(`/v1/teams/${encodeURIComponent(teamId)}/ideas`);
+      const out = await client.get<{ items: CloudIdea[] }>(`/v1/ideas?teamId=${encodeURIComponent(teamId)}`);
       return out.items.map(mapIdea);
     },
     async getIdeaDetail(ideaId) {

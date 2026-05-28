@@ -1,16 +1,10 @@
 //! Backend abstraction over the daemon's persistent store.
 //!
-//! Today the only production implementation is `SupabaseBackend` in
-//! `crate::supabase`; `MockBackend` (in `mock`) is the test-side impl.
-//! Callers bind to `Arc<dyn Backend>` so the daemon's runtime/channel/
-//! session machinery can be exercised against an in-memory backend
+//! The only production implementation is `CloudApiBackend` in
+//! `crate::backend::cloud_api`; `MockBackend` (in `mock`) is the test-side
+//! impl. Callers bind to `Arc<dyn Backend>` so the daemon's runtime/
+//! channel/session machinery can be exercised against an in-memory backend
 //! without going through HTTP.
-//!
-//! Methods intentionally kept off the trait are the Supabase-only
-//! credential primitives — `login_with_password`, the generic
-//! `rpc<Req, Resp>` / `rpc_anon<Req, Resp>`. They stay as inherent
-//! methods on `SupabaseBackend` because no other backend would express
-//! them the same way.
 use async_trait::async_trait;
 use std::time::Instant;
 

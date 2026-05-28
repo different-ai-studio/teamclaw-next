@@ -27,7 +27,6 @@ import { MentionPopover } from "./MentionPopover";
 import { AgentSelectorDock } from "./AgentSelectorDock";
 import { CommandPopover } from "./CommandPopover";
 import type { Command as ChatCommand } from "./CommandPopover";
-import { useTeamModeStore } from "@/stores/team-mode";
 import {
   ModelSelector,
   ModelSelectorTrigger,
@@ -216,9 +215,6 @@ export function ChatInputArea({
   const [commandSearchQuery, setCommandSearchQuery] = React.useState("");
 
   // v2: Plan mode removed.
-
-  // Team mode
-  const teamMode = useTeamModeStore(s => s.teamMode);
 
   // Model selector
   const [modelSelectorOpen, setModelSelectorOpen] = React.useState(false);
@@ -535,18 +531,19 @@ export function ChatInputArea({
             <PromptInputTools>
               <FileInputButton onFilesSelected={onFilesChange} />
 
-              {teamMode ? (
-                /* v2 team-mode: replace legacy team ModelSelector with AgentSelectorDock */
-                <AgentSelectorDock
-                  activeSessionId={activeSessionId}
-                  engagedAgents={engagedAgents}
-                  onRemoveAgent={onRemoveAgent}
-                />
-              ) : (
-                <ModelSelector
-                  open={modelSelectorOpen}
-                  onOpenChange={setModelSelectorOpen}
-                >
+              {/* Engaged agent pills — render in all modes so @-attached agents
+                  surface as chips next to the model selector. The dock returns
+                  null when there are no engaged agents. */}
+              <AgentSelectorDock
+                activeSessionId={activeSessionId}
+                engagedAgents={engagedAgents}
+                onRemoveAgent={onRemoveAgent}
+              />
+
+              <ModelSelector
+                open={modelSelectorOpen}
+                onOpenChange={setModelSelectorOpen}
+              >
                   <ModelSelectorTrigger asChild>
                     <PromptInputButton>
                       {selectedModelOption ? (
@@ -603,7 +600,6 @@ export function ChatInputArea({
                     </ModelSelectorList>
                   </ModelSelectorContent>
                 </ModelSelector>
-              )}
             </PromptInputTools>
 
             <div className="flex items-center gap-2">

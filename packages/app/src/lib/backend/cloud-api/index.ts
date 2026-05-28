@@ -1,8 +1,7 @@
 import type { ServerConfig } from "@/lib/server-config";
-import { createSupabaseBackend } from "../supabase";
 import type { TeamClawBackend } from "../types";
 import { createCloudApiClient, type CloudApiClient } from "./http";
-import { createAuthModule } from "./auth";
+import { createAuthClient, createAuthModule } from "./auth";
 import { createTeamsModule } from "./teams";
 import { createSessionsModule } from "./sessions";
 import { createMessagesModule } from "./messages";
@@ -17,6 +16,7 @@ import { createNotificationsModule } from "./notifications";
 import { createRuntimeModule } from "./runtime";
 import { createAttachmentsModule } from "./attachments";
 import { createTelemetryModule } from "./telemetry";
+import { createSyncModule } from "./sync";
 
 export function hasCloudApiBackendConfig(config: ServerConfig): boolean {
   return Boolean(config.cloudApiUrl);
@@ -24,41 +24,34 @@ export function hasCloudApiBackendConfig(config: ServerConfig): boolean {
 
 export function createCloudApiBackend(
   config: ServerConfig,
-  options: { delegate?: TeamClawBackend; client?: CloudApiClient } = {},
+  options: { client?: CloudApiClient } = {},
 ): TeamClawBackend {
-  // delegate is kept for domains not yet covered by /v1 endpoints:
-  // - sync (no FC route)
-  // - directory (no FC route)
-  // - teamWorkspaceConfig (schema mismatch)
-  // - actors.listActorDirectoryByIds (no bulk endpoint)
-  // - actors.removeAgentAccess (accessId vs actorId mismatch)
-  // - teams.removeTeamActor (no teamId in interface)
-  // These will be removed in Phase D once FC routes are expanded.
-  const delegate = options.delegate ?? createSupabaseBackend();
-  const client = options.client ?? createCloudApiClient({
-    baseUrl: requiredCloudApiUrl(config),
-    auth: delegate.auth,
-  });
+  const baseUrl = requiredCloudApiUrl(config);
+  const authClient = createAuthClient({ baseUrl });
+  // Build a temporary auth backend so the CloudApiClient can pull the bearer
+  // token from the SessionStore.
+  const tempAuth = createAuthModule(null as unknown as CloudApiClient, authClient);
+  const client = options.client ?? createCloudApiClient({ baseUrl, auth: tempAuth });
+  const auth = createAuthModule(client, authClient);
 
   return {
     kind: "cloud_api",
-    auth: createAuthModule(client, delegate.auth),
-    teams: createTeamsModule(client, delegate.teams),
-    sessions: createSessionsModule(client, delegate.sessions),
-    messages: createMessagesModule(client, delegate.messages),
-    workspaces: createWorkspacesModule(client, delegate.workspaces),
-    teamWorkspaceConfig: createTeamWorkspaceConfigModule(client, delegate.teamWorkspaceConfig),
-    actors: createActorsModule(client, delegate.actors),
-    directory: createDirectoryModule(client, delegate.directory),
-    sessionMembers: createSessionMembersModule(client, delegate.sessionMembers),
-    ideas: createIdeasModule(client, delegate.ideas),
-    shortcuts: createShortcutsModule(client, delegate.shortcuts),
-    notifications: createNotificationsModule(client, delegate.notifications),
-    runtime: createRuntimeModule(client, delegate.runtime),
-    attachments: createAttachmentsModule(client, delegate.attachments),
-    telemetry: createTelemetryModule(client, delegate.telemetry),
-    // sync has no /v1 endpoint yet; keep Supabase passthrough
-    sync: delegate.sync,
+    auth,
+    teams: createTeamsModule(client),
+    sessions: createSessionsModule(client),
+    messages: createMessagesModule(client),
+    workspaces: createWorkspacesModule(client),
+    teamWorkspaceConfig: createTeamWorkspaceConfigModule(client),
+    actors: createActorsModule(client),
+    directory: createDirectoryModule(client),
+    sessionMembers: createSessionMembersModule(client),
+    ideas: createIdeasModule(client),
+    shortcuts: createShortcutsModule(client),
+    notifications: createNotificationsModule(client),
+    runtime: createRuntimeModule(client),
+    attachments: createAttachmentsModule(client),
+    telemetry: createTelemetryModule(client),
+    sync: createSyncModule(client),
   };
 }
 

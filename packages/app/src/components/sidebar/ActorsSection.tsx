@@ -62,10 +62,10 @@ export function ActorsSection() {
   }
 
   const confirmRemove = async () => {
-    if (!removeFor) return
+    if (!removeFor || !teamId) return
     setRemoving(true)
     try {
-      await getBackend().teams.removeTeamActor(removeFor.id)
+      await getBackend().teams.removeTeamActor(teamId, removeFor.id)
       toast.success(t('actors.removed', 'Removed from team'))
       setRemoveFor(null)
       refetch()

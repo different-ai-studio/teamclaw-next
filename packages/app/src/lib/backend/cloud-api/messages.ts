@@ -35,9 +35,8 @@ function mapMessage(row: CloudMessage): MessageHistoryRow {
   };
 }
 
-export function createMessagesModule(client: CloudApiClient, delegate: MessagesBackend): MessagesBackend {
+export function createMessagesModule(client: CloudApiClient): MessagesBackend {
   return {
-    ...delegate,
     async listMessages(sessionId: string): Promise<MessageHistoryRow[]> {
       const page = await client.get<Page<CloudMessage>>(
         `/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -65,6 +64,14 @@ export function createMessagesModule(client: CloudApiClient, delegate: MessagesB
     },
     async updateMessageContent(messageId: string, content: string): Promise<void> {
       await client.patch<CloudMessage>(`/v1/messages/${encodeURIComponent(messageId)}`, { content });
+    },
+    async listMessagesForSessionSince(sessionId, updatedAfter) {
+      const params = new URLSearchParams({ sessionId });
+      if (updatedAfter) params.set("since", updatedAfter);
+      const out = await client.get<{ items: import("../types").MessageSyncRow[] }>(
+        `/v1/sync/messages?${params.toString()}`,
+      );
+      return out.items ?? [];
     },
   };
 }

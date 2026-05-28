@@ -2,6 +2,27 @@ import { ApiError } from "../http-utils.mjs";
 import { requireString } from "../router.mjs";
 
 export function registerShortcuts(router) {
+  // Scope-based list: `?scope=personal` or `?scope=team&teamId=...`
+  // RLS gates personal shortcuts to the caller's member rows.
+  router.get("/v1/shortcuts", async (ctx) => {
+    const scope = ctx.query.get("scope");
+    if (scope !== "personal" && scope !== "team") {
+      throw new ApiError(400, "validation_failed", "scope must be 'personal' or 'team'");
+    }
+    const args = { scope };
+    if (scope === "team") {
+      const teamId = ctx.query.get("teamId");
+      if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required for team scope");
+      args.teamId = teamId;
+    }
+    const parentIdRaw = ctx.query.get("parentId");
+    if (parentIdRaw !== null && parentIdRaw !== undefined) {
+      args.parentId = parentIdRaw === "null" ? null : parentIdRaw;
+    }
+    const items = await ctx.repository.listShortcutsByScope(args);
+    return { body: { items } };
+  });
+
   router.get("/v1/teams/:teamId/shortcuts", async (ctx) => {
     const { teamId } = ctx.params;
     const args = {};
@@ -15,10 +36,12 @@ export function registerShortcuts(router) {
 
   router.post("/v1/shortcuts", async (ctx) => {
     const body = ctx.json ?? {};
-    requireString(body.teamId, "teamId");
-    requireString(body.kind, "kind");
+    const scope = body.scope ?? (body.teamId ? "team" : "personal");
+    const nodeType = body.nodeType ?? body.kind;
+    requireString(scope, "scope");
     requireString(body.label, "label");
-    const shortcut = await ctx.repository.createShortcut(body);
+    requireString(nodeType, "nodeType");
+    const shortcut = await ctx.repository.createShortcut({ ...body, scope, nodeType });
     return { statusCode: 201, body: shortcut };
   });
 
@@ -58,6 +81,12 @@ export function registerShortcuts(router) {
 
   router.get("/v1/teams/:teamId/permissions", async (ctx) => {
     const items = await ctx.repository.listTeamPermissions(ctx.params.teamId);
+    return { body: { items } };
+  });
+
+  router.get("/v1/teams/:teamId/shortcut-role-bindings", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const items = await ctx.repository.listShortcutRoleBindings(teamId);
     return { body: { items } };
   });
 }

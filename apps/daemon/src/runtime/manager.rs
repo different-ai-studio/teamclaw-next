@@ -1326,32 +1326,30 @@ mod tests {
     // The spawn path calls into this helper to carry `last_processed_message_id`
     // forward from a prior agent_runtimes row. We can't easily exercise the
     // full spawn (it boots a real ACP subprocess), but we can verify the helper
-    // populates the handle when (a) Supabase has a prior row and (b) does not
+    // populates the handle when (a) the Cloud API has a prior row and (b) does not
     // when the row is missing or its cursor is empty.
 
-    use crate::supabase::config::SupabaseConfig;
-    use crate::supabase::SupabaseBackend;
-    use wiremock::matchers::{method, path_regex};
+    use crate::backend::cloud_api::CloudApiBackend;
+    use crate::provider_config::CloudApiConfig;
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn test_supabase_with_url(url: String) -> Arc<dyn Backend> {
-        Arc::new(
-            SupabaseBackend::new_without_persistence(SupabaseConfig {
-                url,
-                anon_key: "anon".into(),
-                refresh_token: "rt".into(),
-                team_id: "t".into(),
-                actor_id: "agent-actor".into(),
-            })
-            .unwrap(),
-        )
+    fn test_cloud_api_with_url(url: String) -> Arc<dyn Backend> {
+        Arc::new(CloudApiBackend::new(CloudApiConfig {
+            url,
+            refresh_token: "rt".into(),
+            team_id: "t".into(),
+            actor_id: "agent-actor".into(),
+        }))
     }
 
     async fn auth_mock(srv: &MockServer) {
         Mock::given(method("POST"))
-            .and(path_regex(r"^/auth/v1/token$"))
+            .and(path("/v1/auth/refresh"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
+                "accessToken": "at",
+                "refreshToken": "rt",
+                "expiresAt": 9999999999_i64
             })))
             .mount(srv)
             .await;
@@ -1369,24 +1367,18 @@ mod tests {
         let srv = MockServer::start().await;
         auth_mock(&srv).await;
         Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                    "id": "row-1",
-                    "workspace_id": null,
-                    "backend_type": "claude",
-                    "backend_session_id": "acp-1",
-                    "status": "stopped",
-                    "last_processed_message_id": "msg-42",
-                    "last_seen_at": "2025-05-22T01:00:00Z"
-                }
-            ])))
+            .and(path("/v1/agents/runtimes/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "row-1",
+                "backendSessionId": "acp-1",
+                "lastProcessedMessageId": "msg-42"
+            })))
             .mount(&srv)
             .await;
 
         let mut mgr = RuntimeManager::new(
             RuntimeManager::test_launch_configs(),
-            Some(test_supabase_with_url(srv.uri())),
+            Some(test_cloud_api_with_url(srv.uri())),
         );
         mgr.agents
             .insert("rt-X".into(), dummy_handle("rt-X", "sess-1"));
@@ -1406,11 +1398,11 @@ mod tests {
 
     #[tokio::test]
     async fn seed_cursor_from_prior_runtime_noop_when_no_session_id() {
-        // Without a session id we shouldn't touch Supabase. We deliberately
+        // Without a session id we shouldn't touch the cloud backend. We deliberately
         // give the client a bogus URL so any HTTP call would explode.
         let mut mgr = RuntimeManager::new(
             RuntimeManager::test_launch_configs(),
-            Some(test_supabase_with_url("http://127.0.0.1:1".into())),
+            Some(test_cloud_api_with_url("http://127.0.0.1:1".into())),
         );
         mgr.agents.insert("rt-X".into(), dummy_handle("rt-X", ""));
         mgr.seed_cursor_from_prior_runtime("rt-X", None).await;
@@ -1427,14 +1419,16 @@ mod tests {
         let srv = MockServer::start().await;
         auth_mock(&srv).await;
         Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .and(path("/v1/agents/runtimes/latest"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "not_found", "message": "no runtime" }
+            })))
             .mount(&srv)
             .await;
 
         let mut mgr = RuntimeManager::new(
             RuntimeManager::test_launch_configs(),
-            Some(test_supabase_with_url(srv.uri())),
+            Some(test_cloud_api_with_url(srv.uri())),
         );
         mgr.agents
             .insert("rt-X".into(), dummy_handle("rt-X", "sess-1"));
@@ -1455,24 +1449,18 @@ mod tests {
         let srv = MockServer::start().await;
         auth_mock(&srv).await;
         Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                    "id": "row-1",
-                    "workspace_id": null,
-                    "backend_type": "claude",
-                    "backend_session_id": "acp-1",
-                    "status": "stopped",
-                    "last_processed_message_id": "",
-                    "last_seen_at": "2025-05-22T01:00:00Z"
-                }
-            ])))
+            .and(path("/v1/agents/runtimes/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "row-1",
+                "backendSessionId": "acp-1",
+                "lastProcessedMessageId": ""
+            })))
             .mount(&srv)
             .await;
 
         let mut mgr = RuntimeManager::new(
             RuntimeManager::test_launch_configs(),
-            Some(test_supabase_with_url(srv.uri())),
+            Some(test_cloud_api_with_url(srv.uri())),
         );
         mgr.agents
             .insert("rt-X".into(), dummy_handle("rt-X", "sess-1"));

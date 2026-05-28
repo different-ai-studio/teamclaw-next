@@ -326,7 +326,7 @@ pub struct MessageRow {
 }
 
 /// Outbox row — mirrors iOS `OutboxMessage` SwiftData model. Tracks one
-/// pending/in-flight send through Supabase + MQTT with exponential backoff
+/// pending/in-flight send through the cloud backend + MQTT with exponential backoff
 /// retry. `message_id` is the same UUID used in `Message.id` so optimistic
 /// UI bubbles can match the live echo by id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1027,7 +1027,7 @@ impl LocalCacheStore {
             conn.execute(
                 // Conflict on the natural key (session_id, actor_id) because
                 // session-create writes a synthesized "sess:actor" id locally
-                // before Supabase sync brings the real UUID. Both refer to
+                // before the cloud backend sync brings the real UUID. Both refer to
                 // the same logical participant — keep the latest id.
                 "INSERT INTO session_participant
                     (id, session_id, actor_id, joined_at, created_at, updated_at, deleted_at, synced_at)
@@ -1168,7 +1168,7 @@ impl LocalCacheStore {
     /// Merge parts_json into an existing message row. Used when the streaming
     /// pipeline finalizes after the persisted AGENT_REPLY has already landed —
     /// we need to attach thinking/tool_call parts without bumping updated_at
-    /// (so subsequent Supabase syncs with the same updated_at still apply).
+    /// (so subsequent cloud backend syncs with the same updated_at still apply).
     pub async fn message_set_parts(
         &self,
         message_id: &str,

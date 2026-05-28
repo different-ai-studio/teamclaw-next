@@ -13,7 +13,6 @@ const { authState, backendConfig } = vi.hoisted(() => ({
   },
   backendConfig: {
     hasConfig: true,
-    kind: "supabase" as "supabase" | "pocketbase",
   },
 }));
 
@@ -29,7 +28,6 @@ vi.mock("@/stores/auth-store", () => ({
 
 vi.mock("@/lib/backend", () => ({
   hasBackendConfig: () => backendConfig.hasConfig,
-  getBackendKind: () => backendConfig.kind,
 }));
 
 vi.mock("@/lib/version", () => ({
@@ -51,20 +49,30 @@ beforeEach(() => {
   authState.resetOtp.mockReset();
   authState.signInAnonymously.mockReset();
   backendConfig.hasConfig = true;
-  backendConfig.kind = "supabase";
 });
 
 describe("LoginScreen", () => {
-  it("uses quick trial instead of OTP for PocketBase preview", async () => {
-    backendConfig.kind = "pocketbase";
-    authState.signInAnonymously.mockResolvedValueOnce(true);
-
+  it("renders the email OTP form", () => {
     render(<LoginScreen />);
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send code/i })).toBeInTheDocument();
+  });
 
-    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /quick trial/i }));
+  it("renders the anonymous trial button", () => {
+    render(<LoginScreen />);
+    expect(screen.getByRole("button", { name: /try anonymously/i })).toBeInTheDocument();
+  });
 
-    await waitFor(() => expect(authState.signInAnonymously).toHaveBeenCalled());
-    expect(authState.sendOtp).not.toHaveBeenCalled();
+  it("clicking trial button invokes signInAnonymously", async () => {
+    authState.signInAnonymously.mockResolvedValue(true);
+    render(<LoginScreen />);
+    fireEvent.click(screen.getByRole("button", { name: /try anonymously/i }));
+    await waitFor(() => expect(authState.signInAnonymously).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows error message when signInAnonymously fails", () => {
+    authState.errorMessage = "Anonymous sign in failed";
+    render(<LoginScreen />);
+    expect(screen.getByText(/anonymous sign in failed/i)).toBeInTheDocument();
   });
 });

@@ -3,7 +3,7 @@
 //!
 //! Connection options:
 //! - URL handed to async_nats verbatim (nats://, tls://, ws://, wss://)
-//! - Supabase JWT supplied as a token via `async_nats::ConnectOptions::token`,
+//! - Cloud bearer JWT supplied as a token via `async_nats::ConnectOptions::token`,
 //!   verified server-side by the NATS auth_callout service
 //! - Name = `amuxd-<device_id[..8]>` for monitoring (matches MQTT client_id)
 //!
@@ -34,7 +34,7 @@ pub struct NatsBackend {
 }
 
 impl NatsBackend {
-    /// Connect to nats-server using the given URL and Supabase JWT token.
+    /// Connect to nats-server using the given URL and Cloud bearer JWT token.
     /// Initializes the retained-state JetStream KV bucket idempotently.
     pub async fn connect(
         config: &DaemonConfig,

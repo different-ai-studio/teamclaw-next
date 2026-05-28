@@ -2,7 +2,7 @@
 pub(crate) struct PromptAwaitPayload<'a> {
     pub session_key: &'a str,
     pub message: &'a str,
-    /// Human-readable name of the cron job. Used to construct the Supabase
+    /// Human-readable name of the cron job. Used to construct the cloud
     /// session title ("Cron: <job_name>"). Optional; when absent the daemon
     /// falls back to "Cron job".
     pub job_name: Option<&'a str>,

@@ -1,12 +1,3 @@
-import { createSupabaseBackend } from "./supabase";
-import {
-  BACKEND_CONFIG_MISSING_MESSAGE,
-  hasSupabaseBackendConfig,
-} from "./supabase/config";
-import {
-  createPocketBaseBackend,
-  hasPocketBaseBackendConfig,
-} from "./pocketbase";
 import {
   createCloudApiBackend,
   hasCloudApiBackendConfig,
@@ -14,45 +5,27 @@ import {
 import { getEffectiveServerConfigSync } from "../server-config";
 import type { BackendKind, TeamClawBackend } from "./types";
 
-export { BACKEND_CONFIG_MISSING_MESSAGE };
+export const BACKEND_CONFIG_MISSING_MESSAGE =
+  "Cloud API URL is not configured. Set cloudApiUrl in server config.";
 
 let backend: TeamClawBackend | null = null;
 let backendCacheKey: string | null = null;
 
-export function getBackendKind(): Extract<BackendKind, "supabase" | "pocketbase" | "cloud_api"> {
-  const config = getEffectiveServerConfigSync();
-  if (config.backendKind === "cloud_api") return "cloud_api";
-  return config.backendKind === "pocketbase" ? "pocketbase" : "supabase";
+export function getBackendKind(): Extract<BackendKind, "cloud_api"> {
+  return "cloud_api";
 }
 
 export function hasBackendConfig(): boolean {
   const config = getEffectiveServerConfigSync();
-  if (getBackendKind() === "pocketbase") {
-    return hasPocketBaseBackendConfig(config);
-  }
-  if (getBackendKind() === "cloud_api") {
-    return hasCloudApiBackendConfig(config);
-  }
-  return hasSupabaseBackendConfig();
+  return hasCloudApiBackendConfig(config);
 }
 
 export function getBackend(): TeamClawBackend {
   const config = getEffectiveServerConfigSync();
-  const kind = getBackendKind();
-  const cacheKey =
-    kind === "pocketbase"
-      ? `${kind}:${config.pocketbaseUrl ?? ""}`
-      : kind === "cloud_api"
-        ? `${kind}:${config.cloudApiUrl ?? ""}:${config.supabaseUrl ?? ""}:${config.supabaseAnonKey ?? ""}`
-        : `${kind}:${config.supabaseUrl ?? ""}:${config.supabaseAnonKey ?? ""}`;
+  const cacheKey = `cloud_api:${config.cloudApiUrl ?? ""}`;
 
   if (!backend || backendCacheKey !== cacheKey) {
-    backend =
-      kind === "pocketbase"
-        ? createPocketBaseBackend(config)
-        : kind === "cloud_api"
-          ? (hasCloudApiBackendConfig(config) ? createCloudApiBackend(config) : createSupabaseBackend())
-          : createSupabaseBackend();
+backend = createCloudApiBackend(config);
     backendCacheKey = cacheKey;
   }
   return backend;

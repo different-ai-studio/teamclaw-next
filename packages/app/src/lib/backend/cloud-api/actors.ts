@@ -84,17 +84,16 @@ function mapAgentAccess(row: CloudAgentAccess): AgentAccessBackendRow {
   };
 }
 
-export function createActorsModule(client: CloudApiClient, delegate: ActorsBackend): ActorsBackend {
+export function createActorsModule(client: CloudApiClient): ActorsBackend {
   return {
-    ...delegate,
     async listActorDirectory(teamId) {
       const page = await client.get<Page<CloudActor>>(`/v1/teams/${encodeURIComponent(teamId)}/actors?limit=500`);
       return page.items.map(mapActor);
     },
     async listActorDirectoryByIds(actorIds) {
       if (actorIds.length === 0) return [];
-      // No bulk-by-ids endpoint in FC; fall back to delegate
-      return delegate.listActorDirectoryByIds(actorIds);
+      const out = await client.post<{ items: CloudActor[] }>(`/v1/actors/by-ids`, { actorIds });
+      return out.items.map(mapActor);
     },
     async getActorDirectoryEntry(actorId) {
       try {
@@ -103,7 +102,7 @@ export function createActorsModule(client: CloudApiClient, delegate: ActorsBacke
         return null;
       }
     },
-    async getDaemonAgentDirectoryEntry(teamId, agentId) {
+    async getDaemonAgentDirectoryEntry(_teamId, agentId) {
       try {
         return mapActor(await client.get<CloudActor>(`/v1/actors/${encodeURIComponent(agentId)}`));
       } catch {
@@ -147,9 +146,7 @@ export function createActorsModule(client: CloudApiClient, delegate: ActorsBacke
       });
     },
     async removeAgentAccess(accessId) {
-      // accessId is the row id, not memberId; the FC endpoint uses actorId.
-      // Fall back to delegate for this operation.
-      return delegate.removeAgentAccess(accessId);
+      await client.delete<void>(`/v1/actors/access/${encodeURIComponent(accessId)}`);
     },
   };
 }

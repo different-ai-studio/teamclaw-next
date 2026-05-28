@@ -78,6 +78,7 @@ import { useSessionSelectionStore } from "@/stores/session-selection-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { mqttConnect, mqttSubscribe, listenForEnvelopes } from "@/lib/mqtt-bridge";
 import { mqttConnectionKey } from "@/lib/mqtt-connection-key";
+import { useMqttReconnectStore } from "@/stores/mqtt-reconnect";
 import { getEffectiveServerConfig } from "@/lib/server-config";
 import { initTeamclawRpc, disposeTeamclawRpc } from "@/lib/teamclaw-rpc";
 import {
@@ -666,6 +667,7 @@ function AppContent() {
   // the broker's ACL is keyed on team_id and rejects placeholders.
   const firstTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null);
   const mqttAccessToken = useAuthStore((s) => s.session?.access_token ?? null);
+  const mqttReconnectNonce = useMqttReconnectStore((s) => s.nonce);
   const mqttAuthKey = mqttConnectionKey({
     userId,
     teamId: firstTeamId,
@@ -1155,7 +1157,7 @@ function AppContent() {
       disposeRuntimeStateStore();
       disposeDevicePresenceStore();
     };
-  }, [mqttAuthKey, userId, firstTeamId, mqttAccessToken]);
+  }, [mqttAuthKey, userId, firstTeamId, mqttAccessToken, mqttReconnectNonce]);
 
   // Keep session/live subscriptions in sync with the user's most-recent
   // sessions. Rows are sorted by last_message_at DESC, so we slice the top

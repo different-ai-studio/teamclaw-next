@@ -1248,7 +1248,7 @@ impl SessionManager {
             warn!(?e, session_id, "publish_message failed");
         }
 
-        // 3. Backend (final replies only — see TurnAggregator::supabase_persistent)
+        // 3. Backend (final replies only — see TurnAggregator::cloud_persistent)
         if persist_backend {
             if let Some(sb) = backend {
                 let team_id = self.team_id.clone();

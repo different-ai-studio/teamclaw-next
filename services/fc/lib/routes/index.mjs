@@ -13,6 +13,8 @@ import { registerRuntime } from "./runtime.mjs";
 import { registerAttachments } from "./attachments.mjs";
 import { registerTelemetry } from "./telemetry.mjs";
 import { registerConfig } from "./config.mjs";
+import { registerDirectory } from "./directory.mjs";
+import { registerSync } from "./sync.mjs";
 
 export function registerAllRoutes(router) {
   registerAuth(router);
@@ -30,6 +32,8 @@ export function registerAllRoutes(router) {
   registerAttachments(router);
   registerTelemetry(router);
   registerConfig(router);
+  registerDirectory(router);
+  registerSync(router);
 }
 
 export { registerAuth, registerTeams, registerSessions, registerMessages, registerInvites, registerWorkspaces, registerSystem, registerActors, registerNotifications, registerIdeas, registerShortcuts, registerRuntime, registerAttachments, registerTelemetry, registerConfig };

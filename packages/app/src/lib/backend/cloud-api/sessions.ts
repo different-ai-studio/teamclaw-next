@@ -1,9 +1,13 @@
 import type {
+  SessionCreateInput,
+  SessionDisplayRow,
   SessionListCursor,
   SessionListPage,
+  SessionParticipant,
+  SessionSyncRow,
   SessionsBackend,
 } from "../types";
-import type { CloudApiClient } from "./http";
+import { CloudApiError, type CloudApiClient } from "./http";
 
 type CloudSession = {
   id: string;
@@ -42,9 +46,8 @@ function encodeCursor(cursor: SessionListCursor): string {
     .replace(/=+$/, "");
 }
 
-export function createSessionsModule(client: CloudApiClient, delegate: SessionsBackend): SessionsBackend {
+export function createSessionsModule(client: CloudApiClient): SessionsBackend {
   return {
-    ...delegate,
     async listCurrentActorSessions(args: { limit: number; cursor: SessionListCursor | null }): Promise<SessionListPage> {
       const params = new URLSearchParams({ limit: String(args.limit) });
       if (args.cursor) params.set("cursor", encodeCursor(args.cursor));
@@ -53,6 +56,69 @@ export function createSessionsModule(client: CloudApiClient, delegate: SessionsB
     },
     async markCurrentActorSessionViewed(sessionId: string, lastReadMessageId?: string | null) {
       await client.post<void>(`/v1/sessions/${encodeURIComponent(sessionId)}/mark-viewed`, { lastReadMessageId: lastReadMessageId ?? null });
+    },
+    async createSessionShell(input: SessionCreateInput) {
+      await client.post<CloudSession>("/v1/sessions", {
+        id: input.id,
+        teamId: input.teamId,
+        title: input.title,
+        mode: "collab",
+        createdByActorId: input.createdByActorId,
+        ideaId: input.ideaId ?? null,
+        additionalActorIds: input.additionalActorIds,
+      });
+      return { sessionId: input.id };
+    },
+    async addParticipants(sessionId, actorIds) {
+      const unique = Array.from(new Set(actorIds));
+      for (const actorId of unique) {
+        try {
+          await client.post(`/v1/sessions/${encodeURIComponent(sessionId)}/participants`, { actorId });
+        } catch (e) {
+          // Idempotent: ignore conflicts.
+          if (e instanceof CloudApiError && (e.status === 409 || e.status === 200)) continue;
+          throw e;
+        }
+      }
+    },
+    async updateSessionTitle(sessionId, title) {
+      await client.patch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { title });
+    },
+    async archiveSession(sessionId, archivedAt) {
+      await client.patch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { archivedAt });
+    },
+    async getSessionParticipants(sessionId): Promise<SessionParticipant[]> {
+      const out = await client.get<{ items: Array<{ sessionId?: string; actorId: string; role?: string | null }> }>(
+        `/v1/sessions/${encodeURIComponent(sessionId)}/participants`,
+      );
+      return out.items.map((row) => ({
+        session_id: row.sessionId ?? sessionId,
+        actor_id: row.actorId,
+        role: row.role ?? null,
+      }));
+    },
+    async getSessionTeamId(sessionId) {
+      try {
+        const out = await client.get<{ teamId?: string | null }>(`/v1/sessions/${encodeURIComponent(sessionId)}`);
+        return out.teamId ?? null;
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    async listSessionsForTeamSince(teamId, updatedAfter): Promise<SessionSyncRow[]> {
+      const params = new URLSearchParams({ teamId });
+      if (updatedAfter) params.set("since", updatedAfter);
+      const out = await client.get<{ items: SessionSyncRow[] }>(`/v1/sync/sessions?${params.toString()}`);
+      return out.items ?? [];
+    },
+    async listSessionDisplayRows(teamId, sessionIds): Promise<SessionDisplayRow[]> {
+      if (sessionIds.length === 0) return [];
+      const out = await client.post<{ items: SessionDisplayRow[] }>(`/v1/sessions/display-rows`, {
+        teamId,
+        sessionIds,
+      });
+      return out.items ?? [];
     },
   };
 }

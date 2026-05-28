@@ -20,14 +20,14 @@ test("createSupabaseBusinessRepository creates caller-scoped Supabase client", a
 
   await repo.listSessions({ limit: 25 });
 
-  assert.deepEqual(calls, [{
-    url: "https://example.supabase.co",
-    key: "publishable-key",
-    options: {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: "Bearer caller-token" } },
-    },
-  }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://example.supabase.co");
+  assert.equal(calls[0].key, "publishable-key");
+  assert.deepEqual(calls[0].options.auth, { persistSession: false, autoRefreshToken: false });
+  assert.deepEqual(calls[0].options.global, { headers: { Authorization: "Bearer caller-token" } });
+  // realtime transport is wired so supabase-js doesn't crash on Node 20 (FC runtime);
+  // we don't assert on its identity, just that it's set.
+  assert.ok(calls[0].options.realtime?.transport, "expected realtime transport to be set");
 });
 
 test("publishableKeyFromEnv prefers publishable key and falls back to anon key", () => {
@@ -131,28 +131,40 @@ test("insertMessage writes a messages row and maps response", async () => {
   assert.equal(message.senderActorId, "actor-1");
 });
 
-test("claimInvite maps claim_team_invite rpc response", async () => {
-  const repo = createRepo(fakeSupabase({
-    rpcData: {
-      claim_team_invite: [{
-        actor_id: "actor-1",
-        team_id: "team-1",
-        actor_type: "member",
-        display_name: "Alice",
-        refresh_token: "refresh-1",
-      }],
+test("auth repo claimInvite calls claim_team_invite RPC anonymously", async () => {
+  // The bootstrap claim flow has no caller bearer; the auth repo must use an
+  // anon-key Supabase client (no Authorization header) to invoke the
+  // SECURITY DEFINER RPC `claim_team_invite`.
+  const createCalls = [];
+  const repo = createSupabaseAuthRepository({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "publishable-key",
+    createClient(url, key, options) {
+      createCalls.push({ url, key, options });
+      return fakeSupabase({
+        rpcData: {
+          claim_team_invite: [{
+            actor_id: "actor-1",
+            team_id: "team-1",
+            actor_type: "agent",
+            display_name: "Daemon",
+            refresh_token: "refresh-1",
+          }],
+        },
+      });
     },
-  }));
-
-  await assert.doesNotReject(async () => {
-    assert.deepEqual(await repo.claimInvite("invite-token"), {
-      actorId: "actor-1",
-      teamId: "team-1",
-      actorType: "member",
-      displayName: "Alice",
-      refreshToken: "refresh-1",
-    });
   });
+
+  assert.deepEqual(await repo.claimInvite("invite-token"), {
+    actorId: "actor-1",
+    teamId: "team-1",
+    actorType: "agent",
+    displayName: "Daemon",
+    refreshToken: "refresh-1",
+  });
+  // Auth repo must NOT attach a caller bearer header.
+  assert.equal(createCalls.length, 1);
+  assert.equal(createCalls[0].options.global, undefined);
 });
 
 test("repository throws upstream errors without hiding Supabase error codes", async () => {

@@ -29,9 +29,19 @@ function mapWorkspace(row: CloudWorkspace): DaemonWorkspaceBackendRow {
   };
 }
 
-export function createWorkspacesModule(client: CloudApiClient, delegate: WorkspacesBackend): WorkspacesBackend {
+export function createWorkspacesModule(client: CloudApiClient): WorkspacesBackend {
   return {
-    ...delegate,
+    async listWorkspacesByIds(teamId, workspaceIds) {
+      if (workspaceIds.length === 0) return [];
+      const out = await client.post<{
+        items: Array<{ id: string; name: string | null; path: string | null }>;
+      }>(`/v1/workspaces/by-ids`, { teamId, ids: workspaceIds });
+      return (out.items ?? []).map((r) => ({
+        id: r.id,
+        name: r.name ?? null,
+        path: r.path ?? null,
+      }));
+    },
     async listDaemonWorkspaces(teamId, agentId) {
       const params = new URLSearchParams({ teamId, limit: "200" });
       if (agentId) params.set("agentId", agentId);

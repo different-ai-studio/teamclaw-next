@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { createClient as defaultCreateClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
 import { ApiError } from "./http-utils.mjs";
+
+// FC runtime is Node 20 which lacks native WebSocket. supabase-js v2.45+ tries
+// to construct a RealtimeClient at createClient() time and throws without a
+// transport. We never use Realtime in FC; pass `ws` so the construction
+// succeeds. The transport is only opened lazily when realtime channels are
+// subscribed, which we never do.
+const REALTIME_TRANSPORT_OPTS = { transport: WebSocket };
 
 const ATTACHMENTS_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
-const WORKSPACE_COLUMNS = "id, team_id, name, slug, archived, metadata, created_at, updated_at";
+const WORKSPACE_COLUMNS = "id, team_id, name, path, archived, created_at, updated_at";
 
 export function createSupabaseBusinessRepository(options) {
   const {
@@ -22,6 +30,7 @@ export function createSupabaseBusinessRepository(options) {
 
   const supabase = createClient(supabaseUrl, publishableKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    realtime: REALTIME_TRANSPORT_OPTS,
     global: {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -45,7 +54,13 @@ export function createSupabaseBusinessRepository(options) {
       if (input.slug !== undefined) args.p_slug = input.slug;
       const { data, error } = await supabase.rpc("create_team", args);
       if (error) throw error;
-      return mapTeam(requiredRow(data, "teams.createTeam"));
+      const row = requiredRow(data, "teams.createTeam");
+      return mapTeam({
+        id: row.team_id ?? row.id,
+        name: row.team_name ?? row.name,
+        slug: row.team_slug ?? row.slug,
+        created_at: row.created_at ?? null,
+      });
     },
 
     async getTeam(teamId) {
@@ -67,24 +82,42 @@ export function createSupabaseBusinessRepository(options) {
     async createTeamInvite(teamId, input) {
       const args = {
         p_team_id: teamId,
-        p_actor_type: input.actorType,
+        p_kind: input.kind,
         p_display_name: input.displayName,
       };
-      if (input.role !== undefined) args.p_role = input.role;
-      if (input.expiresAt !== undefined) args.p_expires_at = input.expiresAt;
+      if (input.teamRole != null) args.p_team_role = input.teamRole;
+      if (input.agentKind != null) args.p_agent_kind = input.agentKind;
+      if (input.ttlSeconds != null) args.p_ttl_seconds = input.ttlSeconds;
+      if (input.targetActorId != null) args.p_target_actor_id = input.targetActorId;
       const { data, error } = await supabase.rpc("create_team_invite", args);
       if (error) throw error;
       const row = requiredRow(data, "teams.createTeamInvite");
       return {
         token: requiredString(row.token, "teams.createTeamInvite", "token"),
-        inviteId: requiredString(row.invite_id, "teams.createTeamInvite", "invite_id"),
         expiresAt: row.expires_at ?? null,
+        deeplink: row.deeplink ?? null,
       };
     },
 
-    async removeTeamActor(teamId, actorId) {
-      const { error } = await supabase.rpc("remove_team_actor", { p_team_id: teamId, p_actor_id: actorId });
+    async removeTeamActor(_teamId, actorId) {
+      const { error } = await supabase.rpc("remove_team_actor", { p_actor_id: actorId });
       if (error) throw error;
+    },
+
+    async listTeamActors(teamId, { kind = null, limit = 500 } = {}) {
+      let query = supabase
+        .from("actor_directory")
+        .select(
+          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+        )
+        .eq("team_id", teamId);
+      if (kind) query = query.eq("actor_type", kind);
+      query = query.order("last_active_at", { ascending: false, nullsFirst: false })
+                   .order("display_name", { ascending: true })
+                   .limit(limit);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { items: (data ?? []).map(mapDirectoryActor) };
     },
 
     async getTeamDirectory(teamId) {
@@ -164,19 +197,6 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
-    async claimInvite(token) {
-      const { data, error } = await supabase.rpc("claim_team_invite", { p_token: token });
-      if (error) throw error;
-      const row = requiredRow(data, "auth.claimInvite");
-      return {
-        actorId: requiredString(row.actor_id, "auth.claimInvite", "actor_id"),
-        teamId: requiredString(row.team_id, "auth.claimInvite", "team_id"),
-        actorType: requiredString(row.actor_type, "auth.claimInvite", "actor_type"),
-        displayName: requiredString(row.display_name, "auth.claimInvite", "display_name"),
-        refreshToken: row.refresh_token ?? null,
-      };
-    },
-
     async listWorkspaces({ teamId, limit = 50, cursor = null } = {}) {
       let query = supabase
         .from("workspaces")
@@ -199,9 +219,8 @@ export function createSupabaseBusinessRepository(options) {
         id: input.id,
         team_id: input.teamId,
         name: input.name,
-        slug: input.slug ?? null,
+        path: input.slug ?? input.path ?? null,
         archived: input.archived ?? false,
-        metadata: input.metadata ?? null,
       };
       const { data, error } = await supabase
         .from("workspaces")
@@ -229,7 +248,8 @@ export function createSupabaseBusinessRepository(options) {
       const row = {};
       if (patch.name !== undefined) row.name = patch.name;
       if (patch.archived !== undefined) row.archived = patch.archived;
-      if (patch.metadata !== undefined) row.metadata = patch.metadata;
+      if (patch.slug !== undefined) row.path = patch.slug;
+      if (patch.path !== undefined) row.path = patch.path;
       const { data, error } = await supabase
         .from("workspaces")
         .update(row)
@@ -281,7 +301,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
 async heartbeat() {
-      const { error } = await supabase.rpc("heartbeat");
+      const { error } = await supabase.rpc("update_actor_last_active");
       if (error) throw error;
     },
 
@@ -289,8 +309,9 @@ async heartbeat() {
       let query = supabase
         .from("shortcuts")
         .select("*")
+        .eq("scope", "team")
         .eq("team_id", teamId)
-        .order("position", { ascending: true });
+        .order("order", { ascending: true });
       if (parentId !== undefined) {
         if (parentId === null) {
           query = query.is("parent_id", null);
@@ -303,17 +324,30 @@ async heartbeat() {
       return (data ?? []).map(mapShortcut);
     },
 
+    async listShortcutsByScope({ scope, teamId, parentId } = {}) {
+      let query = supabase.from("shortcuts").select("*").eq("scope", scope);
+      if (scope === "team" && teamId) query = query.eq("team_id", teamId);
+      // Personal scope is gated by RLS on owner_member_id; no extra filter here.
+      if (parentId !== undefined) {
+        if (parentId === null) query = query.is("parent_id", null);
+        else query = query.eq("parent_id", parentId);
+      }
+      const { data, error } = await query.order("order", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map(mapShortcut);
+    },
+
     async createShortcut(input) {
       const args = {
-        p_team_id: input.teamId,
-        p_kind: input.kind,
+        p_scope: input.scope,
         p_label: input.label,
+        p_node_type: input.nodeType ?? input.kind,
       };
-      if (input.id !== undefined) args.p_id = input.id;
+      if (input.teamId !== undefined) args.p_team_id = input.teamId;
       if (input.parentId !== undefined) args.p_parent_id = input.parentId;
-      if (input.payload !== undefined) args.p_payload = input.payload;
-      if (input.position !== undefined) args.p_position = input.position;
-      if (input.visibleRoleIds !== undefined) args.p_visible_role_ids = input.visibleRoleIds;
+      if (input.icon !== undefined) args.p_icon = input.icon;
+      if (input.order !== undefined) args.p_order = input.order;
+      if (input.target !== undefined) args.p_target = input.target;
       const { data, error } = await supabase.rpc("shortcut_create", args);
       if (error) throw error;
       const id = requiredString(data, "shortcuts.createShortcut", "id");
@@ -402,45 +436,31 @@ async heartbeat() {
     async getNotificationPrefs() {
       const { data, error } = await supabase
         .from("notification_prefs")
-        .select("user_id, push_enabled, email_enabled, digest_frequency")
+        .select("user_id, enabled, dnd_start_min, dnd_end_min, dnd_tz, updated_at")
         .limit(1);
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) {
-        return {
-          userId: null,
-          pushEnabled: true,
-          emailEnabled: false,
-          digestFrequency: "off",
-        };
-      }
-      return {
-        userId: requiredString(row.user_id, "notifications.getNotificationPrefs", "user_id"),
-        pushEnabled: row.push_enabled ?? true,
-        emailEnabled: row.email_enabled ?? false,
-        digestFrequency: row.digest_frequency ?? "off",
-      };
+      // Frontend expects snake_case raw row shape; returns null when caller
+      // has no prefs row yet so it can fall back to DEFAULT_PREFS.
+      return row ?? null;
     },
 
     async putNotificationPrefs(input) {
+      // Accept snake_case from the frontend (matches the on-disk row shape).
       const row = {
-        user_id: input.userId,
-        push_enabled: input.pushEnabled,
-        email_enabled: input.emailEnabled,
-        digest_frequency: input.digestFrequency,
+        user_id: input.user_id,
+        enabled: input.enabled ?? true,
+        dnd_start_min: input.dnd_start_min ?? null,
+        dnd_end_min: input.dnd_end_min ?? null,
+        dnd_tz: input.dnd_tz ?? "Asia/Shanghai",
       };
       const { data, error } = await supabase
         .from("notification_prefs")
         .upsert(row, { onConflict: "user_id" })
-        .select("user_id, push_enabled, email_enabled, digest_frequency")
+        .select("user_id, enabled, dnd_start_min, dnd_end_min, dnd_tz, updated_at")
         .single();
       if (error) throw error;
-      return {
-        userId: requiredString(data.user_id, "notifications.putNotificationPrefs", "user_id"),
-        pushEnabled: data.push_enabled ?? true,
-        emailEnabled: data.email_enabled ?? false,
-        digestFrequency: data.digest_frequency ?? "off",
-      };
+      return data;
     },
 
     async muteSession(sessionId, input) {
@@ -505,14 +525,13 @@ async heartbeat() {
       const args = {
         p_team_id: body.teamId,
         p_title: body.title,
-        p_description: body.description ?? null,
-        p_author_actor_id: body.authorActorId,
-        p_actor_ids: body.actorIds ?? [],
+        p_description: body.description ?? body.body ?? "",
       };
-      if (body.id !== undefined) args.p_id = body.id;
+      if (body.workspaceId != null) args.p_workspace_id = body.workspaceId;
       const { data, error } = await supabase.rpc("create_idea", args);
       if (error) throw error;
-      const id = requiredString(data, "ideas.createIdea", "id");
+      const row = Array.isArray(data) ? data[0] : data;
+      const id = requiredString(row?.id, "ideas.createIdea", "id");
       return this.getIdea(id);
     },
 
@@ -520,15 +539,16 @@ async heartbeat() {
       const { error } = await supabase.rpc("update_idea", {
         p_idea_id: ideaId,
         p_title: body.title ?? null,
-        p_description: body.description ?? null,
-        p_actor_ids: body.actorIds ?? null,
+        p_workspace_id: body.workspaceId ?? null,
+        p_description: body.description ?? body.body ?? null,
+        p_status: body.status ?? null,
       });
       if (error) throw error;
       return this.getIdea(ideaId);
     },
 
-    async archiveIdea(ideaId) {
-      const { error } = await supabase.rpc("archive_idea", { p_idea_id: ideaId });
+    async archiveIdea(ideaId, { archived = true } = {}) {
+      const { error } = await supabase.rpc("archive_idea", { p_idea_id: ideaId, p_archived: archived });
       if (error) throw error;
     },
 
@@ -537,7 +557,7 @@ async heartbeat() {
         .from("shortcuts")
         .select("*")
         .eq("team_id", teamId)
-        .order("position", { ascending: true });
+        .order("order", { ascending: true });
       if (parentId !== undefined) {
         if (parentId === null) {
           query = query.is("parent_id", null);
@@ -565,15 +585,15 @@ async heartbeat() {
 
     async createShortcut(body) {
       const args = {
-        p_team_id: body.teamId,
-        p_kind: body.kind,
+        p_scope: body.scope,
         p_label: body.label,
+        p_node_type: body.nodeType ?? body.kind,
+        p_team_id: body.teamId ?? null,
         p_parent_id: body.parentId ?? null,
-        p_payload: body.payload ?? null,
-        p_position: body.position ?? 0,
-        p_visible_role_ids: body.visibleRoleIds ?? [],
+        p_icon: body.icon ?? null,
+        p_order: body.order ?? body.position ?? 0,
+        p_target: body.target ?? "",
       };
-      if (body.id !== undefined) args.p_id = body.id;
       const { data, error } = await supabase.rpc("shortcut_create", args);
       if (error) throw error;
       const id = requiredString(data, "shortcuts.createShortcut", "id");
@@ -643,10 +663,10 @@ async heartbeat() {
     async createIdeaActivity(ideaId, body) {
       const { data, error } = await supabase.rpc("create_idea_activity", {
         p_idea_id: ideaId,
-        p_kind: body.kind,
+        p_activity_type: body.activityType ?? body.kind,
         p_content: body.content ?? null,
-        p_actor_id: body.actorId,
         p_metadata: body.metadata ?? null,
+        p_attachment_urls: body.attachmentUrls ?? [],
       });
       if (error) throw error;
       return mapIdeaActivityRow(requiredRow(data, "ideas.createIdeaActivity"));
@@ -655,11 +675,16 @@ async heartbeat() {
     async upsertAgentRuntime(body) {
       const row = {
         id: body.id ?? randomUUID(),
-        agent_actor_id: body.agentActorId,
+        team_id: body.teamId,
+        agent_id: body.agentActorId,
         session_id: body.sessionId,
         runtime_id: body.runtimeId,
+        backend_type: body.backendType ?? "claude",
         backend_session_id: body.backendSessionId,
-        metadata: body.metadata ?? null,
+        status: body.status ?? "running",
+        workspace_id: body.workspaceId ?? null,
+        current_model: body.currentModel ?? null,
+        updated_at: new Date().toISOString(),
       };
       const { data, error } = await supabase
         .from("agent_runtimes")
@@ -691,7 +716,7 @@ async heartbeat() {
       const { data, error } = await supabase
         .from("agent_runtimes")
         .select("*")
-        .eq("agent_actor_id", agentId)
+        .eq("agent_id", agentId)
         .eq("session_id", sessionId)
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -710,10 +735,23 @@ async heartbeat() {
     },
 
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {
-      const { error } = await supabase.rpc("ensure_agent_types", {
-        p_supported_types: supportedTypes,
-        p_default_agent_type: defaultAgentType,
-      });
+      const { data: actorRow, error: actorErr } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("actor_type", "agent")
+        .limit(1)
+        .maybeSingle();
+      if (actorErr) throw actorErr;
+      if (!actorRow?.id) {
+        throw new Error("ensureAgentTypes: no agent actor visible to caller");
+      }
+      const { error } = await supabase
+        .from("agents")
+        .update({
+          agent_types: supportedTypes,
+          default_agent_type: defaultAgentType,
+        })
+        .eq("id", actorRow.id);
       if (error) throw error;
     },
 
@@ -721,7 +759,7 @@ async heartbeat() {
       const { error } = await supabase
         .from("agents")
         .update({ device_id: deviceId })
-        .eq("actor_id", agentActorId);
+        .eq("id", agentActorId);
       if (error) throw error;
     },
 
@@ -797,6 +835,757 @@ async heartbeat() {
       if (error) throw error;
       return { items: (data ?? []).map(mapLeaderboardRow) };
     },
+
+    // --- Directory resolution (frontend supabase delegate parity) ---
+
+    async resolveCallerActorForTeam(teamId) {
+      // Uses the caller's bearer token + RLS to find their own actor row in
+      // this team. Returns null when caller has no actor (or isn't a member).
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("team_id", teamId)
+        .eq("actor_type", "member")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? { id: data.id } : null;
+    },
+
+    async resolveCurrentMemberActor(teamId, userId) {
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("team_id", teamId)
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? { id: data.id } : null;
+    },
+
+    async resolveFirstMemberActorForUser(userId) {
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id, team_id")
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? { id: data.id, team_id: data.team_id ?? null } : null;
+    },
+
+    async getCurrentTeamMember(teamId, userId) {
+      const { data: actorRows, error: actorError } = await supabase
+        .from("actor_directory")
+        .select("id, display_name, team_role")
+        .eq("team_id", teamId)
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .limit(1);
+      if (actorError) throw actorError;
+      const actor = actorRows?.[0];
+      if (!actor) return null;
+      const { data: memberRows, error: memberError } = await supabase
+        .from("team_members")
+        .select("joined_at")
+        .eq("team_id", teamId)
+        .eq("member_id", actor.id)
+        .limit(1);
+      return {
+        id: actor.id,
+        displayName: actor.display_name || "",
+        role: actor.team_role ?? null,
+        joinedAt: memberError ? null : memberRows?.[0]?.joined_at ?? null,
+      };
+    },
+
+    // --- Sync (incremental) ---
+
+    async listActorDirectoryForSync(teamId, updatedAfter) {
+      let q = supabase
+        .from("actor_directory")
+        .select(
+          "id, team_id, actor_type, display_name, member_status, agent_status, last_active_at, created_at, updated_at",
+        )
+        .eq("team_id", teamId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listIdeasForSync(teamId, updatedAfter) {
+      let q = supabase
+        .from("ideas")
+        .select(
+          "id, team_id, workspace_id, parent_idea_id, title, description, status, created_by_actor_id, archived, sort_order, created_at, updated_at",
+        )
+        .eq("team_id", teamId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listSessionParticipantsForSync(sessionId, updatedAfter) {
+      let q = supabase
+        .from("session_participants")
+        .select("id, session_id, actor_id, joined_at, created_at, updated_at")
+        .eq("session_id", sessionId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    // --- Actor directory by ids + remove agent access ---
+
+    async listActorDirectoryByIds(actorIds, teamId) {
+      if (!Array.isArray(actorIds) || actorIds.length === 0) return [];
+      let q = supabase
+        .from("actor_directory")
+        .select(
+          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+        )
+        .in("id", actorIds);
+      if (teamId) q = q.eq("team_id", teamId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []).map(mapDirectoryActor);
+    },
+
+    async removeAgentAccessById(accessId) {
+      const { error } = await supabase
+        .from("agent_member_access")
+        .delete()
+        .eq("id", accessId);
+      if (error) throw error;
+    },
+
+    // --- Team workspace git config (separate column set from
+    // existing default/pinned workspace config) ---
+
+    async listSessionsForTeamSince(teamId, updatedAfter) {
+      const SESSION_SYNC_COLUMNS =
+        "id, team_id, title, mode, primary_agent_id, idea_id, summary, last_message_preview, last_message_at, created_by_actor_id, created_at, updated_at";
+      let q = supabase
+        .from("sessions")
+        .select(SESSION_SYNC_COLUMNS)
+        .eq("team_id", teamId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listMessagesForSessionSince(sessionId, updatedAfter) {
+      const MESSAGE_SYNC_COLUMNS =
+        "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
+      let q = supabase
+        .from("messages")
+        .select(MESSAGE_SYNC_COLUMNS)
+        .eq("session_id", sessionId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listSessionDisplayRows(teamId, sessionIds) {
+      if (!Array.isArray(sessionIds) || sessionIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("id, title")
+        .eq("team_id", teamId)
+        .in("id", sessionIds);
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listSessionIdsForActor(actorId) {
+      const { data, error } = await supabase
+        .from("session_participants")
+        .select("session_id")
+        .eq("actor_id", actorId);
+      if (error) throw error;
+      return (data ?? []).map((r) => r.session_id).filter(Boolean);
+    },
+
+    async listWorkspacesByIdsSlim(teamId, workspaceIds) {
+      if (!Array.isArray(workspaceIds) || workspaceIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("workspaces")
+        .select("id, name, path")
+        .eq("team_id", teamId)
+        .in("id", workspaceIds);
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listShortcutRoleBindings(teamId) {
+      const { data, error } = await supabase
+        .from("permissions")
+        .select("resource_id, permission_roles(role_id)")
+        .eq("team_id", teamId)
+        .eq("resource_type", "shortcut");
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async loadTeamWorkspaceGitConfig(teamId) {
+      const { data, error } = await supabase
+        .from("team_workspace_config")
+        .select("team_id, git_url, git_branch, git_token, ai_gateway_endpoint, enabled, updated_at")
+        .eq("team_id", teamId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+
+    async saveTeamWorkspaceGitConfig(input) {
+      const { error } = await supabase
+        .from("team_workspace_config")
+        .upsert(input, { onConflict: "team_id" });
+      if (error) throw error;
+    },
+
+    // --- Sessions CRUD (single-session ops; list uses listSessions above) ---
+
+    async getSession(sessionId) {
+      const { data, error } = await supabase
+        .from("sessions")
+        .select(SESSION_FULL_COLUMNS)
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? mapSessionFull(data) : null;
+    },
+
+    async createSession(input) {
+      // The frontend createSessionShell path supplies a client-generated id
+      // plus an additionalActorIds list. Insert the session row directly and
+      // bootstrap participants. The `create_session` RPC isn't used because
+      // it requires `idea_id` (NOT NULL via legacy schema gated behind
+      // newer migrations) and assumes the caller as the only seat.
+      const id = input.id ?? randomUUID();
+      const insertRow = {
+        id,
+        team_id: input.teamId,
+        title: input.title,
+        mode: input.mode ?? "collab",
+        idea_id: input.ideaId ?? null,
+      };
+      if (input.createdByActorId) insertRow.created_by_actor_id = input.createdByActorId;
+      if (input.primaryAgentId) insertRow.primary_agent_id = input.primaryAgentId;
+      const { data, error } = await supabase
+        .from("sessions")
+        .insert(insertRow)
+        .select(SESSION_FULL_COLUMNS)
+        .single();
+      if (error) throw error;
+
+      const additionalIds = Array.isArray(input.additionalActorIds) ? input.additionalActorIds : [];
+      const participantIds = Array.isArray(input.participantActorIds) ? input.participantActorIds : [];
+      const seedActorIds = Array.from(
+        new Set(
+          [
+            input.createdByActorId,
+            ...additionalIds,
+            ...participantIds,
+          ].filter((x) => typeof x === "string" && x.length > 0),
+        ),
+      );
+      if (seedActorIds.length > 0) {
+        const rows = seedActorIds.map((actorId) => ({ session_id: id, actor_id: actorId }));
+        const { error: partError } = await supabase
+          .from("session_participants")
+          .upsert(rows, { onConflict: "session_id,actor_id" });
+        if (partError) throw partError;
+      }
+      return mapSessionFull(data);
+    },
+
+    async patchSession(sessionId, patch) {
+      const update = {};
+      if (patch.title !== undefined) update.title = patch.title;
+      if (patch.summary !== undefined) update.summary = patch.summary;
+      if (patch.archivedAt !== undefined) update.archived_at = patch.archivedAt;
+      if (patch.mode !== undefined) update.mode = patch.mode;
+      if (Object.keys(update).length === 0) {
+        return this.getSession(sessionId);
+      }
+      const { data, error } = await supabase
+        .from("sessions")
+        .update(update)
+        .eq("id", sessionId)
+        .select(SESSION_FULL_COLUMNS)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? mapSessionFull(data) : null;
+    },
+
+    async markSessionViewed(sessionId, lastReadMessageId = null) {
+      const { error } = await supabase.rpc("mark_current_actor_session_viewed", {
+        p_session_id: sessionId,
+        p_last_read_message_id: lastReadMessageId ?? null,
+      });
+      if (error) throw error;
+    },
+
+    async getSessionByAcp(acpSessionId) {
+      const { data, error } = await supabase
+        .from("sessions")
+        .select(SESSION_FULL_COLUMNS)
+        .eq("acp_session_id", acpSessionId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? mapSessionFull(data) : null;
+    },
+
+    async ensureGatewaySession(input) {
+      const { data, error } = await supabase.rpc("ensure_gateway_session", {
+        p_team_id: input.teamId,
+        p_binding: input.binding,
+        p_title: input.title,
+        p_primary_agent_actor_id: input.primaryAgentActorId,
+        p_owner_member_actor_ids: input.ownerMemberActorIds ?? [],
+        p_participant_actor_ids: input.participantActorIds ?? [],
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new ApiError(502, "upstream_unavailable", "ensure_gateway_session returned no row");
+      return {
+        sessionId: row.session_id ?? row.sessionId ?? null,
+        acpSessionId: row.acp_session_id ?? row.acpSessionId ?? null,
+        created: row.created === true,
+      };
+    },
+
+    async createCronSession(input) {
+      // Cron sessions are plain `mode='collab'` sessions with no idea_id and
+      // a marker in `summary` or metadata. The supabase create_session RPC
+      // requires an idea_id, so we insert directly to bypass that constraint.
+      const id = input.id ?? randomUUID();
+      const insertRow = {
+        id,
+        team_id: input.teamId,
+        title: input.title,
+        mode: "collab",
+        primary_agent_id: input.primaryAgentActorId,
+      };
+      if (input.createdByActorId) insertRow.created_by_actor_id = input.createdByActorId;
+      else insertRow.created_by_actor_id = input.primaryAgentActorId;
+      const { data, error } = await supabase
+        .from("sessions")
+        .insert(insertRow)
+        .select(SESSION_FULL_COLUMNS)
+        .single();
+      if (error) throw error;
+      // Bootstrap primary agent as participant.
+      const { error: partError } = await supabase
+        .from("session_participants")
+        .upsert(
+          [{ session_id: id, actor_id: input.primaryAgentActorId }],
+          { onConflict: "session_id,actor_id" },
+        );
+      if (partError) throw partError;
+      return { sessionId: data.id, ...mapSessionFull(data) };
+    },
+
+    // --- Session members (participants) ---
+
+    async listSessionParticipants(sessionId) {
+      const { data, error } = await supabase
+        .from("session_participants")
+        .select("session_id, actor_id, role, joined_at")
+        .eq("session_id", sessionId);
+      if (error) throw error;
+      const rows = data ?? [];
+      const actorIds = rows.map((r) => r.actor_id).filter(Boolean);
+      let actorsById = new Map();
+      if (actorIds.length > 0) {
+        const { data: actors, error: actorsErr } = await supabase
+          .from("actor_directory")
+          .select("id, team_id, actor_type, display_name, avatar_url")
+          .in("id", actorIds);
+        if (actorsErr) throw actorsErr;
+        actorsById = new Map((actors ?? []).map((a) => [a.id, a]));
+      }
+      const items = rows.map((row) => {
+        const actor = actorsById.get(row.actor_id);
+        return {
+          sessionId: row.session_id,
+          actorId: row.actor_id,
+          role: row.role ?? null,
+          joinedAt: row.joined_at ?? null,
+          teamId: actor?.team_id ?? null,
+          actorType: actor?.actor_type ?? null,
+          displayName: actor?.display_name ?? null,
+          avatarUrl: actor?.avatar_url ?? null,
+        };
+      });
+      return { items };
+    },
+
+    async upsertSessionParticipant(sessionId, input) {
+      const row = {
+        session_id: sessionId,
+        actor_id: input.actorId,
+      };
+      if (input.role !== undefined) row.role = input.role;
+      const { data, error } = await supabase
+        .from("session_participants")
+        .upsert(row, { onConflict: "session_id,actor_id" })
+        .select("session_id, actor_id, role, joined_at")
+        .single();
+      if (error) throw error;
+      return {
+        sessionId: data.session_id,
+        actorId: data.actor_id,
+        role: data.role ?? null,
+        joinedAt: data.joined_at ?? null,
+      };
+    },
+
+    async removeSessionParticipant(sessionId, actorId) {
+      const { error } = await supabase
+        .from("session_participants")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("actor_id", actorId);
+      if (error) throw error;
+    },
+
+    // --- Actor reads + external + access (member-access table) ---
+
+    async getActor(actorId) {
+      const { data, error } = await supabase
+        .from("actor_directory")
+        .select(ACTOR_DIRECTORY_COLUMNS)
+        .eq("id", actorId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? mapDirectoryActor(data) : null;
+    },
+
+    async upsertExternalActor(input) {
+      const { data, error } = await supabase.rpc("upsert_external_actor", {
+        p_team_id: input.teamId,
+        p_source: input.source,
+        p_source_id: input.sourceId,
+        p_display_name: input.displayName,
+      });
+      if (error) throw error;
+      // RPC returns the actor uuid scalar.
+      const actorId = typeof data === "string" ? data : (Array.isArray(data) ? data[0] : null);
+      if (!actorId) throw new ApiError(502, "upstream_unavailable", "upsert_external_actor returned no id");
+      return { actorId };
+    },
+
+    async checkAgentPermission(agentActorId, actorId) {
+      const { data, error } = await supabase.rpc("check_agent_permission", {
+        p_agent_id: agentActorId,
+        p_actor_id: actorId,
+      });
+      if (error) throw error;
+      // RPC returns a text scalar (permission_level) or null.
+      const role = typeof data === "string" && data.length > 0 ? data : null;
+      return { allowed: role !== null, role };
+    },
+
+    async grantAgentAccess(agentActorId, { actorId, role }) {
+      const { data, error } = await supabase
+        .from("agent_member_access")
+        .upsert(
+          {
+            agent_id: agentActorId,
+            member_id: actorId,
+            permission_level: role,
+          },
+          { onConflict: "agent_id,member_id" },
+        )
+        .select("id, agent_id, member_id, permission_level, granted_by_member_id, created_at, updated_at")
+        .single();
+      if (error) throw error;
+      return {
+        id: data.id,
+        agentActorId: data.agent_id,
+        actorId: data.member_id,
+        role: data.permission_level,
+        grantedByMemberId: data.granted_by_member_id ?? null,
+        createdAt: data.created_at ?? null,
+        updatedAt: data.updated_at ?? null,
+      };
+    },
+
+    async revokeAgentAccess(agentActorId, actorId) {
+      const { error } = await supabase
+        .from("agent_member_access")
+        .delete()
+        .eq("agent_id", agentActorId)
+        .eq("member_id", actorId);
+      if (error) throw error;
+    },
+
+    async listAgentAdminMembers(agentActorId) {
+      const { data, error } = await supabase.rpc("list_agent_admin_member_actor_ids", {
+        p_agent_actor_id: agentActorId,
+      });
+      if (error) throw error;
+      const items = (data ?? [])
+        .map((row) => (typeof row === "string" ? row : row?.member_actor_id))
+        .filter((id) => typeof id === "string" && id.length > 0);
+      return { items };
+    },
+
+    // --- Runtime liveness ---
+
+    async heartbeat() {
+      // Lightweight no-op probe: confirms the caller's JWT can still talk to
+      // PostgREST. We query a row count from `teams` (RLS-scoped to the
+      // caller) and ignore the result. Errors propagate so the FC handler
+      // can return 5xx if the upstream is down.
+      const { error } = await supabase
+        .from("teams")
+        .select("id", { head: true, count: "exact" })
+        .limit(1);
+      if (error) throw error;
+    },
+
+    // --- Actor agent management (RPCs) ---
+
+    async listConnectedAgents(teamId) {
+      const { data, error } = await supabase.rpc("list_connected_agents", { p_team_id: teamId });
+      if (error) throw error;
+      const items = (data ?? []).map((row) => {
+        const id = row.id ?? row.agent_id;
+        return {
+          id,
+          teamId: row.team_id ?? teamId,
+          kind: row.actor_type ?? "agent",
+          displayName: row.display_name ?? null,
+          avatarUrl: row.avatar_url ?? null,
+          userId: row.user_id ?? null,
+          teamRole: row.team_role ?? null,
+          memberStatus: row.member_status ?? null,
+          agentStatus: row.agent_status ?? null,
+          agentTypes: row.agent_types ?? null,
+          defaultAgentType: row.default_agent_type ?? null,
+          defaultWorkspaceId: row.default_workspace_id ?? null,
+          lastActiveAt: row.last_active_at ?? null,
+          createdAt: row.created_at ?? null,
+          updatedAt: row.updated_at ?? null,
+          agentId: row.agent_id ?? id,
+          deviceId: row.device_id ?? null,
+        };
+      }).filter((row) => typeof row.id === "string" && row.id.length > 0);
+      return { items };
+    },
+
+    async updateOwnedAgentProfile(agentActorId, patch) {
+      const { error } = await supabase.rpc("update_owned_agent_profile", {
+        p_agent_id: agentActorId,
+        p_display_name: patch.displayName ?? null,
+        p_visibility: patch.visibility ?? null,
+      });
+      if (error) throw error;
+    },
+
+    async updateAgentDefaults(agentActorId, patch) {
+      const { error } = await supabase.rpc("update_agent_defaults", {
+        p_agent_id: agentActorId,
+        p_default_workspace_id: patch.defaultWorkspaceId ?? null,
+        p_agent_kind: patch.agentKind ?? null,
+        p_default_agent_type: patch.defaultAgentType ?? null,
+      });
+      if (error) throw error;
+    },
+
+    async listAgentAccess(agentActorId) {
+      const { data, error } = await supabase
+        .from("agent_member_access")
+        .select("id, agent_id, member_id, permission_level, granted_by_member_id, created_at, updated_at")
+        .eq("agent_id", agentActorId)
+        .order("permission_level", { ascending: true });
+      if (error) throw error;
+      const rows = data ?? [];
+      const memberIds = [...new Set(rows.map((row) => row.member_id))];
+      const memberNames = new Map();
+      if (memberIds.length > 0) {
+        const { data: members, error: memberError } = await supabase
+          .from("actor_directory")
+          .select("id, display_name")
+          .in("id", memberIds);
+        if (memberError) throw memberError;
+        for (const member of members ?? []) {
+          memberNames.set(member.id, member.display_name || member.id);
+        }
+      }
+      const items = rows.map((row) => ({
+        id: row.id,
+        agentId: row.agent_id,
+        agentActorId: row.agent_id,
+        actorId: row.member_id,
+        memberId: row.member_id,
+        memberName: memberNames.get(row.member_id) ?? row.member_id,
+        role: row.permission_level,
+        permissionLevel: row.permission_level,
+        grantedByMemberId: row.granted_by_member_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+      return { items };
+    },
+
+    async listLatestAgentRuntimeHints(teamId, agentIds) {
+      if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("id, agent_id, workspace_id, backend_type, runtime_id, session_id, status, current_model, updated_at")
+        .eq("team_id", teamId)
+        .in("agent_id", agentIds)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      const latest = new Map();
+      for (const row of data ?? []) {
+        if (!latest.has(row.agent_id)) latest.set(row.agent_id, row);
+      }
+      return [...latest.values()].map((row) => ({
+        id: row.id,
+        agent_id: row.agent_id,
+        workspace_id: row.workspace_id ?? null,
+        backend_type: row.backend_type ?? null,
+        runtime_id: row.runtime_id ?? null,
+        session_id: row.session_id ?? null,
+        status: row.status ?? null,
+        current_model: row.current_model ?? null,
+        updated_at: row.updated_at ?? null,
+      }));
+    },
+
+    async listAgentDefaults(agentIds) {
+      if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("agents")
+        .select("id, agent_types, default_agent_type")
+        .in("id", agentIds);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        agentTypes: Array.isArray(row.agent_types) ? row.agent_types : null,
+        defaultAgentType: row.default_agent_type ?? null,
+      }));
+    },
+
+    async updateRuntimeModel(runtimeId, model) {
+      const { error } = await supabase
+        .from("agent_runtimes")
+        .update({ current_model: model })
+        .eq("runtime_id", runtimeId);
+      if (error) throw error;
+    },
+
+    async listSessionRuntimeModels(sessionId) {
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("runtime_id, backend_type, current_model")
+        .eq("session_id", sessionId);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        runtime_id: row.runtime_id ?? null,
+        backend_type: row.backend_type ?? null,
+        current_model: row.current_model ?? null,
+      }));
+    },
+
+    async listRuntimeTargetsForSession(sessionId, agentIds) {
+      if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("agent_id, runtime_id")
+        .eq("session_id", sessionId)
+        .in("agent_id", agentIds);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        agent_id: row.agent_id ?? null,
+        runtime_id: row.runtime_id ?? null,
+      }));
+    },
+
+    async listDaemonRuntimes(teamId) {
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("id, runtime_id, team_id, agent_id, session_id, workspace_id, backend_type, backend_session_id, status, current_model, last_seen_at, created_at, updated_at")
+        .eq("team_id", teamId)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        runtimeId: row.runtime_id ?? null,
+        teamId: row.team_id,
+        agentId: row.agent_id,
+        sessionId: row.session_id ?? null,
+        workspaceId: row.workspace_id ?? null,
+        backendType: row.backend_type,
+        backendSessionId: row.backend_session_id ?? null,
+        status: row.status,
+        currentModel: row.current_model ?? null,
+        lastSeenAt: row.last_seen_at ?? null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+    },
+  };
+}
+
+const SESSION_FULL_COLUMNS =
+  "id, team_id, title, mode, idea_id, primary_agent_id, created_by_actor_id, summary, last_message_preview, last_message_at, acp_session_id, binding, created_at, updated_at";
+
+const ACTOR_DIRECTORY_COLUMNS =
+  "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at";
+
+function mapSessionFull(row) {
+  return {
+    id: row?.id,
+    teamId: row?.team_id ?? null,
+    title: row?.title ?? "",
+    mode: row?.mode ?? "solo",
+    ideaId: row?.idea_id ?? null,
+    primaryAgentId: row?.primary_agent_id ?? null,
+    createdByActorId: row?.created_by_actor_id ?? null,
+    summary: row?.summary ?? null,
+    lastMessageAt: row?.last_message_at ?? null,
+    lastMessagePreview: row?.last_message_preview ?? null,
+    hasUnread: false,
+    acpSessionId: row?.acp_session_id ?? null,
+    binding: row?.binding ?? null,
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function mapDirectoryActor(row) {
+  return {
+    id: row?.id,
+    teamId: row?.team_id ?? null,
+    kind: row?.actor_type ?? null,
+    displayName: row?.display_name ?? null,
+    avatarUrl: row?.avatar_url ?? null,
+    userId: row?.user_id ?? null,
+    teamRole: row?.team_role ?? null,
+    memberStatus: row?.member_status ?? null,
+    agentStatus: row?.agent_status ?? null,
+    agentTypes: row?.agent_types ?? null,
+    defaultAgentType: row?.default_agent_type ?? null,
+    defaultWorkspaceId: row?.default_workspace_id ?? null,
+    lastActiveAt: row?.last_active_at ?? null,
+    createdAt: row?.created_at ?? null,
+    updatedAt: row?.updated_at ?? null,
   };
 }
 
@@ -809,12 +1598,44 @@ export function createSupabaseAuthRepository(options) {
     supabaseUrl,
     publishableKey,
     fetchImpl = globalThis.fetch,
+    createClient = defaultCreateClient,
   } = options;
 
   if (!supabaseUrl) throw new Error("SUPABASE_URL is required");
   if (!publishableKey) throw new Error("SUPABASE_PUBLISHABLE_KEY is required");
 
+  // Anonymous Supabase client (no Authorization header). Used for the
+  // `claim_team_invite` SECURITY DEFINER RPC which the daemon must call
+  // before it owns any auth token.
+  const anonClient = createClient(supabaseUrl, publishableKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    realtime: REALTIME_TRANSPORT_OPTS,
+  });
+
   return {
+    async claimInvite(token) {
+      const { data, error } = await anonClient.rpc("claim_team_invite", { p_token: token });
+      if (error) {
+        const msg = error.message || "claim_team_invite failed";
+        const lower = msg.toLowerCase();
+        if (lower.includes("not found") || lower.includes("invite invalid") || lower.includes("invalid invite")) {
+          throw new ApiError(404, "not_found", `invite invalid or expired: ${msg}`);
+        }
+        if (lower.includes("already claimed") || lower.includes("claimed")) {
+          throw new ApiError(409, "conflict", `invite already claimed: ${msg}`);
+        }
+        throw new ApiError(400, "validation_failed", msg);
+      }
+      const row = requiredRow(data, "auth.claimInvite");
+      return {
+        actorId: requiredString(row.actor_id, "auth.claimInvite", "actor_id"),
+        teamId: requiredString(row.team_id, "auth.claimInvite", "team_id"),
+        actorType: requiredString(row.actor_type, "auth.claimInvite", "actor_type"),
+        displayName: requiredString(row.display_name, "auth.claimInvite", "display_name"),
+        refreshToken: row.refresh_token ?? null,
+      };
+    },
+
     async refreshAccessToken({ refreshToken }) {
       const url = `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`;
       const res = await fetchImpl(url, {
@@ -838,7 +1659,118 @@ export function createSupabaseAuthRepository(options) {
         expiresAt: requiredInteger(body.expires_at, "auth.refreshAccessToken", "expires_at"),
       };
     },
+
+    async signInAnonymous() {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/signup",
+        body: { data: {} },
+        operation: "auth.signInAnonymous",
+      });
+    },
+
+    async signInOtp({ email, options }) {
+      const body = { email };
+      if (options && typeof options === "object") {
+        Object.assign(body, options);
+      }
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/otp",
+        body,
+        operation: "auth.signInOtp",
+      });
+    },
+
+    async verifyOtp({ email, token, type = "email" }) {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/verify",
+        body: { email, token, type },
+        operation: "auth.verifyOtp",
+      });
+    },
+
+    async signOut({ accessToken }) {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/logout",
+        bearerToken: accessToken,
+        body: null,
+        operation: "auth.signOut",
+      });
+    },
+
+    async updateUser({ accessToken, body }) {
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "PUT",
+        path: "/auth/v1/user",
+        bearerToken: accessToken,
+        body: body ?? {},
+        operation: "auth.updateUser",
+      });
+    },
   };
+}
+
+async function goTrueRequest({
+  fetchImpl,
+  supabaseUrl,
+  apiKey,
+  method,
+  path,
+  body,
+  bearerToken,
+  operation,
+}) {
+  const headers = {
+    "Content-Type": "application/json",
+    apikey: apiKey,
+  };
+  if (bearerToken) {
+    headers.Authorization = `Bearer ${bearerToken}`;
+  }
+  const init = { method, headers };
+  if (body !== undefined && body !== null) {
+    init.body = JSON.stringify(body);
+  } else if (method !== "GET" && method !== "HEAD") {
+    init.body = "{}";
+  }
+  const res = await fetchImpl(`${supabaseUrl}${path}`, init);
+
+  // Logout returns 204 No Content on success.
+  const text = await res.text();
+  let parsed = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text };
+    }
+  }
+
+  if (!res.ok) {
+    const message = parsed?.msg || parsed?.message || parsed?.error_description || parsed?.error || text || `GoTrue ${path} failed`;
+    const code = res.status === 401 ? "missing_auth" : res.status === 422 ? "validation_failed" : "upstream_unavailable";
+    throw new ApiError(res.status, code, `${operation}: ${message}`, { details: parsed });
+  }
+
+  return parsed ?? {};
 }
 
 function outgoingMessageRow(sessionId, input) {
@@ -915,9 +1847,8 @@ function mapWorkspace(row) {
     id: requiredString(row?.id, "workspaces.mapWorkspace", "id"),
     teamId: requiredString(row?.team_id, "workspaces.mapWorkspace", "team_id"),
     name: requiredString(row?.name, "workspaces.mapWorkspace", "name"),
-    slug: row?.slug ?? null,
+    slug: row?.path ?? null,
     archived: row?.archived === true,
-    metadata: row?.metadata ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };
@@ -929,18 +1860,7 @@ function requiredInteger(value, operation, field) {
 }
 
 function mapShortcut(row) {
-  return {
-    id: requiredString(row?.id, "shortcuts.mapShortcut", "id"),
-    teamId: requiredString(row?.team_id, "shortcuts.mapShortcut", "team_id"),
-    parentId: row?.parent_id ?? null,
-    kind: requiredString(row?.kind, "shortcuts.mapShortcut", "kind"),
-    label: requiredString(row?.label, "shortcuts.mapShortcut", "label"),
-    payload: row?.payload ?? null,
-    position: row?.position ?? 0,
-    visibleRoleIds: row?.visible_role_ids ?? [],
-    createdAt: row?.created_at ?? null,
-    updatedAt: row?.updated_at ?? null,
-  };
+  return mapShortcutRow(row);
 }
 
 function mapTeamRole(row) {
@@ -994,29 +1914,37 @@ function mapIdeaRow(row) {
 }
 
 function mapShortcutRow(row) {
+  if (!row) return row;
   return {
-    id: requiredString(row?.id, "shortcuts.mapShortcutRow", "id"),
-    teamId: requiredString(row?.team_id, "shortcuts.mapShortcutRow", "team_id"),
-    parentId: row?.parent_id ?? null,
-    kind: requiredString(row?.kind, "shortcuts.mapShortcutRow", "kind"),
-    label: requiredString(row?.label, "shortcuts.mapShortcutRow", "label"),
-    payload: row?.payload ?? null,
-    position: row?.position ?? 0,
-    visibleRoleIds: row?.visible_role_ids ?? [],
-    createdAt: row?.created_at ?? null,
-    updatedAt: row?.updated_at ?? null,
+    id: row.id,
+    scope: row.scope,
+    label: row.label,
+    owner_member_id: row.owner_member_id ?? null,
+    team_id: row.team_id ?? null,
+    parent_id: row.parent_id ?? null,
+    icon: row.icon ?? null,
+    order: row.order ?? 0,
+    node_type: row.node_type,
+    target: row.target ?? "",
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   };
 }
 
 function mapAgentRuntimeRow(row) {
   return {
     id: requiredString(row?.id, "agentRuntimes.mapAgentRuntimeRow", "id"),
-    agentActorId: requiredString(row?.agent_actor_id, "agentRuntimes.mapAgentRuntimeRow", "agent_actor_id"),
-    sessionId: requiredString(row?.session_id, "agentRuntimes.mapAgentRuntimeRow", "session_id"),
-    runtimeId: requiredString(row?.runtime_id, "agentRuntimes.mapAgentRuntimeRow", "runtime_id"),
-    backendSessionId: requiredString(row?.backend_session_id, "agentRuntimes.mapAgentRuntimeRow", "backend_session_id"),
+    agentActorId: requiredString(row?.agent_id, "agentRuntimes.mapAgentRuntimeRow", "agent_id"),
+    sessionId: row?.session_id ?? null,
+    runtimeId: row?.runtime_id ?? null,
+    backendSessionId: row?.backend_session_id ?? null,
+    teamId: row?.team_id ?? null,
+    backendType: row?.backend_type ?? null,
+    status: row?.status ?? null,
+    workspaceId: row?.workspace_id ?? null,
+    currentModel: row?.current_model ?? null,
+    lastSeenAt: row?.last_seen_at ?? null,
     lastProcessedMessageId: row?.last_processed_message_id ?? null,
-    metadata: row?.metadata ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };

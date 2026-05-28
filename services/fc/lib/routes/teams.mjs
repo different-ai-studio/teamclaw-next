@@ -30,13 +30,16 @@ export function registerTeams(router) {
 
   router.post("/v1/teams/:teamId/invites", async (ctx) => {
     const body = ctx.json;
-    requireString(body.actorType, "actorType");
+    const kind = body.kind ?? body.actorType;
+    requireString(kind, "kind");
     requireString(body.displayName, "displayName");
     const result = await ctx.repository.createTeamInvite(ctx.params.teamId, {
-      actorType: body.actorType,
+      kind,
       displayName: body.displayName,
-      role: body.role,
-      expiresAt: optionalStringOrNull(body.expiresAt, "expiresAt"),
+      teamRole: body.teamRole ?? body.role ?? null,
+      agentKind: body.agentKind ?? null,
+      ttlSeconds: body.ttlSeconds ?? null,
+      targetActorId: body.targetActorId ?? null,
     });
     return { statusCode: 201, body: result };
   });

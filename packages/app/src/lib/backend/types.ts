@@ -1,4 +1,4 @@
-export type BackendKind = "supabase" | "pocketbase" | "cloud_api" | "local";
+export type BackendKind = "cloud_api";
 
 export interface AuthUser {
   id: string;
@@ -310,7 +310,7 @@ export interface TeamsBackend {
   createTeam(input: { name: string; slug?: string | null }): Promise<TeamSummary>;
   renameTeam(teamId: string, name: string): Promise<TeamSummary>;
   createTeamInvite(input: TeamInviteInput): Promise<TeamInviteResult>;
-  removeTeamActor(actorId: string): Promise<void>;
+  removeTeamActor(teamId: string, actorId: string): Promise<void>;
 }
 
 export interface IdeaRow {
