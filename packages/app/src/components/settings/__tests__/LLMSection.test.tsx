@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
     initAll: vi.fn(),
   }
   const workspaceState = { workspacePath: '/test', openCodeReady: true, setOpenCodeBootstrapped: vi.fn(), setWorkspace: vi.fn() }
-  const teamModeState = { teamMode: false, teamModelConfig: null as null | { model: string; modelName: string; baseUrl: string }, devUnlocked: false, teamModelOptions: [] as Array<{ id: string; name: string }>, switchTeamModel: vi.fn() }
+  const teamModeState = { teamModeType: null as string | null, teamModelConfig: null as null | { model: string; modelName: string; baseUrl: string }, devUnlocked: false, teamModelOptions: [] as Array<{ id: string; name: string }>, switchTeamModel: vi.fn() }
   return {
     providerState,
     workspaceState,
@@ -81,7 +81,7 @@ describe('LLMSection', () => {
     mocks.workspaceState.workspacePath = '/test'
     mocks.workspaceState.openCodeReady = true
     mocks.workspaceState.setWorkspace.mockReset()
-    mocks.teamModeState.teamMode = false
+    mocks.teamModeState.teamModeType = null
     mocks.teamModeState.teamModelConfig = null
     mocks.teamModeState.devUnlocked = false
     mocks.teamModeState.teamModelOptions = []

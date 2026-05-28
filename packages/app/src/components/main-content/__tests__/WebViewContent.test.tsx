@@ -34,7 +34,7 @@ describe("WebViewContent", () => {
       height: 600,
       toJSON: () => {},
     })
-    useTeamModeStore.setState({ teamMode: true })
+    useTeamModeStore.setState({ teamModeType: "git" })
     useTeamMembersStore.setState({ members: [] })
   })
 
@@ -42,7 +42,7 @@ describe("WebViewContent", () => {
     vi.unstubAllGlobals()
   })
 
-  it("uses team member display name when teamMode is on and member matches", async () => {
+  it("uses team member display name when team config is loaded and member matches", async () => {
     useTeamMembersStore.setState({
       members: [{ nodeId: "node-123", name: "Matt", role: "owner" } as never],
     })
@@ -92,7 +92,7 @@ describe("WebViewContent", () => {
   })
 
   it("uses device hostname with the persistent device id outside team mode", async () => {
-    useTeamModeStore.setState({ teamMode: false })
+    useTeamModeStore.setState({ teamModeType: null })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
       if (command === "get_persistent_device_id") return Promise.resolve("persisted-node")
@@ -116,7 +116,7 @@ describe("WebViewContent", () => {
   })
 
   it("still passes deviceNo when get_device_hostname fails (does not gate injection on name)", async () => {
-    useTeamModeStore.setState({ teamMode: false })
+    useTeamModeStore.setState({ teamModeType: null })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
       if (command === "get_persistent_device_id") return Promise.resolve("persisted-node")

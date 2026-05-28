@@ -46,7 +46,7 @@ const sidebarState = vi.hoisted(() => ({
 
 const teamModeState = vi.hoisted(() => ({
   devUnlocked: false,
-  teamMode: false,
+  teamModeType: null as string | null,
 }))
 
 const tabsStoreState = vi.hoisted(() => ({
@@ -220,7 +220,7 @@ describe('App', () => {
     workspaceStoreState.activeTab = 'shortcuts'
     workspaceStoreState.isNewWorkspace = false
     teamModeState.devUnlocked = false
-    teamModeState.teamMode = false
+    teamModeState.teamModeType = null
     tabsStoreState.activeTab = null
     tabsStoreState.tabs = []
     tabsStoreState.activeTabId = null

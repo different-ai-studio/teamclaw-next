@@ -65,7 +65,7 @@ vi.mock('@/stores/workspace', () => ({
 }))
 
 const teamModeState = {
-  teamMode: false,
+  teamModeType: null as string | null,
   setState: vi.fn(),
 }
 
@@ -165,7 +165,7 @@ beforeEach(() => {
   workspaceState.workspacePath = null
   workspaceState.workspaceBootstrapped = false
   workspaceState.workspaceReady = false
-  teamModeState.teamMode = false
+  teamModeState.teamModeType = null
   teamModeState.setState.mockClear()
   localStorage.clear()
 })

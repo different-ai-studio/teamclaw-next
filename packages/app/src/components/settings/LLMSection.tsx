@@ -87,7 +87,7 @@ function WorkspacePathCard({
 
 export const LLMSection = React.memo(function LLMSection() {
   const { t } = useTranslation()
-  const teamMode = useTeamModeStore((s) => s.teamMode)
+  const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const teamModelConfig = useTeamModeStore((s) => s.teamModelConfig)
   const devUnlocked = useTeamModeStore((s) => s.devUnlocked)
   const providers = useProviderStore((s) => s.providers)
@@ -179,7 +179,7 @@ export const LLMSection = React.memo(function LLMSection() {
       if (!selected || typeof selected !== 'string') return
       if (selected === workspacePath) return
 
-      if (teamMode) {
+      if (teamModeType) {
         setPendingWorkspacePath(selected)
         setTeamSwitchDialogOpen(true)
         return
@@ -191,7 +191,7 @@ export const LLMSection = React.memo(function LLMSection() {
     } finally {
       setSwitchingWorkspace(false)
     }
-  }, [setWorkspace, t, teamMode, workspacePath])
+  }, [setWorkspace, t, teamModeType, workspacePath])
 
   const handleConfirmTeamWorkspaceSwitch = React.useCallback(async () => {
     if (!pendingWorkspacePath) return
@@ -537,7 +537,7 @@ export const LLMSection = React.memo(function LLMSection() {
   const teamModelOptions = useTeamModeStore((s) => s.teamModelOptions)
   const switchTeamModel = useTeamModeStore((s) => s.switchTeamModel)
 
-  if (teamMode && teamModelConfig && !devUnlocked) {
+  if (teamModelConfig && !devUnlocked) {
     const hasMultipleModels = teamModelOptions.length > 1
     return (
       <div className="space-y-6">

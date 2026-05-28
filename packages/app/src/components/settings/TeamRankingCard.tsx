@@ -51,7 +51,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
   const { t } = useTranslation()
   const [leaderboard, setLeaderboard] = React.useState<TeamLeaderboard | null>(null)
   const [currentMemberName, setCurrentMemberName] = React.useState<string | null>(null)
-  const teamMode = useTeamModeStore((s) => s.teamMode)
+  const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const teamMembers = useTeamMembersStore((s) => s.members)
 
   React.useEffect(() => {
@@ -80,11 +80,11 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
 
   // Clear leaderboard data when team mode is disabled
   React.useEffect(() => {
-    if (!teamMode) {
+    if (!teamModeType) {
       setLeaderboard(null)
       setCurrentMemberName(null)
     }
-  }, [teamMode])
+  }, [teamModeType])
 
   // Calculate current user's rank
   const currentMember = React.useMemo(() => {
