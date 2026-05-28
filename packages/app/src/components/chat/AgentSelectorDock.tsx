@@ -19,7 +19,20 @@ import { useCurrentTeamStore } from '@/stores/current-team'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
-import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
+import { RuntimeLifecycle, AgentStatus, AgentType, type RuntimeInfo } from '@/lib/proto/amux_pb'
+import { amuxAgentTypeFromBackend } from '@/lib/amux-agent-type'
+import { availableModelsFor, type AmuxAgentType } from '@/lib/amuxd-models'
+import {
+  backendTypeFromRuntimeEntry,
+  agentModelDisplayLabel,
+  agentModelIdsMatch,
+  resolveRuntimeIdForAgent,
+  resolveRuntimeStateEntryForAgent,
+  resolveSetModelId,
+  selectAgentModel,
+} from '@/lib/runtime-state-resolve'
+import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
+import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { cn } from '@/lib/utils'
 import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
 
@@ -60,6 +73,19 @@ function modelIdForAgentBackend(model: ModelOption, providerId: string): string 
   return `${model.provider}/${model.id}`
 }
 
+function amuxAgentTypeFromRuntime(agentType: AgentType | number | undefined): AmuxAgentType | null {
+  switch (agentType) {
+    case AgentType.CLAUDE_CODE:
+      return 'claude-code'
+    case AgentType.OPENCODE:
+      return 'opencode'
+    case AgentType.CODEX:
+      return 'codex'
+    default:
+      return null
+  }
+}
+
 export function resolveAgentAvailableModels(
   runtimeInfo: RuntimeInfo | undefined,
   backendType?: string,
@@ -67,6 +93,14 @@ export function resolveAgentAvailableModels(
 ): AgentModelOption[] {
   if (runtimeInfo?.availableModels.length) {
     return runtimeInfo.availableModels
+  }
+
+  const amuxType =
+    amuxAgentTypeFromRuntime(runtimeInfo?.agentType) ??
+    amuxAgentTypeFromBackend(backendType)
+  if (amuxType) {
+    const staticModels = availableModelsFor(amuxType)
+    if (staticModels.length > 0) return staticModels
   }
 
   const providerId = providerIdForBackendType(backendType)
@@ -254,19 +288,34 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {engagedAgents.map((agent) => (
-        <AgentPill
-          key={agent.id}
-          agent={agent}
-          runtimeId={agentToRuntimeId.get(agent.id)}
-          backendType={agentToBackendType.get(agent.id)}
-          runtimeInfo={(() => {
-            const rid = agentToRuntimeId.get(agent.id)
-            return rid ? runtimeStates[rid]?.info : undefined
-          })()}
-          onRemove={() => onRemoveAgent(agent.id)}
-        />
-      ))}
+      {engagedAgents.map((agent) => {
+        const dbRuntimeId = agentToRuntimeId.get(agent.id)
+        const runtimeEntry = resolveRuntimeStateEntryForAgent(
+          agent.id,
+          runtimeStates,
+          dbRuntimeId,
+        )
+        const backendType = backendTypeFromRuntimeEntry(
+          runtimeEntry,
+          agentToBackendType.get(agent.id),
+        )
+        return (
+          <AgentPill
+            key={agent.id}
+            sessionIdProp={activeSessionId}
+            agent={agent}
+            dbRuntimeId={dbRuntimeId}
+            backendType={backendType}
+            runtimeInfo={runtimeEntry?.info}
+            onRemove={() => {
+              if (activeSessionId) {
+                useAgentModelPickStore.getState().clearPick(activeSessionId, agent.id)
+              }
+              onRemoveAgent(agent.id)
+            }}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -276,44 +325,97 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
 // ────────────────────────────────────────────────────────────────────────────
 
 function AgentPill({
+  sessionIdProp,
   agent,
-  runtimeId,
+  dbRuntimeId,
   backendType,
   runtimeInfo,
   onRemove,
 }: {
+  sessionIdProp: string | null
   agent: AttachedAgent
-  runtimeId: string | undefined
+  dbRuntimeId: string | undefined
   backendType: string | undefined
   runtimeInfo: RuntimeInfo | undefined
   onRemove: () => void
 }) {
   const { t } = useTranslation()
-  const { color: dotColor, pulse } = dotClasses(runtimeInfo)
+  const [open, setOpen] = React.useState(false)
   const providerModels = useProviderStore((s) => s.models)
+  const byRuntimeId = useRuntimeStateStore((s) => s.byRuntimeId)
+  const sessionId =
+    sessionIdProp?.trim() ||
+    useSessionSelectionStore.getState().activeSessionId?.trim() ||
+    ''
+
+  const liveRuntimeEntry = React.useMemo(
+    () => resolveRuntimeStateEntryForAgent(agent.id, byRuntimeId, dbRuntimeId),
+    [agent.id, byRuntimeId, dbRuntimeId],
+  )
+  const liveRuntimeInfo = liveRuntimeEntry?.info ?? runtimeInfo
+  const { color: dotColor, pulse } = dotClasses(liveRuntimeInfo)
 
   const availableModels = React.useMemo(
-    () => resolveAgentAvailableModels(runtimeInfo, backendType, providerModels),
-    [runtimeInfo, backendType, providerModels],
+    () => resolveAgentAvailableModels(liveRuntimeInfo, backendType, providerModels),
+    [liveRuntimeInfo, backendType, providerModels],
   )
-  const currentModel = runtimeInfo?.currentModel ?? ''
-  const displayedModel = currentModel || availableModels[0]?.id || ''
-  // Only `currentModel` reflects what the live runtime is actually using.
-  // When we fall back to availableModels[0] it's just a "what the dropdown
-  // would default to" placeholder, not the agent's real model — render it
-  // de-emphasized so the user can tell.
-  const isPlaceholderModel = !currentModel && !!displayedModel
+  const runtimeInfoLoading = availableModels.length === 0
+  // Subscribe to the pick entry so explicit user picks immediately drive the
+  // pill — selectAgentModel reads the same store but via getState() and would
+  // otherwise miss a re-render trigger.
+  const pickEntry = useAgentModelPickStore((s) =>
+    sessionId ? s.bySessionAgent[`${sessionId}::${agent.id}`] : undefined,
+  )
+  const selected = React.useMemo(
+    () =>
+      selectAgentModel({
+        sessionId,
+        agentId: agent.id,
+        available: availableModels,
+        byRuntimeId,
+      }),
+    [
+      sessionId,
+      agent.id,
+      availableModels,
+      byRuntimeId,
+      // Force recompute when the pick changes — pickEntry is referenced for
+      // the dependency hint; selectAgentModel reads from store.getState().
+      pickEntry?.modelId,
+    ],
+  )
+  const effectiveModelId = selected.modelId
+  const displayedModel =
+    (effectiveModelId
+      ? agentModelDisplayLabel(effectiveModelId, availableModels)
+      : '') ||
+    (runtimeInfoLoading ? '' : availableModels[0]?.displayName || availableModels[0]?.id || '')
+  // Pill shows user pick or live retain; list[0] is only a loading placeholder.
+  const isPlaceholderModel = selected.source === 'none' && !!displayedModel
 
-  const runtimeInfoLoading = !runtimeInfo && !backendType
+  const displayRuntimeId = liveRuntimeInfo?.runtimeId?.trim() || dbRuntimeId
+  const [modelSearch, setModelSearch] = React.useState('')
+  const filteredModels = React.useMemo(() => {
+    const q = modelSearch.trim().toLowerCase()
+    if (!q) return availableModels
+    return availableModels.filter((m) => {
+      const label = (m.displayName || m.id).toLowerCase()
+      return label.includes(q) || m.id.toLowerCase().includes(q)
+    })
+  }, [availableModels, modelSearch])
+
+  React.useEffect(() => {
+    if (!open) setModelSearch('')
+  }, [open])
 
   React.useEffect(() => {
     sessionFlowLog('agent_selector.model_options.resolved', {
       agentId: agent.id,
       agentName: agent.displayName,
-      runtimeId,
+      runtimeId: displayRuntimeId,
       backendType,
-      runtimeCurrentModel: runtimeInfo?.currentModel ?? null,
-      runtimeAvailableModelIds: runtimeInfo?.availableModels.map((m) => m.id) ?? [],
+      runtimeCurrentModel: liveRuntimeInfo?.currentModel ?? null,
+      runtimeAvailableModelIds: liveRuntimeInfo?.availableModels.map((m) => m.id) ?? [],
       providerModelKeys: providerModels.map((m) => `${m.provider}/${m.id}`),
       resolvedModelIds: availableModels.map((m) => m.id),
       runtimeInfoLoading,
@@ -321,56 +423,117 @@ function AgentPill({
   }, [
     agent.id,
     agent.displayName,
-    runtimeId,
+    displayRuntimeId,
     backendType,
-    runtimeInfo?.currentModel,
-    runtimeInfo?.availableModels,
+    liveRuntimeInfo?.currentModel,
+    liveRuntimeInfo?.availableModels,
     providerModels,
     availableModels,
     runtimeInfoLoading,
   ])
 
   const handlePickModel = React.useCallback(async (modelId: string) => {
+    const freshByRuntimeId = useRuntimeStateStore.getState().byRuntimeId
+    const rpcModelId = resolveSetModelId(agent.id, modelId, freshByRuntimeId)
+    const liveRuntimeId = resolveRuntimeIdForAgent(agent.id, freshByRuntimeId, dbRuntimeId)
+
     sessionFlowLog('agent_selector.model_pick.begin', {
       agentId: agent.id,
       agentName: agent.displayName,
-      runtimeId,
-      currentModel,
+      runtimeId: liveRuntimeId,
+      dbRuntimeId,
+      effectiveModelId,
       modelId,
+      rpcModelId,
       availableModelIds: availableModels.map((m) => m.id),
     })
-    if (!runtimeId) {
-      sessionFlowLog('agent_selector.model_pick.skipped_missing_runtime', {
+
+    // ── Step 1: store the pick FIRST. The pick is the source of truth from
+    // this point on. Persisted to localStorage; survives reload. Subsequent
+    // MQTT retains for this agent cannot override it (selectAgentModel
+    // prefers pick over retain).
+    if (sessionId) {
+      useAgentModelPickStore.getState().setPick(sessionId, agent.id, rpcModelId)
+    }
+
+    if (!liveRuntimeId) {
+      sessionFlowLog('agent_selector.model_pick.deferred_until_runtime', {
         agentId: agent.id,
         modelId,
-      }, 'warn')
+        sessionId,
+      })
+      const { toast } = await import('sonner')
+      toast.success(t('chat.agentSelector.modelPickSaved', '模型已选择'), {
+        description: t(
+          'chat.agentSelector.modelPickSavedHint',
+          '将在发送消息或 runtime 就绪后应用到 Agent',
+        ),
+      })
       return
     }
+
+    // ── Step 2: best-effort apply on the daemon. If this fails, the pick
+    // stays — the next runtimeStart / send flow re-applies it via
+    // startAgentRuntimesAsync → setModel.
     try {
       const result = await setModel({
         targetDeviceId: agent.id, // daemon device_id == agent actor_id convention
-        runtimeId,
-        modelId,
+        runtimeId: liveRuntimeId,
+        modelId: rpcModelId,
       })
       sessionFlowLog('agent_selector.model_pick.ok', {
         agentId: agent.id,
-        runtimeId,
-        modelId,
+        runtimeId: liveRuntimeId,
+        modelId: rpcModelId,
+        sessionId,
         result,
       })
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      // "agent not found" usually means the daemon spawn id rotated. One
+      // 400ms re-resolve usually catches the new spawn id from a fresh
+      // retain.
+      const retried =
+        /agent\s+.+\s+not found/i.test(message) &&
+        (await (async () => {
+          await new Promise((r) => setTimeout(r, 400))
+          const fresh = useRuntimeStateStore.getState().byRuntimeId
+          const retryRuntimeId = resolveRuntimeIdForAgent(agent.id, fresh, dbRuntimeId)
+          if (!retryRuntimeId || retryRuntimeId === liveRuntimeId) return false
+          try {
+            await setModel({
+              targetDeviceId: agent.id,
+              runtimeId: retryRuntimeId,
+              modelId: rpcModelId,
+            })
+            sessionFlowLog('agent_selector.model_pick.ok_after_retry', {
+              agentId: agent.id,
+              runtimeId: retryRuntimeId,
+              modelId: rpcModelId,
+            })
+            return true
+          } catch {
+            return false
+          }
+        })())
+      if (retried) return
+
       sessionFlowError('agent_selector.model_pick.failed', e, {
         agentId: agent.id,
-        runtimeId,
-        modelId,
+        runtimeId: liveRuntimeId,
+        modelId: rpcModelId,
       })
       const { toast } = await import('sonner')
-      toast.error(t('chat.agentSelector.modelChangeFailed', 'Failed to change model'))
-      console.error('[AgentSelectorDock] setModel failed', e)
+      toast.error(t('chat.agentSelector.modelChangeFailed', 'Failed to change model'), {
+        description: t(
+          'chat.agentSelector.modelChangeWillRetry',
+          '选择已保存，将在下次发送消息时重新应用。详情: {{message}}',
+          { message },
+        ),
+      })
+      console.error('[AgentSelectorDock] setModel failed (pick preserved)', e)
     }
-  }, [agent.id, agent.displayName, runtimeId, t, currentModel, availableModels])
-
-  const [open, setOpen] = React.useState(false)
+  }, [agent.id, agent.displayName, dbRuntimeId, sessionId, t, effectiveModelId, availableModels])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -385,7 +548,7 @@ function AgentPill({
             className={cn('h-2 w-2 rounded-full', dotColor, pulse && 'animate-pulse')}
           />
           <span className="truncate max-w-[8rem]">{agent.displayName}</span>
-          {runtimeInfoLoading ? (
+          {runtimeInfoLoading && !displayedModel ? (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
           ) : displayedModel ? (
             <>
@@ -413,9 +576,11 @@ function AgentPill({
         sideOffset={6}
         className="w-[18rem] p-0"
       >
-        <Command>
-          {availableModels.length > 6 ? (
+        <Command shouldFilter={false}>
+          {availableModels.length > 0 ? (
             <CommandInput
+              value={modelSearch}
+              onValueChange={setModelSearch}
               placeholder={t('chat.agentSelector.searchModelPlaceholder', 'Search models…')}
               className="text-xs"
             />
@@ -429,17 +594,22 @@ function AgentPill({
               <div className="px-2 py-3 text-xs text-muted-foreground">
                 {t('chat.agentSelector.noModels', 'No models advertised')}
               </div>
+            ) : filteredModels.length === 0 ? (
+              <div className="px-2 py-3 text-xs text-muted-foreground">
+                {t('chat.agentSelector.noMatchingModels', 'No matching models')}
+              </div>
             ) : (
               <>
-                <CommandEmpty className="py-3 text-xs">
-                  {t('chat.agentSelector.noMatchingModels', 'No matching models')}
-                </CommandEmpty>
                 <CommandGroup
                   heading={t('chat.agentSelector.modelHeading', 'Model')}
                 >
-                  {availableModels.map((m) => {
+                  {filteredModels.map((m) => {
                     const label = m.displayName || m.id
-                    const selected = m.id === currentModel
+                    const selected = agentModelIdsMatch(
+                      m.id,
+                      effectiveModelId,
+                      availableModels,
+                    )
                     return (
                       <CommandItem
                         key={m.id}

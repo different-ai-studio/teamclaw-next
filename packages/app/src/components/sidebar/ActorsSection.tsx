@@ -27,7 +27,7 @@ export function ActorsSection() {
   const toggle = useUIStore((s) => s.toggleActorsSection)
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
-  const { actors, loading, teamId, refetch } = useActorsForTeam()
+  const { actors, loading, refetch } = useActorsForTeam()
   const [inviteOpen, setInviteOpen] = React.useState(false)
   const [detailFor, setDetailFor] = React.useState<ActorRowData | null>(null)
   const [removeFor, setRemoveFor] = React.useState<ActorRowData | null>(null)
@@ -117,7 +117,7 @@ export function ActorsSection() {
           <Plus className="h-[11px] w-[11px]" />
         </button>
       </div>
-      <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} teamId={teamId} />
+      <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} />
       <ActorDetailDialog actor={detailFor} onOpenChange={(open) => { if (!open) setDetailFor(null) }} />
       <AlertDialog open={!!removeFor} onOpenChange={(open) => { if (!open) setRemoveFor(null) }}>
         <AlertDialogContent>

@@ -137,6 +137,8 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       sessionId: entry.sessionId,
       teamId: entry.teamId,
       topic,
+      mentionActorIds: entry.mentionActorIds,
+      ...summarizeText(entry.content),
     });
     try {
       await mqttPublish(

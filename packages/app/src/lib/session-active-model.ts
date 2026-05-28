@@ -1,4 +1,5 @@
 import { getBackend } from '@/lib/backend'
+import { resolveRuntimeStateEntryForAgent } from '@/lib/runtime-state-resolve'
 import type { RuntimeStateEntry } from '@/stores/runtime-state-store'
 import type { ModelOption } from '@/stores/provider'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
@@ -31,6 +32,15 @@ function providerIdForBackendType(backendType: string | null | undefined): strin
   }
 }
 
+function liveRuntimeEntryForRow(
+  row: RuntimeRow,
+  runtimeStates: Record<string, RuntimeStateEntry>,
+): RuntimeStateEntry | undefined {
+  const runtimeId = row.runtime_id?.trim() ?? ''
+  if (!runtimeId) return undefined
+  return resolveRuntimeStateEntryForAgent(runtimeId, runtimeStates, runtimeId)
+}
+
 export function resolveSessionModelFromRuntimeRows(
   rows: RuntimeRow[],
   runtimeStates: Record<string, RuntimeStateEntry>,
@@ -40,7 +50,7 @@ export function resolveSessionModelFromRuntimeRows(
     const provider = providerIdForBackendType(row.backend_type)
     if (!provider) continue
 
-    const liveModel = row.runtime_id ? runtimeStates[row.runtime_id]?.info.currentModel : ''
+    const liveModel = liveRuntimeEntryForRow(row, runtimeStates)?.info.currentModel ?? ''
     const candidates: Array<{ modelId: string; source: SessionModelResolution['source'] }> = [
       { modelId: liveModel || '', source: 'runtimeInfo' },
       { modelId: row.current_model || '', source: 'agentRuntimes' },
@@ -95,7 +105,7 @@ export async function loadSessionActiveModel(args: {
       runtimeId: row.runtime_id,
       backendType: row.backend_type,
       currentModel: row.current_model,
-      liveCurrentModel: row.runtime_id ? args.runtimeStates[row.runtime_id]?.info.currentModel : undefined,
+      liveCurrentModel: liveRuntimeEntryForRow(row, args.runtimeStates)?.info.currentModel,
     })),
   })
 

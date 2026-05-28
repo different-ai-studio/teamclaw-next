@@ -92,6 +92,7 @@ import {
 } from "@/lib/streaming-persist";
 import { useOutboxStore } from "@/stores/outbox-store";
 import { startOutboxSender } from "@/services/outbox-sender";
+import { useAcpDebugStore } from "@/stores/acp-debug-store";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtime-state-store";
 import { initDevicePresenceStore, disposeDevicePresenceStore } from "@/stores/device-presence-store";
@@ -812,7 +813,37 @@ function AppContent() {
           }
           const decoded = decodeLiveEvent(new Uint8Array(env.bytes));
           if (!decoded) return;
-          const sid = sessionIdFromLiveEvent(decoded, env.topic);
+          const sid = sessionIdFromLiveEvent(decoded, env.topic) ?? "";
+
+          if (env.topic.includes("/session/") && env.topic.endsWith("/live")) {
+            const mentionActorIds =
+              decoded.envelope.eventType === "message.created"
+                ? decoded.sessionMessage?.mentionActorIds ?? []
+                : undefined;
+            useAcpDebugStore.getState().append({
+              sessionId: sid,
+              topic: env.topic,
+              actorId: decoded.envelope.actorId,
+              eventCase: `live:${decoded.envelope.eventType || "unknown"}`,
+              envelopeMeta: {
+                eventId: decoded.envelope.eventId,
+                eventType: decoded.envelope.eventType,
+                sentAt: decoded.envelope.sentAt?.toString?.() ?? "",
+                actorId: decoded.envelope.actorId,
+                sessionId: decoded.envelope.sessionId,
+                hasAcpEvent: Boolean(decoded.acpEvent),
+                acpCase: decoded.acpEvent?.event?.case ?? null,
+                ...(mentionActorIds !== undefined
+                  ? {
+                      mentionActorIds,
+                      contentPreview: decoded.sessionMessage?.message?.content?.slice(0, 80) ?? "",
+                    }
+                  : {}),
+              },
+              acpEvent: decoded.acpEvent,
+            });
+          }
+
           if (!sid) return;
 
           if (
@@ -971,6 +1002,8 @@ function AppContent() {
             const actorId = streamActorIdFromLiveEvent(decoded);
             if (!actorId) return;
             const event = decoded.acpEvent.event;
+
+            // acp.event detail already logged in the live:* line above.
             if (event?.case === "output") {
               const text = (event.value as { text?: string })?.text ?? "";
               useV2StreamingStore.getState().appendOutput(sid, actorId, text);

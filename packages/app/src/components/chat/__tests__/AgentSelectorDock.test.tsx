@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
+import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 
 const mocks = vi.hoisted(() => ({
   agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null; session_id?: string | null }>,
@@ -58,6 +59,7 @@ describe('AgentSelectorDock', () => {
     mocks.runtimeStates = {}
     mocks.providerModels = []
     mocks.queriedTeamIds = []
+    useAgentModelPickStore.setState({ bySessionAgent: {} })
   })
 
   it('renders nothing when no agents are engaged', () => {
@@ -94,6 +96,15 @@ describe('AgentSelectorDock', () => {
     } as any)).toEqual([{ id: 'm-1', displayName: 'Model One' }])
   })
 
+  it('uses static Claude models from backend_type when MQTT retain is missing', () => {
+    const models = resolveAgentAvailableModels(undefined, 'claude-code', [])
+    expect(models.map((m) => m.id)).toEqual([
+      'claude-haiku-4-5',
+      'claude-sonnet-4-6',
+      'claude-opus-4-7',
+    ])
+  })
+
   it('loads runtime mapping for the displayed session id instead of legacy global state', async () => {
     mocks.agentRuntimeRows = [
       { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'displayed-session' },
@@ -111,6 +122,34 @@ describe('AgentSelectorDock', () => {
 
     await screen.findByText('OpenCode Bot')
     expect(mocks.queriedTeamIds).toContain('team-1')
+  })
+
+  it('shows ACP-advertised models when retain is keyed by agent id but DB runtime id differs', async () => {
+    mocks.agentRuntimeRows = [
+      { agent_id: 'a-1', runtime_id: 'uuid-db', backend_type: 'opencode', session_id: 'session-1' },
+    ]
+    mocks.runtimeStates = {
+      'a-1': {
+        daemonDeviceId: 'a-1',
+        lastUpdated: Date.now(),
+        info: {
+          agentType: 2,
+          availableModels: [{ id: 'anthropic/claude-sonnet-4.6', displayName: 'Sonnet 4.6' }],
+          currentModel: 'anthropic/claude-sonnet-4.6',
+        },
+      },
+    }
+
+    render(
+      <AgentSelectorDock
+        activeSessionId="session-1"
+        engagedAgents={[{ id: 'a-1', displayName: 'OpenCode Bot' }]}
+        onRemoveAgent={vi.fn()}
+      />,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: /OpenCode Bot/i }))
+    expect((await screen.findAllByText('Sonnet 4.6')).length).toBeGreaterThanOrEqual(1)
   })
 
   it('keeps the newest runtime row when duplicate rows arrive newest-first', async () => {
@@ -181,10 +220,10 @@ describe('AgentSelectorDock', () => {
       />,
     )
 
-    await screen.findByText('opencode/qwen3.6-plus-free')
+    await screen.findByText('OpenCode Zen/Qwen3.6 Plus Free')
     await userEvent.click(screen.getByRole('button', { name: /OpenCode Bot/i }))
 
-    expect(await screen.findByText('OpenCode Zen/Qwen3.6 Plus Free')).toBeInTheDocument()
+    expect((await screen.findAllByText('OpenCode Zen/Qwen3.6 Plus Free')).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('MiniMax-M2.5')).toBeInTheDocument()
     expect(screen.queryByText('Claude Sonnet 4.6')).not.toBeInTheDocument()
   })

@@ -20,7 +20,9 @@ use crate::daemon::prompt_await::parse_prompt_await_payload;
 use crate::daemon::runtime_resolution::{
     resolve_requested_agent_type, runtime_start_initial_model_override, supported_agent_type_names,
 };
-use crate::daemon::session_events::{format_idea_prompt, parse_mention_actor_ids};
+use crate::daemon::session_events::{
+    format_idea_prompt, message_attachment_urls, parse_mention_actor_ids,
+};
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::pocketbase::PocketBaseBackend;
@@ -2278,6 +2280,14 @@ impl DaemonServer {
         // id that mention_actor_ids encodes — matching against it would
         // never hit and every message would fall through to silent queue.
         let mentioned_actor = mention_actor_ids.iter().any(|m| m == &self.actor_id);
+        if mention_actor_ids.is_empty() {
+            warn!(
+                message_id = %message.message_id,
+                daemon_actor_id = %self.actor_id,
+                "route_session_message: empty mention_actor_ids; message will be silent-queued"
+            );
+        }
+        let attachment_urls = message_attachment_urls(message);
         for runtime_id in runtime_ids {
             if self.agents.lock().await.agent_id_of(&runtime_id).is_none() {
                 continue;
@@ -2285,6 +2295,15 @@ impl DaemonServer {
             let mentioned = mentioned_actor;
 
             if mentioned {
+                let prompt_body = message.content.trim();
+                if prompt_body.is_empty() && attachment_urls.is_empty() {
+                    warn!(
+                        runtime_id = %runtime_id,
+                        message_id = %message.message_id,
+                        "route_session_message: mentioned but empty content; skipping send_prompt"
+                    );
+                    continue;
+                }
                 // Real prompt — flush_pending_silent inside send_prompt does the prefix work.
                 let send_res = self
                     .agents
@@ -2292,8 +2311,8 @@ impl DaemonServer {
                     .await
                     .send_prompt(
                         &runtime_id,
-                        &message.content,
-                        message.attachment_urls.clone(),
+                        message.content.as_str(),
+                        attachment_urls.clone(),
                     )
                     .await;
                 let _drained = match send_res {
@@ -3855,6 +3874,10 @@ impl DaemonServer {
                 runtime_id = %existing,
                 "apply_start_runtime: dedup hit; reusing existing runtime"
             );
+            // Re-publish retained RuntimeInfo so clients that missed the
+            // original retain (late subscribe, reconnect) still populate the
+            // model picker without spawning a duplicate process.
+            self.publish_runtime_state_by_id(&existing).await;
             return Ok(StartRuntimeOutcome {
                 runtime_id: existing,
                 session_id: session_id.to_string(),

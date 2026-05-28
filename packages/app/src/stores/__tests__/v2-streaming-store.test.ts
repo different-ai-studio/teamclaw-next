@@ -3,7 +3,7 @@ import { useV2StreamingStore, selectStreamsForSession } from "../v2-streaming-st
 
 beforeEach(() => {
   // Reset to a clean state
-  useV2StreamingStore.setState({ byKey: {}, archived: [] });
+  useV2StreamingStore.setState({ byKey: {}, archived: [], persistedPlansBySession: {} });
 });
 
 describe("v2-streaming-store", () => {
@@ -291,6 +291,33 @@ describe("v2-streaming-store", () => {
     expect(stream.toolCalls[0].result).toContain("teamclaw-next");
     expect(stream.parts[0].toolCall?.result).toContain("teamclaw-next");
     expect(stream.parts[0].toolCall?.startTime).toBeInstanceOf(Date);
+  });
+
+  it("keeps persisted session plan after clearActor removes the live stream", () => {
+    const store = useV2StreamingStore.getState();
+    store.setPlan("s1", "a1", [
+      { content: "Task one", priority: "high", status: "in_progress" },
+      { content: "Task two", priority: "medium", status: "pending" },
+    ]);
+    store.clearActor("s1", "a1");
+
+    expect(selectStreamsForSession(useV2StreamingStore.getState(), "s1")).toHaveLength(0);
+    expect(useV2StreamingStore.getState().persistedPlansBySession.s1?.planEntries).toHaveLength(2);
+  });
+
+  it("keeps the latest non-empty plan when an empty update arrives", () => {
+    const store = useV2StreamingStore.getState();
+    store.setPlan("s1", "a1", [
+      { content: "Analyze requirements", priority: "high", status: "in_progress" },
+      { content: "Write tests", priority: "medium", status: "pending" },
+    ]);
+
+    store.setPlan("s1", "a1", []);
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.planEntries).toHaveLength(2);
+    expect(stream.planEntries[0].content).toBe("Analyze requirements");
+    expect(stream.planEntries[1].content).toBe("Write tests");
   });
 
   it("adds a completed placeholder when a result references an unseen tool in an existing stream", () => {
