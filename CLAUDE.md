@@ -50,12 +50,12 @@ remove the worktree after the PR is merged or the task is abandoned.
 
 Local files copied into new worktrees when present:
 
-- `.env` and `.env.local` — root secrets for deploy, backend, Supabase, push,
+- `.env` and `.env.local` — root secrets for deploy, backend, push,
   MQTT, and other live/self-test workflows.
 - `packages/app/.env.development.local` — required for the web/desktop Vite
   preview to get `VITE_SUPABASE_*` and MQTT settings.
 - `apps/daemon/.env` — required by daemon onboarding/init fallback when
-  `SUPABASE_URL` and `SUPABASE_ANON_KEY` are not exported in the shell.
+  `CLOUD_API_URL` is not exported in the shell.
 - `apps/expo/.env` — required for Expo when doing mobile work; the tracked
   `.env.example` is only a template.
 - `apps/android/local.properties` — required for Android builds to find the
@@ -182,7 +182,7 @@ bash .claude/skills/fc-deploy/deploy.sh
 
 ## Backend Access Boundary — Cloud API is the default backend
 
-**`cloud_api` is the default and canonical backend. The `supabase` backend kind is deprecated and will be removed in a future release.**
+**`cloud_api` is the default and canonical backend. The `supabase` backend kind has been removed from the daemon; clients still on `kind = "supabase"` in `backend.toml` must rerun `amuxd init <invite-url>` to regenerate the config.**
 
 The API contract is defined in `docs/openapi/teamclaw-api.v1.yaml`. All business data operations must go through the TeamClaw Cloud API (`/v1`) rather than direct Supabase client calls.
 
@@ -193,7 +193,7 @@ The Cloud API facade (`services/fc/lib/business-api.mjs`) is the canonical entry
 - **iOS** (`apps/ios/`): `CloudAPIClient` / `CloudAPIRepositories` in `apps/ios/Packages/AMUXCore/Sources/AMUXCore/CloudAPI/`
 - **daemon** (`apps/daemon/`): `cloud_api` backend module in `apps/daemon/src/backend/cloud_api.rs`
 
-Direct Supabase client usage (e.g. `supabase.from('sessions').select()`) is **reserved for internal FC repository implementation only** (`services/fc/lib/supabase-repo.mjs`). The FC facade forwards caller bearer tokens to Supabase, preserving RLS and auth semantics. The deprecated `supabase` backend kind in client config files is a legacy fallback — do not use it for new deployments.
+Direct Supabase client usage (e.g. `supabase.from('sessions').select()`) is **reserved for internal FC repository implementation only** (`services/fc/lib/supabase-repo.mjs`). The FC facade forwards caller bearer tokens to Supabase, preserving RLS and auth semantics. The `supabase` backend kind has been removed from the daemon and no longer applies to client config files.
 
 **When adding new business endpoints:**
 
