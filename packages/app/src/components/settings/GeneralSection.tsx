@@ -37,6 +37,7 @@ import {
   getEffectiveServerConfig,
   getSavedServerConfig,
   saveServerConfig,
+  type ServerConfig,
 } from '@/lib/server-config'
 
 // Theme helpers
@@ -146,8 +147,6 @@ export const GeneralSection = React.memo(function GeneralSection() {
         description={t('settings.general.description', 'Customize your application preferences')}
         iconColor="text-blue-500"
       />
-
-      <ServerAddressCard />
 
       <SettingCard>
         <h4 className="font-medium mb-4 flex items-center gap-2">
@@ -275,6 +274,8 @@ export const GeneralSection = React.memo(function GeneralSection() {
       </SettingCard>
 
       <ChatSuggestionsCard />
+
+      <ServerAddressCard />
     </div>
   )
 })
@@ -383,22 +384,24 @@ function ChatSuggestionsCard() {
 function ServerAddressCard() {
   const { t } = useTranslation()
   const [savedUrl, setSavedUrl] = React.useState('')
-  const [effectiveUrl, setEffectiveUrl] = React.useState('')
+  const [effective, setEffective] = React.useState<ServerConfig>({})
   const [draft, setDraft] = React.useState('')
   const [saving, setSaving] = React.useState(false)
 
-  React.useEffect(() => {
-    void (async () => {
-      const [saved, effective] = await Promise.all([
-        getSavedServerConfig(),
-        getEffectiveServerConfig(),
-      ])
-      const savedValue = saved.cloudApiUrl?.trim() ?? ''
-      setSavedUrl(savedValue)
-      setEffectiveUrl(effective.cloudApiUrl?.trim() ?? '')
-      setDraft(savedValue)
-    })()
+  const reload = React.useCallback(async () => {
+    const [saved, effectiveConfig] = await Promise.all([
+      getSavedServerConfig(),
+      getEffectiveServerConfig(),
+    ])
+    const savedValue = saved.cloudApiUrl?.trim() ?? ''
+    setSavedUrl(savedValue)
+    setEffective(effectiveConfig)
+    setDraft(savedValue)
   }, [])
+
+  React.useEffect(() => {
+    void reload()
+  }, [reload])
 
   const dirty = draft.trim() !== savedUrl.trim()
 
@@ -408,14 +411,21 @@ function ServerAddressCard() {
       const next = await saveServerConfig({ cloudApiUrl: draft.trim() || undefined })
       const nextValue = next.cloudApiUrl?.trim() ?? ''
       setSavedUrl(nextValue)
-      setEffectiveUrl(nextValue || effectiveUrl)
+      setEffective((current) => ({ ...current, cloudApiUrl: nextValue || current.cloudApiUrl }))
       toast.success(t('settings.general.serverSaved', 'Server address saved. Restart the app to apply.'))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
-  }, [draft, effectiveUrl, t])
+  }, [draft, t])
+
+  const mqttBroker = React.useMemo(() => {
+    if (!effective.mqttHost) return null
+    const scheme = effective.mqttUseTls ? 'mqtts' : 'mqtt'
+    const port = effective.mqttPort ?? (effective.mqttUseTls ? 8883 : 1883)
+    return `${scheme}://${effective.mqttHost}:${port}`
+  }, [effective.mqttHost, effective.mqttPort, effective.mqttUseTls])
 
   return (
     <SettingCard>
@@ -430,7 +440,7 @@ function ServerAddressCard() {
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={effectiveUrl || 'https://cloud.ucar.cc'}
+          placeholder={effective.cloudApiUrl || 'https://cloud.ucar.cc'}
           className="font-mono text-[12.5px]"
         />
         <p className="text-xs text-muted-foreground">
@@ -444,6 +454,42 @@ function ServerAddressCard() {
             {saving ? t('settings.general.saving', 'Saving…') : t('settings.general.save', 'Save')}
           </Button>
         </div>
+      </div>
+
+      <div className="mt-5 space-y-2 border-t border-border-soft pt-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] font-medium text-muted-foreground">
+            {t('settings.general.serverSynced', 'Synced from server')}
+          </span>
+          <span className="text-[11px] text-faint">
+            {t('settings.general.serverSyncedHint', 'Delivered on sign-in, read-only')}
+          </span>
+        </div>
+        {mqttBroker ? (
+          <dl className="grid grid-cols-[120px_1fr] gap-y-1.5 text-[12px]">
+            <dt className="text-muted-foreground">{t('settings.general.mqttBroker', 'MQTT broker')}</dt>
+            <dd className="font-mono text-foreground break-all">{mqttBroker}</dd>
+            {effective.mqttUsername ? (
+              <>
+                <dt className="text-muted-foreground">{t('settings.general.mqttUsername', 'Username')}</dt>
+                <dd className="font-mono text-foreground break-all">{effective.mqttUsername}</dd>
+              </>
+            ) : null}
+            {effective.mqttPassword ? (
+              <>
+                <dt className="text-muted-foreground">{t('settings.general.mqttPassword', 'Password')}</dt>
+                <dd className="font-mono text-foreground">••••••••</dd>
+              </>
+            ) : null}
+          </dl>
+        ) : (
+          <p className="text-[12px] text-muted-foreground italic">
+            {t(
+              'settings.general.serverSyncedEmpty',
+              'Not synced yet. Sign in once to fetch runtime configuration.',
+            )}
+          </p>
+        )}
       </div>
     </SettingCard>
   )
