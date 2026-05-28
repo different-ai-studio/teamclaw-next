@@ -924,13 +924,17 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
             let _ = manager.stop_agent(&runtime_id).await;
         }
         self.set_state(session_id, SessionState::Closed, Some("explicit_close"));
-        self.emit_next(
-            session_id,
-            RuntimeEnvelope::SessionError {
-                message: "session closed".to_string(),
-                details: "explicit_close".to_string(),
-            },
-        );
+        self.emit(session_id, {
+            let mut sessions = self.sessions.write();
+            let session = sessions.get_mut(&session_id).expect("session exists");
+            session.next_seq += 1;
+            SessionEvent::new(
+                session_id,
+                session.next_seq,
+                EventKind::SessionClosed,
+                serde_json::json!({ "reason": "explicit_close" }),
+            )
+        });
         Ok(())
     }
 
