@@ -1,8 +1,8 @@
 //! Per-runtime accumulator that turns the streaming ACP event firehose into
 //! discrete "logical messages" (thinking blocks, tool calls/results, agent
 //! replies). The daemon runs one of these per agent_id and feeds every
-//! `AcpEvent` into it; emitted messages get persisted (TOML, plus Supabase
-//! for AGENT_REPLY) and broadcast on session/live.
+//! `AcpEvent` into it; emitted messages get persisted (TOML, plus the cloud
+//! backend for AGENT_REPLY) and broadcast on session/live.
 //!
 //! ## metadata_json shapes
 //!
@@ -153,10 +153,10 @@ impl TurnAggregator {
         }
     }
 
-    /// True if this emitted message should be persisted to Supabase.
-    /// We only persist `AgentReply` (per design — Supabase is the durable
-    /// canonical conversation log, not an audit trail).
-    pub fn supabase_persistent(msg: &EmittedMessage) -> bool {
+    /// True if this emitted message should be persisted to the cloud backend.
+    /// We only persist `AgentReply` (per design — the cloud backend is the
+    /// durable canonical conversation log, not an audit trail).
+    pub fn cloud_persistent(msg: &EmittedMessage) -> bool {
         matches!(msg.kind, MessageKind::AgentReply)
     }
 

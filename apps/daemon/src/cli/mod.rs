@@ -36,7 +36,7 @@ pub enum Commands {
         join_url: Option<String>,
     },
     /// Delete local daemon state (daemon.toml, members.toml, sessions.toml,
-    /// supabase.toml, workspaces.toml). Use before running `init` against a
+    /// backend.toml, workspaces.toml). Use before running `init` against a
     /// different team or after revoking access.
     Clear {
         /// Skip the interactive confirmation prompt.

@@ -421,7 +421,7 @@ impl DaemonServer {
             return None;
         };
 
-        // The daemon's own actor_id (persisted in supabase.toml during `init`)
+        // The daemon's own actor_id (persisted in backend.toml during `init`)
         // is the agent participant the gateway-port channels speak as. Admin
         // owners are looked up from agent_member_access so they appear in
         // session_participants and can see gateway-originated DMs via RLS.
@@ -617,15 +617,15 @@ impl DaemonServer {
 
     /// Drive one ACP turn to completion for a cron-style session_key.
     ///
-    /// On first hit for a session_key the daemon creates a real Supabase
+    /// On first hit for a session_key the daemon creates a real cloud
     /// `sessions` row (so AgentReply messages land somewhere the desktop UI's
     /// "view session" button can resolve), adds the daemon's primary agent +
     /// admin members as `session_participants`, then spawns the ACP runtime
-    /// bound to that Supabase session id. `cron_sessions` caches a
+    /// bound to that cloud session id. `cron_sessions` caches a
     /// `(remote_session_id, acp_session_id)` pair so subsequent turns reuse
     /// the same chat thread AND reach the same agent process.
     ///
-    /// Returns `{text, session_id}` where `session_id` is the Supabase UUID —
+    /// Returns `{text, session_id}` where `session_id` is the cloud session UUID —
     /// the client (cron scheduler) stores it in `CronRunRecord.session_id` so
     /// the desktop UI's "view session" button resolves to a real chat session.
     async fn handle_prompt_await(
@@ -684,7 +684,7 @@ impl DaemonServer {
                         &format!("cron://{}", parsed.session_key), // binding
                         "cron",                                    // title (display only)
                         parsed.model_override.clone(),
-                        Some(&sb_sid), // bind AgentReply to the Supabase session
+                        Some(&sb_sid), // bind AgentReply to the cloud session
                         parsed.working_directory, // spawn in caller-supplied worktree if Some(_)
                     )
                     .await
@@ -695,7 +695,7 @@ impl DaemonServer {
                     session_key = %parsed.session_key,
                     remote_session_id = %sb_sid,
                     acp_session_id = %acp_sid,
-                    "cron: created Supabase session + spawned ACP runtime"
+                    "cron: created cloud session + spawned ACP runtime"
                 );
 
                 self.cron_sessions.insert(
@@ -869,7 +869,7 @@ impl DaemonServer {
                 loop {
                     tick.tick().await;
                     if let Err(e) = sb.heartbeat().await {
-                        warn!("supabase heartbeat error: {e}");
+                        warn!("cloud heartbeat error: {e}");
                     }
                 }
             });
@@ -896,7 +896,7 @@ impl DaemonServer {
             info!("idle_runtime_timeout_secs unset; idle ACP eviction disabled");
         }
 
-        // Register device_id in Supabase once (background).
+        // Register device_id in the cloud backend once (background).
         {
             let sb = self.backend.clone();
             let device_id = self.config.device.id.clone();
@@ -907,13 +907,13 @@ impl DaemonServer {
                 .unwrap_or_else(|| "claude".to_string());
             tokio::spawn(async move {
                 if let Err(e) = sb.set_agent_device_id(&device_id).await {
-                    warn!("supabase agents.device_id upsert failed: {e}");
+                    warn!("cloud agents.device_id upsert failed: {e}");
                 }
                 if let Err(e) = sb
                     .ensure_agent_types(&supported_agent_types, &default_agent_type)
                     .await
                 {
-                    warn!("supabase agents.agent_types advertise failed: {e}");
+                    warn!("cloud agents.agent_types advertise failed: {e}");
                 }
             });
         }
@@ -931,7 +931,7 @@ impl DaemonServer {
         let mut first_connect = true;
 
         'outer: loop {
-            // ── 1. Get fresh access_token (retry indefinitely on Supabase errors) ──
+            // ── 1. Get fresh access_token (retry indefinitely on cloud backend errors) ──
             let token = loop {
                 match self.backend.auth_token().await {
                     Ok(t) => break t,
@@ -1037,7 +1037,7 @@ impl DaemonServer {
 
             if first_connect {
                 self.register_startup_workspace().await;
-                // Drain messages that landed in Supabase while the daemon
+                // Drain messages that landed in the cloud backend while the daemon
                 // process was down. MQTT lives are dropped by the broker
                 // when clean_session=true clients are offline, so anything
                 // posted by desktop/iOS/expo between daemon stop and start
@@ -1512,7 +1512,7 @@ impl DaemonServer {
                 let mut workspace = outcome.workspace;
                 let mut should_save = outcome.inserted;
 
-                if self.sync_workspace_to_supabase(&mut workspace).await {
+                if self.sync_workspace_to_cloud(&mut workspace).await {
                     should_save = true;
                 }
 
@@ -1547,7 +1547,7 @@ impl DaemonServer {
     }
 
     /// Re-engage with sessions that had a runtime before the daemon was
-    /// last shut down so we can replay messages that landed in Supabase
+    /// last shut down so we can replay messages that landed in the cloud backend
     /// while the daemon was offline.
     ///
     /// Daemon-owned runtimes are subprocesses; they die when the daemon
@@ -1618,7 +1618,7 @@ impl DaemonServer {
     }
 
     /// Pure-decision half of [`auto_restart_offline_sessions`]: walks
-    /// membership sessions, queries Supabase, and returns the subset that
+    /// membership sessions, queries the cloud backend, and returns the subset that
     /// should be re-spawned. Extracted so unit tests can drive the
     /// branching logic (no prior row → skip, only self-authored unread →
     /// skip, already-running runtime → skip, etc.) without booting a real
@@ -1705,7 +1705,7 @@ impl DaemonServer {
             };
             let backend = resolve_requested_agent_type(&self.config, backend_requested);
 
-            // Translate the Supabase workspace id into a local workspace id
+            // Translate the cloud workspace id into a local workspace id
             // by matching on `remote_workspace_id`. If we can't find a
             // local mapping (workspace was archived locally, daemon
             // reinstalled, etc.) leave it empty so apply_start_runtime
@@ -1732,7 +1732,7 @@ impl DaemonServer {
         plan
     }
 
-    async fn sync_workspace_to_supabase(
+    async fn sync_workspace_to_cloud(
         &self,
         workspace: &mut crate::config::StoredWorkspace,
     ) -> bool {
@@ -1759,7 +1759,7 @@ impl DaemonServer {
                 true
             }
             Err(e) => {
-                warn!(path = %workspace.path, "workspace supabase sync failed: {}", e);
+                warn!(path = %workspace.path, "workspace cloud sync failed: {}", e);
                 false
             }
         }
@@ -1838,7 +1838,7 @@ impl DaemonServer {
     ///
     /// Gateway-spawned runtimes never reach `apply_start_runtime` and
     /// therefore have no entry in the local SessionStore. They carry the
-    /// supabase session UUID on their in-memory `RuntimeHandle` instead,
+    /// cloud session UUID on their in-memory `RuntimeHandle` instead,
     /// so when the persisted lookup misses we fall back to RuntimeManager.
     async fn target_sessions(&self, agent_id: &str) -> Vec<String> {
         if let Some(sid) = self
@@ -1991,7 +1991,7 @@ impl DaemonServer {
                 let sb = &self.backend;
                 let new_status = amux::AgentStatus::try_from(sc.new_status)
                     .unwrap_or(amux::AgentStatus::Unknown);
-                let supabase_status: &'static str = match new_status {
+                let cloud_status: &'static str = match new_status {
                     amux::AgentStatus::Active => "running",
                     amux::AgentStatus::Idle => "idle",
                     amux::AgentStatus::Stopped => "stopped",
@@ -2030,12 +2030,12 @@ impl DaemonServer {
                             Some(acp_sid.as_str())
                         },
                         runtime_id: Some(runtime_id_owned.as_str()),
-                        status: supabase_status,
+                        status: cloud_status,
                         current_model: current_model.as_deref(),
                         last_seen_at: now,
                     };
                     if let Err(e) = sb_clone.upsert_agent_runtime(&row).await {
-                        warn!("agent_runtimes upsert ({supabase_status}): {e}");
+                        warn!("agent_runtimes upsert ({cloud_status}): {e}");
                     }
                 });
             }
@@ -2058,11 +2058,11 @@ impl DaemonServer {
         // Drive the per-agent TurnAggregator. Emitted logical messages are
         // appended to local TOML, published to session/live as
         // `message.created`, and (for AGENT_REPLY only) persisted to
-        // Supabase `messages`. ACP `acp.event` envelopes still flow through
+        // cloud `messages`. ACP `acp.event` envelopes still flow through
         // the unchanged publish path below for streaming UI.
         let collab_sessions = self.target_sessions(agent_id).await;
         // Allocate the envelope sequence up front so it can also stamp
-        // emitted messages (Supabase `messages.sequence`). The envelope
+        // emitted messages (cloud `messages.sequence`). The envelope
         // append below uses the same value, keeping a 1:1 link between an
         // ACP event boundary and the messages that flowed from it.
         let (emitted, turn_id, seq) = {
@@ -2097,7 +2097,7 @@ impl DaemonServer {
                     .unwrap_or_default();
                 for msg in emitted {
                     let persist =
-                        crate::runtime::turn_aggregator::TurnAggregator::supabase_persistent(&msg);
+                        crate::runtime::turn_aggregator::TurnAggregator::cloud_persistent(&msg);
                     // Non-persistent kinds (AgentThinking / AgentToolCall /
                     // AgentToolResult) are already fully covered by the
                     // acp.event stream below — re-publishing them as
@@ -2105,7 +2105,7 @@ impl DaemonServer {
                     // render the same content twice (folded thinking card
                     // + plain bubble via handleIncomingChatMessage). Only
                     // AgentReply needs message.created, since that is the
-                    // turn-finalized form persisted to Supabase and used
+                    // turn-finalized form persisted to the cloud backend and used
                     // by historical replay / other collaborators.
                     if !persist {
                         continue;
@@ -2854,7 +2854,7 @@ impl DaemonServer {
                                                 ?err,
                                                 device_id = %device_id,
                                                 session_id = %n.refresh_hint,
-                                                "failed to ingest Supabase session after membership.refresh notify"
+                                                "failed to ingest cloud session after membership.refresh notify"
                                             );
                                         }
                                     }
@@ -2864,7 +2864,7 @@ impl DaemonServer {
                                         ?err,
                                         device_id = %device_id,
                                         session_id = %n.refresh_hint,
-                                        "failed to fetch Supabase session after membership.refresh notify"
+                                        "failed to fetch cloud session after membership.refresh notify"
                                     );
                                 }
                             }
@@ -2878,13 +2878,13 @@ impl DaemonServer {
         }
     }
 
-    /// Derive the caller's MemberRole via a Supabase `agent_member_access`
+    /// Derive the caller's MemberRole via a cloud `agent_member_access`
     /// lookup keyed on (our own agent actor id, envelope's sender_actor_id).
-    /// Supabase is the sole source of truth — on any failure (RPC error,
+    /// the cloud backend is the sole source of truth — on any failure (RPC error,
     /// missing sender_actor_id) the caller is denied (`Member` is the safe
     /// no-op level). Previous versions fell back to a `peer_id` token-prefix
     /// scrape against members.toml, which let anyone who guessed a 6-char
-    /// prefix masquerade as a member during a Supabase outage; that path
+    /// prefix masquerade as a member during a cloud backend outage; that path
     /// is gone.
     async fn resolve_role(&mut self, sender_actor_id: &str, _peer_id: &str) -> amux::MemberRole {
         if sender_actor_id.is_empty() {
@@ -2906,7 +2906,7 @@ impl DaemonServer {
                 amux::MemberRole::Member
             }
             Err(e) => {
-                warn!(%e, actor_id = %sender_actor_id, "supabase permission check failed; denying");
+                warn!(%e, actor_id = %sender_actor_id, "cloud permission check failed; denying");
                 amux::MemberRole::Member
             }
         }
@@ -2937,9 +2937,9 @@ impl DaemonServer {
 
         // Permission check.
         // Preferred path: iOS sets `sender_actor_id` on the envelope, daemon
-        // looks up `agent_member_access.permission_level` in Supabase and
+        // looks up `agent_member_access.permission_level` via the cloud backend and
         // reduces that to a MemberRole. Legacy path: fall back to the
-        // peer's MQTT-era role when the Supabase lookup is unavailable.
+        // peer's MQTT-era role when the cloud backend lookup is unavailable.
         let role = self.resolve_role(&sender_actor_id, &peer_id).await;
 
         if let Err(reason) = self.permissions.check_command_permission(role, &cmd) {
@@ -3583,7 +3583,7 @@ impl DaemonServer {
             Ok(outcome) => {
                 let mut ws = outcome.workspace;
                 let mut should_save = outcome.inserted;
-                if self.sync_workspace_to_supabase(&mut ws).await {
+                if self.sync_workspace_to_cloud(&mut ws).await {
                     should_save = true;
                 }
                 if let Some(existing) = self
@@ -3863,11 +3863,11 @@ impl DaemonServer {
             });
         }
 
-        // If iOS handed us a Supabase session_id, pull the row + participants
+        // If iOS handed us a cloud session_id, pull the row + participants
         // so we (a) populate the teamclaw cache that `agents_to_activate`
         // reads, and (b) subscribe to `session/{sid}/live` so inbound
         // `message.created` events from iOS actually reach us.
-        // iOS creates these sessions directly in Supabase, so this is the
+        // iOS creates these sessions directly in the cloud backend, so this is the
         // only place the daemon learns about them.
         if !session_id.is_empty() {
             match self
@@ -4173,7 +4173,7 @@ impl DaemonServer {
 
         // On success, fan the new current_model out via the retained per-runtime
         // state topic so iOS subscribers see the change immediately. Also
-        // upsert agent_runtimes.current_model so clients that read Supabase
+        // upsert agent_runtimes.current_model so clients that read the cloud backend
         // (e.g. when MQTT delivery is flaky) see the change — without this,
         // iOS picks up the stale current_model and the row label snaps back
         // to the previous model after refreshMemberSheet runs.
@@ -5144,7 +5144,7 @@ mod tests {
             &srv,
             "sess-mention",
             Some("msg-9"),
-            Some("ws-supabase-uuid"),
+            Some("ws-cloud-uuid"),
             "claude_code",
         )
         .await;
@@ -5194,7 +5194,7 @@ mod tests {
         assert_eq!(plan.len(), 1, "one session should need restart");
         assert_eq!(plan[0].session_id, "sess-mention");
         assert_eq!(plan[0].unread_count, 1, "self-authored msg-10 was filtered");
-        // No local workspace is registered for "ws-supabase-uuid", so the
+        // No local workspace is registered for "ws-cloud-uuid", so the
         // helper falls back to empty (apply_start_runtime will then
         // resolve via the registered workspace lookup or current dir).
         assert!(plan[0].local_workspace_id.is_empty());

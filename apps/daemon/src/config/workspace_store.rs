@@ -13,7 +13,6 @@ pub struct WorkspaceStore {
 pub struct StoredWorkspace {
     pub workspace_id: String,
     #[serde(default)]
-    #[serde(alias = "supabase_workspace_id")]
     pub remote_workspace_id: String,
     pub path: String,
     pub display_name: String,

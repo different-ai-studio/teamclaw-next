@@ -15,7 +15,7 @@
 //! On `send_prompt`, if the logical id has no entry, we lazy-spawn a fresh
 //! agent via `create_gateway_session` and remember the mapping. On amuxd
 //! restart the map is empty, so the first prompt for each persisted session
-//! re-spawns; old conversation history stays in Supabase regardless.
+//! re-spawns; old conversation history stays in the cloud backend regardless.
 
 use async_trait::async_trait;
 use std::collections::HashMap;

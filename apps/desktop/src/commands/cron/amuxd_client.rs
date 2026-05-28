@@ -14,7 +14,7 @@ pub struct PromptAwaitRequest<'a> {
     pub session_key: &'a str,
     pub message: &'a str,
     /// Human-readable name of the cron job. amuxd uses this to build the
-    /// Supabase session title ("Cron: <job_name>") so the desktop UI's "view
+    /// Cloud session title ("Cron: <job_name>") so the desktop UI's "view
     /// session" button on cron records resolves to a labeled chat thread.
     /// Optional — if absent amuxd falls back to "Cron job".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -35,7 +35,7 @@ pub struct ModelOverride<'a> {
 #[derive(Debug)]
 pub struct PromptAwaitResponse {
     pub text: String,
-    /// Supabase `sessions.id` (UUID) that the agent's AgentReply was persisted
+    /// Cloud `sessions.id` (UUID) that the agent's AgentReply was persisted
     /// under. The cron scheduler stamps this into `CronRunRecord.session_id`
     /// so the UI's "view session" button can navigate to it.
     pub session_id: String,

@@ -1398,7 +1398,7 @@ mod tests {
 
     #[tokio::test]
     async fn seed_cursor_from_prior_runtime_noop_when_no_session_id() {
-        // Without a session id we shouldn't touch Supabase. We deliberately
+        // Without a session id we shouldn't touch the cloud backend. We deliberately
         // give the client a bogus URL so any HTTP call would explode.
         let mut mgr = RuntimeManager::new(
             RuntimeManager::test_launch_configs(),

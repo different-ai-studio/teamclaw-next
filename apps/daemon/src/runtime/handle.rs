@@ -8,7 +8,7 @@ use crate::proto::amux;
 
 #[derive(Debug, Clone)]
 pub struct PendingMessage {
-    pub message_id: String, // supabase messages.id, used to update cursor after flush
+    pub message_id: String, // cloud messages.id, used to update cursor after flush
     pub sender_display: String, // for the prefix prose ("Matt: …")
     pub content: String,
     pub created_at: i64, // unix ts; preserved for ordering after coalescing
