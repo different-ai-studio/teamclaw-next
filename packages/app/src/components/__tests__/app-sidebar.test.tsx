@@ -38,6 +38,12 @@ const authStoreMocks = vi.hoisted(() => ({
     },
   },
   signOut: vi.fn(() => Promise.resolve()),
+  sendUpgradeEmailOtp: vi.fn(() => Promise.resolve()),
+  verifyUpgradeEmailOtp: vi.fn(() => Promise.resolve()),
+  resetUpgradeOtp: vi.fn(),
+  upgradeEmail: null,
+  loading: false,
+  errorMessage: null,
 }))
 
 const currentTeamStoreMocks = vi.hoisted(() => ({
@@ -129,8 +135,8 @@ vi.mock('@/stores/team-mode', () => ({
 }))
 
 vi.mock('@/stores/auth-store', () => ({
-  useAuthStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel(authStoreMocks as unknown as Record<string, unknown>),
+  useAuthStore: (sel?: (s: Record<string, unknown>) => unknown) =>
+    sel ? sel(authStoreMocks as unknown as Record<string, unknown>) : authStoreMocks,
 }))
 
 vi.mock('@/stores/current-team', () => ({

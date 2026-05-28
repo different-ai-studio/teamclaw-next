@@ -21,7 +21,17 @@ vi.mock('@/lib/backend', () => ({
 }))
 
 vi.mock('@/stores/session-list-store', () => ({
-  useSessionListStore: (sel: any) => sel({ rows: [{ id: 's-1', team_id: 'team-1' }] }),
+  useSessionListStore: Object.assign(
+    (sel: any) => sel({ rows: [{ id: 's-1', team_id: 'team-1' }] }),
+    {
+      subscribe: vi.fn(() => () => {}),
+      getState: vi.fn(() => ({ rows: [{ id: 's-1', team_id: 'team-1' }] })),
+    },
+  ),
+}))
+
+vi.mock('@/components/ui/sidebar', () => ({
+  useSidebar: () => ({ state: 'expanded', sidebarState: 'expanded', open: true, setOpen: vi.fn(), openMobile: false, setOpenMobile: vi.fn(), isMobile: false, toggleSidebar: vi.fn() }),
 }))
 
 vi.mock('react-i18next', () => ({
