@@ -101,6 +101,7 @@ fn default_askpass_path() -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+            // Direct siblings (dev/CI, and Linux/Windows bundles).
             for candidate in [
                 "teamclaw-askpass",
                 "teamclaw-askpass.sh",
@@ -110,6 +111,19 @@ fn default_askpass_path() -> Option<PathBuf> {
                 let p = dir.join(candidate);
                 if p.exists() {
                     return Some(p);
+                }
+            }
+            // macOS app bundle: exe lives in `Contents/MacOS/`, and
+            // tauri.conf.json `bundle.resources` are dropped into
+            // `Contents/Resources/`. Walk up one and check there.
+            if let Some(contents) = dir.parent() {
+                for candidate in [
+                    contents.join("Resources/teamclaw-askpass.sh"),
+                    contents.join("Resources/binaries/teamclaw-askpass.sh"),
+                ] {
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
                 }
             }
         }

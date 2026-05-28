@@ -8,13 +8,17 @@ mod roles;
 mod send;
 mod sync;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 
 // ---------------------------------------------------------------------------
 // CLI args
 // ---------------------------------------------------------------------------
+
+/// Default port of the internal TeamClaw introspect HTTP API (must match
+/// `commands::introspect_api::INTROSPECT_API_PORT` in the desktop crate).
+const DEFAULT_INTROSPECT_API_PORT: u16 = 13144;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -29,6 +33,30 @@ struct Args {
     /// Port of the local TeamClaw API server
     #[arg(long, default_value_t = 1420)]
     api_port: u16,
+
+    #[command(subcommand)]
+    command: Option<Cmd>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Cmd {
+    /// Fetch a stored Git credential for the `teamclaw-askpass` helper.
+    ///
+    /// Reads `_git_credential.{ref}` from the workspace's local encrypted
+    /// env_blob by calling the running TeamClaw app's internal HTTP API.
+    /// Prints the credential value to stdout (trailing newline). Exits with
+    /// non-zero on failure and writes a diagnostic message to stderr.
+    GetCredential {
+        /// Absolute path to the workspace whose env_blob holds the credential.
+        #[arg(long)]
+        workspace: String,
+        /// Credential ref, e.g. `custom_git:t1` or `managed_git:t1`.
+        #[arg(long = "ref")]
+        credential_ref: String,
+        /// Port of the running TeamClaw introspect HTTP API.
+        #[arg(long, default_value_t = DEFAULT_INTROSPECT_API_PORT)]
+        api_port: u16,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -438,9 +466,69 @@ async fn handle_request(req: &Value, workspace: &str, api_port: u16) -> Option<V
 // Entry point
 // ---------------------------------------------------------------------------
 
+async fn run_get_credential(workspace: &str, credential_ref: &str, api_port: u16) -> i32 {
+    match fetch_credential(workspace, credential_ref, api_port).await {
+        Ok(value) => {
+            // Print the credential value with a trailing newline. Git's
+            // GIT_ASKPASS treats either form (with or without newline) as the
+            // credential, so this is the conventional shape.
+            println!("{}", value);
+            0
+        }
+        Err(e) => {
+            eprintln!("[introspect] get-credential failed: {e}");
+            1
+        }
+    }
+}
+
+async fn fetch_credential(
+    workspace: &str,
+    credential_ref: &str,
+    api_port: u16,
+) -> Result<String, String> {
+    let url = format!("http://127.0.0.1:{api_port}/git-credential-get");
+    let body = json!({
+        "workspace_path": workspace,
+        "credential_ref": credential_ref,
+    });
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}. Is the TeamClaw app running?"))?;
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("read body failed: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("API error ({status}): {text}"));
+    }
+    let v: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("parse response failed: {e} (body: {text})"))?;
+    v.get("credential")
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("response missing `credential` field: {text}"))
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    if let Some(Cmd::GetCredential {
+        workspace,
+        credential_ref,
+        api_port,
+    }) = args.command
+    {
+        let code = run_get_credential(&workspace, &credential_ref, api_port).await;
+        std::process::exit(code);
+    }
+
     let workspace = args.workspace.clone();
     let api_port = args.api_port;
 
@@ -491,4 +579,66 @@ async fn main() {
     }
 
     eprintln!("[introspect] stdin closed, exiting");
+}
+
+#[cfg(test)]
+mod get_credential_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// Spawns a tiny one-shot HTTP responder on an ephemeral port that
+    /// returns `body` for a single request, then exits. Returns the bound
+    /// port.
+    async fn spawn_stub(body: &'static str, status: u16) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                // Drain request — we don't validate it here.
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let reason = if status == 200 { "OK" } else { "Error" };
+                let resp = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn fetch_credential_returns_value_on_success() {
+        let port = spawn_stub(
+            r#"{"ok":true,"authKind":"https_token","credential":"ghp_secret"}"#,
+            200,
+        )
+        .await;
+        let value = fetch_credential("/ws", "custom_git:t1", port).await.unwrap();
+        assert_eq!(value, "ghp_secret");
+    }
+
+    #[tokio::test]
+    async fn fetch_credential_errors_on_missing_field() {
+        let port = spawn_stub(r#"{"ok":true,"authKind":"ssh_key"}"#, 200).await;
+        let err = fetch_credential("/ws", "custom_git:t1", port).await.unwrap_err();
+        assert!(err.contains("missing `credential`"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn fetch_credential_errors_on_http_error() {
+        let port = spawn_stub("git credential not found: custom_git:t1", 500).await;
+        let err = fetch_credential("/ws", "custom_git:t1", port).await.unwrap_err();
+        assert!(err.contains("API error"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn fetch_credential_errors_when_api_down() {
+        // Port that nothing is listening on (use 1 which is privileged + unused).
+        let err = fetch_credential("/ws", "custom_git:t1", 1).await.unwrap_err();
+        assert!(err.contains("request failed"), "got: {err}");
+    }
 }
