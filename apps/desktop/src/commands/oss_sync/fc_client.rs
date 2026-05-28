@@ -313,37 +313,30 @@ impl FcClient {
     }
 
     /// POST /sync/set-mode — owner-only sync_mode switch (Tranche 5).
-    pub async fn set_team_sync_mode(
-        &self,
-        team_id: &str,
-        mode: &str,
-    ) -> Result<String, SyncError> {
+    pub async fn set_team_sync_mode(&self, team_id: &str, mode: &str) -> Result<String, SyncError> {
         let body = serde_json::json!({ "teamId": team_id, "mode": mode });
         #[derive(serde::Deserialize)]
-        struct ModeResp { mode: String }
+        struct ModeResp {
+            mode: String,
+        }
         let resp: ModeResp = self.post("/sync/set-mode", &body).await?;
         Ok(resp.mode)
     }
 
     /// POST /sync/team-mode — read sync_mode (Tranche 5).
-    pub async fn get_team_sync_mode(
-        &self,
-        team_id: &str,
-    ) -> Result<Option<String>, SyncError> {
+    pub async fn get_team_sync_mode(&self, team_id: &str) -> Result<Option<String>, SyncError> {
         let body = serde_json::json!({ "teamId": team_id });
         #[derive(serde::Deserialize)]
-        struct ModeResp { mode: Option<String> }
+        struct ModeResp {
+            mode: Option<String>,
+        }
         let resp: ModeResp = self.post("/sync/team-mode", &body).await?;
         Ok(resp.mode)
     }
 
     /// Generic POST helper for ad-hoc endpoints (e.g. team_share enable flow).
     /// Returns the raw JSON value on 2xx; surfaces FC error envelope on non-2xx.
-    pub async fn post_json(
-        &self,
-        path: &str,
-        body: &Value,
-    ) -> Result<Value, SyncError> {
+    pub async fn post_json(&self, path: &str, body: &Value) -> Result<Value, SyncError> {
         self.post(path, body).await
     }
 
@@ -400,10 +393,7 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
         let reason = body["reason"].as_str().unwrap_or("");
 
         // 409 CAS mismatch
-        if status.as_u16() == 409
-            || code == "P0409"
-            || reason == "cas-mismatch"
-        {
+        if status.as_u16() == 409 || code == "P0409" || reason == "cas-mismatch" {
             let remote_version = body["remoteVersion"].as_i64().map(|v| v as i32);
             let remote_cipher_hash = body["remoteHash"].as_str().map(|s| s.to_string());
             return Err(SyncError::Conflict {
@@ -422,7 +412,10 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
         // Session expired / gone
         if status.as_u16() == 410 || code == "P0410" {
             return Err(SyncError::SessionExpired(
-                body["error"].as_str().unwrap_or("session expired").to_string(),
+                body["error"]
+                    .as_str()
+                    .unwrap_or("session expired")
+                    .to_string(),
             ));
         }
 

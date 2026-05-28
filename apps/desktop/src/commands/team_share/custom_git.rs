@@ -251,8 +251,8 @@ pub fn clone_or_init(
     )?;
     let clone_result = cmd.output();
 
-    let clone_ok = matches!(&clone_result, Ok(out) if out.status.success())
-        && dest.join(".git").exists();
+    let clone_ok =
+        matches!(&clone_result, Ok(out) if out.status.success()) && dest.join(".git").exists();
 
     if clone_ok {
         return Ok(CloneOutcome::Cloned);

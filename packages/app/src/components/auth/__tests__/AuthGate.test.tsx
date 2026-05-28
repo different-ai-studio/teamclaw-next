@@ -10,6 +10,8 @@ const { authState, currentTeamMock, backendMock } = vi.hoisted(() => ({
   },
   currentTeamMock: {
     reloadAndSwitchTo: vi.fn(),
+    setActiveTeam: vi.fn(),
+    team: null as null | { id: string },
   },
   backendMock: {
     teams: {
@@ -66,6 +68,8 @@ beforeEach(() => {
   backendMock.teams.listCurrentUserTeams.mockReset();
   backendMock.teams.createTeam.mockReset();
   currentTeamMock.reloadAndSwitchTo.mockReset();
+  currentTeamMock.setActiveTeam.mockReset();
+  currentTeamMock.team = null;
 });
 
 describe("AuthGate", () => {
@@ -129,7 +133,7 @@ describe("AuthGate", () => {
       name: "Trial Team",
       slug: "trial-team",
     });
-    currentTeamMock.reloadAndSwitchTo.mockResolvedValueOnce(undefined);
+    currentTeamMock.setActiveTeam.mockResolvedValueOnce(undefined);
 
     render(
       <AuthGate>
@@ -137,7 +141,13 @@ describe("AuthGate", () => {
       </AuthGate>,
     );
 
-    await waitFor(() => expect(currentTeamMock.reloadAndSwitchTo).toHaveBeenCalledWith("team-new"));
+    await waitFor(() =>
+      expect(currentTeamMock.setActiveTeam).toHaveBeenCalledWith({
+        id: "team-new",
+        name: "Trial Team",
+        slug: "trial-team",
+      }),
+    );
     await waitFor(() => expect(screen.getByText("App shell")).toBeInTheDocument());
   });
 });

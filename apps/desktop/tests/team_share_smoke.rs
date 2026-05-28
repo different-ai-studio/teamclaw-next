@@ -119,8 +119,14 @@ async fn create_team_slim_only_calls_v1_teams_and_returns_id_slug() {
         );
     }
     // Pre-seeded keys preserved.
-    assert_eq!(obj.get("supabase_jwt").and_then(|v| v.as_str()), Some("test-jwt"));
-    assert_eq!(obj.get("fc_endpoint").and_then(|v| v.as_str()), Some(server.uri().as_str()));
+    assert_eq!(
+        obj.get("supabase_jwt").and_then(|v| v.as_str()),
+        Some("test-jwt")
+    );
+    assert_eq!(
+        obj.get("fc_endpoint").and_then(|v| v.as_str()),
+        Some(server.uri().as_str())
+    );
 }
 
 // ─── Task 6 tests ─────────────────────────────────────────────────────────
@@ -144,10 +150,9 @@ async fn enable_oss_provisions_secret_and_local_dir() {
     isolate_home(&tmp);
     let workspace = seed_workspace(&tmp, &server.uri());
 
-    let result =
-        team_share::enable::enable_oss_impl("t1".to_string(), workspace.clone())
-            .await
-            .expect("enable_oss should succeed");
+    let result = team_share::enable::enable_oss_impl("t1".to_string(), workspace.clone())
+        .await
+        .expect("enable_oss should succeed");
     assert_eq!(result.team_id, "t1");
     assert_eq!(result.share_mode, "oss");
 
@@ -233,19 +238,22 @@ async fn enable_custom_git_writes_git_config() {
         credential: "PRIVATE KEY BODY".to_string(),
         branch: None,
     };
-    let result = team_share::enable::enable_custom_git_impl(
-        "t1".to_string(),
-        workspace.clone(),
-        input,
-    )
-    .await
-    .expect("enable_custom_git should succeed");
+    let result =
+        team_share::enable::enable_custom_git_impl("t1".to_string(), workspace.clone(), input)
+            .await
+            .expect("enable_custom_git should succeed");
     assert_eq!(result.share_mode, "custom_git");
 
     let cfg = read_cfg(&workspace);
     let obj = cfg.as_object().expect("config is object");
-    assert_eq!(obj.get("share_mode").and_then(|v| v.as_str()), Some("custom_git"));
-    assert_eq!(obj.get("git_remote_url").and_then(|v| v.as_str()), Some("https://x"));
+    assert_eq!(
+        obj.get("share_mode").and_then(|v| v.as_str()),
+        Some("custom_git")
+    );
+    assert_eq!(
+        obj.get("git_remote_url").and_then(|v| v.as_str()),
+        Some("https://x")
+    );
     assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
 }
 
@@ -272,12 +280,10 @@ async fn join_existing_writes_config_when_share_enabled() {
     isolate_home(&tmp);
     let workspace = seed_workspace(&tmp, &server.uri());
 
-    let result = team_share::join::team_share_join_existing_impl(
-        "t1".to_string(),
-        workspace.clone(),
-    )
-    .await
-    .expect("join should succeed");
+    let result =
+        team_share::join::team_share_join_existing_impl("t1".to_string(), workspace.clone())
+            .await
+            .expect("join should succeed");
     assert!(result.initialized);
     assert_eq!(result.share_mode.as_deref(), Some("oss"));
 
@@ -314,18 +320,19 @@ async fn join_existing_noop_when_share_not_opened() {
     isolate_home(&tmp);
     let workspace = seed_workspace(&tmp, &server.uri());
 
-    let result = team_share::join::team_share_join_existing_impl(
-        "t2".to_string(),
-        workspace.clone(),
-    )
-    .await
-    .expect("join should succeed");
+    let result =
+        team_share::join::team_share_join_existing_impl("t2".to_string(), workspace.clone())
+            .await
+            .expect("join should succeed");
     assert!(!result.initialized);
     assert!(result.share_mode.is_none());
 
     // No teamclaw-team dir.
     let team_repo_dir = std::path::Path::new(&workspace).join("teamclaw-team");
-    assert!(!team_repo_dir.exists(), "teamclaw-team dir should NOT exist");
+    assert!(
+        !team_repo_dir.exists(),
+        "teamclaw-team dir should NOT exist"
+    );
 
     // No share_mode/oss_team_id written.
     let cfg = read_cfg(&workspace);
@@ -343,11 +350,7 @@ fn set_team_secret_rejects_non_hex() {
     // 64 chars but contains a non-hex char.
     let mut bad = "a".repeat(63);
     bad.push('z');
-    let err = team_share::enable::set_team_secret_impl(
-        "team-x".to_string(),
-        bad,
-        workspace,
-    )
-    .expect_err("non-hex should be rejected");
+    let err = team_share::enable::set_team_secret_impl("team-x".to_string(), bad, workspace)
+        .expect_err("non-hex should be rejected");
     assert!(err.contains("64 hex"), "unexpected error: {err}");
 }

@@ -60,10 +60,7 @@ pub async fn team_share_create(
 }
 
 /// Library entry point (also called from integration tests).
-pub async fn create_team(
-    name: String,
-    workspace_path: String,
-) -> Result<CreateTeamResult, String> {
+pub async fn create_team(name: String, workspace_path: String) -> Result<CreateTeamResult, String> {
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
     let row = fc

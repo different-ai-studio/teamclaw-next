@@ -135,10 +135,7 @@ pub enum ConflictChoice {
 
 /// Run a full OSS sync tick (pull + push).
 #[tauri::command]
-pub async fn oss_sync_now(
-    workspace_path: String,
-    _app: AppHandle,
-) -> Result<TickResult, String> {
+pub async fn oss_sync_now(workspace_path: String, _app: AppHandle) -> Result<TickResult, String> {
     let team_id = get_team_id(&workspace_path)?;
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
@@ -205,8 +202,8 @@ pub async fn oss_sync_restore_version(
         .get_blob(&dl.download_url, &content_hash)
         .await
         .map_err(|e| e.to_string())?;
-    let plaintext = crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key)
-        .map_err(|e| e.to_string())?;
+    let plaintext =
+        crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key).map_err(|e| e.to_string())?;
     let plain_hash = crate::commands::oss_sync::crypto::sha256_hex(&plaintext);
 
     let abs_path = std::path::Path::new(&workspace_path).join(&path);
@@ -343,8 +340,7 @@ fn oss_sync_set_local_sync_mode_inner(workspace_path: &str, mode: &str) -> Resul
     json["team_mode"] = serde_json::Value::String(mode.to_string());
 
     if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create config dir: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
     }
     std::fs::write(
         &config_path,
