@@ -29,7 +29,6 @@ use crate::pocketbase::PocketBaseBackend;
 use crate::proto::amux;
 use crate::provider_config::ProviderConfig;
 use crate::runtime::{AgentLaunchConfig, RuntimeManager};
-use crate::supabase::{SupabaseBackend, SupabaseConfig};
 use crate::team_shared_git::TeamSharedGitConfig;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
@@ -4688,21 +4687,11 @@ mod tests {
         }
     }
 
-    fn test_supabase() -> Arc<dyn Backend> {
-        test_supabase_with_url("http://localhost".to_string())
-    }
-
-    fn test_supabase_with_url(url: String) -> Arc<dyn Backend> {
-        Arc::new(
-            SupabaseBackend::new_without_persistence(SupabaseConfig {
-                url,
-                anon_key: "anon".to_string(),
-                refresh_token: "refresh".to_string(),
-                team_id: "team-test".to_string(),
-                actor_id: "agent-actor".to_string(),
-            })
-            .unwrap(),
-        )
+    fn test_backend() -> Arc<crate::backend::mock::MockBackend> {
+        Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ))
     }
 
     #[test]
@@ -4734,10 +4723,15 @@ mod tests {
     }
 
     fn test_server() -> TestServer {
-        test_server_with_supabase(test_supabase())
+        test_server_with_backend(test_backend())
     }
 
-    fn test_server_with_supabase(backend: Arc<dyn Backend>) -> TestServer {
+    fn test_server_with_backend(backend: Arc<crate::backend::mock::MockBackend>) -> TestServer {
+        let backend_dyn: Arc<dyn Backend> = backend;
+        test_server_with_dyn_backend(backend_dyn)
+    }
+
+    fn test_server_with_dyn_backend(backend: Arc<dyn Backend>) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
         let mqtt = test_mqtt(&config.device.id);
@@ -4934,10 +4928,7 @@ mod tests {
     async fn auto_restart_offline_sessions_is_noop_without_membership() {
         // The default test fixture has no teamclaw memberships (no
         // sessions.toml entries the actor is a participant in), so the
-        // method must return early before touching Supabase. A real
-        // Supabase call would fail because `test_supabase()` points at
-        // http://localhost with no server running, so a successful return
-        // here implies the early-exit guard fired.
+        // method must return early before touching the backend.
         let mut fixture = test_server();
         fixture.server.auto_restart_offline_sessions().await;
         // No runtimes added beyond the fixture's seeded "rt1".
@@ -4949,9 +4940,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_start_with_session_id_fails_when_supabase_lookup_fails() {
-        let mut fixture =
-            test_server_with_supabase(test_supabase_with_url("http://127.0.0.1:1".into()));
+    async fn runtime_start_with_session_id_fails_when_session_lookup_fails() {
+        // `MockBackend::fetch_session_with_participants` returns a Provider
+        // error for unseeded sessions, which is exactly the failure mode
+        // we want apply_start_runtime to translate into SESSION_LOOKUP_FAILED.
+        let mut fixture = test_server();
 
         let result = fixture
             .server
@@ -4986,51 +4979,48 @@ mod tests {
     //   - prior row exists, unread from someone else, no live runtime →
     //     keep with backend/workspace_id resolved from the prior row
     //   - prior row exists, but a live runtime is already serving → skip
-    use wiremock::matchers::{method, path_regex, query_param};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    async fn auth_token_mock(srv: &MockServer) {
-        Mock::given(method("POST"))
-            .and(path_regex(r"^/auth/v1/token$"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "at", "expires_in": 3600, "refresh_token": "rt"
-            })))
-            .mount(srv)
-            .await;
-    }
-
-    async fn mock_agent_runtime_row(
-        srv: &MockServer,
+    fn seed_latest_runtime_row(
+        backend: &crate::backend::mock::MockBackend,
         session_id: &str,
         last_processed_message_id: Option<&str>,
         workspace_id: Option<&str>,
         backend_type: &str,
     ) {
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .and(query_param("session_id", format!("eq.{}", session_id)))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                    "id": format!("row-{}", session_id),
-                    "workspace_id": workspace_id,
-                    "backend_type": backend_type,
-                    "backend_session_id": format!("acp-{}", session_id),
-                    "status": "stopped",
-                    "last_processed_message_id": last_processed_message_id,
-                    "last_seen_at": "2025-05-22T01:00:00Z"
-                }
-            ])))
-            .mount(srv)
-            .await;
+        backend.state().latest_runtime_rows.insert(
+            ("agent-actor".to_string(), session_id.to_string()),
+            crate::backend::AgentRuntimeRow {
+                id: format!("row-{session_id}"),
+                workspace_id: workspace_id.map(str::to_string),
+                backend_type: backend_type.to_string(),
+                backend_session_id: Some(format!("acp-{session_id}")),
+                status: "stopped".to_string(),
+                last_processed_message_id: last_processed_message_id.map(str::to_string),
+            },
+        );
     }
 
-    async fn mock_messages_response(srv: &MockServer, session_id: &str, rows: serde_json::Value) {
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/messages"))
-            .and(query_param("session_id", format!("eq.{}", session_id)))
-            .respond_with(ResponseTemplate::new(200).set_body_json(rows))
-            .mount(srv)
-            .await;
+    fn seed_messages(
+        backend: &crate::backend::mock::MockBackend,
+        session_id: &str,
+        rows: Vec<(&str, &str, &str, i64)>,
+    ) {
+        let stored: Vec<crate::backend::StoredMessage> = rows
+            .into_iter()
+            .map(|(id, sender, content, created_at)| crate::backend::StoredMessage {
+                id: id.to_string(),
+                session_id: session_id.to_string(),
+                sender_actor_id: sender.to_string(),
+                kind: "text".to_string(),
+                content: content.to_string(),
+                metadata_json: "{}".to_string(),
+                created_at,
+            })
+            .collect();
+        backend
+            .state()
+            .messages_by_session
+            .insert(session_id.to_string(), stored);
     }
 
     async fn add_membership(fixture: &mut TestServer, session_id: &str) {
@@ -5047,16 +5037,9 @@ mod tests {
 
     #[tokio::test]
     async fn plan_skips_session_with_no_prior_runtime_row() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
-        // Empty agent_runtimes response — no prior row.
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/agent_runtimes"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
-            .mount(&srv)
-            .await;
-
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        // No latest_runtime_rows entry seeded — fetch_latest returns None.
+        let backend = test_backend();
+        let mut fixture = test_server_with_backend(backend);
         add_membership(&mut fixture, "sess-no-row").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5065,15 +5048,11 @@ mod tests {
 
     #[tokio::test]
     async fn plan_skips_when_no_unread_messages_after_cursor() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
-        mock_agent_runtime_row(&srv, "sess-empty", Some("msg-9"), None, "claude").await;
-        // Supabase honours `messages_after_cursor` by returning an empty
-        // list (the drain-through-cursor logic happens client-side, but
-        // here we simulate "no messages newer than the cursor").
-        mock_messages_response(&srv, "sess-empty", serde_json::json!([])).await;
+        let backend = test_backend();
+        seed_latest_runtime_row(&backend, "sess-empty", Some("msg-9"), None, "claude");
+        // No messages seeded → messages_after_cursor returns empty.
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_backend(backend);
         add_membership(&mut fixture, "sess-empty").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5085,30 +5064,17 @@ mod tests {
 
     #[tokio::test]
     async fn plan_skips_when_unread_messages_are_all_self_authored() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
-        mock_agent_runtime_row(&srv, "sess-self", None, None, "claude").await;
-        // Two messages, both sent by the daemon's own actor (e.g. prior
-        // agent replies we already emitted). Auto-restart must NOT fire
-        // for these — there is no user input to process.
-        mock_messages_response(
-            &srv,
+        let backend = test_backend();
+        seed_latest_runtime_row(&backend, "sess-self", None, None, "claude");
+        // One message, sent by the daemon's own actor — must not trigger
+        // a restart because there is no user input to process.
+        seed_messages(
+            &backend,
             "sess-self",
-            serde_json::json!([
-                {
-                    "id": "msg-1",
-                    "session_id": "sess-self",
-                    "sender_actor_id": "agent-actor",
-                    "kind": "agent_reply",
-                    "content": "ok",
-                    "metadata": {},
-                    "created_at": "2025-05-22T01:00:00Z"
-                }
-            ]),
-        )
-        .await;
+            vec![("msg-1", "agent-actor", "ok", 1_716_336_000)],
+        );
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_backend(backend);
         add_membership(&mut fixture, "sess-self").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5120,51 +5086,33 @@ mod tests {
 
     #[tokio::test]
     async fn plan_keeps_session_with_unread_from_someone_else() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
-        mock_agent_runtime_row(
-            &srv,
+        let backend = test_backend();
+        seed_latest_runtime_row(
+            &backend,
             "sess-mention",
             Some("msg-9"),
-            Some("ws-supabase-uuid"),
+            Some("ws-remote-uuid"),
             "claude_code",
-        )
-        .await;
-        // One self-authored row (filtered out) plus one human row (kept).
-        mock_messages_response(
-            &srv,
+        );
+        // One self-authored row (filtered out by sender_actor_id check)
+        // plus one human row (kept).
+        seed_messages(
+            &backend,
             "sess-mention",
-            serde_json::json!([
-                {
-                    "id": "msg-10",
-                    "session_id": "sess-mention",
-                    "sender_actor_id": "agent-actor",
-                    "kind": "agent_reply",
-                    "content": "prior reply",
-                    "metadata": {},
-                    "created_at": "2025-05-22T00:30:00Z"
-                },
-                {
-                    "id": "msg-11",
-                    "session_id": "sess-mention",
-                    "sender_actor_id": "human-actor",
-                    "kind": "text",
-                    "content": "are you there?",
-                    "metadata": { "mention_actor_ids": ["agent-actor"] },
-                    "created_at": "2025-05-22T01:00:00Z"
-                }
-            ]),
-        )
-        .await;
+            vec![
+                ("msg-10", "agent-actor", "prior reply", 1_716_334_200),
+                ("msg-11", "human-actor", "are you there?", 1_716_336_000),
+            ],
+        );
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_backend(backend);
         add_membership(&mut fixture, "sess-mention").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
         assert_eq!(plan.len(), 1, "one session should need restart");
         assert_eq!(plan[0].session_id, "sess-mention");
         assert_eq!(plan[0].unread_count, 1, "self-authored msg-10 was filtered");
-        // No local workspace is registered for "ws-supabase-uuid", so the
+        // No local workspace is registered for "ws-remote-uuid", so the
         // helper falls back to empty (apply_start_runtime will then
         // resolve via the registered workspace lookup or current dir).
         assert!(plan[0].local_workspace_id.is_empty());
@@ -5172,31 +5120,19 @@ mod tests {
 
     #[tokio::test]
     async fn plan_skips_session_with_live_runtime_already_running() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
+        let backend = test_backend();
         // The fixture seeds a runtime "rt1" bound to session_id
         // "session-1" via add_test_runtime. Make that the membership
         // session and confirm the planner refuses to schedule a second
         // spawn for the same session.
-        mock_agent_runtime_row(&srv, "session-1", None, None, "claude").await;
-        mock_messages_response(
-            &srv,
+        seed_latest_runtime_row(&backend, "session-1", None, None, "claude");
+        seed_messages(
+            &backend,
             "session-1",
-            serde_json::json!([
-                {
-                    "id": "msg-50",
-                    "session_id": "session-1",
-                    "sender_actor_id": "human-actor",
-                    "kind": "text",
-                    "content": "hi",
-                    "metadata": {},
-                    "created_at": "2025-05-22T01:00:00Z"
-                }
-            ]),
-        )
-        .await;
+            vec![("msg-50", "human-actor", "hi", 1_716_336_000)],
+        );
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_backend(backend);
         add_membership(&mut fixture, "session-1").await;
 
         let plan = fixture.server.plan_auto_restart_offline_sessions().await;
@@ -5215,29 +5151,28 @@ mod tests {
     // conversation already moved past them — firing a fresh turn on those
     // stale mentions would emit out-of-date replies.
 
-    fn make_message_row(
+    fn make_stored_message(
         id: &str,
         session_id: &str,
         sender_actor_id: &str,
         mentions: &[&str],
         content: &str,
-        created_at: &str,
-    ) -> serde_json::Value {
-        serde_json::json!({
-            "id": id,
-            "session_id": session_id,
-            "sender_actor_id": sender_actor_id,
-            "kind": "text",
-            "content": content,
-            "metadata": { "mention_actor_ids": mentions },
-            "created_at": created_at,
-        })
+        created_at: i64,
+    ) -> crate::backend::StoredMessage {
+        let metadata = serde_json::json!({ "mention_actor_ids": mentions });
+        crate::backend::StoredMessage {
+            id: id.to_string(),
+            session_id: session_id.to_string(),
+            sender_actor_id: sender_actor_id.to_string(),
+            kind: "text".to_string(),
+            content: content.to_string(),
+            metadata_json: metadata.to_string(),
+            created_at,
+        }
     }
 
     #[tokio::test]
     async fn catchup_runtime_prompts_only_on_last_mention_compacting_stale_ones() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
         // 3-message replay: @daemon, @daemon, plain. The latest @daemon is
         // msg-b; msg-a is stale (a later @daemon came in). msg-c is a
         // non-mention follow-up and should also land as silent context.
@@ -5246,38 +5181,38 @@ mod tests {
         //     @-mention's content)
         //   - the silent queue holds msg-a only (msg-b is consumed by the
         //     real prompt; msg-c never @-mentions us, hence silent)
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                make_message_row(
+        let backend = test_backend();
+        backend.state().messages_by_session.insert(
+            "session-1".to_string(),
+            vec![
+                make_stored_message(
                     "msg-a",
                     "session-1",
                     "human-1",
                     &["agent-actor"],
                     "ask A",
-                    "2025-05-22T01:00:01Z",
+                    1_716_336_001,
                 ),
-                make_message_row(
+                make_stored_message(
                     "msg-b",
                     "session-1",
                     "human-1",
                     &["agent-actor"],
                     "ask B",
-                    "2025-05-22T01:00:02Z",
+                    1_716_336_002,
                 ),
-                make_message_row(
+                make_stored_message(
                     "msg-c",
                     "session-1",
                     "human-2",
                     &[],
                     "drive-by chatter",
-                    "2025-05-22T01:00:03Z",
+                    1_716_336_003,
                 ),
-            ])))
-            .mount(&srv)
-            .await;
+            ],
+        );
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_backend(backend);
         fixture.server.catchup_runtime("rt1").await;
 
         // `send_prompt` (not raw) auto-drains the silent queue via
@@ -5317,32 +5252,30 @@ mod tests {
 
     #[tokio::test]
     async fn catchup_runtime_with_no_mentions_routes_everything_silent() {
-        let srv = MockServer::start().await;
-        auth_token_mock(&srv).await;
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/rest/v1/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                make_message_row(
+        let backend = test_backend();
+        backend.state().messages_by_session.insert(
+            "session-1".to_string(),
+            vec![
+                make_stored_message(
                     "msg-a",
                     "session-1",
                     "human-1",
                     &[],
                     "first chatter",
-                    "2025-05-22T01:00:01Z",
+                    1_716_336_001,
                 ),
-                make_message_row(
+                make_stored_message(
                     "msg-b",
                     "session-1",
                     "human-2",
                     &[],
                     "second chatter",
-                    "2025-05-22T01:00:02Z",
+                    1_716_336_002,
                 ),
-            ])))
-            .mount(&srv)
-            .await;
+            ],
+        );
 
-        let mut fixture = test_server_with_supabase(test_supabase_with_url(srv.uri()));
+        let mut fixture = test_server_with_backend(backend);
         fixture.server.catchup_runtime("rt1").await;
 
         let agents = fixture.server.agents.lock().await;
