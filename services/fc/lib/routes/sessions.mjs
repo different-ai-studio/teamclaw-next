@@ -61,8 +61,24 @@ export function registerSessions(router) {
 
   router.post("/v1/sessions/:sessionId/mark-viewed", async (ctx) => {
     const sessionId = decodeURIComponent(ctx.params.sessionId);
-    await ctx.repository.markSessionViewed(sessionId);
+    const body = ctx.json ?? {};
+    const lastReadMessageId = typeof body.lastReadMessageId === "string" && body.lastReadMessageId.length > 0
+      ? body.lastReadMessageId
+      : null;
+    await ctx.repository.markSessionViewed(sessionId, lastReadMessageId);
     return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/teams/:teamId/sessions", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const items = await ctx.repository.listTeamSessionsFull(teamId);
+    return { body: { items } };
+  });
+
+  router.get("/v1/teams/:teamId/agent-runtimes", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const items = await ctx.repository.listAgentRuntimesForTeam(teamId);
+    return { body: { items } };
   });
 
   router.get("/v1/sessions/:sessionId/participants", async (ctx) => {

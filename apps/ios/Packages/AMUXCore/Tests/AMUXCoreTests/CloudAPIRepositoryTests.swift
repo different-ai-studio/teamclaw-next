@@ -13,8 +13,7 @@ struct CloudAPIRepositoryTests {
             send: { request in
                 await recorder.append(request)
                 let path = request.url?.path ?? ""
-                let query = request.url?.query ?? ""
-                if path == "/v1/sessions", query == "limit=100" {
+                if path == "/v1/teams/team-1/sessions" {
                     return try response("""
                     {
                       "items": [
@@ -24,8 +23,12 @@ struct CloudAPIRepositoryTests {
                           "title": "Session",
                           "mode": "collab",
                           "ideaId": null,
+                          "primaryAgentId": "agent-1",
+                          "createdByActorId": "actor-1",
+                          "summary": "topic",
                           "lastMessageAt": "2026-05-27T10:00:00Z",
                           "lastMessagePreview": "hello",
+                          "participantCount": 3,
                           "hasUnread": true,
                           "createdAt": "2026-05-27T09:00:00Z",
                           "updatedAt": null
@@ -70,6 +73,10 @@ struct CloudAPIRepositoryTests {
 
         #expect(sessions.map(\.id) == ["session-1"])
         #expect(sessions.first?.lastMessagePreview == "hello")
+        #expect(sessions.first?.primaryAgentID == "agent-1")
+        #expect(sessions.first?.createdByActorID == "actor-1")
+        #expect(sessions.first?.summary == "topic")
+        #expect(sessions.first?.participantCount == 3)
         #expect(messages.map(\.id) == ["message-1"])
         #expect(messages.first?.turnID == "turn-1")
         let requests = await recorder.requests
@@ -123,6 +130,92 @@ struct CloudAPIRepositoryTests {
         #expect(json["id"] as? String == "message-1")
         #expect(json["teamId"] as? String == "team-1")
         #expect((json["metadata"] as? [String: [String]])?["mention_actor_ids"] == ["agent-1"])
+    }
+
+    @Test
+    func sessionIDsRepositoryProjectsIDs() async throws {
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { _ in
+                try response("""
+                {
+                  "items": [
+                    { "id": "session-a", "teamId": "team-1", "title": "A", "mode": "solo",
+                      "ideaId": null, "primaryAgentId": null, "createdByActorId": null,
+                      "summary": null, "lastMessageAt": null, "lastMessagePreview": null,
+                      "participantCount": 1, "hasUnread": false, "createdAt": null, "updatedAt": null },
+                    { "id": "session-b", "teamId": "team-1", "title": "B", "mode": "solo",
+                      "ideaId": null, "primaryAgentId": null, "createdByActorId": null,
+                      "summary": null, "lastMessageAt": null, "lastMessagePreview": null,
+                      "participantCount": 0, "hasUnread": false, "createdAt": null, "updatedAt": null }
+                  ],
+                  "nextCursor": null
+                }
+                """)
+            }
+        )
+        let repo = CloudAPISessionIDsRepository(client: client)
+        let ids = try await repo.listSessionIDs(teamID: "team-1")
+        #expect(ids == Set(["session-a", "session-b"]))
+    }
+
+    @Test
+    func agentRuntimesRepositoryDecodesTeamRuntimes() async throws {
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { request in
+                #expect(request.url?.path == "/v1/teams/team-1/agent-runtimes")
+                return try response("""
+                {
+                  "items": [
+                    {
+                      "id": "rt-1", "teamId": "team-1", "agentId": "agent-1",
+                      "sessionId": "session-1", "workspaceId": null,
+                      "backendType": "claude_code", "status": "ready",
+                      "backendSessionId": "bs-1", "runtimeId": "rt12abcd",
+                      "currentModel": "claude-opus-4-7",
+                      "lastSeenAt": "2026-05-27T10:00:00Z",
+                      "createdAt": "2026-05-27T09:00:00Z",
+                      "updatedAt": "2026-05-27T10:00:00Z"
+                    }
+                  ],
+                  "nextCursor": null
+                }
+                """)
+            }
+        )
+        let repo = CloudAPIAgentRuntimesRepository(client: client)
+        let runtimes = try await repo.listForTeam(teamID: "team-1")
+        #expect(runtimes.map(\.id) == ["rt-1"])
+        #expect(runtimes.first?.backendType == "claude_code")
+        #expect(runtimes.first?.runtimeID == "rt12abcd")
+        #expect(runtimes.first?.currentModel == "claude-opus-4-7")
+    }
+
+    @Test
+    func markSessionViewedPostsLastReadMessageId() async throws {
+        let recorder = RequestRecorder()
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { request in
+                await recorder.append(request)
+                let url = URL(string: "https://fc.example.com")!
+                let http = try #require(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil))
+                return (Data(), http)
+            }
+        )
+        let repo = CloudAPISessionsRepository(client: client)
+        try await repo.markSessionViewed(sessionId: "session-1", lastReadMessageId: "msg-42")
+
+        let request = try #require(await recorder.requests.first)
+        #expect(request.url?.path == "/v1/sessions/session-1/mark-viewed")
+        #expect(request.httpMethod == "POST")
+        let body = try #require(request.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["lastReadMessageId"] as? String == "msg-42")
     }
 
     private func configuration() -> CloudAPIConfiguration {
