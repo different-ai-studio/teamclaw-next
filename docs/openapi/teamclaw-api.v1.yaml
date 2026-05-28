@@ -1441,6 +1441,14 @@ paths:
           schema:
             type: string
           description: Storage path for the attachment (e.g. team-id/file.png)
+        - in: query
+          name: bucket
+          required: false
+          schema:
+            type: string
+            enum: [attachments, avatars]
+            default: attachments
+          description: Storage bucket. Defaults to `attachments`. `avatars` is reserved for actor avatar images.
         - in: header
           name: Content-Type
           required: true
@@ -1483,6 +1491,14 @@ paths:
           schema:
             type: string
           description: Storage path of the attachment
+        - in: query
+          name: bucket
+          required: false
+          schema:
+            type: string
+            enum: [attachments, avatars]
+            default: attachments
+          description: Storage bucket. Defaults to `attachments`.
       responses:
         "200":
           description: Attachment bytes.

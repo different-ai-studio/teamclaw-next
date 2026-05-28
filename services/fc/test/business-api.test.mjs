@@ -1236,8 +1236,45 @@ test("POST /v1/attachments uploads binary body and returns path + url", async ()
   assert.ok(typeof parsed.url === "string");
   assert.deepEqual(repo.calls[0], {
     method: "uploadAttachment",
-    input: { path: "foo/bar.png", mime: "image/png", bytes: body },
+    input: { path: "foo/bar.png", mime: "image/png", bytes: body, bucket: "attachments" },
   });
+});
+
+test("POST /v1/attachments?bucket=avatars routes to avatars bucket and returns avatars url", async () => {
+  const repo = fakeRepo();
+  const body = Buffer.from("avatar-bytes");
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/attachments",
+    headers: { Authorization: "Bearer token", "Content-Type": "image/jpeg" },
+    queryStringParameters: { path: "actor-1/avatar-1.jpg", bucket: "avatars" },
+    body: body.toString("base64"),
+    isBase64Encoded: true,
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.path, "actor-1/avatar-1.jpg");
+  assert.ok(parsed.url.includes("/avatars/"));
+  assert.deepEqual(repo.calls[0], {
+    method: "uploadAttachment",
+    input: { path: "actor-1/avatar-1.jpg", mime: "image/jpeg", bytes: body, bucket: "avatars" },
+  });
+});
+
+test("POST /v1/attachments rejects unknown bucket with 400", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/attachments",
+    headers: { Authorization: "Bearer token", "Content-Type": "image/png" },
+    queryStringParameters: { path: "x.png", bucket: "secrets" },
+    body: Buffer.from("x").toString("base64"),
+    isBase64Encoded: true,
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
+  assert.equal(repo.calls.length, 0);
 });
 
 test("POST /v1/attachments returns 400 when path query param is missing", async () => {
@@ -1267,7 +1304,7 @@ test("GET /v1/attachments/:path returns binary response", async () => {
   assert.equal(response.headers["Content-Type"], "image/png");
   const decoded = Buffer.from(response.body, "base64");
   assert.deepEqual(decoded, Buffer.from("fake-image-bytes"));
-  assert.deepEqual(repo.calls[0], { method: "downloadAttachment", path: "foo%2Fbar.png" });
+  assert.deepEqual(repo.calls[0], { method: "downloadAttachment", path: "foo%2Fbar.png", options: { bucket: "attachments" } });
 });
 
 test("GET /v1/attachments/:path returns 404 when attachment missing", async () => {
@@ -1456,8 +1493,8 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async updateRuntimeCursor(runtimeRowId, input) { calls.push({ method: "updateRuntimeCursor", runtimeRowId, input }); if (error) throw error; },
     async ensureAgentTypes(input) { calls.push({ method: "ensureAgentTypes", input }); if (error) throw error; },
     async setAgentDeviceId(agentActorId, input) { calls.push({ method: "setAgentDeviceId", agentActorId, input }); if (error) throw error; },
-    async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/attachments/${input.path}` }; },
-    async downloadAttachment(path) { calls.push({ method: "downloadAttachment", path }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
+    async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; const bucket = input.bucket ?? "attachments"; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/${bucket}/${input.path}` }; },
+    async downloadAttachment(path, options) { calls.push({ method: "downloadAttachment", path, options }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
     async submitFeedback(body) { calls.push({ method: "submitFeedback", body }); if (error) throw error; return { messageId: body.messageId, actorId: body.actorId, kind: body.kind, starRating: body.starRating ?? null, note: body.note ?? null, createdAt: "2026-05-28T00:00:00Z", updatedAt: null }; },
     async listFeedback(args) { calls.push({ method: "listFeedback", args }); if (error) throw error; return { items: [] }; },
     async deleteFeedback(messageId, actorId) { calls.push({ method: "deleteFeedback", messageId, actorId }); if (error) throw error; },
