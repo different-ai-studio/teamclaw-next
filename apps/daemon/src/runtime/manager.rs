@@ -681,11 +681,28 @@ impl RuntimeManager {
             if let Some(message) = self.send_failures.remove(agent_id) {
                 return Err(crate::error::AmuxError::Agent(message));
             }
-            if let Some(h) = self.agents.get_mut(agent_id) {
+            let event_tx = if let Some(h) = self.agents.get_mut(agent_id) {
                 h.bump_activity();
-            }
+                Some(h.event_tx.clone())
+            } else {
+                None
+            };
             self.last_sent
                 .insert(agent_id.to_string(), text.to_string());
+            if let Some(event_tx) = event_tx {
+                let text = text.to_string();
+                tokio::spawn(async move {
+                    let _ = event_tx
+                        .send(amux::AcpEvent {
+                            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                                text,
+                                is_complete: true,
+                            })),
+                            model: String::new(),
+                        })
+                        .await;
+                });
+            }
             return Ok(());
         }
         #[cfg(not(test))]

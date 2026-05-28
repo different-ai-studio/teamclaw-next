@@ -27,6 +27,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+use crate::proto::amux;
+use crate::runtime::adapter::{runtime_envelopes_from_acp_event, RuntimeEnvelope};
+use crate::runtime::RuntimeManager;
+
 use super::errors::HttpError;
 use super::events::SessionEvent;
 
@@ -468,6 +472,615 @@ impl Clone for StubRuntimeAdapter {
         Self {
             inner: self.inner.clone(),
         }
+    }
+}
+
+// ── RuntimeManager facade ───────────────────────────────────────────────────
+
+pub struct RuntimeManagerAdapter {
+    manager: Arc<tokio::sync::Mutex<RuntimeManager>>,
+    sessions: Arc<RwLock<HashMap<Uuid, ManagedSession>>>,
+    backlog_cap: usize,
+}
+
+struct ManagedSession {
+    snapshot: SessionSnapshot,
+    owner_token_id: Uuid,
+    workspace_id: Option<String>,
+    runtime_id: String,
+    event_tx: broadcast::Sender<SessionEvent>,
+    ring: EventRingBuffer,
+    next_seq: u64,
+    active_turn_id: Option<Uuid>,
+    buffered_output: String,
+}
+
+impl RuntimeManagerAdapter {
+    pub fn new(manager: Arc<tokio::sync::Mutex<RuntimeManager>>, backlog_cap: usize) -> Arc<Self> {
+        let adapter = Arc::new(Self {
+            manager,
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            backlog_cap,
+        });
+        Self::spawn_event_pump(&adapter);
+        adapter
+    }
+
+    fn spawn_event_pump(this: &Arc<Self>) {
+        let adapter = Arc::clone(this);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(10));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                let drained = {
+                    let mut manager = adapter.manager.lock().await;
+                    manager.poll_events()
+                };
+                for (runtime_id, event) in drained {
+                    adapter.process_runtime_event(&runtime_id, event);
+                }
+            }
+        });
+    }
+
+    async fn spawn_runtime(
+        &self,
+        session_id: Uuid,
+        agent_type: amux::AgentType,
+        workspace_id: Option<String>,
+        model: Option<String>,
+        initial_prompt: Option<String>,
+    ) -> Result<String, HttpError> {
+        #[cfg(test)]
+        {
+            let runtime_id = format!("rt-{}", &session_id.to_string()[..8]);
+            let mut manager = self.manager.lock().await;
+            manager.add_test_runtime(&runtime_id, &runtime_id, &session_id.to_string());
+            if let Some(handle) = manager.get_handle_mut(&runtime_id) {
+                handle.agent_type = agent_type;
+                handle.workspace_id = workspace_id.clone().unwrap_or_default();
+                handle.current_prompt = initial_prompt.unwrap_or_default();
+            }
+            if let Some(model_id) = model {
+                manager.set_current_model(&runtime_id, &model_id);
+            }
+            return Ok(runtime_id);
+        }
+
+        #[cfg(not(test))]
+        {
+            let worktree = std::env::current_dir()
+                .map_err(|e| HttpError::internal(format!("resolve runtime worktree: {e}")))?;
+            let mut manager = self.manager.lock().await;
+            manager
+                .spawn_agent_with_model(
+                    agent_type,
+                    worktree.to_string_lossy().as_ref(),
+                    initial_prompt.as_deref().unwrap_or(""),
+                    workspace_id.as_deref().unwrap_or(""),
+                    None,
+                    Some(&session_id.to_string()),
+                    model,
+                    None,
+                    HashMap::new(),
+                )
+                .await
+                .map_err(|e| HttpError::internal(format!("spawn runtime: {e}")))
+        }
+    }
+
+    fn emit(&self, session_id: Uuid, event: SessionEvent) {
+        let mut sessions = self.sessions.write();
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.snapshot.last_event_seq = event.seq;
+            session.snapshot.last_activity = chrono::Utc::now();
+            session.ring.push(event.clone());
+            let _ = session.event_tx.send(event);
+        }
+    }
+
+    fn emit_next(&self, session_id: Uuid, event: RuntimeEnvelope) {
+        let session_event = {
+            let mut sessions = self.sessions.write();
+            let Some(session) = sessions.get_mut(&session_id) else {
+                return;
+            };
+            session.next_seq += 1;
+            let event = translate_runtime_event(session.next_seq, session_id, event);
+            session.snapshot.last_event_seq = event.seq;
+            session.snapshot.last_activity = chrono::Utc::now();
+            session.ring.push(event.clone());
+            let _ = session.event_tx.send(event.clone());
+            event
+        };
+        let _ = session_event;
+    }
+
+    fn set_state(&self, session_id: Uuid, new_state: SessionState, reason: Option<&str>) {
+        let event = {
+            let mut sessions = self.sessions.write();
+            let Some(session) = sessions.get_mut(&session_id) else {
+                return;
+            };
+            session.snapshot.state = new_state;
+            session.next_seq += 1;
+            let mut data = serde_json::json!({ "state": new_state });
+            if let Some(reason) = reason {
+                data["reason"] = serde_json::Value::String(reason.to_string());
+            }
+            let event =
+                SessionEvent::new(session_id, session.next_seq, EventKind::SessionState, data);
+            session.snapshot.last_event_seq = event.seq;
+            session.snapshot.last_activity = chrono::Utc::now();
+            session.ring.push(event.clone());
+            let _ = session.event_tx.send(event.clone());
+            event
+        };
+        let _ = event;
+    }
+
+    fn session_id_for_runtime(&self, runtime_id: &str) -> Option<Uuid> {
+        self.sessions
+            .read()
+            .iter()
+            .find_map(|(session_id, session)| {
+                (session.runtime_id == runtime_id).then_some(*session_id)
+            })
+    }
+
+    fn process_runtime_event(&self, runtime_id: &str, event: amux::AcpEvent) {
+        let Some(session_id) = self.session_id_for_runtime(runtime_id) else {
+            return;
+        };
+
+        for envelope in runtime_envelopes_from_acp_event(&event) {
+            match envelope {
+                RuntimeEnvelope::TokenDelta { text } => {
+                    {
+                        let mut sessions = self.sessions.write();
+                        if let Some(session) = sessions.get_mut(&session_id) {
+                            session.buffered_output.push_str(&text);
+                        }
+                    }
+                    self.emit_next(session_id, RuntimeEnvelope::TokenDelta { text });
+                }
+                RuntimeEnvelope::ToolCall { tool_name, args } => {
+                    self.emit_next(session_id, RuntimeEnvelope::ToolCall { tool_name, args });
+                }
+                RuntimeEnvelope::ToolResult {
+                    tool_id,
+                    success,
+                    summary,
+                } => {
+                    self.emit_next(
+                        session_id,
+                        RuntimeEnvelope::ToolResult {
+                            tool_id,
+                            success,
+                            summary,
+                        },
+                    );
+                }
+                RuntimeEnvelope::MessageCompleted {
+                    message_id,
+                    content,
+                } => {
+                    let turn_id = {
+                        let mut sessions = self.sessions.write();
+                        let Some(session) = sessions.get_mut(&session_id) else {
+                            return;
+                        };
+                        if session.buffered_output.is_empty() {
+                            session.buffered_output = content.clone();
+                        }
+                        session.active_turn_id.take()
+                    };
+                    self.emit_next(
+                        session_id,
+                        RuntimeEnvelope::MessageCompleted {
+                            message_id,
+                            content,
+                        },
+                    );
+                    if let Some(turn_id) = turn_id {
+                        self.emit_next(session_id, RuntimeEnvelope::TurnFinished { turn_id });
+                        self.set_state(session_id, SessionState::Idle, None);
+                    }
+                }
+                RuntimeEnvelope::SessionError { message, details } => {
+                    self.emit_next(
+                        session_id,
+                        RuntimeEnvelope::SessionError { message, details },
+                    );
+                    self.set_state(session_id, SessionState::Errored, Some("runtime_error"));
+                }
+                RuntimeEnvelope::StatusChanged { status } => match status {
+                    amux::AgentStatus::Idle => {
+                        let pending = {
+                            let mut sessions = self.sessions.write();
+                            let Some(session) = sessions.get_mut(&session_id) else {
+                                return;
+                            };
+                            session.active_turn_id.take().map(|turn_id| {
+                                (turn_id, std::mem::take(&mut session.buffered_output))
+                            })
+                        };
+                        if let Some((turn_id, content)) = pending {
+                            self.emit_next(
+                                session_id,
+                                RuntimeEnvelope::MessageCompleted {
+                                    message_id: Uuid::new_v4(),
+                                    content,
+                                },
+                            );
+                            self.emit_next(session_id, RuntimeEnvelope::TurnFinished { turn_id });
+                        }
+                        self.set_state(session_id, SessionState::Idle, None);
+                    }
+                    amux::AgentStatus::Active | amux::AgentStatus::Starting => {
+                        self.set_state(session_id, SessionState::Running, None);
+                    }
+                    amux::AgentStatus::Stopped => {
+                        self.set_state(session_id, SessionState::Closed, Some("runtime_stopped"));
+                    }
+                    _ => {}
+                },
+                RuntimeEnvelope::TurnFinished { turn_id } => {
+                    self.emit_next(session_id, RuntimeEnvelope::TurnFinished { turn_id });
+                    self.set_state(session_id, SessionState::Idle, None);
+                }
+            }
+        }
+    }
+
+    fn insert_managed_session(
+        &self,
+        owner_token_id: Uuid,
+        session_id: Uuid,
+        params: &CreateSessionParams,
+        runtime_id: String,
+    ) -> SessionSnapshot {
+        let now = chrono::Utc::now();
+        let (event_tx, _event_rx) = broadcast::channel::<SessionEvent>(256);
+        let snapshot = SessionSnapshot {
+            session_id,
+            agent_type: params.agent_type.clone(),
+            runtime_id: runtime_id.clone(),
+            workspace_id: params.workspace_id.clone(),
+            state: SessionState::Idle,
+            created_at: now,
+            last_activity: now,
+            last_event_seq: 0,
+        };
+        {
+            let mut sessions = self.sessions.write();
+            sessions.insert(
+                session_id,
+                ManagedSession {
+                    snapshot: snapshot.clone(),
+                    owner_token_id,
+                    workspace_id: params.workspace_id.clone(),
+                    runtime_id,
+                    event_tx,
+                    ring: EventRingBuffer::new(self.backlog_cap),
+                    next_seq: 0,
+                    active_turn_id: None,
+                    buffered_output: String::new(),
+                },
+            );
+        }
+        self.emit(
+            session_id,
+            SessionEvent::new(
+                session_id,
+                1,
+                EventKind::SessionCreated,
+                serde_json::json!({
+                    "session_id": session_id,
+                    "agent_type": params.agent_type,
+                }),
+            ),
+        );
+        {
+            let mut sessions = self.sessions.write();
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.next_seq = 1;
+            }
+        }
+        snapshot
+    }
+}
+
+fn parse_agent_type(agent_type: &str) -> Result<amux::AgentType, HttpError> {
+    match agent_type {
+        "opencode" => Ok(amux::AgentType::Opencode),
+        "codex" => Ok(amux::AgentType::Codex),
+        "claude" | "claude_code" | "claude-code" => Ok(amux::AgentType::ClaudeCode),
+        other => Err(HttpError::new(
+            super::errors::ErrorCode::BadRequest,
+            format!("unsupported agent_type: {other}"),
+        )),
+    }
+}
+
+fn translate_runtime_event(seq: u64, session_id: Uuid, event: RuntimeEnvelope) -> SessionEvent {
+    match event {
+        RuntimeEnvelope::TokenDelta { text } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::TokenDelta,
+            serde_json::json!({ "text": text }),
+        ),
+        RuntimeEnvelope::ToolCall { tool_name, args } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::ToolCall,
+            serde_json::json!({ "tool_name": tool_name, "args": args }),
+        ),
+        RuntimeEnvelope::ToolResult {
+            tool_id,
+            success,
+            summary,
+        } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::ToolResult,
+            serde_json::json!({ "tool_id": tool_id, "success": success, "summary": summary }),
+        ),
+        RuntimeEnvelope::MessageCompleted {
+            message_id,
+            content,
+        } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::MessageCompleted,
+            serde_json::json!({ "message_id": message_id, "content": content }),
+        ),
+        RuntimeEnvelope::TurnFinished { turn_id } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::TurnFinished,
+            serde_json::json!({ "turn_id": turn_id }),
+        ),
+        RuntimeEnvelope::SessionError { message, details } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::SessionError,
+            serde_json::json!({ "message": message, "details": details }),
+        ),
+        RuntimeEnvelope::StatusChanged { status } => SessionEvent::new(
+            session_id,
+            seq,
+            EventKind::SessionState,
+            serde_json::json!({ "state": format!("{status:?}") }),
+        ),
+    }
+}
+
+#[async_trait]
+impl RuntimeAdapter for RuntimeManagerAdapter {
+    async fn create_session(
+        &self,
+        owner_token_id: Uuid,
+        params: CreateSessionParams,
+    ) -> Result<SessionSnapshot, HttpError> {
+        let session_id = Uuid::new_v4();
+        let agent_type = parse_agent_type(&params.agent_type)?;
+        let runtime_id = self
+            .spawn_runtime(
+                session_id,
+                agent_type,
+                params.workspace_id.clone(),
+                params.model.clone(),
+                params.initial_prompt.clone(),
+            )
+            .await?;
+        let snapshot = self.insert_managed_session(owner_token_id, session_id, &params, runtime_id);
+
+        if let Some(prompt) = params.initial_prompt {
+            self.send_prompt(
+                session_id,
+                PromptParams {
+                    text: prompt,
+                    attachments: vec![],
+                    mentions: vec![],
+                    metadata: None,
+                },
+            )
+            .await?;
+        }
+
+        Ok(snapshot)
+    }
+
+    async fn get_session(&self, session_id: Uuid) -> Result<SessionSnapshot, HttpError> {
+        self.sessions
+            .read()
+            .get(&session_id)
+            .map(|session| session.snapshot.clone())
+            .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))
+    }
+
+    async fn list_sessions(&self, owner_token_id: Uuid) -> Vec<SessionSnapshot> {
+        self.sessions
+            .read()
+            .values()
+            .filter(|session| session.owner_token_id == owner_token_id)
+            .map(|session| session.snapshot.clone())
+            .collect()
+    }
+
+    async fn close_session(&self, session_id: Uuid) -> Result<(), HttpError> {
+        let runtime_id = {
+            let sessions = self.sessions.read();
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+            session.runtime_id.clone()
+        };
+        {
+            let mut manager = self.manager.lock().await;
+            let _ = manager.stop_agent(&runtime_id).await;
+        }
+        self.set_state(session_id, SessionState::Closed, Some("explicit_close"));
+        self.emit_next(
+            session_id,
+            RuntimeEnvelope::SessionError {
+                message: "session closed".to_string(),
+                details: "explicit_close".to_string(),
+            },
+        );
+        Ok(())
+    }
+
+    async fn send_prompt(
+        &self,
+        session_id: Uuid,
+        params: PromptParams,
+    ) -> Result<PromptAck, HttpError> {
+        let runtime_id = {
+            let mut sessions = self.sessions.write();
+            let session = sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+            if matches!(session.snapshot.state, SessionState::Running) {
+                return Err(HttpError::new(
+                    super::errors::ErrorCode::SessionBusy,
+                    "session is already processing a prompt",
+                ));
+            }
+            if matches!(session.snapshot.state, SessionState::Closed) {
+                return Err(HttpError::session_not_found(&session_id.to_string()));
+            }
+            session.runtime_id.clone()
+        };
+
+        let prompt_id = Uuid::new_v4();
+        let turn_id = Uuid::new_v4();
+        {
+            let mut sessions = self.sessions.write();
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.active_turn_id = Some(turn_id);
+                session.buffered_output.clear();
+            }
+        }
+
+        self.emit(session_id, {
+            let mut sessions = self.sessions.write();
+            let session = sessions.get_mut(&session_id).expect("session exists");
+            session.next_seq += 1;
+            SessionEvent::new(
+                session_id,
+                session.next_seq,
+                EventKind::PromptAccepted,
+                serde_json::json!({
+                    "prompt_id": prompt_id,
+                    "text": params.text,
+                    "at": chrono::Utc::now(),
+                }),
+            )
+        });
+        self.set_state(session_id, SessionState::Running, None);
+        self.emit(session_id, {
+            let mut sessions = self.sessions.write();
+            let session = sessions.get_mut(&session_id).expect("session exists");
+            session.next_seq += 1;
+            SessionEvent::new(
+                session_id,
+                session.next_seq,
+                EventKind::TurnStarted,
+                serde_json::json!({ "turn_id": turn_id, "prompt_id": prompt_id }),
+            )
+        });
+
+        let attachment_urls = params
+            .attachments
+            .into_iter()
+            .filter_map(|attachment| attachment.as_str().map(ToString::to_string))
+            .collect::<Vec<_>>();
+        let mut manager = self.manager.lock().await;
+        manager
+            .send_prompt(&runtime_id, &params.text, attachment_urls)
+            .await
+            .map_err(|e| HttpError::internal(format!("dispatch prompt: {e}")))?;
+
+        Ok(PromptAck { prompt_id, turn_id })
+    }
+
+    async fn cancel(&self, session_id: Uuid, turn_id: Option<Uuid>) -> Result<(), HttpError> {
+        let runtime_id = {
+            let sessions = self.sessions.read();
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+            session.runtime_id.clone()
+        };
+        {
+            let mut manager = self.manager.lock().await;
+            manager
+                .cancel_agent(&runtime_id)
+                .await
+                .map_err(|e| HttpError::internal(format!("cancel prompt: {e}")))?;
+        }
+        self.set_state(session_id, SessionState::Cancelling, None);
+        self.emit_next(
+            session_id,
+            RuntimeEnvelope::TurnFinished {
+                turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
+            },
+        );
+        self.set_state(session_id, SessionState::Idle, Some("cancelled"));
+        Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+        session_id: Uuid,
+        since: Option<u64>,
+    ) -> Result<SubscriptionHandle, HttpError> {
+        let sessions = self.sessions.read();
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+        if let Some(since) = since {
+            if let Some(oldest) = session.ring.oldest_seq() {
+                if since + 1 < oldest {
+                    return Err(HttpError::new(
+                        super::errors::ErrorCode::EventGone,
+                        format!(
+                            "Last-Event-ID {since} is below window {oldest}; refetch session snapshot before reconnecting"
+                        ),
+                    ));
+                }
+            }
+        }
+        let backlog = match since {
+            Some(seq) => session.ring.replay_after(seq).cloned().collect(),
+            None => session.ring.snapshot(),
+        };
+        let live = session.event_tx.subscribe();
+        Ok(SubscriptionHandle { backlog, live })
+    }
+
+    async fn replay(
+        &self,
+        session_id: Uuid,
+        since: u64,
+        limit: usize,
+    ) -> Result<ReplayPage, HttpError> {
+        let sessions = self.sessions.read();
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
+        let limit = limit.clamp(1, 500);
+        let events = session.ring.replay_after_limited(since, limit);
+        let next_cursor = events.last().map(|event| event.seq);
+        Ok(ReplayPage {
+            events,
+            next_cursor,
+            window_oldest_seq: session.ring.oldest_seq(),
+        })
     }
 }
 
