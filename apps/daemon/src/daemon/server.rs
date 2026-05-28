@@ -836,7 +836,11 @@ impl DaemonServer {
                 let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(
                     http_cfg.max_event_backlog,
                 );
-                match crate::http::spawn(http_cfg, meta, runtime, None).await {
+                let workspace_control: Option<std::sync::Arc<dyn crate::config::WorkspaceControlStore>> =
+                    Some(std::sync::Arc::new(
+                        crate::config::OpenCodeCompatStore::new(),
+                    ));
+                match crate::http::spawn(http_cfg, meta, runtime, workspace_control).await {
                     Ok(h) => {
                         info!(addr = %h.local_addr, "http listener bound");
                         Some(h)

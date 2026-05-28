@@ -23,7 +23,6 @@ import {
 import { useProviderStore } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTeamModeStore } from '@/stores/team-mode'
-import { initOpenCodeClient } from '@/lib/opencode/sdk-client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,8 +46,6 @@ const MAINSTREAM_PROVIDER_IDS = new Set([
   'alibaba-cn',
   'zhipuai',
 ])
-
-const OPENCODE_SETTINGS_URL = 'http://127.0.0.1:13141'
 
 function WorkspacePathCard({
   path,
@@ -264,20 +261,16 @@ export const LLMSection = React.memo(function LLMSection() {
     }
   }, [providers, showAllProviders, customProviderIds])
 
-  const connectCurrentOpenCodeAndRefresh = React.useCallback(async () => {
-    if (!workspacePath) return
-    initOpenCodeClient({ baseUrl: OPENCODE_SETTINGS_URL, workspacePath })
+  const refreshAllProviders = React.useCallback(async () => {
     await Promise.all([refreshProviders(), refreshConfiguredProviders(), refreshAuthMethods()])
-  }, [workspacePath, refreshProviders, refreshConfiguredProviders, refreshAuthMethods])
+  }, [refreshProviders, refreshConfiguredProviders, refreshAuthMethods])
 
-  // Load providers from the current OpenCode server on mount. This page talks
-  // to the user's OpenCode on 13141 directly, instead of the desktop sidecar.
   React.useEffect(() => {
-    void connectCurrentOpenCodeAndRefresh()
+    void refreshAllProviders()
     if (workspacePath) {
       refreshCustomProviderIds(workspacePath)
     }
-  }, [connectCurrentOpenCodeAndRefresh, refreshCustomProviderIds, workspacePath])
+  }, [refreshAllProviders, refreshCustomProviderIds, workspacePath])
 
   const getProviderOAuthMethodIndex = (providerId: string): number => {
     const methods = authMethods[providerId] || []
@@ -303,7 +296,7 @@ export const LLMSection = React.memo(function LLMSection() {
     if (success) {
       setConnectDialogOpen(false)
       setApiKeyInput('')
-      await connectCurrentOpenCodeAndRefresh()
+      await refreshAllProviders()
     }
     setIsConnecting(false)
   }
@@ -334,7 +327,7 @@ export const LLMSection = React.memo(function LLMSection() {
           setOAuthPending(false)
           setOAuthMethodType(null)
           setOAuthCodeInput('')
-          void connectCurrentOpenCodeAndRefresh()
+          void refreshAllProviders()
         }
       })
     }
@@ -353,7 +346,7 @@ export const LLMSection = React.memo(function LLMSection() {
         setOAuthPending(false)
         setOAuthMethodType(null)
         setOAuthCodeInput('')
-        await connectCurrentOpenCodeAndRefresh()
+        await refreshAllProviders()
       }
     } finally {
       setIsConnecting(false)
@@ -387,7 +380,7 @@ export const LLMSection = React.memo(function LLMSection() {
 
   const handleRefreshProviders = async () => {
     setIsRefreshing(true)
-    await connectCurrentOpenCodeAndRefresh()
+    await refreshAllProviders()
     if (workspacePath) {
       await refreshCustomProviderIds(workspacePath)
     }
@@ -464,7 +457,7 @@ export const LLMSection = React.memo(function LLMSection() {
           setCustomBaseURL('')
           setCustomApiKey('')
           setCustomModels([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
-          await connectCurrentOpenCodeAndRefresh()
+          await refreshAllProviders()
           await refreshCustomProviderIds(workspacePath)
         }
       } else {
@@ -479,7 +472,7 @@ export const LLMSection = React.memo(function LLMSection() {
           setCustomApiKey('')
           setCustomModels([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
           await connectProvider(providerId, customApiKey.trim())
-          await connectCurrentOpenCodeAndRefresh()
+          await refreshAllProviders()
           await refreshCustomProviderIds(workspacePath)
         }
       }
@@ -511,7 +504,7 @@ export const LLMSection = React.memo(function LLMSection() {
       const success = await removeCustomProvider(workspacePath, providerId)
       if (success) {
         setDeletingProviderId(null)
-        await connectCurrentOpenCodeAndRefresh()
+        await refreshAllProviders()
         await refreshCustomProviderIds(workspacePath)
       }
     } finally {

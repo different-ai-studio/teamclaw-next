@@ -111,10 +111,15 @@ pub enum AllowlistDecision {
 
 /// A permanently-remembered tool-call decision for a workspace project.
 /// Stored in `<workspace>/.teamclaw/allowlist.json` (daemon-owned).
+/// Fields intentionally mirror the component's `PermissionRule` shape so
+/// the frontend can use them directly without transformation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowlistRule {
     pub project_id: String,
-    pub tool_call: String,
+    /// Tool / skill name (e.g. `"bash"`, `"read_file"`).
+    pub permission: String,
+    /// Argument or file-path pattern being allowlisted.
+    pub pattern: String,
     pub decision: AllowlistDecision,
 }
 
@@ -222,57 +227,62 @@ struct OcPermissionSection {
 /// - `<workspace_path>/.teamclaw/allowlist.json` — permanently-remembered
 ///   tool-call decisions (daemon-owned sidecar; separate from OpenCode's
 ///   SQLite allowlist DB)
+/// Stateless workspace-control store. The workspace identity is the
+/// **base64url-encoded absolute filesystem path** — no registration step
+/// required. Clients (frontend, desktop Tauri bridge) call
+/// `base64url(workspacePath)` and pass the result as the `:id` URL segment.
 pub struct OpenCodeCompatStore {
-    /// workspace_id → absolute workspace_path
-    workspaces: HashMap<String, String>,
     /// Coarse write mutex: one workspace write at a time per process.
-    /// Per-workspace locking is overkill for the current traffic model.
     write_lock: Mutex<()>,
 }
 
 impl OpenCodeCompatStore {
-    pub fn new(workspaces: HashMap<String, String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            workspaces,
             write_lock: Mutex::new(()),
         }
     }
 
-    /// Build from a `WorkspaceStore` slice (convenience constructor).
-    pub fn from_workspace_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
-        Self::new(pairs.into_iter().collect())
+    /// Decode a base64url workspace-ID to an absolute filesystem path.
+    /// Returns `WorkspaceNotFound` if the ID is malformed or the directory
+    /// does not exist on disk.
+    fn workspace_path(&self, workspace_id: &str) -> Result<PathBuf, WorkspaceControlError> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let bytes = URL_SAFE_NO_PAD
+            .decode(workspace_id)
+            .map_err(|_| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))?;
+        let path_str = String::from_utf8(bytes)
+            .map_err(|_| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))?;
+        let path = PathBuf::from(&path_str);
+        if path.is_dir() {
+            Ok(path)
+        } else {
+            Err(WorkspaceControlError::WorkspaceNotFound(path_str))
+        }
     }
 
-    fn workspace_path(&self, workspace_id: &str) -> Result<&str, WorkspaceControlError> {
-        self.workspaces
-            .get(workspace_id)
-            .map(String::as_str)
-            .ok_or_else(|| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))
+    fn opencode_json_path(workspace_path: &std::path::Path) -> PathBuf {
+        workspace_path.join("opencode.json")
     }
 
-    fn opencode_json_path(workspace_path: &str) -> PathBuf {
-        PathBuf::from(workspace_path).join("opencode.json")
+    fn allowlist_path(workspace_path: &std::path::Path) -> PathBuf {
+        workspace_path.join(".teamclaw").join("allowlist.json")
     }
 
-    fn allowlist_path(workspace_path: &str) -> PathBuf {
-        PathBuf::from(workspace_path)
-            .join(".teamclaw")
-            .join("allowlist.json")
-    }
-
-    fn read_opencode_json(workspace_path: &str) -> Result<OpencodeJson, WorkspaceControlError> {
+    fn read_opencode_json(
+        workspace_path: &std::path::Path,
+    ) -> Result<OpencodeJson, WorkspaceControlError> {
         let path = Self::opencode_json_path(workspace_path);
         if !path.exists() {
             return Ok(OpencodeJson::default());
         }
         let content = std::fs::read_to_string(&path)
             .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| WorkspaceControlError::Parse(e.to_string()))
+        serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
     }
 
     fn write_opencode_json(
-        workspace_path: &str,
+        workspace_path: &std::path::Path,
         cfg: &OpencodeJson,
     ) -> Result<(), WorkspaceControlError> {
         let path = Self::opencode_json_path(workspace_path);
@@ -281,19 +291,20 @@ impl OpenCodeCompatStore {
         std::fs::write(&path, content).map_err(|e| WorkspaceControlError::Io(e.to_string()))
     }
 
-    fn read_allowlist(workspace_path: &str) -> Result<Vec<AllowlistRule>, WorkspaceControlError> {
+    fn read_allowlist(
+        workspace_path: &std::path::Path,
+    ) -> Result<Vec<AllowlistRule>, WorkspaceControlError> {
         let path = Self::allowlist_path(workspace_path);
         if !path.exists() {
             return Ok(vec![]);
         }
         let content = std::fs::read_to_string(&path)
             .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| WorkspaceControlError::Parse(e.to_string()))
+        serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
     }
 
     fn write_allowlist(
-        workspace_path: &str,
+        workspace_path: &std::path::Path,
         rules: &[AllowlistRule],
     ) -> Result<(), WorkspaceControlError> {
         let path = Self::allowlist_path(workspace_path);
@@ -307,13 +318,19 @@ impl OpenCodeCompatStore {
     }
 }
 
+impl Default for OpenCodeCompatStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkspaceControlStore for OpenCodeCompatStore {
     fn get_providers(
         &self,
         workspace_id: &str,
     ) -> Result<Vec<ProviderInfo>, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
-        let cfg = Self::read_opencode_json(wpath)?;
+        let cfg = Self::read_opencode_json(&wpath)?;
 
         let providers = cfg
             .provider
@@ -347,7 +364,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
         let _lock = self.write_lock.lock().unwrap();
-        let mut cfg = Self::read_opencode_json(wpath)?;
+        let mut cfg = Self::read_opencode_json(&wpath)?;
 
         let entry = cfg
             .provider
@@ -375,7 +392,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             entry.models.insert(model.model_id, model_val);
         }
 
-        Self::write_opencode_json(wpath, &cfg)?;
+        Self::write_opencode_json(&wpath, &cfg)?;
         Ok(ApplyOutcome::RestartRequired)
     }
 
@@ -386,10 +403,10 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
         let _lock = self.write_lock.lock().unwrap();
-        let mut cfg = Self::read_opencode_json(wpath)?;
+        let mut cfg = Self::read_opencode_json(&wpath)?;
 
         cfg.provider.remove(provider_id);
-        Self::write_opencode_json(wpath, &cfg)?;
+        Self::write_opencode_json(&wpath, &cfg)?;
         Ok(ApplyOutcome::RestartRequired)
     }
 
@@ -398,7 +415,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         workspace_id: &str,
     ) -> Result<PermissionConfig, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
-        let cfg = Self::read_opencode_json(wpath)?;
+        let cfg = Self::read_opencode_json(&wpath)?;
 
         let skills = cfg
             .permission
@@ -425,7 +442,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
         let _lock = self.write_lock.lock().unwrap();
-        let mut cfg = Self::read_opencode_json(wpath)?;
+        let mut cfg = Self::read_opencode_json(&wpath)?;
 
         cfg.permission.skill = config
             .skills
@@ -441,7 +458,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             })
             .collect();
 
-        Self::write_opencode_json(wpath, &cfg)?;
+        Self::write_opencode_json(&wpath, &cfg)?;
         Ok(ApplyOutcome::RestartRequired)
     }
 
@@ -450,7 +467,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         workspace_id: &str,
     ) -> Result<Vec<AllowlistRule>, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
-        Self::read_allowlist(wpath)
+        Self::read_allowlist(&wpath)
     }
 
     fn put_allowlist(
@@ -460,7 +477,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
         let _lock = self.write_lock.lock().unwrap();
-        Self::write_allowlist(wpath, &rules)?;
+        Self::write_allowlist(&wpath, &rules)?;
         Ok(ApplyOutcome::AppliedLive)
     }
 
@@ -468,7 +485,6 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         &self,
         workspace_id: &str,
     ) -> Result<RuntimeStatus, WorkspaceControlError> {
-        // Workspace path lookup validates the workspace exists.
         let _wpath = self.workspace_path(workspace_id)?;
         Ok(RuntimeStatus {
             workspace_id: workspace_id.to_owned(),
@@ -549,29 +565,34 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    fn make_store(workspace_path: &str, workspace_id: &str) -> OpenCodeCompatStore {
-        OpenCodeCompatStore::new(HashMap::from([(
-            workspace_id.to_owned(),
-            workspace_path.to_owned(),
-        )]))
+    fn make_store() -> OpenCodeCompatStore {
+        OpenCodeCompatStore::new()
+    }
+
+    /// Encode an absolute path as a base64url workspace ID (mirrors the
+    /// frontend `encodeWorkspaceId` helper in daemon-local-client.ts).
+    fn ws_id(path: &std::path::Path) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        URL_SAFE_NO_PAD.encode(path.to_str().unwrap())
     }
 
     #[test]
     fn get_providers_empty_workspace_returns_empty_list() {
         let dir = tempfile::tempdir().unwrap();
-        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
-        let providers = store.get_providers("ws-1").unwrap();
+        let store = make_store();
+        let providers = store.get_providers(&ws_id(dir.path())).unwrap();
         assert!(providers.is_empty());
     }
 
     #[test]
     fn put_provider_auth_creates_entry_and_get_returns_it() {
         let dir = tempfile::tempdir().unwrap();
-        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+        let store = make_store();
+        let wid = ws_id(dir.path());
 
         let outcome = store
             .put_provider_auth(
-                "ws-1",
+                &wid,
                 "my-llm",
                 ProviderAuthRequest {
                     api_key: "sk-test".to_owned(),
@@ -587,7 +608,7 @@ mod tests {
 
         assert!(matches!(outcome, ApplyOutcome::RestartRequired));
 
-        let providers = store.get_providers("ws-1").unwrap();
+        let providers = store.get_providers(&wid).unwrap();
         assert_eq!(providers.len(), 1);
         let p = &providers[0];
         assert_eq!(p.id, "my-llm");
@@ -600,11 +621,12 @@ mod tests {
     #[test]
     fn delete_provider_auth_removes_entry() {
         let dir = tempfile::tempdir().unwrap();
-        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+        let store = make_store();
+        let wid = ws_id(dir.path());
 
         store
             .put_provider_auth(
-                "ws-1",
+                &wid,
                 "to-remove",
                 ProviderAuthRequest {
                     api_key: "sk-x".to_owned(),
@@ -615,15 +637,16 @@ mod tests {
             )
             .unwrap();
 
-        store.delete_provider_auth("ws-1", "to-remove").unwrap();
-        let providers = store.get_providers("ws-1").unwrap();
+        store.delete_provider_auth(&wid, "to-remove").unwrap();
+        let providers = store.get_providers(&wid).unwrap();
         assert!(providers.is_empty());
     }
 
     #[test]
     fn put_and_get_permissions_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+        let store = make_store();
+        let wid = ws_id(dir.path());
 
         let config = PermissionConfig {
             skills: HashMap::from([
@@ -633,8 +656,8 @@ mod tests {
             ]),
         };
 
-        store.put_permissions("ws-1", config.clone()).unwrap();
-        let got = store.get_permissions("ws-1").unwrap();
+        store.put_permissions(&wid, config.clone()).unwrap();
+        let got = store.get_permissions(&wid).unwrap();
 
         assert_eq!(got.skills.get("*"), Some(&PermissionAction::Ask));
         assert_eq!(got.skills.get("bash"), Some(&PermissionAction::Allow));
@@ -644,35 +667,39 @@ mod tests {
     #[test]
     fn put_and_get_allowlist_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        let store = make_store(dir.path().to_str().unwrap(), "ws-1");
+        let store = make_store();
+        let wid = ws_id(dir.path());
 
         let rules = vec![
             AllowlistRule {
                 project_id: "proj-1".to_owned(),
-                tool_call: "bash(rm -rf)".to_owned(),
+                permission: "bash".to_owned(),
+                pattern: "rm -rf *".to_owned(),
                 decision: AllowlistDecision::Deny,
             },
             AllowlistRule {
                 project_id: "proj-1".to_owned(),
-                tool_call: "read_file(*)".to_owned(),
+                permission: "read_file".to_owned(),
+                pattern: "*".to_owned(),
                 decision: AllowlistDecision::Allow,
             },
         ];
 
-        store.put_allowlist("ws-1", rules.clone()).unwrap();
-        let got = store.get_allowlist("ws-1").unwrap();
+        store.put_allowlist(&wid, rules.clone()).unwrap();
+        let got = store.get_allowlist(&wid).unwrap();
 
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].project_id, "proj-1");
+        assert_eq!(got[0].permission, "bash");
+        assert_eq!(got[0].pattern, "rm -rf *");
         assert_eq!(got[1].decision, AllowlistDecision::Allow);
     }
 
     #[test]
     fn opencode_json_round_trip_preserves_unknown_fields() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace_path = dir.path().to_str().unwrap();
+        let wid = ws_id(dir.path());
 
-        // Write an opencode.json with extra fields that the store doesn't know about.
         let json = serde_json::json!({
             "provider": {},
             "someOtherKey": "preserved",
@@ -684,10 +711,10 @@ mod tests {
         )
         .unwrap();
 
-        let store = make_store(workspace_path, "ws-1");
+        let store = make_store();
         store
             .put_provider_auth(
-                "ws-1",
+                &wid,
                 "p1",
                 ProviderAuthRequest {
                     api_key: "sk".to_owned(),
@@ -714,10 +741,21 @@ mod tests {
     }
 
     #[test]
-    fn unknown_workspace_returns_not_found() {
-        let store = make_store("/some/path", "ws-1");
+    fn invalid_base64_workspace_id_returns_not_found() {
+        let store = make_store();
         assert!(matches!(
-            store.get_providers("ws-999"),
+            store.get_providers("!!!not-base64!!!"),
+            Err(WorkspaceControlError::WorkspaceNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn nonexistent_directory_returns_not_found() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let store = make_store();
+        let bogus_id = URL_SAFE_NO_PAD.encode("/tmp/definitely-does-not-exist-xyz123");
+        assert!(matches!(
+            store.get_providers(&bogus_id),
             Err(WorkspaceControlError::WorkspaceNotFound(_))
         ));
     }

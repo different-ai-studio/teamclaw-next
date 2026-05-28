@@ -6,15 +6,19 @@ import { workspaceScopedKey } from '@/lib/storage'
 import { sessionFlowLog } from '@/lib/session-flow-log'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { getOpenCodeClient } from '@/lib/opencode/sdk-client'
+// Legacy config.ts helpers kept for initAll (Phase D removes them).
 import {
   type CustomProviderConfig,
-  addCustomProviderToConfig,
-  updateCustomProviderConfig,
   getCustomProviderConfig,
-  removeCustomProviderFromConfig,
   getCustomProviderIds,
   providerApiKeyName,
 } from '@/lib/opencode/config'
+import {
+  encodeWorkspaceId,
+  putDaemonProviderAuth,
+  deleteDaemonProviderAuth,
+  getDaemonProviders,
+} from '@/lib/daemon-local-client'
 
 const SELECTED_MODEL_BASE = `${appShortName}-selected-model`
 
@@ -460,8 +464,18 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Refresh custom provider IDs from the legacy workspace config
+  // Refresh custom provider IDs. Tries daemon first; falls back to config.ts.
   refreshCustomProviderIds: async (workspacePath: string) => {
+    const wsId = encodeWorkspaceId(workspacePath)
+    try {
+      const daemonProviders = await getDaemonProviders(wsId)
+      if (daemonProviders !== null) {
+        set({ customProviderIds: daemonProviders.map((p) => p.id) })
+        return
+      }
+    } catch {
+      // fall through to legacy
+    }
     try {
       const ids = await getCustomProviderIds(workspacePath)
       set({ customProviderIds: ids })
@@ -470,17 +484,23 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Add a custom OpenAI-compatible provider
+  // Add a custom OpenAI-compatible provider via daemon workspace-control API.
   addCustomProvider: async (workspacePath: string, config: CustomProviderConfig, apiKey: string) => {
+    const wsId = encodeWorkspaceId(workspacePath)
+    const providerId = `custom-${config.name.toLowerCase().replace(/\s+/g, '-')}`
     try {
-      const providerId = await addCustomProviderToConfig(workspacePath, config)
-      // Store raw API key in keychain so ${ref} gets resolved at startup.
-      // Skip if the value is already a ${ref} (user referencing an existing secret).
+      // Store API key in keychain (env_var_set) for ${ref} resolution at startup.
       const isRef = /^\$\{?.+\}?$/.test(apiKey)
       if (apiKey && !isRef) {
         const keyName = providerApiKeyName(providerId)
         await invoke('env_var_set', { key: keyName, value: apiKey, description: `API key for provider ${config.name}` })
       }
+      await putDaemonProviderAuth(wsId, providerId, {
+        api_key: apiKey || '',
+        base_url: config.baseUrl || undefined,
+        display_name: config.name,
+        models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
+      })
       toast.success('Custom provider added', {
         description: `${config.name} has been added. Restarting agent...`,
       })
@@ -494,21 +514,24 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Update an existing custom provider
+  // Update an existing custom provider via daemon workspace-control API.
   updateCustomProvider: async (workspacePath: string, providerId: string, config: CustomProviderConfig) => {
+    const wsId = encodeWorkspaceId(workspacePath)
     try {
-      const success = await updateCustomProviderConfig(workspacePath, providerId, config)
-      if (success) {
-        // Update API key in keychain if provided (skip ${ref} values)
-        if (config.apiKey && !/^\$\{?.+\}?$/.test(config.apiKey)) {
-          const keyName = providerApiKeyName(providerId)
-          await invoke('env_var_set', { key: keyName, value: config.apiKey, description: `API key for provider ${config.name}` })
-        }
-        toast.success('Custom provider updated', {
-          description: `${config.name} has been updated. Restarting agent...`,
-        })
+      if (config.apiKey && !/^\$\{?.+\}?$/.test(config.apiKey)) {
+        const keyName = providerApiKeyName(providerId)
+        await invoke('env_var_set', { key: keyName, value: config.apiKey, description: `API key for provider ${config.name}` })
       }
-      return success
+      await putDaemonProviderAuth(wsId, providerId, {
+        api_key: config.apiKey || '',
+        base_url: config.baseUrl || undefined,
+        display_name: config.name,
+        models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
+      })
+      toast.success('Custom provider updated', {
+        description: `${config.name} has been updated. Restarting agent...`,
+      })
+      return true
     } catch (err) {
       console.error('Failed to update custom provider:', err)
       toast.error('Failed to update custom provider', {
@@ -518,8 +541,23 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Get a custom provider configuration
+  // Get a custom provider config. Tries daemon first; falls back to config.ts.
   getCustomProvider: async (workspacePath: string, providerId: string) => {
+    const wsId = encodeWorkspaceId(workspacePath)
+    try {
+      const providers = await getDaemonProviders(wsId)
+      if (providers !== null) {
+        const p = providers.find((x) => x.id === providerId)
+        if (!p) return null
+        return {
+          name: p.display_name,
+          baseUrl: p.base_url ?? '',
+          models: p.models.map((id) => ({ modelId: id, modelName: id })),
+        } satisfies CustomProviderConfig
+      }
+    } catch {
+      // fall through
+    }
     try {
       return await getCustomProviderConfig(workspacePath, providerId)
     } catch (err) {
@@ -528,10 +566,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Remove a custom provider from the legacy workspace config
+  // Remove a custom provider via daemon workspace-control API.
   removeCustomProvider: async (workspacePath: string, providerId: string) => {
+    const wsId = encodeWorkspaceId(workspacePath)
     try {
-      await removeCustomProviderFromConfig(workspacePath, providerId)
+      await deleteDaemonProviderAuth(wsId, providerId)
       toast.success('Custom provider removed', {
         description: `Provider has been removed. Restarting agent...`,
       })
