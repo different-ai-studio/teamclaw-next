@@ -51,7 +51,7 @@ export function getBackend(): TeamClawBackend {
       kind === "pocketbase"
         ? createPocketBaseBackend(config)
         : kind === "cloud_api"
-          ? createCloudApiBackend(config)
+          ? (hasCloudApiBackendConfig(config) ? createCloudApiBackend(config) : createSupabaseBackend())
           : createSupabaseBackend();
     backendCacheKey = cacheKey;
   }

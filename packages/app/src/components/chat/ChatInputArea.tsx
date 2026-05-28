@@ -114,10 +114,12 @@ function MentionPopoverWrapper({
 }
 
 function CommandPopoverWrapper({
+  activeSessionId,
   open,
   onOpenChange,
   searchQuery,
 }: {
+  activeSessionId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   searchQuery: string;
@@ -134,6 +136,7 @@ function CommandPopoverWrapper({
 
   return (
     <CommandPopover
+      activeSessionId={activeSessionId}
       open={open}
       onOpenChange={onOpenChange}
       searchQuery={searchQuery}
@@ -522,6 +525,7 @@ export function ChatInputArea({
             />
           )}
           <CommandPopoverWrapper
+            activeSessionId={activeSessionId}
             open={commandPopoverOpen}
             onOpenChange={setCommandPopoverOpen}
             searchQuery={commandSearchQuery}
