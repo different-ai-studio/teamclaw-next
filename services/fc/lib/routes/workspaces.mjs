@@ -36,7 +36,6 @@ export function registerWorkspaces(router) {
       name: body.name,
       slug: body.slug ?? null,
       archived: body.archived ?? false,
-      metadata: body.metadata ?? null,
     });
     return { body: w };
   });

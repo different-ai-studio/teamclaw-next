@@ -72,7 +72,7 @@ function isSortOrderUpdate(input: IdeaSortOrderUpdateInput | IdeaFullUpdateInput
 export function createIdeasModule(client: CloudApiClient): IdeasBackend {
   return {
     async listIdeas(teamId) {
-      const out = await client.get<{ items: CloudIdea[] }>(`/v1/teams/${encodeURIComponent(teamId)}/ideas`);
+      const out = await client.get<{ items: CloudIdea[] }>(`/v1/ideas?teamId=${encodeURIComponent(teamId)}`);
       return out.items.map(mapIdea);
     },
     async getIdeaDetail(ideaId) {

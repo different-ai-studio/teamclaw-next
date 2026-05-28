@@ -34,6 +34,7 @@ interface State {
   error: string | null;
   load: () => Promise<void>;
   reloadAndSwitchTo: (teamId: string) => Promise<void>;
+  setActiveTeam: (team: CurrentTeam) => Promise<void>;
   rename: (newName: string) => Promise<boolean>;
 }
 
@@ -101,6 +102,15 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
       currentMember,
       loading: false,
     });
+  },
+
+  setActiveTeam: async (team) => {
+    const session = useAuthStore.getState().session;
+    await setLocalCacheTeamGate(team.id);
+    const currentMember = session
+      ? await loadCurrentMember(team.id, session.user.id)
+      : null;
+    set({ team, currentMember, loading: false, error: null });
   },
 
   rename: async (newName) => {

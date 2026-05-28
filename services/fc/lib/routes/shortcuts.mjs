@@ -36,10 +36,12 @@ export function registerShortcuts(router) {
 
   router.post("/v1/shortcuts", async (ctx) => {
     const body = ctx.json ?? {};
-    requireString(body.teamId, "teamId");
-    requireString(body.kind, "kind");
+    const scope = body.scope ?? (body.teamId ? "team" : "personal");
+    const nodeType = body.nodeType ?? body.kind;
+    requireString(scope, "scope");
     requireString(body.label, "label");
-    const shortcut = await ctx.repository.createShortcut(body);
+    requireString(nodeType, "nodeType");
+    const shortcut = await ctx.repository.createShortcut({ ...body, scope, nodeType });
     return { statusCode: 201, body: shortcut };
   });
 

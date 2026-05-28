@@ -162,13 +162,19 @@ export function parseLimit(value) {
 }
 
 export function queryParams(event) {
-  const direct = event.queryStringParameters || {};
+  const direct = event.queryStringParameters || event.queryParameters || {};
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(direct)) {
     if (value !== undefined && value !== null) params.set(key, String(value));
   }
-  if (event.rawQueryString) {
-    for (const [key, value] of new URLSearchParams(event.rawQueryString)) {
+  let raw = event.rawQueryString ?? event.queryString ?? "";
+  if (!raw) {
+    const pathStr = event.rawPath ?? event.path ?? "";
+    const qIdx = pathStr.indexOf("?");
+    if (qIdx >= 0) raw = pathStr.slice(qIdx + 1);
+  }
+  if (raw) {
+    for (const [key, value] of new URLSearchParams(raw)) {
       params.set(key, value);
     }
   }

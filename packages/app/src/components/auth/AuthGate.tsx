@@ -79,9 +79,12 @@ export function AuthGate({ children }: AuthGateProps) {
         const name = generateRandomTeamName();
         try {
           const created = await getBackend().teams.createTeam({ name });
-          const teamId = created.id || undefined;
-          if (teamId) {
-            await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId);
+          if (created?.id) {
+            await useCurrentTeamStore.getState().setActiveTeam({
+              id: created.id,
+              name: created.name,
+              slug: created.slug ?? "",
+            });
           }
           console.log("[AuthGate] auto-created team", name);
         } catch (createErr) {

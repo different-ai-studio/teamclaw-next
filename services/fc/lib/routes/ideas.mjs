@@ -54,7 +54,6 @@ export function registerIdeas(router) {
     const body = ctx.json ?? {};
     requireString(body.teamId, "teamId");
     requireString(body.title, "title");
-    requireString(body.authorActorId, "authorActorId");
     const idea = await ctx.repository.createIdea(body);
     return { statusCode: 201, body: idea };
   });
@@ -78,9 +77,10 @@ export function registerIdeas(router) {
 
   router.post("/v1/ideas/:ideaId/activities", async (ctx) => {
     const body = ctx.json ?? {};
-    requireString(body.kind, "kind");
+    const kind = body.kind ?? body.activityType ?? body.eventType;
+    requireString(kind, "kind");
     requireString(body.actorId, "actorId");
-    const activity = await ctx.repository.createIdeaActivity(ctx.params.ideaId, body);
+    const activity = await ctx.repository.createIdeaActivity(ctx.params.ideaId, { ...body, kind });
     return { statusCode: 201, body: activity };
   });
 }

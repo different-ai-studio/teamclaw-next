@@ -385,7 +385,6 @@ test("POST /v1/workspaces upserts workspace", async () => {
       name: "Beta",
       slug: null,
       archived: false,
-      metadata: null,
     },
   });
 });
@@ -758,14 +757,13 @@ test("POST /v1/teams/:teamId/invites creates invite", async () => {
     httpMethod: "POST",
     path: "/v1/teams/team-1/invites",
     headers: { Authorization: "Bearer token" },
-    body: JSON.stringify({ actorType: "user", displayName: "New User", role: "member" }),
+    body: JSON.stringify({ kind: "member", displayName: "New User", teamRole: "member" }),
   }, { createRepository: () => repo });
 
   assert.equal(response.statusCode, 201);
   const body = JSON.parse(response.body);
   assert.equal(body.token, "invite-token");
-  assert.equal(body.inviteId, "invite-1");
-  assert.deepEqual(repo.calls[0], { method: "createTeamInvite", teamId: "team-1", input: { actorType: "user", displayName: "New User", role: "member", expiresAt: null } });
+  assert.deepEqual(repo.calls[0], { method: "createTeamInvite", teamId: "team-1", input: { kind: "member", displayName: "New User", teamRole: "member", agentKind: null, ttlSeconds: null, targetActorId: null } });
 });
 
 test("POST /v1/teams/:teamId/invites returns 400 without required fields", async () => {
@@ -833,7 +831,7 @@ test("POST /v1/shortcuts calls repo.createShortcut", async () => {
   const body = JSON.parse(response.body);
   assert.ok(body.id);
   assert.equal(body.teamId, "team-1");
-  assert.deepEqual(repo.calls[0], { method: "createShortcut", input: { teamId: "team-1", kind: "link", label: "New Shortcut", position: 100 } });
+  assert.deepEqual(repo.calls[0], { method: "createShortcut", input: { teamId: "team-1", kind: "link", label: "New Shortcut", position: 100, scope: "team", nodeType: "link" } });
 });
 
 test("PATCH /v1/shortcuts/:shortcutId calls repo.updateShortcut", async () => {

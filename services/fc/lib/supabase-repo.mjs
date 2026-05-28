@@ -14,7 +14,7 @@ const ATTACHMENTS_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
-const WORKSPACE_COLUMNS = "id, team_id, name, slug, archived, metadata, created_at, updated_at";
+const WORKSPACE_COLUMNS = "id, team_id, name, path, archived, created_at, updated_at";
 
 export function createSupabaseBusinessRepository(options) {
   const {
@@ -54,7 +54,13 @@ export function createSupabaseBusinessRepository(options) {
       if (input.slug !== undefined) args.p_slug = input.slug;
       const { data, error } = await supabase.rpc("create_team", args);
       if (error) throw error;
-      return mapTeam(requiredRow(data, "teams.createTeam"));
+      const row = requiredRow(data, "teams.createTeam");
+      return mapTeam({
+        id: row.team_id ?? row.id,
+        name: row.team_name ?? row.name,
+        slug: row.team_slug ?? row.slug,
+        created_at: row.created_at ?? null,
+      });
     },
 
     async getTeam(teamId) {
@@ -76,23 +82,25 @@ export function createSupabaseBusinessRepository(options) {
     async createTeamInvite(teamId, input) {
       const args = {
         p_team_id: teamId,
-        p_actor_type: input.actorType,
+        p_kind: input.kind,
         p_display_name: input.displayName,
       };
-      if (input.role !== undefined) args.p_role = input.role;
-      if (input.expiresAt !== undefined) args.p_expires_at = input.expiresAt;
+      if (input.teamRole != null) args.p_team_role = input.teamRole;
+      if (input.agentKind != null) args.p_agent_kind = input.agentKind;
+      if (input.ttlSeconds != null) args.p_ttl_seconds = input.ttlSeconds;
+      if (input.targetActorId != null) args.p_target_actor_id = input.targetActorId;
       const { data, error } = await supabase.rpc("create_team_invite", args);
       if (error) throw error;
       const row = requiredRow(data, "teams.createTeamInvite");
       return {
         token: requiredString(row.token, "teams.createTeamInvite", "token"),
-        inviteId: requiredString(row.invite_id, "teams.createTeamInvite", "invite_id"),
         expiresAt: row.expires_at ?? null,
+        deeplink: row.deeplink ?? null,
       };
     },
 
-    async removeTeamActor(teamId, actorId) {
-      const { error } = await supabase.rpc("remove_team_actor", { p_team_id: teamId, p_actor_id: actorId });
+    async removeTeamActor(_teamId, actorId) {
+      const { error } = await supabase.rpc("remove_team_actor", { p_actor_id: actorId });
       if (error) throw error;
     },
 
@@ -109,7 +117,7 @@ export function createSupabaseBusinessRepository(options) {
                    .limit(limit);
       const { data, error } = await query;
       if (error) throw error;
-      return { items: data ?? [] };
+      return { items: (data ?? []).map(mapDirectoryActor) };
     },
 
     async getTeamDirectory(teamId) {
@@ -211,9 +219,8 @@ export function createSupabaseBusinessRepository(options) {
         id: input.id,
         team_id: input.teamId,
         name: input.name,
-        slug: input.slug ?? null,
+        path: input.slug ?? input.path ?? null,
         archived: input.archived ?? false,
-        metadata: input.metadata ?? null,
       };
       const { data, error } = await supabase
         .from("workspaces")
@@ -241,7 +248,8 @@ export function createSupabaseBusinessRepository(options) {
       const row = {};
       if (patch.name !== undefined) row.name = patch.name;
       if (patch.archived !== undefined) row.archived = patch.archived;
-      if (patch.metadata !== undefined) row.metadata = patch.metadata;
+      if (patch.slug !== undefined) row.path = patch.slug;
+      if (patch.path !== undefined) row.path = patch.path;
       const { data, error } = await supabase
         .from("workspaces")
         .update(row)
@@ -293,7 +301,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
 async heartbeat() {
-      const { error } = await supabase.rpc("heartbeat");
+      const { error } = await supabase.rpc("update_actor_last_active");
       if (error) throw error;
     },
 
@@ -331,15 +339,15 @@ async heartbeat() {
 
     async createShortcut(input) {
       const args = {
-        p_team_id: input.teamId,
-        p_kind: input.kind,
+        p_scope: input.scope,
         p_label: input.label,
+        p_node_type: input.nodeType ?? input.kind,
       };
-      if (input.id !== undefined) args.p_id = input.id;
+      if (input.teamId !== undefined) args.p_team_id = input.teamId;
       if (input.parentId !== undefined) args.p_parent_id = input.parentId;
-      if (input.payload !== undefined) args.p_payload = input.payload;
-      if (input.position !== undefined) args.p_position = input.position;
-      if (input.visibleRoleIds !== undefined) args.p_visible_role_ids = input.visibleRoleIds;
+      if (input.icon !== undefined) args.p_icon = input.icon;
+      if (input.order !== undefined) args.p_order = input.order;
+      if (input.target !== undefined) args.p_target = input.target;
       const { data, error } = await supabase.rpc("shortcut_create", args);
       if (error) throw error;
       const id = requiredString(data, "shortcuts.createShortcut", "id");
@@ -517,14 +525,13 @@ async heartbeat() {
       const args = {
         p_team_id: body.teamId,
         p_title: body.title,
-        p_description: body.description ?? null,
-        p_author_actor_id: body.authorActorId,
-        p_actor_ids: body.actorIds ?? [],
+        p_description: body.description ?? body.body ?? "",
       };
-      if (body.id !== undefined) args.p_id = body.id;
+      if (body.workspaceId != null) args.p_workspace_id = body.workspaceId;
       const { data, error } = await supabase.rpc("create_idea", args);
       if (error) throw error;
-      const id = requiredString(data, "ideas.createIdea", "id");
+      const row = Array.isArray(data) ? data[0] : data;
+      const id = requiredString(row?.id, "ideas.createIdea", "id");
       return this.getIdea(id);
     },
 
@@ -532,15 +539,16 @@ async heartbeat() {
       const { error } = await supabase.rpc("update_idea", {
         p_idea_id: ideaId,
         p_title: body.title ?? null,
-        p_description: body.description ?? null,
-        p_actor_ids: body.actorIds ?? null,
+        p_workspace_id: body.workspaceId ?? null,
+        p_description: body.description ?? body.body ?? null,
+        p_status: body.status ?? null,
       });
       if (error) throw error;
       return this.getIdea(ideaId);
     },
 
-    async archiveIdea(ideaId) {
-      const { error } = await supabase.rpc("archive_idea", { p_idea_id: ideaId });
+    async archiveIdea(ideaId, { archived = true } = {}) {
+      const { error } = await supabase.rpc("archive_idea", { p_idea_id: ideaId, p_archived: archived });
       if (error) throw error;
     },
 
@@ -549,7 +557,7 @@ async heartbeat() {
         .from("shortcuts")
         .select("*")
         .eq("team_id", teamId)
-        .order("position", { ascending: true });
+        .order("order", { ascending: true });
       if (parentId !== undefined) {
         if (parentId === null) {
           query = query.is("parent_id", null);
@@ -577,15 +585,15 @@ async heartbeat() {
 
     async createShortcut(body) {
       const args = {
-        p_team_id: body.teamId,
-        p_kind: body.kind,
+        p_scope: body.scope,
         p_label: body.label,
+        p_node_type: body.nodeType ?? body.kind,
+        p_team_id: body.teamId ?? null,
         p_parent_id: body.parentId ?? null,
-        p_payload: body.payload ?? null,
-        p_position: body.position ?? 0,
-        p_visible_role_ids: body.visibleRoleIds ?? [],
+        p_icon: body.icon ?? null,
+        p_order: body.order ?? body.position ?? 0,
+        p_target: body.target ?? "",
       };
-      if (body.id !== undefined) args.p_id = body.id;
       const { data, error } = await supabase.rpc("shortcut_create", args);
       if (error) throw error;
       const id = requiredString(data, "shortcuts.createShortcut", "id");
@@ -655,10 +663,10 @@ async heartbeat() {
     async createIdeaActivity(ideaId, body) {
       const { data, error } = await supabase.rpc("create_idea_activity", {
         p_idea_id: ideaId,
-        p_kind: body.kind,
+        p_activity_type: body.activityType ?? body.kind,
         p_content: body.content ?? null,
-        p_actor_id: body.actorId,
         p_metadata: body.metadata ?? null,
+        p_attachment_urls: body.attachmentUrls ?? [],
       });
       if (error) throw error;
       return mapIdeaActivityRow(requiredRow(data, "ideas.createIdeaActivity"));
@@ -727,10 +735,23 @@ async heartbeat() {
     },
 
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {
-      const { error } = await supabase.rpc("ensure_agent_types", {
-        p_supported_types: supportedTypes,
-        p_default_agent_type: defaultAgentType,
-      });
+      const { data: actorRow, error: actorErr } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("actor_type", "agent")
+        .limit(1)
+        .maybeSingle();
+      if (actorErr) throw actorErr;
+      if (!actorRow?.id) {
+        throw new Error("ensureAgentTypes: no agent actor visible to caller");
+      }
+      const { error } = await supabase
+        .from("agents")
+        .update({
+          agent_types: supportedTypes,
+          default_agent_type: defaultAgentType,
+        })
+        .eq("id", actorRow.id);
       if (error) throw error;
     },
 
@@ -738,7 +759,7 @@ async heartbeat() {
       const { error } = await supabase
         .from("agents")
         .update({ device_id: deviceId })
-        .eq("actor_id", agentActorId);
+        .eq("id", agentActorId);
       if (error) throw error;
     },
 
@@ -816,6 +837,20 @@ async heartbeat() {
     },
 
     // --- Directory resolution (frontend supabase delegate parity) ---
+
+    async resolveCallerActorForTeam(teamId) {
+      // Uses the caller's bearer token + RLS to find their own actor row in
+      // this team. Returns null when caller has no actor (or isn't a member).
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("team_id", teamId)
+        .eq("actor_type", "member")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? { id: data.id } : null;
+    },
 
     async resolveCurrentMemberActor(teamId, userId) {
       const { data, error } = await supabase
@@ -921,7 +956,7 @@ async heartbeat() {
       if (teamId) q = q.eq("team_id", teamId);
       const { data, error } = await q;
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []).map(mapDirectoryActor);
     },
 
     async removeAgentAccessById(accessId) {
@@ -1170,12 +1205,30 @@ async heartbeat() {
         .select("session_id, actor_id, role, joined_at")
         .eq("session_id", sessionId);
       if (error) throw error;
-      const items = (data ?? []).map((row) => ({
-        sessionId: row.session_id,
-        actorId: row.actor_id,
-        role: row.role ?? null,
-        joinedAt: row.joined_at ?? null,
-      }));
+      const rows = data ?? [];
+      const actorIds = rows.map((r) => r.actor_id).filter(Boolean);
+      let actorsById = new Map();
+      if (actorIds.length > 0) {
+        const { data: actors, error: actorsErr } = await supabase
+          .from("actor_directory")
+          .select("id, team_id, actor_type, display_name, avatar_url")
+          .in("id", actorIds);
+        if (actorsErr) throw actorsErr;
+        actorsById = new Map((actors ?? []).map((a) => [a.id, a]));
+      }
+      const items = rows.map((row) => {
+        const actor = actorsById.get(row.actor_id);
+        return {
+          sessionId: row.session_id,
+          actorId: row.actor_id,
+          role: row.role ?? null,
+          joinedAt: row.joined_at ?? null,
+          teamId: actor?.team_id ?? null,
+          actorType: actor?.actor_type ?? null,
+          displayName: actor?.display_name ?? null,
+          avatarUrl: actor?.avatar_url ?? null,
+        };
+      });
       return { items };
     },
 
@@ -1387,6 +1440,105 @@ async heartbeat() {
         updatedAt: row.updated_at,
       }));
       return { items };
+    },
+
+    async listLatestAgentRuntimeHints(teamId, agentIds) {
+      if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("id, agent_id, workspace_id, backend_type, runtime_id, session_id, status, current_model, updated_at")
+        .eq("team_id", teamId)
+        .in("agent_id", agentIds)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      const latest = new Map();
+      for (const row of data ?? []) {
+        if (!latest.has(row.agent_id)) latest.set(row.agent_id, row);
+      }
+      return [...latest.values()].map((row) => ({
+        id: row.id,
+        agent_id: row.agent_id,
+        workspace_id: row.workspace_id ?? null,
+        backend_type: row.backend_type ?? null,
+        runtime_id: row.runtime_id ?? null,
+        session_id: row.session_id ?? null,
+        status: row.status ?? null,
+        current_model: row.current_model ?? null,
+        updated_at: row.updated_at ?? null,
+      }));
+    },
+
+    async listAgentDefaults(agentIds) {
+      if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("agents")
+        .select("id, agent_types, default_agent_type")
+        .in("id", agentIds);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        agentTypes: Array.isArray(row.agent_types) ? row.agent_types : null,
+        defaultAgentType: row.default_agent_type ?? null,
+      }));
+    },
+
+    async updateRuntimeModel(runtimeId, model) {
+      const { error } = await supabase
+        .from("agent_runtimes")
+        .update({ current_model: model })
+        .eq("runtime_id", runtimeId);
+      if (error) throw error;
+    },
+
+    async listSessionRuntimeModels(sessionId) {
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("runtime_id, backend_type, current_model")
+        .eq("session_id", sessionId);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        runtime_id: row.runtime_id ?? null,
+        backend_type: row.backend_type ?? null,
+        current_model: row.current_model ?? null,
+      }));
+    },
+
+    async listRuntimeTargetsForSession(sessionId, agentIds) {
+      if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("agent_id, runtime_id")
+        .eq("session_id", sessionId)
+        .in("agent_id", agentIds);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        agent_id: row.agent_id ?? null,
+        runtime_id: row.runtime_id ?? null,
+      }));
+    },
+
+    async listDaemonRuntimes(teamId) {
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select("id, runtime_id, team_id, agent_id, session_id, workspace_id, backend_type, backend_session_id, status, current_model, last_seen_at, created_at, updated_at")
+        .eq("team_id", teamId)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        runtimeId: row.runtime_id ?? null,
+        teamId: row.team_id,
+        agentId: row.agent_id,
+        sessionId: row.session_id ?? null,
+        workspaceId: row.workspace_id ?? null,
+        backendType: row.backend_type,
+        backendSessionId: row.backend_session_id ?? null,
+        status: row.status,
+        currentModel: row.current_model ?? null,
+        lastSeenAt: row.last_seen_at ?? null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
     },
   };
 }
@@ -1695,9 +1847,8 @@ function mapWorkspace(row) {
     id: requiredString(row?.id, "workspaces.mapWorkspace", "id"),
     teamId: requiredString(row?.team_id, "workspaces.mapWorkspace", "team_id"),
     name: requiredString(row?.name, "workspaces.mapWorkspace", "name"),
-    slug: row?.slug ?? null,
+    slug: row?.path ?? null,
     archived: row?.archived === true,
-    metadata: row?.metadata ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };
@@ -1709,18 +1860,7 @@ function requiredInteger(value, operation, field) {
 }
 
 function mapShortcut(row) {
-  return {
-    id: requiredString(row?.id, "shortcuts.mapShortcut", "id"),
-    teamId: requiredString(row?.team_id, "shortcuts.mapShortcut", "team_id"),
-    parentId: row?.parent_id ?? null,
-    kind: requiredString(row?.kind, "shortcuts.mapShortcut", "kind"),
-    label: requiredString(row?.label, "shortcuts.mapShortcut", "label"),
-    payload: row?.payload ?? null,
-    position: row?.position ?? 0,
-    visibleRoleIds: row?.visible_role_ids ?? [],
-    createdAt: row?.created_at ?? null,
-    updatedAt: row?.updated_at ?? null,
-  };
+  return mapShortcutRow(row);
 }
 
 function mapTeamRole(row) {
@@ -1774,17 +1914,20 @@ function mapIdeaRow(row) {
 }
 
 function mapShortcutRow(row) {
+  if (!row) return row;
   return {
-    id: requiredString(row?.id, "shortcuts.mapShortcutRow", "id"),
-    teamId: requiredString(row?.team_id, "shortcuts.mapShortcutRow", "team_id"),
-    parentId: row?.parent_id ?? null,
-    kind: requiredString(row?.kind, "shortcuts.mapShortcutRow", "kind"),
-    label: requiredString(row?.label, "shortcuts.mapShortcutRow", "label"),
-    payload: row?.payload ?? null,
-    position: row?.position ?? 0,
-    visibleRoleIds: row?.visible_role_ids ?? [],
-    createdAt: row?.created_at ?? null,
-    updatedAt: row?.updated_at ?? null,
+    id: row.id,
+    scope: row.scope,
+    label: row.label,
+    owner_member_id: row.owner_member_id ?? null,
+    team_id: row.team_id ?? null,
+    parent_id: row.parent_id ?? null,
+    icon: row.icon ?? null,
+    order: row.order ?? 0,
+    node_type: row.node_type,
+    target: row.target ?? "",
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   };
 }
 
