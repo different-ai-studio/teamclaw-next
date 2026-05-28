@@ -23,6 +23,8 @@ import {
 import { useProviderStore } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTeamModeStore } from '@/stores/team-mode'
+import { useCurrentTeamStore } from '@/stores/current-team'
+import { TeamLiteLlmSection } from './llm/TeamLiteLlmSection'
 import { initOpenCodeClient } from '@/lib/opencode/sdk-client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -90,6 +92,8 @@ export const LLMSection = React.memo(function LLMSection() {
   const teamMode = useTeamModeStore((s) => s.teamMode)
   const teamModelConfig = useTeamModeStore((s) => s.teamModelConfig)
   const devUnlocked = useTeamModeStore((s) => s.devUnlocked)
+  const myRole = useTeamModeStore((s) => s.myRole)
+  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const providers = useProviderStore((s) => s.providers)
   const providersLoading = useProviderStore((s) => s.providersLoading)
   const configuredProviders = useProviderStore((s) => s.configuredProviders)
@@ -548,6 +552,13 @@ export const LLMSection = React.memo(function LLMSection() {
           iconColor="text-purple-500"
         />
         <WorkspacePathCard path={workspacePath} t={t} onSwitch={handleSwitchWorkspace} switching={switchingWorkspace} />
+        {currentTeamId && workspacePath && (
+          <TeamLiteLlmSection
+            teamId={currentTeamId}
+            workspacePath={workspacePath}
+            isOwner={myRole === 'owner'}
+          />
+        )}
         <SettingCard>
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400">
@@ -628,6 +639,14 @@ export const LLMSection = React.memo(function LLMSection() {
       </div>
 
       <WorkspacePathCard path={workspacePath} t={t} onSwitch={handleSwitchWorkspace} switching={switchingWorkspace} />
+
+      {currentTeamId && workspacePath && (
+        <TeamLiteLlmSection
+          teamId={currentTeamId}
+          workspacePath={workspacePath}
+          isOwner={myRole === 'owner'}
+        />
+      )}
 
       {/* Loading State */}
       {providersLoading && providers.length === 0 && (
