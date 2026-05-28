@@ -102,6 +102,16 @@ export function registerSessions(router) {
     return { body: out };
   });
 
+  router.post("/v1/sessions/display-rows", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.teamId, "teamId");
+    if (!Array.isArray(body.sessionIds)) {
+      throw new ApiError(400, "validation_failed", "sessionIds must be an array");
+    }
+    const items = await ctx.repository.listSessionDisplayRows(body.teamId, body.sessionIds);
+    return { body: { items } };
+  });
+
   router.post("/v1/sessions/cron", async (ctx) => {
     const body = ctx.json ?? {};
     for (const k of ["teamId", "primaryAgentActorId", "title"]) {

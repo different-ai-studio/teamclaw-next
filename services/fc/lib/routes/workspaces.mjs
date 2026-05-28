@@ -41,6 +41,16 @@ export function registerWorkspaces(router) {
     return { body: w };
   });
 
+  router.post("/v1/workspaces/by-ids", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.teamId, "teamId");
+    if (!Array.isArray(body.ids)) {
+      throw new ApiError(400, "validation_failed", "ids must be an array");
+    }
+    const items = await ctx.repository.listWorkspacesByIdsSlim(body.teamId, body.ids);
+    return { body: { items } };
+  });
+
   router.get("/v1/workspaces/:workspaceId", async (ctx) => {
     const w = await ctx.repository.getWorkspace(ctx.params.workspaceId);
     if (!w) throw new ApiError(404, "not_found", "workspace not found");

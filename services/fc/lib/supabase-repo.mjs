@@ -784,6 +784,210 @@ async heartbeat() {
       if (error) throw error;
       return { items: (data ?? []).map(mapLeaderboardRow) };
     },
+
+    // --- Directory resolution (frontend supabase delegate parity) ---
+
+    async resolveCurrentMemberActor(teamId, userId) {
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("team_id", teamId)
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? { id: data.id } : null;
+    },
+
+    async resolveFirstMemberActorForUser(userId) {
+      const { data, error } = await supabase
+        .from("actors")
+        .select("id, team_id")
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? { id: data.id, team_id: data.team_id ?? null } : null;
+    },
+
+    async getCurrentTeamMember(teamId, userId) {
+      const { data: actorRows, error: actorError } = await supabase
+        .from("actor_directory")
+        .select("id, display_name, team_role")
+        .eq("team_id", teamId)
+        .eq("user_id", userId)
+        .eq("actor_type", "member")
+        .limit(1);
+      if (actorError) throw actorError;
+      const actor = actorRows?.[0];
+      if (!actor) return null;
+      const { data: memberRows, error: memberError } = await supabase
+        .from("team_members")
+        .select("joined_at")
+        .eq("team_id", teamId)
+        .eq("member_id", actor.id)
+        .limit(1);
+      return {
+        id: actor.id,
+        displayName: actor.display_name || "",
+        role: actor.team_role ?? null,
+        joinedAt: memberError ? null : memberRows?.[0]?.joined_at ?? null,
+      };
+    },
+
+    // --- Sync (incremental) ---
+
+    async listActorDirectoryForSync(teamId, updatedAfter) {
+      let q = supabase
+        .from("actor_directory")
+        .select(
+          "id, team_id, actor_type, display_name, member_status, agent_status, last_active_at, created_at, updated_at",
+        )
+        .eq("team_id", teamId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listIdeasForSync(teamId, updatedAfter) {
+      let q = supabase
+        .from("ideas")
+        .select(
+          "id, team_id, workspace_id, parent_idea_id, title, description, status, created_by_actor_id, archived, sort_order, created_at, updated_at",
+        )
+        .eq("team_id", teamId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listSessionParticipantsForSync(sessionId, updatedAfter) {
+      let q = supabase
+        .from("session_participants")
+        .select("id, session_id, actor_id, joined_at, created_at, updated_at")
+        .eq("session_id", sessionId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    // --- Actor directory by ids + remove agent access ---
+
+    async listActorDirectoryByIds(actorIds, teamId) {
+      if (!Array.isArray(actorIds) || actorIds.length === 0) return [];
+      let q = supabase
+        .from("actor_directory")
+        .select(
+          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+        )
+        .in("id", actorIds);
+      if (teamId) q = q.eq("team_id", teamId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async removeAgentAccessById(accessId) {
+      const { error } = await supabase
+        .from("agent_member_access")
+        .delete()
+        .eq("id", accessId);
+      if (error) throw error;
+    },
+
+    // --- Team workspace git config (separate column set from
+    // existing default/pinned workspace config) ---
+
+    async listSessionsForTeamSince(teamId, updatedAfter) {
+      const SESSION_SYNC_COLUMNS =
+        "id, team_id, title, mode, primary_agent_id, idea_id, summary, last_message_preview, last_message_at, created_by_actor_id, created_at, updated_at";
+      let q = supabase
+        .from("sessions")
+        .select(SESSION_SYNC_COLUMNS)
+        .eq("team_id", teamId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listMessagesForSessionSince(sessionId, updatedAfter) {
+      const MESSAGE_SYNC_COLUMNS =
+        "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
+      let q = supabase
+        .from("messages")
+        .select(MESSAGE_SYNC_COLUMNS)
+        .eq("session_id", sessionId);
+      if (updatedAfter) q = q.gt("updated_at", updatedAfter);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listSessionDisplayRows(teamId, sessionIds) {
+      if (!Array.isArray(sessionIds) || sessionIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("id, title")
+        .eq("team_id", teamId)
+        .in("id", sessionIds);
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listSessionIdsForActor(actorId) {
+      const { data, error } = await supabase
+        .from("session_participants")
+        .select("session_id")
+        .eq("actor_id", actorId);
+      if (error) throw error;
+      return (data ?? []).map((r) => r.session_id).filter(Boolean);
+    },
+
+    async listWorkspacesByIdsSlim(teamId, workspaceIds) {
+      if (!Array.isArray(workspaceIds) || workspaceIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("workspaces")
+        .select("id, name, path")
+        .eq("team_id", teamId)
+        .in("id", workspaceIds);
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async listShortcutRoleBindings(teamId) {
+      const { data, error } = await supabase
+        .from("permissions")
+        .select("resource_id, permission_roles(role_id)")
+        .eq("team_id", teamId)
+        .eq("resource_type", "shortcut");
+      if (error) throw error;
+      return data ?? [];
+    },
+
+    async loadTeamWorkspaceGitConfig(teamId) {
+      const { data, error } = await supabase
+        .from("team_workspace_config")
+        .select("team_id, git_url, git_branch, git_token, ai_gateway_endpoint, enabled, updated_at")
+        .eq("team_id", teamId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+
+    async saveTeamWorkspaceGitConfig(input) {
+      const { error } = await supabase
+        .from("team_workspace_config")
+        .upsert(input, { onConflict: "team_id" });
+      if (error) throw error;
+    },
   };
 }
 
