@@ -1,0 +1,244 @@
+// SessionStore — local persistence + cross-tab sync + auto-refresh for the
+// TeamClaw auth session. Replaces what supabase-js's GoTrueClient previously
+// provided for the web/desktop frontend.
+//
+// Responsibilities:
+//   - persist the session under `teamclaw.session.v1` in localStorage
+//   - cache it in module-level memory for synchronous reads
+//   - notify subscribers on change (in-process + cross-tab via BroadcastChannel
+//     with `storage` event fallback)
+//   - schedule auto-refresh 60s before `expires_at`; dedup concurrent refreshes
+//
+// The actual refresh HTTP call is injected by `auth-client` to avoid an import
+// cycle.
+
+import type { AuthChangeEvent, AuthListener, Session } from "./types";
+
+const STORAGE_KEY = "teamclaw.session.v1";
+const CHANNEL_NAME = "teamclaw.auth";
+const REFRESH_LEEWAY_SECONDS = 60;
+
+type Refresher = (refreshToken: string) => Promise<Session>;
+
+let cachedSession: Session | null | undefined = undefined; // undefined = not yet hydrated
+let listeners = new Set<AuthListener>();
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let inFlightRefresh: Promise<Session> | null = null;
+let refresher: Refresher | null = null;
+let broadcastChannel: BroadcastChannel | null = null;
+let storageListenerInstalled = false;
+let visibilityListenerInstalled = false;
+
+function safeLocalStorage(): Storage | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readPersistedSession(): Session | null {
+  const ls = safeLocalStorage();
+  if (!ls) return null;
+  try {
+    const raw = ls.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Session;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSession(session: Session | null) {
+  const ls = safeLocalStorage();
+  if (!ls) return;
+  try {
+    if (session) ls.setItem(STORAGE_KEY, JSON.stringify(session));
+    else ls.removeItem(STORAGE_KEY);
+  } catch {
+    // localStorage may be full or blocked; degrade silently
+  }
+}
+
+function ensureCrossTab() {
+  if (typeof window === "undefined") return;
+  if (!broadcastChannel && typeof BroadcastChannel !== "undefined") {
+    try {
+      broadcastChannel = new BroadcastChannel(CHANNEL_NAME);
+      broadcastChannel.onmessage = (ev: MessageEvent) => {
+        const next = (ev.data ?? null) as Session | null;
+        if (sessionsEqual(cachedSession ?? null, next)) return;
+        cachedSession = next;
+        scheduleRefresh();
+        emit(next ? "SIGNED_IN" : "SIGNED_OUT", next);
+      };
+    } catch {
+      broadcastChannel = null;
+    }
+  }
+  if (!storageListenerInstalled) {
+    window.addEventListener("storage", (ev: StorageEvent) => {
+      if (ev.key !== STORAGE_KEY) return;
+      const next = ev.newValue ? (safeParse(ev.newValue) as Session | null) : null;
+      if (sessionsEqual(cachedSession ?? null, next)) return;
+      cachedSession = next;
+      scheduleRefresh();
+      emit(next ? "SIGNED_IN" : "SIGNED_OUT", next);
+    });
+    storageListenerInstalled = true;
+  }
+  if (!visibilityListenerInstalled && typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleRefresh();
+    });
+    visibilityListenerInstalled = true;
+  }
+}
+
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function sessionsEqual(a: Session | null, b: Session | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.access_token === b.access_token && a.refresh_token === b.refresh_token;
+}
+
+function emit(event: AuthChangeEvent, session: Session | null) {
+  for (const l of listeners) {
+    try {
+      l(event, session);
+    } catch (e) {
+      console.warn("[auth] listener threw", e);
+    }
+  }
+}
+
+function clearRefreshTimer() {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+function scheduleRefresh() {
+  clearRefreshTimer();
+  const session = cachedSession ?? null;
+  if (!session || !session.expires_at || !refresher) return;
+  const expiresAtMs = session.expires_at * 1000;
+  const fireAt = expiresAtMs - REFRESH_LEEWAY_SECONDS * 1000;
+  const delay = Math.max(0, fireAt - Date.now());
+  refreshTimer = setTimeout(() => {
+    void refreshSession().catch(() => {
+      // refresh failed — refreshSession already clears the session on hard failure
+    });
+  }, delay);
+}
+
+export function configureSessionStore(args: { refresher: Refresher }) {
+  refresher = args.refresher;
+  // first hydration: load persisted session into the in-memory cache.
+  if (cachedSession === undefined) {
+    cachedSession = readPersistedSession();
+  }
+  ensureCrossTab();
+  scheduleRefresh();
+}
+
+export function getSession(): Session | null {
+  if (cachedSession === undefined) {
+    cachedSession = readPersistedSession();
+    ensureCrossTab();
+    scheduleRefresh();
+  }
+  return cachedSession;
+}
+
+export function setSession(next: Session | null, event?: AuthChangeEvent) {
+  const prev = cachedSession ?? null;
+  cachedSession = next;
+  writePersistedSession(next);
+  if (broadcastChannel) {
+    try {
+      broadcastChannel.postMessage(next);
+    } catch {
+      // ignore
+    }
+  }
+  scheduleRefresh();
+  const e: AuthChangeEvent = event ?? (next ? (prev ? "TOKEN_REFRESHED" : "SIGNED_IN") : "SIGNED_OUT");
+  emit(e, next);
+}
+
+export function subscribe(listener: AuthListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
+ * Refresh the access token. Concurrent callers receive the same in-flight
+ * promise. On hard failure (4xx invalid_grant / refresh_token_not_found),
+ * the session is cleared and a SIGNED_OUT event is emitted.
+ */
+export function refreshSession(): Promise<Session> {
+  if (inFlightRefresh) return inFlightRefresh;
+  const session = cachedSession ?? null;
+  if (!session || !session.refresh_token) {
+    return Promise.reject(new Error("No refresh token available."));
+  }
+  if (!refresher) {
+    return Promise.reject(new Error("SessionStore not configured with a refresher."));
+  }
+  const fn = refresher;
+  const refreshToken = session.refresh_token;
+  inFlightRefresh = (async () => {
+    try {
+      const next = await fn(refreshToken);
+      setSession(next, "TOKEN_REFRESHED");
+      return next;
+    } catch (err) {
+      const e = err as { status?: number; code?: string };
+      if (
+        e?.status &&
+        e.status >= 400 &&
+        e.status < 500 &&
+        (e.code === "invalid_grant" || e.code === "refresh_token_not_found" || e.status === 401)
+      ) {
+        setSession(null, "SIGNED_OUT");
+      }
+      throw err;
+    } finally {
+      inFlightRefresh = null;
+    }
+  })();
+  return inFlightRefresh;
+}
+
+/** Test-only: reset all module state. */
+export function __resetSessionStoreForTests() {
+  clearRefreshTimer();
+  listeners = new Set();
+  cachedSession = undefined;
+  inFlightRefresh = null;
+  refresher = null;
+  if (broadcastChannel) {
+    try {
+      broadcastChannel.close();
+    } catch {
+      // ignore
+    }
+    broadcastChannel = null;
+  }
+  storageListenerInstalled = false;
+  visibilityListenerInstalled = false;
+  const ls = safeLocalStorage();
+  if (ls) ls.removeItem(STORAGE_KEY);
+}

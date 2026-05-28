@@ -2,7 +2,7 @@ import type { ServerConfig } from "@/lib/server-config";
 import { createSupabaseBackend } from "../supabase";
 import type { TeamClawBackend } from "../types";
 import { createCloudApiClient, type CloudApiClient } from "./http";
-import { createAuthModule } from "./auth";
+import { createAuthClient, createAuthModule } from "./auth";
 import { createTeamsModule } from "./teams";
 import { createSessionsModule } from "./sessions";
 import { createMessagesModule } from "./messages";
@@ -26,23 +26,24 @@ export function createCloudApiBackend(
   config: ServerConfig,
   options: { delegate?: TeamClawBackend; client?: CloudApiClient } = {},
 ): TeamClawBackend {
-  // delegate is kept for domains not yet covered by /v1 endpoints:
-  // - sync (no FC route)
-  // - directory (no FC route)
-  // - teamWorkspaceConfig (schema mismatch)
-  // - actors.listActorDirectoryByIds (no bulk endpoint)
-  // - actors.removeAgentAccess (accessId vs actorId mismatch)
-  // - teams.removeTeamActor (no teamId in interface)
-  // These will be removed in Phase D once FC routes are expanded.
+  // The Supabase delegate is still used to back the long tail of methods that
+  // do not yet have a /v1 FC endpoint (telemetry, runtime, shortcuts,
+  // notifications, several sessions/messages history paths, sync, etc.). The
+  // Auth surface, however, has been fully migrated to the FC /v1/auth/*
+  // proxy + the in-process SessionStore — see ./auth.ts and @/lib/auth.
   const delegate = options.delegate ?? createSupabaseBackend();
-  const client = options.client ?? createCloudApiClient({
-    baseUrl: requiredCloudApiUrl(config),
-    auth: delegate.auth,
-  });
+  const baseUrl = requiredCloudApiUrl(config);
+  const authClient = createAuthClient({ baseUrl });
+  // Build a temporary auth backend so the CloudApiClient can pull the bearer
+  // token from the SessionStore. This is the FC auth backend — it does not
+  // touch the Supabase delegate.
+  const tempAuth = createAuthModule(/* client */ null as unknown as CloudApiClient, authClient);
+  const client = options.client ?? createCloudApiClient({ baseUrl, auth: tempAuth });
+  const auth = createAuthModule(client, authClient);
 
   return {
     kind: "cloud_api",
-    auth: createAuthModule(client, delegate.auth),
+    auth,
     teams: createTeamsModule(client, delegate.teams),
     sessions: createSessionsModule(client, delegate.sessions),
     messages: createMessagesModule(client, delegate.messages),
@@ -57,7 +58,6 @@ export function createCloudApiBackend(
     runtime: createRuntimeModule(client, delegate.runtime),
     attachments: createAttachmentsModule(client, delegate.attachments),
     telemetry: createTelemetryModule(client, delegate.telemetry),
-    // sync has no /v1 endpoint yet; keep Supabase passthrough
     sync: delegate.sync,
   };
 }
