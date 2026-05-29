@@ -556,29 +556,20 @@ function createTableQuery(table, calls, data, error, hooks = {}) {
         },
       };
     },
-    upsert(row, _options) {
-      calls.push({ table, op: "upsert", row });
-      if (onUpsert) onUpsert(table, row);
-      const resolvedData = upsertData ?? data[0] ?? null;
-      return {
-        select(_columns) {
-          return {
-            single() {
-              return Promise.resolve({ data: resolvedData, error });
-            },
-          };
-        },
-      };
-    },
+    // Single upsert: captures options + call records (agent_runtimes tests) and
+    // honors the onUpsert/upsertData hooks (telemetry tests). A prior auto-merge
+    // left two same-named upsert methods; the later silently shadowed the former.
     upsert(row, options) {
       calls.push({ table, op: "upsert", row, options });
+      if (onUpsert) onUpsert(table, row);
+      const resolvedData = upsertData ?? data[0] ?? null;
       return {
         select(columns) {
           calls.push({ table, op: "upsert.select", columns });
           return {
             async single() {
               calls.push({ table, op: "upsert.single" });
-              return { data: data[0] ?? null, error };
+              return { data: resolvedData, error };
             },
           };
         },
