@@ -436,6 +436,8 @@
     }
   },
   "workspace": {
+    "connectingDaemon": "Connecting to amuxd daemon…",
+    "daemonUnavailableHint": "Start amuxd on this machine (e.g. pnpm daemon:run), confirm the HTTP port/token files exist under ~/.amuxd/, then retry.",
     "title": "Workspace",
     "openFolder": "Open Folder",
     "recentFolders": "Recent Folders",
@@ -1722,6 +1724,9 @@
       }
     },
     "team": {
+      "prereqTitle": "Team sharing can't be configured yet",
+      "prereqNoTeam": "No team has been created or selected yet — create or pick a team before configuring team sharing.",
+      "prereqNoWorkspace": "workspacePath is empty — open a workspace first.",
       "currentTeam": "Shared space",
       "loadingShareMode": "Loading team share status…",
       "oss": {
