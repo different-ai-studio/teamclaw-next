@@ -335,6 +335,22 @@ pub struct OpenCodeCompatStore {
     write_lock: Mutex<()>,
 }
 
+/// Decode a base64url workspace-ID to an absolute filesystem path.
+pub fn decode_workspace_path(workspace_id: &str) -> Result<PathBuf, WorkspaceControlError> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let bytes = URL_SAFE_NO_PAD
+        .decode(workspace_id)
+        .map_err(|_| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))?;
+    let path_str = String::from_utf8(bytes)
+        .map_err(|_| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))?;
+    let path = PathBuf::from(&path_str);
+    if path.is_dir() {
+        Ok(path)
+    } else {
+        Err(WorkspaceControlError::WorkspaceNotFound(path_str))
+    }
+}
+
 impl OpenCodeCompatStore {
     pub fn new() -> Self {
         Self {
@@ -342,22 +358,8 @@ impl OpenCodeCompatStore {
         }
     }
 
-    /// Decode a base64url workspace-ID to an absolute filesystem path.
-    /// Returns `WorkspaceNotFound` if the ID is malformed or the directory
-    /// does not exist on disk.
     fn workspace_path(&self, workspace_id: &str) -> Result<PathBuf, WorkspaceControlError> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-        let bytes = URL_SAFE_NO_PAD
-            .decode(workspace_id)
-            .map_err(|_| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))?;
-        let path_str = String::from_utf8(bytes)
-            .map_err(|_| WorkspaceControlError::WorkspaceNotFound(workspace_id.to_owned()))?;
-        let path = PathBuf::from(&path_str);
-        if path.is_dir() {
-            Ok(path)
-        } else {
-            Err(WorkspaceControlError::WorkspaceNotFound(path_str))
-        }
+        decode_workspace_path(workspace_id)
     }
 
     fn opencode_json_path(workspace_path: &std::path::Path) -> PathBuf {

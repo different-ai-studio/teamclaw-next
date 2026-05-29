@@ -833,11 +833,20 @@ impl DaemonServer {
                         self.agents.clone(),
                         http_cfg.max_event_backlog,
                     );
+                let runtime_supervisor =
+                    Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
                 let workspace_control: Option<std::sync::Arc<dyn crate::config::WorkspaceControlStore>> =
                     Some(std::sync::Arc::new(
                         crate::config::OpenCodeCompatStore::new(),
                     ));
-                match crate::http::spawn(http_cfg, meta, runtime, workspace_control).await {
+                match crate::http::spawn(
+                    http_cfg,
+                    meta,
+                    runtime,
+                    workspace_control,
+                    runtime_supervisor,
+                )
+                .await {
                     Ok(h) => {
                         info!(addr = %h.local_addr, "http listener bound");
                         Some(h)

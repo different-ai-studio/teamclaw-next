@@ -263,14 +263,14 @@ export async function createSessionWithFirstMessage(
       agentType: args.agentType,
       modelId: args.modelId,
     })
-    await startAgentRuntimesAsync({
+    void startAgentRuntimesAsync({
       sessionId,
       teamId: args.teamId,
       agentActorIds: args.agentActorIds,
       agentType: args.agentType,
       modelId: args.modelId,
     })
-    sessionFlowLog('session_with_first_message.runtime_start.done', {
+    sessionFlowLog('session_with_first_message.runtime_start.scheduled', {
       sessionId,
       teamId: args.teamId,
       agentActorIds: args.agentActorIds,

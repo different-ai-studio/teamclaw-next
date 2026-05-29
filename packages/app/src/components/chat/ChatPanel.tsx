@@ -1506,7 +1506,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         teamId: teamIdForSend,
         sessionId,
       });
-      await ensureSessionLiveSubscribed(teamIdForSend, sessionId);
+      await ensureSessionLiveSubscribed(teamIdForSend, sessionId).catch((e) => {
+        console.warn('[ChatPanel] live subscribe failed (non-fatal):', e);
+      });
       sessionFlowLog("session_create.subscribe_live.ok", {
         teamId: teamIdForSend,
         sessionId,

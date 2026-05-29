@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::proto::amux;
 use crate::runtime::adapter::{runtime_envelopes_from_acp_event, RuntimeEnvelope};
+use crate::runtime::supervisor::prepare_workspace;
 use crate::runtime::RuntimeManager;
 
 use super::errors::HttpError;
@@ -613,13 +614,15 @@ impl RuntimeManagerAdapter {
 
         #[cfg(not(test))]
         {
-            let worktree = std::env::current_dir()
-                .map_err(|e| HttpError::internal(format!("resolve runtime worktree: {e}")))?;
+            let worktree = resolve_spawn_worktree(workspace_id.as_deref())?;
+            prepare_workspace(std::path::Path::new(&worktree)).map_err(|e| {
+                HttpError::internal(format!("prepare workspace for runtime spawn: {e}"))
+            })?;
             let mut manager = self.manager.lock().await;
             manager
                 .spawn_agent_with_model(
                     agent_type,
-                    worktree.to_string_lossy().as_ref(),
+                    &worktree,
                     initial_prompt.as_deref().unwrap_or(""),
                     workspace_id.as_deref().unwrap_or(""),
                     None,
@@ -854,6 +857,23 @@ impl RuntimeManagerAdapter {
         }
         snapshot
     }
+}
+
+/// Resolve the filesystem worktree for HTTP session runtime spawn.
+/// Accepts base64url workspace IDs (workspace control plane) or a plain path.
+fn resolve_spawn_worktree(workspace_id: Option<&str>) -> Result<String, HttpError> {
+    if let Some(id) = workspace_id.filter(|s| !s.is_empty()) {
+        if let Ok(path) = crate::config::decode_workspace_path(id) {
+            return Ok(path.to_string_lossy().into_owned());
+        }
+        let path = std::path::Path::new(id);
+        if path.is_dir() {
+            return Ok(id.to_owned());
+        }
+    }
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| HttpError::internal(format!("resolve runtime worktree: {e}")))
 }
 
 fn parse_agent_type(agent_type: &str) -> Result<amux::AgentType, HttpError> {

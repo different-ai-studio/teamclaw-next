@@ -590,6 +590,56 @@ impl RuntimeManager {
         }
     }
 
+    fn workspace_runtime_matches(
+        handle: &RuntimeHandle,
+        workspace_path: &str,
+        workspace_id: &str,
+    ) -> bool {
+        handle.worktree == workspace_path
+            || handle.workspace_id == workspace_path
+            || handle.workspace_id == workspace_id
+    }
+
+    /// Active runtimes bound to a workspace path or id.
+    pub fn active_handles_for_workspace<'a>(
+        &'a self,
+        workspace_path: &'a str,
+        workspace_id: &'a str,
+    ) -> impl Iterator<Item = (&'a String, &'a RuntimeHandle)> + 'a {
+        self.agents.iter().filter(move |(_, handle)| {
+            Self::workspace_runtime_matches(handle, workspace_path, workspace_id)
+                && matches!(
+                    handle.status,
+                    amux::AgentStatus::Starting
+                        | amux::AgentStatus::Active
+                        | amux::AgentStatus::Idle
+                )
+        })
+    }
+
+    /// Stop all runtimes for a workspace (used after settings reload).
+    pub async fn stop_runtimes_for_workspace(
+        &mut self,
+        workspace_path: &str,
+        workspace_id: &str,
+    ) -> usize {
+        let ids: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, handle)| {
+                Self::workspace_runtime_matches(handle, workspace_path, workspace_id)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut stopped = 0usize;
+        for id in ids {
+            if self.stop_agent(&id).await.is_some() {
+                stopped += 1;
+            }
+        }
+        stopped
+    }
+
     /// Stop every runtime whose `last_active_at` is older than
     /// `now - threshold_secs`. Skips runtimes whose `event_rx` is currently
     /// checked out (a gateway turn is in flight). Returns the list of

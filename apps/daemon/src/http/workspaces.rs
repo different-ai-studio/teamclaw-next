@@ -18,9 +18,10 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::config::workspace_control::{
-    AllowlistRule, ApplyOutcome, ManagedSkillDto, McpServerConfig, PermissionConfig,
-    ProviderAuthRequest, ProviderInfo, RoleRecordDto, RolesSkillsStateDto, RuntimeStatus,
-    UpsertRoleRequest, UpsertSkillRequest, WorkspaceControlError, WorkspaceControlStore,
+    decode_workspace_path, AllowlistRule, ApplyOutcome, ManagedSkillDto, McpServerConfig,
+    PermissionConfig, ProviderAuthRequest, ProviderInfo, RoleRecordDto, RolesSkillsStateDto,
+    RuntimeStatus, UpsertRoleRequest, UpsertSkillRequest, WorkspaceControlError,
+    WorkspaceControlStore,
 };
 use std::collections::HashMap;
 
@@ -336,6 +337,16 @@ pub async fn get_runtime(
     Path(workspace_id): Path<String>,
 ) -> Result<Json<RuntimeStatus>, HttpError> {
     require_scope(&principal, "workspace:read")?;
+    let workspace_path = decode_workspace_path(&workspace_id).map_err(map_control_err)?;
+
+    if let Some(supervisor) = state.runtime_supervisor.as_ref() {
+        let status = supervisor
+            .runtime_status(&workspace_id, &workspace_path)
+            .await
+            .map_err(map_control_err)?;
+        return Ok(Json(status));
+    }
+
     let store = resolve_store(&state)?;
     let status = store
         .get_runtime_status(&workspace_id)
@@ -350,6 +361,16 @@ pub async fn reload_runtime(
     Path(workspace_id): Path<String>,
 ) -> Result<Json<ApplyResponse>, HttpError> {
     require_scope(&principal, "workspace:write")?;
+    let workspace_path = decode_workspace_path(&workspace_id).map_err(map_control_err)?;
+
+    if let Some(supervisor) = state.runtime_supervisor.as_ref() {
+        let outcome = supervisor
+            .reload_workspace(&workspace_id, &workspace_path)
+            .await
+            .map_err(map_control_err)?;
+        return Ok(apply_ok(outcome));
+    }
+
     let store = resolve_store(&state)?;
     let outcome = store
         .reload_runtime(&workspace_id)

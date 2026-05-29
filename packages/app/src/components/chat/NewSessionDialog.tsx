@@ -17,7 +17,7 @@ import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { createSessionWithFirstMessage } from '@/lib/session-create'
-import { ensureSessionLiveSubscribed } from '@/App'
+import { ensureSessionLiveSubscribed } from '@/lib/session-live-subscriptions'
 import { cn } from '@/lib/utils'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import {
@@ -229,7 +229,9 @@ export function NewSessionDialog() {
         agentType: selectedModel ? resolveAmuxAgentType(selectedModel.provider) : undefined,
         modelId: selectedModel?.id,
       })
-      await ensureSessionLiveSubscribed(teamId, sessionId)
+      await ensureSessionLiveSubscribed(teamId, sessionId).catch((e) => {
+        console.warn('[NewSessionDialog] live subscribe failed (non-fatal):', e)
+      })
       await useSessionListStore.getState().load()
       useSessionStore.getState().addHighlightedSession(sessionId)
       await useUIStore.getState().switchToSession(sessionId)

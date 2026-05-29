@@ -138,7 +138,7 @@ vi.mock('@/lib/session-create', () => ({
   createSessionWithFirstMessage: (...args: unknown[]) => mocks.createSessionWithFirstMessage(...args),
 }))
 
-vi.mock('@/App', () => ({
+vi.mock('@/lib/session-live-subscriptions', () => ({
   ensureSessionLiveSubscribed: (...args: unknown[]) => mocks.ensureSessionLiveSubscribed(...args),
 }))
 

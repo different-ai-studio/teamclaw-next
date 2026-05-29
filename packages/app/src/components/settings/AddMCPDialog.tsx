@@ -94,7 +94,7 @@ export function AddMCPDialog({
     if (open) {
       if (editingServer) {
         setName(editingServer.name)
-        setServerType(editingServer.config.type)
+        setServerType(editingServer.config.type === 'remote' ? 'remote' : 'local')
         setCommand(editingServer.config.command?.join(' ') || '')
         setEnvVars(objectToArray(editingServer.config.environment || {}))
         setUrl(editingServer.config.url || '')

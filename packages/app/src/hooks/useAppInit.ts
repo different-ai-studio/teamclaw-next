@@ -25,6 +25,12 @@ import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useCronStore } from "@/stores/cron";
 import { isDaemonHttpAvailable } from "@/lib/daemon-local-client";
+import { initOpenCodeClient } from "@/lib/opencode/sdk-client";
+import {
+  startOpenCode,
+  hasPreloadFor,
+  waitForOpenCodeBootstrapped,
+} from "@/lib/opencode/preloader";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
 import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
 
@@ -125,7 +131,9 @@ export function useWorkspaceInit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Probe daemon HTTP and mark workspace control plane ready (replaces OpenCode sidecar bootstrap).
+  // Prefer daemon HTTP for workspace control; fall back to the legacy OpenCode
+  // sidecar so settings, gateways, and OpenCode SDK session metadata keep
+  // working when amuxd is not running yet.
   useEffect(() => {
     if (!workspacePath) {
       setDaemonHttpReady(false);
@@ -135,26 +143,66 @@ export function useWorkspaceInit() {
     setOpenCodeError(null);
 
     if (!isTauri()) {
-      setOpenCodeBootstrapped(true);
-      setOpenCodeReady(true);
+      const url = "http://127.0.0.1:4096";
+      initOpenCodeClient({ baseUrl: url, workspacePath });
+      setOpenCodeBootstrapped(true, url);
+      setOpenCodeReady(true, url);
       setDaemonHttpReady(true);
       return;
     }
 
     let cancelled = false;
+    const explicitPort =
+      windowParams && windowParams.workspace === workspacePath ? windowParams.port : undefined;
+
     void (async () => {
-      const ready = await isDaemonHttpAvailable();
+      const daemonReady = await isDaemonHttpAvailable();
       if (cancelled) return;
-      setDaemonHttpReady(ready);
-      if (ready) {
+
+      if (daemonReady) {
+        setDaemonHttpReady(true);
         setOpenCodeBootstrapped(true);
         setOpenCodeReady(true);
         setOpenCodeError(null);
         performance.mark("daemon-ready");
-      } else {
+        return;
+      }
+
+      setDaemonHttpReady(false);
+
+      const alreadyPreloading = hasPreloadFor(workspacePath);
+      if (!alreadyPreloading) {
+        setOpenCodeBootstrapped(false);
+      }
+
+      waitForOpenCodeBootstrapped(workspacePath, explicitPort)
+        .then((status) => {
+          if (cancelled) return;
+          initOpenCodeClient({ baseUrl: status.url, workspacePath });
+          setOpenCodeError(null);
+          setOpenCodeBootstrapped(true, status.url);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          console.warn("[OpenCode] Failed waiting for bootstrap event:", error);
+        });
+
+      try {
+        const status = await startOpenCode(workspacePath, explicitPort);
+        if (cancelled) return;
+        initOpenCodeClient({ baseUrl: status.url, workspacePath });
+        setOpenCodeError(null);
+        setOpenCodeBootstrapped(true, status.url);
+        setOpenCodeReady(true, status.url);
+        performance.mark("opencode-ready");
+      } catch (error) {
+        if (cancelled) return;
+        console.error("[OpenCode] Failed to start sidecar fallback:", error);
         setOpenCodeBootstrapped(false);
         setOpenCodeReady(false);
-        setOpenCodeError("Daemon HTTP control plane unavailable");
+        setOpenCodeError(
+          "Daemon HTTP unavailable and OpenCode sidecar failed to start",
+        );
       }
     })();
 

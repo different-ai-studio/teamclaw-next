@@ -39,6 +39,7 @@ pub struct HttpState {
     /// store (e.g. in focused unit tests). Workspace routes return 404 in
     /// that case.
     pub workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
+    pub runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
 }
 
 impl HttpState {
@@ -48,6 +49,7 @@ impl HttpState {
         meta: DaemonMetadata,
         runtime: Arc<dyn RuntimeAdapter>,
         workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
+        runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
     ) -> Self {
         Self {
             config: Arc::new(config),
@@ -58,6 +60,7 @@ impl HttpState {
             idempotency: IdempotencyCache::new(),
             limiter: RateLimiter::new(),
             workspace_control,
+            runtime_supervisor,
         }
     }
 }

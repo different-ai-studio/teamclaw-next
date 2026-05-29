@@ -17,7 +17,7 @@ pub use roles_skills::{
     ManagedSkillDto, RoleRecordDto, RoleSkillLinkDto, RolesSkillsMetricsDto, RolesSkillsStateDto,
 };
 pub use workspace_control::{
-    AllowlistDecision, AllowlistRule, ApplyOutcome, McpServerConfig, NullWorkspaceControlStore,
+    decode_workspace_path, AllowlistDecision, AllowlistRule, ApplyOutcome, McpServerConfig, NullWorkspaceControlStore,
     OpenCodeCompatStore, PermissionAction, PermissionConfig, ProviderAuthRequest,
     ProviderInfo, ProviderModelConfig, RuntimeStatus, WorkspaceControlError,
     WorkspaceControlStore,

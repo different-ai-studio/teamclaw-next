@@ -369,7 +369,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
       await putDaemonProviderAuth(wsId, providerId, {
         api_key: apiKey || '',
-        base_url: config.baseUrl || undefined,
+        base_url: config.baseURL || undefined,
         display_name: config.name,
         models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
       })
@@ -396,7 +396,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
       await putDaemonProviderAuth(wsId, providerId, {
         api_key: config.apiKey || '',
-        base_url: config.baseUrl || undefined,
+        base_url: config.baseURL || undefined,
         display_name: config.name,
         models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
       })
@@ -423,7 +423,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         if (!p) return null
         return {
           name: p.display_name,
-          baseUrl: p.base_url ?? '',
+          baseURL: p.base_url ?? '',
           models: p.models.map((id) => ({ modelId: id, modelName: id })),
         } satisfies CustomProviderConfig
       }
