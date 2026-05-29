@@ -132,26 +132,29 @@ describe('useOssSyncStore', () => {
   // ── listVersions ─────────────────────────────────────────────────────────
 
   describe('listVersions', () => {
-    it('calls oss_sync_list_versions and returns array', async () => {
-      const versions = [
-        {
-          version: 2,
-          contentHash: 'abc123',
-          size: 512,
-          deleted: false,
-          createdAt: '2026-05-27T10:00:00Z',
-          message: null,
-        },
-        {
-          version: 1,
-          contentHash: 'def456',
-          size: 480,
-          deleted: false,
-          createdAt: '2026-05-26T10:00:00Z',
-          message: 'initial',
-        },
-      ]
-      mockInvoke.mockResolvedValueOnce(versions)
+    it('calls oss_sync_list_versions with cursor and returns a version page', async () => {
+      const page = {
+        versions: [
+          {
+            version: 2,
+            contentHash: 'abc123',
+            size: 512,
+            deleted: false,
+            createdAt: '2026-05-27T10:00:00Z',
+            message: null,
+          },
+          {
+            version: 1,
+            contentHash: 'def456',
+            size: 480,
+            deleted: false,
+            createdAt: '2026-05-26T10:00:00Z',
+            message: 'initial',
+          },
+        ],
+        nextCursor: null,
+      }
+      mockInvoke.mockResolvedValueOnce(page)
 
       const result = await useOssSyncStore
         .getState()
@@ -161,9 +164,45 @@ describe('useOssSyncStore', () => {
         workspacePath: '/workspace/path',
         teamId: 'team-active',
         path: 'notes/foo.md',
+        cursor: null,
       })
-      expect(result).toHaveLength(2)
-      expect(result[0].contentHash).toBe('abc123')
+      expect(result.versions).toHaveLength(2)
+      expect(result.versions[0].contentHash).toBe('abc123')
+      expect(result.nextCursor).toBeNull()
+    })
+
+    it('forwards an explicit cursor to oss_sync_list_versions', async () => {
+      mockInvoke.mockResolvedValueOnce({ versions: [], nextCursor: null })
+
+      await useOssSyncStore
+        .getState()
+        .listVersions('/workspace/path', 'notes/foo.md', 'CURSOR1')
+
+      expect(mockInvoke).toHaveBeenCalledWith('oss_sync_list_versions', {
+        workspacePath: '/workspace/path',
+        teamId: 'team-active',
+        path: 'notes/foo.md',
+        cursor: 'CURSOR1',
+      })
+    })
+  })
+
+  // ── getVersionContent ─────────────────────────────────────────────────────
+
+  describe('getVersionContent', () => {
+    it('calls oss_sync_get_version_content and returns the plaintext', async () => {
+      mockInvoke.mockResolvedValueOnce('# hello\nplain text body')
+
+      const result = await useOssSyncStore
+        .getState()
+        .getVersionContent('/workspace/path', 'abc123')
+
+      expect(mockInvoke).toHaveBeenCalledWith('oss_sync_get_version_content', {
+        workspacePath: '/workspace/path',
+        teamId: 'team-active',
+        contentHash: 'abc123',
+      })
+      expect(result).toBe('# hello\nplain text body')
     })
   })
 
