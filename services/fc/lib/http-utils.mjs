@@ -46,6 +46,16 @@ export function extractBearerToken(headers = {}) {
   return match[1].trim();
 }
 
+// Like extractBearerToken but returns null instead of throwing when the
+// Authorization header is absent. Used by routes where a bearer is optional
+// (e.g. native id_token sign-in: present only for the identity-link path).
+export function optionalBearerToken(headers = {}) {
+  const authorization = getHeader(headers, "authorization");
+  if (!authorization) return null;
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match && match[1]?.trim() ? match[1].trim() : null;
+}
+
 export function decodeBody(event = {}) {
   if (event.body === undefined || event.body === null || event.body === "") return "";
   if (event.isBase64Encoded) return Buffer.from(event.body, "base64").toString("utf8");

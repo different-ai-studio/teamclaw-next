@@ -397,9 +397,115 @@ paths:
       tags: [Sessions]
       parameters:
         - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lastReadMessageId:
+                  type:
+                    - string
+                    - "null"
+                  description: Pin the read marker to a specific message id. If omitted, the marker advances to the most recent message.
       responses:
         "204":
           description: OK
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/sessions:
+    get:
+      operationId: listTeamSessions
+      summary: List all sessions for a team with display-row fields populated
+      description: |
+        Returns the full SessionFull shape (summary, createdByActorId,
+        primaryAgentId, participantCount) for every session in the team that
+        the caller can see. Used by iOS to populate the session list without
+        following up per-row participant queries.
+      tags: [Sessions]
+      parameters:
+        - in: path
+          name: teamId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Sessions for team.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, teamId, title, mode, hasUnread, participantCount]
+                      properties:
+                        id: { type: string }
+                        teamId: { type: string }
+                        title: { type: string }
+                        mode: { type: string }
+                        ideaId: { type: [string, "null"] }
+                        primaryAgentId: { type: [string, "null"] }
+                        createdByActorId: { type: [string, "null"] }
+                        summary: { type: [string, "null"] }
+                        lastMessageAt: { type: [string, "null"], format: date-time }
+                        lastMessagePreview: { type: [string, "null"] }
+                        participantCount: { type: integer }
+                        hasUnread: { type: boolean }
+                        createdAt: { type: [string, "null"], format: date-time }
+                        updatedAt: { type: [string, "null"], format: date-time }
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/agent-runtimes:
+    get:
+      operationId: listTeamAgentRuntimes
+      summary: List all agent runtimes for a team
+      description: |
+        Returns every row in `agent_runtimes` for the team that the caller
+        can see. Used by iOS to merge backend runtime state into the local
+        session list.
+      tags: [Agents]
+      parameters:
+        - in: path
+          name: teamId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Agent runtimes for team.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, teamId, agentId, backendType, status, createdAt, updatedAt]
+                      properties:
+                        id: { type: string }
+                        teamId: { type: string }
+                        agentId: { type: string }
+                        sessionId: { type: [string, "null"] }
+                        workspaceId: { type: [string, "null"] }
+                        backendType: { type: string }
+                        status: { type: string }
+                        backendSessionId: { type: [string, "null"] }
+                        runtimeId: { type: [string, "null"] }
+                        currentModel: { type: [string, "null"] }
+                        lastSeenAt: { type: [string, "null"], format: date-time }
+                        createdAt: { type: string, format: date-time }
+                        updatedAt: { type: string, format: date-time }
         "401":
           $ref: "#/components/responses/Error"
   /v1/sessions/{sessionId}/participants:
@@ -2964,6 +3070,76 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/auth/signin-idtoken:
+    post:
+      operationId: signInWithIdToken
+      summary: Native OIDC sign-in / identity link (Apple, Google) via GoTrue id_token grant
+      description: |
+        Exchanges a provider ID token for a Supabase session. When called with
+        a Bearer access token, GoTrue links the OIDC identity to the current
+        user instead of minting a new one — powering the anonymous → Apple
+        upgrade flow.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, idToken]
+              properties:
+                provider:
+                  type: string
+                  enum: [apple, google]
+                idToken:
+                  type: string
+                nonce:
+                  type: [string, "null"]
+      responses:
+        "200":
+          description: GoTrue session
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/me/bootstrap:
+    get:
+      operationId: getMeBootstrap
+      summary: Member actor + team memberships for the authenticated user
+      description: |
+        Returns the caller's member-actor id, the teams they belong to, and a
+        per-team member-actor map. Backs the iOS onboarding bootstrap that
+        previously read actors + team_members directly from Supabase.
+      tags: [Config]
+      responses:
+        "200":
+          description: Bootstrap payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [memberActorId, teams, memberActorIdByTeam]
+                properties:
+                  memberActorId:
+                    type: [string, "null"]
+                  teams:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, role]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        slug: { type: [string, "null"] }
+                        role: { type: string }
+                  memberActorIdByTeam:
+                    type: object
+                    additionalProperties: { type: string }
         "401":
           $ref: "#/components/responses/Error"
 components:

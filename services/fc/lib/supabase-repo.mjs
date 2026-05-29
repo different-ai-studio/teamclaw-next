@@ -1183,6 +1183,114 @@ async heartbeat() {
     // --- Team workspace git config (separate column set from
     // existing default/pinned workspace config) ---
 
+    async getMeBootstrap() {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) {
+        throw new ApiError(401, "unauthorized", "no authenticated user");
+      }
+      const { data: actorRows, error: actorErr } = await supabase
+        .from("actors")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("actor_type", "member");
+      if (actorErr) throw actorErr;
+      const actorIds = (actorRows ?? []).map((r) => r.id);
+      if (actorIds.length === 0) {
+        return { memberActorId: null, teams: [], memberActorIdByTeam: {} };
+      }
+      const { data: memberRows, error: memberErr } = await supabase
+        .from("team_members")
+        .select("role, member_id, teams!inner(id, name, slug)")
+        .in("member_id", actorIds);
+      if (memberErr) throw memberErr;
+      const seenTeam = new Map();
+      const memberByTeam = {};
+      for (const m of memberRows ?? []) {
+        const t = m.teams;
+        if (!t?.id) continue;
+        if (!seenTeam.has(t.id)) {
+          seenTeam.set(t.id, { id: t.id, name: t.name, slug: t.slug, role: m.role });
+        }
+        memberByTeam[t.id] = m.member_id;
+      }
+      const teams = Array.from(seenTeam.values());
+      const primary = teams[0] ? memberByTeam[teams[0].id] : null;
+      return {
+        memberActorId: primary ?? null,
+        teams,
+        memberActorIdByTeam: memberByTeam,
+      };
+    },
+
+    async listTeamSessionsFull(teamId) {
+      const FULL_COLUMNS =
+        "id, team_id, title, mode, primary_agent_id, idea_id, summary, last_message_preview, last_message_at, created_by_actor_id, created_at, updated_at";
+      const { data: sessionRows, error: sessionErr } = await supabase
+        .from("sessions")
+        .select(FULL_COLUMNS)
+        .eq("team_id", teamId)
+        .order("last_message_at", { ascending: false, nullsFirst: false });
+      if (sessionErr) throw sessionErr;
+      const rows = sessionRows ?? [];
+      if (rows.length === 0) return [];
+
+      const ids = rows.map((r) => r.id);
+      const { data: pRows, error: pErr } = await supabase
+        .from("session_participants")
+        .select("session_id")
+        .in("session_id", ids);
+      if (pErr) throw pErr;
+      const counts = (pRows ?? []).reduce((acc, r) => {
+        acc[r.session_id] = (acc[r.session_id] ?? 0) + 1;
+        return acc;
+      }, {});
+
+      return rows.map((row) => ({
+        id: row.id,
+        teamId: row.team_id,
+        title: row.title ?? "",
+        mode: row.mode ?? "solo",
+        ideaId: row.idea_id ?? null,
+        primaryAgentId: row.primary_agent_id ?? null,
+        createdByActorId: row.created_by_actor_id ?? null,
+        summary: row.summary ?? null,
+        lastMessageAt: row.last_message_at ?? null,
+        lastMessagePreview: row.last_message_preview ?? null,
+        participantCount: counts[row.id] ?? 0,
+        hasUnread: false,
+        createdAt: row.created_at ?? null,
+        updatedAt: row.updated_at ?? null,
+      }));
+    },
+
+    async listAgentRuntimesForTeam(teamId) {
+      const COLS =
+        "id, team_id, agent_id, session_id, workspace_id, backend_type, status, backend_session_id, runtime_id, current_model, last_seen_at, created_at, updated_at";
+      const { data, error } = await supabase
+        .from("agent_runtimes")
+        .select(COLS)
+        .eq("team_id", teamId)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        teamId: row.team_id,
+        agentId: row.agent_id,
+        sessionId: row.session_id ?? null,
+        workspaceId: row.workspace_id ?? null,
+        backendType: row.backend_type,
+        status: row.status,
+        backendSessionId: row.backend_session_id ?? null,
+        runtimeId: row.runtime_id ?? null,
+        currentModel: row.current_model ?? null,
+        lastSeenAt: row.last_seen_at ?? null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+    },
+
     async listSessionsForTeamSince(teamId, updatedAfter) {
       const SESSION_SYNC_COLUMNS =
         "id, team_id, title, mode, primary_agent_id, idea_id, summary, last_message_preview, last_message_at, created_by_actor_id, created_at, updated_at";
@@ -1936,6 +2044,27 @@ export function createSupabaseAuthRepository(options) {
         bearerToken: accessToken,
         body: body ?? {},
         operation: "auth.updateUser",
+      });
+    },
+
+    // Sign in (or sign up) with an OIDC ID token from a native provider.
+    // GoTrue's `grant_type=id_token` endpoint verifies the token signature
+    // against the provider, then mints / returns a Supabase session.
+    async signInWithIdToken({ provider, idToken, nonce, accessToken }) {
+      const body = { provider, id_token: idToken };
+      if (nonce) body.nonce = nonce;
+      // When a bearer is forwarded, GoTrue links the OIDC identity to the
+      // existing (e.g. anonymous) user instead of minting a new one — this
+      // backs the anonymous → Apple upgrade flow.
+      return goTrueRequest({
+        fetchImpl,
+        supabaseUrl,
+        apiKey: publishableKey,
+        method: "POST",
+        path: "/auth/v1/token?grant_type=id_token",
+        bearerToken: accessToken,
+        body,
+        operation: "auth.signInWithIdToken",
       });
     },
   };

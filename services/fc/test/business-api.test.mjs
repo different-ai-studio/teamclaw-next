@@ -244,6 +244,81 @@ test("POST /v1/auth/refresh rejects missing refreshToken", async () => {
   assert.equal(JSON.parse(response.body).error.code, "validation_failed");
 });
 
+test("POST /v1/auth/signin-idtoken proxies provider + idToken to auth repo", async () => {
+  const authCalls = [];
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/auth/signin-idtoken",
+    headers: {},
+    body: JSON.stringify({ provider: "apple", idToken: "id-token-123", nonce: "n-1" }),
+  }, {
+    createRepository: () => fakeRepo(),
+    createAuthRepository: () => ({
+      async signInWithIdToken(input) {
+        authCalls.push(input);
+        return { access_token: "at-apple", refresh_token: "rt-apple" };
+      },
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(authCalls[0], { provider: "apple", idToken: "id-token-123", nonce: "n-1", accessToken: null });
+  assert.equal(JSON.parse(response.body).access_token, "at-apple");
+});
+
+test("POST /v1/auth/signin-idtoken forwards bearer for identity linking", async () => {
+  const authCalls = [];
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/auth/signin-idtoken",
+    headers: { Authorization: "Bearer anon-token" },
+    body: JSON.stringify({ provider: "apple", idToken: "id-token-123" }),
+  }, {
+    createRepository: () => fakeRepo(),
+    createAuthRepository: () => ({
+      async signInWithIdToken(input) {
+        authCalls.push(input);
+        return { access_token: "at-linked", refresh_token: "rt-linked" };
+      },
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(authCalls[0].accessToken, "anon-token");
+  assert.equal(authCalls[0].nonce, null);
+});
+
+test("POST /v1/auth/signin-idtoken rejects missing idToken", async () => {
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/auth/signin-idtoken",
+    headers: {},
+    body: JSON.stringify({ provider: "apple" }),
+  }, {
+    createRepository: () => fakeRepo(),
+    createAuthRepository: () => ({ async signInWithIdToken() { throw new Error("should not be called"); } }),
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error.code, "validation_failed");
+});
+
+test("GET /v1/me/bootstrap returns member actor + teams", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/me/bootstrap",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.memberActorId, "actor-1");
+  assert.equal(parsed.teams[0].id, "team-1");
+  assert.equal(parsed.memberActorIdByTeam["team-1"], "actor-1");
+  assert.deepEqual(repo.calls[0], { method: "getMeBootstrap" });
+});
+
 test("repository Supabase errors are normalized", async () => {
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
@@ -563,7 +638,7 @@ test("POST /v1/sessions returns 400 without required fields", async () => {
   assert.equal(JSON.parse(response.body).error.code, "validation_failed");
 });
 
-test("POST /v1/sessions/:sessionId/mark-viewed returns 204", async () => {
+test("POST /v1/sessions/:sessionId/mark-viewed returns 204 with no body", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({
     httpMethod: "POST",
@@ -572,7 +647,56 @@ test("POST /v1/sessions/:sessionId/mark-viewed returns 204", async () => {
   }, { createRepository: () => repo });
 
   assert.equal(response.statusCode, 204);
-  assert.deepEqual(repo.calls[0], { method: "markSessionViewed", sessionId: "session-1" });
+  assert.deepEqual(repo.calls[0], { method: "markSessionViewed", sessionId: "session-1", lastReadMessageId: null });
+});
+
+test("POST /v1/sessions/:sessionId/mark-viewed forwards lastReadMessageId", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/sessions/session-1/mark-viewed",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ lastReadMessageId: "msg-42" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "markSessionViewed", sessionId: "session-1", lastReadMessageId: "msg-42" });
+});
+
+test("GET /v1/teams/:teamId/sessions returns full session display rows", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/sessions",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.ok(Array.isArray(parsed.items));
+  assert.equal(parsed.items[0].id, "session-1");
+  assert.equal(parsed.items[0].participantCount, 3);
+  assert.equal(parsed.items[0].primaryAgentId, "agent-1");
+  assert.equal(parsed.items[0].createdByActorId, "actor-1");
+  assert.equal(parsed.items[0].summary, "s");
+  assert.deepEqual(repo.calls[0], { method: "listTeamSessionsFull", teamId: "team-1" });
+});
+
+test("GET /v1/teams/:teamId/agent-runtimes returns team runtimes", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/teams/team-1/agent-runtimes",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.ok(Array.isArray(parsed.items));
+  assert.equal(parsed.items[0].id, "rt-1");
+  assert.equal(parsed.items[0].backendType, "claude_code");
+  assert.equal(parsed.items[0].runtimeId, "rt12abcd");
+  assert.deepEqual(repo.calls[0], { method: "listAgentRuntimesForTeam", teamId: "team-1" });
 });
 
 test("GET /v1/sessions/:sessionId/participants returns participant list", async () => {
@@ -1505,7 +1629,10 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async getSession(sessionId) { calls.push({ method: "getSession", sessionId }); if (error) throw error; const store = sessions.length > 0 ? sessions : sessionStore; return store.find(s => s.id === sessionId) ?? null; },
     async patchSession(sessionId, patch) { calls.push({ method: "patchSession", sessionId, patch }); if (error) throw error; const store = sessions.length > 0 ? sessions : sessionStore; const s = store.find(s => s.id === sessionId); if (!s) return null; if (patch.title !== undefined) s.title = patch.title; return s; },
     async createSession(input) { calls.push({ method: "createSession", input }); if (error) throw error; const id = input.id ?? "session-new"; const newS = { id, teamId: input.teamId, title: input.title, mode: input.mode, ideaId: null, lastMessageAt: null, lastMessagePreview: null, hasUnread: false, createdAt: "2026-05-27T03:00:00Z", updatedAt: "2026-05-27T03:00:00Z", participants: (input.participantActorIds ?? []).map(a => ({ sessionId: id, actorId: a, role: "member", joinedAt: null })) }; sessionStore.push(newS); return newS; },
-    async markSessionViewed(sessionId) { calls.push({ method: "markSessionViewed", sessionId }); if (error) throw error; },
+    async markSessionViewed(sessionId, lastReadMessageId) { calls.push({ method: "markSessionViewed", sessionId, lastReadMessageId }); if (error) throw error; },
+    async listTeamSessionsFull(teamId) { calls.push({ method: "listTeamSessionsFull", teamId }); if (error) throw error; return [{ id: "session-1", teamId, title: "T", mode: "solo", ideaId: null, primaryAgentId: "agent-1", createdByActorId: "actor-1", summary: "s", lastMessageAt: null, lastMessagePreview: null, participantCount: 3, hasUnread: false, createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }]; },
+    async listAgentRuntimesForTeam(teamId) { calls.push({ method: "listAgentRuntimesForTeam", teamId }); if (error) throw error; return [{ id: "rt-1", teamId, agentId: "agent-1", sessionId: "session-1", workspaceId: null, backendType: "claude_code", status: "ready", backendSessionId: "bs-1", runtimeId: "rt12abcd", currentModel: "claude-opus-4-7", lastSeenAt: "2026-05-27T01:00:00Z", createdAt: "2026-05-27T00:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }]; },
+    async getMeBootstrap() { calls.push({ method: "getMeBootstrap" }); if (error) throw error; return { memberActorId: "actor-1", teams: [{ id: "team-1", name: "Team", slug: "team", role: "owner" }], memberActorIdByTeam: { "team-1": "actor-1" } }; },
     async listSessionParticipants(sessionId) { calls.push({ method: "listSessionParticipants", sessionId }); if (error) throw error; const store = sessions.length > 0 ? sessions : sessionStore; const s = store.find(s => s.id === sessionId); return { items: s?.participants ?? [] }; },
     async upsertSessionParticipant(sessionId, input) { calls.push({ method: "upsertSessionParticipant", sessionId, input }); if (error) throw error; const store = sessions.length > 0 ? sessions : sessionStore; const s = store.find(s => s.id === sessionId); const existing = s?.participants?.find(p => p.actorId === input.actorId); if (existing) { existing.role = input.role ?? existing.role; return existing; } const newP = { sessionId, actorId: input.actorId, role: input.role ?? "member", joinedAt: null }; if (s) s.participants.push(newP); return newP; },
     async removeSessionParticipant(sessionId, actorId) { calls.push({ method: "removeSessionParticipant", sessionId, actorId }); if (error) throw error; const store = sessions.length > 0 ? sessions : sessionStore; const s = store.find(s => s.id === sessionId); if (s?.participants) s.participants = s.participants.filter(p => p.actorId !== actorId); },

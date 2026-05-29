@@ -48,6 +48,15 @@ public struct CloudAPIClient: Sendable {
         return try await request("POST", path: path, body: data, idempotencyKey: idempotencyKey, as: type)
     }
 
+    public func postVoid<Body: Encodable & Sendable>(
+        _ path: String,
+        body: Body,
+        idempotencyKey: String? = nil
+    ) async throws {
+        let data = try JSONEncoder().encode(body)
+        try await requestVoid("POST", path: path, body: data, idempotencyKey: idempotencyKey)
+    }
+
     private func request<T: Decodable & Sendable>(
         _ method: String,
         path: String,
@@ -85,6 +94,43 @@ public struct CloudAPIClient: Sendable {
             )
         }
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func requestVoid(
+        _ method: String,
+        path: String,
+        body: Data?,
+        idempotencyKey: String?
+    ) async throws {
+        let token = try await accessToken().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw CloudAPIError.missingAccessToken }
+
+        let normalizedBase = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        guard let url = URL(string: "\(normalizedBase)\(normalizedPath)") else {
+            throw CloudAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(Self.requestID(), forHTTPHeaderField: "X-Request-Id")
+        if let idempotencyKey {
+            request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        let (data, response) = try await send(request)
+        guard (200..<300).contains(response.statusCode) else {
+            let envelope = try? JSONDecoder().decode(CloudAPIErrorEnvelope.self, from: data)
+            throw CloudAPIError.requestFailed(
+                status: response.statusCode,
+                code: envelope?.error.code,
+                message: envelope?.error.message ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+            )
+        }
     }
 
     public static let urlSessionSend: CloudAPISend = { request in

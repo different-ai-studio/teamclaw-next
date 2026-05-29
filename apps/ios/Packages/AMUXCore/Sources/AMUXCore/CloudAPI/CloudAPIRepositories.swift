@@ -27,25 +27,23 @@ public actor CloudAPISessionsRepository: SessionsRepository {
     }
 
     public func listSessions(teamID: String) async throws -> [SessionRecord] {
-        let page: CloudPage<CloudSession> = try await client.get("/v1/sessions?limit=100")
-        return page.items
-            .filter { $0.teamId == teamID }
-            .map { row in
-                SessionRecord(
-                    id: row.id,
-                    teamID: row.teamId,
-                    ideaID: row.ideaId,
-                    createdByActorID: "",
-                    primaryAgentID: nil,
-                    mode: row.mode,
-                    title: row.title,
-                    summary: "",
-                    participantCount: 0,
-                    lastMessagePreview: row.lastMessagePreview ?? "",
-                    lastMessageAt: parseCloudDate(row.lastMessageAt),
-                    createdAt: parseCloudDate(row.createdAt) ?? .distantPast
-                )
-            }
+        let page: CloudPage<CloudSessionFull> = try await client.get("/v1/teams/\(teamID)/sessions")
+        return page.items.map { row in
+            SessionRecord(
+                id: row.id,
+                teamID: row.teamId,
+                ideaID: row.ideaId,
+                createdByActorID: row.createdByActorId ?? "",
+                primaryAgentID: row.primaryAgentId,
+                mode: row.mode,
+                title: row.title,
+                summary: row.summary ?? "",
+                participantCount: row.participantCount,
+                lastMessagePreview: row.lastMessagePreview ?? "",
+                lastMessageAt: parseCloudDate(row.lastMessageAt),
+                createdAt: parseCloudDate(row.createdAt) ?? .distantPast
+            )
+        }
     }
 
     public func fetchUnreadFlags(limit: Int) async throws -> [String: Bool] {
@@ -56,11 +54,50 @@ public actor CloudAPISessionsRepository: SessionsRepository {
     }
 
     public func markSessionViewed(sessionId: String, lastReadMessageId: String?) async throws {
-        throw CloudAPIError.requestFailed(
-            status: 501,
-            code: "not_implemented",
-            message: "Cloud API does not implement session view markers yet."
-        )
+        let body = CloudMarkViewedRequest(lastReadMessageId: lastReadMessageId)
+        try await client.postVoid("/v1/sessions/\(sessionId)/mark-viewed", body: body)
+    }
+}
+
+public actor CloudAPISessionIDsRepository: SessionIDsRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listSessionIDs(teamID: String) async throws -> Set<String> {
+        let page: CloudPage<CloudSessionFull> = try await client.get("/v1/teams/\(teamID)/sessions")
+        return Set(page.items.map(\.id))
+    }
+}
+
+public actor CloudAPIAgentRuntimesRepository: AgentRuntimesRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listForTeam(teamID: String) async throws -> [AgentRuntimeRecord] {
+        let page: CloudPage<CloudAgentRuntime> = try await client.get("/v1/teams/\(teamID)/agent-runtimes")
+        return page.items.map { row in
+            AgentRuntimeRecord(
+                id: row.id,
+                teamID: row.teamId,
+                agentID: row.agentId,
+                sessionID: row.sessionId,
+                workspaceID: row.workspaceId,
+                backendType: row.backendType,
+                status: row.status,
+                backendSessionID: row.backendSessionId,
+                runtimeID: row.runtimeId,
+                currentModel: row.currentModel,
+                lastSeenAt: parseCloudDate(row.lastSeenAt),
+                createdAt: parseCloudDate(row.createdAt) ?? .distantPast,
+                updatedAt: parseCloudDate(row.updatedAt) ?? .distantPast
+            )
+        }
     }
 }
 
@@ -162,6 +199,20 @@ public enum CloudAPIRepositoryFactory {
     ) -> any TeamRepository {
         CloudAPITeamRepository(client: client(configuration: configuration, accessToken: accessToken))
     }
+
+    public static func sessionIDsRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any SessionIDsRepository {
+        CloudAPISessionIDsRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func agentRuntimesRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any AgentRuntimesRepository {
+        CloudAPIAgentRuntimesRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
 }
 
 private struct CloudPage<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -199,6 +250,43 @@ private struct CloudMessage: Decodable, Sendable {
     let content: String
     let model: String?
     let createdAt: String
+}
+
+private struct CloudSessionFull: Decodable, Sendable {
+    let id: String
+    let teamId: String
+    let title: String
+    let mode: String
+    let ideaId: String?
+    let primaryAgentId: String?
+    let createdByActorId: String?
+    let summary: String?
+    let lastMessageAt: String?
+    let lastMessagePreview: String?
+    let participantCount: Int
+    let hasUnread: Bool
+    let createdAt: String?
+    let updatedAt: String?
+}
+
+private struct CloudAgentRuntime: Decodable, Sendable {
+    let id: String
+    let teamId: String
+    let agentId: String
+    let sessionId: String?
+    let workspaceId: String?
+    let backendType: String
+    let status: String
+    let backendSessionId: String?
+    let runtimeId: String?
+    let currentModel: String?
+    let lastSeenAt: String?
+    let createdAt: String
+    let updatedAt: String
+}
+
+private struct CloudMarkViewedRequest: Encodable, Sendable {
+    let lastReadMessageId: String?
 }
 
 private struct CloudInsertMessageRequest<Metadata: Encodable & Sendable>: Encodable, Sendable {
