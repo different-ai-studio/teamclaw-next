@@ -2073,6 +2073,22 @@ export function createSupabaseAuthRepository(options) {
         operation: "auth.signInWithIdToken",
       });
     },
+
+    async signInWithPassword({ email, password }) {
+      return goTrueRequest({
+        fetchImpl, supabaseUrl, apiKey: publishableKey,
+        method: "POST", path: "/auth/v1/token?grant_type=password",
+        body: { email, password }, operation: "auth.signInWithPassword",
+      });
+    },
+
+    async signUp({ email, password }) {
+      return goTrueRequest({
+        fetchImpl, supabaseUrl, apiKey: publishableKey,
+        method: "POST", path: "/auth/v1/signup",
+        body: { email, password }, operation: "auth.signUp",
+      });
+    },
   };
 }
 
