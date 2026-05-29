@@ -287,9 +287,16 @@ fn load_provider_config_from_default_paths() -> crate::error::Result<ProviderCon
 
 fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<Arc<dyn Backend>> {
     match config {
-        ProviderConfig::CloudApi(config) => Ok(Arc::new(
-            crate::backend::cloud_api::CloudApiBackend::new(config),
-        )),
+        ProviderConfig::CloudApi(config) => {
+            // Rotated refresh tokens are written back to the same backend.toml
+            // we loaded from, so the daemon survives restarts.
+            let persist_path = ProviderConfig::default_path().map_err(|e| {
+                crate::error::AmuxError::Config(format!("backend config path failed: {e}"))
+            })?;
+            Ok(Arc::new(
+                crate::backend::cloud_api::CloudApiBackend::with_persist_path(config, persist_path),
+            ))
+        }
     }
 }
 
