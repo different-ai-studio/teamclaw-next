@@ -132,32 +132,20 @@ fn main() {
     let target_triple = std::env::var("TARGET").unwrap_or_default();
     let in_ci = std::env::var("CI").is_ok();
 
-    // Check that the OpenCode sidecar binary exists before building.
-    // The binary is not checked into git (>100MB). Developers must download it:
-    //   Unix: ./apps/desktop/binaries/download-opencode.sh
-    //   Windows: .\apps\desktop\binaries\download-opencode.ps1
+    // OpenCode sidecar is optional — agent runtime is owned by amuxd. Keep the
+    // binary around only for legacy local debugging; desktop builds must not
+    // require downloading the >100MB sidecar.
     let binary_name = format!("binaries/opencode-{}", target_triple);
     let with_exe = format!("{}.exe", binary_name);
-    let exists = std::path::Path::new(&binary_name).exists()
+    let opencode_sidecar_exists = std::path::Path::new(&binary_name).exists()
         || (target_triple.contains("windows") && std::path::Path::new(&with_exe).exists());
-    if !exists && !in_ci {
-        let hint = if target_triple.contains("windows") {
-            ".\\apps\\desktop\\binaries\\download-opencode.ps1"
-        } else {
-            "./apps/desktop/binaries/download-opencode.sh"
-        };
-        panic!(
-            "\n\n\
-            ╔══════════════════════════════════════════════════════════════╗\n\
-            ║  OpenCode sidecar binary not found!                        ║\n\
-            ║                                                            ║\n\
-            ║  Run this to download it:                                  ║\n\
-            ║    {:<56} ║\n\
-            ╚══════════════════════════════════════════════════════════════╝\n\n",
-            hint
+    if opencode_sidecar_exists {
+        println!("cargo:rerun-if-changed={}", binary_name);
+    } else if !in_ci {
+        println!(
+            "cargo:warning=OpenCode sidecar not found (optional). Agent runtime is provided by amuxd."
         );
     }
-    println!("cargo:rerun-if-changed={}", binary_name);
 
     // Check that the teamclaw-introspect sidecar binary exists.
     // Unlike opencode (downloaded), this is built from crates/teamclaw-introspect.
