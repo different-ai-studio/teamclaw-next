@@ -123,6 +123,28 @@ fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSh
     })
 }
 
+/// Group registered workspaces by their `team_id`. Workspaces without a
+/// team_id are skipped. Returns `(team_id, Vec<workspace_path>)` pairs so the
+/// sweep syncs each team's global dir once, then links every member workspace.
+pub(crate) fn group_workspaces_by_team(
+    workspaces: &[crate::config::StoredWorkspace],
+) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
+    let mut by_team: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for w in workspaces {
+        if w.path.trim().is_empty() {
+            continue;
+        }
+        if let Some(team_id) = w.team_id.as_deref().filter(|t| !t.trim().is_empty()) {
+            by_team
+                .entry(team_id.to_string())
+                .or_default()
+                .push(w.path.clone());
+        }
+    }
+    by_team.into_iter().collect()
+}
+
 /// Per-session plan emitted by
 /// [`DaemonServer::plan_auto_restart_offline_sessions`]. Sessions that pass
 /// every filter (have a prior runtime, have unread from someone other than
@@ -834,13 +856,34 @@ impl DaemonServer {
     }
 
     async fn sync_team_shared_dirs_for_known_workspaces(&self) {
-        for workspace in &self.workspaces.workspaces {
-            if workspace.path.trim().is_empty() {
-                continue;
+        let grouped = group_workspaces_by_team(&self.workspaces.workspaces);
+        for (team_id, workspace_paths) in grouped {
+            // 1. Sync the single global copy for this team (git modes). The
+            //    OSS-mode global state lives at global_sync_state_path(team_id);
+            //    git modes sync the working tree here.
+            let global_dir =
+                match crate::config::global_team_store::ensure_initialized(&team_id) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        warn!(team_id, "global team dir init failed: {e}");
+                        continue;
+                    }
+                };
+            // Pull git config from the first member workspace's .teamclaw config.
+            if let Some(first) = workspace_paths.first() {
+                if let Some(config) = load_team_shared_config_for_workspace(Path::new(first)) {
+                    if let Err(e) = crate::team_shared_git::sync_git_dir(&global_dir, &config) {
+                        warn!(team_id, "global git sync failed: {e}");
+                    }
+                }
             }
-            let workspace_root = Path::new(&workspace.path);
-            if let Some(config) = load_team_shared_config_for_workspace(workspace_root) {
-                sync_team_shared_dir_for_workspace(workspace_root, &config);
+            // 2. Ensure every member workspace links to the global dir.
+            for ws_path in &workspace_paths {
+                let status = crate::config::workspace_link::ensure_workspace_link(
+                    Path::new(ws_path),
+                    &team_id,
+                );
+                info!(team_id, workspace = %ws_path, "team link: {status:?}");
             }
         }
     }
@@ -4977,6 +5020,31 @@ mod tests {
     use rumqttc::{AsyncClient, MqttOptions};
     use std::io;
     use tempfile::TempDir;
+
+    #[test]
+    fn group_workspaces_by_team_dedups_and_skips_unteamed() {
+        use crate::config::StoredWorkspace;
+        let mk = |path: &str, team: Option<&str>| StoredWorkspace {
+            workspace_id: "id".into(),
+            remote_workspace_id: String::new(),
+            path: path.into(),
+            display_name: "ws".into(),
+            team_id: team.map(|t| t.to_string()),
+        };
+        let ws = vec![
+            mk("/a", Some("team-1")),
+            mk("/b", Some("team-1")),
+            mk("/c", Some("team-2")),
+            mk("/d", None),
+            mk("", Some("team-1")),
+        ];
+        let grouped = group_workspaces_by_team(&ws);
+        assert_eq!(grouped.len(), 2);
+        let t1 = grouped.iter().find(|(t, _)| t == "team-1").unwrap();
+        assert_eq!(t1.1, vec!["/a".to_string(), "/b".to_string()]);
+        let t2 = grouped.iter().find(|(t, _)| t == "team-2").unwrap();
+        assert_eq!(t2.1, vec!["/c".to_string()]);
+    }
 
     struct TestServer {
         server: DaemonServer,
