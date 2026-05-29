@@ -31,7 +31,7 @@ import {
   waitForOpenCodeBootstrapped,
 } from "@/lib/opencode/preloader";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
-import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
+import { appShortName, TEAM_REPO_DIR } from "@/lib/build-config";
 
 export const SKILLS_CHANGED_EVENT = "skills-files-changed";
 
@@ -537,33 +537,16 @@ export function useGitReposInit() {
   useEffect(() => {
     if (!workspacePath || !isTauri()) return;
     let unlistenFileChange: (() => void) | undefined;
-    let unlistenMembersChanged: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
 
     const normalizePath = (value: string) => value.replace(/\\/g, "/").replace(/\/$/, "");
     const teamDirPrefix = `${workspacePath}/${TEAM_REPO_DIR}/`;
-    const memberManifestPaths = new Set([
-      `${workspacePath}/${TEAM_REPO_DIR}/_meta/members.json`,
-      `${workspacePath}/${TEAM_REPO_DIR}/_team/members.json`,
-      `${workspacePath}/${TEAMCLAW_DIR}/_team/members.json`,
-    ].map(normalizePath));
-
-    const refreshCurrentMemberShortcutRoles = async () => {
-      try {
-        await useTeamMembersStore.getState().loadCurrentNodeId();
-      } catch (err: unknown) {
-        console.warn("[App] Failed to refresh current team member identity (non-critical):", err);
-      }
-    };
 
     import("@tauri-apps/api/event").then(({ listen }) => {
       if (cancelled) return;
       listen<{ path: string; kind: string }>("file-change", (event) => {
         const path = normalizePath(event.payload.path);
-        if (memberManifestPaths.has(path)) {
-          void refreshCurrentMemberShortcutRoles();
-        }
 
         if (!path.startsWith(teamDirPrefix)) return;
         // Skip churn inside .git/
@@ -581,23 +564,12 @@ export function useGitReposInit() {
         }
         unlistenFileChange = fn;
       });
-
-      listen("team:members-changed", () => {
-        void refreshCurrentMemberShortcutRoles();
-      }).then((fn) => {
-        if (cancelled) {
-          fn();
-          return;
-        }
-        unlistenMembersChanged = fn;
-      });
     });
 
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
       unlistenFileChange?.();
-      unlistenMembersChanged?.();
     };
   }, [workspacePath]);
 }

@@ -3,7 +3,7 @@ import { Loader2, ExternalLink } from "lucide-react"
 import { isTauri } from "@/lib/utils"
 import { normalizeUrl, urlToLabel } from "@/lib/webview-utils"
 import { useTabsStore } from "@/stores/tabs"
-import { useTeamModeStore } from "@/stores/team-mode"
+import { useCurrentTeamStore } from "@/stores/current-team"
 
 interface WebViewContentProps {
   url: string
@@ -140,10 +140,11 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
             }
 
             // Device name is purely a display value and must NOT gate injection:
-            // fall back to hostname, accept empty if unavailable.
+            // prefer cloud profile display name, fall back to hostname, accept empty if unavailable.
             let deviceName = ""
             try {
-              deviceName = await invoke<string>("get_device_hostname")
+              const friendly = useCurrentTeamStore.getState().currentMember?.displayName ?? null
+              deviceName = friendly || (await invoke<string>("get_device_hostname"))
             } catch {
               // Empty deviceName is acceptable; injection still happens.
             }
