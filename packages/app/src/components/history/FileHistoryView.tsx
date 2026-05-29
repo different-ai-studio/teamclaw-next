@@ -1,21 +1,18 @@
 import { useEffect, useState, lazy, Suspense, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
-import { gitManager } from '@/lib/git/manager'
-import type { GitLogEntry } from '@/lib/git/types'
+import type { HistoryEntry, HistoryProvider } from '@/lib/history/types'
 import { CommitList } from './CommitList'
 
 const LazyDiffRenderer = lazy(() => import('@/components/diff/DiffRenderer'))
 
-const PAGE_SIZE = 50
 // Heuristic: code-unit count, not byte count. Big-enough strings are slow
 // regardless of encoding, so a code-unit ceiling is sufficient as a sanity guard.
 const MAX_DIFF_CHARS = 256 * 1024
 const NULL_SCAN_CHARS = 8192
 
 interface FileHistoryViewProps {
-  repoPath: string
-  relativePath: string
+  provider: HistoryProvider
   filePath: string
   isDark: boolean
 }
@@ -29,15 +26,11 @@ function isBinaryOrTooLarge(text: string): boolean {
   return false
 }
 
-export function FileHistoryView({
-  repoPath,
-  relativePath,
-  filePath,
-  isDark,
-}: FileHistoryViewProps) {
+export function FileHistoryView({ provider, filePath, isDark }: FileHistoryViewProps) {
   const { t } = useTranslation()
-  const [commits, setCommits] = useState<GitLogEntry[]>([])
-  const [selectedSha, setSelectedSha] = useState<string | null>(null)
+  const [entries, setEntries] = useState<HistoryEntry[]>([])
+  const [selectedRef, setSelectedRef] = useState<string | null>(null)
+  const [cursor, setCursor] = useState<string | null>(null)
   const [before, setBefore] = useState<string | null>(null)
   const [after, setAfter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -50,8 +43,8 @@ export function FileHistoryView({
   const loadMoreGenRef = useRef(0)
 
   const selectedEntry = useMemo(
-    () => commits.find((c) => c.sha === selectedSha) ?? null,
-    [commits, selectedSha],
+    () => entries.find((e) => e.ref === selectedRef) ?? null,
+    [entries, selectedRef],
   )
 
   const fetchInitial = useCallback(() => {
@@ -61,24 +54,26 @@ export function FileHistoryView({
     setAfter(null)
     setDiffError(null)
     setLoadingDiff(false)
-    return gitManager
-      .logFile(repoPath, relativePath, PAGE_SIZE, 0)
-      .then((entries) => {
-        setCommits(entries)
-        setHasMore(entries.length === PAGE_SIZE)
-        setSelectedSha(entries.length > 0 ? entries[0].sha : null)
+    return provider
+      .list(null)
+      .then((page) => {
+        setEntries(page.entries)
+        setCursor(page.nextCursor)
+        setHasMore(page.nextCursor !== null)
+        setSelectedRef(page.entries.length > 0 ? page.entries[0].ref : null)
         setLoading(false)
       })
       .catch((err: unknown) => {
         setListError(err instanceof Error ? err.message : String(err))
         setLoading(false)
       })
-  }, [repoPath, relativePath])
+  }, [provider])
 
-  // (Re)load when target file changes.
+  // (Re)load when target file / provider changes.
   useEffect(() => {
-    setCommits([])
-    setSelectedSha(null)
+    setEntries([])
+    setSelectedRef(null)
+    setCursor(null)
     setBefore(null)
     setAfter(null)
     setListError(null)
@@ -88,9 +83,9 @@ export function FileHistoryView({
     void fetchInitial()
   }, [fetchInitial])
 
-  // Fetch diff for selected commit.
+  // Fetch diff for selected entry: selected content vs its parent's content.
   useEffect(() => {
-    if (!selectedSha || !selectedEntry) {
+    if (!selectedRef || !selectedEntry) {
       setBefore(null)
       setAfter(null)
       setDiffError(null)
@@ -101,20 +96,22 @@ export function FileHistoryView({
     setLoadingDiff(true)
     setDiffError(null)
 
-    const afterPromise = gitManager.showFile(repoPath, relativePath, selectedSha)
+    const afterPromise = provider.getContent(selectedEntry.ref)
     const beforePromise: Promise<string | null> =
-      selectedEntry.parentSha === ''
+      selectedEntry.parentRef === ''
         ? Promise.resolve('')
-        : gitManager.showFile(repoPath, relativePath, selectedEntry.parentSha)
+        : provider.getContent(selectedEntry.parentRef)
 
     Promise.all([beforePromise, afterPromise])
       .then(([b, a]) => {
         if (cancelled) return
         if (a === null) {
-          setDiffError(t('history.loadCommitContentFailed', {
-            sha: selectedSha.slice(0, 7),
-            defaultValue: 'Unable to load content for this commit ({{sha}})',
-          }))
+          setDiffError(
+            t('history.loadCommitContentFailed', {
+              sha: selectedRef.slice(0, 7),
+              defaultValue: 'Unable to load content for this version ({{sha}})',
+            }),
+          )
           setBefore(null)
           setAfter(null)
         } else {
@@ -132,18 +129,19 @@ export function FileHistoryView({
     return () => {
       cancelled = true
     }
-  }, [selectedSha, selectedEntry, repoPath, relativePath, t])
+  }, [selectedRef, selectedEntry, provider, t])
 
   const handleLoadMore = useCallback(() => {
     if (loadingMore) return
     const gen = ++loadMoreGenRef.current
     setLoadingMore(true)
-    gitManager
-      .logFile(repoPath, relativePath, PAGE_SIZE, commits.length)
-      .then((entries) => {
+    provider
+      .list(cursor)
+      .then((page) => {
         if (gen !== loadMoreGenRef.current) return
-        setCommits((prev) => [...prev, ...entries])
-        setHasMore(entries.length === PAGE_SIZE)
+        setEntries((prev) => [...prev, ...page.entries])
+        setCursor(page.nextCursor)
+        setHasMore(page.nextCursor !== null)
         setLoadingMore(false)
       })
       .catch((err: unknown) => {
@@ -151,9 +149,9 @@ export function FileHistoryView({
         setListError(err instanceof Error ? err.message : String(err))
         setLoadingMore(false)
       })
-  }, [repoPath, relativePath, commits.length, loadingMore])
+  }, [provider, cursor, loadingMore])
 
-  const showEmpty = !loading && !listError && commits.length === 0
+  const showEmpty = !loading && !listError && entries.length === 0
   const beforeTooLarge = before !== null && isBinaryOrTooLarge(before)
   const afterTooLarge = after !== null && isBinaryOrTooLarge(after)
   const showSizeGuard = afterTooLarge || beforeTooLarge
@@ -174,9 +172,9 @@ export function FileHistoryView({
           </div>
         ) : (
           <CommitList
-            commits={commits}
-            selectedSha={selectedSha}
-            onSelect={setSelectedSha}
+            entries={entries}
+            selectedRef={selectedRef}
+            onSelect={setSelectedRef}
             onLoadMore={handleLoadMore}
             hasMore={hasMore}
             loadingMore={loadingMore}
@@ -186,7 +184,7 @@ export function FileHistoryView({
       <div className="flex-1 overflow-hidden">
         {showEmpty ? (
           <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-            {t('history.noFileHistory', 'This file has no commit history yet')}
+            {t('history.noFileHistory', 'This file has no version history yet')}
           </div>
         ) : loadingDiff ? (
           <div className="flex items-center justify-center h-full">
