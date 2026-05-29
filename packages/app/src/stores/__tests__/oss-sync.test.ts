@@ -17,6 +17,15 @@ vi.mock('@/lib/utils', () => ({
   isTauri: () => true,
 }))
 
+// The store resolves the active team id from the current-team store and now
+// passes `teamId` to every OSS sync command (refactor ad563711). Provide a
+// stable active team so the team-guarded paths run and invoke is reached.
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: {
+    getState: () => ({ team: { id: 'team-active' } }),
+  },
+}))
+
 // ── Import store after mocks ──────────────────────────────────────────────
 
 const { useOssSyncStore } = await import('../oss-sync')
@@ -60,6 +69,7 @@ describe('useOssSyncStore', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('oss_sync_status', {
         workspacePath: '/workspace/path',
+        teamId: 'team-active',
       })
       const state = useOssSyncStore.getState()
       expect(state.teamId).toBe('team-abc')
@@ -102,6 +112,7 @@ describe('useOssSyncStore', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('oss_sync_now', {
         workspacePath: '/workspace/path',
+        teamId: 'team-active',
       })
       expect(useOssSyncStore.getState().syncing).toBe(false)
       expect(useOssSyncStore.getState().lastError).toBeNull()
@@ -148,6 +159,7 @@ describe('useOssSyncStore', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('oss_sync_list_versions', {
         workspacePath: '/workspace/path',
+        teamId: 'team-active',
         path: 'notes/foo.md',
       })
       expect(result).toHaveLength(2)
@@ -167,6 +179,7 @@ describe('useOssSyncStore', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('oss_sync_restore_version', {
         workspacePath: '/workspace/path',
+        teamId: 'team-active',
         path: 'notes/foo.md',
         contentHash: 'abc123',
       })
@@ -185,6 +198,7 @@ describe('useOssSyncStore', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('oss_sync_resolve_conflict', {
         workspacePath: '/workspace/path',
+        teamId: 'team-active',
         path: 'notes/foo.md',
         choice: 'keepRemote',
       })
@@ -199,6 +213,7 @@ describe('useOssSyncStore', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('oss_sync_resolve_conflict', {
         workspacePath: '/workspace/path',
+        teamId: 'team-active',
         path: 'notes/foo.md',
         choice: 'keepLocal',
       })

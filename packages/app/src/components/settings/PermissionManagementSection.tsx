@@ -29,8 +29,8 @@ import { SettingCard, SectionHeader } from './shared'
 import { invalidatePermissionConfigCache } from '@/stores/session-permissions'
 import {
   encodeWorkspaceId,
-  getDaemonPermissions,
-  putDaemonPermissions,
+  getDaemonToolPermissions,
+  putDaemonToolPermissions,
   getDaemonAllowlist,
   putDaemonAllowlist,
   type DaemonAllowlistRule,
@@ -136,7 +136,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
     if (!workspaceId) return
     setLoadingConfig(true)
     try {
-      const cfg = await getDaemonPermissions(workspaceId)
+      const cfg = await getDaemonToolPermissions(workspaceId)
       setPermissionConfig(cfg ?? {})
     } catch (error) {
       console.error('[PermissionManagement] Failed to load permissions:', error)
@@ -149,7 +149,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
     if (!workspaceId) return
     setSavingConfig(true)
     try {
-      await putDaemonPermissions(workspaceId, permissionConfig)
+      await putDaemonToolPermissions(workspaceId, permissionConfig)
       setConfigModified(false)
       invalidatePermissionConfigCache()
     } catch (error) {

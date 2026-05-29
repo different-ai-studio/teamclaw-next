@@ -63,7 +63,7 @@ async function getConnection(): Promise<DaemonConnection | null> {
 }
 
 async function _fetchConnection(): Promise<DaemonConnection | null> {
-  let info: DaemonHttpInfo | null = null
+  let info: DaemonHttpInfo | null
   try {
     info = await invoke<DaemonHttpInfo | null>('get_daemon_http_info')
   } catch {
@@ -115,7 +115,7 @@ export type DaemonHttpProbe =
 export async function probeDaemonHttp(): Promise<DaemonHttpProbe> {
   if (!isTauri()) return { ok: false, reason: 'not_tauri' }
 
-  let info: DaemonHttpInfo | null = null
+  let info: DaemonHttpInfo | null
   try {
     info = await invoke<DaemonHttpInfo | null>('get_daemon_http_info')
   } catch (err) {
@@ -158,6 +158,8 @@ export async function isDaemonHttpAvailable(): Promise<boolean> {
 async function daemonFetch<T>(
   path: string,
   init?: RequestInit,
+  // Internal: set false to disable the single re-auth retry (prevents loops).
+  allowReauth = true,
 ): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string }> {
   const conn = await getConnection()
   if (!conn) return { ok: false, status: 0, error: 'daemon HTTP not available' }
@@ -172,6 +174,13 @@ async function daemonFetch<T>(
   })
 
   if (!resp.ok) {
+    // A 401 means our cached session token was rejected — most commonly because
+    // the daemon restarted and minted a new root token. Drop the stale token,
+    // re-exchange, and retry the request exactly once.
+    if (resp.status === 401 && allowReauth) {
+      invalidateDaemonConnection()
+      return daemonFetch<T>(path, init, false)
+    }
     const text = await resp.text().catch(() => '')
     return { ok: false, status: resp.status, error: text }
   }

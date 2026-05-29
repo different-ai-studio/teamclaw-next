@@ -146,12 +146,16 @@ fn default_max_body_bytes() -> usize {
     1024 * 1024
 }
 fn default_scopes() -> Vec<String> {
+    // Least privilege: a token minted without an explicit `scopes` list can read
+    // sessions/events/workspace config but must request `workspace:write`
+    // explicitly to mutate provider/permission/MCP/skill/role state. The desktop
+    // client always requests the scopes it needs, so this only narrows the
+    // implicit fallback grant.
     vec![
         "sessions:read".into(),
         "sessions:write".into(),
         "events:read".into(),
         "workspace:read".into(),
-        "workspace:write".into(),
     ]
 }
 

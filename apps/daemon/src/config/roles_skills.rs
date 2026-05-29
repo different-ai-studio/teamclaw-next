@@ -631,18 +631,77 @@ fn ensure_frontmatter(content: &str, slug: &str, display_name: &str) -> String {
     )
 }
 
+/// Lexically resolve `.` / `..` components without touching the filesystem,
+/// so we can confine caller-supplied paths even when the target doesn't exist
+/// yet (`std::fs::canonicalize` requires the path to exist).
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// True when `candidate` equals or nests under `base` (compared lexically).
+fn is_within(base: &Path, candidate: &Path) -> bool {
+    normalize_lexical(candidate).starts_with(normalize_lexical(base))
+}
+
+/// Reject a single path segment (skill slug, dir name, role slug) that could
+/// escape its parent directory via separators or `..`.
+fn ensure_safe_segment(seg: &str) -> Result<(), WorkspaceControlError> {
+    if seg.is_empty() || seg.contains('/') || seg.contains('\\') || seg == "." || seg == ".." {
+        return Err(WorkspaceControlError::InvalidInput(format!(
+            "unsafe path segment {seg:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// Resolve a caller-supplied path (absolute, or relative to the workspace) and
+/// confine it to the workspace directory or the user's home. The daemon runs as
+/// the local user and legitimately manages skill/role dirs under both roots;
+/// anything outside (e.g. `/etc`, another user's home) is rejected.
+fn confine_path(
+    raw: &str,
+    workspace_path: &Path,
+    home: &Path,
+) -> Result<PathBuf, WorkspaceControlError> {
+    let raw_path = Path::new(raw);
+    let abs = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        workspace_path.join(raw_path)
+    };
+    let normalized = normalize_lexical(&abs);
+    if is_within(workspace_path, &normalized) || is_within(home, &normalized) {
+        Ok(normalized)
+    } else {
+        Err(WorkspaceControlError::InvalidInput(format!(
+            "path escapes workspace and home: {}",
+            normalized.display()
+        )))
+    }
+}
+
 fn skills_dir_for_request(
     workspace_path: &Path,
     home: &Path,
     req: &UpsertSkillRequest,
-) -> PathBuf {
+) -> Result<PathBuf, WorkspaceControlError> {
     if let Some(dir) = req.dir_path.as_deref().filter(|d| !d.is_empty()) {
-        return PathBuf::from(dir);
+        return confine_path(dir, workspace_path, home);
     }
     if req.install_location.as_deref() == Some("global") {
-        return home.join(".config/opencode/skills");
+        return Ok(home.join(".config/opencode/skills"));
     }
-    workspace_path.join(".teamclaw/skills")
+    Ok(workspace_path.join(".teamclaw/skills"))
 }
 
 pub fn upsert_skill(
@@ -653,7 +712,7 @@ pub fn upsert_skill(
     let home = dirs::home_dir().ok_or_else(|| {
         WorkspaceControlError::Io("home directory not found".to_owned())
     })?;
-    let skills_dir = skills_dir_for_request(workspace_path, &home, req);
+    let skills_dir = skills_dir_for_request(workspace_path, &home, req)?;
     std::fs::create_dir_all(&skills_dir).map_err(io_err)?;
 
     let dir_name = req
@@ -668,6 +727,8 @@ pub fn upsert_skill(
                 .filter(|v| !v.is_empty())
         })
         .unwrap_or_else(|| slug.to_owned());
+    // `dir_name` becomes a child directory of `skills_dir`; reject traversal.
+    ensure_safe_segment(&dir_name)?;
 
     let display_name = req
         .skill_name
@@ -698,8 +759,10 @@ pub fn delete_skill(
     let home = dirs::home_dir().ok_or_else(|| {
         WorkspaceControlError::Io("home directory not found".to_owned())
     })?;
+    // `slug` is the leaf skill directory; it must not contain separators/`..`.
+    ensure_safe_segment(slug)?;
     let candidates: Vec<PathBuf> = if let Some(dir) = dir_path.filter(|d| !d.is_empty()) {
-        vec![PathBuf::from(dir).join(slug)]
+        vec![confine_path(dir, workspace_path, &home)?.join(slug)]
     } else {
         vec![
             workspace_path.join(".teamclaw/skills").join(slug),
@@ -723,12 +786,15 @@ pub fn upsert_role(
     slug: &str,
     req: &UpsertRoleRequest,
 ) -> Result<RoleRecordDto, WorkspaceControlError> {
-    let role_path = req
-        .target_file_path
-        .as_deref()
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_path.join(ROLE_ROOT).join(slug).join("ROLE.md"));
+    let home = dirs::home_dir()
+        .ok_or_else(|| WorkspaceControlError::Io("home directory not found".to_owned()))?;
+    let role_path = match req.target_file_path.as_deref().filter(|p| !p.is_empty()) {
+        Some(target) => confine_path(target, workspace_path, &home)?,
+        None => {
+            ensure_safe_segment(slug)?;
+            workspace_path.join(ROLE_ROOT).join(slug).join("ROLE.md")
+        }
+    };
 
     if let Some(parent) = role_path.parent() {
         std::fs::create_dir_all(parent).map_err(io_err)?;
@@ -752,16 +818,36 @@ pub fn delete_role(
     slug: &str,
     file_path: Option<&str>,
 ) -> Result<(), WorkspaceControlError> {
+    let roots: Vec<PathBuf> = role_roots(workspace_path)
+        .iter()
+        .map(|r| normalize_lexical(r))
+        .collect();
+
     if let Some(path) = file_path.filter(|p| !p.is_empty()) {
-        let role_path = PathBuf::from(path);
-        if let Some(role_dir) = role_path.parent() {
-            if role_dir.is_dir() {
-                std::fs::remove_dir_all(role_dir).map_err(io_err)?;
-                return Ok(());
-            }
+        // `delete_role` recursively removes the role directory (the parent of
+        // ROLE.md). Confine that directory to a managed role root and require it
+        // to be a strict child of the root — never the root itself or anything
+        // outside it — so a crafted `filePath` can't delete arbitrary dirs.
+        let role_path = normalize_lexical(Path::new(path));
+        let role_dir = role_path.parent().ok_or_else(|| {
+            WorkspaceControlError::InvalidInput("role file path has no parent".to_owned())
+        })?;
+        let confined = roots
+            .iter()
+            .any(|root| is_within(root, role_dir) && role_dir != root.as_path());
+        if !confined {
+            return Err(WorkspaceControlError::InvalidInput(format!(
+                "role path outside managed role roots: {}",
+                role_dir.display()
+            )));
+        }
+        if role_dir.is_dir() {
+            std::fs::remove_dir_all(role_dir).map_err(io_err)?;
+            return Ok(());
         }
     }
 
+    ensure_safe_segment(slug)?;
     for root in role_roots(workspace_path) {
         let role_dir = root.join(slug);
         if role_dir.is_dir() {
@@ -829,5 +915,66 @@ mod tests {
         delete_skill(ws.path(), "demo-skill", None).unwrap();
         let state = scan_roles_skills_state(ws.path()).unwrap();
         assert!(state.skills.is_empty());
+    }
+
+    #[test]
+    fn upsert_skill_rejects_dir_path_outside_workspace_and_home() {
+        let ws = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let req = UpsertSkillRequest {
+            content: "# Evil".to_owned(),
+            skill_name: Some("Evil".to_owned()),
+            install_location: None,
+            dir_path: Some(outside.path().to_string_lossy().into_owned()),
+            filename: Some("pwned".to_owned()),
+        };
+        let err = upsert_skill(ws.path(), "evil", &req).unwrap_err();
+        assert!(matches!(err, WorkspaceControlError::InvalidInput(_)));
+        assert!(!outside.path().join("pwned").exists());
+    }
+
+    #[test]
+    fn upsert_skill_rejects_traversal_in_filename() {
+        let ws = tempfile::tempdir().unwrap();
+        let req = UpsertSkillRequest {
+            content: "# Evil".to_owned(),
+            skill_name: None,
+            install_location: Some("workspace".to_owned()),
+            dir_path: None,
+            filename: Some("../../escape".to_owned()),
+        };
+        let err = upsert_skill(ws.path(), "evil", &req).unwrap_err();
+        assert!(matches!(err, WorkspaceControlError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn delete_skill_rejects_traversal_slug() {
+        let ws = tempfile::tempdir().unwrap();
+        let err = delete_skill(ws.path(), "../../../etc", None).unwrap_err();
+        assert!(matches!(err, WorkspaceControlError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn delete_role_rejects_file_path_outside_role_roots() {
+        let ws = tempfile::tempdir().unwrap();
+        // A victim directory that lives under the workspace but NOT under a
+        // managed role root. delete_role must refuse to remove it.
+        let victim = ws.path().join("important-data");
+        std::fs::create_dir_all(victim.join("nested")).unwrap();
+        let crafted = victim.join("nested/ROLE.md");
+        let err = delete_role(ws.path(), "x", Some(&crafted.to_string_lossy())).unwrap_err();
+        assert!(matches!(err, WorkspaceControlError::InvalidInput(_)));
+        assert!(victim.is_dir(), "victim dir must survive a rejected delete");
+    }
+
+    #[test]
+    fn delete_role_removes_managed_role_dir_via_file_path() {
+        let ws = tempfile::tempdir().unwrap();
+        let role_dir = ws.path().join(".teamclaw/roles/reviewer");
+        std::fs::create_dir_all(&role_dir).unwrap();
+        std::fs::write(role_dir.join("ROLE.md"), "---\nname: reviewer\n---\n").unwrap();
+        let file_path = role_dir.join("ROLE.md");
+        delete_role(ws.path(), "reviewer", Some(&file_path.to_string_lossy())).unwrap();
+        assert!(!role_dir.exists());
     }
 }

@@ -48,6 +48,7 @@ fn map_control_err(e: WorkspaceControlError) -> HttpError {
         WorkspaceControlError::NotFound(msg) => HttpError::not_found(msg),
         WorkspaceControlError::Io(e) => HttpError::internal(format!("io error: {e}")),
         WorkspaceControlError::Parse(e) => HttpError::internal(format!("parse error: {e}")),
+        WorkspaceControlError::InvalidInput(msg) => HttpError::validation(msg),
     }
 }
 

@@ -243,8 +243,11 @@ impl RuntimeSupervisor {
         workspace_id: &str,
         workspace_path: &Path,
     ) -> Result<RuntimeStatus, WorkspaceControlError> {
-        prepare_workspace(workspace_path)?;
-
+        // NOTE: status reads must be side-effect free. Workspace bootstrap
+        // (writing opencode.json defaults, syncing skill dirs) happens at
+        // runtime start (`runtime_adapter` spawn) and on explicit
+        // `reload_workspace`, not here — otherwise polling this GET endpoint
+        // would silently rewrite config and delete/recreate skill dirs.
         let manager = self.agents.lock().await;
         let agent_type = manager.default_agent_type();
         let backend = backend_label(agent_type).to_owned();

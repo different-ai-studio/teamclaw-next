@@ -28,6 +28,8 @@ pub enum WorkspaceControlError {
     NotFound(String),
     Io(String),
     Parse(String),
+    /// Caller supplied an unsafe or out-of-bounds path/segment. Maps to 400.
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for WorkspaceControlError {
@@ -37,6 +39,7 @@ impl std::fmt::Display for WorkspaceControlError {
             Self::NotFound(msg) => write!(f, "not found: {msg}"),
             Self::Io(e) => write!(f, "io error: {e}"),
             Self::Parse(e) => write!(f, "parse error: {e}"),
+            Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
         }
     }
 }

@@ -107,53 +107,6 @@ function flattenConfiguredProviders(configuredProviders: ConfiguredProvider[]): 
   )
 }
 
-function mergeConfiguredProviders(...groups: ConfiguredProvider[][]): ConfiguredProvider[] {
-  const merged = new Map<string, { id: string; name: string; models: Map<string, { id: string; name: string }> }>()
-
-  for (const providers of groups) {
-    for (const provider of providers) {
-      const existing =
-        merged.get(provider.id) ??
-        { id: provider.id, name: provider.name, models: new Map<string, { id: string; name: string }>() }
-
-      existing.name = provider.name
-      for (const model of provider.models) {
-        existing.models.set(model.id, { ...model })
-      }
-
-      merged.set(provider.id, existing)
-    }
-  }
-
-  return Array.from(merged.values()).map((provider) => ({
-    id: provider.id,
-    name: provider.name,
-    models: Array.from(provider.models.values()),
-  }))
-}
-
-function mergeProviders(...groups: ProviderEntry[][]): ProviderEntry[] {
-  const merged = new Map<string, ProviderEntry>()
-
-  for (const providers of groups) {
-    for (const provider of providers) {
-      const existing = merged.get(provider.id)
-      merged.set(provider.id, existing
-        ? {
-            ...existing,
-            ...provider,
-            configured: existing.configured || provider.configured,
-          }
-        : { ...provider })
-    }
-  }
-
-  return Array.from(merged.values()).sort((a, b) => {
-    if (a.configured !== b.configured) return a.configured ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
-}
-
 export interface ProviderState {
   // All available providers (from GET /provider), with configured status
   providers: ProviderEntry[]
