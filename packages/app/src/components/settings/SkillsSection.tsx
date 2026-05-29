@@ -233,12 +233,6 @@ export const SkillsSection = React.memo(function SkillsSection({
     setError(null)
 
     try {
-      const { exists, mkdir } = await import('@tauri-apps/plugin-fs')
-      const skillsDir = `${workspacePath}/.opencode/skills`
-
-      if (!(await exists(skillsDir))) {
-        await mkdir(skillsDir, { recursive: true })
-      }
       const { loadRolesSkillsWorkspaceState } = await import('@/lib/roles/loader')
       const [workspaceState] = await Promise.all([
         loadRolesSkillsWorkspaceState(workspacePath),

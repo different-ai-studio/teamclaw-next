@@ -66,6 +66,18 @@ pub fn build(state: HttpState) -> Router {
             get(workspaces::get_mcp).put(workspaces::put_mcp),
         )
         .route(
+            "/v1/workspaces/:id/roles-skills",
+            get(workspaces::get_roles_skills),
+        )
+        .route(
+            "/v1/workspaces/:id/skills",
+            get(workspaces::get_skills),
+        )
+        .route(
+            "/v1/workspaces/:id/roles",
+            get(workspaces::get_roles),
+        )
+        .route(
             "/v1/workspaces/:id/runtime",
             get(workspaces::get_runtime),
         )

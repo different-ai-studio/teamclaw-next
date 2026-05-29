@@ -18,8 +18,9 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::config::workspace_control::{
-    AllowlistRule, ApplyOutcome, McpServerConfig, PermissionConfig, ProviderAuthRequest,
-    ProviderInfo, RuntimeStatus, WorkspaceControlError, WorkspaceControlStore,
+    AllowlistRule, ApplyOutcome, ManagedSkillDto, McpServerConfig, PermissionConfig,
+    ProviderAuthRequest, ProviderInfo, RoleRecordDto, RolesSkillsStateDto, RuntimeStatus,
+    WorkspaceControlError, WorkspaceControlStore,
 };
 use std::collections::HashMap;
 
@@ -199,6 +200,44 @@ pub async fn put_mcp(
     let store = resolve_store(&state)?;
     let outcome = store.put_mcp(&workspace_id, body).map_err(map_control_err)?;
     Ok(apply_ok(outcome))
+}
+
+// ── Roles & skills handlers ───────────────────────────────────────────────────
+pub async fn get_roles_skills(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<RolesSkillsStateDto>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let store = resolve_store(&state)?;
+    let payload = store
+        .get_roles_skills_state(&workspace_id)
+        .map_err(map_control_err)?;
+    Ok(Json(payload))
+}
+
+/// `GET /v1/workspaces/:id/skills`
+pub async fn get_skills(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<Vec<ManagedSkillDto>>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let store = resolve_store(&state)?;
+    let skills = store.get_skills(&workspace_id).map_err(map_control_err)?;
+    Ok(Json(skills))
+}
+
+/// `GET /v1/workspaces/:id/roles`
+pub async fn get_roles(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<Vec<RoleRecordDto>>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let store = resolve_store(&state)?;
+    let roles = store.get_roles(&workspace_id).map_err(map_control_err)?;
+    Ok(Json(roles))
 }
 
 // ── Runtime status handlers ───────────────────────────────────────────────────

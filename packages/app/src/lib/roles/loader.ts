@@ -10,6 +10,9 @@ import type {
   RolesSkillsWorkspaceState,
 } from "./types"
 import { loadAllSkills } from "@/lib/git/skill-loader"
+import type { SkillSource } from "@/lib/git/types"
+import { isTauri } from "@/lib/utils"
+import { encodeWorkspaceId, getDaemonRolesSkillsState } from "@/lib/daemon-local-client"
 
 const ROLE_ROOT = ".teamclaw/roles"
 const ROLE_SKILL_DIR = ".teamclaw/roles/skills"
@@ -248,8 +251,7 @@ async function loadRoleManagedSkills(workspacePath: string): Promise<ManagedSkil
   return roleSkills
 }
 
-export async function loadAllRoles(workspacePath: string | null): Promise<RoleRecord[]> {
-  if (!workspacePath) return []
+async function loadAllRolesFromFs(workspacePath: string): Promise<RoleRecord[]> {
   const roles: RoleRecord[] = []
   const seen = new Set<string>()
   const roots = await getRoleRoots(workspacePath)
@@ -271,24 +273,16 @@ export async function loadAllRoles(workspacePath: string | null): Promise<RoleRe
   return roles.sort((a, b) => a.slug.localeCompare(b.slug))
 }
 
-export async function loadRolesSkillsWorkspaceState(workspacePath: string | null): Promise<RolesSkillsWorkspaceState> {
-  if (!workspacePath) {
-    return {
-      roles: [],
-      skills: [],
-      roleUsageBySkill: {},
-      skillNamesByRole: {},
-      metrics: {
-        rolesCount: 0,
-        skillsCount: 0,
-        linkedSkillsCount: 0,
-        unlinkedSkillsCount: 0,
-      },
-    }
-  }
+export async function loadAllRoles(workspacePath: string | null): Promise<RoleRecord[]> {
+  const state = await loadRolesSkillsWorkspaceState(workspacePath)
+  return state.roles
+}
 
+async function loadRolesSkillsWorkspaceStateFromFs(
+  workspacePath: string,
+): Promise<RolesSkillsWorkspaceState> {
   const [roles, { skills: normalSkills }, roleManagedSkills] = await Promise.all([
-    loadAllRoles(workspacePath),
+    loadAllRolesFromFs(workspacePath),
     loadAllSkills(workspacePath),
     loadRoleManagedSkills(workspacePath),
   ])
@@ -349,6 +343,45 @@ export async function loadRolesSkillsWorkspaceState(workspacePath: string | null
       unlinkedSkillsCount: Math.max(skills.length - linkedSkillsCount, 0),
     },
   }
+}
+
+export async function loadRolesSkillsWorkspaceState(workspacePath: string | null): Promise<RolesSkillsWorkspaceState> {
+  if (!workspacePath) {
+    return {
+      roles: [],
+      skills: [],
+      roleUsageBySkill: {},
+      skillNamesByRole: {},
+      metrics: {
+        rolesCount: 0,
+        skillsCount: 0,
+        linkedSkillsCount: 0,
+        unlinkedSkillsCount: 0,
+      },
+    }
+  }
+
+  if (isTauri()) {
+    try {
+      const daemonState = await getDaemonRolesSkillsState(encodeWorkspaceId(workspacePath))
+      if (daemonState) {
+        return {
+          roles: daemonState.roles as RoleRecord[],
+          skills: daemonState.skills.map((skill) => ({
+            ...skill,
+            source: skill.source as SkillSource | undefined,
+          })),
+          roleUsageBySkill: daemonState.roleUsageBySkill,
+          skillNamesByRole: daemonState.skillNamesByRole,
+          metrics: daemonState.metrics,
+        }
+      }
+    } catch (err) {
+      console.warn("[roles/loader] daemon roles-skills fetch failed, falling back to FS:", err)
+    }
+  }
+
+  return loadRolesSkillsWorkspaceStateFromFs(workspacePath)
 }
 
 export async function saveRole(workspacePath: string, editor: RoleEditorState, targetFilePath?: string): Promise<RoleRecord> {

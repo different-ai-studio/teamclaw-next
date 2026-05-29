@@ -273,6 +273,70 @@ export async function putDaemonToolPermissions(
   return putDaemonPermissions(workspaceId, {}, tools)
 }
 
+// ─── Roles & skills ───────────────────────────────────────────────────────────
+
+/** Mirrors `RolesSkillsWorkspaceState` from lib/roles/types.ts (camelCase from daemon). */
+export interface DaemonRolesSkillsState {
+  roles: Array<{
+    slug: string
+    name: string
+    description: string
+    body: string
+    role: string
+    whenToUse: string
+    workingStyle: string
+    roleSkills: Array<{ name: string; description: string }>
+    filePath: string
+    rawMarkdown: string
+  }>
+  skills: Array<{
+    filename: string
+    name: string
+    invocationName?: string
+    content: string
+    description: string
+    source?: string
+    dirPath: string
+    linkedRoles: string[]
+    isRoleSkill: boolean
+  }>
+  roleUsageBySkill: Record<string, string[]>
+  skillNamesByRole: Record<string, string[]>
+  metrics: {
+    rolesCount: number
+    skillsCount: number
+    linkedSkillsCount: number
+    unlinkedSkillsCount: number
+  }
+}
+
+export async function getDaemonRolesSkillsState(
+  workspaceId: string,
+): Promise<DaemonRolesSkillsState | null> {
+  const result = await daemonFetch<DaemonRolesSkillsState>(
+    `/v1/workspaces/${workspaceId}/roles-skills`,
+  )
+  return result.ok ? result.data : null
+}
+
+export async function getDaemonSkills(
+  workspaceId: string,
+): Promise<DaemonRolesSkillsState['skills'] | null> {
+  const result = await daemonFetch<DaemonRolesSkillsState['skills']>(
+    `/v1/workspaces/${workspaceId}/skills`,
+  )
+  return result.ok ? result.data : null
+}
+
+export async function getDaemonRoles(
+  workspaceId: string,
+): Promise<DaemonRolesSkillsState['roles'] | null> {
+  const result = await daemonFetch<DaemonRolesSkillsState['roles']>(
+    `/v1/workspaces/${workspaceId}/roles`,
+  )
+  return result.ok ? result.data : null
+}
+
 // ─── Allowlist ────────────────────────────────────────────────────────────────
 
 export async function getDaemonAllowlist(

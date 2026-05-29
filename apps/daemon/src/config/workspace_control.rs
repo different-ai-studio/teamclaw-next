@@ -9,6 +9,10 @@
 //! boundary so future replacements only require a new `WorkspaceControlStore`
 //! implementation.
 
+pub use super::roles_skills::{
+    ManagedSkillDto, RoleRecordDto, RolesSkillsStateDto, scan_roles_skills_state,
+};
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -221,6 +225,21 @@ pub trait WorkspaceControlStore: Send + Sync {
         workspace_id: &str,
         servers: HashMap<String, McpServerConfig>,
     ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
+    fn get_roles_skills_state(
+        &self,
+        workspace_id: &str,
+    ) -> Result<RolesSkillsStateDto, WorkspaceControlError>;
+
+    fn get_skills(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<ManagedSkillDto>, WorkspaceControlError>;
+
+    fn get_roles(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<RoleRecordDto>, WorkspaceControlError>;
 
     fn get_runtime_status(
         &self,
@@ -599,6 +618,28 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         // needs a restart to pick up server changes.
         Ok(ApplyOutcome::RestartRequired)
     }
+
+    fn get_roles_skills_state(
+        &self,
+        workspace_id: &str,
+    ) -> Result<RolesSkillsStateDto, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        scan_roles_skills_state(&wpath)
+    }
+
+    fn get_skills(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<ManagedSkillDto>, WorkspaceControlError> {
+        Ok(self.get_roles_skills_state(workspace_id)?.skills)
+    }
+
+    fn get_roles(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<RoleRecordDto>, WorkspaceControlError> {
+        Ok(self.get_roles_skills_state(workspace_id)?.roles)
+    }
 }
 
 // ── NullWorkspaceControlStore ─────────────────────────────────────────────────
@@ -658,6 +699,15 @@ impl WorkspaceControlStore for NullWorkspaceControlStore {
         id: &str,
         _: HashMap<String, McpServerConfig>,
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_roles_skills_state(&self, id: &str) -> Result<RolesSkillsStateDto, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_skills(&self, id: &str) -> Result<Vec<ManagedSkillDto>, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_roles(&self, id: &str) -> Result<Vec<RoleRecordDto>, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
     fn get_runtime_status(&self, id: &str) -> Result<RuntimeStatus, WorkspaceControlError> {
