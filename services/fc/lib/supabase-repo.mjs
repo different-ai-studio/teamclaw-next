@@ -2089,6 +2089,24 @@ export function createSupabaseAuthRepository(options) {
         body: { email, password }, operation: "auth.signUp",
       });
     },
+
+    oauthAuthorizeUrl({ provider, redirect, codeChallenge }) {
+      const u = new URL(`${supabaseUrl}/auth/v1/authorize`);
+      u.searchParams.set("provider", provider);
+      u.searchParams.set("redirect_to", redirect);
+      u.searchParams.set("code_challenge", codeChallenge);
+      u.searchParams.set("code_challenge_method", "s256");
+      return u.toString();
+    },
+
+    async exchangePkceCode({ code, codeVerifier }) {
+      return goTrueRequest({
+        fetchImpl, supabaseUrl, apiKey: publishableKey,
+        method: "POST", path: "/auth/v1/token?grant_type=pkce",
+        body: { auth_code: code, code_verifier: codeVerifier },
+        operation: "auth.exchangePkceCode",
+      });
+    },
   };
 }
 
