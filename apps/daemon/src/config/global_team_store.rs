@@ -51,6 +51,12 @@ pub fn ensure_initialized(team_id: &str) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
+/// Serializes tests that mutate the process-global `HOME` env var (which
+/// `config_dir()` reads). Shared across config submodule tests so HOME-based
+/// path assertions don't race. Test-only.
+#[cfg(test)]
+pub(crate) static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,6 +72,7 @@ mod tests {
 
     #[test]
     fn ensure_initialized_creates_all_prefixes() {
+        let _guard = TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Redirect HOME so config_dir() points at a temp dir.
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", tmp.path());
