@@ -1733,7 +1733,9 @@
         "never": "Not synced yet",
         "syncedFiles": "Synced files",
         "pendingChanges": "Pending changes",
-        "syncNow": "Sync now"
+        "syncNow": "Sync now",
+        "recentFiles": "Recently synced files",
+        "fileDirty": "pending"
       },
       "noTeam": "No shared space",
       "renameSuccess": "Shared space renamed",

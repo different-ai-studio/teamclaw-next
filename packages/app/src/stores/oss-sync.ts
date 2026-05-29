@@ -35,6 +35,15 @@ export interface OssSyncConflict {
   timestamp: number
 }
 
+// Mirrors Rust SyncedFile (oss_sync_status -> recentFiles).
+export interface SyncedFile {
+  path: string
+  syncedVersion: number
+  dirty: boolean
+  /** Local mtime in unix seconds. */
+  mtime: number
+}
+
 // ---------------------------------------------------------------------------
 // State interface
 // ---------------------------------------------------------------------------
@@ -45,6 +54,7 @@ export interface OssSyncState {
   teamId: string | null
   dirtyCount: number
   totalFiles: number
+  recentFiles: SyncedFile[]
   fileStatusMap: Record<string, OssSyncFileStatus>
   conflicts: OssSyncConflict[]
   lastError: string | null
@@ -80,6 +90,7 @@ interface SyncStatusResult {
     path: string
     status: 'synced' | 'modified' | 'new' | 'conflict'
   }>
+  recentFiles?: SyncedFile[]
 }
 
 interface SyncNowResult {
@@ -98,6 +109,7 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   teamId: null,
   dirtyCount: 0,
   totalFiles: 0,
+  recentFiles: [],
   fileStatusMap: {},
   conflicts: [],
   lastError: null,
@@ -121,6 +133,7 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
         fileStatusMap,
         dirtyCount: status.dirtyCount,
         totalFiles: status.totalFiles,
+        recentFiles: status.recentFiles ?? [],
       })
     } catch (e) {
       set({ lastError: String(e) })

@@ -48,6 +48,7 @@ export function TeamOssSyncStatus() {
   const lastSyncAt = useOssSyncStore((s) => s.lastSyncAt)
   const dirtyCount = useOssSyncStore((s) => s.dirtyCount)
   const totalFiles = useOssSyncStore((s) => s.totalFiles)
+  const recentFiles = useOssSyncStore((s) => s.recentFiles)
   const syncing = useOssSyncStore((s) => s.syncing)
   const lastError = useOssSyncStore((s) => s.lastError)
   const refresh = useOssSyncStore((s) => s.refresh)
@@ -109,6 +110,39 @@ export function TeamOssSyncStatus() {
           value={dirtyCount}
         />
       </div>
+
+      {recentFiles.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-1.5 text-[12px] font-medium text-foreground/70">
+            {t('settings.team.oss.recentFiles', 'Recently synced files')}
+          </div>
+          <ul className="divide-y divide-border/40 rounded-md border border-border/40">
+            {recentFiles.map((f) => (
+              <li
+                key={f.path}
+                className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-[12px]"
+              >
+                <span className="truncate font-mono text-foreground/90" title={f.path}>
+                  {f.path}
+                </span>
+                <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+                  {f.dirty && (
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                      {t('settings.team.oss.fileDirty', 'pending')}
+                    </span>
+                  )}
+                  <span className="tabular-nums">
+                    {formatTimestamp(
+                      new Date(f.mtime * 1000).toISOString(),
+                      i18n?.language,
+                    )}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {lastError && (
         <p className="mt-3 text-[12px] text-destructive">{lastError}</p>

@@ -112,10 +112,21 @@ pub async fn oss_sync_set_jwt(workspace_path: String, jwt: String) -> Result<(),
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileSyncStatus {
-    /// Relative path from the workspace root (forward slashes).
+    /// Relative path from the team content root (forward slashes).
     pub path: String,
     /// One of: `synced` | `modified` | `new` | `conflict`.
     pub status: String,
+}
+
+/// One synced file, surfaced for the team-share OSS status panel.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedFile {
+    pub path: String,
+    pub synced_version: i32,
+    pub dirty: bool,
+    /// Local mtime (unix seconds) — used to order "recently synced" files.
+    pub mtime: u64,
 }
 
 /// Current sync status for the workspace.
@@ -129,6 +140,8 @@ pub struct SyncStatus {
     pub total_files: usize,
     /// Per-file status for tree coloring. Only non-trivial in OSS (webdav) mode.
     pub file_states: Vec<FileSyncStatus>,
+    /// Most-recently-touched synced files (newest first), capped for display.
+    pub recent_files: Vec<SyncedFile>,
 }
 
 /// Conflict resolution choices.
@@ -199,6 +212,20 @@ pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, Strin
         })
         .collect();
 
+    // Most-recently-touched synced files for the status panel.
+    let mut recent_files: Vec<SyncedFile> = state
+        .files
+        .iter()
+        .map(|(path, f)| SyncedFile {
+            path: path.clone(),
+            synced_version: f.synced_version,
+            dirty: f.dirty,
+            mtime: f.mtime,
+        })
+        .collect();
+    recent_files.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    recent_files.truncate(20);
+
     Ok(SyncStatus {
         team_id,
         last_server_seq: state.last_server_seq,
@@ -206,6 +233,7 @@ pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, Strin
         dirty_count,
         total_files,
         file_states,
+        recent_files,
     })
 }
 
