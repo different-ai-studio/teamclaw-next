@@ -16,14 +16,15 @@ describe('insertFeedback', () => {
     telemetryMock.insertFeedback.mockResolvedValue(undefined)
   })
 
-  it('writes one row to actor_message_feedback with kind=positive', async () => {
+  it('forwards camelCase feedback to the Cloud API with kind=positive', async () => {
     await insertFeedback({
       actorId: 'a-1', teamId: 't-1', sessionId: 's-1',
       messageId: 'm-1', kind: 'positive', skill: 'editor',
     })
+    // Cloud API contract is camelCase (FC validates body.messageId/actorId/...).
     expect(telemetryMock.insertFeedback).toHaveBeenCalledWith({
-      actor_id: 'a-1', team_id: 't-1', session_id: 's-1',
-      message_id: 'm-1', kind: 'positive', star_rating: null, skill: 'editor',
+      messageId: 'm-1', actorId: 'a-1', teamId: 't-1', sessionId: 's-1',
+      kind: 'positive', starRating: null, skill: 'editor',
     })
   })
 })
