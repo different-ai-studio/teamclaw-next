@@ -87,6 +87,7 @@ impl TeamclawSessionStore {
             .find(|s| s.session_id == session_id)
     }
 
+    #[allow(dead_code)]
     pub fn remove(&mut self, session_id: &str) -> bool {
         let len = self.sessions.len();
         self.sessions.retain(|s| s.session_id != session_id);

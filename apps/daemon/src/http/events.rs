@@ -112,10 +112,12 @@ impl EventRingBuffer {
         self.inner.push_back(event);
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }

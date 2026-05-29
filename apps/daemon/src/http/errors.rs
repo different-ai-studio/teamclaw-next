@@ -17,6 +17,7 @@ use serde::Serialize;
 /// branch on these strings.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // stable wire contract — not every code is emitted yet
 pub enum ErrorCode {
     Unauthorized,
     Forbidden,
@@ -102,6 +103,7 @@ impl HttpError {
         Self::new(ErrorCode::Forbidden, detail)
     }
 
+    #[allow(dead_code)]
     pub fn not_found(detail: impl Into<String>) -> Self {
         Self::new(ErrorCode::NotFound, detail)
     }

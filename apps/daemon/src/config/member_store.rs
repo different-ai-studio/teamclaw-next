@@ -48,6 +48,7 @@ impl PendingInvite {
 }
 
 impl MemberStore {
+    #[allow(dead_code)]
     pub fn default_path() -> PathBuf {
         super::DaemonConfig::migrate_legacy_file("members.toml")
     }

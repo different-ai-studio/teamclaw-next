@@ -6,7 +6,6 @@ use tracing::{info, warn};
 
 use crate::config::DaemonConfig;
 use crate::proto::amux::DeviceState;
-use prost::Message;
 
 use super::Topics;
 
@@ -136,6 +135,7 @@ impl MqttClient {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn announce_online(&self, device_name: &str) -> Result<(), rumqttc::ClientError> {
         let status = DeviceState {
             online: true,

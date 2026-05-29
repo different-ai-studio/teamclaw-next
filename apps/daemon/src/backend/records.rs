@@ -1,6 +1,7 @@
 /// Returned by `claim_team_invite` — both member and agent branches.
 /// `refresh_token` is `None` for member claims.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct ClaimResult {
     pub actor_id: String,
     pub team_id: String,
@@ -65,6 +66,7 @@ pub struct StoredMessage {
     pub id: String,
     pub session_id: String,
     pub sender_actor_id: String,
+    #[allow(dead_code)]
     pub kind: String,
     pub content: String,
     /// Raw JSON string of the `metadata` column.
@@ -82,6 +84,7 @@ pub struct BackendSessionRow {
     #[serde(default)]
     pub primary_agent_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub mode: String,
     #[serde(default)]
     pub title: String,
@@ -94,9 +97,11 @@ pub struct BackendSessionRow {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BackendParticipantRow {
+    #[allow(dead_code)]
     pub session_id: String,
     pub actor_id: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub role: Option<String>,
     pub joined_at: chrono::DateTime<chrono::Utc>,
 }

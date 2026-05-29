@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
-use tracing::warn;
 
 use super::adapter::AcpCommand;
 use crate::proto::amux;

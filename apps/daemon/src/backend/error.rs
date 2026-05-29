@@ -6,6 +6,7 @@ pub enum BackendError {
     Auth(String),
 
     #[error("validation error: {0}")]
+    #[allow(dead_code)]
     Validation(String),
 
     #[error("not found: {0}")]
@@ -19,6 +20,7 @@ pub enum BackendError {
     },
 
     #[error("config error: {0}")]
+    #[allow(dead_code)]
     Config(String),
 
     #[error("io error: {0}")]
