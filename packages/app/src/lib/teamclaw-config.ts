@@ -73,6 +73,25 @@ async function readTeamclawConfig(workspacePath: string): Promise<TeamclawConfig
   return JSON.parse(content) as TeamclawConfig
 }
 
+/** Provider map from teamclaw.json, or opencode.json when teamclaw.json is absent. */
+async function readProviderEntries(workspacePath: string): Promise<Record<string, ProviderEntry>> {
+  const { readTextFile, exists } = await import('@tauri-apps/plugin-fs')
+
+  const teamclawPath = `${workspacePath}/teamclaw.json`
+  if (await exists(teamclawPath)) {
+    const teamclawConfig = JSON.parse(await readTextFile(teamclawPath)) as TeamclawConfig
+    return teamclawConfig.provider ?? {}
+  }
+
+  const opencodePath = `${workspacePath}/opencode.json`
+  if (await exists(opencodePath)) {
+    const opencodeConfig = JSON.parse(await readTextFile(opencodePath)) as TeamclawConfig
+    return opencodeConfig.provider ?? {}
+  }
+
+  return {}
+}
+
 async function writeTeamclawConfig(workspacePath: string, config: TeamclawConfig): Promise<void> {
   const { writeTextFile } = await import('@tauri-apps/plugin-fs')
   const configPath = `${workspacePath}/teamclaw.json`
@@ -159,9 +178,7 @@ export async function getCustomProviderConfig(
   workspacePath: string,
   providerId: string
 ): Promise<CustomProviderConfig | null> {
-  const teamclawConfig = await readTeamclawConfig(workspacePath)
-
-  const providerEntry = teamclawConfig.provider?.[providerId]
+  const providerEntry = (await readProviderEntries(workspacePath))[providerId]
   if (!providerEntry) return null
 
   const models: CustomModelConfig[] = []
@@ -267,9 +284,7 @@ export async function removeCustomProviderFromConfig(
 
 export async function getCustomProviderIds(workspacePath: string): Promise<string[]> {
   try {
-    const teamclawConfig = await readTeamclawConfig(workspacePath)
-    if (!teamclawConfig.provider) return []
-    return Object.keys(teamclawConfig.provider)
+    return Object.keys(await readProviderEntries(workspacePath))
   } catch {
     return []
   }

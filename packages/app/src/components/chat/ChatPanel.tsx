@@ -32,6 +32,7 @@ import {
 import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import { isAgentActorType } from "@/lib/actor-type";
+import { resolveSessionWorkspaceHintForRuntimeStart } from "@/lib/teamclaw/resolve-runtime-start-workspace";
 import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
@@ -1270,10 +1271,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           // 2. Enqueue to outbox — status dot beside the bubble tracks
           //    pending/inFlight/delivered. Network + runtime work continue
           //    asynchronously after the bubble is visible.
+          let workspaceIdHint: string | null = null;
+          if (agentRuntimeIdsForSend.length > 0 && teamIdForSend) {
+            workspaceIdHint =
+              (await resolveSessionWorkspaceHintForRuntimeStart({
+                teamId: teamIdForSend,
+                localWorkspacePath: workspacePath,
+                sessionId: sid,
+                agentActorIds: agentRuntimeIdsForSend,
+              })) || null;
+          }
           sessionFlowLog("send.outbox_enqueue.begin", {
             sessionId: sid,
             teamId: teamIdForSend,
             messageId,
+            workspaceIdHint,
           });
           await useOutboxStore.getState().enqueue({
             messageId,
@@ -1285,6 +1297,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             mentionActorIds,
             displayMentionActorIds,
             attachmentUrls,
+            workspaceIdHint,
           });
           sessionFlowLog("send.outbox_enqueue.ok", {
             sessionId: sid,

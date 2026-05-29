@@ -399,4 +399,28 @@ describe('startAgentRuntimesAsync', () => {
       }),
     )
   })
+
+  it('prefers workspaceIdHint from send/outbox over backend lookups', async () => {
+    mockTables({
+      runtimes: [],
+      sessionRuntimes: [{ agent_id: 'agent-10', workspace_id: 'ws-session' }],
+      actors: [{ id: 'agent-10', agent_types: [], default_agent_type: null, default_workspace_id: 'ws-default' }],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-10'],
+      workspaceIdHint: 'ws-from-send',
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-10',
+        workspaceId: 'ws-from-send',
+        worktree: '',
+      }),
+    )
+  })
 })

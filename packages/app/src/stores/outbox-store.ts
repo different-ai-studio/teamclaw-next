@@ -23,6 +23,8 @@ export interface OutboxEntry {
   mentionActorIds: string[];
   displayMentionActorIds?: string[];
   attachmentUrls: string[];
+  /** Cloud workspace UUID captured at enqueue — survives outbox retries. */
+  workspaceIdHint?: string | null;
   state: OutboxState;
   attemptCount: number;
   lastAttemptAt: string | null;

@@ -56,6 +56,8 @@ export type EnsureAgentRuntimeArgs = {
   agentActorIds: string[];
   modelId?: string;
   modelIdByAgent?: Record<string, string>;
+  /** Cloud workspace UUID captured at send time — passed through to runtimeStart. */
+  workspaceIdHint?: string;
   reason?: string;
 };
 
@@ -127,6 +129,7 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
       agentActorIds,
       modelId: args.modelId,
       modelIdByAgent: args.modelIdByAgent,
+      workspaceIdHint: args.workspaceIdHint,
     });
 
     const retainDeadline = Date.now() + 12_000;
