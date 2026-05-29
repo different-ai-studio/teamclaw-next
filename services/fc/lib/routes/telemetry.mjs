@@ -40,8 +40,10 @@ export function registerTelemetry(router) {
   router.get("/v1/feedback-summary", async (ctx) => {
     const teamId = ctx.query.get("teamId");
     if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required");
+    // listFeedbackSummary already returns { items: [...] }; pass it through
+    // (do NOT re-wrap — that would double-nest the items array).
     const result = await ctx.repository.listFeedbackSummary(teamId);
-    return { body: { items: result } };
+    return { body: result };
   });
 
   router.post("/v1/session-report", async (ctx) => {

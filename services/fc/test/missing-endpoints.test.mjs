@@ -258,8 +258,10 @@ test("POST /v1/skill-usage requires skill", async () => {
 });
 
 test("GET /v1/feedback-summary returns items from listFeedbackSummary", async () => {
+  // Stub mirrors the real repo, which returns { items: [...] } (NOT a bare
+  // array) — so this guards against the route double-wrapping the result.
   const repo = makeRepo({
-    listFeedbackSummary: () => [{ sessionId: "s1", positive: 3, negative: 1 }],
+    listFeedbackSummary: () => ({ items: [{ actorId: "a1", displayName: null, positive: 3, negative: 1, total: 4 }] }),
   });
   const res = await request(repo, {
     method: "GET",
@@ -270,7 +272,9 @@ test("GET /v1/feedback-summary returns items from listFeedbackSummary", async ()
   assert.equal(repo.calls[0].method, "listFeedbackSummary");
   assert.deepEqual(repo.calls[0].args, ["t1"]);
   const body = JSON.parse(res.body);
-  assert.equal(body.items[0].sessionId, "s1");
+  assert.equal(body.items[0].actorId, "a1");
+  assert.equal(body.items[0].total, 4);
+  assert.ok(!Array.isArray(body.items[0]), "items[0] must be an object, not a nested array (no double-wrap)");
 });
 
 test("GET /v1/feedback-summary requires teamId", async () => {
