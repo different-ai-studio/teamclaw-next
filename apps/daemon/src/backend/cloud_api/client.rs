@@ -75,10 +75,20 @@ pub(super) struct RefreshRequest<'a> {
 }
 
 /// Token response from `/v1/auth/refresh` (camelCase).
+///
+/// Supabase rotates the refresh token on every successful refresh and revokes
+/// the prior one after the reuse interval, so the rotated `refreshToken` MUST be
+/// captured and persisted — dropping it permanently breaks auth on the next
+/// refresh. `expiresAt` (epoch seconds) lets us cache the access token instead
+/// of refreshing on every request.
 #[derive(Deserialize)]
 pub(super) struct TokenResponse {
     #[serde(rename = "accessToken")]
     pub(super) access_token: String,
+    #[serde(rename = "refreshToken", default)]
+    pub(super) refresh_token: Option<String>,
+    #[serde(rename = "expiresAt", default)]
+    pub(super) expires_at: Option<i64>,
 }
 
 pub(super) fn refresh_failure_message(body: &str) -> String {

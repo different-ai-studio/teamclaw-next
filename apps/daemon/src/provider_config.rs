@@ -87,6 +87,15 @@ impl ProviderConfig {
         })
     }
 
+    /// Persist a `cloud_api` backend config to `path`, atomically.
+    ///
+    /// Used both by the legacy `supabase.toml` migration and at runtime to write
+    /// back a rotated refresh token, so the write must be crash-safe: a torn
+    /// write here would lose the only credential the daemon has.
+    pub fn save_cloud_api(path: &Path, cfg: &CloudApiConfig) -> Result<(), ProviderConfigError> {
+        Self::write_backend_toml(path, cfg)
+    }
+
     fn write_backend_toml(path: &Path, cfg: &CloudApiConfig) -> Result<(), ProviderConfigError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -105,7 +114,11 @@ actor_id = {actor_id}
             team_id = toml_quote(&cfg.team_id),
             actor_id = toml_quote(&cfg.actor_id),
         );
-        std::fs::write(path, text)?;
+        // Write to a sibling temp file then rename, so a crash mid-write can
+        // never leave a partially written backend.toml.
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 

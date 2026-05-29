@@ -14,7 +14,9 @@ use client::{
     RefreshRequest, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
 struct BootstrapResponse {
@@ -31,31 +33,93 @@ struct BootstrapMqttPayload {
     password: Option<String>,
 }
 
+/// Access token must be refreshed this long before its `expires_at` so an
+/// in-flight request never races the expiry boundary.
+const ACCESS_TOKEN_LEEWAY: Duration = Duration::from_secs(60);
+
+/// Mutable token state shared across all clones of a `CloudApiBackend`.
+///
+/// Held only for brief, synchronous critical sections — never across an
+/// `.await`. The network refresh itself is serialized by `refresh_lock`.
+struct TokenState {
+    /// The live refresh token. Seeded from `backend.toml`, then updated in place
+    /// every time Supabase rotates it.
+    refresh_token: String,
+    /// The most recently fetched access token, if any.
+    access_token: Option<String>,
+    /// When `access_token` expires, as a monotonic `Instant`.
+    expires_at: Option<Instant>,
+}
+
 #[derive(Clone)]
 pub struct CloudApiBackend {
     pub(super) cfg: CloudApiConfig,
     pub(super) http: reqwest::Client,
+    /// Cached token + live refresh token. Shared across clones via `Arc`.
+    token: Arc<Mutex<TokenState>>,
+    /// Single-flight gate: ensures only one refresh hits the network at a time
+    /// so concurrent requests can't submit the same (rotating) refresh token in
+    /// parallel and trip Supabase's reuse detection.
+    refresh_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Where to persist a rotated refresh token (`~/.amuxd/backend.toml`).
+    /// `None` in tests that don't exercise persistence.
+    persist_path: Option<PathBuf>,
 }
 
 impl CloudApiBackend {
     pub fn new(cfg: CloudApiConfig) -> Self {
+        Self::with_optional_persist(cfg, None)
+    }
+
+    /// Construct a backend that persists rotated refresh tokens back to
+    /// `persist_path` (the `backend.toml` it was loaded from).
+    pub fn with_persist_path(cfg: CloudApiConfig, persist_path: PathBuf) -> Self {
+        Self::with_optional_persist(cfg, Some(persist_path))
+    }
+
+    fn with_optional_persist(cfg: CloudApiConfig, persist_path: Option<PathBuf>) -> Self {
+        let refresh_token = cfg.refresh_token.clone();
         Self {
             cfg,
             http: reqwest::Client::new(),
+            token: Arc::new(Mutex::new(TokenState {
+                refresh_token,
+                access_token: None,
+                expires_at: None,
+            })),
+            refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
+            persist_path,
         }
     }
 
-    /// Obtain a fresh access token via `/v1/auth/refresh`.
+    /// Return a valid access token, refreshing only when the cached one is
+    /// missing or within `ACCESS_TOKEN_LEEWAY` of expiry.
     pub(super) async fn access_token(&self) -> BackendResult<String> {
-        let url = format!(
-            "{}/v1/auth/refresh",
-            self.cfg.url.trim_end_matches('/')
-        );
+        // Fast path: a cached token with comfortable headroom.
+        if let Some(token) = self.cached_access_token() {
+            return Ok(token);
+        }
+
+        // Slow path: serialize refreshes so concurrent callers don't each submit
+        // the (about-to-rotate) refresh token in parallel.
+        let _guard = self.refresh_lock.lock().await;
+
+        // Re-check: another task may have refreshed while we waited on the gate.
+        if let Some(token) = self.cached_access_token() {
+            return Ok(token);
+        }
+
+        let refresh_token = {
+            let state = self.token.lock().expect("token state poisoned");
+            state.refresh_token.clone()
+        };
+
+        let url = format!("{}/v1/auth/refresh", self.cfg.url.trim_end_matches('/'));
         let resp = self
             .http
             .post(url)
             .json(&RefreshRequest {
-                refresh_token: &self.cfg.refresh_token,
+                refresh_token: &refresh_token,
             })
             .send()
             .await
@@ -67,7 +131,65 @@ impl CloudApiBackend {
         }
 
         let body: TokenResponse = resp.json().await.map_err(network_error)?;
+
+        // Capture the rotated refresh token. Supabase revokes the prior token
+        // after the reuse interval, so we must keep (and persist) the new one.
+        let rotated = match body.refresh_token {
+            Some(ref new_rt) if !new_rt.is_empty() && *new_rt != refresh_token => {
+                Some(new_rt.clone())
+            }
+            _ => None,
+        };
+
+        {
+            let mut state = self.token.lock().expect("token state poisoned");
+            state.access_token = Some(body.access_token.clone());
+            state.expires_at = body.expires_at.and_then(instant_from_epoch_secs);
+            if let Some(ref new_rt) = rotated {
+                state.refresh_token = new_rt.clone();
+            }
+        }
+
+        if let Some(new_rt) = rotated {
+            self.persist_refresh_token(&new_rt);
+        }
+
         Ok(body.access_token)
+    }
+
+    /// The cached access token if it is still comfortably valid, else `None`.
+    fn cached_access_token(&self) -> Option<String> {
+        let state = self.token.lock().expect("token state poisoned");
+        match (&state.access_token, state.expires_at) {
+            (Some(token), Some(expires_at))
+                if Instant::now() + ACCESS_TOKEN_LEEWAY < expires_at =>
+            {
+                Some(token.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Best-effort write of a rotated refresh token back to `backend.toml`.
+    /// Failure is logged but non-fatal — the in-memory token is still updated,
+    /// so the running daemon keeps working; only a restart would lose it.
+    fn persist_refresh_token(&self, refresh_token: &str) {
+        let Some(path) = self.persist_path.as_ref() else {
+            return;
+        };
+        let cfg = CloudApiConfig {
+            url: self.cfg.url.clone(),
+            refresh_token: refresh_token.to_string(),
+            team_id: self.cfg.team_id.clone(),
+            actor_id: self.cfg.actor_id.clone(),
+        };
+        if let Err(e) = crate::provider_config::ProviderConfig::save_cloud_api(path, &cfg) {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "failed to persist rotated refresh_token; auth may break after restart"
+            );
+        }
     }
 
     pub(super) async fn get<T>(&self, path: &str) -> BackendResult<T>
@@ -173,6 +295,18 @@ impl CloudApiBackend {
 
 }
 
+/// Convert an epoch-seconds expiry into a monotonic `Instant`, clamping to "now"
+/// if it is already in the past. Returns `None` for absurd / un-representable
+/// values so a malformed response degrades to "refresh on next request".
+fn instant_from_epoch_secs(secs: i64) -> Option<Instant> {
+    let secs = u64::try_from(secs).ok()?;
+    let expires_sys = UNIX_EPOCH.checked_add(Duration::from_secs(secs))?;
+    let remaining = expires_sys
+        .duration_since(SystemTime::now())
+        .unwrap_or(Duration::ZERO);
+    Instant::now().checked_add(remaining)
+}
+
 #[async_trait]
 impl Backend for CloudApiBackend {
     fn team_id(&self) -> &str {
@@ -197,7 +331,10 @@ impl Backend for CloudApiBackend {
     }
 
     fn cached_credential_expiry(&self) -> Option<Instant> {
-        None
+        self.token
+            .lock()
+            .expect("token state poisoned")
+            .expires_at
     }
 
     async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult> {
@@ -810,6 +947,133 @@ mod tests {
         let backend = CloudApiBackend::new(config(&server));
         let tok = backend.access_token().await.unwrap();
         assert_eq!(tok, "access-token");
+    }
+
+    #[tokio::test]
+    async fn access_token_is_cached_until_near_expiry() {
+        let server = MockServer::start().await;
+        // Far-future expiry → the first refresh should satisfy later calls.
+        mount_refresh(&server).await;
+        let backend = CloudApiBackend::new(config(&server));
+
+        assert_eq!(backend.access_token().await.unwrap(), "access-token");
+        assert_eq!(backend.access_token().await.unwrap(), "access-token");
+        assert_eq!(backend.access_token().await.unwrap(), "access-token");
+
+        let refreshes = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(refreshes, 1, "access token should be cached, not re-fetched");
+    }
+
+    #[tokio::test]
+    async fn access_token_refreshes_again_once_expired() {
+        let server = MockServer::start().await;
+        // expiresAt in the past → never cacheable, so each call refreshes.
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "accessToken": "access-token",
+                "refreshToken": "refresh",
+                "expiresAt": 1_i64
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+
+        backend.access_token().await.unwrap();
+        backend.access_token().await.unwrap();
+
+        let refreshes = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(refreshes, 2, "expired token must trigger a fresh refresh");
+    }
+
+    #[tokio::test]
+    async fn rotated_refresh_token_is_persisted_and_reused() {
+        let server = MockServer::start().await;
+        // First refresh uses the seed token "refresh", rotates to "rt-rotated",
+        // and is immediately expired so the next call must refresh again.
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({ "refreshToken": "refresh" }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "accessToken": "at-1",
+                "refreshToken": "rt-rotated",
+                "expiresAt": 1_i64
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // Second refresh must present the rotated token "rt-rotated".
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({ "refreshToken": "rt-rotated" }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "accessToken": "at-2",
+                "refreshToken": "rt-rotated",
+                "expiresAt": 9999999999_i64
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let backend_path = dir.path().join("backend.toml");
+        let backend =
+            CloudApiBackend::with_persist_path(config(&server), backend_path.clone());
+
+        assert_eq!(backend.access_token().await.unwrap(), "at-1");
+
+        // Rotated token must have been written back to backend.toml.
+        let persisted = std::fs::read_to_string(&backend_path).unwrap();
+        assert!(
+            persisted.contains(r#"refresh_token = "rt-rotated""#),
+            "rotated refresh token should be persisted, got:\n{persisted}"
+        );
+
+        // Next call (cache expired) must refresh using the rotated token.
+        assert_eq!(backend.access_token().await.unwrap(), "at-2");
+        // wiremock `.expect(1)` on both mocks is verified on server drop.
+    }
+
+    #[tokio::test]
+    async fn concurrent_access_token_calls_refresh_only_once() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        let backend = CloudApiBackend::new(config(&server));
+
+        let calls = (0..8).map(|_| {
+            let b = backend.clone();
+            async move { b.access_token().await.unwrap() }
+        });
+        let tokens = futures::future::join_all(calls).await;
+        assert!(tokens.iter().all(|t| t == "access-token"));
+
+        let refreshes = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(
+            refreshes, 1,
+            "single-flight should collapse concurrent refreshes into one"
+        );
     }
 
     #[tokio::test]
