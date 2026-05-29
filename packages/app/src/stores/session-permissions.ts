@@ -2,7 +2,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   encodeWorkspaceId,
   getDaemonAllowlist,
+  getDaemonToolPermissions,
   putDaemonAllowlist,
+  putDaemonToolPermissions,
   type DaemonAllowlistRule,
 } from "@/lib/daemon-local-client";
 // Permissive proxy until the amuxd daemon client is wired up;
@@ -41,7 +43,7 @@ import {
 } from "@/lib/session-list-activity";
 
 /**
- * Cache of permission config from the legacy workspace config file.
+ * Cache of tool-level permission defaults from the daemon workspace-control API.
  * Maps permission name (e.g. "bash", "write") to its action ("allow" | "ask" | "deny").
  */
 let _permConfigCache: Record<string, string> | null = null;
@@ -58,15 +60,11 @@ async function loadPermissionConfig(): Promise<Record<string, string>> {
   _permConfigLoading = true;
 
   try {
-    const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
-    const configPath = `${workspacePath}/opencode.json`;
-    if (!(await exists(configPath))) return {};
-
-    const content = await readTextFile(configPath);
-    const config = JSON.parse(content);
-    if (config.permission && typeof config.permission === "object") {
-      _permConfigCache = config.permission;
-      return _permConfigCache!;
+    const workspaceId = encodeWorkspaceId(workspacePath);
+    const tools = await getDaemonToolPermissions(workspaceId);
+    if (tools) {
+      _permConfigCache = tools;
+      return _permConfigCache;
     }
   } catch {
     // ignore read errors
@@ -83,8 +81,8 @@ async function loadPermissionConfig(): Promise<Record<string, string>> {
 const _alwaysAllowedPermissions = new Set<string>();
 
 /**
- * Write a permission as "allow" into the legacy workspace config so the
- * agent runtime stops asking for this permission type entirely.
+ * Write a permission as "allow" via the daemon so the agent runtime stops
+ * asking for this permission type entirely.
  */
 async function setPermissionAllowInConfig(permissionType: string): Promise<void> {
   if (!isTauri()) return;
@@ -92,30 +90,15 @@ async function setPermissionAllowInConfig(permissionType: string): Promise<void>
   const workspacePath = useWorkspaceStore.getState().workspacePath;
   if (!workspacePath) return;
 
+  if (_permConfigCache?.[permissionType] === "allow") return;
+
   try {
-    const { readTextFile, writeTextFile, exists } = await import("@tauri-apps/plugin-fs");
-    const configPath = `${workspacePath}/opencode.json`;
-
-    let config: Record<string, unknown> = {};
-    if (await exists(configPath)) {
-      const content = await readTextFile(configPath);
-      config = JSON.parse(content);
-    }
-
-    const permission = (config.permission as Record<string, string>) || {};
-    if (permission[permissionType] === "allow") return; // already set
-
-    permission[permissionType] = "allow";
-    config.permission = permission;
-
-    await writeTextFile(configPath, JSON.stringify(config, null, 2));
-
-    // Update the in-memory cache
-    _permConfigCache = permission;
-
-    console.log("[Session] Set permission '%s' to 'allow' in legacy config", permissionType);
+    const workspaceId = encodeWorkspaceId(workspacePath);
+    await putDaemonToolPermissions(workspaceId, { [permissionType]: "allow" });
+    _permConfigCache = { ...(_permConfigCache ?? {}), [permissionType]: "allow" };
+    console.log("[Session] Set permission '%s' to 'allow' via daemon", permissionType);
   } catch (err) {
-    console.error("[Session] Failed to update legacy config permission:", err);
+    console.error("[Session] Failed to update permission via daemon:", err);
   }
 }
 

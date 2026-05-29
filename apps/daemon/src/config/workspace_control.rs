@@ -98,6 +98,10 @@ pub enum PermissionAction {
 pub struct PermissionConfig {
     #[serde(default)]
     pub skills: HashMap<String, PermissionAction>,
+    /// Non-skill permission defaults (e.g. `"bash"`, `"read"`) stored at the
+    /// root of `permission` in opencode.json, outside the `skill` sub-object.
+    #[serde(default)]
+    pub tools: HashMap<String, PermissionAction>,
 }
 
 // ── Allowlist types ───────────────────────────────────────────────────────────
@@ -361,6 +365,23 @@ impl OpenCodeCompatStore {
             .map_err(|e| WorkspaceControlError::Parse(e.to_string()))?;
         std::fs::write(&path, content).map_err(|e| WorkspaceControlError::Io(e.to_string()))
     }
+
+    fn parse_permission_action(value: &str) -> Option<PermissionAction> {
+        match value {
+            "allow" => Some(PermissionAction::Allow),
+            "deny" => Some(PermissionAction::Deny),
+            "ask" => Some(PermissionAction::Ask),
+            _ => None,
+        }
+    }
+
+    fn permission_action_label(action: PermissionAction) -> &'static str {
+        match action {
+            PermissionAction::Allow => "allow",
+            PermissionAction::Deny => "deny",
+            PermissionAction::Ask => "ask",
+        }
+    }
 }
 
 impl Default for OpenCodeCompatStore {
@@ -467,17 +488,21 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             .skill
             .iter()
             .filter_map(|(k, v)| {
-                let action = match v.as_str() {
-                    "allow" => PermissionAction::Allow,
-                    "deny" => PermissionAction::Deny,
-                    "ask" => PermissionAction::Ask,
-                    _ => return None,
-                };
-                Some((k.clone(), action))
+                Self::parse_permission_action(v).map(|action| (k.clone(), action))
             })
             .collect();
 
-        Ok(PermissionConfig { skills })
+        let tools = cfg
+            .permission
+            .extra
+            .iter()
+            .filter_map(|(k, v)| {
+                let s = v.as_str()?;
+                Self::parse_permission_action(s).map(|action| (k.clone(), action))
+            })
+            .collect();
+
+        Ok(PermissionConfig { skills, tools })
     }
 
     fn put_permissions(
@@ -489,19 +514,22 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         let _lock = self.write_lock.lock().unwrap();
         let mut cfg = Self::read_opencode_json(&wpath)?;
 
-        cfg.permission.skill = config
-            .skills
-            .into_iter()
-            .map(|(k, v)| {
-                let s = match v {
-                    PermissionAction::Allow => "allow",
-                    PermissionAction::Deny => "deny",
-                    PermissionAction::Ask => "ask",
-                }
-                .to_owned();
-                (k, s)
-            })
-            .collect();
+        if !config.skills.is_empty() {
+            cfg.permission.skill = config
+                .skills
+                .into_iter()
+                .map(|(k, v)| (k, Self::permission_action_label(v).to_owned()))
+                .collect();
+        }
+
+        if !config.tools.is_empty() {
+            for (k, v) in config.tools {
+                cfg.permission.extra.insert(
+                    k,
+                    serde_json::Value::String(Self::permission_action_label(v).to_owned()),
+                );
+            }
+        }
 
         Self::write_opencode_json(&wpath, &cfg)?;
         Ok(ApplyOutcome::RestartRequired)
@@ -736,6 +764,7 @@ mod tests {
                 ("bash".to_owned(), PermissionAction::Allow),
                 ("network/*".to_owned(), PermissionAction::Deny),
             ]),
+            ..Default::default()
         };
 
         store.put_permissions(&wid, config.clone()).unwrap();
@@ -744,6 +773,61 @@ mod tests {
         assert_eq!(got.skills.get("*"), Some(&PermissionAction::Ask));
         assert_eq!(got.skills.get("bash"), Some(&PermissionAction::Allow));
         assert_eq!(got.skills.get("network/*"), Some(&PermissionAction::Deny));
+    }
+
+    #[test]
+    fn put_and_get_tool_permissions_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store();
+        let wid = ws_id(dir.path());
+
+        store
+            .put_permissions(
+                &wid,
+                PermissionConfig {
+                    tools: HashMap::from([
+                        ("bash".to_owned(), PermissionAction::Allow),
+                        ("read".to_owned(), PermissionAction::Ask),
+                    ]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let got = store.get_permissions(&wid).unwrap();
+        assert_eq!(got.tools.get("bash"), Some(&PermissionAction::Allow));
+        assert_eq!(got.tools.get("read"), Some(&PermissionAction::Ask));
+    }
+
+    #[test]
+    fn put_skills_only_does_not_clear_tool_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store();
+        let wid = ws_id(dir.path());
+
+        store
+            .put_permissions(
+                &wid,
+                PermissionConfig {
+                    tools: HashMap::from([("bash".to_owned(), PermissionAction::Allow)]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        store
+            .put_permissions(
+                &wid,
+                PermissionConfig {
+                    skills: HashMap::from([("*".to_owned(), PermissionAction::Ask)]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let got = store.get_permissions(&wid).unwrap();
+        assert_eq!(got.skills.get("*"), Some(&PermissionAction::Ask));
+        assert_eq!(got.tools.get("bash"), Some(&PermissionAction::Allow));
     }
 
     #[test]

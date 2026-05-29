@@ -163,6 +163,11 @@ export interface DaemonProviderAuthRequest {
 /** Skill-name → 'allow' | 'deny' | 'ask' */
 export type DaemonPermissionMap = Record<string, 'allow' | 'deny' | 'ask'>
 
+export interface DaemonPermissionConfig {
+  skills: DaemonPermissionMap
+  tools: DaemonPermissionMap
+}
+
 export interface DaemonAllowlistRule {
   project_id: string
   permission: string
@@ -209,33 +214,63 @@ export async function deleteDaemonProviderAuth(
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
 /**
+ * Fetch the full workspace permission config (skill + tool defaults).
+ */
+export async function getDaemonPermissionConfig(
+  workspaceId: string,
+): Promise<DaemonPermissionConfig | null> {
+  const result = await daemonFetch<DaemonPermissionConfig>(
+    `/v1/workspaces/${workspaceId}/permissions`,
+  )
+  if (!result.ok) return null
+  return {
+    skills: result.data.skills ?? {},
+    tools: result.data.tools ?? {},
+  }
+}
+
+/**
  * Fetch the workspace permission map.
- * Returns a flat `{ bash: 'ask', read: 'allow', ... }` object, stripping the
- * `skills` wrapper the daemon uses internally.
+ * Returns a flat `{ bash: 'ask', read: 'allow', ... }` object for skill keys only.
  */
 export async function getDaemonPermissions(
   workspaceId: string,
 ): Promise<DaemonPermissionMap | null> {
-  const result = await daemonFetch<{ skills: DaemonPermissionMap }>(
-    `/v1/workspaces/${workspaceId}/permissions`,
-  )
-  return result.ok ? (result.data.skills ?? {}) : null
+  const config = await getDaemonPermissionConfig(workspaceId)
+  return config?.skills ?? null
+}
+
+/** Tool-level permission defaults (e.g. `bash`, `read`) outside the skill map. */
+export async function getDaemonToolPermissions(
+  workspaceId: string,
+): Promise<DaemonPermissionMap | null> {
+  const config = await getDaemonPermissionConfig(workspaceId)
+  return config?.tools ?? null
 }
 
 /**
- * Replace the workspace permission map.
- * Accepts the flat `{ bash: 'ask', ... }` shape; wraps it in `{ skills: ... }`
- * before sending to the daemon.
+ * Replace the workspace skill permission map.
+ * Pass `tools` to merge tool-level defaults; omitted/empty tools are left unchanged.
  */
 export async function putDaemonPermissions(
   workspaceId: string,
   permissions: DaemonPermissionMap,
+  tools?: DaemonPermissionMap,
 ): Promise<DaemonApplyOutcome | null> {
+  const body: DaemonPermissionConfig = { skills: permissions, tools: tools ?? {} }
   const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
     `/v1/workspaces/${workspaceId}/permissions`,
-    { method: 'PUT', body: JSON.stringify({ skills: permissions }) },
+    { method: 'PUT', body: JSON.stringify(body) },
   )
   return result.ok ? result.data.outcome : null
+}
+
+/** Merge tool-level permission defaults without replacing skill permissions. */
+export async function putDaemonToolPermissions(
+  workspaceId: string,
+  tools: DaemonPermissionMap,
+): Promise<DaemonApplyOutcome | null> {
+  return putDaemonPermissions(workspaceId, {}, tools)
 }
 
 // ─── Allowlist ────────────────────────────────────────────────────────────────
