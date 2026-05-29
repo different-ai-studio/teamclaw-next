@@ -129,6 +129,33 @@ export const useLocalStatsStore = create<LocalStatsStore>((set, get) => ({
     } catch (err) {
       console.error('[LocalStats] Failed to increment skill usage:', err)
     }
+
+    // Mirror to cloud so the team leaderboard skill dimension is populated.
+    // This is best-effort: a cloud failure must not prevent or throw from the
+    // local write above.
+    //
+    // TRIGGER NOTE: This function is ready and wired, but callers must exist
+    // at the point where skills actually run. The primary frontend hook is in
+    // App.tsx at the `toolUse` ACP event (case "skill") — see the `toolUse`
+    // handler in the `listenForEnvelopes` callback. Skills that run entirely
+    // inside the daemon/agent runtime without emitting a `toolUse` ACP event
+    // to the frontend will not be captured here; those require a separate
+    // daemon-side call (e.g. from `apps/daemon/src/teamclaw/rpc.rs`).
+    try {
+      const { useCurrentTeamStore } = await import('@/stores/current-team')
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
+      const { useAuthStore } = await import('@/stores/auth-store')
+      const userId = useAuthStore.getState().session?.user?.id
+      if (!userId) return
+      const { resolveCurrentMemberActorId } = await import('@/lib/current-actor')
+      const actorId = await resolveCurrentMemberActorId(teamId, userId)
+      if (!actorId) return
+      const { getBackend } = await import('@/lib/backend')
+      await getBackend().telemetry.insertSkillUsage({ actorId, teamId, skill: skillName, count: 1 })
+    } catch (err) {
+      console.error('[LocalStats] Failed to report skill usage to cloud:', err)
+    }
   },
 
   resetStats: async (workspacePath: string) => {
