@@ -21,6 +21,7 @@ import {
 } from '@/lib/team-provider'
 import { isTauri } from '@/lib/utils'
 import { humanizeFcError } from '@/lib/fc-error'
+import { ensureJwtSynced } from '@/lib/jwt-bridge'
 
 interface Props {
   open: boolean
@@ -62,6 +63,7 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath, onSaved }
     setError(null)
     ;(async () => {
       try {
+        await ensureJwtSynced(workspacePath)
         const formState = await loadTeamProviderFormState(workspacePath)
         if (cancelled) return
         if (formState) {
@@ -98,6 +100,7 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath, onSaved }
     setSaving(true)
     setError(null)
     try {
+      await ensureJwtSynced(workspacePath)
       await invoke('update_team_llm_config', {
         llmBaseUrl: enabled ? baseUrl || null : null,
         llmModel: enabled ? models[0]?.id || null : null,

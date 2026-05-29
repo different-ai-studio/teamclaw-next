@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/lib/utils'
+import { ensureJwtSynced } from '@/lib/jwt-bridge'
 
 // ---------------------------------------------------------------------------
 // Types — mirror FC GET /v1/teams/:id/share-mode response (camelCase JSON)
@@ -72,6 +73,9 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
     if (!isTauri()) return
     set({ loading: true, lastError: null })
     try {
+      // Make sure the Supabase JWT is in teamclaw.json before the FC call, in
+      // case the background bridge hasn't written it yet this session.
+      await ensureJwtSynced(workspacePath)
       const raw = await invoke<ShareStatus>('team_share_get_status', {
         teamId,
         workspacePath,
@@ -92,6 +96,7 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   },
 
   async enableOss(teamId, workspacePath) {
+    await ensureJwtSynced(workspacePath)
     const res = await invoke<EnableShareResult>('team_share_enable_oss', {
       teamId,
       workspacePath,
@@ -101,6 +106,7 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   },
 
   async enableManagedGit(teamId, workspacePath) {
+    await ensureJwtSynced(workspacePath)
     const res = await invoke<EnableShareResult>(
       'team_share_enable_managed_git',
       { teamId, workspacePath },
@@ -110,6 +116,7 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   },
 
   async enableCustomGit(teamId, workspacePath, input) {
+    await ensureJwtSynced(workspacePath)
     const res = await invoke<EnableShareResult>(
       'team_share_enable_custom_git',
       { teamId, workspacePath, input },
