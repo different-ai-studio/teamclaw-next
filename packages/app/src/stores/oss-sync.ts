@@ -27,6 +27,11 @@ export interface VersionInfo {
   message: string | null
 }
 
+export interface VersionPage {
+  versions: VersionInfo[]
+  nextCursor: string | null
+}
+
 // Per-file sync status, aligned with git-mode file-tree coloring
 // (`modified`/`new`) plus OSS-only `conflict`. `synced` files are omitted from
 // the map by `refresh()` (no color), matching git-mode behavior.
@@ -69,7 +74,15 @@ export interface OssSyncState {
 
   refresh(workspacePath: string): Promise<void>
   syncNow(workspacePath: string): Promise<void>
-  listVersions(workspacePath: string, path: string): Promise<VersionInfo[]>
+  listVersions(
+    workspacePath: string,
+    path: string,
+    cursor?: string | null,
+  ): Promise<VersionPage>
+  getVersionContent(
+    workspacePath: string,
+    contentHash: string,
+  ): Promise<string>
   restoreVersion(
     workspacePath: string,
     path: string,
@@ -174,11 +187,27 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
     }
   },
 
-  async listVersions(workspacePath: string, path: string) {
-    return invoke<VersionInfo[]>('oss_sync_list_versions', {
+  async listVersions(
+    workspacePath: string,
+    path: string,
+    cursor?: string | null,
+  ): Promise<VersionPage> {
+    return invoke<VersionPage>('oss_sync_list_versions', {
       workspacePath,
       teamId: activeTeamId(),
       path,
+      cursor: cursor ?? null,
+    })
+  },
+
+  async getVersionContent(
+    workspacePath: string,
+    contentHash: string,
+  ): Promise<string> {
+    return invoke<string>('oss_sync_get_version_content', {
+      workspacePath,
+      teamId: activeTeamId(),
+      contentHash,
     })
   },
 
