@@ -1723,6 +1723,20 @@
     },
     "team": {
       "currentTeam": "共享空间",
+      "loadingShareMode": "正在加载团队共享状态…",
+      "oss": {
+        "title": "OSS 同步",
+        "status": "状态",
+        "synced": "已同步",
+        "pending": "有改动待同步",
+        "lastSync": "最后同步",
+        "never": "尚未同步",
+        "syncedFiles": "已同步文件",
+        "pendingChanges": "待同步改动",
+        "syncNow": "立即同步",
+        "recentFiles": "最近同步的文件",
+        "fileDirty": "待同步"
+      },
       "noTeam": "暂无共享空间",
       "renameSuccess": "共享空间已重命名",
       "renameFailed": "重命名失败",

@@ -29,6 +29,9 @@ export interface CurrentTeamMember {
 interface State {
   team: CurrentTeam | null;
   currentMember: CurrentTeamMember | null;
+  /** Auth user id the current `team` was resolved for. Guards the RLS-lag
+   * preserve below from carrying one user's team into another's session. */
+  teamUserId: string | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -41,6 +44,7 @@ interface State {
 export const useCurrentTeamStore = create<State>((set, get) => ({
   team: null,
   currentMember: null,
+  teamUserId: null,
   loading: false,
   saving: false,
   error: null,
@@ -49,7 +53,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     const session = useAuthStore.getState().session;
     if (!session) {
       await setLocalCacheTeamGate(null);
-      set({ team: null, currentMember: null, loading: false, error: null });
+      set({ team: null, currentMember: null, teamUserId: null, loading: false, error: null });
       return;
     }
 
@@ -61,6 +65,24 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
       set({ loading: false, error: error instanceof Error ? error.message : String(error) });
       return;
     }
+    // RLS replica lag guard: AuthGate auto-creates/joins a team for a fresh
+    // (e.g. anonymous) session and populates this store via setActiveTeam, but
+    // the just-written membership row is not always visible to this follow-up
+    // listCurrentUserTeams() yet. When that race returns an empty list, do NOT
+    // clobber the team AuthGate just set to null — that left the team-share
+    // settings page unable to see the team (showing the git form / prereq
+    // notice even after OSS was enabled). A genuinely team-less session keeps
+    // team === null, so this only preserves a team we already hold.
+    //
+    // Cross-user guard: only preserve when the held team was resolved for the
+    // CURRENT user. After logout + re-login (e.g. a new anonymous user) the new
+    // user's team list lags RLS; without this check the previous user's team
+    // would be preserved and team actions would target the wrong (foreign,
+    // already-locked) team.
+    if (!row && get().team && get().teamUserId === session.user.id) {
+      set({ loading: false });
+      return;
+    }
     const activeTeam = row ? { id: row.id, name: row.name, slug: row.slug ?? "" } : null;
     await setLocalCacheTeamGate(activeTeam?.id ?? null);
     const currentMember = activeTeam
@@ -69,6 +91,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     set({
       team: activeTeam,
       currentMember,
+      teamUserId: activeTeam ? session.user.id : null,
       loading: false,
     });
   },
@@ -77,7 +100,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     const session = useAuthStore.getState().session;
     if (!session) {
       await setLocalCacheTeamGate(null);
-      set({ team: null, currentMember: null, loading: false, error: null });
+      set({ team: null, currentMember: null, teamUserId: null, loading: false, error: null });
       return;
     }
 
@@ -100,6 +123,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     set({
       team: activeTeam,
       currentMember,
+      teamUserId: activeTeam ? session.user.id : null,
       loading: false,
     });
   },
@@ -110,7 +134,7 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     const currentMember = session
       ? await loadCurrentMember(team.id, session.user.id)
       : null;
-    set({ team, currentMember, loading: false, error: null });
+    set({ team, currentMember, teamUserId: session?.user.id ?? null, loading: false, error: null });
   },
 
   rename: async (newName) => {

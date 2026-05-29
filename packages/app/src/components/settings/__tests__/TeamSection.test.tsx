@@ -15,6 +15,7 @@ const workspace = vi.hoisted(() => ({
 }))
 const teamShare = vi.hoisted(() => ({
   mode: null as 'oss' | 'managed_git' | 'custom_git' | null,
+  refresh: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('react-i18next', () => ({
@@ -37,8 +38,9 @@ vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: (sel: (s: typeof workspace) => unknown) => sel(workspace),
 }))
 vi.mock('@/stores/team-share', () => ({
-  useTeamShareStore: (sel: (s: { status: { mode: unknown } }) => unknown) =>
-    sel({ status: { mode: teamShare.mode } }),
+  useTeamShareStore: (
+    sel: (s: { status: { mode: unknown }; refresh: unknown }) => unknown,
+  ) => sel({ status: { mode: teamShare.mode }, refresh: teamShare.refresh }),
 }))
 
 vi.mock('@/lib/team-permissions', () => ({
@@ -57,8 +59,8 @@ vi.mock('../team/TeamShareSection', () => ({
 vi.mock('../team/TeamGitConfig', () => ({
   TeamGitConfig: () => <div data-testid="git-config">git</div>,
 }))
-vi.mock('../team/TeamWebDavConfig', () => ({
-  TeamWebDavConfig: () => <div data-testid="webdav-config">webdav</div>,
+vi.mock('../team/TeamOssSyncStatus', () => ({
+  TeamOssSyncStatus: () => <div data-testid="oss-status">oss</div>,
 }))
 
 import { TeamSection } from '../TeamSection'
@@ -69,41 +71,54 @@ beforeEach(() => {
   currentTeam.teamId = null
   workspace.workspacePath = null
   teamShare.mode = null
+  teamShare.refresh = vi.fn().mockResolvedValue(undefined)
 })
 
 describe('TeamSection share-mode gating', () => {
-  it('shows the onboarding wizard for an unconfigured team with a workspace', () => {
+  it('shows the onboarding wizard for an unconfigured team with a workspace', async () => {
     currentTeam.teamId = 'team-1'
     workspace.workspacePath = '/ws'
     render(<TeamSection />)
-    expect(screen.getByTestId('onboarding').textContent).toContain(
+    // share status resolves async (spinner first), then the wizard renders.
+    expect((await screen.findByTestId('onboarding')).textContent).toContain(
       'onboarding:team-1:/ws',
     )
     expect(screen.queryByTestId('git-config')).toBeNull()
-    expect(screen.queryByTestId('webdav-config')).toBeNull()
+    expect(screen.queryByTestId('oss-status')).toBeNull()
   })
 
-  it('falls back to the legacy Git config when there is no team/workspace context', () => {
+  it('shows the missing-prereq notice when there is no team/workspace context', () => {
     render(<TeamSection />)
-    expect(screen.getByTestId('git-config')).toBeTruthy()
+    // PR #224: no team + no workspace surfaces the prereq notice, not the git form.
     expect(screen.queryByTestId('onboarding')).toBeNull()
+    expect(screen.queryByTestId('git-config')).toBeNull()
+    expect(screen.queryByTestId('oss-status')).toBeNull()
   })
 
-  it('shows the WebDAV (OSS) config for an already-configured OSS team', () => {
+  it("routes shareMode 'oss' to the OSS sync status, not the git form", async () => {
+    teamShare.mode = 'oss'
+    currentTeam.teamId = 'team-1'
+    workspace.workspacePath = '/ws'
+    render(<TeamSection />)
+    expect(await screen.findByTestId('oss-status')).toBeTruthy()
+    expect(screen.queryByTestId('git-config')).toBeNull()
+  })
+
+  it('routes the legacy webdav teamModeType to the OSS sync status when shareMode is absent', async () => {
     teamMode.teamModeType = 'webdav'
     currentTeam.teamId = 'team-1'
     workspace.workspacePath = '/ws'
     render(<TeamSection />)
-    expect(screen.getByTestId('webdav-config')).toBeTruthy()
-    expect(screen.queryByTestId('onboarding')).toBeNull()
+    expect(await screen.findByTestId('oss-status')).toBeTruthy()
+    expect(screen.queryByTestId('git-config')).toBeNull()
   })
 
-  it('shows the Git config when a share mode is locked but legacy mode is unset', () => {
+  it('shows the Git config for a locked git share mode', async () => {
     teamShare.mode = 'managed_git'
     currentTeam.teamId = 'team-1'
     workspace.workspacePath = '/ws'
     render(<TeamSection />)
-    expect(screen.getByTestId('git-config')).toBeTruthy()
-    expect(screen.queryByTestId('onboarding')).toBeNull()
+    expect(await screen.findByTestId('git-config')).toBeTruthy()
+    expect(screen.queryByTestId('oss-status')).toBeNull()
   })
 })

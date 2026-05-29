@@ -5,6 +5,7 @@ import {
   errorResponse,
   extractBearerToken,
   mapSupabaseError,
+  normalizeError,
   parseJsonBody,
   resolveRequestId,
 } from "../lib/http-utils.mjs";
@@ -70,6 +71,52 @@ test("errorResponse emits stable envelope and request header", () => {
       code: "conflict",
       message: "Already exists",
       requestId: "req_12345678",
+    },
+  });
+});
+
+test("mapSupabaseError classifies PostgREST schema-cache errors with the cause", () => {
+  // The create_team 500 regression: a missing migration meant PostgREST could
+  // not resolve the function signature. supabase-js throws a PostgrestError
+  // with code "PGRST202" and NO numeric status, which used to fall through to
+  // an opaque 500. It must now surface as a diagnosable schema_drift.
+  const mapped = mapSupabaseError({
+    code: "PGRST202",
+    message: "Could not find the function public.create_team(...) in the schema cache",
+  });
+  assert.equal(mapped.statusCode, 500);
+  assert.equal(mapped.code, "schema_drift");
+  assert.match(mapped.message, /schema cache/);
+  assert.deepEqual(mapped.details, { upstreamCode: "PGRST202" });
+});
+
+test("mapSupabaseError maps PGRST116 (no rows) to not_found", () => {
+  const mapped = mapSupabaseError({ code: "PGRST116", message: "no rows" });
+  assert.equal(mapped.statusCode, 404);
+  assert.equal(mapped.code, "not_found");
+});
+
+test("normalizeError surfaces the real message instead of opaque 'Internal server error'", () => {
+  // A plain Error that no classifier recognises must still reach the client
+  // with its real message + any upstream code, not a generic 500 body that
+  // forces a trip through FC logs.
+  const err = Object.assign(new Error("boom: relation \"widgets\" does not exist"), { code: "42P01" });
+  const normalized = normalizeError(err);
+  assert.equal(normalized.statusCode, 500);
+  assert.equal(normalized.code, "internal");
+  assert.equal(normalized.message, 'boom: relation "widgets" does not exist');
+  assert.deepEqual(normalized.details, { upstreamCode: "42P01" });
+});
+
+test("errorResponse includes details in the body when present", () => {
+  const response = errorResponse({ code: "PGRST202", message: "missing fn in schema cache" }, "req_abcdef12");
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: {
+      code: "schema_drift",
+      message: "missing fn in schema cache",
+      requestId: "req_abcdef12",
+      details: { upstreamCode: "PGRST202" },
     },
   });
 });

@@ -19,10 +19,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::commands::oss_sync::error::SyncError;
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
 use crate::commands::team_share::custom_git;
-use crate::commands::{env_vars, team_secret_store, TEAM_REPO_DIR};
+use crate::commands::{team_secret_store, TEAM_REPO_DIR};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,33 +60,16 @@ fn generate_team_secret_hex() -> Result<String, String> {
 fn ensure_team_repo_dir(workspace_path: &str) -> Result<(), String> {
     let dir = std::path::Path::new(workspace_path).join(TEAM_REPO_DIR);
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("create_dir_all({}) failed: {e}", dir.display()))
-}
-
-fn set_teamclaw_fields(
-    workspace_path: &str,
-    team_id: &str,
-    share_mode: &str,
-    git_remote_url: Option<&str>,
-) -> Result<(), String> {
-    let mut json = env_vars::read_teamclaw_json(workspace_path)?;
-    if let Some(obj) = json.as_object_mut() {
-        obj.insert(
-            "oss_team_id".to_string(),
-            serde_json::Value::String(team_id.to_string()),
-        );
-        obj.insert(
-            "share_mode".to_string(),
-            serde_json::Value::String(share_mode.to_string()),
-        );
-        if let Some(url) = git_remote_url {
-            obj.insert(
-                "git_remote_url".to_string(),
-                serde_json::Value::String(url.to_string()),
-            );
-        }
+        .map_err(|e| format!("create_dir_all({}) failed: {e}", dir.display()))?;
+    // Initialize the fixed shared layout so every team-share mode (oss /
+    // managed_git / custom_git) starts with the same top-level directories the
+    // sync engine watches: skills/ knowledge/ .mcp/ _meta/ _secrets/ _feedback/.
+    for prefix in crate::commands::oss_sync::path_validator::ALLOWED_PREFIXES {
+        let sub = dir.join(prefix.trim_end_matches('/'));
+        std::fs::create_dir_all(&sub)
+            .map_err(|e| format!("create_dir_all({}) failed: {e}", sub.display()))?;
     }
-    env_vars::write_teamclaw_json(workspace_path, &json)
+    Ok(())
 }
 
 fn team_repo_path(workspace_path: &str) -> std::path::PathBuf {
@@ -136,7 +120,17 @@ async fn post_share_mode(
     let (base_url, jwt) = get_fc_endpoint_and_jwt(workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
     let path = format!("/v1/teams/{}/share-mode", team_id);
-    fc.post_json(&path, body).await.map_err(|e| e.to_string())?;
+    // The /v1 share-mode endpoint returns 409 once a team's mode is locked.
+    // FcClient::map_fc_response maps any 409 to SyncError::Conflict (its CAS
+    // semantics for /sync/*), which would surface to the UI as the meaningless
+    // "conflict: remote_version=None, remote_cipher_hash=None". Translate it to
+    // a clear, user-facing message instead.
+    fc.post_json(&path, body).await.map_err(|e| match e {
+        SyncError::Conflict { .. } => {
+            "团队共享已开通,无法重复开通或切换共享模式 (share mode already locked)".to_string()
+        }
+        other => other.to_string(),
+    })?;
     Ok(())
 }
 
@@ -146,13 +140,16 @@ pub async fn enable_oss_impl(
     team_id: String,
     workspace_path: String,
 ) -> Result<EnableShareResult, String> {
+    // Lock the share mode on the server FIRST. If it is already locked (409),
+    // post_share_mode returns a clear error and we bail out BEFORE mutating any
+    // local state — otherwise we would overwrite the existing team secret and
+    // break decryption of data already synced under the original secret.
+    post_share_mode(&workspace_path, &team_id, &json!({ "mode": "oss" })).await?;
+
     let secret = generate_team_secret_hex()?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
-    post_share_mode(&workspace_path, &team_id, &json!({ "mode": "oss" })).await?;
-
     ensure_team_repo_dir(&workspace_path)?;
-    set_teamclaw_fields(&workspace_path, &team_id, "oss", None)?;
 
     Ok(EnableShareResult {
         team_id,
@@ -214,7 +211,6 @@ pub async fn enable_managed_git_impl(
 
     ensure_team_repo_dir(&workspace_path)?;
     let clone_warning = try_clone_team_repo(&workspace_path, &repo_url, &cred_ref, "https_token");
-    set_teamclaw_fields(&workspace_path, &team_id, "managed_git", Some(&repo_url))?;
 
     Ok(EnableShareResult {
         team_id,
@@ -283,12 +279,6 @@ pub async fn enable_custom_git_impl(
         &cred_ref,
         &input.auth_kind,
     );
-    set_teamclaw_fields(
-        &workspace_path,
-        &team_id,
-        "custom_git",
-        Some(&input.remote_url),
-    )?;
 
     Ok(EnableShareResult {
         team_id,

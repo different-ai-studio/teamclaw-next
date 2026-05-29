@@ -3,7 +3,6 @@
 // JWT verification + actor resolution for /sync/* endpoints.
 // Spec §3 auth middleware.
 
-import { jwtVerify } from 'jose';
 import { createServiceRoleClient } from './supabase.mjs';
 
 /**
@@ -23,38 +22,42 @@ export async function authenticateSyncCall({ headers, teamId }) {
   }
   const token = authz.slice(7);
 
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  if (!jwtSecret) {
-    return { ok: false, status: 500, error: 'SUPABASE_JWT_SECRET not configured' };
-  }
-
-  const secret = new TextEncoder().encode(jwtSecret);
-  let claims;
-  try {
-    ({ payload: claims } = await jwtVerify(token, secret, { algorithms: ['HS256'] }));
-  } catch (e) {
-    return { ok: false, status: 401, error: `jwt invalid: ${e.message}` };
-  }
-
-  const userId = claims.sub;
-  if (!userId) {
-    return { ok: false, status: 401, error: 'jwt has no sub claim' };
-  }
-
+  // Verify the token through Supabase Auth (works for HS256 and asymmetric
+  // signing keys alike) instead of a local HS256 check. This matches how the
+  // /v1 business API authenticates and removes the SUPABASE_JWT_SECRET env
+  // dependency that was never provisioned on FC.
   const supabase = createServiceRoleClient();
+  const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+  if (userErr || !userData?.user?.id) {
+    return { ok: false, status: 401, error: `jwt invalid: ${userErr?.message ?? 'no user'}` };
+  }
+  const userId = userData.user.id;
+
   const { data: rows, error } = await supabase
     .rpc('actor_id_for_user_in_team', { p_user_id: userId, p_team_id: teamId });
 
   if (error) {
     return { ok: false, status: 403, error: `actor lookup failed: ${error.message}` };
   }
-  if (!rows || rows.length === 0 || rows[0] == null) {
+  if (rows == null || (Array.isArray(rows) && rows.length === 0)) {
     return { ok: false, status: 403, error: 'caller is not a member of this team' };
   }
 
-  // The RPC returns a single uuid scalar (wrapped in an array by supabase-js)
-  const actorId = typeof rows[0] === 'object' ? Object.values(rows[0])[0] : rows[0];
-  if (!actorId) {
+  // actor_id_for_user_in_team `returns uuid` (a scalar), so supabase-js returns
+  // the uuid STRING directly in `data` — NOT wrapped in an array/object. The
+  // old `rows[0]` indexed the first CHARACTER of that string (e.g. "f"), which
+  // then got inserted into a uuid column and failed upload-prepare with
+  // "invalid input syntax for type uuid". Normalize all possible shapes.
+  let actorId = null;
+  if (typeof rows === 'string') {
+    actorId = rows;
+  } else if (Array.isArray(rows)) {
+    const first = rows[0];
+    actorId = first && typeof first === 'object' ? Object.values(first)[0] : first;
+  } else if (typeof rows === 'object') {
+    actorId = Object.values(rows)[0];
+  }
+  if (!actorId || typeof actorId !== 'string') {
     return { ok: false, status: 403, error: 'caller has no actor in this team' };
   }
 
@@ -78,23 +81,12 @@ export async function authenticateJwtOnly({ headers }) {
   }
   const token = authz.slice(7);
 
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  if (!jwtSecret) {
-    return { ok: false, status: 500, error: 'SUPABASE_JWT_SECRET not configured' };
+  // Verify via Supabase Auth (see authenticateSyncCall) — no local JWT secret.
+  const supabase = createServiceRoleClient();
+  const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+  if (userErr || !userData?.user?.id) {
+    return { ok: false, status: 401, error: `jwt invalid: ${userErr?.message ?? 'no user'}` };
   }
 
-  const secret = new TextEncoder().encode(jwtSecret);
-  let claims;
-  try {
-    ({ payload: claims } = await jwtVerify(token, secret, { algorithms: ['HS256'] }));
-  } catch (e) {
-    return { ok: false, status: 401, error: `jwt invalid: ${e.message}` };
-  }
-
-  const userId = claims.sub;
-  if (!userId) {
-    return { ok: false, status: 401, error: 'jwt has no sub claim' };
-  }
-
-  return { ok: true, userId };
+  return { ok: true, userId: userData.user.id };
 }

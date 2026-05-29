@@ -25,6 +25,8 @@ import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useCronStore } from "@/stores/cron";
 import { probeDaemonHttp } from "@/lib/daemon-local-client";
+import { useTeamModeStore } from "@/stores/team-mode";
+import { useOssSyncStore } from "@/stores/oss-sync";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
 import { appShortName, TEAM_REPO_DIR } from "@/lib/build-config";
 
@@ -525,9 +527,13 @@ export function useGitReposInit() {
         if (path.includes(`/${TEAM_REPO_DIR}/.git/`)) return;
         if (timer) clearTimeout(timer);
         timer = setTimeout(async () => {
-          const { useTeamModeStore } = await import("@/stores/team-mode");
-          if (useTeamModeStore.getState().teamModeType !== "git") return;
-          useTeamModeStore.getState().loadTeamGitFileSyncStatus(workspacePath);
+          const mode = useTeamModeStore.getState().teamModeType;
+          if (mode === "git") {
+            useTeamModeStore.getState().loadTeamGitFileSyncStatus(workspacePath);
+          } else if (mode === "webdav") {
+            // OSS mode: re-scan per-file sync status for tree coloring.
+            void useOssSyncStore.getState().refresh(workspacePath);
+          }
         }, 500);
       }).then((fn) => {
         if (cancelled) {
@@ -544,6 +550,20 @@ export function useGitReposInit() {
       unlistenFileChange?.();
     };
   }, [workspacePath]);
+
+  // Initial population of per-file team sync status for file-tree coloring,
+  // re-run whenever the active team mode changes. git mode is also refreshed by
+  // the post-sync callback and KnowledgeBrowser; this guarantees OSS (webdav)
+  // mode gets an initial scan so its teamclaw-team files are colored too.
+  const teamModeType = useTeamModeStore((s) => s.teamModeType);
+  useEffect(() => {
+    if (!workspacePath || !isTauri()) return;
+    if (teamModeType === "git") {
+      void useTeamModeStore.getState().loadTeamGitFileSyncStatus(workspacePath);
+    } else if (teamModeType === "webdav") {
+      void useOssSyncStore.getState().refresh(workspacePath);
+    }
+  }, [workspacePath, teamModeType]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
