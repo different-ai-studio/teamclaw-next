@@ -27,7 +27,7 @@ use super::auth::{require_scope, Principal};
 use super::errors::{ErrorCode, HttpError};
 use super::events::SessionEvent;
 use super::runtime_adapter::{
-    CreateSessionParams, PromptAck, PromptParams, ReplayPage, RuntimeAdapter, SessionSnapshot,
+    CreateSessionParams, PromptAck, PromptParams, ReplayPage, SessionSnapshot,
 };
 use super::state::HttpState;
 
@@ -89,6 +89,7 @@ pub struct SessionResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct StreamQuery {
     #[serde(default)]
     pub access_token: Option<String>,

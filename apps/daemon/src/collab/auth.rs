@@ -92,6 +92,7 @@ impl AuthManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn create_invite(
         &mut self,
         display_name: &str,
@@ -122,6 +123,7 @@ impl AuthManager {
         Ok(removed)
     }
 
+    #[allow(dead_code)]
     pub fn to_proto_member_list(&mut self) -> amux::MemberList {
         self.reload_if_changed();
         amux::MemberList {

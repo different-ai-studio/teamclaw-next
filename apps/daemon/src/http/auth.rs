@@ -20,8 +20,8 @@ use axum::{
     extract::{Query, State},
     Json,
 };
+use http::header;
 use http::request::Parts;
-use http::{header, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
@@ -265,6 +265,7 @@ pub async fn list_tokens_handler(
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct SseQuery {
     #[serde(default)]
     pub access_token: Option<String>,

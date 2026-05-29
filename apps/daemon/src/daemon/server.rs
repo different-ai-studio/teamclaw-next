@@ -42,6 +42,7 @@ struct StartRuntimeOutcome {
 }
 
 struct StartRuntimeError {
+    #[allow(dead_code)]
     error_code: String,
     error_message: String,
     failed_stage: String,
@@ -1933,7 +1934,7 @@ impl DaemonServer {
             if raw.method == "tool_title_update" {
                 // Format: "tool_id|new_title"
                 let payload = String::from_utf8_lossy(&raw.json_payload);
-                if let Some((tool_id, new_title)) = payload.split_once('|') {
+                if let Some((_tool_id, _new_title)) = payload.split_once('|') {
                     // Forward as a ToolUse event so iOS updates the tool name
                     let update_event = amux::AcpEvent {
                         event: Some(amux::acp_event::Event::Raw(amux::AcpRawJson {

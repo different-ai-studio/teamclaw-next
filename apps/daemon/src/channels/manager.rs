@@ -70,6 +70,7 @@ impl ChannelManager {
 
     /// Override the workspace path the gateways will use (e.g. for tests or
     /// when the daemon wants channels to share a specific workspace's state).
+    #[allow(dead_code)]
     pub fn with_workspace_path(mut self, workspace_path: impl Into<String>) -> Self {
         self.workspace_path = workspace_path.into();
         self

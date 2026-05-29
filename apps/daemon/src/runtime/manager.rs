@@ -251,6 +251,7 @@ impl RuntimeManager {
         self.aggregators.get(agent_id)
     }
 
+    #[allow(dead_code)]
     pub async fn spawn_agent(
         &mut self,
         agent_type: amux::AgentType,
@@ -850,9 +851,11 @@ impl RuntimeManager {
         request_id: &str,
         granted: bool,
     ) -> crate::error::Result<()> {
-        let agent_key = self.resolve_permission_runtime_key(topic_runtime_id).ok_or_else(|| {
-            crate::error::AmuxError::Agent(format!("agent {} not found", topic_runtime_id))
-        })?;
+        let agent_key = self
+            .resolve_permission_runtime_key(topic_runtime_id)
+            .ok_or_else(|| {
+                crate::error::AmuxError::Agent(format!("agent {} not found", topic_runtime_id))
+            })?;
         if agent_key != topic_runtime_id {
             tracing::warn!(
                 requested_runtime_id = topic_runtime_id,
@@ -860,7 +863,8 @@ impl RuntimeManager {
                 "permission response retargeted to active runtime"
             );
         }
-        self.resolve_permission(&agent_key, request_id, granted).await
+        self.resolve_permission(&agent_key, request_id, granted)
+            .await
     }
 
     pub fn get_handle(&self, agent_id: &str) -> Option<&RuntimeHandle> {
@@ -1004,6 +1008,7 @@ impl RuntimeManager {
         Some(handle.to_proto_info(current, commands))
     }
 
+    #[allow(dead_code)]
     pub fn agent_ids(&self) -> Vec<String> {
         self.agents.keys().cloned().collect()
     }
@@ -1074,6 +1079,7 @@ impl RuntimeManager {
     /// real ACP UUID (for gateway sessions this is the SQL-minted
     /// `acp_session_id` hex). It's used to name the per-session MCP config
     /// file and is forwarded back to amuxd by the spawned `mcp-server`.
+    #[allow(dead_code)]
     pub async fn create_gateway_session(
         &mut self,
         team_id: &str,

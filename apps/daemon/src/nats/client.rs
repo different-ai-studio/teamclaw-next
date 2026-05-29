@@ -13,7 +13,6 @@
 //! callout service via NATS connection events (handled outside the daemon).
 
 use async_nats::{Client, ConnectOptions};
-use prost::Message;
 use std::sync::Arc;
 use teamclaw_transport::nats::NatsClient;
 use teamclaw_transport::{DeliveryGuarantee, IncomingFrame, MessagePublisher};
@@ -114,6 +113,7 @@ impl NatsBackend {
 
     /// Return an `Arc<dyn MessagePublisher>` for SessionManager / live / rpc /
     /// notify. Same shape as `Arc::new(mqtt.client.clone())` on the MQTT path.
+    #[allow(dead_code)]
     pub fn publisher(&self) -> Arc<dyn MessagePublisher> {
         Arc::new(self.client.clone())
     }
