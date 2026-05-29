@@ -260,10 +260,10 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
         const fb = new Map(state.feedbackCache)
         const sr = new Map(state.starRatingCache)
         for (const r of data ?? []) {
-          const messageId = typeof r.message_id === 'string' ? r.message_id : null
+          const messageId = typeof r.messageId === 'string' ? r.messageId : null
           if (messageId) {
             fb.set(messageId, r.kind as FeedbackRating)
-            if (r.star_rating != null) sr.set(messageId, r.star_rating as StarRating)
+            if (r.starRating != null) sr.set(messageId, r.starRating as StarRating)
           }
         }
         return { feedbackCache: fb, starRatingCache: sr }

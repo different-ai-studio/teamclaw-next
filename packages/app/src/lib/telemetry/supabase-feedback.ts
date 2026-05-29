@@ -14,24 +14,12 @@ export interface FeedbackInsert {
 
 export async function insertFeedback(input: FeedbackInsert): Promise<void> {
   await getBackend().telemetry.insertFeedback({
-    actor_id: input.actorId,
-    team_id: input.teamId,
-    session_id: input.sessionId ?? null,
-    message_id: input.messageId ?? null,
+    messageId: input.messageId ?? null,
+    actorId: input.actorId,
+    teamId: input.teamId,
+    sessionId: input.sessionId ?? null,
     kind: input.kind,
-    star_rating: input.starRating ?? null,
+    starRating: input.starRating ?? null,
     skill: input.skill ?? null,
   })
-}
-
-export interface FeedbackSummaryRow {
-  actor_id: string
-  display_name: string | null
-  positive_feedback_30d: number
-  negative_feedback_30d: number
-}
-
-export async function getTeamFeedbackSummary(teamId: string): Promise<FeedbackSummaryRow[]> {
-  const data = await getBackend().telemetry.listFeedbackSummary(teamId)
-  return data as unknown as FeedbackSummaryRow[]
 }
