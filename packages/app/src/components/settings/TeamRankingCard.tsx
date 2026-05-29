@@ -5,7 +5,7 @@ import { cn, isTauri } from '@/lib/utils'
 import { TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import { buildSharedRankMap } from '@/lib/team-leaderboard-ranks'
 import { useTeamModeStore } from '@/stores/team-mode'
-import { useTeamMembersStore } from '@/stores/team-members'
+import { useCurrentTeamStore } from '@/stores/current-team'
 
 async function tauriInvoke<T>(
   cmd: string,
@@ -52,7 +52,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
   const [leaderboard, setLeaderboard] = React.useState<TeamLeaderboard | null>(null)
   const [currentMemberName, setCurrentMemberName] = React.useState<string | null>(null)
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
-  const teamMembers = useTeamMembersStore((s) => s.members)
+  const currentMemberDisplayName = useCurrentTeamStore((s) => s.currentMember?.displayName ?? null)
 
   React.useEffect(() => {
     const load = async () => {
@@ -63,8 +63,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
           tauriInvoke<string>("get_device_hostname"),
         ])
         setLeaderboard(leaderboardResult)
-        const me = teamMembers.find((m) => m.hostname === hostname)
-        setCurrentMemberName(me?.name || hostname)
+        setCurrentMemberName(currentMemberDisplayName ?? hostname)
       } catch {
         // Ignore errors
       }
@@ -76,7 +75,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
     }
     window.addEventListener(TEAM_SYNCED_EVENT, handler)
     return () => window.removeEventListener(TEAM_SYNCED_EVENT, handler)
-  }, [teamMembers])
+  }, [currentMemberDisplayName])
 
   // Clear leaderboard data when team mode is disabled
   React.useEffect(() => {
