@@ -237,18 +237,61 @@ pub async fn oss_sync_status(
     })
 }
 
-/// List version history for a file.
+/// One page of version history for a file.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListVersionsResult {
+    pub versions: Vec<VersionInfo>,
+    pub next_cursor: Option<String>,
+}
+
 #[tauri::command]
 pub async fn oss_sync_list_versions(
     workspace_path: String,
     team_id: String,
     path: String,
-) -> Result<Vec<VersionInfo>, String> {
+    cursor: Option<String>,
+) -> Result<ListVersionsResult, String> {
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
-    fc.list_versions(&team_id, &path, None)
+    let (versions, next_cursor) = fc
+        .list_versions(&team_id, &path, cursor)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(ListVersionsResult {
+        versions,
+        next_cursor,
+    })
+}
+
+/// Fetch the plaintext content of a specific version by content hash.
+/// Downloads + decrypts the blob and returns it as a UTF-8 string.
+/// Does NOT write to disk and does NOT touch LocalSyncState (read-only;
+/// for diffing in the version-history UI).
+#[tauri::command]
+pub async fn oss_sync_get_version_content(
+    workspace_path: String,
+    team_id: String,
+    content_hash: String,
+) -> Result<String, String> {
+    let team_secret = team_secret_store::load_team_secret(&workspace_path, &team_id)?;
+    let key = derive_key(&team_secret)?;
+    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
+    let fc = FcClient::new(base_url, jwt);
+
+    let dl = fc
+        .download(&team_id, &content_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    let blob = fc
+        .get_blob(&dl.download_url, &content_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    let plaintext =
+        crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key).map_err(|e| e.to_string())?;
+
+    String::from_utf8(plaintext)
+        .map_err(|_| "version content is not valid UTF-8 (binary file)".to_string())
 }
 
 /// Restore a file to a specific version by downloading its blob.
