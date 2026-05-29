@@ -63,19 +63,6 @@ pub(crate) fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, S
     Ok((base_url, jwt))
 }
 
-fn get_team_id(workspace_path: &str) -> Result<String, String> {
-    let config_path = std::path::Path::new(workspace_path)
-        .join(crate::commands::TEAMCLAW_DIR)
-        .join(crate::commands::CONFIG_FILE_NAME);
-    let json: serde_json::Value = std::fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    json.get("oss_team_id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| "oss_team_id not found in teamclaw.json".to_string())
-}
 
 /// Write (or refresh) the Supabase JWT into teamclaw.json so that the OSS sync
 /// commands (`oss_sync_now`, `oss_sync_create_team`, etc.) can authenticate
@@ -160,8 +147,13 @@ pub enum ConflictChoice {
 
 /// Run a full OSS sync tick (pull + push).
 #[tauri::command]
-pub async fn oss_sync_now(workspace_path: String, _app: AppHandle) -> Result<TickResult, String> {
-    let team_id = get_team_id(&workspace_path)?;
+pub async fn oss_sync_now(
+    workspace_path: String,
+    team_id: String,
+    _app: AppHandle,
+) -> Result<TickResult, String> {
+    // team_id comes from the single source of truth (current-team store), not
+    // a local teamclaw.json field, so it can't drift from the active team.
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
     engine::tick(&workspace_path, &team_id, &fc, &_app)
@@ -171,10 +163,11 @@ pub async fn oss_sync_now(workspace_path: String, _app: AppHandle) -> Result<Tic
 
 /// Return current sync status (dirty count, last sync time, etc.).
 #[tauri::command]
-pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, String> {
-    let team_id = get_team_id(&workspace_path).ok();
-    let tid = team_id.as_deref().unwrap_or("unknown");
-    let state = LocalSyncState::load(&workspace_path, tid)?;
+pub async fn oss_sync_status(
+    workspace_path: String,
+    team_id: String,
+) -> Result<SyncStatus, String> {
+    let state = LocalSyncState::load(&workspace_path, &team_id)?;
 
     // Fresh scan so coloring reflects edits made since the last sync tick,
     // mirroring how git_status re-runs on each file-tree poll.
@@ -227,7 +220,7 @@ pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, Strin
     recent_files.truncate(20);
 
     Ok(SyncStatus {
-        team_id,
+        team_id: Some(team_id),
         last_server_seq: state.last_server_seq,
         last_sync_at: state.last_sync_at.clone(),
         dirty_count,
@@ -241,9 +234,9 @@ pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, Strin
 #[tauri::command]
 pub async fn oss_sync_list_versions(
     workspace_path: String,
+    team_id: String,
     path: String,
 ) -> Result<Vec<VersionInfo>, String> {
-    let team_id = get_team_id(&workspace_path)?;
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
     fc.list_versions(&team_id, &path, None)
@@ -255,11 +248,11 @@ pub async fn oss_sync_list_versions(
 #[tauri::command]
 pub async fn oss_sync_restore_version(
     workspace_path: String,
+    team_id: String,
     path: String,
     content_hash: String,
     _app: AppHandle,
 ) -> Result<(), String> {
-    let team_id = get_team_id(&workspace_path)?;
     let team_secret = team_secret_store::load_team_secret(&workspace_path, &team_id)?;
     let key = derive_key(&team_secret)?;
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
@@ -323,11 +316,11 @@ pub async fn oss_sync_restore_version(
 #[tauri::command]
 pub async fn oss_sync_resolve_conflict(
     workspace_path: String,
+    team_id: String,
     path: String,
     choice: ConflictChoice,
     _app: AppHandle,
 ) -> Result<(), String> {
-    let team_id = get_team_id(&workspace_path)?;
     let mut state = LocalSyncState::load(&workspace_path, &team_id)?;
 
     match choice {
