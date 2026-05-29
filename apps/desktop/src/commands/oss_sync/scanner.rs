@@ -111,6 +111,41 @@ pub fn scan_workspace(workspace_path: &str, state: &LocalSyncState) -> Vec<Scann
     results
 }
 
+/// Walk the workspace under allowed prefixes and return the relative paths of
+/// all conflict sidecar files (`*.conflict.*`) currently on disk.
+///
+/// Used by `oss_sync_status` to surface conflicted files in the file tree;
+/// `scan_workspace` deliberately skips these, so they need a separate pass.
+pub fn scan_conflict_files(workspace_path: &str) -> Vec<String> {
+    let root = Path::new(workspace_path);
+    let mut results = Vec::new();
+
+    for prefix in ALLOWED_PREFIXES {
+        let prefix_dir = root.join(prefix.trim_end_matches('/'));
+        if !prefix_dir.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(&prefix_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let rel = match entry.path().strip_prefix(root) {
+                Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            if is_conflict_file(&rel) {
+                results.push(rel);
+            }
+        }
+    }
+
+    results
+}
+
 /// Returns true if the relative path is a conflict sidecar.
 /// Pattern: `*.conflict.*` (any segment containing `.conflict.`).
 pub fn is_conflict_file(rel_path: &str) -> bool {
@@ -134,8 +169,12 @@ mod tests {
 
     #[test]
     fn test_conflict_detection() {
-        assert!(is_conflict_file("skills/foo.conflict.1748332800.abc12345.md"));
-        assert!(is_conflict_file("knowledge/bar.conflict.1748332800.def67890"));
+        assert!(is_conflict_file(
+            "skills/foo.conflict.1748332800.abc12345.md"
+        ));
+        assert!(is_conflict_file(
+            "knowledge/bar.conflict.1748332800.def67890"
+        ));
         assert!(!is_conflict_file("skills/foo.md"));
         assert!(!is_conflict_file("skills/conflict.md")); // "conflict" not after "."
         assert!(!is_conflict_file("skills/my.conflict")); // no dot after "conflict"
@@ -153,12 +192,12 @@ mod tests {
         let files = scan_workspace(ws, &state);
 
         // New file → dirty
-        let f = files.iter().find(|f| f.rel_path == "skills/hello.md").unwrap();
+        let f = files
+            .iter()
+            .find(|f| f.rel_path == "skills/hello.md")
+            .unwrap();
         assert!(f.dirty);
-        assert_eq!(
-            f.local_plain_hash,
-            super::sha256_hex(b"hello world")
-        );
+        assert_eq!(f.local_plain_hash, super::sha256_hex(b"hello world"));
     }
 
     #[test]
@@ -167,7 +206,11 @@ mod tests {
         let ws = dir.path().to_str().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
-        std::fs::write(skills_dir.join("foo.conflict.1234567890.abc12345.md"), b"conflict").unwrap();
+        std::fs::write(
+            skills_dir.join("foo.conflict.1234567890.abc12345.md"),
+            b"conflict",
+        )
+        .unwrap();
         std::fs::write(skills_dir.join("real.md"), b"real").unwrap();
 
         let state = LocalSyncState::load(ws, "team-test").unwrap();
@@ -175,6 +218,25 @@ mod tests {
 
         assert!(files.iter().any(|f| f.rel_path == "skills/real.md"));
         assert!(!files.iter().any(|f| f.rel_path.contains(".conflict.")));
+    }
+
+    #[test]
+    fn test_scan_conflict_files_collects_sidecars() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path().to_str().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::write(skills_dir.join("real.md"), b"real").unwrap();
+        std::fs::write(
+            skills_dir.join("foo.conflict.1234567890.abc12345.md"),
+            b"conflict",
+        )
+        .unwrap();
+
+        let conflicts = scan_conflict_files(ws);
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].contains(".conflict."));
+        assert!(!conflicts.iter().any(|c| c == "skills/real.md"));
     }
 
     #[test]
@@ -229,7 +291,10 @@ mod tests {
         );
 
         let files = scan_workspace(ws, &state);
-        let f = files.iter().find(|f| f.rel_path == "skills/stable.md").unwrap();
+        let f = files
+            .iter()
+            .find(|f| f.rel_path == "skills/stable.md")
+            .unwrap();
         assert!(!f.dirty, "file should be clean (mtime+size match)");
     }
 }

@@ -39,11 +39,12 @@ import {
   ContextMenuShortcut,
 } from "@/components/ui/context-menu";
 
-function getSyncStatusTextColor(status: 'synced' | 'modified' | 'new'): string {
+function getSyncStatusTextColor(status: 'synced' | 'modified' | 'new' | 'conflict'): string {
   switch (status) {
     case 'synced': return ''
     case 'modified': return 'text-yellow-500'
     case 'new': return 'text-green-500'
+    case 'conflict': return 'text-red-500'
   }
 }
 
@@ -167,7 +168,7 @@ export interface FileTreeItemProps {
   /** ISO timestamp of last successful team repo sync (for relative-time label) */
   teamLastSyncAt?: string | null;
   /** Sync status for team files */
-  syncStatus?: 'synced' | 'modified' | 'new' | null;
+  syncStatus?: 'synced' | 'modified' | 'new' | 'conflict' | null;
   compactName?: string;
   compactedPaths?: string[];
   onCollapseCompacted: (paths: string[]) => void;
