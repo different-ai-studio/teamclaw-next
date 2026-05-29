@@ -16,6 +16,10 @@ pub struct StoredWorkspace {
     pub remote_workspace_id: String,
     pub path: String,
     pub display_name: String,
+    /// Team this workspace belongs to, when it has joined team-share. Drives
+    /// global-sync + symlink creation. `None` = not joined.
+    #[serde(default)]
+    pub team_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +94,7 @@ impl WorkspaceStore {
             remote_workspace_id: String::new(),
             path: canonical_str,
             display_name,
+            team_id: None,
         };
         self.workspaces.push(workspace.clone());
         Ok(AddWorkspaceOutcome {
@@ -132,6 +137,27 @@ impl WorkspaceStore {
 #[cfg(test)]
 mod tests {
     use super::WorkspaceStore;
+
+    #[test]
+    fn team_id_defaults_to_none_and_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("workspaces.toml");
+
+        // Old file with no team_id field still parses (serde default).
+        std::fs::write(
+            &toml_path,
+            "[[workspaces]]\nworkspace_id = \"abc\"\npath = \"/tmp\"\ndisplay_name = \"tmp\"\n",
+        )
+        .unwrap();
+        let mut store = WorkspaceStore::load(&toml_path).unwrap();
+        assert_eq!(store.workspaces[0].team_id, None);
+
+        // Set + save + reload preserves it.
+        store.workspaces[0].team_id = Some("team-7".into());
+        store.save(&toml_path).unwrap();
+        let reloaded = WorkspaceStore::load(&toml_path).unwrap();
+        assert_eq!(reloaded.workspaces[0].team_id.as_deref(), Some("team-7"));
+    }
 
     #[test]
     fn add_reports_when_workspace_was_inserted() {
