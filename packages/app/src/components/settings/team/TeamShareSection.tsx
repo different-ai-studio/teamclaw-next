@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useTeamShareStore, type ShareMode } from '@/stores/team-share'
+import { useAuthStore } from '@/stores/auth-store'
 import { EnableShareWizard } from './EnableShareWizard'
 
 interface Props {
@@ -30,13 +31,24 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
   const loading = useTeamShareStore((s) => s.loading)
   const lastError = useTeamShareStore((s) => s.lastError)
   const refresh = useTeamShareStore((s) => s.refresh)
+  const isLoggedIn = useAuthStore((s) => s.session !== null)
 
   const [wizardOpen, setWizardOpen] = useState(false)
 
   useEffect(() => {
-    if (!teamId || !workspacePath) return
+    // Status lives behind the Cloud API, which needs a logged-in JWT. Skip the
+    // call when signed out so we don't surface a raw "supabase_jwt not found"
+    // error — the signed-out state is rendered explicitly below.
+    if (!teamId || !workspacePath || !isLoggedIn) return
     void refresh(teamId, workspacePath)
-  }, [teamId, workspacePath, refresh])
+  }, [teamId, workspacePath, isLoggedIn, refresh])
+
+  // Don't echo the backend's not-logged-in error in red — it's an expected
+  // signed-out state, handled with a friendly message instead.
+  const visibleError =
+    lastError && !/not logged in|supabase_jwt/i.test(lastError)
+      ? lastError
+      : null
 
   return (
     <section className="rounded-xl border border-border-soft bg-panel p-4 space-y-3">
@@ -47,7 +59,11 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
         </p>
       </div>
 
-      {loading ? (
+      {!isLoggedIn ? (
+        <p className="text-[12.5px] text-muted-foreground">
+          请先登录后再管理团队共享。
+        </p>
+      ) : loading ? (
         <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           加载中…
@@ -75,8 +91,8 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
         </div>
       )}
 
-      {lastError && (
-        <p className="text-[12px] text-red-500">{lastError}</p>
+      {visibleError && (
+        <p className="text-[12px] text-red-500">{visibleError}</p>
       )}
 
       {isOwner && (
