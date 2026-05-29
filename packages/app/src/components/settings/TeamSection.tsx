@@ -7,10 +7,12 @@ import { Users, ArrowRightLeft, Loader2 } from 'lucide-react'
 
 import { TeamGitConfig } from './team/TeamGitConfig'
 import { TeamWebDavConfig } from './team/TeamWebDavConfig'
+import { TeamShareSection } from './team/TeamShareSection'
 import { Button } from '@/components/ui/button'
 import { useTeamModeStore } from '@/stores/team-mode'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useTeamShareStore } from '@/stores/team-share'
 import { isTauri } from '@/lib/utils'
 
 // ─── Section Header ──────────────────────────────────────────────────────────
@@ -115,13 +117,18 @@ export function TeamSection() {
   const { t } = useTranslation()
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const myRole = useTeamModeStore((s) => s.myRole)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const shareMode = useTeamShareStore((s) => s.status.mode)
 
-  // teamModeType: 'git' | 'webdav' (oss) | null
-  // Per product spec: git → only git info; oss → oss info + (owner only) switch-to-git entry.
-  // null (no team configured yet) → fall back to the Git config UI, which has its own
-  // empty-state and is the documented entry point for setting a team up.
+  // Two notions of "mode" coexist:
+  //   - teamModeType ('git' | 'webdav' | null): legacy, from local teamclaw.json
+  //   - shareMode ('oss' | 'managed_git' | 'custom_git' | null): the FC-locked share mode
+  // A team is "already configured" if either source reports a mode. New teams (PR #213
+  // no longer auto-create team-share) report neither — those land in the onboarding wizard.
   const isOss = teamModeType === 'webdav'
   const isOwner = myRole === 'owner'
+  const isConfigured = shareMode !== null || teamModeType !== null
 
   return (
     <div className="space-y-6">
@@ -134,7 +141,16 @@ export function TeamSection() {
         )}
       />
 
-      {isOss ? (
+      {!isConfigured && teamId && workspacePath ? (
+        // New team (PR #213 no longer auto-creates team-share): show the onboarding
+        // wizard so the owner can lock in oss / managed_git / custom_git. Needs a team +
+        // workspace to target; without them we fall through to the legacy config UI.
+        <TeamShareSection
+          teamId={teamId}
+          workspacePath={workspacePath}
+          isOwner={isOwner}
+        />
+      ) : isOss ? (
         <>
           {isOwner && <SwitchToGitEntry />}
           <TeamWebDavConfig />
