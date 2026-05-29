@@ -2,21 +2,18 @@
 //!
 //! Called by the frontend `JoinTeamFlow` immediately after a user claims an
 //! invite. Fetches the team's current workspace config from FC
-//! (`GET /v1/teams/{team_id}/workspace-config`) and, if the owner has already
-//! enabled a share mode, populates the local workspace `teamclaw.json` and
-//! ensures `teamclaw-team/` exists.
+//! (`GET /v1/teams/{team_id}/workspace-config`) and reports whether the owner
+//! has already enabled a share mode.
+//!
+//! The team shared directory is created and linked by the daemon (a
+//! `teamclaw-team` symlink to the team's single global copy); joining no longer
+//! creates a per-workspace real dir, and team identifiers are not persisted to
+//! `teamclaw.json` (single source of truth = the Cloud API current-team store).
 //!
 //! Per spec: the joiner enters their own team secret manually afterwards via
-//! `team_share_set_team_secret`. For git modes we do NOT clone here — the
+//! `team_share_set_team_secret`. For git modes the daemon owns the clone — the
 //! joiner needs credentials separately (managed_git tokens are re-shared
 //! out-of-band, custom_git creds are user-supplied later).
-//!
-//! Note: FC `getWorkspaceConfig` does not currently return `aiGatewayEndpoint`
-//! / `litellmKey`; only `litellmTeamId`. That's intentional — gateway endpoint
-//! comes from app config, and a fresh joiner does not need the LiteLLM key
-//! until they call `team_litellm.setup`. We mirror `litellm_team_id` into
-//! `teamclaw.json` so the LLM settings UI knows which team the gateway maps
-//! to.
 
 use serde::{Deserialize, Serialize};
 

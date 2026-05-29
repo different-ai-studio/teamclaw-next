@@ -121,8 +121,12 @@ fn migrate_legacy_dir(link: &Path, target: &Path) -> LinkStatus {
     }
 
     if global_is_empty(target) {
-        // First workspace wins: seed the global copy from the legacy content.
-        // Nothing is lost because the content is copied before removal.
+        // First workspace wins: seed the global copy from the legacy content,
+        // INCLUDING a `.git` if present. The legacy `teamclaw-team/.git` is the
+        // team repo itself (not the user's project repo), so preserving it keeps
+        // the seeded global a valid git repo — otherwise a later `sync_git_dir`
+        // would find a non-git populated dir and bail permanently, stranding the
+        // team after we delete the workspace's only clone below.
         if let Err(e) = copy_dir_contents(link, target) {
             tracing::warn!("seed global from legacy {} failed: {e}", link.display());
             return LinkStatus::LegacyDirRetained {
@@ -183,15 +187,14 @@ fn global_is_empty(target: &Path) -> bool {
     }
 }
 
+/// Recursively copy everything under `from` into `to`, including any `.git`
+/// (the team repo's own git metadata, which must survive into the global copy).
 fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let src = entry.path();
         let dst = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            if src.file_name().and_then(|n| n.to_str()) == Some(".git") {
-                continue; // don't drag a workspace-local .git into the shared copy
-            }
             std::fs::create_dir_all(&dst)?;
             copy_dir_contents(&src, &dst)?;
         } else {
@@ -298,6 +301,33 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seeds_git_legacy_dir_into_empty_global_preserving_dot_git() {
+        let (_home, _guard) = temp_home();
+        let ws = tempfile::tempdir().unwrap();
+        let legacy = ws.path().join("teamclaw-team");
+        std::fs::create_dir_all(legacy.join("skills")).unwrap();
+        std::fs::write(legacy.join("skills/a.md"), b"hello").unwrap();
+        // A clean git repo (committed) — its .git is the team repo and must
+        // survive into the global copy so the global stays a valid repo.
+        run_git(&legacy, &["init", "-q"]);
+        run_git(&legacy, &["config", "user.email", "t@e"]);
+        run_git(&legacy, &["config", "user.name", "t"]);
+        run_git(&legacy, &["add", "-A"]);
+        run_git(&legacy, &["commit", "-q", "-m", "seed"]);
+
+        let status = ensure_workspace_link(ws.path(), "team-gitseed");
+        assert_eq!(status, LinkStatus::Linked(LinkKind::Symlink));
+        let global = global_team_store::global_team_dir("team-gitseed");
+        // Content AND the team repo's .git landed in global.
+        assert_eq!(std::fs::read(global.join("skills/a.md")).unwrap(), b"hello");
+        assert!(
+            global.join(".git").is_dir(),
+            "global must remain a valid git repo (.git preserved)"
+        );
     }
 
     #[cfg(unix)]

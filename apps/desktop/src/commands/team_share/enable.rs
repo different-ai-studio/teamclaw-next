@@ -7,14 +7,13 @@
 //!      `team_secret_store`.
 //!   2. POST `/v1/teams/{teamId}/share-mode` on FC with the chosen mode +
 //!      (for git modes) the `gitConfig` payload.
-//!   3. Ensure the workspace `teamclaw-team/` repo dir exists.
-//!   4. Update `.teamclaw/teamclaw.json` with `oss_team_id`, `share_mode`,
-//!      and (for git modes) `git_remote_url`.
 //!
-//! Actual `git clone` for managed_git / custom_git is intentionally deferred
-//! to Task 7, along with the proper credential-storage helper. For now,
-//! credentials are stashed directly into the env blob under
-//! `_git_credential.{mode}:{team_id}` with a TODO marker.
+//! The team shared directory is created and linked by the daemon (one global
+//! copy per team under `~/.amuxd/teams/<team_id>/teamclaw-team`, exposed via a
+//! `teamclaw-team` symlink in each workspace); these commands no longer create
+//! a per-workspace real dir. Team identifiers (team_id / share_mode / git URL)
+//! are NOT persisted to `teamclaw.json` — the single source of truth is the
+//! Cloud API current-team store.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
