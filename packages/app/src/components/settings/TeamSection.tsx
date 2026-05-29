@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
-import { Users, ArrowRightLeft, Loader2 } from 'lucide-react'
+import { Users, ArrowRightLeft, Loader2, AlertCircle } from 'lucide-react'
 
 import { TeamGitConfig } from './team/TeamGitConfig'
 import { TeamWebDavConfig } from './team/TeamWebDavConfig'
@@ -112,6 +112,50 @@ function SwitchToGitEntry() {
   )
 }
 
+// ─── Missing prerequisite notice ─────────────────────────────────────────────
+// Shown when team-share is not yet configured but we lack a team and/or workspace
+// to target. Previously this case fell through to the legacy Git config form,
+// which was misleading — surface the actual missing prerequisite instead.
+
+function MissingPrereqNotice({
+  teamId,
+  workspacePath,
+}: {
+  teamId: string | null
+  workspacePath: string | null
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <section className="rounded-xl border border-border-soft bg-panel p-4">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="space-y-1.5">
+          <h4 className="text-[13.5px] font-semibold">
+            {t('settings.team.prereqTitle', '暂无法配置团队共享')}
+          </h4>
+          {!teamId && (
+            <p className="text-[12px] leading-5 text-muted-foreground">
+              {t(
+                'settings.team.prereqNoTeam',
+                '尚未创建或选择团队，请先创建/选择一个团队后再配置团队共享。',
+              )}
+            </p>
+          )}
+          {!workspacePath && (
+            <p className="text-[12px] leading-5 text-muted-foreground">
+              {t(
+                'settings.team.prereqNoWorkspace',
+                'workspacePath 为空，请先打开一个工作区。',
+              )}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function TeamSection() {
@@ -141,15 +185,20 @@ export function TeamSection() {
         )}
       />
 
-      {!isConfigured && teamId && workspacePath ? (
+      {!isConfigured ? (
         // New team (PR #213 no longer auto-creates team-share): show the onboarding
-        // wizard so the owner can lock in oss / managed_git / custom_git. Needs a team +
-        // workspace to target; without them we fall through to the legacy config UI.
-        <TeamShareSection
-          teamId={teamId}
-          workspacePath={workspacePath}
-          isOwner={isOwner}
-        />
+        // wizard so the owner can lock in oss / managed_git / custom_git. This needs a
+        // team + workspace to target; without them, surface the missing prerequisite
+        // instead of falling through to the (misleading) legacy Git config form.
+        teamId && workspacePath ? (
+          <TeamShareSection
+            teamId={teamId}
+            workspacePath={workspacePath}
+            isOwner={isOwner}
+          />
+        ) : (
+          <MissingPrereqNotice teamId={teamId} workspacePath={workspacePath} />
+        )
       ) : isOss ? (
         <>
           {isOwner && <SwitchToGitEntry />}
