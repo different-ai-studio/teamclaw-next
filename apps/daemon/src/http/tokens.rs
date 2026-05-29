@@ -239,6 +239,7 @@ pub fn write_port_file(port_file: &Path, port: u16) {
 }
 
 /// Re-export so callers don't depend on `PathBuf` here directly.
+#[allow(dead_code)]
 pub type TokenPath = PathBuf;
 
 #[cfg(test)]

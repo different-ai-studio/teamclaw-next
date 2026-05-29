@@ -64,6 +64,7 @@ pub trait Backend: Send + Sync {
     // ── Business operations ───────────────────────────────────────────────
     /// Claim a team invite token. Used both by the human onboarding path
     /// and by the daemon's `claim_daemon_invite` flow.
+    #[allow(dead_code)]
     async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult>;
 
     /// Upsert an `agent_runtimes` row keyed on `(agent_id, backend_session_id)`.

@@ -77,6 +77,7 @@ impl MessageStore {
         self.messages.push(message);
     }
 
+    #[allow(dead_code)]
     pub fn recent(&self, n: usize) -> &[StoredMessage] {
         let len = self.messages.len();
         if n >= len {
@@ -122,6 +123,7 @@ impl MessageStore {
         (slice, has_more, next_before_created_at)
     }
 
+    #[allow(dead_code)]
     pub fn latest_preview(&self) -> Option<(String, i64)> {
         self.messages.last().map(|msg| {
             let preview = msg.content.chars().take(140).collect::<String>();

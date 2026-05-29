@@ -1,5 +1,4 @@
 use chrono::Utc;
-use prost::Message;
 use std::sync::Arc;
 use teamclaw_transport::{DeliveryGuarantee, MessagePublisher};
 

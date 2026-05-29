@@ -16,4 +16,3 @@ pub mod client;
 pub mod retained;
 
 pub use client::NatsBackend;
-pub use retained::RetainedKv;

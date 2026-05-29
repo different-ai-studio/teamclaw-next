@@ -11,7 +11,6 @@
 //! `Retry-After` header.
 
 use axum::{
-    body::Body,
     extract::{Request, State},
     http::header,
     middleware::Next,
@@ -69,6 +68,7 @@ impl RateLimiter {
         }
     }
 
+    #[allow(dead_code)]
     pub fn vacuum(&self) {
         // Drop entries that have been at full capacity for a while. Cheap
         // best-effort sweep called from the existing token reaper.

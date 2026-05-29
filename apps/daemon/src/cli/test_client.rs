@@ -241,7 +241,7 @@ pub async fn run_start_agent(
     worktree: &str,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    let mut tc = TestClient::new(config)?;
+    let tc = TestClient::new(config)?;
 
     // Need to pump eventloop once to connect
     let connect_task = tokio::spawn({

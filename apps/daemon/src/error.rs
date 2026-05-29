@@ -17,8 +17,10 @@ pub enum AmuxError {
     #[error("agent error: {0}")]
     Agent(String),
     #[error("auth error: {0}")]
+    #[allow(dead_code)]
     Auth(String),
     #[error("ipc error: {0}")]
+    #[allow(dead_code)]
     Ipc(String),
 }
 

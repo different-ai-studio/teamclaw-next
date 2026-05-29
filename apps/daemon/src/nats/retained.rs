@@ -72,6 +72,7 @@ impl RetainedKv {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn delete(&self, topic: &str) -> crate::error::Result<()> {
         self.bucket
             .delete(Self::key(topic))
@@ -80,6 +81,7 @@ impl RetainedKv {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get(&self, topic: &str) -> crate::error::Result<Option<Vec<u8>>> {
         let entry = self
             .bucket
