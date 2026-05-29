@@ -1,40 +1,15 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Trophy, Flame, MessageSquareHeart, ChevronRight } from 'lucide-react'
-import { cn, isTauri } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import { buildSharedRankMap } from '@/lib/team-leaderboard-ranks'
 import { useTeamModeStore } from '@/stores/team-mode'
-import { useTeamMembersStore } from '@/stores/team-members'
-
-async function tauriInvoke<T>(
-  cmd: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  const { invoke } = await import("@tauri-apps/api/core")
-  return invoke<T>(cmd, args)
-}
-
-interface LeaderboardStats {
-  totalFeedbacks: number
-  positiveCount: number
-  negativeCount: number
-  totalTokens: number
-  totalCost: number
-  sessionCount: number
-}
-
-interface MemberLeaderboardExport {
-  memberId: string
-  memberName: string
-  exportedAt: string
-  updateAt: string
-  workspaces: Record<string, LeaderboardStats>  // workspace path -> stats
-}
-
-interface TeamLeaderboard {
-  members: MemberLeaderboardExport[]
-}
+import { useCurrentTeamStore } from '@/stores/current-team'
+import { useAuthStore } from '@/stores/auth-store'
+import { fetchTeamLeaderboard } from '@/lib/telemetry/cloud-leaderboard'
+import { resolveCurrentMemberActorId } from '@/lib/current-actor'
+import type { TeamLeaderboard } from '@/components/settings/LeaderboardSection'
 
 function getRankEmoji(rank: number) {
   if (rank === 1) return '🥇'
@@ -52,31 +27,32 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
   const [leaderboard, setLeaderboard] = React.useState<TeamLeaderboard | null>(null)
   const [currentMemberName, setCurrentMemberName] = React.useState<string | null>(null)
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
-  const teamMembers = useTeamMembersStore((s) => s.members)
 
   React.useEffect(() => {
     const load = async () => {
-      if (!isTauri()) return
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
       try {
-        const [leaderboardResult, hostname] = await Promise.all([
-          tauriInvoke<TeamLeaderboard>("telemetry_get_team_leaderboard"),
-          tauriInvoke<string>("get_device_hostname"),
-        ])
+        const leaderboardResult = await fetchTeamLeaderboard(teamId, "week")
         setLeaderboard(leaderboardResult)
-        const me = teamMembers.find((m) => m.hostname === hostname)
-        setCurrentMemberName(me?.name || hostname)
+        const userId = useAuthStore.getState().session?.user?.id
+        if (userId) {
+          const actorId = await resolveCurrentMemberActorId(teamId, userId)
+          if (actorId) {
+            const me = leaderboardResult.members.find((m) => m.memberId === actorId)
+            setCurrentMemberName(me?.memberName ?? null)
+          }
+        }
       } catch {
         // Ignore errors
       }
     }
     load()
 
-    const handler = () => {
-      load()
-    }
+    const handler = () => { load() }
     window.addEventListener(TEAM_SYNCED_EVENT, handler)
     return () => window.removeEventListener(TEAM_SYNCED_EVENT, handler)
-  }, [teamMembers])
+  }, [])
 
   // Clear leaderboard data when team mode is disabled
   React.useEffect(() => {

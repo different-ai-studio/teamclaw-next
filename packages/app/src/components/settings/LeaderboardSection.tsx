@@ -1,18 +1,12 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Trophy, Flame, MessageSquareHeart, Sparkles, RefreshCw, Loader2 } from 'lucide-react'
-import { cn, isTauri } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import { buildSharedRankMap } from '@/lib/team-leaderboard-ranks'
 import { Button } from '@/components/ui/button'
-
-async function tauriInvoke<T>(
-  cmd: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  const { invoke } = await import("@tauri-apps/api/core")
-  return invoke<T>(cmd, args)
-}
+import { fetchTeamLeaderboard } from '@/lib/telemetry/cloud-leaderboard'
+import { useCurrentTeamStore } from '@/stores/current-team'
 
 function formatTokens(tokens: number | undefined | null): string {
   if (tokens == null || tokens === 0) {
@@ -75,11 +69,15 @@ export function LeaderboardSection() {
   const [error, setError] = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
-    if (!isTauri()) return
+    const teamId = useCurrentTeamStore.getState().team?.id
+    if (!teamId) {
+      setLeaderboard(null)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
-      const result = await tauriInvoke<TeamLeaderboard>("telemetry_get_team_leaderboard")
+      const result = await fetchTeamLeaderboard(teamId, "week")
       setLeaderboard(result)
     } catch (err) {
       setError(String(err))
@@ -89,35 +87,9 @@ export function LeaderboardSection() {
   }, [])
 
   const handleRefresh = React.useCallback(async () => {
-    if (!isTauri()) return
-    setLoading(true)
-    setError(null)
-    
-    try {
-      console.log('[leaderboard] Exporting stats from .teamclaw/stats.json')
-      
-      // Export leaderboard (reads from .teamclaw/stats.json)
-      await tauriInvoke('telemetry_export_leaderboard')
-      
-      console.log('[leaderboard] Export complete, reloading data...')
-      
-      // Wait a moment for file write to complete, then reload
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Reload leaderboard data
-      const result = await tauriInvoke<TeamLeaderboard>("telemetry_get_team_leaderboard")
-      setLeaderboard(result)
-      
-      // Trigger teamclaw-team-synced event to update TeamRankingCard
-      window.dispatchEvent(new CustomEvent(TEAM_SYNCED_EVENT))
-      console.log('[leaderboard] Triggered teamclaw-team-synced event')
-    } catch (err) {
-      console.error('[leaderboard] Refresh failed:', err)
-      setError(String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    await load()
+    window.dispatchEvent(new CustomEvent(TEAM_SYNCED_EVENT))
+  }, [load])
 
   React.useEffect(() => {
     load()
