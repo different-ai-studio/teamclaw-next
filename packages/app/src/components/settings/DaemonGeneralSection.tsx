@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, Bot, Loader2, RefreshCw, Save, Shield, Trash2, UserPlus } from 'lucide-react'
+import { AlertCircle, Bot, CheckCircle2, Loader2, RefreshCw, Save, Shield, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCurrentTeamStore } from '@/stores/current-team'
@@ -9,6 +9,7 @@ import {
   listAgentAccess,
   listTeamMembersForAccess,
   removeAgentAccess,
+  setAgentDefaultType,
   updateCurrentDaemonAgent,
   upsertAgentAccess,
   type AgentAccessRow,
@@ -45,6 +46,7 @@ export function DaemonGeneralSection() {
   const [members, setMembers] = React.useState<TeamMemberOption[]>([])
   const [displayName, setDisplayName] = React.useState('')
   const [visibility, setVisibility] = React.useState<AgentVisibility>('team')
+  const [defaultAgentType, setDefaultAgentType] = React.useState('')
   const [memberId, setMemberId] = React.useState('')
   const [permissionLevel, setPermissionLevel] = React.useState<AgentPermissionLevel>('prompt')
   const [loading, setLoading] = React.useState(false)
@@ -60,6 +62,7 @@ export function DaemonGeneralSection() {
       setAgent(nextAgent)
       setDisplayName(nextAgent?.displayName ?? '')
       setVisibility(nextAgent?.visibility ?? 'team')
+      setDefaultAgentType(nextAgent?.defaultAgentType ?? '')
       const [nextMembers, nextAccessRows] = await Promise.all([
         listTeamMembersForAccess(team.id),
         nextAgent ? listAgentAccess(nextAgent.id) : Promise.resolve([]),
@@ -88,6 +91,9 @@ export function DaemonGeneralSection() {
         displayName: displayName.trim(),
         visibility,
       })
+      if (defaultAgentType && defaultAgentType !== (agent.defaultAgentType ?? '')) {
+        await setAgentDefaultType(agent.id, defaultAgentType)
+      }
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -237,15 +243,56 @@ export function DaemonGeneralSection() {
                 </label>
               </div>
 
+              <div className="space-y-3 rounded-lg border border-border-soft bg-background/50 p-3">
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.backendTypes', 'Backend types')}</span>
+                  {agent.agentTypes.length === 0 ? (
+                    <p className="text-[13px] text-muted-foreground">
+                      {t('settings.daemonGeneral.noBackends', 'This daemon has not advertised any backend types yet.')}
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {agent.agentTypes.map((type) => {
+                        const isDefault = type === defaultAgentType
+                        return (
+                          <span
+                            key={type}
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                              isDefault ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {isDefault && <CheckCircle2 className="h-3 w-3" />}
+                            {type}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.defaultBackend', 'Default backend')}</span>
+                  <select
+                    value={defaultAgentType}
+                    onChange={(event) => setDefaultAgentType(event.target.value)}
+                    disabled={saving || !agent.isOwner || agent.agentTypes.length === 0}
+                    className="h-8 w-full rounded-md border border-input bg-background px-3 text-[13px] sm:max-w-xs"
+                  >
+                    {!defaultAgentType && (
+                      <option value="">{t('settings.daemonGeneral.defaultBackendPlaceholder', 'Select default backend')}</option>
+                    )}
+                    {agent.agentTypes.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
               <div className="grid gap-2 rounded-lg border border-border-soft bg-background/50 p-3 text-xs sm:grid-cols-[128px_minmax(0,1fr)]">
                 <span className="text-muted-foreground">{t('settings.daemonGeneral.agentId', 'Agent ID')}</span>
                 <code className="break-all font-mono text-foreground">{agent.id}</code>
                 <span className="text-muted-foreground">{t('settings.daemonGeneral.deviceId', 'Device ID')}</span>
                 <code className="break-all font-mono text-foreground">{agent.deviceId || '-'}</code>
-                <span className="text-muted-foreground">{t('settings.daemonGeneral.backendTypes', 'Backend types')}</span>
-                <code className="break-all font-mono text-foreground">{agent.agentTypes.join(', ') || '-'}</code>
-                <span className="text-muted-foreground">{t('settings.daemonGeneral.defaultBackend', 'Default backend')}</span>
-                <code className="break-all font-mono text-foreground">{agent.defaultAgentType || '-'}</code>
                 <span className="text-muted-foreground">{t('settings.daemonGeneral.lastActive', 'Last active')}</span>
                 <span>{formatRelative(agent.lastActiveAt)}</span>
               </div>

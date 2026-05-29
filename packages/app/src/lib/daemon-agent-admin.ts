@@ -102,6 +102,13 @@ export async function updateCurrentDaemonAgent(input: {
   })
 }
 
+export async function setAgentDefaultType(agentId: string, defaultAgentType: string): Promise<void> {
+  await getBackend().actors.updateAgentDefaults({
+    agentId,
+    defaultAgentType,
+  })
+}
+
 export async function listAgentAccess(agentId: string): Promise<AgentAccessRow[]> {
   const rows = await getBackend().actors.listAgentAccess(agentId)
   return rows.map((row) => ({
