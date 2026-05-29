@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   switchToSession: vi.fn(),
   loadSessions: vi.fn(),
   addHighlightedSession: vi.fn(),
-  selectModel: vi.fn(),
   createSessionWithFirstMessage: vi.fn(),
   ensureSessionLiveSubscribed: vi.fn(),
   listActorDirectory: vi.fn(),
@@ -29,16 +28,6 @@ vi.mock('@/components/ui/button', () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button {...props}>{children}</button>
   ),
-}))
-
-vi.mock('@/components/ui/select', () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
-    <div data-value={value}>{children}</div>
-  ),
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
-  SelectValue: ({ placeholder }: { placeholder?: string }) => <span>{placeholder}</span>,
 }))
 
 vi.mock('@/stores/ui', () => ({
@@ -99,15 +88,6 @@ vi.mock('@/stores/session', () => ({
   },
 }))
 
-vi.mock('@/stores/provider', () => ({
-  useProviderStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      models: [],
-      currentModelKey: null,
-      selectModel: mocks.selectModel,
-    }),
-}))
-
 vi.mock('@/lib/current-actor', () => ({
   resolveCurrentMemberActorId: vi.fn().mockResolvedValue('member-1'),
 }))
@@ -165,16 +145,13 @@ describe('NewSessionDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /创建会话/ }))
 
     await waitFor(() => {
-      expect(mocks.createSessionWithFirstMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          teamId: 'team-1',
-          creatorActorId: 'member-1',
-          agentActorIds: ['agent-1'],
-          messageText: 'hello daemon',
-          modelId: undefined,
-        }),
-      )
+      expect(mocks.createSessionWithFirstMessage).toHaveBeenCalledWith({
+        teamId: 'team-1',
+        creatorActorId: 'member-1',
+        additionalActorIds: ['agent-1'],
+        agentActorIds: ['agent-1'],
+        messageText: 'hello daemon',
+      })
     })
-    expect(mocks.selectModel).not.toHaveBeenCalled()
   })
 })

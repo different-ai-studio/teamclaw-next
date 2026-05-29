@@ -1311,6 +1311,25 @@ impl SessionManager {
         self.refresh_membership_subscriptions().await
     }
 
+    /// Subscribe to `session/{sid}/live` when attaching a runtime. Unlike
+    /// `refresh_membership_subscriptions`, this does not depend on the local
+    /// participant cache being complete — a race where the backend fetch omits
+    /// the daemon actor must not leave us deaf to inbound @-mentions.
+    pub async fn ensure_session_live_subscription(
+        &mut self,
+        session_id: &str,
+    ) -> crate::error::Result<()> {
+        if session_id.is_empty() {
+            return Ok(());
+        }
+        if self.subscribed_live_sessions.contains(session_id) {
+            return Ok(());
+        }
+        self.subscribe_session_live(session_id).await?;
+        self.subscribed_live_sessions.insert(session_id.to_string());
+        Ok(())
+    }
+
     pub async fn refresh_membership_subscriptions(&mut self) -> crate::error::Result<()> {
         self.apply_membership_sessions(self.membership_session_ids())
             .await
@@ -1743,6 +1762,19 @@ mod tests {
             created_at: Utc::now().timestamp(),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_session_live_subscription_subscribes_without_membership_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let mut sm = dummy_session_manager(tmp.path());
+        sm.skip_live_subscription_io = true;
+
+        sm.ensure_session_live_subscription("sess-new")
+            .await
+            .unwrap();
+
+        assert!(sm.subscribed_live_sessions().contains(&"sess-new".to_string()));
     }
 
     #[tokio::test]

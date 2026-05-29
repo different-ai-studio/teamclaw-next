@@ -36,9 +36,18 @@ vi.mock('@/lib/backend', () => {
       messages: {
         insertOutgoingMessage: mocks.insertOutgoingMessage,
       },
+      sessionMembers: {
+        listParticipants: vi.fn().mockResolvedValue([
+          { id: 'agent-1', actor_type: 'agent' },
+        ]),
+      },
     }),
   }
 })
+
+vi.mock('@/lib/teamclaw/ensure-agent-runtime', () => ({
+  ensureAgentRuntimesForSession: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('@/lib/local-cache', () => ({
   upsertOutbox: mocks.upsertOutbox,

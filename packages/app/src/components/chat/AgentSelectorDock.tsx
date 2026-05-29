@@ -14,18 +14,15 @@ import {
 } from '@/components/ui/command'
 import { getBackend } from '@/lib/backend'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { useProviderStore, type ModelOption } from '@/stores/provider'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { setModel } from '@/lib/teamclaw-rpc'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
-import { RuntimeLifecycle, AgentStatus, AgentType, type RuntimeInfo } from '@/lib/proto/amux_pb'
-import { amuxAgentTypeFromBackend } from '@/lib/amux-agent-type'
-import { availableModelsFor, type AmuxAgentType } from '@/lib/amuxd-models'
+import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import {
   backendTypeFromRuntimeEntry,
   agentModelDisplayLabel,
-  agentModelIdsMatch,
+  isAgentModelRowSelected,
   resolveRuntimeIdForAgent,
   resolveRuntimeStateEntryForAgent,
   resolveSetModelId,
@@ -51,69 +48,19 @@ interface AgentSelectorDockProps {
 
 type AgentModelOption = { id: string; displayName: string }
 
-const OPENCODE_STATIC_PROVIDER_IDS = new Set(['claude-code', 'codex'])
-
-function providerIdForBackendType(backendType: string | undefined): string | null {
-  switch (backendType) {
-    case 'claude-code':
-    case 'claude':
-    case 'claude_code':
-      return 'claude-code'
-    case 'opencode':
-      return 'opencode'
-    case 'codex':
-      return 'codex'
-    default:
-      return null
-  }
-}
-
-function modelIdForAgentBackend(model: ModelOption, providerId: string): string {
-  if (model.provider === providerId) return model.id
-  return `${model.provider}/${model.id}`
-}
-
-function amuxAgentTypeFromRuntime(agentType: AgentType | number | undefined): AmuxAgentType | null {
-  switch (agentType) {
-    case AgentType.CLAUDE_CODE:
-      return 'claude-code'
-    case AgentType.OPENCODE:
-      return 'opencode'
-    case AgentType.CODEX:
-      return 'codex'
-    default:
-      return null
-  }
-}
-
+/** Daemon ACP `RuntimeInfo.available_models` only — no provider store or static fallback. */
 export function resolveAgentAvailableModels(
   runtimeInfo: RuntimeInfo | undefined,
-  backendType?: string,
-  providerModels: ModelOption[] = [],
 ): AgentModelOption[] {
-  if (runtimeInfo?.availableModels.length) {
-    return runtimeInfo.availableModels
-  }
+  if (!runtimeInfo?.availableModels.length) return []
 
-  const amuxType =
-    amuxAgentTypeFromRuntime(runtimeInfo?.agentType) ??
-    amuxAgentTypeFromBackend(backendType)
-  if (amuxType) {
-    const staticModels = availableModelsFor(amuxType)
-    if (staticModels.length > 0) return staticModels
-  }
-
-  const providerId = providerIdForBackendType(backendType)
-  if (!providerId) return []
-
-  const models = providerId === 'opencode'
-    ? providerModels.filter((model) => !OPENCODE_STATIC_PROVIDER_IDS.has(model.provider))
-    : providerModels.filter((model) => model.provider === providerId)
-
-  return models.map((model) => ({
-    id: modelIdForAgentBackend(model, providerId),
-    displayName: model.name || modelIdForAgentBackend(model, providerId),
-  }))
+  const seen = new Set<string>()
+  return runtimeInfo.availableModels.filter((model) => {
+    const id = model.id?.trim()
+    if (!id || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
 }
 
 /** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */
@@ -341,7 +288,6 @@ function AgentPill({
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
-  const providerModels = useProviderStore((s) => s.models)
   const byRuntimeId = useRuntimeStateStore((s) => s.byRuntimeId)
   const sessionId =
     sessionIdProp?.trim() ||
@@ -356,8 +302,8 @@ function AgentPill({
   const { color: dotColor, pulse } = dotClasses(liveRuntimeInfo)
 
   const availableModels = React.useMemo(
-    () => resolveAgentAvailableModels(liveRuntimeInfo, backendType, providerModels),
-    [liveRuntimeInfo, backendType, providerModels],
+    () => resolveAgentAvailableModels(liveRuntimeInfo),
+    [liveRuntimeInfo],
   )
   const runtimeInfoLoading = availableModels.length === 0
   // Subscribe to the pick entry so explicit user picks immediately drive the
@@ -386,6 +332,7 @@ function AgentPill({
   )
   const effectiveModelId = selected.modelId
   const displayedModel =
+    availableModels.find((m) => m.id === effectiveModelId)?.displayName ||
     (effectiveModelId
       ? agentModelDisplayLabel(effectiveModelId, availableModels)
       : '') ||
@@ -416,7 +363,6 @@ function AgentPill({
       backendType,
       runtimeCurrentModel: liveRuntimeInfo?.currentModel ?? null,
       runtimeAvailableModelIds: liveRuntimeInfo?.availableModels.map((m) => m.id) ?? [],
-      providerModelKeys: providerModels.map((m) => `${m.provider}/${m.id}`),
       resolvedModelIds: availableModels.map((m) => m.id),
       runtimeInfoLoading,
     })
@@ -427,7 +373,6 @@ function AgentPill({
     backendType,
     liveRuntimeInfo?.currentModel,
     liveRuntimeInfo?.availableModels,
-    providerModels,
     availableModels,
     runtimeInfoLoading,
   ])
@@ -605,10 +550,9 @@ function AgentPill({
                 >
                   {filteredModels.map((m) => {
                     const label = m.displayName || m.id
-                    const selected = agentModelIdsMatch(
+                    const selected = isAgentModelRowSelected(
                       m.id,
                       effectiveModelId,
-                      availableModels,
                     )
                     return (
                       <CommandItem

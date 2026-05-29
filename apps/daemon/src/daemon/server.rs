@@ -9,7 +9,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::backend::{AgentRuntimeUpsert, Backend, WorkspaceUpsert};
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
@@ -22,6 +22,7 @@ use crate::daemon::runtime_resolution::{
 };
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids,
+    resolve_mention_actor_ids,
 };
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
@@ -132,6 +133,40 @@ pub(crate) struct OfflineRestartPlan {
     pub backend: amux::AgentType,
     pub local_workspace_id: String,
     pub unread_count: usize,
+}
+
+/// Pure decision half of [`DaemonServer::resume_historical_runtimes_for_session`].
+///
+/// Given every resumable `StoredSession` for one conversation, keep only the
+/// most-recent (`created_at`) row per `(agent_type, workspace_id)` tuple and
+/// report the rest as superseded `runtime_id`s. Each desktop session-start /
+/// model-switch spawns a fresh `runtime_id`, so a session accumulates several
+/// non-stopped historical rows across restarts; resuming all of them would
+/// bring up multiple live agents that each answer the same @mention. Exposed
+/// as a free fn so the dedup invariant is unit-testable without spawning ACP
+/// processes.
+pub(crate) fn dedup_resumable_runtimes(
+    stored_sessions: Vec<StoredSession>,
+) -> (Vec<StoredSession>, Vec<String>) {
+    let mut latest_by_tuple: std::collections::HashMap<(i32, String), StoredSession> =
+        std::collections::HashMap::new();
+    let mut superseded: Vec<String> = Vec::new();
+    for stored in stored_sessions {
+        let key = (stored.agent_type, stored.workspace_id.clone());
+        match latest_by_tuple.get(&key) {
+            Some(existing) if existing.created_at >= stored.created_at => {
+                superseded.push(stored.runtime_id.clone());
+            }
+            Some(existing) => {
+                superseded.push(existing.runtime_id.clone());
+                latest_by_tuple.insert(key, stored);
+            }
+            None => {
+                latest_by_tuple.insert(key, stored);
+            }
+        }
+    }
+    (latest_by_tuple.into_values().collect(), superseded)
 }
 
 pub struct DaemonServer {
@@ -820,6 +855,11 @@ impl DaemonServer {
         // channel doesn't delay collab connectivity.
         self.start_channels().await;
         self.sync_team_shared_dirs_for_known_workspaces().await;
+
+        {
+            let mut mgr = self.agents.lock().await;
+            mgr.prewarm_acp_hosts().await;
+        }
 
         // Optional browser-facing HTTP+SSE listener. Skipped silently when
         // `[http]` is absent from daemon.toml so existing deployments keep
@@ -2239,7 +2279,7 @@ impl DaemonServer {
 
     async fn route_session_message_to_runtimes(
         &mut self,
-        _session_id: &str,
+        session_id: &str,
         message: &crate::proto::teamclaw::Message,
         mention_actor_ids: &[String],
         runtime_ids: Vec<String>,
@@ -2248,6 +2288,28 @@ impl DaemonServer {
 
         if message.sender_actor_id == self.actor_id {
             return;
+        }
+
+        // Single dedup gate for ALL ingestion paths. A freshly-sent message
+        // reaches the daemon twice — once via live MQTT `message.created` and
+        // once via the runtimeStart→catchup replay (it is already persisted by
+        // the time the client fires runtimeStart). Both funnel through this
+        // sink, so deduping here (keyed by message_id) guarantees each message
+        // is prompted/queued exactly once regardless of which path wins the
+        // race. The in-memory cache is also seeded across restarts by the
+        // persisted `last_processed_message_id` cursor, so cold starts replay
+        // only genuinely-new rows.
+        if !message.message_id.is_empty() {
+            if let Some(tc) = self.teamclaw.as_mut() {
+                if !tc.should_process_message(session_id, &message.message_id) {
+                    debug!(
+                        session_id = %session_id,
+                        message_id = %message.message_id,
+                        "route_session_message: already processed; skipping (dedup gate)"
+                    );
+                    return;
+                }
+            }
         }
 
         let sender_display = self
@@ -2265,6 +2327,13 @@ impl DaemonServer {
                 message_id = %message.message_id,
                 daemon_actor_id = %self.actor_id,
                 "route_session_message: empty mention_actor_ids; message will be silent-queued"
+            );
+        } else if !mentioned_actor {
+            debug!(
+                message_id = %message.message_id,
+                daemon_actor_id = %self.actor_id,
+                mention_actor_ids = ?mention_actor_ids,
+                "route_session_message: mention_actor_ids present but not this daemon; silent-queued"
             );
         }
         let attachment_urls = message_attachment_urls(message);
@@ -2284,6 +2353,12 @@ impl DaemonServer {
                     );
                     continue;
                 }
+                info!(
+                    runtime_id = %runtime_id,
+                    message_id = %message.message_id,
+                    mention_actor_ids = ?mention_actor_ids,
+                    "route_session_message: @ mention matched; sending prompt"
+                );
                 // Real prompt — flush_pending_silent inside send_prompt does the prefix work.
                 let send_res = self
                     .agents
@@ -2303,7 +2378,11 @@ impl DaemonServer {
                     }
                 };
 
-                // Cursor advances to this message id.
+                // Cursor advances to this message id (in-memory + backend).
+                self.agents.lock().await.advance_message_cursor(
+                    &runtime_id,
+                    &message.message_id,
+                );
                 let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
                     let sb = self.backend.clone();
@@ -2328,6 +2407,10 @@ impl DaemonServer {
                         });
                     }
                 }
+                self.agents.lock().await.advance_message_cursor(
+                    &runtime_id,
+                    &message.message_id,
+                );
                 let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
                     let sb = self.backend.clone();
@@ -2349,8 +2432,34 @@ impl DaemonServer {
             return false;
         }
 
+        // Collapse to at most one runtime per (agent_type, workspace_id).
+        // `StoredSession`s are keyed by runtime_id and every desktop
+        // session-start / model-switch spawns a fresh runtime_id, so a single
+        // conversation accumulates several non-stopped historical rows across
+        // restarts. Resuming all of them brings up multiple live agents for
+        // one session — each then answers the same @mention, which is the
+        // "two different models reply to one prompt" duplication the user
+        // sees after restart. Keep only the most recent row per tuple; the
+        // rest are superseded and marked Stopped so they neither resume now
+        // nor linger as resumable on disk.
+        let (keep, superseded) = dedup_resumable_runtimes(stored_sessions);
+
+        if !superseded.is_empty() {
+            for runtime_id in &superseded {
+                if let Some(s) = self.sessions.find_by_id_mut(runtime_id) {
+                    s.status = amux::AgentStatus::Stopped as i32;
+                }
+            }
+            let _ = self.sessions.save(&self.sessions_path);
+            info!(
+                session_id = %session_id,
+                superseded = ?superseded,
+                "resume_historical: marked superseded duplicate runtimes Stopped (one live runtime per agent_type+workspace)"
+            );
+        }
+
         let mut resumed_any = false;
-        for stored in stored_sessions {
+        for stored in keep {
             if self
                 .agents
                 .lock()
@@ -2770,24 +2879,17 @@ impl DaemonServer {
                                 );
                                 return;
                             };
-                            if !msg.message_id.is_empty() {
-                                if let Some(tc) = self.teamclaw.as_mut() {
-                                    if !tc.should_process_message(&session_id, &msg.message_id) {
-                                        info!(
-                                            session_id = %session_id,
-                                            session_title = %session_title,
-                                            daemon_device_id = %daemon_device_id,
-                                            daemon_actor_id = %daemon_actor_id,
-                                            daemon_team_id = %daemon_team_id,
-                                            message_id = %msg.message_id,
-                                            "duplicate session/live message.created dropped"
-                                        );
-                                        return;
-                                    }
-                                }
-                            }
-                            self.route_session_message(&session_id, msg, &env.mention_actor_ids)
-                                .await;
+                            // Dedup is enforced centrally in
+                            // `route_session_message_to_runtimes` (the single
+                            // routing sink) so the live path and the
+                            // catchup-replay path share one message_id gate and
+                            // a freshly-sent message can't be prompted twice.
+                            self.route_session_message(
+                                &session_id,
+                                msg,
+                                &resolve_mention_actor_ids(&env.mention_actor_ids, &msg.metadata_json),
+                            )
+                            .await;
                         }
                         "idea.created" | "idea.updated" => {
                             if let Ok(event) =
@@ -3884,6 +3986,21 @@ impl DaemonServer {
             // original retain (late subscribe, reconnect) still populate the
             // model picker without spawning a duplicate process.
             self.publish_runtime_state_by_id(&existing).await;
+            if !session_id.is_empty() {
+                if let Some(tc) = self.teamclaw.as_mut() {
+                    if let Err(e) = tc.ensure_session_live_subscription(session_id).await {
+                        warn!(
+                            session_id,
+                            err = %e,
+                            "apply_start_runtime: ensure_session_live_subscription failed (dedup)"
+                        );
+                    }
+                }
+            }
+            // Live MQTT can miss messages that landed in the backend after the
+            // initial attach catchup (e.g. client dedup runtimeStart on send).
+            // Replay from the cursor so @-mentioned rows still reach send_prompt.
+            self.catchup_runtime(&existing).await;
             return Ok(StartRuntimeOutcome {
                 runtime_id: existing,
                 session_id: session_id.to_string(),
@@ -3902,7 +4019,19 @@ impl DaemonServer {
                 .fetch_session_with_participants(session_id)
                 .await
             {
-                Ok(snap) => {
+                Ok(mut snap) => {
+                    if !snap
+                        .participants
+                        .iter()
+                        .any(|p| p.actor_id == self.actor_id)
+                    {
+                        snap.participants.push(crate::backend::BackendParticipantRow {
+                            session_id: session_id.to_string(),
+                            actor_id: self.actor_id.clone(),
+                            role: Some("agent".to_string()),
+                            joined_at: chrono::Utc::now(),
+                        });
+                    }
                     if let Some(tc) = self.teamclaw.as_mut() {
                         if let Err(e) = tc
                             .insert_session_from_backend(&snap.session, &snap.participants)
@@ -3913,6 +4042,13 @@ impl DaemonServer {
                                 error_message: format!("insert_session_from_backend failed: {}", e),
                                 failed_stage: "session_subscribe".to_string(),
                             });
+                        }
+                        if let Err(e) = tc.ensure_session_live_subscription(session_id).await {
+                            warn!(
+                                session_id,
+                                err = %e,
+                                "apply_start_runtime: ensure_session_live_subscription failed"
+                            );
                         }
                     } else {
                         return Err(StartRuntimeError {
@@ -5374,6 +5510,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn catchup_runtime_does_not_replay_after_cursor_advanced_in_memory() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_messages_response(
+            &srv,
+            "session-1",
+            serde_json::json!([make_message_row(
+                "msg-a",
+                "session-1",
+                "human-1",
+                &["agent-actor"],
+                "ask once",
+                "2025-05-22T01:00:01Z",
+            ),]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
+        assert!(fixture.server.catchup_runtime("rt1").await);
+        {
+            let agents = fixture.server.agents.lock().await;
+            assert_eq!(
+                agents.last_sent_to("rt1").as_deref(),
+                Some("ask once"),
+            );
+            assert_eq!(
+                agents
+                    .get_handle("rt1")
+                    .unwrap()
+                    .last_processed_message_id
+                    .as_deref(),
+                Some("msg-a"),
+            );
+        }
+
+        // Session refresh → runtimeStart dedup → catchup must not re-prompt.
+        assert!(!fixture.server.catchup_runtime("rt1").await);
+        let agents = fixture.server.agents.lock().await;
+        assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("ask once"));
+    }
+
+    #[tokio::test]
     async fn catchup_runtime_with_no_mentions_routes_everything_silent() {
         let srv = MockServer::start().await;
         auth_token_mock(&srv).await;
@@ -5414,6 +5592,72 @@ mod tests {
             2,
             "both messages should land in silent context"
         );
+    }
+
+    fn make_stored_session(
+        runtime_id: &str,
+        session_id: &str,
+        agent_type: amux::AgentType,
+        workspace_id: &str,
+        created_at: i64,
+    ) -> StoredSession {
+        StoredSession {
+            runtime_id: runtime_id.to_string(),
+            acp_session_id: format!("acp-{runtime_id}"),
+            session_id: session_id.to_string(),
+            agent_type: agent_type as i32,
+            workspace_id: workspace_id.to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: amux::AgentStatus::Active as i32,
+            created_at,
+            last_prompt: String::new(),
+            last_output_summary: String::new(),
+            tool_use_count: 0,
+        }
+    }
+
+    #[test]
+    fn dedup_resumable_runtimes_keeps_latest_per_agent_workspace_tuple() {
+        // Same conversation accumulated three historical runtimes for one
+        // (agent_type, workspace) tuple across restarts/model-switches, plus
+        // one runtime for a different agent_type. Only the newest of the
+        // duplicate tuple and the lone other-agent runtime should be kept;
+        // the two older duplicates are superseded.
+        let stored = vec![
+            make_stored_session("rt-old", "s1", amux::AgentType::ClaudeCode, "ws-1", 100),
+            make_stored_session("rt-mid", "s1", amux::AgentType::ClaudeCode, "ws-1", 200),
+            make_stored_session("rt-new", "s1", amux::AgentType::ClaudeCode, "ws-1", 300),
+            make_stored_session("rt-other", "s1", amux::AgentType::Codex, "ws-1", 150),
+        ];
+
+        let (mut keep, mut superseded) = dedup_resumable_runtimes(stored);
+        keep.sort_by(|a, b| a.runtime_id.cmp(&b.runtime_id));
+        superseded.sort();
+
+        assert_eq!(
+            keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
+            vec!["rt-new", "rt-other"],
+            "keep the newest runtime per (agent_type, workspace) tuple"
+        );
+        assert_eq!(
+            superseded,
+            vec!["rt-mid".to_string(), "rt-old".to_string()],
+            "older duplicates of the same tuple are superseded"
+        );
+    }
+
+    #[test]
+    fn dedup_resumable_runtimes_distinguishes_workspace() {
+        // Same agent_type but different workspaces are independent agents —
+        // neither supersedes the other even though one is older.
+        let stored = vec![
+            make_stored_session("rt-a", "s1", amux::AgentType::ClaudeCode, "ws-1", 100),
+            make_stored_session("rt-b", "s1", amux::AgentType::ClaudeCode, "ws-2", 50),
+        ];
+
+        let (keep, superseded) = dedup_resumable_runtimes(stored);
+        assert_eq!(keep.len(), 2, "different workspaces are kept independently");
+        assert!(superseded.is_empty(), "no cross-workspace supersession");
     }
 
     #[tokio::test]

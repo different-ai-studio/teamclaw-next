@@ -166,6 +166,7 @@ impl RuntimeHandle {
     ) -> crate::error::Result<()> {
         if let Some(ref tx) = self.cmd_tx {
             tx.send(AcpCommand::Prompt {
+                acp_session_id: self.acp_session_id.clone(),
                 text: text.to_string(),
                 attachment_urls,
             })
@@ -181,7 +182,9 @@ impl RuntimeHandle {
     /// Cancel the current turn via ACP.
     pub async fn cancel(&self) -> crate::error::Result<()> {
         if let Some(ref tx) = self.cmd_tx {
-            tx.send(AcpCommand::Cancel)
+            tx.send(AcpCommand::Cancel {
+                acp_session_id: self.acp_session_id.clone(),
+            })
                 .await
                 .map_err(|_| crate::error::AmuxError::Agent("ACP command channel closed".into()))
         } else {
@@ -214,7 +217,13 @@ impl RuntimeHandle {
     /// Shut down the ACP agent gracefully.
     pub async fn shutdown(&self) {
         if let Some(ref tx) = self.cmd_tx {
-            let _ = tx.send(AcpCommand::Shutdown).await;
+            if !self.acp_session_id.is_empty() {
+                let _ = tx
+                    .send(AcpCommand::DetachSession {
+                        acp_session_id: self.acp_session_id.clone(),
+                    })
+                    .await;
+            }
         }
     }
 

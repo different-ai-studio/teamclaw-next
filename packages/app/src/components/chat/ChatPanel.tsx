@@ -58,7 +58,6 @@ import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
-import { ensureAgentRuntimesForSession } from "@/lib/teamclaw/ensure-agent-runtime";
 import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
 import { selectAgentModel } from "@/lib/runtime-state-resolve";
 import { useAgentModelPickStore } from "@/stores/agent-model-pick-store";
@@ -1293,60 +1292,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             messageId,
           });
 
-          if (agentRuntimeIdsForSend.length > 0) {
-            const byRuntimeId = useRuntimeStateStore.getState().byRuntimeId;
-            const pickStore = useAgentModelPickStore.getState();
-            const modelIdByAgent: Record<string, string> = {};
-            for (const agentId of agentRuntimeIdsForSend) {
-              const pick = pickStore.getPick(sid, agentId);
-              if (pick) modelIdByAgent[agentId] = pick;
-            }
-            const primaryAgentId = agentRuntimeIdsForSend[0];
-            const runtimeModelId = selectAgentModel({
-              sessionId: sid,
-              agentId: primaryAgentId,
-              available: [],
-              byRuntimeId,
-              providerFallback: selectedModelOption?.id,
-            }).modelId || undefined;
-            sessionFlowLog("send.runtime_ensure.begin", {
-              sessionId: sid,
-              teamId: teamIdForSend,
-              agentActorIds: agentRuntimeIdsForSend,
-              modelId: runtimeModelId ?? null,
-              modelIdByAgent,
-            });
-            void ensureAgentRuntimesForSession({
-              sessionId: sid,
-              teamId: teamIdForSend,
-              agentActorIds: agentRuntimeIdsForSend,
-              modelId: runtimeModelId,
-              modelIdByAgent,
-              reason: "send_message",
-            })
-              .then(() => {
-                sessionFlowLog("send.runtime_ensure.ok", {
-                  sessionId: sid,
-                  teamId: teamIdForSend,
-                  agentActorIds: agentRuntimeIdsForSend,
-                });
-              })
-              .catch((runtimeEnsureError) => {
-                sessionFlowError("send.runtime_ensure.failed", runtimeEnsureError, {
-                  sessionId: sid,
-                  teamId: teamIdForSend,
-                  agentActorIds: agentRuntimeIdsForSend,
-                });
-                void import("sonner").then(({ toast }) => {
-                  toast.error("Agent runtime 未就绪", {
-                    description:
-                      runtimeEnsureError instanceof Error
-                        ? runtimeEnsureError.message
-                        : String(runtimeEnsureError),
-                  });
-                });
-              });
-          }
+          // Runtime ensure + MQTT publish happen inside the outbox sender
+          // (insert → runtimeStart/catchup → mqtt). Do not fire a parallel
+          // ensure here — it races ahead of persistence and triggers catchup
+          // before the @-mentioned row exists in the backend.
         } catch (e) {
           sessionFlowError("send.failed_before_outbox", e, {
             sessionId: sid,

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { AgentType } from "@/lib/proto/amux_pb";
 import type { RuntimeStateEntry } from "@/stores/runtime-state-store";
 import {
+  agentModelDisplayLabel,
   agentModelIdsMatch,
   backendTypeFromRuntimeEntry,
   normalizeAgentModelId,
@@ -101,6 +102,18 @@ describe("agentModelIdsMatch", () => {
   it("treats prefixed and short ids as the same model", () => {
     const available = [{ id: "big-pickle", displayName: "Big Pickle" }];
     expect(agentModelIdsMatch("opencode/big-pickle", "big-pickle", available)).toBe(true);
+  });
+});
+
+describe("agentModelDisplayLabel", () => {
+  it("prefers exact id row over earlier fuzzy alias in the list", () => {
+    const available = [
+      { id: "alibaba-cn/qwen3-coder-plus", displayName: "Alibaba (China)/QwQ Plus" },
+      { id: "opencode/mimo-v2.5-free (medium)", displayName: "OpenCode Zen/MiMo V2.5 Free (medium)" },
+    ];
+    expect(agentModelDisplayLabel("opencode/mimo-v2.5-free (medium)", available)).toBe(
+      "OpenCode Zen/MiMo V2.5 Free (medium)",
+    );
   });
 });
 

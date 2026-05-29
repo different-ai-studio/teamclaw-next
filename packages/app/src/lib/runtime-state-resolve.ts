@@ -120,6 +120,20 @@ export function shortAgentModelId(modelId: string): string {
   return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
 }
 
+/**
+ * Whether a dropdown row is the selected model.
+ * Uses exact id equality only — `selectAgentModel` already canonicalizes
+ * retain/pick to one `availableModels[i].id`.
+ */
+export function isAgentModelRowSelected(
+  rowId: string,
+  effectiveModelId: string,
+): boolean {
+  const left = rowId.trim();
+  const right = effectiveModelId.trim();
+  return left.length > 0 && right.length > 0 && left === right;
+}
+
 /** Whether two model ids refer to the same advertised runtime model. */
 export function agentModelIdsMatch(
   a: string | undefined | null,
@@ -146,6 +160,8 @@ export function agentModelDisplayLabel(
 ): string {
   const trimmed = modelId.trim();
   if (!trimmed) return "";
+  const exact = available.find((m) => m.id === trimmed);
+  if (exact) return exact.displayName || exact.id;
   const match = available.find((m) =>
     agentModelIdsMatch(m.id, trimmed, available),
   );
@@ -318,6 +334,8 @@ function canonicalizeAgainstAvailable(
   const exact = available.find((m) => m.id === raw);
   if (exact) return exact.id;
   const normalized = normalizeAgentModelId(agentId, raw, byRuntimeId) ?? raw;
+  const normalizedExact = available.find((m) => m.id === normalized);
+  if (normalizedExact) return normalizedExact.id;
   const match = available.find((m) =>
     agentModelIdsMatch(m.id, normalized, available),
   );
