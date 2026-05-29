@@ -44,11 +44,39 @@ grant select, insert on public.actor_skill_usage to authenticated;
 
 -- 2) Make the feedback upsert key valid -----------------------------------
 -- supabase-repo upserts on (actor_id, message_id); the table had no matching
--- unique constraint, so the upsert would error. Partial unique (message_id
--- may be null for session-level feedback).
+-- unique constraint, so the upsert would error.
+-- Non-partial unique index: required so supabase-js .upsert({ onConflict:
+-- "actor_id,message_id" }) (which emits ON CONFLICT with no WHERE) can match it.
+-- NULL message_id rows (session-level feedback) remain unconstrained because
+-- Postgres treats NULLs as distinct in a unique index.
 create unique index actor_message_feedback_actor_message_uidx
-  on public.actor_message_feedback (actor_id, message_id)
-  where message_id is not null;
+  on public.actor_message_feedback (actor_id, message_id);
+
+-- The feedback upsert (INSERT ... ON CONFLICT DO UPDATE) needs UPDATE rights
+-- for the re-rate path. Mirror the existing insert-self policy.
+create policy actor_message_feedback_update_self
+  on public.actor_message_feedback
+  for update to authenticated
+  using (
+    app.is_team_member(team_id)
+    and exists (
+      select 1 from public.actors a
+       where a.id = actor_id
+         and a.user_id = auth.uid()
+         and a.team_id = team_id
+    )
+  )
+  with check (
+    app.is_team_member(team_id)
+    and exists (
+      select 1 from public.actors a
+       where a.id = actor_id
+         and a.user_id = auth.uid()
+         and a.team_id = team_id
+    )
+  );
+
+grant update on public.actor_message_feedback to authenticated;
 
 -- 3) Period-aware leaderboard ---------------------------------------------
 drop view if exists public.team_leaderboard;
@@ -118,6 +146,7 @@ as $$
     coalesce(fb.negative_feedback, 0)             as negative_feedback,
     coalesce(reports.session_count, 0)            as session_count,
     coalesce(skills.skill_usage, '{}'::jsonb)     as skill_usage,
+    -- score = tokens_used (placeholder ranking key; cost-weighted formula TBD)
     coalesce(reports.tokens_used, 0)::numeric     as score
   from public.actors a
   left join reports on reports.actor_id = a.id
