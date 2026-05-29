@@ -868,6 +868,18 @@ test("DELETE /v1/teams/:teamId/members/:actorId removes team actor", async () =>
   assert.deepEqual(repo.calls[0], { method: "removeTeamActor", teamId: "team-1", actorId: "actor-1" });
 });
 
+test("DELETE /v1/teams/:teamId/actors/:actorId removes team actor (scoped path)", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/teams/team-1/actors/actor-1",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], { method: "removeTeamActor", teamId: "team-1", actorId: "actor-1" });
+});
+
 test("GET /v1/sessions/muted returns muted session IDs", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({

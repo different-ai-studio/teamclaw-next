@@ -67,6 +67,14 @@ export function registerTeams(router) {
     return { statusCode: 204 };
   });
 
+  // OpenAPI removeTeamActorScoped: clients (cloud-api/teams.ts) call the
+  // /actors/ path. Same operation as /members/ above — register both so the
+  // route resolves instead of returning "Route not found".
+  router.delete("/v1/teams/:teamId/actors/:actorId", async (ctx) => {
+    await ctx.repository.removeTeamActor(ctx.params.teamId, ctx.params.actorId);
+    return { statusCode: 204 };
+  });
+
   router.get("/v1/teams/:teamId/directory", async (ctx) => {
     const result = await ctx.repository.getTeamDirectory(ctx.params.teamId);
     return { body: result };
