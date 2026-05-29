@@ -23,7 +23,7 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-vi.mock('@/lib/utils', () => ({ isTauri: () => true }))
+vi.mock('@/lib/utils', () => ({ isTauri: () => true, cn: (...a: string[]) => a.join(' ') }))
 
 vi.mock('@/stores/team-mode', () => ({
   useTeamModeStore: (sel: (s: typeof teamMode) => unknown) => sel(teamMode),
@@ -39,6 +39,10 @@ vi.mock('@/stores/workspace', () => ({
 vi.mock('@/stores/team-share', () => ({
   useTeamShareStore: (sel: (s: { status: { mode: unknown } }) => unknown) =>
     sel({ status: { mode: teamShare.mode } }),
+}))
+
+vi.mock('@/lib/team-permissions', () => ({
+  useTeamPermissions: () => ({ role: 'owner', isOwner: true, canManageTeam: true, canEditFiles: true }),
 }))
 
 // Child components are exercised by their own tests — here we only assert which

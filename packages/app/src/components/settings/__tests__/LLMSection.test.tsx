@@ -57,6 +57,9 @@ vi.mock('@/stores/team-mode', () => ({
     return sel(mocks.teamModeState)
   }),
 }))
+vi.mock('@/lib/team-permissions', () => ({
+  useTeamPermissions: () => ({ role: 'owner', isOwner: true, canManageTeam: true, canEditFiles: true }),
+}))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: mocks.shellOpen }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.dialogOpen }))

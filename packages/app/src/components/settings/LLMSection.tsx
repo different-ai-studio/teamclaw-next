@@ -24,7 +24,7 @@ import {
 import { useProviderStore } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTeamModeStore } from '@/stores/team-mode'
-import { useCurrentTeamStore } from '@/stores/current-team'
+import { useTeamPermissions } from '@/lib/team-permissions'
 import { TeamSharedLlmPane } from './llm/TeamSharedLlmPane'
 import type { LlmModelEntry } from './team/HostLlmConfig'
 import { loadTeamProviderFormState, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'
@@ -95,8 +95,6 @@ export const LLMSection = React.memo(function LLMSection() {
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const teamModelConfig = useTeamModeStore((s) => s.teamModelConfig)
   const devUnlocked = useTeamModeStore((s) => s.devUnlocked)
-  const myRole = useTeamModeStore((s) => s.myRole)
-  const currentMemberRole = useCurrentTeamStore((s) => s.currentMember?.role ?? null)
   const providers = useProviderStore((s) => s.providers)
   const providersLoading = useProviderStore((s) => s.providersLoading)
   const configuredProviders = useProviderStore((s) => s.configuredProviders)
@@ -159,10 +157,8 @@ export const LLMSection = React.memo(function LLMSection() {
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null)
 
   // Team-shared ("host") LLM config — owner-only edit, surfaced as a pinned
-  // card at the top of the provider list for everyone. Ownership comes from the
-  // cloud membership role (available before team-share is set up); team-mode's
-  // myRole only resolves once team-share is active, so it's a fallback.
-  const isTeamOwner = currentMemberRole === 'owner' || myRole === 'owner'
+  // card at the top of the provider list for everyone.
+  const { isOwner: isTeamOwner } = useTeamPermissions()
   const [teamSharedLlmOpen, setTeamSharedLlmOpen] = React.useState(false)
   const [teamSharedModel, setTeamSharedModel] = React.useState<{
     baseUrl: string
