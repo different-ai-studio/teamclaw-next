@@ -33,6 +33,18 @@ pub(crate) fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Prefer envelope mentions; fall back to message metadata when the envelope
+/// field is empty (older clients or partial encodes).
+pub(crate) fn resolve_mention_actor_ids(
+    envelope_mentions: &[String],
+    metadata_json: &str,
+) -> Vec<String> {
+    if !envelope_mentions.is_empty() {
+        return envelope_mentions.to_vec();
+    }
+    parse_mention_actor_ids(metadata_json)
+}
+
 pub(crate) fn parse_attachment_urls(metadata_json: &str) -> Vec<String> {
     serde_json::from_str::<serde_json::Value>(metadata_json)
         .ok()
@@ -80,6 +92,24 @@ mod tests {
     #[test]
     fn parse_mention_actor_ids_handles_empty_array() {
         assert!(parse_mention_actor_ids(r#"{"mention_actor_ids":[]}"#).is_empty());
+    }
+
+    #[test]
+    fn resolve_mention_actor_ids_prefers_envelope() {
+        let meta = r#"{"mention_actor_ids":["from-meta"]}"#;
+        assert_eq!(
+            resolve_mention_actor_ids(&["from-env".to_string()], meta),
+            vec!["from-env".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_mention_actor_ids_falls_back_to_metadata() {
+        let meta = r#"{"mention_actor_ids":["from-meta"]}"#;
+        assert_eq!(
+            resolve_mention_actor_ids(&[], meta),
+            vec!["from-meta".to_string()]
+        );
     }
 
     #[test]

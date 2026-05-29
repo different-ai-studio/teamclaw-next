@@ -17,6 +17,7 @@ import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { createSessionWithFirstMessage } from '@/lib/session-create'
 import { ensureSessionLiveSubscribed } from '@/App'
+import { useEngagedAgentStore } from '@/stores/engaged-agent-store'
 import { cn } from '@/lib/utils'
 
 type Candidate = {
@@ -166,6 +167,16 @@ export function NewSessionDialog() {
         messageText: message,
       })
       await ensureSessionLiveSubscribed(teamId, sessionId)
+      const agentPicks = pickedActors.filter((p) => p.actor_type === 'agent')
+      if (agentPicks.length > 0) {
+        useEngagedAgentStore.getState().setAgents(
+          sessionId,
+          agentPicks.map((p) => ({
+            id: p.id,
+            displayName: p.display_name || 'AI',
+          })),
+        )
+      }
       await useSessionListStore.getState().load()
       useSessionStore.getState().addHighlightedSession(sessionId)
       await useUIStore.getState().switchToSession(sessionId)

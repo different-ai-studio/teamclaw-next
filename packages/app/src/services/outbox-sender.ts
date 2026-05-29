@@ -61,25 +61,6 @@ async function attempt(entry: OutboxEntry): Promise<void> {
   });
 
   try {
-    if (entry.mentionActorIds.length > 0) {
-      const participants = await getBackend().sessionMembers.listParticipants(
-        entry.sessionId,
-      );
-      const agentActorIds = entry.mentionActorIds.filter((id) => {
-        const row = participants.find((p) => p.id === id);
-        return row ? isAgentActorType(row.actor_type) : false;
-      });
-      if (agentActorIds.length > 0) {
-        await ensureAgentRuntimesForSession({
-          sessionId: entry.sessionId,
-          teamId: entry.teamId,
-          agentActorIds,
-          modelId: entry.model ?? undefined,
-          reason: "outbox_send",
-        });
-      }
-    }
-
     const createdAtSec = BigInt(
       Math.floor(new Date(entry.createdAt).getTime() / 1000),
     );
@@ -117,6 +98,9 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       body: toBinary(SessionMessageEnvelopeSchema, sessionEnv),
     });
 
+    // Persist first so daemon catchup (triggered by runtimeStart below) can
+    // see @-mentioned rows. Previously runtimeStart ran before insert, so
+    // dedup catchup always replayed an empty slice for the outbound message.
     sessionFlowLog("outbox_sender.message_insert.begin", {
       messageId: entry.messageId,
       sessionId: entry.sessionId,
@@ -151,6 +135,25 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       teamId: entry.teamId,
       duplicateAlreadyInserted,
     });
+
+    if (entry.mentionActorIds.length > 0) {
+      const participants = await getBackend().sessionMembers.listParticipants(
+        entry.sessionId,
+      );
+      const agentActorIds = entry.mentionActorIds.filter((id) => {
+        const row = participants.find((p) => p.id === id);
+        return row ? isAgentActorType(row.actor_type) : false;
+      });
+      if (agentActorIds.length > 0) {
+        await ensureAgentRuntimesForSession({
+          sessionId: entry.sessionId,
+          teamId: entry.teamId,
+          agentActorIds,
+          modelId: entry.model ?? undefined,
+          reason: "outbox_send",
+        });
+      }
+    }
 
     const topic = `amux/${entry.teamId}/session/${entry.sessionId}/live`;
     sessionFlowLog("outbox_sender.mqtt_publish.begin", {

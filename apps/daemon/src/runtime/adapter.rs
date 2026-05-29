@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -19,20 +19,39 @@ use crate::proto::amux;
 // Messages sent INTO the ACP LocalSet thread
 // ---------------------------------------------------------------------------
 
-/// Commands the main tokio runtime sends to the ACP thread.
+/// Commands the main tokio runtime sends to a shared ACP host thread.
 pub enum AcpCommand {
-    /// Send a prompt to the running session.
+    /// Create or resume an ACP session on an already-initialized host.
+    AttachSession {
+        worktree: String,
+        resume_acp_session_id: Option<String>,
+        mcp_config_path: Option<PathBuf>,
+        initial_model_override: Option<String>,
+        initial_prompt: String,
+        event_tx: mpsc::Sender<amux::AcpEvent>,
+        startup_tx: oneshot::Sender<Result<AcpStartupMetadata, String>>,
+        /// Gateway sessions auto-allow tool permissions; native runtimes wait
+        /// for MQTT approval.
+        is_gateway: bool,
+    },
+    /// Drop routing state for a session; the host process keeps running.
+    DetachSession { acp_session_id: String },
+    /// Send a prompt to a bound session.
     Prompt {
+        acp_session_id: String,
         text: String,
         attachment_urls: Vec<String>,
     },
-    /// Cancel the current turn.
-    Cancel,
-    /// Resolve a pending permission request.
+    /// Cancel the current turn for a bound session.
+    Cancel { acp_session_id: String },
+    /// Resolve a pending permission request (any session on this host).
     ResolvePermission { request_id: String, granted: bool },
-    /// Switch the model used by the current session.
-    SetModel { model_id: String },
-    /// Shut down the agent.
+    /// Switch the model used by a bound session.
+    SetModel {
+        acp_session_id: String,
+        model_id: String,
+    },
+    /// Shut down the entire host process.
     Shutdown,
 }
 
@@ -71,17 +90,100 @@ async fn emit_acp_error(
 // AmuxClient — implements acp::Client inside the LocalSet
 // ---------------------------------------------------------------------------
 
-struct AmuxClient {
+/// Per-session routing table inside a shared ACP host.
+#[derive(Default)]
+struct SessionRegistry {
+    sessions: HashMap<String, SessionRoute>,
+}
+
+struct SessionRoute {
     event_tx: mpsc::Sender<amux::AcpEvent>,
-    /// Pending permission requests: request_id -> oneshot sender
-    pending_permissions: Rc<RefCell<HashMap<String, oneshot::Sender<bool>>>>,
-    /// Gateway runtimes have no interactive client on the other end of MQTT
-    /// to approve `requestPermission` callbacks the claude-agent-acp wrapper
-    /// fires for every tool use. Without auto-allow here the oneshot never
-    /// resolves and every tool — including the `send` MCP tool we mounted
-    /// for the gateway specifically — gets denied. Detected at construction
-    /// time from whether an MCP config path was attached (gateway-only).
     is_gateway: bool,
+    pending_permissions: HashMap<String, oneshot::Sender<bool>>,
+    /// Count of `session_notification` handlers currently between "entered"
+    /// and "finished pushing their events onto `event_tx`". The ACP crate
+    /// dispatches every incoming `session/update` on its own spawned task,
+    /// fully decoupled from when `conn.prompt()` resolves (the prompt
+    /// response is read + the response oneshot fired by the rpc reader task,
+    /// see `agent-client-protocol` `rpc.rs::handle_io`). So when `prompt()`
+    /// returns, the turn's trailing `AgentMessageChunk` handlers may not have
+    /// pushed their `Output` onto `event_tx` yet. The prompt worker waits for
+    /// this counter to go (and stay) quiescent before emitting Active->Idle,
+    /// guaranteeing the turn's final text lands ahead of the turn-end marker.
+    notif_inflight: Rc<Cell<usize>>,
+}
+
+/// RAII guard that marks one in-flight `session_notification` on a session
+/// route: increments on construction, decrements on drop (panic-safe).
+struct NotifInflightGuard {
+    counter: Rc<Cell<usize>>,
+}
+
+impl NotifInflightGuard {
+    fn new(counter: Rc<Cell<usize>>) -> Self {
+        counter.set(counter.get() + 1);
+        Self { counter }
+    }
+}
+
+impl Drop for NotifInflightGuard {
+    fn drop(&mut self) {
+        self.counter.set(self.counter.get().saturating_sub(1));
+    }
+}
+
+/// Block until the per-session notification dispatch pipeline is quiescent.
+///
+/// See `SessionRoute::notif_inflight` for why this barrier exists. We can't
+/// hook the crate's reader/dispatcher, but we can observe quiescence: the
+/// reader enqueues every trailing notification onto the crate's internal
+/// `incoming_rx` *before* it resolves the prompt response, so by the time
+/// `prompt()` returns those notifications are already queued. One scheduler
+/// turn lets the dispatcher spawn all of their handlers; subsequent turns let
+/// those handlers run (each bumps `notif_inflight` on entry, before its first
+/// `await`, and clears it once its `event_tx` sends complete). Requiring the
+/// counter to read zero across two consecutive yields closes the
+/// "dispatched-but-not-yet-polled" window: any handler that was merely queued
+/// at the first observation has run to completion (pushing its `Output`) by
+/// the second.
+async fn await_notifications_drained(registry: &Rc<RefCell<SessionRegistry>>, acp_session_id: &str) {
+    // Bounded so a wedged/removed session can never pin the prompt worker.
+    const MAX_SPINS: usize = 4096;
+    let mut zero_streak = 0usize;
+    for _ in 0..MAX_SPINS {
+        tokio::task::yield_now().await;
+        let inflight = {
+            let guard = registry.borrow();
+            match guard.sessions.get(acp_session_id) {
+                Some(route) => route.notif_inflight.get(),
+                // Session detached mid-turn: nothing left to order against.
+                None => return,
+            }
+        };
+        if inflight == 0 {
+            zero_streak += 1;
+            if zero_streak >= 2 {
+                return;
+            }
+        } else {
+            zero_streak = 0;
+        }
+    }
+}
+
+struct AmuxClient {
+    registry: Rc<RefCell<SessionRegistry>>,
+}
+
+fn resolve_permission_in_registry(registry: &RefCell<SessionRegistry>, request_id: &str, granted: bool) {
+    let mut guard = registry.borrow_mut();
+    for route in guard.sessions.values_mut() {
+        if let Some(tx) = route.pending_permissions.remove(request_id) {
+            let _ = tx.send(granted);
+            return;
+        }
+    }
+    warn!(request_id, "no pending permission request found");
 }
 
 #[async_trait::async_trait(?Send)]
@@ -90,7 +192,7 @@ impl acp::Client for AmuxClient {
         &self,
         args: acp::RequestPermissionRequest,
     ) -> acp::Result<acp::RequestPermissionResponse> {
-        // Extract tool info from the tool_call update
+        let session_id = args.session_id.to_string();
         let tool_id = args.tool_call.tool_call_id.to_string();
         let tool_name = args.tool_call.fields.title.clone().unwrap_or_default();
         let description = args
@@ -100,10 +202,16 @@ impl acp::Client for AmuxClient {
             .map(|k| format!("{:?}", k))
             .unwrap_or_default();
 
-        // Gateway runtimes have no human/MQTT subscriber to approve, so we
-        // auto-allow here. Picks the first AllowAlways/AllowOnce option the
-        // wrapper offered; falls back to a synthetic "allow" optionId.
-        if self.is_gateway {
+        let is_gateway = {
+            let guard = self.registry.borrow();
+            guard
+                .sessions
+                .get(&session_id)
+                .map(|r| r.is_gateway)
+                .unwrap_or(false)
+        };
+
+        if is_gateway {
             let option_id = args
                 .options
                 .iter()
@@ -129,36 +237,44 @@ impl acp::Client for AmuxClient {
             ));
         }
 
-        // Generate a request_id for MQTT routing
         let request_id = uuid::Uuid::new_v4().to_string();
-
-        // Send the permission request event to MQTT
-        let _ = self
-            .event_tx
-            .send(amux::AcpEvent {
-                event: Some(amux::acp_event::Event::PermissionRequest(
-                    amux::AcpPermissionRequest {
-                        request_id: request_id.clone(),
-                        tool_name: tool_name.clone(),
-                        description,
-                        params: Default::default(),
-                    },
-                )),
-                model: String::new(),
-            })
-            .await;
-
-        // Create oneshot channel and wait for the response
         let (tx, rx) = oneshot::channel();
-        self.pending_permissions
-            .borrow_mut()
-            .insert(request_id.clone(), tx);
 
-        // Wait for the permission response from the main thread
+        {
+            let event_tx = {
+                let mut guard = self.registry.borrow_mut();
+                let Some(route) = guard.sessions.get_mut(&session_id) else {
+                    warn!(session_id, "permission request for unknown session");
+                    return Ok(acp::RequestPermissionResponse::new(
+                        acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
+                            acp::PermissionOptionId::new("deny"),
+                        )),
+                    ));
+                };
+                route
+                    .pending_permissions
+                    .insert(request_id.clone(), tx);
+                route.event_tx.clone()
+            };
+
+            let _ = event_tx
+                .send(amux::AcpEvent {
+                    event: Some(amux::acp_event::Event::PermissionRequest(
+                        amux::AcpPermissionRequest {
+                            request_id: request_id.clone(),
+                            tool_name: tool_name.clone(),
+                            description,
+                            params: Default::default(),
+                        },
+                    )),
+                    model: String::new(),
+                })
+                .await;
+        }
+
         let granted = rx.await.unwrap_or(false);
 
         if granted {
-            // Find the first "allow" option (AllowOnce or AllowAlways), or fall back to the first option
             let option_id = args
                 .options
                 .iter()
@@ -179,7 +295,6 @@ impl acp::Client for AmuxClient {
                 )),
             ))
         } else {
-            // Find the first "reject" option, or fall back to last option
             let option_id = args
                 .options
                 .iter()
@@ -255,9 +370,26 @@ impl acp::Client for AmuxClient {
         &self,
         args: acp::SessionNotification,
     ) -> acp::Result<(), acp::Error> {
+        let session_id = args.session_id.to_string();
         let events = translate_session_update(args.update);
-        for event in events {
-            let _ = self.event_tx.send(event).await;
+        let route = {
+            let guard = self.registry.borrow();
+            guard
+                .sessions
+                .get(&session_id)
+                .map(|r| (r.event_tx.clone(), r.notif_inflight.clone()))
+        };
+        if let Some((event_tx, inflight)) = route {
+            // Mark this handler in-flight *before* the first await so the
+            // prompt worker's drain barrier can observe it (see
+            // `await_notifications_drained`). The guard clears it once all
+            // sends below complete, even on early return / panic.
+            let _inflight_guard = NotifInflightGuard::new(inflight);
+            for event in events {
+                let _ = event_tx.send(event).await;
+            }
+        } else {
+            debug!(session_id, event_count = events.len(), "dropped ACP events for detached session");
         }
         Ok(())
     }
@@ -847,233 +979,98 @@ mod command_selection_tests {
 }
 
 // ---------------------------------------------------------------------------
-// Public API: spawn an ACP agent in its own thread with LocalSet
+// Public API: long-lived ACP host (initialize once, many session/new)
 // ---------------------------------------------------------------------------
 
-/// Spawn an ACP-speaking agent (claude-code, opencode, codex, …).
-///
-/// Returns a command sender that the main runtime uses to send prompts,
-/// permission responses, and cancellation signals.
-///
-/// Events from the agent flow through `event_tx`.
-///
-/// `startup_tx` is fulfilled once the child process has spawned, ACP has
-/// initialized, and a session has been created/resumed. Startup failures are
-/// sent through it so callers do not publish a successful RuntimeStart for a
-/// process that never became usable.
-#[allow(clippy::too_many_arguments)]
-pub fn spawn_acp_agent(
-    binary: String,
-    args: Vec<String>,
-    worktree: String,
-    initial_prompt: String,
-    agent_type: amux::AgentType,
-    event_tx: mpsc::Sender<amux::AcpEvent>,
-    resume_acp_session_id: Option<String>,
-    startup_tx: oneshot::Sender<Result<AcpStartupMetadata, String>>,
-    // When `Some`, the ACP session is initialised on this model id instead of
-    // the agent's reported default. Used by the gateway adapter to honour
-    // per-session `set_model` overrides on first spawn. Pass a full model
-    // id ("claude-sonnet-4-6"), not a short name — callers translate short
-    // names via `model_id_for_short_name`.
-    initial_model_override: Option<String>,
-    // When `Some`, the path is forwarded as `--mcp-config <path>` to the
-    // underlying claude-code child. Gateway sessions use this to mount
-    // amuxd's own `mcp-server` subcommand so the agent can call the
-    // `send` tool. Bare/native runtimes pass `None`.
-    mcp_config_path: Option<PathBuf>,
-    extra_env: HashMap<String, String>,
-) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
-    let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
-    let startup_reporter: StartupReporter = Arc::new(Mutex::new(Some(startup_tx)));
-
-    // Clone event_tx so we can push an AcpError after run_acp_session
-    // fails — without this, the ACP thread would log the failure and
-    // silently exit, leaving iOS staring at a runtime that never replies.
-    let error_tx = event_tx.clone();
-    let startup_error_reporter = startup_reporter.clone();
-
-    // Spawn a dedicated thread with its own single-threaded tokio runtime + LocalSet
-    // because ACP futures are !Send.
-    std::thread::Builder::new()
-        .name(format!("acp-agent"))
-        .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("failed to build tokio runtime for ACP agent");
-
-            let local_set = tokio::task::LocalSet::new();
-            rt.block_on(local_set.run_until(async move {
-                if let Err(e) = run_acp_session(
-                    binary,
-                    args,
-                    worktree,
-                    initial_prompt,
-                    agent_type,
-                    event_tx,
-                    cmd_rx,
-                    resume_acp_session_id,
-                    startup_reporter,
-                    initial_model_override,
-                    mcp_config_path,
-                    extra_env,
-                )
-                .await
-                {
-                    let summary = format!("{}", e);
-                    let details = format!("{:#}", e);
-                    error!(error = %details, "ACP agent session failed");
-                    report_startup(&startup_error_reporter, Err(details.clone()));
-                    // Best-effort fanout to iOS. The receiver may already
-                    // be gone (RuntimeManager teardown raced ahead) — in
-                    // that case the send is a no-op and the log line
-                    // above is the only record.
-                    emit_acp_error(&error_tx, summary, details).await;
-                }
-            }));
-        })
-        .map_err(|e| {
-            crate::error::AmuxError::Agent(format!("failed to spawn ACP thread: {}", e))
-        })?;
-
-    Ok(cmd_tx)
+struct ActiveSession {
+    prompt_tx: mpsc::Sender<(String, Vec<String>)>,
 }
 
-/// The main ACP session loop running inside a LocalSet.
-#[allow(clippy::too_many_arguments)]
-async fn run_acp_session(
-    binary: String,
-    args: Vec<String>,
-    worktree: String,
-    initial_prompt: String,
+fn build_acp_process_command(
+    binary: &str,
+    args: &[String],
     agent_type: amux::AgentType,
-    event_tx: mpsc::Sender<amux::AcpEvent>,
-    mut cmd_rx: mpsc::Receiver<AcpCommand>,
-    resume_acp_session_id: Option<String>,
-    startup_reporter: StartupReporter,
-    initial_model_override: Option<String>,
-    mcp_config_path: Option<PathBuf>,
-    extra_env: HashMap<String, String>,
-) -> anyhow::Result<()> {
-    // Spawn the ACP agent process
-    // Use claude-agent-acp wrapper (Node.js) which speaks ACP JSON-RPC over stdio
-    // Falls back to npx if the binary is a Claude CLI path/name. The user's
-    // daemon.toml may store an absolute path like ~/.local/bin/claude.
-    let mut cmd = if should_use_claude_agent_acp_wrapper(&binary) {
+    extra_env: &HashMap<String, String>,
+) -> tokio::process::Command {
+    let mut cmd = if should_use_claude_agent_acp_wrapper(binary) {
         let mut c = tokio::process::Command::new("npx");
         c.arg("--yes").arg("@zed-industries/claude-agent-acp");
         c
     } else if (agent_type == amux::AgentType::Opencode || agent_type == amux::AgentType::Codex)
         && args.is_empty()
     {
-        // Both opencode and codex CLIs expose ACP via an `acp` subcommand.
-        // Operators can override this default by supplying `default_flags`
-        // in daemon.toml's [agents.opencode] / [agents.codex] section.
-        let mut c = tokio::process::Command::new(&binary);
+        let mut c = tokio::process::Command::new(binary);
         c.arg("acp");
         c
     } else {
-        let mut c = tokio::process::Command::new(&binary);
-        c.args(&args);
+        let mut c = tokio::process::Command::new(binary);
+        c.args(args);
         c
     };
-    // Forward per-session MCP config to the underlying claude-code so the
-    // agent can call amuxd's `send` tool. The wrapper passes unknown args
-    // through to claude.
-    if let Some(ref cfg_path) = mcp_config_path {
-        cmd.arg("--mcp-config").arg(cfg_path);
-        info!(mcp_config = %cfg_path.display(), "claude-code launched with --mcp-config");
-    }
     for (key, value) in extra_env {
-        if std::env::var_os(&key).is_none() {
+        if std::env::var_os(key).is_none() {
             cmd.env(key, value);
         }
     }
-    let mut child = cmd
-        .current_dir(&worktree)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("spawn ACP agent: {}", e))?;
+    cmd
+}
 
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("no stdin"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
+/// Spawn a long-lived ACP host thread. Returns a command sender immediately;
+/// `host_ready_tx` is fulfilled after ACP `initialize` completes.
+pub fn spawn_acp_host(
+    binary: String,
+    args: Vec<String>,
+    agent_type: amux::AgentType,
+    extra_env: HashMap<String, String>,
+    host_ready_tx: oneshot::Sender<Result<(), String>>,
+) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
 
-    // Drain stderr line-by-line so the pipe buffer can't fill up and
-    // wedge the subprocess. Each line is logged at warn — claude-agent-acp
-    // writes its JSON-RPC error envelopes here when something goes wrong,
-    // and previously they were invisible (we piped stderr but never read
-    // it), making "Internal error" failures impossible to diagnose
-    // without manual reproduction outside the daemon.
-    if let Some(stderr) = child.stderr.take() {
-        tokio::task::spawn_local(async move {
-            let mut reader = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                warn!(target: "acp_stderr", "{}", line);
-            }
-        });
-    }
+    std::thread::Builder::new()
+        .name(format!("acp-host-{agent_type:?}"))
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime for ACP host");
 
-    info!(binary = %binary, worktree = %worktree, "ACP agent process spawned");
+            let local_set = tokio::task::LocalSet::new();
+            rt.block_on(local_set.run_until(async move {
+                if let Err(e) = run_acp_host(
+                    binary,
+                    args,
+                    agent_type,
+                    extra_env,
+                    cmd_rx,
+                    host_ready_tx,
+                )
+                .await
+                {
+                    error!(error = %e, "ACP host failed");
+                }
+            }));
+        })
+        .map_err(|e| {
+            crate::error::AmuxError::Agent(format!("failed to spawn ACP host thread: {}", e))
+        })?;
 
-    let pending_permissions: Rc<RefCell<HashMap<String, oneshot::Sender<bool>>>> =
-        Rc::new(RefCell::new(HashMap::new()));
+    Ok(cmd_tx)
+}
 
-    let client = AmuxClient {
-        event_tx: event_tx.clone(),
-        pending_permissions: pending_permissions.clone(),
-        is_gateway: mcp_config_path.is_some(),
-    };
-
-    // Create the ACP connection
-    let (conn, handle_io) =
-        acp::ClientSideConnection::new(client, stdin.compat_write(), stdout.compat(), |fut| {
-            tokio::task::spawn_local(fut);
-        });
-
-    let (fatal_tx, mut fatal_rx) = mpsc::channel::<String>(4);
-    let io_fatal_tx = fatal_tx.clone();
-    tokio::task::spawn_local(async move {
-        let message = match handle_io.await {
-            Ok(()) => "ACP IO task ended".to_string(),
-            Err(e) => format!("ACP IO task ended: {e}"),
-        };
-        warn!("{}", message);
-        let _ = io_fatal_tx.send(message).await;
-    });
-
-    // Initialize the connection
-    let t_init = Instant::now();
-    conn.initialize(
-        acp::InitializeRequest::new(acp::ProtocolVersion::V1)
-            .client_info(acp::Implementation::new("amuxd", "0.1.0").title("AMUX Daemon")),
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("ACP initialize failed: {}", e))?;
-
-    info!(
-        agent_type = ?agent_type,
-        initialize_ms = t_init.elapsed().as_millis() as u64,
-        "ACP connection initialized"
-    );
-
-    // Create or resume session
-    let worktree_path = std::path::PathBuf::from(&worktree);
-
-    // claude-agent-acp 0.x silently drops the claude-code `--mcp-config` CLI
-    // flag — it expects MCP servers to be declared on the ACP `session/new`
-    // payload's `mcpServers` array instead. Parse the gateway MCP config
-    // file we wrote earlier back into ACP-native `McpServerStdio` entries so
-    // the `send` tool actually lands in the spawned agent's tool list.
+/// Attach a TeamClaw runtime to an initialized ACP host via `session/new`.
+#[allow(clippy::too_many_arguments)]
+async fn attach_acp_session_on_conn(
+    conn: &acp::ClientSideConnection,
+    registry: &Rc<RefCell<SessionRegistry>>,
+    agent_type: amux::AgentType,
+    worktree: &str,
+    resume_acp_session_id: Option<String>,
+    mcp_config_path: Option<PathBuf>,
+    initial_model_override: Option<String>,
+    event_tx: mpsc::Sender<amux::AcpEvent>,
+    is_gateway: bool,
+) -> anyhow::Result<AcpStartupMetadata> {
+    let worktree_path = std::path::PathBuf::from(worktree);
     let acp_mcp_servers: Vec<acp::McpServer> = match mcp_config_path.as_ref() {
         Some(p) => match parse_mcp_config_to_acp(p) {
             Ok(Some(v)) => v,
@@ -1094,11 +1091,6 @@ async fn run_acp_session(
         req
     };
 
-    // Capture both the session id AND the optional `SessionModelState` the
-    // agent advertises in its session response. opencode and codex populate
-    // this via the `unstable_session_model` capability; claude-agent-acp
-    // currently does not, so it stays None and the hardcoded fallback table
-    // takes over below.
     let t_session = Instant::now();
     let (session_id, acp_model_state): (acp::SessionId, Option<acp::SessionModelState>) =
         if let Some(ref resume_id) = resume_acp_session_id {
@@ -1112,7 +1104,7 @@ async fn run_acp_session(
                     info!(
                         session_id = %sid,
                         resume_ms = t_session.elapsed().as_millis() as u64,
-                        "ACP session resumed"
+                        "ACP session resumed on host"
                     );
                     (sid, resp.models)
                 }
@@ -1129,7 +1121,7 @@ async fn run_acp_session(
                     info!(
                         session_id = %sid,
                         new_session_ms = t_session.elapsed().as_millis() as u64,
-                        "ACP session created (fallback)"
+                        "ACP session created on host (fallback)"
                     );
                     (sid, resp.models)
                 }
@@ -1143,14 +1135,22 @@ async fn run_acp_session(
             info!(
                 session_id = %sid,
                 new_session_ms = t_session.elapsed().as_millis() as u64,
-                "ACP session created"
+                "ACP session created on host"
             );
             (sid, resp.models)
         };
 
-    // Translate the agent-reported model list to amux's wire type, or fall
-    // back to the hardcoded table for agents (claude-agent-acp today) that
-    // don't implement `unstable_session_model`.
+    let acp_session_key = session_id.to_string();
+    registry.borrow_mut().sessions.insert(
+        acp_session_key.clone(),
+        SessionRoute {
+            event_tx: event_tx.clone(),
+            is_gateway,
+            pending_permissions: HashMap::new(),
+            notif_inflight: Rc::new(Cell::new(0)),
+        },
+    );
+
     let acp_current_model_id: Option<String> = acp_model_state
         .as_ref()
         .map(|s| s.current_model_id.0.to_string());
@@ -1164,23 +1164,14 @@ async fn run_acp_session(
         count = available_models.len(),
         "available models resolved",
     );
-    // Apply the initial model before any prompt runs. Precedence:
-    //   1. `initial_model_override` (gateway `set_model` chose this on spawn)
-    //   2. agent-reported `current_model_id` (no set_model needed; the
-    //      session is already on it)
-    //   3. first entry from the fallback table (claude legacy path)
-    // We only issue `session/set_model` when the chosen id differs from
-    // the agent's current — otherwise we'd round-trip a no-op call.
+
     let initial_model: Option<String> = {
         let chosen = initial_model_override
             .clone()
             .or_else(|| acp_current_model_id.clone())
             .or_else(|| available_models.first().map(|m| m.id.clone()));
         match chosen {
-            Some(model_id) if acp_current_model_id.as_ref() == Some(&model_id) => {
-                info!(model_id = %model_id, "ACP session already on selected model");
-                Some(model_id)
-            }
+            Some(model_id) if acp_current_model_id.as_ref() == Some(&model_id) => Some(model_id),
             Some(model_id) => {
                 let req = acp::SetSessionModelRequest::new(
                     session_id.clone(),
@@ -1193,9 +1184,6 @@ async fn run_acp_session(
                     }
                     Err(e) => {
                         warn!(error = %e, model_id = %model_id, "initial set_session_model failed");
-                        // Fall back to whatever the agent already runs on,
-                        // so the daemon still reports a current_model when
-                        // the agent self-reported one.
                         acp_current_model_id.clone()
                     }
                 }
@@ -1203,150 +1191,330 @@ async fn run_acp_session(
             None => None,
         }
     };
-    report_startup(
-        &startup_reporter,
-        Ok(AcpStartupMetadata {
-            available_models: available_models.clone(),
-            initial_model: initial_model.clone(),
-            acp_session_id: session_id.to_string(),
-        }),
-    );
 
-    // Use Rc to share conn across spawn_local tasks
-    let conn = Rc::new(conn);
-    let (prompt_tx, mut prompt_rx) = mpsc::channel::<(String, Vec<String>)>(64);
-    {
-        let conn = conn.clone();
-        let session_id = session_id.clone();
-        let event_tx = event_tx.clone();
+    Ok(AcpStartupMetadata {
+        available_models,
+        initial_model,
+        acp_session_id: acp_session_key,
+    })
+}
+
+fn spawn_prompt_worker(
+    conn: Rc<acp::ClientSideConnection>,
+    session_id: acp::SessionId,
+    event_tx: mpsc::Sender<amux::AcpEvent>,
+    registry: Rc<RefCell<SessionRegistry>>,
+    mut prompt_rx: mpsc::Receiver<(String, Vec<String>)>,
+) {
+    let acp_session_key = session_id.to_string();
+    tokio::task::spawn_local(async move {
+        while let Some((text, attachment_urls)) = prompt_rx.recv().await {
+            let _ = event_tx
+                .send(amux::AcpEvent {
+                    event: Some(amux::acp_event::Event::StatusChange(
+                        amux::AcpStatusChange {
+                            old_status: amux::AgentStatus::Idle as i32,
+                            new_status: amux::AgentStatus::Active as i32,
+                        },
+                    )),
+                    model: String::new(),
+                })
+                .await;
+
+            let mut blocks: Vec<acp::ContentBlock> = vec![text.into()];
+            for url in &attachment_urls {
+                match build_attachment_block(url).await {
+                    Ok(block) => blocks.push(block),
+                    Err(e) => warn!(url = %url, err = %e, "attachment fetch failed; skipping"),
+                }
+            }
+
+            let result = conn
+                .prompt(acp::PromptRequest::new(session_id.clone(), blocks))
+                .await;
+
+            match result {
+                Ok(_) => {
+                    // `prompt()` can resolve before the turn's trailing
+                    // `AgentMessageChunk` notifications have been pushed onto
+                    // `event_tx` (the crate dispatches them on independent
+                    // spawned tasks). Wait for that pipeline to drain so the
+                    // final text is ordered ahead of the Active->Idle marker
+                    // the aggregator uses to close the turn.
+                    await_notifications_drained(&registry, &acp_session_key).await;
+                    let _ = event_tx
+                        .send(amux::AcpEvent {
+                            event: Some(amux::acp_event::Event::StatusChange(
+                                amux::AcpStatusChange {
+                                    old_status: amux::AgentStatus::Active as i32,
+                                    new_status: amux::AgentStatus::Idle as i32,
+                                },
+                            )),
+                            model: String::new(),
+                        })
+                        .await;
+                }
+                Err(e) => {
+                    let details = format!("ACP prompt failed: {e}");
+                    error!("{}", details);
+                    emit_acp_error(&event_tx, "ACP prompt failed", details).await;
+                }
+            }
+        }
+    });
+}
+
+/// Long-lived ACP host: `initialize` once, then `session/new` per AttachSession.
+async fn run_acp_host(
+    binary: String,
+    args: Vec<String>,
+    agent_type: amux::AgentType,
+    extra_env: HashMap<String, String>,
+    mut cmd_rx: mpsc::Receiver<AcpCommand>,
+    host_ready_tx: oneshot::Sender<Result<(), String>>,
+) -> anyhow::Result<()> {
+    let mut cmd = build_acp_process_command(&binary, &args, agent_type, &extra_env);
+    let mut child = cmd
+        .current_dir(".")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("spawn ACP host: {}", e))?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("no stdin"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
+
+    if let Some(stderr) = child.stderr.take() {
         tokio::task::spawn_local(async move {
-            while let Some((text, attachment_urls)) = prompt_rx.recv().await {
-                let _ = event_tx
-                    .send(amux::AcpEvent {
-                        event: Some(amux::acp_event::Event::StatusChange(
-                            amux::AcpStatusChange {
-                                old_status: amux::AgentStatus::Idle as i32,
-                                new_status: amux::AgentStatus::Active as i32,
-                            },
-                        )),
-                        model: String::new(),
-                    })
-                    .await;
-
-                let mut blocks: Vec<acp::ContentBlock> = vec![text.into()];
-                for url in &attachment_urls {
-                    match build_attachment_block(url).await {
-                        Ok(block) => blocks.push(block),
-                        Err(e) => warn!(url = %url, err = %e, "attachment fetch failed; skipping"),
-                    }
-                }
-
-                let result = conn
-                    .prompt(acp::PromptRequest::new(session_id.clone(), blocks))
-                    .await;
-
-                match result {
-                    Ok(_) => {
-                        let _ = event_tx
-                            .send(amux::AcpEvent {
-                                event: Some(amux::acp_event::Event::StatusChange(
-                                    amux::AcpStatusChange {
-                                        old_status: amux::AgentStatus::Active as i32,
-                                        new_status: amux::AgentStatus::Idle as i32,
-                                    },
-                                )),
-                                model: String::new(),
-                            })
-                            .await;
-                    }
-                    Err(e) => {
-                        let details = format!("ACP prompt failed: {e}");
-                        error!("{}", details);
-                        emit_acp_error(&event_tx, "ACP prompt failed", details).await;
-                    }
-                }
+            let mut reader = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                warn!(target: "acp_stderr", "{}", line);
             }
         });
     }
 
-    // Send the initial prompt (skipped when empty — iOS new-session flow
-    // now passes empty initial_prompt and delivers the user's first
-    // message via session/live instead, so the runtime sees only one
-    // copy of the prompt instead of two).
-    if !initial_prompt.is_empty() {
-        let _ = prompt_tx.send((initial_prompt, Vec::new())).await;
-    }
+    info!(binary = %binary, agent_type = ?agent_type, "ACP host process spawned");
 
-    // Command loop: receive commands from the main runtime
-    {
-        let child_wait = child.wait();
-        tokio::pin!(child_wait);
-        loop {
-            tokio::select! {
-                maybe_cmd = cmd_rx.recv() => {
-                    let Some(cmd) = maybe_cmd else {
-                        break;
-                    };
-                    match cmd {
-                        AcpCommand::Prompt { text, attachment_urls } => {
-                            if prompt_tx.send((text, attachment_urls)).await.is_err() {
-                                emit_acp_error(
-                                    &event_tx,
-                                    "ACP prompt failed",
-                                    "ACP prompt worker stopped",
-                                ).await;
+    let registry = Rc::new(RefCell::new(SessionRegistry::default()));
+    let client = AmuxClient {
+        registry: registry.clone(),
+    };
+
+    let (conn, handle_io) =
+        acp::ClientSideConnection::new(client, stdin.compat_write(), stdout.compat(), |fut| {
+            tokio::task::spawn_local(fut);
+        });
+
+    let (fatal_tx, mut fatal_rx) = mpsc::channel::<String>(4);
+    let io_fatal_tx = fatal_tx.clone();
+    tokio::task::spawn_local(async move {
+        let message = match handle_io.await {
+            Ok(()) => "ACP IO task ended".to_string(),
+            Err(e) => format!("ACP IO task ended: {e}"),
+        };
+        warn!("{}", message);
+        let _ = io_fatal_tx.send(message).await;
+    });
+
+    let t_init = Instant::now();
+    conn.initialize(
+        acp::InitializeRequest::new(acp::ProtocolVersion::V1)
+            .client_info(acp::Implementation::new("amuxd", "0.1.0").title("AMUX Daemon")),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("ACP initialize failed: {}", e))?;
+
+    info!(
+        agent_type = ?agent_type,
+        initialize_ms = t_init.elapsed().as_millis() as u64,
+        "ACP host initialized"
+    );
+    let _ = host_ready_tx.send(Ok(()));
+
+    let conn = Rc::new(conn);
+    let mut active_sessions: HashMap<String, ActiveSession> = HashMap::new();
+
+    let child_wait = child.wait();
+    tokio::pin!(child_wait);
+    loop {
+        tokio::select! {
+            maybe_cmd = cmd_rx.recv() => {
+                let Some(cmd) = maybe_cmd else {
+                    break;
+                };
+                match cmd {
+                    AcpCommand::AttachSession {
+                        worktree,
+                        resume_acp_session_id,
+                        mcp_config_path,
+                        initial_model_override,
+                        initial_prompt,
+                        event_tx,
+                        startup_tx,
+                        is_gateway,
+                    } => {
+                        let startup_reporter: StartupReporter =
+                            Arc::new(Mutex::new(Some(startup_tx)));
+                        let attach_result = attach_acp_session_on_conn(
+                            &conn,
+                            &registry,
+                            agent_type,
+                            &worktree,
+                            resume_acp_session_id,
+                            mcp_config_path,
+                            initial_model_override,
+                            event_tx.clone(),
+                            is_gateway,
+                        )
+                        .await;
+
+                        match attach_result {
+                            Ok(meta) => {
+                                let acp_sid = meta.acp_session_id.clone();
+                                let session_id = acp::SessionId::new(acp_sid.clone());
+                                let (prompt_tx, prompt_rx) = mpsc::channel::<(String, Vec<String>)>(64);
+                                spawn_prompt_worker(
+                                    conn.clone(),
+                                    session_id,
+                                    event_tx.clone(),
+                                    registry.clone(),
+                                    prompt_rx,
+                                );
+                                active_sessions.insert(acp_sid.clone(), ActiveSession { prompt_tx });
+                                report_startup(&startup_reporter, Ok(meta));
+                                if !initial_prompt.is_empty() {
+                                    if let Some(active) = active_sessions.get(&acp_sid) {
+                                        let _ = active.prompt_tx.send((initial_prompt, Vec::new())).await;
+                                    }
+                                }
                             }
-                        }
-                        AcpCommand::Cancel => {
-                            if let Err(e) = conn
-                                .cancel(acp::CancelNotification::new(session_id.clone()))
-                                .await
-                            {
-                                warn!("ACP cancel failed: {}", e);
+                            Err(e) => {
+                                let details = format!("{e:#}");
+                                report_startup(&startup_reporter, Err(details.clone()));
+                                emit_acp_error(&event_tx, "ACP attach failed", details).await;
                             }
-                        }
-                        AcpCommand::ResolvePermission { request_id, granted } => {
-                            if let Some(tx) = pending_permissions.borrow_mut().remove(&request_id) {
-                                let _ = tx.send(granted);
-                            } else {
-                                warn!(request_id, "no pending permission request found");
-                            }
-                        }
-                        AcpCommand::SetModel { model_id } => {
-                            let req = acp::SetSessionModelRequest::new(
-                                session_id.clone(),
-                                acp::ModelId::new(model_id.clone()),
-                            );
-                            if let Err(e) = conn.set_session_model(req).await {
-                                warn!(error = %e, model_id = %model_id, "set_session_model failed");
-                            } else {
-                                info!(model_id = %model_id, "set_session_model applied");
-                            }
-                        }
-                        AcpCommand::Shutdown => {
-                            info!("ACP agent shutting down");
-                            break;
                         }
                     }
+                    AcpCommand::Prompt { acp_session_id, text, attachment_urls } => {
+                        if let Some(active) = active_sessions.get(&acp_session_id) {
+                            if active.prompt_tx.send((text, attachment_urls)).await.is_err() {
+                                if let Some(route) = registry.borrow().sessions.get(&acp_session_id) {
+                                    emit_acp_error(
+                                        &route.event_tx,
+                                        "ACP prompt failed",
+                                        "ACP prompt worker stopped",
+                                    ).await;
+                                }
+                            }
+                        } else {
+                            warn!(acp_session_id, "prompt for unknown session");
+                        }
+                    }
+                    AcpCommand::Cancel { acp_session_id } => {
+                        if let Err(e) = conn
+                            .cancel(acp::CancelNotification::new(acp::SessionId::new(acp_session_id)))
+                            .await
+                        {
+                            warn!("ACP cancel failed: {}", e);
+                        }
+                    }
+                    AcpCommand::ResolvePermission { request_id, granted } => {
+                        resolve_permission_in_registry(&registry, &request_id, granted);
+                    }
+                    AcpCommand::SetModel { acp_session_id, model_id } => {
+                        let req = acp::SetSessionModelRequest::new(
+                            acp::SessionId::new(acp_session_id.clone()),
+                            acp::ModelId::new(model_id.clone()),
+                        );
+                        if let Err(e) = conn.set_session_model(req).await {
+                            warn!(error = %e, model_id = %model_id, "set_session_model failed");
+                        } else {
+                            info!(model_id = %model_id, "set_session_model applied");
+                        }
+                    }
+                    AcpCommand::DetachSession { acp_session_id } => {
+                        active_sessions.remove(&acp_session_id);
+                        registry.borrow_mut().sessions.remove(&acp_session_id);
+                        info!(acp_session_id, "ACP session detached from host");
+                    }
+                    AcpCommand::Shutdown => {
+                        info!("ACP host shutting down");
+                        break;
+                    }
                 }
-                Some(message) = fatal_rx.recv() => {
-                    return Err(anyhow::anyhow!(message));
-                }
-                status = &mut child_wait => {
-                    let message = match status {
-                        Ok(status) => format!("ACP agent process exited: {status}"),
-                        Err(e) => format!("ACP agent process wait failed: {e}"),
-                    };
-                    return Err(anyhow::anyhow!(message));
-                }
+            }
+            Some(message) = fatal_rx.recv() => {
+                return Err(anyhow::anyhow!(message));
+            }
+            status = &mut child_wait => {
+                let message = match status {
+                    Ok(status) => format!("ACP host process exited: {status}"),
+                    Err(e) => format!("ACP host process wait failed: {e}"),
+                };
+                return Err(anyhow::anyhow!(message));
             }
         }
     }
 
-    // Clean up: drop the child process (kill_on_drop will handle it)
-    drop(child);
-    info!("ACP agent thread exiting");
+    info!(agent_type = ?agent_type, "ACP host thread exiting");
     Ok(())
+}
+
+/// Legacy single-session helper used by the `amuxd acp` debug CLI.
+/// Production runtimes attach via [`AcpHostPool`] instead.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_acp_agent(
+    binary: String,
+    args: Vec<String>,
+    worktree: String,
+    initial_prompt: String,
+    agent_type: amux::AgentType,
+    event_tx: mpsc::Sender<amux::AcpEvent>,
+    resume_acp_session_id: Option<String>,
+    startup_tx: oneshot::Sender<Result<AcpStartupMetadata, String>>,
+    initial_model_override: Option<String>,
+    mcp_config_path: Option<PathBuf>,
+    extra_env: HashMap<String, String>,
+) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
+    let (host_ready_tx, host_ready_rx) = oneshot::channel();
+    let cmd_tx = spawn_acp_host(binary, args, agent_type, extra_env, host_ready_tx)?;
+    let host_cmd = cmd_tx.clone();
+    std::thread::Builder::new()
+        .name("acp-cli-attach".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("cli attach runtime");
+            rt.block_on(async move {
+                if host_ready_rx.await.ok().and_then(|r| r.ok()).is_some() {
+                    let _ = host_cmd
+                        .send(AcpCommand::AttachSession {
+                            worktree,
+                            resume_acp_session_id,
+                            mcp_config_path,
+                            initial_model_override,
+                            initial_prompt,
+                            event_tx,
+                            startup_tx,
+                            is_gateway: false,
+                        })
+                        .await;
+                }
+            });
+        })
+        .map_err(|e| {
+            crate::error::AmuxError::Agent(format!("failed to spawn CLI attach thread: {}", e))
+        })?;
+    Ok(cmd_tx)
 }
 
 #[cfg(test)]
