@@ -32,6 +32,9 @@ import { ConflictBanner } from "@/components/editors/ConflictBanner";
 import { useSessionStore } from "@/stores/session";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTeamPermissions } from "@/lib/team-permissions";
+import { useTeamModeStore } from '@/stores/team-mode'
+import { GitHistoryProvider } from '@/lib/history/git-provider'
+import { OssHistoryProvider } from '@/lib/history/oss-provider'
 import { gitManager } from "@/lib/git/manager";
 import { Button } from "@/components/ui/button";
 import {
@@ -418,6 +421,15 @@ export function FileEditor({
     if (!norm.startsWith(teamRepoPath + '/')) return null
     return norm.slice(teamRepoPath.length + 1)
   }, [teamRepoPath, filePath])
+
+  const teamModeType = useTeamModeStore((s) => s.teamModeType)
+
+  const historyProvider = useMemo(() => {
+    if (!teamRepoPath || !relativeTeamPath || !workspacePath) return null
+    return teamModeType === 'git'
+      ? new GitHistoryProvider(teamRepoPath, relativeTeamPath, filePath)
+      : new OssHistoryProvider(workspacePath, relativeTeamPath)
+  }, [teamModeType, teamRepoPath, relativeTeamPath, workspacePath, filePath])
 
   // Fetch the file's content from git HEAD for gutter decorations (team files only)
   useEffect(() => {
@@ -889,7 +901,7 @@ export function FileEditor({
       {/* Editor / Diff / Preview - file-type-routed */}
       <div className="flex-1 overflow-hidden">
         {/* History view */}
-        {showHistory && teamRepoPath && relativeTeamPath ? (
+        {showHistory && historyProvider ? (
           <Suspense
             fallback={
               <div className="flex items-center justify-center h-full">
@@ -898,13 +910,12 @@ export function FileEditor({
             }
           >
             <LazyFileHistoryView
-              repoPath={teamRepoPath}
-              relativePath={relativeTeamPath}
+              provider={historyProvider}
               filePath={filePath}
               isDark={isDark}
             />
           </Suspense>
-        ) : isMarkdown && showConflictDiff && conflictAgentContent !== null ? (
+        ) : showHistory ? null : isMarkdown && showConflictDiff && conflictAgentContent !== null ? (
           <Suspense
             fallback={
               <div className="flex items-center justify-center h-full">
