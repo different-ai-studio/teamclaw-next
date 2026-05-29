@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, Bot, CheckCircle2, Loader2, RefreshCw, Save, Shield, Trash2, UserPlus } from 'lucide-react'
+import { AlertCircle, Bot, Check, Loader2, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCurrentTeamStore } from '@/stores/current-team'
@@ -212,18 +212,13 @@ export function DaemonGeneralSection() {
       ) : (
         <>
           <SettingCard>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-                  <Bot className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-[13px] font-medium">{t('settings.daemonGeneral.basicInfo', 'Agent info')}</p>
-                  <p className="text-xs text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent matched to the local device id.')}</p>
-                </div>
+            <div className="space-y-5">
+              <div>
+                <p className="text-[13px] font-semibold">{t('settings.daemonGeneral.basicInfo', 'Agent info')}</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent matched to the local device id.')}</p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.displayName', 'Display name')}</span>
                   <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} disabled={saving || !agent.isOwner} />
@@ -234,7 +229,7 @@ export function DaemonGeneralSection() {
                     value={visibility}
                     onChange={(event) => setVisibility(event.target.value as AgentVisibility)}
                     disabled={saving || !agent.isOwner}
-                    className="h-8 w-full rounded-md border border-input bg-background px-3 text-[13px]"
+                    className="h-9 w-full rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                   >
                     {visibilityOptions.map((option) => (
                       <option key={option} value={option}>{option}</option>
@@ -243,82 +238,78 @@ export function DaemonGeneralSection() {
                 </label>
               </div>
 
-              <div className="space-y-3 rounded-lg border border-border-soft bg-background/50 p-3">
-                <div className="space-y-1.5">
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                   <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.backendTypes', 'Backend types')}</span>
-                  {agent.agentTypes.length === 0 ? (
-                    <p className="text-[13px] text-muted-foreground">
-                      {t('settings.daemonGeneral.noBackends', 'This daemon has not advertised any backend types yet.')}
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {agent.agentTypes.map((type) => {
-                        const isDefault = type === defaultAgentType
-                        return (
-                          <span
-                            key={type}
-                            className={cn(
-                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
-                              isDefault ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-                            )}
-                          >
-                            {isDefault && <CheckCircle2 className="h-3 w-3" />}
-                            {type}
-                          </span>
-                        )
-                      })}
-                    </div>
+                  {agent.isOwner && agent.agentTypes.length > 1 && (
+                    <span className="text-[11px] text-faint">{t('settings.daemonGeneral.backendHint', 'Click a type to make it the default')}</span>
                   )}
                 </div>
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.defaultBackend', 'Default backend')}</span>
-                  <select
-                    value={defaultAgentType}
-                    onChange={(event) => setDefaultAgentType(event.target.value)}
-                    disabled={saving || !agent.isOwner || agent.agentTypes.length === 0}
-                    className="h-8 w-full rounded-md border border-input bg-background px-3 text-[13px] sm:max-w-xs"
-                  >
-                    {!defaultAgentType && (
-                      <option value="">{t('settings.daemonGeneral.defaultBackendPlaceholder', 'Select default backend')}</option>
-                    )}
-                    {agent.agentTypes.map((type) => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
-                </label>
+                {agent.agentTypes.length === 0 ? (
+                  <p className="text-[13px] text-muted-foreground">
+                    {t('settings.daemonGeneral.noBackends', 'This daemon has not advertised any backend types yet.')}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {agent.agentTypes.map((type) => {
+                      const isDefault = type === defaultAgentType
+                      const interactive = agent.isOwner && !saving
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => interactive && setDefaultAgentType(type)}
+                          disabled={!interactive}
+                          aria-pressed={isDefault}
+                          title={isDefault
+                            ? t('settings.daemonGeneral.isDefaultBackend', 'Default backend')
+                            : t('settings.daemonGeneral.setAsDefault', 'Set as default backend')}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 rounded-[7px] px-2.5 py-1 font-mono text-[12px] transition-colors',
+                            isDefault
+                              ? 'bg-foreground text-background'
+                              : 'border border-border bg-paper text-ink-2',
+                            interactive && !isDefault && 'hover:border-foreground/25 hover:bg-selected/50',
+                            !interactive && 'cursor-default',
+                          )}
+                        >
+                          {isDefault && <Check className="h-3 w-3" />}
+                          {type}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
-              <div className="grid gap-2 rounded-lg border border-border-soft bg-background/50 p-3 text-xs sm:grid-cols-[128px_minmax(0,1fr)]">
-                <span className="text-muted-foreground">{t('settings.daemonGeneral.agentId', 'Agent ID')}</span>
-                <code className="break-all font-mono text-foreground">{agent.id}</code>
-                <span className="text-muted-foreground">{t('settings.daemonGeneral.deviceId', 'Device ID')}</span>
-                <code className="break-all font-mono text-foreground">{agent.deviceId || '-'}</code>
-                <span className="text-muted-foreground">{t('settings.daemonGeneral.lastActive', 'Last active')}</span>
-                <span>{formatRelative(agent.lastActiveAt)}</span>
-              </div>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-2.5 border-t border-border-soft pt-4 text-[12px]">
+                <dt className="text-muted-foreground">{t('settings.daemonGeneral.agentId', 'Agent ID')}</dt>
+                <dd className="truncate font-mono text-foreground">{agent.id}</dd>
+                <dt className="text-muted-foreground">{t('settings.daemonGeneral.deviceId', 'Device ID')}</dt>
+                <dd className="truncate font-mono text-foreground">{agent.deviceId || '—'}</dd>
+                <dt className="text-muted-foreground">{t('settings.daemonGeneral.lastActive', 'Last active')}</dt>
+                <dd className="font-mono text-ink-2">{formatRelative(agent.lastActiveAt)}</dd>
+              </dl>
 
-              <Button size="sm" className="gap-1.5" onClick={handleSaveProfile} disabled={saving || !agent.isOwner || !displayName.trim()}>
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                {t('common.save', 'Save')}
-              </Button>
-              {!agent.isOwner && (
-                <p className="text-xs text-muted-foreground">
-                  {t('settings.daemonGeneral.ownerOnly', 'Only the agent owner can edit profile and access settings.')}
-                </p>
-              )}
+              <div className="flex items-center gap-3 border-t border-border-soft pt-4">
+                <Button size="sm" className="gap-1.5" onClick={handleSaveProfile} disabled={saving || !agent.isOwner || !displayName.trim()}>
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {t('common.save', 'Save')}
+                </Button>
+                {!agent.isOwner && (
+                  <p className="text-[11px] text-faint">
+                    {t('settings.daemonGeneral.ownerOnly', 'Only the agent owner can edit profile and access settings.')}
+                  </p>
+                )}
+              </div>
             </div>
           </SettingCard>
 
           <SettingCard>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-                  <Shield className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-[13px] font-medium">{t('settings.daemonGeneral.accessTitle', 'Member access')}</p>
-                  <p className="text-xs text-muted-foreground">{t('settings.daemonGeneral.accessDesc', 'Rows are read from agent_member_access for this daemon agent.')}</p>
-                </div>
+            <div className="space-y-5">
+              <div>
+                <p className="text-[13px] font-semibold">{t('settings.daemonGeneral.accessTitle', 'Member access')}</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">{t('settings.daemonGeneral.accessDesc', 'Rows are read from agent_member_access for this daemon agent.')}</p>
               </div>
 
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
@@ -326,7 +317,7 @@ export function DaemonGeneralSection() {
                   value={memberId}
                   onChange={(event) => setMemberId(event.target.value)}
                   disabled={saving || !agent.isOwner || members.length === 0}
-                  className="h-8 rounded-md border border-input bg-background px-3 text-[13px]"
+                  className="h-9 rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                 >
                   {members.map((member) => (
                     <option key={member.id} value={member.id}>{member.displayName}</option>
@@ -336,13 +327,13 @@ export function DaemonGeneralSection() {
                   value={permissionLevel}
                   onChange={(event) => setPermissionLevel(event.target.value as AgentPermissionLevel)}
                   disabled={saving || !agent.isOwner}
-                  className="h-8 rounded-md border border-input bg-background px-3 text-[13px]"
+                  className="h-9 rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                 >
                   {permissionLevels.map((level) => (
                     <option key={level} value={level}>{level}</option>
                   ))}
                 </select>
-                <Button size="sm" className="h-8 gap-1.5" onClick={handleAddAccess} disabled={saving || !agent.isOwner || !memberId}>
+                <Button size="sm" className="h-9 gap-1.5" onClick={handleAddAccess} disabled={saving || !agent.isOwner || !memberId}>
                   <UserPlus className="h-3.5 w-3.5" />
                   {t('settings.daemonGeneral.addAccess', 'Add')}
                 </Button>
@@ -352,17 +343,17 @@ export function DaemonGeneralSection() {
                 {accessRows.length === 0 ? (
                   <p className="text-[13px] text-muted-foreground">{t('settings.daemonGeneral.noAccess', 'No member access rows yet.')}</p>
                 ) : accessRows.map((row) => (
-                  <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg border border-border-soft bg-background/50 p-3">
+                  <div key={row.id} className="flex items-center justify-between gap-3 rounded-[10px] border border-border-soft bg-background/40 px-3.5 py-2.5">
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium">{row.memberName}</p>
-                      <code className="block truncate font-mono text-xs text-muted-foreground">{row.memberId}</code>
+                      <code className="block truncate font-mono text-[11px] text-faint">{row.memberId}</code>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <select
                         value={row.permissionLevel}
                         onChange={(event) => handleUpdateAccess(row, event.target.value as AgentPermissionLevel)}
                         disabled={saving || !agent.isOwner}
-                        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                        className="h-8 rounded-[7px] border border-border bg-paper px-2 text-xs transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                       >
                         {permissionLevels.map((level) => (
                           <option key={level} value={level}>{level}</option>
