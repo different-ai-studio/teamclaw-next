@@ -12,106 +12,22 @@ For **UI / visual design** work, source-of-truth depends on the platform:
 
 ## Git Workflow
 
+**Never push directly to `main`.** All changes go through a feature branch and a
+Pull Request:
+
+1. Work on a task-scoped branch, never on `main`.
+2. **Wait for the user to explicitly ask you to open the PR.** Do not `git push`
+   or run `gh pr create` on your own initiative, even if the work looks "done"
+   and tests pass. An explicit "open the PR", "ship it", "提 PR", or
+   "可以提 PR 了" is the trigger; absent that, stop after committing and report
+   back.
+3. Do not merge or push to `main` directly, even for small fixes.
+
 If `docs/SDLC.md` exists in this checkout, read it before starting any change.
-It is a local, git-ignored SDLC override for this workspace.
-
-**Never push directly to `main`.** All changes must go through a Pull Request:
-
-1. Create or reuse a project-local worktree under `.worktrees/` before making
-   changes
-2. Do all file edits, verification, and commits inside that worktree
-3. Patch the diff into `.worktrees/preview-integration` so the user can verify
-   it live (see the "Single-preview multi-agent workflow" section below)
-4. **Wait for the user to explicitly ask you to open the PR.** Do not push the
-   branch or run `gh pr create` on your own initiative — even if the worktree
-   work looks "done", tests pass, and the diff has been accepted into preview.
-   An explicit "open the PR", "ship it", "提 PR", or "可以提 PR 了" from the
-   user is the trigger; absent that, stop after the preview-integration commit
-   and report back.
-5. Do not merge or push to `main` directly, even for small fixes
-
-**Why this matters:** the user runs a worktree-develop → preview-integration
-patch → human verification → PR pipeline. Agents that race ahead and open a
-PR before the human has tested the change in preview break that pipeline.
-When in doubt, stop and ask.
-
-**All AI-made changes must happen in a project-local worktree.** Do not edit the
-stable repo checkout directly. If the user asks for a change and you are not
-already inside the right worktree, create one under `.worktrees/<task-slug>` and
-work there. Creating the branch needed for that worktree is part of the normal
-workflow and does not require a separate approval when the user has requested
-the change.
-
-Do not switch branches in an existing checkout to start work. Use
-`scripts/create-agent-worktree.sh <task-slug> <base-ref>` instead of raw
-`git worktree add` so the new checkout gets the local env/config files needed
-for preview and self-test. Keep branches task-scoped and short-lived, then
-remove the worktree after the PR is merged or the task is abandoned.
-
-Local files copied into new worktrees when present:
-
-- `.env` and `.env.local` — root secrets for deploy, backend, Supabase, push,
-  MQTT, and other live/self-test workflows.
-- `packages/app/.env.development.local` — required for the web/desktop Vite
-  preview to get `VITE_SUPABASE_*` and MQTT settings.
-- `apps/daemon/.env` — optional. Set `TEAMCLAW_CLOUD_API_URL` to override the
-  Cloud API endpoint that `amuxd init` POSTs `/v1/invites/claim` to (defaults
-  to the production `https://cloud.ucar.cc`).
-- `apps/expo/.env` — required for Expo when doing mobile work; the tracked
-  `.env.example` is only a template.
-- `apps/android/local.properties` — required for Android builds to find the
-  local SDK.
-
-Tracked config such as `build.config.local.json`, `build.config.production.json`,
-`apps/daemon/.env.example`, `apps/expo/.env.example`, and
-`apps/android/secrets.defaults.properties` comes from git automatically and
-does not need manual copying.
-
-### Single-preview multi-agent workflow
-
-When several agents work in parallel but the user wants only one live
-hot-reload preview, use a dedicated integration worktree. Do not run one dev
-server per agent branch.
-
-Layout:
-
-```text
-teamclaw-v2/                         # stable repo checkout, not edited by agents
-teamclaw-v2/.worktrees/
-  preview-integration/               # the only hot-reload preview worktree
-  agent-<name>-candidate/            # one isolated candidate worktree per agent
-```
-
-Rules:
-
-- Run the single preview instance from `.worktrees/preview-integration` only
-  (`pnpm dev` for frontend preview; use `pnpm tauri:dev` only when native
-  desktop behavior must be checked).
-- Each agent works in its own `agent-<name>-candidate` worktree and does not
-  start a dev server.
-- Candidate worktrees produce diffs. Apply selected diffs into
-  `preview-integration` automatically when the user wants to inspect them.
-- After applying a selected diff to `preview-integration`, commit it
-  immediately as a local WIP commit. Do not leave accepted preview changes as a
-  long-lived unstaged diff.
-- If the user rejects the last applied candidate, revert the corresponding WIP
-  commit from `preview-integration`.
-- If the user wants to continue forward, apply the next candidate diff on top
-  of the existing accepted WIP commits.
-- When all accepted changes look good, open the PR from the
-  `preview-integration` branch. The accepted diffs are the PR contents.
-- After the PR is merged and no local work needs to be preserved, remove the
-  preview and candidate worktrees.
-
-Keep the integration branch fresh:
-
-- Rebase `preview-integration` onto `origin/main` before starting a new round of
-  agent candidates.
-- Rebase again after every few accepted WIP commits if other people are landing
-  related changes.
-- Rebase immediately before opening the PR.
-- If rebase conflicts appear, stop applying new candidate diffs until the
-  integration worktree is reconciled with `origin/main`.
+It is a local, git-ignored SDLC override that can layer additional personal
+workflow (e.g. worktree + preview-integration conventions) on top of the rules
+above. It is intentionally not checked in, so it only affects the workspace that
+has it.
 
 ## Project Overview
 
