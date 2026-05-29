@@ -25,7 +25,7 @@ interface TeamRankingCardProps {
 export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
   const { t } = useTranslation()
   const [leaderboard, setLeaderboard] = React.useState<TeamLeaderboard | null>(null)
-  const [currentMemberName, setCurrentMemberName] = React.useState<string | null>(null)
+  const [currentActorId, setCurrentActorId] = React.useState<string | null>(null)
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
 
   React.useEffect(() => {
@@ -39,8 +39,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
         if (userId) {
           const actorId = await resolveCurrentMemberActorId(teamId, userId)
           if (actorId) {
-            const me = leaderboardResult.members.find((m) => m.memberId === actorId)
-            setCurrentMemberName(me?.memberName ?? null)
+            setCurrentActorId(actorId)
           }
         }
       } catch {
@@ -58,15 +57,15 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
   React.useEffect(() => {
     if (!teamModeType) {
       setLeaderboard(null)
-      setCurrentMemberName(null)
+      setCurrentActorId(null)
     }
   }, [teamModeType])
 
   // Calculate current user's rank
   const currentMember = React.useMemo(() => {
-    if (!leaderboard?.members || !currentMemberName) return null
-    return leaderboard.members.find((m) => m.memberName === currentMemberName)
-  }, [leaderboard, currentMemberName])
+    if (!leaderboard?.members || !currentActorId) return null
+    return leaderboard.members.find((m) => m.memberId === currentActorId)
+  }, [leaderboard, currentActorId])
 
   const ranks = React.useMemo(() => {
     if (!leaderboard?.members || !currentMember) {
@@ -91,28 +90,28 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
 
     const tokenRanks = buildSharedRankMap({
       items: membersWithAggregated,
-      getKey: (member) => member.memberName,
+      getKey: (member) => member.memberId,
       getScore: (member) => member.aggregated.totalTokens,
     })
     const feedbackRanks = buildSharedRankMap({
       items: membersWithAggregated,
-      getKey: (member) => member.memberName,
+      getKey: (member) => member.memberId,
       getScore: (member) => member.aggregated.totalFeedbacks,
     })
 
     // Overall rank is still based on the average metric rank, but tied averages now share the same place.
     const memberRanks = membersWithAggregated.map((member) => ({
-      memberName: member.memberName,
-      avgRank: ((tokenRanks.get(member.memberName) ?? 0) + (feedbackRanks.get(member.memberName) ?? 0)) / 2,
+      memberId: member.memberId,
+      avgRank: ((tokenRanks.get(member.memberId) ?? 0) + (feedbackRanks.get(member.memberId) ?? 0)) / 2,
     }))
     const overallRanks = buildSharedRankMap({
       items: memberRanks,
-      getKey: (member) => member.memberName,
+      getKey: (member) => member.memberId,
       getScore: (member) => member.avgRank,
       direction: 'asc',
     })
 
-    const currentMemberKey = currentMemberName ?? ''
+    const currentMemberKey = currentActorId ?? ''
     const tokenRank = tokenRanks.get(currentMemberKey) ?? 0
     const feedbackRank = feedbackRanks.get(currentMemberKey) ?? 0
     const overallRank = overallRanks.get(currentMemberKey) ?? 0
@@ -123,7 +122,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
       overallRank,
       totalMembers: leaderboard.members.length,
     }
-  }, [leaderboard, currentMember, currentMemberName])
+  }, [leaderboard, currentMember, currentActorId])
 
   const { overallRank, totalMembers, tokenRank, feedbackRank } = ranks
 
