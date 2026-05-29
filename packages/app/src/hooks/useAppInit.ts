@@ -523,12 +523,6 @@ export function useGitReposInit() {
       } catch (err: unknown) {
         console.warn("[App] Failed to load current team member identity (non-critical):", err);
       }
-
-      try {
-        await useTeamMembersStore.getState().loadMembers();
-      } catch (err: unknown) {
-        console.warn("[App] Failed to load team members for shortcut roles (non-critical):", err);
-      }
     })();
 
     return () => {
@@ -560,12 +554,6 @@ export function useGitReposInit() {
         await useTeamMembersStore.getState().loadCurrentNodeId();
       } catch (err: unknown) {
         console.warn("[App] Failed to refresh current team member identity (non-critical):", err);
-      }
-
-      try {
-        await useTeamMembersStore.getState().loadMembers();
-      } catch (err: unknown) {
-        console.warn("[App] Failed to refresh team members for shortcut roles (non-critical):", err);
       }
     };
 
