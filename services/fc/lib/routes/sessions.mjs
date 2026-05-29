@@ -69,6 +69,11 @@ export function registerSessions(router) {
     return { statusCode: 204, body: null };
   });
 
+  router.get("/v1/me/bootstrap", async (ctx) => {
+    const out = await ctx.repository.getMeBootstrap();
+    return { body: out };
+  });
+
   router.get("/v1/teams/:teamId/sessions", async (ctx) => {
     const teamId = decodeURIComponent(ctx.params.teamId);
     const items = await ctx.repository.listTeamSessionsFull(teamId);

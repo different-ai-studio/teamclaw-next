@@ -1,4 +1,4 @@
-import { ApiError, extractBearerToken } from "../http-utils.mjs";
+import { ApiError, extractBearerToken, optionalBearerToken } from "../http-utils.mjs";
 
 export function registerAuth(router) {
   router.post("/v1/auth/refresh", { auth: "none" }, async (ctx) => {
@@ -59,6 +59,27 @@ export function registerAuth(router) {
     }
     const body = ctx.json ?? {};
     const out = await ctx.repository.updateUser({ accessToken, body });
+    return { body: out };
+  });
+
+  // Native OIDC sign-in (Apple / Google id_token grant). When a bearer token
+  // is supplied, GoTrue links the identity to the current user instead of
+  // creating a new one — this powers the anonymous → Apple upgrade path.
+  router.post("/v1/auth/signin-idtoken", { auth: "none" }, async (ctx) => {
+    const body = ctx.json ?? {};
+    if (!body.provider || typeof body.provider !== "string") {
+      throw new ApiError(400, "validation_failed", "provider is required");
+    }
+    if (!body.idToken || typeof body.idToken !== "string") {
+      throw new ApiError(400, "validation_failed", "idToken is required");
+    }
+    const accessToken = optionalBearerToken(ctx.event.headers);
+    const out = await ctx.repository.signInWithIdToken({
+      provider: body.provider,
+      idToken: body.idToken,
+      nonce: body.nonce ?? null,
+      accessToken: accessToken ?? null,
+    });
     return { body: out };
   });
 }
