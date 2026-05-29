@@ -7,7 +7,6 @@ import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 const mocks = vi.hoisted(() => ({
   agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null; session_id?: string | null }>,
   runtimeStates: {} as Record<string, unknown>,
-  providerModels: [] as Array<{ provider: string; id: string; name: string }>,
   queriedTeamIds: [] as string[],
 }))
 
@@ -43,11 +42,6 @@ vi.mock('@/stores/runtime-state-store', () => ({
     selector({ byRuntimeId: mocks.runtimeStates }),
 }))
 
-vi.mock('@/stores/provider', () => ({
-  useProviderStore: (selector: (s: unknown) => unknown) =>
-    selector({ models: mocks.providerModels }),
-}))
-
 vi.mock('@/lib/teamclaw-rpc', () => ({
   setModel: vi.fn(),
 }))
@@ -57,7 +51,6 @@ describe('AgentSelectorDock', () => {
     vi.clearAllMocks()
     mocks.agentRuntimeRows = []
     mocks.runtimeStates = {}
-    mocks.providerModels = []
     mocks.queriedTeamIds = []
     useAgentModelPickStore.setState({ bySessionAgent: {} })
   })
@@ -94,15 +87,6 @@ describe('AgentSelectorDock', () => {
     expect(resolveAgentAvailableModels({
       availableModels: [{ id: 'm-1', displayName: 'Model One' }],
     } as any)).toEqual([{ id: 'm-1', displayName: 'Model One' }])
-  })
-
-  it('uses static Claude models from backend_type when MQTT retain is missing', () => {
-    const models = resolveAgentAvailableModels(undefined, 'claude-code', [])
-    expect(models.map((m) => m.id)).toEqual([
-      'claude-haiku-4-5',
-      'claude-sonnet-4-6',
-      'claude-opus-4-7',
-    ])
   })
 
   it('loads runtime mapping for the displayed session id instead of legacy global state', async () => {
@@ -190,7 +174,7 @@ describe('AgentSelectorDock', () => {
     expect(screen.queryByText('old-model')).not.toBeInTheDocument()
   })
 
-  it('uses dynamic provider-store models for the agent backend while waiting for runtime advertised models', async () => {
+  it('shows loading when runtime has not advertised ACP models yet', async () => {
     mocks.agentRuntimeRows = [
       { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'session-1' },
     ]
@@ -204,27 +188,16 @@ describe('AgentSelectorDock', () => {
         },
       },
     }
-    mocks.providerModels = [
-      { provider: 'opencode', id: 'opencode/qwen3.6-plus-free', name: 'OpenCode Zen/Qwen3.6 Plus Free' },
-      { provider: 'scnet', id: 'minimax-m2.5', name: 'MiniMax-M2.5' },
-      { provider: 'claude-code', id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-    ]
 
     render(
       <AgentSelectorDock
         activeSessionId="session-1"
-        engagedAgents={[
-          { id: 'a-1', displayName: 'OpenCode Bot' },
-        ]}
+        engagedAgents={[{ id: 'a-1', displayName: 'OpenCode Bot' }]}
         onRemoveAgent={vi.fn()}
       />,
     )
 
-    await screen.findByText('OpenCode Zen/Qwen3.6 Plus Free')
-    await userEvent.click(screen.getByRole('button', { name: /OpenCode Bot/i }))
-
-    expect((await screen.findAllByText('OpenCode Zen/Qwen3.6 Plus Free')).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('MiniMax-M2.5')).toBeInTheDocument()
-    expect(screen.queryByText('Claude Sonnet 4.6')).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: /OpenCode Bot/i }))
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
   })
 })
