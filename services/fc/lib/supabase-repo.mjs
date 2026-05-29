@@ -406,6 +406,22 @@ async heartbeat() {
       if (error) throw error;
     },
 
+    async writeForegroundPresence({ deviceId, foregroundUntil }) {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) {
+        throw new ApiError(401, "unauthorized", "no authenticated user");
+      }
+      const { error } = await supabase
+        .from("client_presence")
+        .upsert(
+          { user_id: userId, device_id: deviceId, foreground_until: foregroundUntil },
+          { onConflict: "user_id,device_id" }
+        );
+      if (error) throw error;
+    },
+
     async listShortcuts(teamId, { parentId } = {}) {
       let query = supabase
         .from("shortcuts")

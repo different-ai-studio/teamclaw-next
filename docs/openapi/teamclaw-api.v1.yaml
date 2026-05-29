@@ -761,6 +761,37 @@ paths:
           description: OK
         "401":
           $ref: "#/components/responses/Error"
+  /v1/presence/foreground:
+    post:
+      operationId: writeForegroundPresence
+      summary: Report that a client device is in the foreground until a deadline
+      description: |
+        Upserts a `client_presence` row keyed by (user_id, device_id). The
+        push dispatcher reads this row to suppress notifications while the
+        device is in the foreground.
+      tags: [System]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, foregroundUntil]
+              properties:
+                deviceId:
+                  type: string
+                  description: Stable per-installation device identifier.
+                foregroundUntil:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp until which the device should be treated as foreground.
+      responses:
+        "204":
+          description: Presence recorded.
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/config/bootstrap:
     get:
       operationId: getBootstrapConfig
