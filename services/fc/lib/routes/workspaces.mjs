@@ -20,7 +20,8 @@ export function registerWorkspaces(router) {
     const limit = parseWorkspaceLimit(ctx.query.get("limit"));
     const cursorStr = ctx.query.get("cursor");
     const cursor = cursorStr ? decodeWorkspaceCursor(cursorStr) : null;
-    const page = await ctx.repository.listWorkspaces({ teamId, limit, cursor });
+    const agentId = ctx.query.get("agentId");
+    const page = await ctx.repository.listWorkspaces({ teamId, limit, cursor, agentId });
     const nextCursor = nextWorkspaceCursor(page.items, limit);
     return { body: { items: page.items, nextCursor } };
   });
@@ -34,7 +35,10 @@ export function registerWorkspaces(router) {
       id: body.id,
       teamId: body.teamId,
       name: body.name,
-      slug: body.slug ?? null,
+      path: body.path ?? body.slug ?? null,
+      agentId: body.agentId ?? null,
+      createdByMemberId: body.createdByMemberId ?? null,
+      slug: body.slug ?? body.path ?? null,
       archived: body.archived ?? false,
     });
     return { body: w };

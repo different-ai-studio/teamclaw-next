@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const backendMocks = vi.hoisted(() => ({
   listDaemonWorkspaces: vi.fn().mockResolvedValue([]),
+  createDaemonWorkspace: vi.fn(),
 }))
 
 vi.mock('@/lib/backend', () => ({
   getBackend: () => ({
     workspaces: {
       listDaemonWorkspaces: backendMocks.listDaemonWorkspaces,
+      createDaemonWorkspace: backendMocks.createDaemonWorkspace,
     },
     runtime: {
       fetchLatestRuntimeForSession: vi.fn(),
@@ -21,6 +23,7 @@ vi.mock('@/lib/backend', () => ({
 import {
   resolveAgentRuntimeWorkspaceId,
   resolveCloudWorkspaceIdForLocalPath,
+  ensureCloudWorkspaceIdForAgentRuntime,
   runtimeStartWorkspaceArgs,
 } from '../resolve-runtime-start-workspace'
 
@@ -81,7 +84,7 @@ describe('resolveCloudWorkspaceIdForLocalPath', () => {
     backendMocks.listDaemonWorkspaces.mockResolvedValue([])
   })
 
-  it('matches cloud workspace by daemon path', async () => {
+  it('matches cloud workspace when API returns legacy slug field', async () => {
     backendMocks.listDaemonWorkspaces.mockResolvedValue([
       {
         id: 'ws-cloud',
@@ -98,5 +101,43 @@ describe('resolveCloudWorkspaceIdForLocalPath', () => {
     await expect(
       resolveCloudWorkspaceIdForLocalPath('team-1', '~/TeamClaw'),
     ).resolves.toBe('ws-cloud')
+  })
+})
+
+describe('ensureCloudWorkspaceIdForAgentRuntime', () => {
+  beforeEach(() => {
+    backendMocks.listDaemonWorkspaces.mockReset()
+    backendMocks.createDaemonWorkspace.mockReset()
+    backendMocks.listDaemonWorkspaces.mockResolvedValue([])
+  })
+
+  it('creates a cloud workspace when lookup and path match both fail', async () => {
+    backendMocks.createDaemonWorkspace.mockResolvedValue({
+      id: 'ws-new',
+      team_id: 'team-1',
+      agent_id: 'agent-1',
+      name: 'TeamClaw',
+      path: '/Users/me/TeamClaw',
+      archived: false,
+      created_at: '',
+      updated_at: '',
+    })
+
+    await expect(
+      ensureCloudWorkspaceIdForAgentRuntime({
+        teamId: 'team-1',
+        agentActorId: 'agent-1',
+        localWorkspacePath: '/Users/me/TeamClaw',
+        createdByMemberId: 'member-1',
+      }),
+    ).resolves.toBe('ws-new')
+
+    expect(backendMocks.createDaemonWorkspace).toHaveBeenCalledWith({
+      teamId: 'team-1',
+      agentId: 'agent-1',
+      createdByMemberId: 'member-1',
+      name: 'TeamClaw',
+      path: '/Users/me/TeamClaw',
+    })
   })
 })

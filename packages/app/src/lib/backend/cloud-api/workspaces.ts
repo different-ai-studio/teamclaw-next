@@ -7,6 +7,8 @@ type CloudWorkspace = {
   agentId?: string | null;
   createdByMemberId?: string | null;
   name: string;
+  /** Legacy API field — filesystem path is stored here in FC responses. */
+  slug?: string | null;
   path?: string | null;
   archived: boolean;
   createdAt: string | null;
@@ -15,6 +17,10 @@ type CloudWorkspace = {
 
 type Page<T> = { items: T[]; nextCursor: string | null };
 
+function workspacePathFromCloud(row: Pick<CloudWorkspace, "path" | "slug">): string | null {
+  return row.path?.trim() || row.slug?.trim() || null;
+}
+
 function mapWorkspace(row: CloudWorkspace): DaemonWorkspaceBackendRow {
   return {
     id: row.id,
@@ -22,7 +28,7 @@ function mapWorkspace(row: CloudWorkspace): DaemonWorkspaceBackendRow {
     agent_id: row.agentId ?? null,
     created_by_member_id: row.createdByMemberId ?? null,
     name: row.name,
-    path: row.path ?? null,
+    path: workspacePathFromCloud(row),
     archived: row.archived,
     created_at: row.createdAt ?? new Date().toISOString(),
     updated_at: row.updatedAt ?? new Date().toISOString(),
@@ -34,12 +40,12 @@ export function createWorkspacesModule(client: CloudApiClient): WorkspacesBacken
     async listWorkspacesByIds(teamId, workspaceIds) {
       if (workspaceIds.length === 0) return [];
       const out = await client.post<{
-        items: Array<{ id: string; name: string | null; path: string | null }>;
+        items: Array<{ id: string; name: string | null; path?: string | null; slug?: string | null }>;
       }>(`/v1/workspaces/by-ids`, { teamId, ids: workspaceIds });
       return (out.items ?? []).map((r) => ({
         id: r.id,
         name: r.name ?? null,
-        path: r.path ?? null,
+        path: r.path?.trim() || r.slug?.trim() || null,
       }));
     },
     async listDaemonWorkspaces(teamId, agentId) {

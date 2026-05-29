@@ -14,7 +14,8 @@ const DEFAULT_ATTACHMENT_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
-const WORKSPACE_COLUMNS = "id, team_id, name, path, archived, created_at, updated_at";
+const WORKSPACE_COLUMNS =
+  "id, team_id, name, path, agent_id, created_by_member_id, archived, created_at, updated_at";
 
 export function createSupabaseBusinessRepository(options) {
   const {
@@ -298,7 +299,7 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
-    async listWorkspaces({ teamId, limit = 50, cursor = null } = {}) {
+    async listWorkspaces({ teamId, limit = 50, cursor = null, agentId = null } = {}) {
       let query = supabase
         .from("workspaces")
         .select(WORKSPACE_COLUMNS)
@@ -306,6 +307,9 @@ export function createSupabaseBusinessRepository(options) {
         .order("updated_at", { ascending: false })
         .order("id", { ascending: false })
         .limit(limit + 1);
+      if (agentId) {
+        query = query.eq("agent_id", agentId);
+      }
       if (cursor?.updatedAt) {
         query = query.lt("updated_at", cursor.updatedAt);
       }
@@ -320,7 +324,9 @@ export function createSupabaseBusinessRepository(options) {
         id: input.id,
         team_id: input.teamId,
         name: input.name,
-        path: input.slug ?? input.path ?? null,
+        path: input.path ?? input.slug ?? null,
+        agent_id: input.agentId ?? null,
+        created_by_member_id: input.createdByMemberId ?? null,
         archived: input.archived ?? false,
       };
       const { data, error } = await supabase
@@ -2189,11 +2195,15 @@ function requiredString(value, operation, field) {
 }
 
 function mapWorkspace(row) {
+  const path = row?.path ?? null;
   return {
     id: requiredString(row?.id, "workspaces.mapWorkspace", "id"),
     teamId: requiredString(row?.team_id, "workspaces.mapWorkspace", "team_id"),
     name: requiredString(row?.name, "workspaces.mapWorkspace", "name"),
-    slug: row?.path ?? null,
+    path,
+    slug: path,
+    agentId: row?.agent_id ?? null,
+    createdByMemberId: row?.created_by_member_id ?? null,
     archived: row?.archived === true,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
