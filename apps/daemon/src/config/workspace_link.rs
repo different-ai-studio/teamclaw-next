@@ -105,11 +105,92 @@ fn junction_create(link: &Path, target: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Migration placeholder — replaced in Task 4.
-fn migrate_legacy_dir(_link: &Path, _target: &Path) -> LinkStatus {
-    LinkStatus::LegacyDirRetained {
-        reason: "migration not yet implemented".into(),
+/// A legacy real `teamclaw-team/` dir was found. If it has no un-synced
+/// changes, consolidate it into the global dir and replace it with a symlink.
+/// If it is dirty, leave it untouched and report it for the UI to resolve.
+fn migrate_legacy_dir(link: &Path, target: &Path) -> LinkStatus {
+    if is_dirty(link) {
+        return LinkStatus::LegacyDirRetained {
+            reason: "uncommitted or unsynced changes".into(),
+        };
     }
+
+    // Seed the global dir from the legacy content only when global is still
+    // empty (first workspace wins); otherwise the global copy is authoritative.
+    if global_is_empty(target) {
+        if let Err(e) = copy_dir_contents(link, target) {
+            tracing::warn!("seed global from legacy {} failed: {e}", link.display());
+            return LinkStatus::LegacyDirRetained {
+                reason: format!("seed-global failed: {e}"),
+            };
+        }
+    }
+
+    // Remove the now-redundant clean legacy dir and replace with a link.
+    if let Err(e) = std::fs::remove_dir_all(link) {
+        tracing::warn!("remove legacy dir {} failed: {e}", link.display());
+        return LinkStatus::LegacyDirRetained {
+            reason: format!("remove legacy dir failed: {e}"),
+        };
+    }
+    create_link(link, target)
+}
+
+/// Dirty = a git repo with `git status --porcelain` output. Non-git dirs are
+/// treated as clean here (their content seeds/defers to the global copy).
+fn is_dirty(dir: &Path) -> bool {
+    if dir.join(".git").exists() {
+        let out = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(dir)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output();
+        return match out {
+            Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
+            Err(_) => true, // can't tell → keep it
+        };
+    }
+    false
+}
+
+/// The global dir counts as empty when it is missing, has no entries, or holds
+/// only the empty fixed-prefix scaffold dirs created by `ensure_initialized`.
+fn global_is_empty(target: &Path) -> bool {
+    match std::fs::read_dir(target) {
+        Ok(entries) => entries.into_iter().all(|e| {
+            e.ok()
+                .map(|e| {
+                    let p = e.path();
+                    p.is_dir()
+                        && std::fs::read_dir(&p)
+                            .map(|mut r| r.next().is_none())
+                            .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        }),
+        Err(_) => true,
+    }
+}
+
+fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            if src.file_name().and_then(|n| n.to_str()) == Some(".git") {
+                continue; // don't drag a workspace-local .git into the shared copy
+            }
+            std::fs::create_dir_all(&dst)?;
+            copy_dir_contents(&src, &dst)?;
+        } else {
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -179,5 +260,59 @@ mod tests {
             std::fs::read_link(&link).unwrap(),
             global_team_store::global_team_dir("team-1")
         );
+    }
+
+    fn run_git(cwd: &std::path::Path, args: &[&str]) {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migrates_clean_legacy_dir_into_empty_global() {
+        let (_home, _guard) = temp_home();
+        let ws = tempfile::tempdir().unwrap();
+        let legacy = ws.path().join("teamclaw-team");
+        std::fs::create_dir_all(legacy.join("skills")).unwrap();
+        std::fs::write(legacy.join("skills/a.md"), b"hello").unwrap();
+
+        let status = ensure_workspace_link(ws.path(), "team-mig");
+        assert_eq!(status, LinkStatus::Linked(LinkKind::Symlink));
+        // Content moved into the global dir.
+        let global = global_team_store::global_team_dir("team-mig");
+        assert_eq!(std::fs::read(global.join("skills/a.md")).unwrap(), b"hello");
+        // Workspace entry is now a symlink, not a real dir.
+        assert!(std::fs::symlink_metadata(&legacy)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retains_dirty_legacy_git_dir() {
+        let (_home, _guard) = temp_home();
+        let ws = tempfile::tempdir().unwrap();
+        let legacy = ws.path().join("teamclaw-team");
+        std::fs::create_dir_all(&legacy).unwrap();
+        // Make it a git repo with an uncommitted change → "dirty".
+        run_git(&legacy, &["init", "-q"]);
+        std::fs::write(legacy.join("dirty.txt"), b"x").unwrap();
+
+        let status = ensure_workspace_link(ws.path(), "team-dirty");
+        match status {
+            LinkStatus::LegacyDirRetained { .. } => {}
+            other => panic!("expected LegacyDirRetained, got {other:?}"),
+        }
+        // Real dir untouched.
+        assert!(legacy.is_dir());
+        assert!(!std::fs::symlink_metadata(&legacy)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 }
