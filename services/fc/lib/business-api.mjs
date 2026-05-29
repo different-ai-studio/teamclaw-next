@@ -47,7 +47,7 @@ export async function handleBusinessApiRequest(event, deps) {
           "Location": result.redirect,
           "X-Request-Id": requestId,
         },
-        body: null,
+        body: "",
       };
     }
     return jsonResponse(result.statusCode ?? 200, result.body, requestId);

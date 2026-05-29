@@ -63,3 +63,27 @@ test("POST /v1/auth/oauth/exchange rejects missing fields", async () => {
   }, authDeps(async () => new Response("{}", { status: 200 })));
   assert.equal(res.statusCode, 400);
 });
+
+test("GET /v1/auth/oauth/google/authorize 400s when redirect is missing", async () => {
+  const deps = authDeps(async () => new Response("{}", { status: 200 }));
+  const res = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/auth/oauth/google/authorize",
+    queryParameters: { code_challenge: "CH" },
+    headers: {},
+    body: null,
+  }, deps);
+  assert.equal(res.statusCode, 400);
+});
+
+test("GET /v1/auth/oauth/google/authorize 400s when code_challenge is missing", async () => {
+  const deps = authDeps(async () => new Response("{}", { status: 200 }));
+  const res = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/auth/oauth/google/authorize",
+    queryParameters: { redirect: "teamclaw://auth-callback" },
+    headers: {},
+    body: null,
+  }, deps);
+  assert.equal(res.statusCode, 400);
+});
