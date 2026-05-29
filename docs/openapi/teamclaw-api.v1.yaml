@@ -2163,7 +2163,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [messageId, actorId, kind]
+              required: [messageId, actorId, teamId, kind]
               properties:
                 messageId:
                   type: string
@@ -2171,16 +2171,24 @@ paths:
                 actorId:
                   type: string
                   format: uuid
+                teamId:
+                  type: string
+                  format: uuid
+                sessionId:
+                  type:
+                    - string
+                    - "null"
+                  format: uuid
                 kind:
                   type: string
-                  enum: [up, down, star]
+                  enum: [positive, negative]
                 starRating:
                   type:
                     - integer
                     - "null"
                   minimum: 1
                   maximum: 5
-                note:
+                skill:
                   type:
                     - string
                     - "null"
@@ -2273,6 +2281,96 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/LeaderboardEntry"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/session-report:
+    post:
+      operationId: submitSessionReport
+      summary: Submit a completed-session telemetry report
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, teamId, sessionId, tokensUsed, costUsd]
+              properties:
+                actorId: { type: string, format: uuid }
+                teamId: { type: string, format: uuid }
+                sessionId: { type: string, format: uuid }
+                tokensUsed: { type: integer }
+                costUsd: { type: number }
+                model: { type: [string, "null"] }
+                agentKind: { type: [string, "null"] }
+                endedAt: { type: [string, "null"], format: date-time }
+                skillUsage:
+                  type: object
+                  additionalProperties: { type: integer }
+      responses:
+        "201":
+          description: Report stored
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/skill-usage:
+    post:
+      operationId: submitSkillUsage
+      summary: Increment per-skill usage for an actor
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, teamId, skill]
+              properties:
+                actorId: { type: string, format: uuid }
+                teamId: { type: string, format: uuid }
+                sessionId: { type: [string, "null"], format: uuid }
+                skill: { type: string }
+                count: { type: integer, minimum: 1, default: 1 }
+      responses:
+        "201":
+          description: Skill usage recorded
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/feedback-summary:
+    get:
+      operationId: listFeedbackSummary
+      summary: Per-actor feedback counts for a team
+      tags: [Telemetry]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: teamId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Feedback summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [actorId, positive, negative, total]
+                      properties:
+                        actorId: { type: string, format: uuid }
+                        displayName: { type: [string, "null"] }
+                        positive: { type: integer }
+                        negative: { type: integer }
+                        total: { type: integer }
         "401":
           $ref: "#/components/responses/Error"
   /v1/directory/current-member-actor:
@@ -3721,25 +3819,30 @@ components:
         actorId:
           type: string
           format: uuid
+        teamId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        sessionId:
+          type:
+            - string
+            - "null"
+          format: uuid
         kind:
           type: string
-          enum: [up, down, star]
+          enum: [positive, negative]
         starRating:
           type:
             - integer
             - "null"
           minimum: 1
           maximum: 5
-        note:
+        skill:
           type:
             - string
             - "null"
         createdAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        updatedAt:
           type:
             - string
             - "null"
@@ -3756,16 +3859,26 @@ components:
             - string
             - "null"
           format: uuid
-        period:
-          type: string
-          enum: [day, week, month]
-        score:
-          type: number
-        rank:
-          type:
-            - integer
-            - "null"
         displayName:
           type:
             - string
             - "null"
+        period:
+          type: string
+          enum: [day, week, month]
+        tokensUsed:
+          type: number
+        costUsd:
+          type: number
+        positiveFeedback:
+          type: integer
+        negativeFeedback:
+          type: integer
+        sessionCount:
+          type: integer
+        skillUsage:
+          type: object
+          additionalProperties:
+            type: integer
+        score:
+          type: number

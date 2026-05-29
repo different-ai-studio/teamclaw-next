@@ -1316,12 +1316,12 @@ test("POST /v1/feedback happy path returns 201", async () => {
     httpMethod: "POST",
     path: "/v1/feedback",
     headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
-    body: JSON.stringify({ messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "star", starRating: 5, note: "great" }),
+    body: JSON.stringify({ messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", teamId: "00000000-0000-0000-0000-000000000003", kind: "positive", starRating: 5, note: "great" }),
   }, { createRepository: () => repo });
   assert.equal(response.statusCode, 201);
   const parsed = JSON.parse(response.body);
-  assert.equal(parsed.kind, "star");
-  assert.deepEqual(repo.calls[0], { method: "submitFeedback", body: { messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "star", starRating: 5, note: "great" } });
+  assert.equal(parsed.kind, "positive");
+  assert.deepEqual(repo.calls[0], { method: "submitFeedback", body: { messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", teamId: "00000000-0000-0000-0000-000000000003", kind: "positive", starRating: 5, note: "great" } });
 });
 
 test("GET /v1/feedback returns 400 when sessionId is missing", async () => {

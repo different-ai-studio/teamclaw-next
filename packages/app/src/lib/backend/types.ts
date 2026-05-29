@@ -631,10 +631,7 @@ export interface SyncBackend {
 }
 
 export interface TelemetryFeedbackDeleteInput {
-  actor_id: string;
-  team_id: string;
-  message_id: string;
-  kind: "thumb" | "star";
+  messageId: string;
 }
 
 export interface TelemetryBackend {
@@ -643,7 +640,8 @@ export interface TelemetryBackend {
   listFeedbacks(input: { teamId: string; sessionId: string }): Promise<Array<Record<string, unknown>>>;
   listFeedbackSummary(teamId: string): Promise<Array<Record<string, unknown>>>;
   insertSessionReport(input: Record<string, unknown>): Promise<void>;
-  listLeaderboard(teamId: string): Promise<Array<Record<string, unknown>>>;
+  insertSkillUsage(input: Record<string, unknown>): Promise<void>;
+  listLeaderboard(teamId: string, period?: "day" | "week" | "month"): Promise<Array<Record<string, unknown>>>;
 }
 
 export interface TeamClawBackend {
