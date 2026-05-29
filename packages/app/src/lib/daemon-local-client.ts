@@ -79,7 +79,10 @@ async function _fetchConnection(): Promise<DaemonConnection | null> {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${info.root_token}`,
       },
-      body: JSON.stringify({ scopes: ['workspace:read', 'workspace:write'], ttl_secs: 3600 }),
+      body: JSON.stringify({
+        scopes: ['workspace:read', 'workspace:write', 'sessions:read', 'sessions:write', 'events:read'],
+        ttl_seconds: 3600,
+      }),
     })
     if (!resp.ok) {
       console.warn('[daemon-local-client] token exchange failed:', resp.status)
@@ -104,16 +107,50 @@ export function invalidateDaemonConnection(): void {
   _connection = null
 }
 
-/** True when the local daemon HTTP server responds to `/v1/healthz`. */
-export async function isDaemonHttpAvailable(): Promise<boolean> {
-  const conn = await getConnection()
-  if (!conn) return false
+export type DaemonHttpProbe =
+  | { ok: true; baseUrl: string }
+  | { ok: false; reason: 'not_tauri' | 'port_file_missing' | 'token_exchange_failed' | 'health_check_failed' | 'ipc_error' }
+
+/** Probe daemon HTTP and return a specific failure reason for UI messaging. */
+export async function probeDaemonHttp(): Promise<DaemonHttpProbe> {
+  if (!isTauri()) return { ok: false, reason: 'not_tauri' }
+
+  let info: DaemonHttpInfo | null = null
+  try {
+    info = await invoke<DaemonHttpInfo | null>('get_daemon_http_info')
+  } catch (err) {
+    console.warn('[daemon-local-client] get_daemon_http_info failed:', err)
+    return { ok: false, reason: 'ipc_error' }
+  }
+  if (!info) {
+    console.warn(
+      '[daemon-local-client] ~/.amuxd/amuxd.http.port or amuxd.http.token missing — is amuxd running with HTTP enabled?',
+    )
+    return { ok: false, reason: 'port_file_missing' }
+  }
+
+  invalidateDaemonConnection()
+  _connection = null
+  const conn = await _fetchConnection()
+  if (!conn) return { ok: false, reason: 'token_exchange_failed' }
+
   try {
     const resp = await fetch(`${conn.baseUrl}/v1/healthz`)
-    return resp.ok
-  } catch {
-    return false
+    if (!resp.ok) {
+      console.warn('[daemon-local-client] healthz returned', resp.status)
+      return { ok: false, reason: 'health_check_failed' }
+    }
+    return { ok: true, baseUrl: conn.baseUrl }
+  } catch (err) {
+    console.warn('[daemon-local-client] healthz fetch failed:', err)
+    return { ok: false, reason: 'health_check_failed' }
   }
+}
+
+/** True when the local daemon HTTP server responds to `/v1/healthz`. */
+export async function isDaemonHttpAvailable(): Promise<boolean> {
+  const probe = await probeDaemonHttp()
+  return probe.ok
 }
 
 // ─── Authenticated fetch ──────────────────────────────────────────────────────

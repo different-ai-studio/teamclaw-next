@@ -24,13 +24,7 @@ import { useTeamMembersStore } from "@/stores/team-members";
 import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useCronStore } from "@/stores/cron";
-import { isDaemonHttpAvailable } from "@/lib/daemon-local-client";
-import { initOpenCodeClient } from "@/lib/opencode/sdk-client";
-import {
-  startOpenCode,
-  hasPreloadFor,
-  waitForOpenCodeBootstrapped,
-} from "@/lib/opencode/preloader";
+import { probeDaemonHttp } from "@/lib/daemon-local-client";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
 import { appShortName, TEAM_REPO_DIR } from "@/lib/build-config";
 
@@ -131,9 +125,7 @@ export function useWorkspaceInit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Prefer daemon HTTP for workspace control; fall back to the legacy OpenCode
-  // sidecar so settings, gateways, and OpenCode SDK session metadata keep
-  // working when amuxd is not running yet.
+  // Probe daemon HTTP — required on desktop; no OpenCode sidecar fallback.
   useEffect(() => {
     if (!workspacePath) {
       setDaemonHttpReady(false);
@@ -143,66 +135,35 @@ export function useWorkspaceInit() {
     setOpenCodeError(null);
 
     if (!isTauri()) {
-      const url = "http://127.0.0.1:4096";
-      initOpenCodeClient({ baseUrl: url, workspacePath });
-      setOpenCodeBootstrapped(true, url);
-      setOpenCodeReady(true, url);
+      setOpenCodeBootstrapped(true);
+      setOpenCodeReady(true);
       setDaemonHttpReady(true);
       return;
     }
 
     let cancelled = false;
-    const explicitPort =
-      windowParams && windowParams.workspace === workspacePath ? windowParams.port : undefined;
-
     void (async () => {
-      const daemonReady = await isDaemonHttpAvailable();
+      const probe = await probeDaemonHttp();
       if (cancelled) return;
-
-      if (daemonReady) {
-        setDaemonHttpReady(true);
+      const ready = probe.ok;
+      setDaemonHttpReady(ready);
+      if (ready) {
         setOpenCodeBootstrapped(true);
         setOpenCodeReady(true);
         setOpenCodeError(null);
         performance.mark("daemon-ready");
-        return;
-      }
-
-      setDaemonHttpReady(false);
-
-      const alreadyPreloading = hasPreloadFor(workspacePath);
-      if (!alreadyPreloading) {
-        setOpenCodeBootstrapped(false);
-      }
-
-      waitForOpenCodeBootstrapped(workspacePath, explicitPort)
-        .then((status) => {
-          if (cancelled) return;
-          initOpenCodeClient({ baseUrl: status.url, workspacePath });
-          setOpenCodeError(null);
-          setOpenCodeBootstrapped(true, status.url);
-        })
-        .catch((error) => {
-          if (cancelled) return;
-          console.warn("[OpenCode] Failed waiting for bootstrap event:", error);
-        });
-
-      try {
-        const status = await startOpenCode(workspacePath, explicitPort);
-        if (cancelled) return;
-        initOpenCodeClient({ baseUrl: status.url, workspacePath });
-        setOpenCodeError(null);
-        setOpenCodeBootstrapped(true, status.url);
-        setOpenCodeReady(true, status.url);
-        performance.mark("opencode-ready");
-      } catch (error) {
-        if (cancelled) return;
-        console.error("[OpenCode] Failed to start sidecar fallback:", error);
+      } else {
         setOpenCodeBootstrapped(false);
         setOpenCodeReady(false);
-        setOpenCodeError(
-          "Daemon HTTP unavailable and OpenCode sidecar failed to start",
-        );
+        const message =
+          probe.reason === "port_file_missing"
+            ? "amuxd daemon 未连接：HTTP 控制面未就绪（~/.amuxd/amuxd.http.port 不存在）。请重启 amuxd，或确认运行的是本分支构建的版本。"
+            : probe.reason === "token_exchange_failed"
+              ? "amuxd daemon HTTP 已启动但鉴权失败：请重启 amuxd 后重试。"
+              : probe.reason === "health_check_failed"
+                ? "amuxd daemon HTTP 无响应：请确认 amuxd 进程仍在运行。"
+                : "amuxd daemon 未连接：请确认 amuxd 已启动且 HTTP 控制面可用";
+        setOpenCodeError(message);
       }
     })();
 
@@ -356,7 +317,7 @@ export function useOpenCodePreload() {
 
 export function useChannelGatewayInit() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady || s.openCodeReady);
+  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady);
   const {
     autoStartEnabledGateways,
     loadConfig: loadChannelsConfig,
@@ -591,7 +552,7 @@ export function useGitReposInit() {
 
 export function useCronInit() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady || s.openCodeReady);
+  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady);
 
   useEffect(() => {
     if (!isTauri() || !workspacePath || !workspaceReady) return;

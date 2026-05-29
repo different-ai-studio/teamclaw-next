@@ -11,6 +11,7 @@ import { Toaster } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
 import {
+  AlertCircle,
   BookOpen,
   FolderGit,
   ChevronLeft,
@@ -630,7 +631,8 @@ function AppContent() {
   // Resolved by the MQTT-connect effect; passed to the notification dispatcher.
   const [myActorId, setMyActorId] = useState<string | null>(null);
   // Extracted hooks — initialization, panel state, keyboard shortcuts
-  const { initialWorkspaceResolved } = useWorkspaceInit();
+  const { initialWorkspaceResolved, openCodeError } = useWorkspaceInit();
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
   useDesktopNotifications(myActorId);
   useChannelGatewayInit();
   useGitReposInit();
@@ -1472,6 +1474,56 @@ function AppContent() {
     );
   }
 
+  if (isTauri() && workspacePath && !daemonHttpReady) {
+    return (
+      <>
+        <AppSidebar />
+        <SidebarInset className="flex h-svh flex-col overflow-hidden">
+          <header
+            className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background px-4"
+            data-tauri-drag-region
+          >
+            {collapsedInsetLeading}
+            <span className="font-medium">{buildConfig.app.name}</span>
+          </header>
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+            {openCodeError ? (
+              <>
+                <AlertCircle className="h-10 w-10 text-destructive" />
+                <p className="max-w-md text-[15px] font-medium text-foreground">
+                  {openCodeError}
+                </p>
+                <p className="max-w-md text-[13px] text-muted-foreground">
+                  {t(
+                    "workspace.daemonUnavailableHint",
+                    "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
+                  )}
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => window.location.reload()}
+                >
+                  <RotateCw className="mr-2 h-3.5 w-3.5" />
+                  {t("common.retry", "重试")}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <p className="text-[13px] text-muted-foreground">
+                  {t("workspace.connectingDaemon", "正在连接 amuxd daemon…")}
+                </p>
+              </>
+            )}
+          </div>
+        </SidebarInset>
+        {settingsModal}
+      </>
+    );
+  }
+
   return (
     <>
       <AppSidebar />
@@ -1717,8 +1769,7 @@ function App() {
   useOpenCodePreload();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
-  const openCodeReady = useWorkspaceStore((s) => s.openCodeReady);
-  const setupReady = !workspacePath || daemonHttpReady || openCodeReady || !isTauri();
+  const setupReady = !workspacePath || daemonHttpReady || !isTauri();
   const { showSetupGuide, dependencies, handleRecheck, handleSetupContinue } = useSetupGuide(setupReady);
   const { showConsentDialog, setShowConsentDialog } = useTelemetryConsent(showSetupGuide);
 

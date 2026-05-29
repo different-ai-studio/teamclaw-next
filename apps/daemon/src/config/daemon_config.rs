@@ -86,11 +86,23 @@ pub struct HttpConfig {
     pub default_scopes: Vec<String>,
 }
 
+fn default_allowed_origins() -> Vec<String> {
+    // TeamClaw desktop (Tauri devUrl) and standalone Vite dev servers.
+    vec![
+        "http://127.0.0.1:1420".into(),
+        "http://localhost:1420".into(),
+        "http://127.0.0.1:5173".into(),
+        "http://localhost:5173".into(),
+        "tauri://localhost".into(),
+        "https://tauri.localhost".into(),
+    ]
+}
+
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             bind: default_http_bind(),
-            allowed_origins: Vec::new(),
+            allowed_origins: default_allowed_origins(),
             session_idle_ttl: default_session_idle_ttl(),
             heartbeat_interval: default_heartbeat_interval(),
             max_sessions_per_token: default_max_sessions_per_token(),
@@ -138,6 +150,8 @@ fn default_scopes() -> Vec<String> {
         "sessions:read".into(),
         "sessions:write".into(),
         "events:read".into(),
+        "workspace:read".into(),
+        "workspace:write".into(),
     ]
 }
 
