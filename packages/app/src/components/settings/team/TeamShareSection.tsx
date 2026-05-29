@@ -87,6 +87,22 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
               仓库：{status.gitRemoteUrl}
             </p>
           )}
+          {status.globalPath && (
+            <p className="text-[12px] text-muted-foreground break-all">
+              全局同步目录：
+              <code className="font-mono">{status.globalPath}</code>
+            </p>
+          )}
+          <p className="text-[12px] text-muted-foreground">
+            本工作区链接：
+            <span className="ml-1">
+              {status.linkStatus === 'symlink'
+                ? '已软链 ✓'
+                : status.linkStatus === 'real_dir'
+                  ? '本地目录（待迁移）'
+                  : '未链接'}
+            </span>
+          </p>
         </div>
       )}
 
