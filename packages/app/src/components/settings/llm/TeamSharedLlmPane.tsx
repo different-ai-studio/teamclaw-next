@@ -1,16 +1,16 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
-import { Check, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { HostLlmConfig, type LlmModelEntry } from '@/components/settings/team/HostLlmConfig'
 import {
@@ -25,6 +25,8 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   workspacePath: string
+  /** Called after a successful save so the caller can reload the shared model. */
+  onSaved?: () => void
 }
 
 interface TeamStatusLlm {
@@ -35,29 +37,28 @@ interface TeamStatusLlm {
 }
 
 /**
- * Side pane that surfaces the team-shared ("host") LLM config — the same
- * checkbox + base URL + model list block from TeamGitConfig — from inside the
- * local LLM settings screen. Loads and persists through the same team-provider
- * helpers + `update_team_llm_config`, so the two entry points stay in sync.
+ * Modal dialog (styled like "Add Custom") for the team-shared ("host") LLM —
+ * the checkbox + proxy base URL + model list block from TeamGitConfig — opened
+ * from the local LLM settings screen. Owner-only entry point. Loads and
+ * persists through the same team-provider helpers + `update_team_llm_config`,
+ * so this and the Team settings tab stay in sync.
  */
-export function TeamSharedLlmPane({ open, onOpenChange, workspacePath }: Props) {
+export function TeamSharedLlmPane({ open, onOpenChange, workspacePath, onSaved }: Props) {
   const { t } = useTranslation()
   const [enabled, setEnabled] = React.useState(false)
   const [baseUrl, setBaseUrl] = React.useState('')
   const [models, setModels] = React.useState<LlmModelEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
-  const [saved, setSaved] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  // Load the current config each time the pane opens, so it reflects edits made
-  // from the Team settings tab without a full reload.
+  // Load the current config each time the dialog opens, so it reflects edits
+  // made from the Team settings tab without a full reload.
   React.useEffect(() => {
     if (!open || !workspacePath || !isTauri()) return
     let cancelled = false
     setLoading(true)
     setError(null)
-    setSaved(false)
     ;(async () => {
       try {
         const formState = await loadTeamProviderFormState(workspacePath)
@@ -94,7 +95,6 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath }: Props) 
 
   const handleSave = async () => {
     setSaving(true)
-    setSaved(false)
     setError(null)
     try {
       await invoke('update_team_llm_config', {
@@ -112,7 +112,8 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath }: Props) 
         // the provider file — mirrors TeamGitConfig.handleSaveLlmConfig.
         await removeTeamProviderFile(workspacePath)
       }
-      setSaved(true)
+      onSaved?.()
+      onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -121,21 +122,19 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath }: Props) 
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-md gap-0 p-0">
-        <SheetHeader className="border-b border-border-soft">
-          <SheetTitle>
-            {t('settings.llm.teamSharedModel', '团队共享模型')}
-          </SheetTitle>
-          <SheetDescription>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>{t('settings.llm.teamSharedModel', '团队共享模型')}</DialogTitle>
+          <DialogDescription>
             {t(
               'settings.team.hostLlmPaneDesc',
               '为团队配置共享 AI 模型代理地址与模型列表，所有成员可直接使用。',
             )}
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="flex-1 overflow-y-auto py-2">
           {loading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -144,33 +143,18 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath }: Props) 
           ) : (
             <HostLlmConfig
               enabled={enabled}
-              onEnabledChange={(v) => {
-                setEnabled(v)
-                setSaved(false)
-              }}
+              onEnabledChange={setEnabled}
               baseUrl={baseUrl}
-              onBaseUrlChange={(v) => {
-                setBaseUrl(v)
-                setSaved(false)
-              }}
+              onBaseUrlChange={setBaseUrl}
               models={models}
-              onModelsChange={(v) => {
-                setModels(v)
-                setSaved(false)
-              }}
+              onModelsChange={setModels}
               disabled={saving}
             />
           )}
           {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
         </div>
 
-        <SheetFooter className="flex-row items-center justify-end gap-2 border-t border-border-soft">
-          {saved && !saving && (
-            <span className="mr-auto flex items-center gap-1 text-xs text-muted-foreground">
-              <Check className="h-3.5 w-3.5" />
-              {t('settings.team.llmSaved', '已保存')}
-            </span>
-          )}
+        <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             {t('common.close', '关闭')}
           </Button>
@@ -178,8 +162,8 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath }: Props) 
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             {t('settings.team.saveLlm', '保存')}
           </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

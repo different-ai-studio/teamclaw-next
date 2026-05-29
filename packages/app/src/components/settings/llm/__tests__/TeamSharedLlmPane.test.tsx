@@ -58,15 +58,22 @@ describe('TeamSharedLlmPane', () => {
     })
   })
 
-  it('persists via update_team_llm_config + saveTeamProviderFile on save', async () => {
+  it('persists via update_team_llm_config + saveTeamProviderFile, fires onSaved, and closes', async () => {
     teamProvider.loadTeamProviderFormState.mockResolvedValue({
       enabled: true,
       baseUrl: 'https://proxy.example.com/v1',
       models: [{ id: 'gpt-x', name: 'GPT-X' }],
     })
+    const onSaved = vi.fn()
+    const onOpenChange = vi.fn()
 
     render(
-      <TeamSharedLlmPane open onOpenChange={() => {}} workspacePath="/ws" />,
+      <TeamSharedLlmPane
+        open
+        onOpenChange={onOpenChange}
+        workspacePath="/ws"
+        onSaved={onSaved}
+      />,
     )
 
     await waitFor(() => {
@@ -89,7 +96,8 @@ describe('TeamSharedLlmPane', () => {
       { id: 'team' },
       'gpt-x',
     )
-    await waitFor(() => expect(screen.getByText(/已保存|Saved/)).toBeTruthy())
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it('removes the provider file when the shared LLM is disabled on save', async () => {

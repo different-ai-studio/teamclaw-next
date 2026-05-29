@@ -62,7 +62,7 @@ vi.mock('@tauri-apps/plugin-shell', () => ({ open: mocks.shellOpen }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.dialogOpen }))
 vi.mock('@/lib/opencode/sdk-client', () => ({ initOpenCodeClient: mocks.initOpenCodeClient }))
 vi.mock('@/lib/opencode/restart', () => ({ restartOpencode: mocks.restartOpencode }))
-vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' ') }))
+vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' '), isTauri: () => false }))
 vi.mock('../shared', () => ({
   SettingCard: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SectionHeader: ({ title }: { title: string }) => <h2>{title}</h2>,

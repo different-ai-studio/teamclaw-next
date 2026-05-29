@@ -27,8 +27,10 @@ import { useTeamModeStore } from '@/stores/team-mode'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { TeamLiteLlmSection } from './llm/TeamLiteLlmSection'
 import { TeamSharedLlmPane } from './llm/TeamSharedLlmPane'
+import type { LlmModelEntry } from './team/HostLlmConfig'
+import { loadTeamProviderFormState, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'
 import { initOpenCodeClient } from '@/lib/opencode/sdk-client'
-import { cn } from '@/lib/utils'
+import { cn, isTauri } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -157,8 +159,35 @@ export const LLMSection = React.memo(function LLMSection() {
   // Detail view for connected provider
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null)
 
-  // Team-shared ("host") LLM config pane
+  // Team-shared ("host") LLM config — owner-only edit, surfaced as a pinned
+  // card at the top of the provider list for everyone.
+  const isTeamOwner = myRole === 'owner'
   const [teamSharedLlmOpen, setTeamSharedLlmOpen] = React.useState(false)
+  const [teamSharedModel, setTeamSharedModel] = React.useState<{
+    baseUrl: string
+    models: LlmModelEntry[]
+  } | null>(null)
+
+  const loadTeamSharedModel = React.useCallback(async () => {
+    if (!workspacePath || !isTauri()) {
+      setTeamSharedModel(null)
+      return
+    }
+    try {
+      const formState = await loadTeamProviderFormState(workspacePath)
+      setTeamSharedModel(
+        formState && formState.enabled && formState.models.length > 0
+          ? { baseUrl: formState.baseUrl, models: formState.models }
+          : null,
+      )
+    } catch {
+      setTeamSharedModel(null)
+    }
+  }, [workspacePath])
+
+  React.useEffect(() => {
+    void loadTeamSharedModel()
+  }, [loadTeamSharedModel])
 
   // Collapsible other providers
   const [showAllProviders, setShowAllProviders] = React.useState(false)
@@ -253,6 +282,8 @@ export const LLMSection = React.memo(function LLMSection() {
     const others: typeof providers = []
 
     for (const p of providers) {
+      // The team-shared provider is rendered as its own pinned card below.
+      if (p.id === TEAM_SHARED_PROVIDER_ID) continue
       if (p.configured) {
         connected.push(p)
       } else if (
@@ -619,7 +650,7 @@ export const LLMSection = React.memo(function LLMSection() {
           iconColor="text-purple-500"
         />
         <div className="flex items-center gap-1.5">
-          {workspacePath && (
+          {workspacePath && isTeamOwner && (
             <Button
               variant="ghost"
               size="sm"
@@ -676,17 +707,76 @@ export const LLMSection = React.memo(function LLMSection() {
 
       {teamWorkspaceSwitchDialog}
 
-      {workspacePath && (
+      {workspacePath && isTeamOwner && (
         <TeamSharedLlmPane
           open={teamSharedLlmOpen}
           onOpenChange={setTeamSharedLlmOpen}
           workspacePath={workspacePath}
+          onSaved={loadTeamSharedModel}
         />
       )}
 
       {/* Provider List */}
       {!providersLoading || providers.length > 0 ? (
         <div className="space-y-1.5">
+          {/* Pinned team-shared model — always first, clearly badged. */}
+          {teamSharedModel && (
+            <SettingCard
+              className={cn(
+                '!p-3 border-primary/40 bg-primary/5',
+                isTeamOwner && 'cursor-pointer hover:border-primary/60 transition-all',
+              )}
+            >
+              <div
+                className="flex items-center justify-between"
+                onClick={isTeamOwner ? () => setTeamSharedLlmOpen(true) : undefined}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="h-7 w-7 rounded-md flex items-center justify-center bg-primary/15 text-primary">
+                    <Users className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-[13px] font-medium">
+                        {teamSharedModel.models[0]?.name || teamSharedModel.models[0]?.id}
+                      </p>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                        <Users className="h-2.5 w-2.5" />
+                        {t('settings.llm.teamSharedBadge', '团队共享')}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {teamSharedModel.models.length > 1
+                        ? t('settings.llm.teamSharedModelsCount', {
+                            count: teamSharedModel.models.length,
+                            defaultValue: `${teamSharedModel.models.length} shared models`,
+                          })
+                        : teamSharedModel.baseUrl}
+                    </p>
+                  </div>
+                </div>
+                {isTeamOwner ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    title={t('settings.llm.teamSharedModelTooltip', 'Configure the team-shared AI model proxy and model list')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setTeamSharedLlmOpen(true)
+                    }}
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                  </Button>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">
+                    {t('settings.llm.teamSharedReadOnly', '仅团队 owner 可编辑')}
+                  </span>
+                )}
+              </div>
+            </SettingCard>
+          )}
+
           {visibleProviders.map((p) => {
             const isConnected = p.configured
             const isExpanded = selectedProviderId === p.id
