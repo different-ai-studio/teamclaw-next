@@ -27,7 +27,7 @@ export function ActorsSection() {
   const toggle = useUIStore((s) => s.toggleActorsSection)
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
-  const { actors, loading, refetch } = useActorsForTeam()
+  const { actors, loading, refetch, teamId } = useActorsForTeam()
   const [inviteOpen, setInviteOpen] = React.useState(false)
   const [detailFor, setDetailFor] = React.useState<ActorRowData | null>(null)
   const [removeFor, setRemoveFor] = React.useState<ActorRowData | null>(null)

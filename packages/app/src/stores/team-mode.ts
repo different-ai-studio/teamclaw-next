@@ -78,7 +78,6 @@ interface TeamModeState {
   teamModelOptions: TeamModelOption[] // available model choices from build config
   _appliedConfigKey: string | null // fingerprint of last applied config to avoid redundant apply
   devUnlocked: boolean // hidden dev mode: unlocks model selector & hidden dirs in team mode
-  myRole: 'owner' | 'editor' | 'viewer' | null
   teamGitFileSyncStatusMap: Record<string, 'modified' | 'new'>
   /** True while a Git team sync is in progress (for file tree loading indicator) */
   teamGitSyncing: boolean
@@ -123,7 +122,6 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
   teamModelOptions: buildConfig.team.llm.models ?? [],
   _appliedConfigKey: null,
   devUnlocked: true,
-  myRole: null,
   teamGitSyncing: false,
   teamGitLastSyncAt: null,
   teamGitFileSyncStatusMap: {},
@@ -188,14 +186,6 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
       }
     } else {
       set({ teamModeType: null, teamModelConfig: null })
-    }
-    // Load user's role (non-critical)
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const role = await invoke<string | null>('unified_team_get_my_role')
-      set({ myRole: role as any })
-    } catch {
-      // Non-critical, role can be loaded later
     }
   },
 

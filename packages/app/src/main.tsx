@@ -9,6 +9,12 @@ import './styles/globals.css'
 import './stores/dev-expose'
 import './lib/i18n'; // Initialize i18n
 import { appShortName, buildConfig } from './lib/build-config'
+import { initJwtBridge } from './lib/jwt-bridge'
+
+// Sync the Supabase JWT into teamclaw.json so FC-backed commands (team share,
+// LiteLLM, OSS sync) can authenticate. Must run at startup, before any of those
+// features open. No-op outside Tauri.
+initJwtBridge()
 
 // Initialize Sentry for frontend error tracking
 Sentry.init({
