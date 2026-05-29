@@ -6,7 +6,7 @@
 use axum::{
     extract::State,
     middleware,
-    routing::{delete, get, post, MethodRouter},
+    routing::{delete, get, post, put, MethodRouter},
     Json, Router,
 };
 
@@ -60,6 +60,10 @@ pub fn build(state: HttpState) -> Router {
         .route(
             "/v1/workspaces/:id/permission-allowlist",
             get(workspaces::get_allowlist).put(workspaces::put_allowlist),
+        )
+        .route(
+            "/v1/workspaces/:id/mcp",
+            get(workspaces::get_mcp).put(workspaces::put_mcp),
         )
         .route(
             "/v1/workspaces/:id/runtime",

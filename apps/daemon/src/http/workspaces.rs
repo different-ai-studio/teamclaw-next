@@ -18,9 +18,10 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::config::workspace_control::{
-    AllowlistRule, ApplyOutcome, PermissionConfig, ProviderAuthRequest, ProviderInfo,
-    RuntimeStatus, WorkspaceControlError, WorkspaceControlStore,
+    AllowlistRule, ApplyOutcome, McpServerConfig, PermissionConfig, ProviderAuthRequest,
+    ProviderInfo, RuntimeStatus, WorkspaceControlError, WorkspaceControlStore,
 };
+use std::collections::HashMap;
 
 use super::auth::{require_scope, Principal};
 use super::errors::HttpError;
@@ -167,6 +168,36 @@ pub async fn put_allowlist(
     let outcome = store
         .put_allowlist(&workspace_id, body)
         .map_err(map_control_err)?;
+    Ok(apply_ok(outcome))
+}
+
+// ── MCP handlers ─────────────────────────────────────────────────────────────
+
+/// `GET /v1/workspaces/:id/mcp`
+pub async fn get_mcp(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<HashMap<String, McpServerConfig>>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let store = resolve_store(&state)?;
+    let servers = store.get_mcp(&workspace_id).map_err(map_control_err)?;
+    Ok(Json(servers))
+}
+
+/// `PUT /v1/workspaces/:id/mcp`
+///
+/// Replaces the entire MCP server map for a workspace. Callers should
+/// fetch the current map with GET, apply their change, and PUT the full map.
+pub async fn put_mcp(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(workspace_id): Path<String>,
+    Json(body): Json<HashMap<String, McpServerConfig>>,
+) -> Result<Json<ApplyResponse>, HttpError> {
+    require_scope(&principal, "workspace:write")?;
+    let store = resolve_store(&state)?;
+    let outcome = store.put_mcp(&workspace_id, body).map_err(map_control_err)?;
     Ok(apply_ok(outcome))
 }
 

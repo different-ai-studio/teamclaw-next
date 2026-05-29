@@ -13,7 +13,7 @@ pub use member_store::{MemberStore, PendingInvite, StoredMember};
 pub use session_store::{SessionStore, StoredSession};
 pub use workspace_store::{AddWorkspaceOutcome, StoredWorkspace, WorkspaceStore};
 pub use workspace_control::{
-    AllowlistDecision, AllowlistRule, ApplyOutcome, NullWorkspaceControlStore,
+    AllowlistDecision, AllowlistRule, ApplyOutcome, McpServerConfig, NullWorkspaceControlStore,
     OpenCodeCompatStore, PermissionAction, PermissionConfig, ProviderAuthRequest,
     ProviderInfo, ProviderModelConfig, RuntimeStatus, WorkspaceControlError,
     WorkspaceControlStore,

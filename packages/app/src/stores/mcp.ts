@@ -1,33 +1,21 @@
 import { create } from 'zustand'
-import { invoke } from '@tauri-apps/api/core'
-// MCPRuntimeStatus was sourced from sdk-types; minimal stand-in below.
-type MCPRuntimeStatus = {
-  name: string;
-  status: string;
-  error?: string;
-  toolCount?: number;
-  [k: string]: unknown;
-}
+import {
+  encodeWorkspaceId,
+  getDaemonMcp,
+  putDaemonMcp,
+  type DaemonMcpServerConfig,
+} from '@/lib/daemon-local-client'
 import { withAsync } from '@/lib/store-utils'
 import { useWorkspaceStore } from './workspace'
 
-function getWorkspaceArgs() {
+function getWorkspaceId(): string | null {
   const workspacePath = useWorkspaceStore.getState().workspacePath
-  return workspacePath ? { workspacePath } : {}
+  return workspacePath ? encodeWorkspaceId(workspacePath) : null
 }
 
-// MCP Server configuration types
-export interface MCPServerConfig {
-  type: 'local' | 'remote'
-  enabled?: boolean
-  command?: string[]  // for local
-  environment?: Record<string, string>
-  url?: string  // for remote
-  headers?: Record<string, string>
-  timeout?: number
-}
+// MCPServerConfig is re-exported so callers don't need to import from daemon-local-client.
+export type MCPServerConfig = DaemonMcpServerConfig
 
-// MCP Test result types
 export interface MCPTestResult {
   success: boolean
   message: string
@@ -41,31 +29,24 @@ export interface MCPServer {
 
 interface MCPState {
   servers: Record<string, MCPServerConfig>
-  runtimeStatus: Record<string, MCPRuntimeStatus>
-  serverTools: Record<string, string[]>  // serverName -> tool names
   isLoading: boolean
   error: string | null
-  testingServers: Record<string, boolean>  // Track which servers are being tested
-  testResults: Record<string, MCPTestResult>  // Store test results
+  testingServers: Record<string, boolean>
+  testResults: Record<string, MCPTestResult>
 
-  // Actions
   loadConfig: () => Promise<void>
-  loadRuntimeStatus: () => Promise<void>
-  loadTools: () => Promise<void>
   addServer: (name: string, config: MCPServerConfig) => Promise<void>
   updateServer: (name: string, config: MCPServerConfig) => Promise<void>
   removeServer: (name: string) => Promise<void>
   toggleServer: (name: string, enabled: boolean) => Promise<void>
-  testServer: (name: string) => Promise<void>
   clearError: () => void
   clearTestResult: (name: string) => void
+  /** Re-read MCP config from daemon (replaces legacy file-sync). */
   syncFromFile: () => Promise<void>
 }
 
-export const useMCPStore = create<MCPState>((set) => ({
+export const useMCPStore = create<MCPState>((set, get) => ({
   servers: {},
-  runtimeStatus: {},
-  serverTools: {},
   isLoading: false,
   error: null,
   testingServers: {},
@@ -73,84 +54,60 @@ export const useMCPStore = create<MCPState>((set) => ({
 
   loadConfig: async () => {
     await withAsync(set, async () => {
-      const config = await invoke<Record<string, MCPServerConfig>>('get_mcp_config', getWorkspaceArgs())
-      set({ servers: config })
+      const wid = getWorkspaceId()
+      if (!wid) return
+      const servers = await getDaemonMcp(wid)
+      if (servers !== null) set({ servers })
     })
-  },
-
-  loadRuntimeStatus: async () => {
-    // Runtime status is managed via Tauri commands (list_mcp_tools, test_mcp_server, etc.)
-  },
-
-  loadTools: async () => {
-    try {
-      // Query each MCP server directly for its tools (via Tauri command)
-      const toolMap = await invoke<Record<string, string[]>>('list_mcp_tools')
-      set({ serverTools: toolMap })
-    } catch (error) {
-      console.error('Failed to load MCP tools:', error)
-    }
   },
 
   addServer: async (name: string, config: MCPServerConfig) => {
     await withAsync(set, async () => {
-      await invoke('add_mcp_server', { name, serverConfig: config, ...getWorkspaceArgs() })
-      const updatedConfig = await invoke<Record<string, MCPServerConfig>>('get_mcp_config', getWorkspaceArgs())
-      set({ servers: updatedConfig })
+      const wid = getWorkspaceId()
+      if (!wid) throw new Error('no workspace')
+      const current = get().servers
+      const updated = { ...current, [name]: config }
+      await putDaemonMcp(wid, updated)
+      set({ servers: updated })
     }, { rethrow: true })
   },
 
   updateServer: async (name: string, config: MCPServerConfig) => {
     await withAsync(set, async () => {
-      await invoke('update_mcp_server', { name, serverConfig: config, ...getWorkspaceArgs() })
-      const updatedConfig = await invoke<Record<string, MCPServerConfig>>('get_mcp_config', getWorkspaceArgs())
-      set({ servers: updatedConfig })
+      const wid = getWorkspaceId()
+      if (!wid) throw new Error('no workspace')
+      const current = get().servers
+      const updated = { ...current, [name]: config }
+      await putDaemonMcp(wid, updated)
+      set({ servers: updated })
     }, { rethrow: true })
   },
 
   removeServer: async (name: string) => {
     await withAsync(set, async () => {
-      await invoke('remove_mcp_server', { name, ...getWorkspaceArgs() })
-      const updatedConfig = await invoke<Record<string, MCPServerConfig>>('get_mcp_config', getWorkspaceArgs())
-      set({ servers: updatedConfig })
+      const wid = getWorkspaceId()
+      if (!wid) throw new Error('no workspace')
+      const current = { ...get().servers }
+      delete current[name]
+      await putDaemonMcp(wid, current)
+      set({ servers: current })
     }, { rethrow: true })
   },
 
   toggleServer: async (name: string, enabled: boolean) => {
     await withAsync(set, async () => {
-      await invoke('toggle_mcp_server', { name, enabled, ...getWorkspaceArgs() })
-      const updatedConfig = await invoke<Record<string, MCPServerConfig>>('get_mcp_config', getWorkspaceArgs())
-      set({ servers: updatedConfig })
+      const wid = getWorkspaceId()
+      if (!wid) throw new Error('no workspace')
+      const current = get().servers
+      if (!(name in current)) return
+      const updated = { ...current, [name]: { ...current[name], enabled } }
+      await putDaemonMcp(wid, updated)
+      set({ servers: updated })
     }, { rethrow: true })
   },
 
-  testServer: async (name: string) => {
-    set((state) => ({
-      testingServers: { ...state.testingServers, [name]: true },
-    }))
-    try {
-      const result = await invoke<MCPTestResult>('test_mcp_server', { name, ...getWorkspaceArgs() })
-      set((state) => ({
-        testingServers: { ...state.testingServers, [name]: false },
-        testResults: { ...state.testResults, [name]: result },
-      }))
-    } catch (error) {
-      set((state) => ({
-        testingServers: { ...state.testingServers, [name]: false },
-        testResults: {
-          ...state.testResults,
-          [name]: {
-            success: false,
-            message: error instanceof Error ? error.message : String(error),
-            details: undefined,
-          },
-        },
-      }))
-    }
-  },
-
   clearError: () => set({ error: null }),
-  
+
   clearTestResult: (name: string) => {
     set((state) => {
       const newResults = { ...state.testResults }
@@ -160,10 +117,11 @@ export const useMCPStore = create<MCPState>((set) => ({
   },
 
   syncFromFile: async () => {
+    const wid = getWorkspaceId()
+    if (!wid) return
     try {
-      const newConfig = await invoke<Record<string, MCPServerConfig>>('get_mcp_config')
-      // Update local state from file (agent runtime will re-read on next session start)
-      set({ servers: newConfig })
+      const servers = await getDaemonMcp(wid)
+      if (servers !== null) set({ servers })
     } catch (error) {
       console.error('[MCP] syncFromFile failed:', error)
     }

@@ -123,6 +123,38 @@ pub struct AllowlistRule {
     pub decision: AllowlistDecision,
 }
 
+// ── MCP types ─────────────────────────────────────────────────────────────────
+
+/// One MCP server entry from the `mcp` section of opencode.json.
+/// Field names intentionally match the frontend `MCPServerConfig` and the
+/// existing `mcp.rs` Tauri command type so JSON round-trips are lossless.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Server kind: `"local"` (stdio) or `"remote"` (HTTP). Defaults to `""` when
+    /// not present in the JSON so we can safely round-trip entries written by
+    /// other tools that omit the field.
+    #[serde(rename = "type", default, skip_serializing_if = "String::is_empty")]
+    pub server_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Command + args for `type = "local"` stdio servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub environment: HashMap<String, String>,
+    /// Base URL for `type = "remote"` HTTP servers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+    /// Unknown fields are preserved so the daemon never silently drops
+    /// opencode.json keys it does not yet understand.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
 // ── Runtime status ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -175,6 +207,17 @@ pub trait WorkspaceControlStore: Send + Sync {
         rules: Vec<AllowlistRule>,
     ) -> Result<ApplyOutcome, WorkspaceControlError>;
 
+    fn get_mcp(
+        &self,
+        workspace_id: &str,
+    ) -> Result<HashMap<String, McpServerConfig>, WorkspaceControlError>;
+
+    fn put_mcp(
+        &self,
+        workspace_id: &str,
+        servers: HashMap<String, McpServerConfig>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
     fn get_runtime_status(
         &self,
         workspace_id: &str,
@@ -193,6 +236,8 @@ struct OpencodeJson {
     provider: HashMap<String, OcProviderEntry>,
     #[serde(default)]
     permission: OcPermissionSection,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    mcp: HashMap<String, McpServerConfig>,
     #[serde(flatten)]
     extra: HashMap<String, serde_json::Value>,
 }
@@ -502,6 +547,30 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         // Phase D wires in the real reload signal.
         Ok(ApplyOutcome::ReloadRequired)
     }
+
+    fn get_mcp(
+        &self,
+        workspace_id: &str,
+    ) -> Result<HashMap<String, McpServerConfig>, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let cfg = Self::read_opencode_json(&wpath)?;
+        Ok(cfg.mcp)
+    }
+
+    fn put_mcp(
+        &self,
+        workspace_id: &str,
+        servers: HashMap<String, McpServerConfig>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        let mut cfg = Self::read_opencode_json(&wpath)?;
+        cfg.mcp = servers;
+        Self::write_opencode_json(&wpath, &cfg)?;
+        // OpenCode re-reads mcp on next session start; a running session
+        // needs a restart to pick up server changes.
+        Ok(ApplyOutcome::RestartRequired)
+    }
 }
 
 // ── NullWorkspaceControlStore ─────────────────────────────────────────────────
@@ -547,6 +616,19 @@ impl WorkspaceControlStore for NullWorkspaceControlStore {
         &self,
         id: &str,
         _: Vec<AllowlistRule>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn get_mcp(
+        &self,
+        id: &str,
+    ) -> Result<HashMap<String, McpServerConfig>, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn put_mcp(
+        &self,
+        id: &str,
+        _: HashMap<String, McpServerConfig>,
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
@@ -729,6 +811,89 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["someOtherKey"], "preserved");
         assert_eq!(parsed["mcp"]["server1"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn get_mcp_empty_workspace_returns_empty_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store();
+        let servers = store.get_mcp(&ws_id(dir.path())).unwrap();
+        assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn put_and_get_mcp_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store();
+        let wid = ws_id(dir.path());
+
+        let mut servers = HashMap::new();
+        servers.insert(
+            "playwright".to_owned(),
+            McpServerConfig {
+                server_type: "local".to_owned(),
+                enabled: Some(true),
+                command: vec!["npx".to_owned(), "@playwright/mcp".to_owned()],
+                environment: HashMap::new(),
+                url: None,
+                headers: HashMap::new(),
+                timeout: None,
+                extra: HashMap::new(),
+            },
+        );
+
+        let outcome = store.put_mcp(&wid, servers.clone()).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::RestartRequired));
+
+        let got = store.get_mcp(&wid).unwrap();
+        assert_eq!(got.len(), 1);
+        let s = got.get("playwright").unwrap();
+        assert_eq!(s.server_type, "local");
+        assert_eq!(s.command, vec!["npx", "@playwright/mcp"]);
+        assert_eq!(s.enabled, Some(true));
+    }
+
+    #[test]
+    fn put_mcp_preserves_other_opencode_json_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store();
+        let wid = ws_id(dir.path());
+
+        // Seed a provider entry first.
+        store
+            .put_provider_auth(
+                &wid,
+                "openai",
+                ProviderAuthRequest {
+                    api_key: "sk-seed".to_owned(),
+                    base_url: None,
+                    display_name: None,
+                    models: vec![],
+                },
+            )
+            .unwrap();
+
+        // Write MCP config.
+        let mut servers = HashMap::new();
+        servers.insert(
+            "my-server".to_owned(),
+            McpServerConfig {
+                server_type: "remote".to_owned(),
+                enabled: None,
+                command: vec![],
+                environment: HashMap::new(),
+                url: Some("http://localhost:8080".to_owned()),
+                headers: HashMap::new(),
+                timeout: Some(30),
+                extra: HashMap::new(),
+            },
+        );
+        store.put_mcp(&wid, servers).unwrap();
+
+        // Provider section must still be intact.
+        let providers = store.get_providers(&wid).unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "openai");
     }
 
     #[test]

@@ -248,6 +248,43 @@ export async function putDaemonAllowlist(
   return result.ok ? result.data.outcome : null
 }
 
+// ─── MCP ──────────────────────────────────────────────────────────────────────
+
+/** Single MCP server config entry; mirrors `McpServerConfig` in workspace_control.rs. */
+export interface DaemonMcpServerConfig {
+  /** `"local"` (stdio) or `"remote"` (HTTP). May be absent for legacy entries. */
+  type?: string
+  enabled?: boolean
+  /** Command + args for local stdio servers. */
+  command?: string[]
+  environment?: Record<string, string>
+  /** Base URL for remote HTTP servers. */
+  url?: string
+  headers?: Record<string, string>
+  timeout?: number
+  [key: string]: unknown
+}
+
+export async function getDaemonMcp(
+  workspaceId: string,
+): Promise<Record<string, DaemonMcpServerConfig> | null> {
+  const result = await daemonFetch<Record<string, DaemonMcpServerConfig>>(
+    `/v1/workspaces/${workspaceId}/mcp`,
+  )
+  return result.ok ? result.data : null
+}
+
+export async function putDaemonMcp(
+  workspaceId: string,
+  servers: Record<string, DaemonMcpServerConfig>,
+): Promise<DaemonApplyOutcome | null> {
+  const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
+    `/v1/workspaces/${workspaceId}/mcp`,
+    { method: 'PUT', body: JSON.stringify(servers) },
+  )
+  return result.ok ? result.data.outcome : null
+}
+
 // ─── Runtime ──────────────────────────────────────────────────────────────────
 
 export async function reloadDaemonRuntime(

@@ -30,7 +30,12 @@ import {
 import { invoke } from '@tauri-apps/api/core'
 import { SKILLS_CHANGED_EVENT } from '@/hooks/useAppInit'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { restartOpencode } from '@/lib/opencode/restart'
+import {
+  encodeWorkspaceId,
+  getDaemonPermissions,
+  putDaemonPermissions,
+  reloadDaemonRuntime,
+} from '@/lib/daemon-local-client'
 import { cn } from '@/lib/utils'
 import { buildConfig } from '@/lib/build-config'
 import { Button } from '@/components/ui/button'
@@ -53,12 +58,7 @@ import {
 } from '@/components/ui/dialog'
 import { SettingCard, SectionHeader } from './shared'
 import type { SkillPermission, SkillPermissionMap } from '@/lib/opencode/config'
-import {
-  readSkillPermissions,
-  writeSkillPermission,
-  removeSkillPermission,
-  resolveSkillPermission,
-} from '@/lib/opencode/config'
+import { resolveSkillPermission } from '@/lib/opencode/config'
 import type { SkillSource } from '@/lib/git/types'
 import { INHERENT_SKILL_NAMES } from '@/lib/git/types'
 import { SkillsMarketplace } from './SkillsMarketplace'
@@ -218,8 +218,9 @@ export const SkillsSection = React.memo(function SkillsSection({
   const loadPermissions = React.useCallback(async () => {
     if (!workspacePath) return
     try {
-      const perms = await readSkillPermissions(workspacePath)
-      setSkillPermissions(perms)
+      const wid = encodeWorkspaceId(workspacePath)
+      const perms = await getDaemonPermissions(wid)
+      if (perms !== null) setSkillPermissions(perms as SkillPermissionMap)
     } catch (err) {
       console.error('[SkillsSection] Failed to load permissions:', err)
     }
@@ -301,7 +302,8 @@ export const SkillsSection = React.memo(function SkillsSection({
   const restartOpenCodeInstance = React.useCallback(
     async (options?: RestartOptions) => {
       if (!workspacePath) return
-      await restartOpencode(workspacePath)
+      const wid = encodeWorkspaceId(workspacePath)
+      await reloadDaemonRuntime(wid)
       if (!options?.preserveChangeFlag) {
         setHasChanges(false)
       }
@@ -558,8 +560,10 @@ ${skillContent.trim()}`
   const handleDefaultPermissionChange = async (value: SkillPermission) => {
     if (!workspacePath) return
     try {
-      await writeSkillPermission(workspacePath, '*', value)
-      setSkillPermissions(prev => ({ ...prev, '*': value }))
+      const wid = encodeWorkspaceId(workspacePath)
+      const updated: SkillPermissionMap = { ...skillPermissions, '*': value }
+      await putDaemonPermissions(wid, updated)
+      setSkillPermissions(updated)
       setHasChanges(true)
     } catch (err) {
       console.error('[SkillsSection] Failed to update default permission:', err)
@@ -569,17 +573,16 @@ ${skillContent.trim()}`
   const handleSkillPermissionChange = async (skillName: string, value: string) => {
     if (!workspacePath) return
     try {
+      const wid = encodeWorkspaceId(workspacePath)
+      let updated: SkillPermissionMap
       if (value === '__inherited__') {
-        await removeSkillPermission(workspacePath, skillName)
-        setSkillPermissions(prev => {
-          const next = { ...prev }
-          delete next[skillName]
-          return next
-        })
+        updated = { ...skillPermissions }
+        delete updated[skillName]
       } else {
-        await writeSkillPermission(workspacePath, skillName, value as SkillPermission)
-        setSkillPermissions(prev => ({ ...prev, [skillName]: value as SkillPermission }))
+        updated = { ...skillPermissions, [skillName]: value as SkillPermission }
       }
+      await putDaemonPermissions(wid, updated)
+      setSkillPermissions(updated)
       setHasChanges(true)
     } catch (err) {
       console.error('[SkillsSection] Failed to update skill permission:', err)
