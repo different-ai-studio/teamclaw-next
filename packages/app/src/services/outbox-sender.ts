@@ -14,6 +14,7 @@ import { create as createMessage, toBinary } from "@bufbuild/protobuf";
 import { isAgentActorType } from "@/lib/actor-type";
 import { BackendError, getBackend } from "@/lib/backend";
 import { ensureAgentRuntimesForSession } from "@/lib/teamclaw/ensure-agent-runtime";
+import { resolveSessionWorkspaceHintForRuntimeStart } from "@/lib/teamclaw/resolve-runtime-start-workspace";
 import {
   LiveEventEnvelopeSchema,
   MessageKind,
@@ -27,6 +28,7 @@ import {
   useOutboxStore,
   type OutboxEntry,
 } from "@/stores/outbox-store";
+import { useWorkspaceStore } from "@/stores/workspace";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -145,11 +147,27 @@ async function attempt(entry: OutboxEntry): Promise<void> {
         return row ? isAgentActorType(row.actor_type) : false;
       });
       if (agentActorIds.length > 0) {
+        const workspaceIdHint =
+          entry.workspaceIdHint?.trim() ||
+          (await resolveSessionWorkspaceHintForRuntimeStart({
+            teamId: entry.teamId,
+            localWorkspacePath: useWorkspaceStore.getState().workspacePath,
+            sessionId: entry.sessionId,
+            agentActorIds,
+          }));
+        sessionFlowLog("outbox_sender.runtime_ensure.begin", {
+          messageId: entry.messageId,
+          sessionId: entry.sessionId,
+          teamId: entry.teamId,
+          agentActorIds,
+          workspaceIdHint: workspaceIdHint || null,
+        });
         await ensureAgentRuntimesForSession({
           sessionId: entry.sessionId,
           teamId: entry.teamId,
           agentActorIds,
           modelId: entry.model ?? undefined,
+          workspaceIdHint: workspaceIdHint || undefined,
           reason: "outbox_send",
         });
       }

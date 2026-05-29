@@ -49,6 +49,16 @@ vi.mock('@/lib/teamclaw/ensure-agent-runtime', () => ({
   ensureAgentRuntimesForSession: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('@/lib/teamclaw/resolve-runtime-start-workspace', () => ({
+  resolveSessionWorkspaceHintForRuntimeStart: vi.fn().mockResolvedValue(''),
+}))
+
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: {
+    getState: () => ({ workspacePath: '/tmp/workspace' }),
+  },
+}))
+
 vi.mock('@/lib/local-cache', () => ({
   upsertOutbox: mocks.upsertOutbox,
   deleteOutbox: mocks.deleteOutbox,
@@ -72,6 +82,7 @@ describe('outbox sender', () => {
   })
 
   it('publishes and persists the selected message model', async () => {
+    const { ensureAgentRuntimesForSession } = await import('@/lib/teamclaw/ensure-agent-runtime')
     const { useOutboxStore } = await import('@/stores/outbox-store')
     const { startOutboxSender } = await import('../outbox-sender')
 
@@ -87,6 +98,7 @@ describe('outbox sender', () => {
           mentionActorIds: ['agent-1'],
           displayMentionActorIds: ['agent-1'],
           attachmentUrls: [],
+          workspaceIdHint: 'ws-from-enqueue',
           state: 'pending',
           attemptCount: 0,
           lastAttemptAt: null,
@@ -128,6 +140,15 @@ describe('outbox sender', () => {
       mention_actor_ids: ['agent-1'],
       display_mention_actor_ids: ['agent-1'],
     })
+    expect(ensureAgentRuntimesForSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'sess-1',
+        teamId: 'team-1',
+        agentActorIds: ['agent-1'],
+        workspaceIdHint: 'ws-from-enqueue',
+        reason: 'outbox_send',
+      }),
+    )
   })
 
   it('retries agent-mentioned messages when MQTT publish fails', async () => {

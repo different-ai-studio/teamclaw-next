@@ -307,6 +307,8 @@ export interface StartAgentRuntimesArgs {
   /** Applied to every agent when `modelIdByAgent` has no entry for that id. */
   modelId?: string
   modelIdByAgent?: Record<string, string>
+  /** Explicit cloud workspace UUID from send/outbox — highest lookup priority. */
+  workspaceIdHint?: string | null
 }
 
 function normalizeAgentTypes(value: unknown): string[] {
@@ -439,9 +441,12 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
       byRuntimeId,
       providerFallback: args.modelIdByAgent?.[agentActorId] ?? args.modelId,
     }).modelId || undefined
-    const workspaceId = resolveAgentRuntimeWorkspaceId(
-      workspaceLookups.get(agentActorId) ?? {},
-    )
+
+    const workspaceLookup = {
+      ...(workspaceLookups.get(agentActorId) ?? {}),
+      ...(args.workspaceIdHint?.trim() ? { callerWorkspaceId: args.workspaceIdHint } : {}),
+    }
+    const workspaceId = resolveAgentRuntimeWorkspaceId(workspaceLookup)
     try {
       sessionFlowLog('runtime_start.request.begin', {
         sessionId: args.sessionId,
