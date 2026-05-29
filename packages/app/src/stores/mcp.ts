@@ -29,12 +29,18 @@ export interface MCPServer {
 
 interface MCPState {
   servers: Record<string, MCPServerConfig>
+  /** Legacy runtime status — not populated until daemon exposes MCP health. */
+  runtimeStatus: Record<string, { status: string; error?: string }>
+  /** Legacy per-server tool names — not populated until daemon exposes tool list. */
+  serverTools: Record<string, string[]>
   isLoading: boolean
   error: string | null
   testingServers: Record<string, boolean>
   testResults: Record<string, MCPTestResult>
 
   loadConfig: () => Promise<void>
+  loadRuntimeStatus: () => Promise<void>
+  loadTools: () => Promise<void>
   addServer: (name: string, config: MCPServerConfig) => Promise<void>
   updateServer: (name: string, config: MCPServerConfig) => Promise<void>
   removeServer: (name: string) => Promise<void>
@@ -47,6 +53,8 @@ interface MCPState {
 
 export const useMCPStore = create<MCPState>((set, get) => ({
   servers: {},
+  runtimeStatus: {},
+  serverTools: {},
   isLoading: false,
   error: null,
   testingServers: {},
@@ -59,6 +67,14 @@ export const useMCPStore = create<MCPState>((set, get) => ({
       const servers = await getDaemonMcp(wid)
       if (servers !== null) set({ servers })
     })
+  },
+
+  loadRuntimeStatus: async () => {
+    // Runtime MCP status will come from daemon in a follow-up; config CRUD is live.
+  },
+
+  loadTools: async () => {
+    // Per-server tool discovery will come from daemon in a follow-up.
   },
 
   addServer: async (name: string, config: MCPServerConfig) => {

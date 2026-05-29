@@ -1,5 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  encodeWorkspaceId,
+  getDaemonAllowlist,
+  putDaemonAllowlist,
+  type DaemonAllowlistRule,
+} from "@/lib/daemon-local-client";
 // Permissive proxy until the amuxd daemon client is wired up;
 // permission flows are non-functional.
 // TODO(amuxd): wire to daemon
@@ -128,25 +133,16 @@ type SessionSet = (fn: ((state: SessionState) => Partial<SessionState>) | Partia
 type SessionGet = () => SessionState;
 
 /**
- * Persist an "always allow" rule to the agent runtime DB so it survives restarts.
- *
- * Tauri commands `get_opencode_project_id`, `read_opencode_allowlist`, and
- * `write_opencode_allowlist` are provided by the restored OpenCode sidecar module.
- * Calls fail silently inside try/catch — preserved as historical wiring until
- * the amuxd daemon installer ships its own allowlist persistence path.
+ * Persist an "always allow" rule via the daemon workspace-control API so it
+ * survives restarts. Stored in `<workspace>/.teamclaw/allowlist.json`.
  */
 async function persistAllowlistRule(perm: PermissionAskedEvent): Promise<void> {
   if (!isTauri()) return;
 
   const workspacePath = useWorkspaceStore.getState().workspacePath;
-  let projectId: string;
-  try {
-    projectId = await invoke<string>("get_opencode_project_id", {
-      workspacePath: workspacePath || "/",
-    });
-  } catch {
-    projectId = "global";
-  }
+  if (!workspacePath) return;
+
+  const projectId = "global";
 
   const patterns: string[] = [];
   if (perm.always && perm.always.length > 0) {
@@ -158,40 +154,34 @@ async function persistAllowlistRule(perm: PermissionAskedEvent): Promise<void> {
 
   if (patterns.length === 0) return;
 
-  type Rule = { permission: string; pattern: string; action: string };
-  type Row = { project_id: string; rules: Rule[] };
-  let existingRows: Row[] = [];
-  try {
-    existingRows = await invoke<Row[]>("read_opencode_allowlist", {
-      workspacePath: workspacePath || "/",
-    });
-  } catch {
-    // DB may not exist yet
-  }
+  const workspaceId = encodeWorkspaceId(workspacePath);
+  const existing = (await getDaemonAllowlist(workspaceId)) ?? [];
 
-  const row = existingRows.find((r) => r.project_id === projectId);
-  const currentRules: Rule[] = row?.rules ?? [];
-
+  const updated: DaemonAllowlistRule[] = [...existing];
   for (const pat of patterns) {
-    const alreadyExists = currentRules.some(
-      (r) => r.permission === perm.permission && r.pattern === pat
+    const alreadyExists = updated.some(
+      (r) =>
+        r.project_id === projectId &&
+        r.permission === perm.permission &&
+        r.pattern === pat,
     );
     if (!alreadyExists) {
-      currentRules.push({ permission: perm.permission, pattern: pat, action: "allow" });
+      updated.push({
+        project_id: projectId,
+        permission: perm.permission,
+        pattern: pat,
+        decision: "allow",
+      });
     }
   }
 
-  await invoke("write_opencode_allowlist", {
-    workspacePath: workspacePath || "/",
-    projectId,
-    rules: currentRules,
-  });
+  await putDaemonAllowlist(workspaceId, updated);
 
   console.log(
-    "[Session] Persisted allowlist rules to DB for project '%s': %s %s",
+    "[Session] Persisted allowlist rules for project '%s': %s %s",
     projectId,
     perm.permission,
-    patterns.join(", ")
+    patterns.join(", "),
   );
 }
 

@@ -91,19 +91,19 @@ pub async fn cron_init(
     app: AppHandle,
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
-    opencode_state: State<'_, crate::commands::opencode::OpenCodeState>,
     cron_state: State<'_, CronState>,
     gateway_state: State<'_, crate::commands::gateway::GatewayState>,
     workspace_path: Option<String>,
 ) -> Result<(), String> {
     // The frontend may pass an explicit workspace; otherwise we resolve from
-    // the calling window. We then `resolve_workspace` against OpenCodeState
+    // the calling window. Cron no longer requires a running OpenCode sidecar.
     let workspace_path = match workspace_path.filter(|p| !p.is_empty()) {
         Some(p) => p,
         None => crate::commands::window::current_workspace_for_window(&window, &registry)?,
     };
-    let (workspace_path, _port) =
-        crate::commands::opencode::resolve_workspace(&opencode_state, Some(&workspace_path))?;
+    if !std::path::Path::new(&workspace_path).is_dir() {
+        return Err(format!("Workspace not found: {}", workspace_path));
+    }
 
     // Get-or-create per-workspace instance, then stop its old scheduler
     // (if any) before reloading. This is workspace-local — peer workspaces

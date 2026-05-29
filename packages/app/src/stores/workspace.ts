@@ -99,6 +99,10 @@ interface WorkspaceState {
   setOpenCodeBootstrapped: (bootstrapped: boolean, url?: string) => void;
   setOpenCodeReady: (ready: boolean, url?: string) => void;
 
+  /** Local amuxd daemon HTTP control plane is reachable (`/v1/healthz`). */
+  daemonHttpReady: boolean;
+  setDaemonHttpReady: (ready: boolean) => void;
+
   // Right panel state
   isPanelOpen: boolean;
   activeTab: RightPanelTab;
@@ -240,6 +244,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       ...(ready ? { openCodeBootstrapped: true } : {}),
       ...(url ? { openCodeUrl: url } : {}),
     }),
+  daemonHttpReady: false,
+  setDaemonHttpReady: (ready: boolean) => set({ daemonHttpReady: ready }),
   isPanelOpen: false,
   activeTab: "shortcuts",
   fileTree: [],
@@ -335,6 +341,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       openCodeBootstrapped: false,
       openCodeReady: false,
       openCodeUrl: null,
+      daemonHttpReady: false,
       workspacePath: expandedPath,
       workspaceName: getFolderName(expandedPath),
       fileTree: [],
@@ -514,6 +521,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       openCodeBootstrapped: false,
       openCodeReady: false,
       openCodeUrl: null,
+      daemonHttpReady: false,
       fileTree: [],
       expandedPaths: new Set<string>(),
       loadingPaths: new Set<string>(),

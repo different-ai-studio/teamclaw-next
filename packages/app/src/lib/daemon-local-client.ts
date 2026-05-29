@@ -104,6 +104,18 @@ export function invalidateDaemonConnection(): void {
   _connection = null
 }
 
+/** True when the local daemon HTTP server responds to `/v1/healthz`. */
+export async function isDaemonHttpAvailable(): Promise<boolean> {
+  const conn = await getConnection()
+  if (!conn) return false
+  try {
+    const resp = await fetch(`${conn.baseUrl}/v1/healthz`)
+    return resp.ok
+  } catch {
+    return false
+  }
+}
+
 // ─── Authenticated fetch ──────────────────────────────────────────────────────
 
 async function daemonFetch<T>(

@@ -30,6 +30,7 @@ import {
   hasPreloadFor,
   waitForOpenCodeBootstrapped,
 } from "@/lib/opencode/preloader";
+import { isDaemonHttpAvailable } from "@/lib/daemon-local-client";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
 import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from "@/lib/build-config";
 
@@ -61,6 +62,7 @@ export function useWorkspaceInit() {
   const setWorkspace = useWorkspaceStore((s) => s.setWorkspace);
   const setOpenCodeBootstrapped = useWorkspaceStore((s) => s.setOpenCodeBootstrapped);
   const setOpenCodeReady = useWorkspaceStore((s) => s.setOpenCodeReady);
+  const setDaemonHttpReady = useWorkspaceStore((s) => s.setDaemonHttpReady);
   const [openCodeError, setOpenCodeError] = useState<string | null>(null);
   const [initialWorkspaceResolved, setInitialWorkspaceResolved] = useState(false);
 
@@ -128,6 +130,23 @@ export function useWorkspaceInit() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Probe the local amuxd HTTP control plane (workspace settings API).
+  useEffect(() => {
+    if (!workspacePath || !isTauri()) {
+      setDaemonHttpReady(false);
+      return;
+    }
+
+    let cancelled = false;
+    void isDaemonHttpAvailable().then((ready) => {
+      if (!cancelled) setDaemonHttpReady(ready);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath, setDaemonHttpReady]);
 
   // Start OpenCode when a workspace is selected. The restored runtime is used
   // by settings, automations, and external gateways; chat dispatch remains
