@@ -43,6 +43,8 @@ export interface OssSyncState {
   syncing: boolean
   lastSyncAt: string | null
   teamId: string | null
+  dirtyCount: number
+  totalFiles: number
   fileStatusMap: Record<string, OssSyncFileStatus>
   conflicts: OssSyncConflict[]
   lastError: string | null
@@ -94,6 +96,8 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   syncing: false,
   lastSyncAt: null,
   teamId: null,
+  dirtyCount: 0,
+  totalFiles: 0,
   fileStatusMap: {},
   conflicts: [],
   lastError: null,
@@ -115,6 +119,8 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
         teamId: status.teamId,
         lastSyncAt: status.lastSyncAt,
         fileStatusMap,
+        dirtyCount: status.dirtyCount,
+        totalFiles: status.totalFiles,
       })
     } catch (e) {
       set({ lastError: String(e) })

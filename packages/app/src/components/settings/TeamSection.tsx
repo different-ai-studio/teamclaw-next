@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Users, ArrowRightLeft, Loader2, AlertCircle } from 'lucide-react'
 
 import { TeamGitConfig } from './team/TeamGitConfig'
-import { TeamWebDavConfig } from './team/TeamWebDavConfig'
+import { TeamOssSyncStatus } from './team/TeamOssSyncStatus'
 import { TeamShareSection } from './team/TeamShareSection'
 import { Button } from '@/components/ui/button'
 import { useTeamModeStore } from '@/stores/team-mode'
@@ -238,7 +238,7 @@ export function TeamSection() {
       ) : isOss ? (
         <>
           {isOwner && <SwitchToGitEntry />}
-          <TeamWebDavConfig />
+          <TeamOssSyncStatus />
         </>
       ) : (
         <TeamGitConfig />
