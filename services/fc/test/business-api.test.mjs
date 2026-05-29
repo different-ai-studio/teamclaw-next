@@ -1403,6 +1403,22 @@ test("PUT /v1/agents/:agentActorId/device sets device id", async () => {
   assert.deepEqual(repo.calls[0], { method: "setAgentDeviceId", agentActorId: "actor-1", input: { deviceId: "device-abc" } });
 });
 
+test("PATCH /v1/agents/:agentActorId/defaults forwards default workspace + agent type", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "PATCH",
+    path: "/v1/agents/actor-1/defaults",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ defaultAgentType: "claude", defaultWorkspaceId: "workspace-1" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "updateAgentDefaults",
+    agentActorId: "actor-1",
+    patch: { defaultAgentType: "claude", supportedAgentTypes: null, defaultWorkspaceId: "workspace-1", agentKind: null },
+  });
+});
+
 test("POST /v1/attachments uploads binary body and returns path + url", async () => {
   const repo = fakeRepo();
   const body = Buffer.from("png-bytes");
@@ -1681,6 +1697,7 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async updateRuntimeCursor(runtimeRowId, input) { calls.push({ method: "updateRuntimeCursor", runtimeRowId, input }); if (error) throw error; },
     async ensureAgentTypes(input) { calls.push({ method: "ensureAgentTypes", input }); if (error) throw error; },
     async setAgentDeviceId(agentActorId, input) { calls.push({ method: "setAgentDeviceId", agentActorId, input }); if (error) throw error; },
+    async updateAgentDefaults(agentActorId, patch) { calls.push({ method: "updateAgentDefaults", agentActorId, patch }); if (error) throw error; },
     async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; const bucket = input.bucket ?? "attachments"; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/${bucket}/${input.path}` }; },
     async downloadAttachment(path, options) { calls.push({ method: "downloadAttachment", path, options }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
     async submitFeedback(body) { calls.push({ method: "submitFeedback", body }); if (error) throw error; return { messageId: body.messageId, actorId: body.actorId, kind: body.kind, starRating: body.starRating ?? null, note: body.note ?? null, createdAt: "2026-05-28T00:00:00Z", updatedAt: null }; },

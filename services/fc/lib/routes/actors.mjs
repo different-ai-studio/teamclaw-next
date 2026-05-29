@@ -68,6 +68,8 @@ export function registerActors(router) {
     await ctx.repository.updateAgentDefaults(agentActorId, {
       defaultAgentType: body.defaultAgentType ?? null,
       supportedAgentTypes: body.supportedAgentTypes ?? null,
+      defaultWorkspaceId: body.defaultWorkspaceId ?? null,
+      agentKind: body.agentKind ?? null,
     });
     return { statusCode: 204, body: null };
   });
