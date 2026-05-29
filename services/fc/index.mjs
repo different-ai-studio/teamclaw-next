@@ -19,6 +19,7 @@ import {
   publishableKeyFromEnv,
 } from './lib/supabase-repo.mjs';
 import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.mjs';
+import { queryParams } from './lib/router.mjs';
 import { logSyncEvent } from './lib/sync-log.mjs';
 import {
   handleSyncManifest,
@@ -913,6 +914,19 @@ async function handleManagedGitCreateRepo(body) {
 // ---------------------------------------------------------------------------
 // FC HTTP handler
 // ---------------------------------------------------------------------------
+
+// Build a body-like object from a GET event's query string (used by the only
+// GET endpoint on the legacy /sync/* API, /sync/versions). Delegates to
+// queryParams() so it reads event.queryStringParameters / event.queryParameters
+// — the fields the FC HTTP trigger actually populates — with rawQueryString /
+// rawPath fallbacks. Reading rawQueryString alone drops teamId & path and 400s
+// the request ("teamId is required").
+export function syncGetQueryToBody(event) {
+  const body = {};
+  for (const [k, v] of queryParams(event)) body[k] = v;
+  return body;
+}
+
 export async function handler(event, context) {
   // FC 3.0 HTTP trigger passes a Buffer, parse it first
   if (Buffer.isBuffer(event)) {
@@ -970,13 +984,8 @@ export async function handler(event, context) {
 
   let body;
   if (httpMethod === "GET") {
-    // Parse query string into body-like object for /sync/versions
-    body = {};
-    const qIdx = (event.rawQueryString || event.queryString || "").indexOf("?") >= 0
-      ? event.rawQueryString || event.queryString
-      : null;
-    const qs = event.rawQueryString || event.queryString || "";
-    new URLSearchParams(qs).forEach((v, k) => { body[k] = v; });
+    // Parse the query string into a body-like object for /sync/versions.
+    body = syncGetQueryToBody(event);
   } else {
     try {
       body = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody || {};
