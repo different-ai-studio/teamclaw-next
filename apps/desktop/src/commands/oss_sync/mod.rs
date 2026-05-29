@@ -171,10 +171,7 @@ pub async fn oss_sync_status(
 
     // Synced content lives under the team shared dir, not the workspace root —
     // scan there so coloring / counts match what oss_sync_now actually syncs.
-    let content_root = std::path::Path::new(&workspace_path)
-        .join(crate::commands::TEAM_REPO_DIR)
-        .to_string_lossy()
-        .into_owned();
+    let content_root = engine::team_content_root(&workspace_path);
 
     // Fresh scan so coloring reflects edits made since the last sync tick,
     // mirroring how git_status re-runs on each file-tree poll.
