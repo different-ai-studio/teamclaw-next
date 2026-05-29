@@ -210,10 +210,7 @@ mod tests {
 
     /// Sets an isolated `HOME` and holds the shared HOME lock for the test's
     /// duration so path assertions don't race other HOME-mutating tests.
-    fn temp_home() -> (
-        tempfile::TempDir,
-        std::sync::MutexGuard<'static, ()>,
-    ) {
+    fn temp_home() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
         let guard = global_team_store::TEST_HOME_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());

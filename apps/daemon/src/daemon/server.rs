@@ -901,7 +901,8 @@ impl DaemonServer {
                     crate::config::workspace_link::ensure_workspace_link(ws_root, &team_id);
                 // The effective dir agents read from — the in-workspace link
                 // normally, or the global dir under the no-link fallback.
-                let effective = crate::config::global_team_store::resolve_team_dir(ws_root, &team_id);
+                let effective =
+                    crate::config::global_team_store::resolve_team_dir(ws_root, &team_id);
                 info!(
                     team_id,
                     workspace = %ws_path,
