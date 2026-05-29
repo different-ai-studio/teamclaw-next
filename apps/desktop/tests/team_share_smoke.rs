@@ -165,15 +165,22 @@ async fn enable_oss_provisions_secret_and_local_dir() {
         "secret should be hex"
     );
 
-    // `teamclaw-team/` dir created.
+    // teamclaw-team is created+linked by the daemon, not by enable_oss.
     let team_repo_dir = std::path::Path::new(&workspace).join("teamclaw-team");
-    assert!(team_repo_dir.is_dir(), "teamclaw-team dir should exist");
+    assert!(
+        !team_repo_dir.exists()
+            || team_repo_dir
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+        "enable must not create a real teamclaw-team dir (daemon owns it)"
+    );
 
-    // teamclaw.json updated.
-    let cfg = read_cfg(&workspace);
-    let obj = cfg.as_object().expect("config is object");
-    assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
-    assert_eq!(obj.get("share_mode").and_then(|v| v.as_str()), Some("oss"));
+    // NOTE: team fields (oss_team_id / share_mode) are intentionally NOT
+    // persisted to teamclaw.json anymore — the single source of truth is the
+    // current-team store (commits ad563711 / b1baec40). The returned
+    // share_mode / team_id are asserted above.
 }
 
 #[tokio::test]
@@ -244,17 +251,10 @@ async fn enable_custom_git_writes_git_config() {
             .expect("enable_custom_git should succeed");
     assert_eq!(result.share_mode, "custom_git");
 
-    let cfg = read_cfg(&workspace);
-    let obj = cfg.as_object().expect("config is object");
-    assert_eq!(
-        obj.get("share_mode").and_then(|v| v.as_str()),
-        Some("custom_git")
-    );
-    assert_eq!(
-        obj.get("git_remote_url").and_then(|v| v.as_str()),
-        Some("https://x")
-    );
-    assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
+    // NOTE: team fields (share_mode / git_remote_url / oss_team_id) are no
+    // longer persisted to teamclaw.json — single source of truth is the
+    // current-team store (commits ad563711 / b1baec40). The returned
+    // share_mode is asserted above.
 }
 
 // ─── Task 12 tests ────────────────────────────────────────────────────────
@@ -287,17 +287,22 @@ async fn join_existing_writes_config_when_share_enabled() {
     assert!(result.initialized);
     assert_eq!(result.share_mode.as_deref(), Some("oss"));
 
+    // teamclaw-team is created+linked by the daemon, not by join_existing.
     let team_repo_dir = std::path::Path::new(&workspace).join("teamclaw-team");
-    assert!(team_repo_dir.is_dir(), "teamclaw-team dir should exist");
-
-    let cfg = read_cfg(&workspace);
-    let obj = cfg.as_object().expect("config is object");
-    assert_eq!(obj.get("oss_team_id").and_then(|v| v.as_str()), Some("t1"));
-    assert_eq!(obj.get("share_mode").and_then(|v| v.as_str()), Some("oss"));
-    assert_eq!(
-        obj.get("litellm_team_id").and_then(|v| v.as_str()),
-        Some("ll-1")
+    assert!(
+        !team_repo_dir.exists()
+            || team_repo_dir
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+        "join must not create a real teamclaw-team dir (daemon owns it)"
     );
+
+    // NOTE: team fields (oss_team_id / share_mode / litellm_team_id) are no
+    // longer persisted to teamclaw.json — single source of truth is the
+    // current-team store (commits ad563711 / b1baec40). The returned
+    // initialized / share_mode are asserted above.
 }
 
 #[tokio::test]

@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
-use crate::commands::TEAM_REPO_DIR;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,11 +54,10 @@ pub async fn team_share_join_existing_impl(
         });
     }
 
-    // Ensure teamclaw-team/ dir exists. For git modes we deliberately do NOT
-    // clone — credentials are provisioned out-of-band by Task 7 paths.
-    let team_repo = std::path::Path::new(&workspace_path).join(TEAM_REPO_DIR);
-    std::fs::create_dir_all(&team_repo)
-        .map_err(|e| format!("create_dir_all({}) failed: {e}", team_repo.display()))?;
+    // The team shared dir is created and linked by the daemon (one global copy
+    // per team, exposed via a `teamclaw-team` symlink). Joining no longer
+    // eagerly creates a per-workspace real directory; the daemon's sweep links
+    // it (and consolidates any legacy real dir into the global copy).
 
     // NOTE: team_id / share_mode / git_remote_url / litellm_team_id are NOT
     // written to teamclaw.json anymore. They duplicated the Cloud API (teams /
