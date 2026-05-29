@@ -861,34 +861,47 @@ impl DaemonServer {
             mgr.prewarm_acp_hosts().await;
         }
 
-        // Optional browser-facing HTTP+SSE listener. Skipped silently when
-        // `[http]` is absent from daemon.toml so existing deployments keep
-        // their current Unix-socket-only behaviour. Failure to bind here
-        // is logged but does NOT abort the daemon — the Unix socket path
-        // is still usable for desktop clients.
-        let _http_handle = match self.config.http.clone() {
-            Some(http_cfg) => {
-                let meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
-                // Until the RuntimeManager adapter ships, the HTTP layer
-                // runs against the StubRuntimeAdapter — useful for
-                // browser dev integration but does not drive real agent
-                // processes. The follow-up to PR8 replaces this with a
-                // real `RuntimeManagerAdapter::new(self.agents.clone())`.
-                let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(
+        // Browser-facing HTTP+SSE listener. Desktop TeamClaw requires this
+        // control plane; when `[http]` is absent from daemon.toml we still
+        // bind loopback with `HttpConfig::default()`. Failure to bind is
+        // logged but does NOT abort the daemon — the Unix socket path remains
+        // usable for legacy clients.
+        let http_cfg = self
+            .config
+            .http
+            .clone()
+            .unwrap_or_else(crate::config::HttpConfig::default);
+        let _http_handle = {
+            let meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
+            let runtime: Arc<dyn crate::http::runtime_adapter::RuntimeAdapter> =
+                crate::http::runtime_adapter::RuntimeManagerAdapter::new(
+                    self.agents.clone(),
                     http_cfg.max_event_backlog,
                 );
-                match crate::http::spawn(http_cfg, meta, runtime).await {
-                    Ok(h) => {
-                        info!(addr = %h.local_addr, "http listener bound");
-                        Some(h)
-                    }
-                    Err(e) => {
-                        warn!("http listener failed to start: {e}");
-                        None
-                    }
+            let runtime_supervisor =
+                Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
+            let workspace_control: Option<std::sync::Arc<dyn crate::config::WorkspaceControlStore>> =
+                Some(std::sync::Arc::new(
+                    crate::config::OpenCodeCompatStore::new(),
+                ));
+            match crate::http::spawn(
+                http_cfg,
+                meta,
+                runtime,
+                workspace_control,
+                runtime_supervisor,
+            )
+            .await
+            {
+                Ok(h) => {
+                    info!(addr = %h.local_addr, "http listener bound");
+                    Some(h)
+                }
+                Err(e) => {
+                    warn!("http listener failed to start: {e}");
+                    None
                 }
             }
-            None => None,
         };
 
         // Bind the control socket and spawn a listener that funnels parsed
@@ -2399,6 +2412,12 @@ impl DaemonServer {
                     "route_session_message: @ mention matched; sending prompt"
                 );
                 // Real prompt — flush_pending_silent inside send_prompt does the prefix work.
+                info!(
+                    runtime_id = %runtime_id,
+                    message_id = %message.message_id,
+                    session_id = %session_id,
+                    "route_session_message: delivering mentioned prompt to runtime"
+                );
                 let send_res = self
                     .agents
                     .lock()
@@ -2410,7 +2429,15 @@ impl DaemonServer {
                     )
                     .await;
                 let _drained = match send_res {
-                    Ok(d) => d,
+                    Ok(d) => {
+                        info!(
+                            runtime_id = %runtime_id,
+                            message_id = %message.message_id,
+                            drained_silent = d.len(),
+                            "route_session_message: send_prompt ok"
+                        );
+                        d
+                    }
                     Err(e) => {
                         warn!(runtime_id = %runtime_id, err = ?e, "send_prompt failed");
                         continue;
@@ -3930,6 +3957,54 @@ impl DaemonServer {
     ///   - No FAILED publish here — spawn_agent error path returns before any
     ///     runtime_id is allocated, so there is no retained topic to write to.
     ///     Callers may surface the error via their wire envelope.
+    /// Load a collab session + participants from the backend, cache them in
+    /// the teamclaw session manager, and subscribe to `session/{sid}/live`.
+    /// Idempotent — safe on every RuntimeStart, including dedup reuse.
+    async fn ensure_collab_session_registered(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(), StartRuntimeError> {
+        if session_id.is_empty() {
+            return Ok(());
+        }
+        match self
+            .backend
+            .fetch_session_with_participants(session_id)
+            .await
+        {
+            Ok(snap) => {
+                if let Some(tc) = self.teamclaw.as_mut() {
+                    if let Err(e) = tc
+                        .insert_session_from_backend(&snap.session, &snap.participants)
+                        .await
+                    {
+                        return Err(StartRuntimeError {
+                            error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
+                            error_message: format!("insert_session_from_backend failed: {}", e),
+                            failed_stage: "session_subscribe".to_string(),
+                        });
+                    }
+                } else {
+                    return Err(StartRuntimeError {
+                        error_code: "SESSION_SUBSCRIBE_FAILED".to_string(),
+                        error_message:
+                            "teamclaw session manager is not available for session runtime"
+                                .to_string(),
+                        failed_stage: "session_subscribe".to_string(),
+                    });
+                }
+            }
+            Err(e) => {
+                return Err(StartRuntimeError {
+                    error_code: "SESSION_LOOKUP_FAILED".to_string(),
+                    error_message: format!("fetch_session_with_participants failed: {}", e),
+                    failed_stage: "session_lookup".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     async fn apply_start_runtime(
         &mut self,
         agent_type: amux::AgentType,
@@ -4063,6 +4138,33 @@ impl DaemonServer {
                 runtime_id = %existing,
                 "apply_start_runtime: dedup hit; reusing existing runtime"
             );
+            // Still register the session + subscribe to session/live. The
+            // spawn path does this before returning; skipping it on dedup left
+            // runtimes that were reused without a live subscription, so
+            // @-mention prompts published to MQTT never reached send_prompt.
+            self.ensure_collab_session_registered(session_id).await?;
+            if !initial_prompt.trim().is_empty() {
+                if let Err(e) = self
+                    .agents
+                    .lock()
+                    .await
+                    .send_prompt(&existing, initial_prompt, vec![])
+                    .await
+                {
+                    warn!(
+                        runtime_id = %existing,
+                        session_id,
+                        err = %e,
+                        "apply_start_runtime: dedup reuse send_prompt failed"
+                    );
+                } else {
+                    info!(
+                        runtime_id = %existing,
+                        session_id,
+                        "apply_start_runtime: dedup reuse delivered initial_prompt"
+                    );
+                }
+            }
             // Re-publish retained RuntimeInfo so clients that missed the
             // original retain (late subscribe, reconnect) still populate the
             // model picker without spawning a duplicate process.

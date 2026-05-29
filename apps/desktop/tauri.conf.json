@@ -79,7 +79,6 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/opencode",
       "binaries/teamclaw-introspect"
     ],
     "resources": [

@@ -6,7 +6,7 @@
 use axum::{
     extract::State,
     middleware,
-    routing::{delete, get, post, MethodRouter},
+    routing::{delete, get, post, put, MethodRouter},
     Json, Router,
 };
 
@@ -15,6 +15,7 @@ use super::limit::{body_limit_layer, rate_limit_layer};
 use super::observ::request_id_layer;
 use super::sessions;
 use super::state::HttpState;
+use super::workspaces;
 
 pub fn build(state: HttpState) -> Router {
     let body_cap = state.config.max_body_bytes;
@@ -34,8 +35,64 @@ pub fn build(state: HttpState) -> Router {
         )
         .route("/v1/sessions/:id/prompt", post(sessions::send_prompt))
         .route("/v1/sessions/:id/cancel", post(sessions::cancel))
+        .route("/v1/sessions/:id/model", post(sessions::set_model))
+        .route(
+            "/v1/sessions/:id/permissions/:request_id",
+            post(sessions::reply_permission),
+        )
+        .route("/v1/sessions/:id/restart", post(sessions::restart))
         .route("/v1/sessions/:id/events", get(sessions::replay_events))
         .route("/v1/sessions/:id/stream", get(sessions::stream))
+        // Workspace control-plane APIs (Phase B/C)
+        .route(
+            "/v1/workspaces/:id/providers",
+            get(workspaces::get_providers),
+        )
+        .route(
+            "/v1/workspaces/:id/providers/:provider_id/auth",
+            post(workspaces::put_provider_auth)
+                .delete(workspaces::delete_provider_auth),
+        )
+        .route(
+            "/v1/workspaces/:id/permissions",
+            get(workspaces::get_permissions).put(workspaces::put_permissions),
+        )
+        .route(
+            "/v1/workspaces/:id/permission-allowlist",
+            get(workspaces::get_allowlist).put(workspaces::put_allowlist),
+        )
+        .route(
+            "/v1/workspaces/:id/mcp",
+            get(workspaces::get_mcp).put(workspaces::put_mcp),
+        )
+        .route(
+            "/v1/workspaces/:id/roles-skills",
+            get(workspaces::get_roles_skills),
+        )
+        .route(
+            "/v1/workspaces/:id/skills",
+            get(workspaces::get_skills),
+        )
+        .route(
+            "/v1/workspaces/:id/skills/:slug",
+            put(workspaces::put_skill).delete(workspaces::delete_skill),
+        )
+        .route(
+            "/v1/workspaces/:id/roles",
+            get(workspaces::get_roles),
+        )
+        .route(
+            "/v1/workspaces/:id/roles/:slug",
+            put(workspaces::put_role).delete(workspaces::delete_role),
+        )
+        .route(
+            "/v1/workspaces/:id/runtime",
+            get(workspaces::get_runtime),
+        )
+        .route(
+            "/v1/workspaces/:id/runtime/reload",
+            post(workspaces::reload_runtime),
+        )
         .layer(body_limit_layer(body_cap))
         .layer(middleware::from_fn_with_state(
             state.clone(),

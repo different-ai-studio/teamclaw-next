@@ -16,7 +16,7 @@ import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { createSessionWithFirstMessage } from '@/lib/session-create'
-import { ensureSessionLiveSubscribed } from '@/App'
+import { ensureSessionLiveSubscribed } from '@/lib/session-live-subscriptions'
 import { useEngagedAgentStore } from '@/stores/engaged-agent-store'
 import { cn } from '@/lib/utils'
 
@@ -166,7 +166,9 @@ export function NewSessionDialog() {
         agentActorIds,
         messageText: message,
       })
-      await ensureSessionLiveSubscribed(teamId, sessionId)
+      await ensureSessionLiveSubscribed(teamId, sessionId).catch((e) => {
+        console.warn('[NewSessionDialog] live subscribe failed (non-fatal):', e)
+      })
       const agentPicks = pickedActors.filter((p) => p.actor_type === 'agent')
       if (agentPicks.length > 0) {
         useEngagedAgentStore.getState().setAgents(

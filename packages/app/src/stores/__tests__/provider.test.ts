@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getCustomProviderIds: vi.fn(),
   getCustomProviderConfig: vi.fn(),
+  getDaemonProviders: vi.fn(),
   runtimeById: {} as Record<string, any>,
 }))
 
@@ -29,14 +30,15 @@ vi.mock('@/stores/workspace', () => ({
   },
 }))
 
-vi.mock('@/lib/opencode/sdk-client', () => ({
-  getOpenCodeClient: vi.fn(() => {
-    throw new Error('not connected')
-  }),
-}))
-
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+}))
+
+vi.mock('@/lib/daemon-local-client', () => ({
+  encodeWorkspaceId: (path: string) => path,
+  getDaemonProviders: mocks.getDaemonProviders,
+  putDaemonProviderAuth: vi.fn(),
+  deleteDaemonProviderAuth: vi.fn(),
 }))
 
 vi.mock('@/lib/amuxd-models', () => ({
@@ -64,7 +66,7 @@ vi.mock('@/lib/opencode/config', () => ({
   getCustomProviderIds: mocks.getCustomProviderIds,
   getCustomProviderConfig: mocks.getCustomProviderConfig,
   removeCustomProviderFromConfig: vi.fn(),
-  providerApiKeyName: vi.fn(),
+  providerApiKeyName: vi.fn((id: string) => `PROVIDER_${id.toUpperCase()}_API_KEY`),
 }))
 
 describe('provider store initAll', () => {
@@ -74,10 +76,12 @@ describe('provider store initAll', () => {
     mocks.runtimeById = {}
     mocks.getCustomProviderIds.mockReset()
     mocks.getCustomProviderConfig.mockReset()
+    mocks.getDaemonProviders.mockReset()
+    mocks.getDaemonProviders.mockResolvedValue(null)
+    mocks.getCustomProviderIds.mockResolvedValue([])
   })
 
-  it('ignores daemon runtime models when initializing OpenCode model settings', async () => {
-    mocks.getCustomProviderIds.mockResolvedValue([])
+  it('ignores daemon runtime models when initializing model settings', async () => {
     mocks.runtimeById = {
       'runtime-1': {
         info: {
@@ -102,33 +106,18 @@ describe('provider store initAll', () => {
     expect(getSelectedModelOption(state)).toBeNull()
   })
 
-  it('keeps an explicit selected OpenCode model when daemon runtime info reports a different current model', async () => {
-    mocks.getCustomProviderIds.mockResolvedValue([])
-    mocks.runtimeById = {
-      'runtime-1': {
-        info: {
-          agentType: 1,
-          availableModels: [
-            { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6' },
-            { id: 'claude-opus-4-7', displayName: 'Claude Opus 4.7' },
-          ],
-          currentModel: 'claude-sonnet-4-6',
-        },
+  it('keeps an explicit selected model when daemon reports a different catalog', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'opencode',
+        display_name: 'OpenCode',
+        authenticated: true,
+        models: ['opencode/qwen3.6-plus-free', 'opencode/big-pickle'],
       },
-    }
+    ])
 
     const { useProviderStore } = await import('../provider')
     useProviderStore.setState({
-      configuredProviders: [
-        {
-          id: 'opencode',
-          name: 'OpenCode',
-          models: [
-            { id: 'opencode/qwen3.6-plus-free', name: 'OpenCode Zen/Qwen3.6 Plus Free' },
-            { id: 'opencode/big-pickle', name: 'Big Pickle' },
-          ],
-        },
-      ],
       currentModelKey: 'opencode/opencode/big-pickle',
     })
 
@@ -137,8 +126,7 @@ describe('provider store initAll', () => {
     expect(useProviderStore.getState().currentModelKey).toBe('opencode/opencode/big-pickle')
   })
 
-  it('does not load the old static model list when daemon has no runtime info', async () => {
-    mocks.getCustomProviderIds.mockResolvedValue([])
+  it('does not recover a saved model when daemon providers are unavailable', async () => {
     localStorage.setItem('teamclaw-selected-model:/workspace/demo', 'openai/gpt-4o')
 
     const { useProviderStore } = await import('../provider')
@@ -151,16 +139,15 @@ describe('provider store initAll', () => {
     expect(state.currentModelKey).toBeNull()
   })
 
-  it('keeps workspace custom models available and restores the saved selection', async () => {
-    mocks.getCustomProviderIds.mockResolvedValue(['custom-openai'])
-    mocks.getCustomProviderConfig.mockResolvedValue({
-      name: 'Custom OpenAI',
-      baseURL: 'https://example.com/v1',
-      models: [
-        { modelId: 'my-model', modelName: 'My Model' },
-      ],
-    })
-
+  it('loads workspace custom models from daemon providers and restores the saved selection', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'custom-openai',
+        display_name: 'Custom OpenAI',
+        authenticated: true,
+        models: ['my-model'],
+      },
+    ])
     localStorage.setItem('teamclaw-selected-model:/workspace/demo', 'custom-openai/my-model')
 
     const { useProviderStore, getSelectedModelOption } = await import('../provider')
@@ -173,7 +160,7 @@ describe('provider store initAll', () => {
         expect.objectContaining({
           provider: 'custom-openai',
           id: 'my-model',
-          name: 'My Model',
+          name: 'my-model',
         }),
       ]),
     )
@@ -181,19 +168,19 @@ describe('provider store initAll', () => {
     expect(getSelectedModelOption(state)).toMatchObject({
       provider: 'custom-openai',
       id: 'my-model',
-      name: 'My Model',
+      name: 'my-model',
     })
   })
 
-  it('falls back to a custom provider when a saved daemon runtime model is not in OpenCode settings', async () => {
-    mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
-    mocks.getCustomProviderConfig.mockResolvedValue({
-      name: 'Scnet',
-      baseURL: 'https://example.com/v1',
-      models: [
-        { modelId: 'minimax-m2.5', modelName: 'MiniMax-M2.5' },
-      ],
-    })
+  it('falls back to a custom provider when a saved model is not in the daemon catalog', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'scnet',
+        display_name: 'Scnet',
+        authenticated: true,
+        models: ['minimax-m2.5'],
+      },
+    ])
     localStorage.setItem('teamclaw-selected-model:/workspace/demo', 'opencode/opencode/qwen3.6-plus-free')
 
     const { useProviderStore } = await import('../provider')
@@ -204,14 +191,14 @@ describe('provider store initAll', () => {
   })
 
   it('does not recover to daemon runtime info from a custom-provider selection', async () => {
-    mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
-    mocks.getCustomProviderConfig.mockResolvedValue({
-      name: 'Scnet',
-      baseURL: 'https://example.com/v1',
-      models: [
-        { modelId: 'minimax-m2.5', modelName: 'MiniMax-M2.5' },
-      ],
-    })
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'scnet',
+        display_name: 'Scnet',
+        authenticated: true,
+        models: ['minimax-m2.5'],
+      },
+    ])
     mocks.runtimeById = {
       'runtime-1': {
         info: {

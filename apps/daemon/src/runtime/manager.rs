@@ -157,6 +157,8 @@ pub struct RuntimeManager {
     last_sent: HashMap<String, String>,
     #[cfg(test)]
     send_failures: HashMap<String, String>,
+    #[cfg(test)]
+    permission_log: Vec<(String, bool)>,
 }
 
 impl RuntimeManager {
@@ -177,6 +179,8 @@ impl RuntimeManager {
             last_sent: HashMap::new(),
             #[cfg(test)]
             send_failures: HashMap::new(),
+            #[cfg(test)]
+            permission_log: Vec::new(),
         }
     }
 
@@ -551,6 +555,56 @@ impl RuntimeManager {
         }
     }
 
+    fn workspace_runtime_matches(
+        handle: &RuntimeHandle,
+        workspace_path: &str,
+        workspace_id: &str,
+    ) -> bool {
+        handle.worktree == workspace_path
+            || handle.workspace_id == workspace_path
+            || handle.workspace_id == workspace_id
+    }
+
+    /// Active runtimes bound to a workspace path or id.
+    pub fn active_handles_for_workspace<'a>(
+        &'a self,
+        workspace_path: &'a str,
+        workspace_id: &'a str,
+    ) -> impl Iterator<Item = (&'a String, &'a RuntimeHandle)> + 'a {
+        self.agents.iter().filter(move |(_, handle)| {
+            Self::workspace_runtime_matches(handle, workspace_path, workspace_id)
+                && matches!(
+                    handle.status,
+                    amux::AgentStatus::Starting
+                        | amux::AgentStatus::Active
+                        | amux::AgentStatus::Idle
+                )
+        })
+    }
+
+    /// Stop all runtimes for a workspace (used after settings reload).
+    pub async fn stop_runtimes_for_workspace(
+        &mut self,
+        workspace_path: &str,
+        workspace_id: &str,
+    ) -> usize {
+        let ids: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, handle)| {
+                Self::workspace_runtime_matches(handle, workspace_path, workspace_id)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut stopped = 0usize;
+        for id in ids {
+            if self.stop_agent(&id).await.is_some() {
+                stopped += 1;
+            }
+        }
+        stopped
+    }
+
     /// Stop every runtime whose `last_active_at` is older than
     /// `now - threshold_secs`. Skips runtimes whose `event_rx` is currently
     /// checked out (a gateway turn is in flight). Returns the list of
@@ -646,11 +700,28 @@ impl RuntimeManager {
             if let Some(message) = self.send_failures.remove(agent_id) {
                 return Err(crate::error::AmuxError::Agent(message));
             }
-            if let Some(h) = self.agents.get_mut(agent_id) {
+            let event_tx = if let Some(h) = self.agents.get_mut(agent_id) {
                 h.bump_activity();
-            }
+                Some(h.event_tx.clone())
+            } else {
+                None
+            };
             self.last_sent
                 .insert(agent_id.to_string(), text.to_string());
+            if let Some(event_tx) = event_tx {
+                let text = text.to_string();
+                tokio::spawn(async move {
+                    let _ = event_tx
+                        .send(amux::AcpEvent {
+                            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                                text,
+                                is_complete: true,
+                            })),
+                            model: String::new(),
+                        })
+                        .await;
+                });
+            }
             return Ok(());
         }
         #[cfg(not(test))]
@@ -688,13 +759,28 @@ impl RuntimeManager {
         agent_id: &str,
         model_id: &str,
     ) -> crate::error::Result<()> {
+        #[cfg(test)]
+        {
+            if !self.agents.contains_key(agent_id) {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "agent {} not found",
+                    agent_id
+                )));
+            }
+            let _ = model_id;
+            return Ok(());
+        }
+
+        #[cfg(not(test))]
         let handle = self.agents.get(agent_id).ok_or_else(|| {
             crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
         })?;
+        #[cfg(not(test))]
         let tx = handle
             .cmd_tx
             .as_ref()
             .ok_or_else(|| crate::error::AmuxError::Agent("no ACP command channel".into()))?;
+        #[cfg(not(test))]
         tx.send(adapter::AcpCommand::SetModel {
             acp_session_id: handle.acp_session_id.clone(),
             model_id: model_id.to_string(),
@@ -769,18 +855,54 @@ impl RuntimeManager {
         handle.cancel().await
     }
 
-    /// Resolve a permission request for an agent.
+    /// Reply to a pending permission request for an agent.
+    pub async fn reply_permission(
+        &mut self,
+        agent_id: &str,
+        request_id: &str,
+        granted: bool,
+    ) -> crate::error::Result<()> {
+        #[cfg(test)]
+        {
+            if !self.agents.contains_key(agent_id) {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "agent {} not found",
+                    agent_id
+                )));
+            }
+            self.permission_log
+                .push((request_id.to_string(), granted));
+            return Ok(());
+        }
+
+        #[cfg(not(test))]
+        let handle = self.agents.get(agent_id).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
+        })?;
+        #[cfg(not(test))]
+        handle.resolve_permission(request_id, granted).await
+    }
+
+    /// Backward-compatible alias for older call sites that still speak
+    /// in terms of permission resolution.
     pub async fn resolve_permission(
         &mut self,
         agent_id: &str,
         request_id: &str,
         granted: bool,
     ) -> crate::error::Result<()> {
-        let handle = self.agents.get(agent_id).ok_or_else(|| {
-            crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
-        })?;
+        self.reply_permission(agent_id, request_id, granted).await
+    }
 
-        handle.resolve_permission(request_id, granted).await
+    pub async fn restart_session(&mut self, agent_id: &str) -> crate::error::Result<()> {
+        if self.stop_agent(agent_id).await.is_some() {
+            Ok(())
+        } else {
+            Err(crate::error::AmuxError::Agent(format!(
+                "agent {} not found",
+                agent_id
+            )))
+        }
     }
 
     /// Map a command-topic runtime id to a live agent key. Desktop clients can
@@ -1329,6 +1451,10 @@ impl RuntimeManager {
     pub fn fail_next_send_for(&mut self, runtime_id: &str, message: &str) {
         self.send_failures
             .insert(runtime_id.to_string(), message.to_string());
+    }
+
+    pub fn permission_log(&self) -> Vec<(String, bool)> {
+        self.permission_log.clone()
     }
 }
 

@@ -218,7 +218,14 @@ pub async fn exchange_handler(
 }
 
 fn validate_scopes(scopes: &[String]) -> Result<(), HttpError> {
-    const ALLOWED: &[&str] = &["sessions:read", "sessions:write", "events:read", "admin"];
+    const ALLOWED: &[&str] = &[
+        "sessions:read",
+        "sessions:write",
+        "events:read",
+        "workspace:read",
+        "workspace:write",
+        "admin",
+    ];
     for s in scopes {
         if !ALLOWED.contains(&s.as_str()) {
             return Err(HttpError::validation(format!("unknown scope: {s}")));

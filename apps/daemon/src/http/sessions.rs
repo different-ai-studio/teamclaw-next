@@ -103,6 +103,16 @@ pub struct EventsQuery {
     pub limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetModelParams {
+    pub model_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PermissionReplyParams {
+    pub granted: bool,
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 pub async fn create_session(
@@ -223,6 +233,44 @@ pub async fn cancel(
     enforce_session_owner(&state, &principal, id)?;
     state.runtime.cancel(id, params.turn_id).await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+pub async fn set_model(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetModelParams>,
+) -> Result<StatusCode, HttpError> {
+    require_scope(&principal, "sessions:write")?;
+    enforce_session_owner(&state, &principal, id)?;
+    state.runtime.set_model(id, body.model_id).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+pub async fn reply_permission(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path((id, request_id)): Path<(Uuid, String)>,
+    Json(body): Json<PermissionReplyParams>,
+) -> Result<StatusCode, HttpError> {
+    require_scope(&principal, "sessions:write")?;
+    enforce_session_owner(&state, &principal, id)?;
+    state
+        .runtime
+        .reply_permission(id, request_id, body.granted)
+        .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+pub async fn restart(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SessionSnapshot>, HttpError> {
+    require_scope(&principal, "sessions:write")?;
+    enforce_session_owner(&state, &principal, id)?;
+    let snapshot = state.runtime.restart_session(id).await?;
+    Ok(Json(snapshot))
 }
 
 pub async fn replay_events(

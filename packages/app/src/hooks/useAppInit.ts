@@ -24,14 +24,9 @@ import { useTeamMembersStore } from "@/stores/team-members";
 import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useCronStore } from "@/stores/cron";
+import { probeDaemonHttp } from "@/lib/daemon-local-client";
 import { useTeamModeStore } from "@/stores/team-mode";
 import { useOssSyncStore } from "@/stores/oss-sync";
-import { initOpenCodeClient } from "@/lib/opencode/sdk-client";
-import {
-  startOpenCode,
-  hasPreloadFor,
-  waitForOpenCodeBootstrapped,
-} from "@/lib/opencode/preloader";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
 import { appShortName, TEAM_REPO_DIR } from "@/lib/build-config";
 
@@ -63,6 +58,7 @@ export function useWorkspaceInit() {
   const setWorkspace = useWorkspaceStore((s) => s.setWorkspace);
   const setOpenCodeBootstrapped = useWorkspaceStore((s) => s.setOpenCodeBootstrapped);
   const setOpenCodeReady = useWorkspaceStore((s) => s.setOpenCodeReady);
+  const setDaemonHttpReady = useWorkspaceStore((s) => s.setDaemonHttpReady);
   const [openCodeError, setOpenCodeError] = useState<string | null>(null);
   const [initialWorkspaceResolved, setInitialWorkspaceResolved] = useState(false);
 
@@ -131,68 +127,52 @@ export function useWorkspaceInit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Start OpenCode when a workspace is selected. The restored runtime is used
-  // by settings, automations, and external gateways; chat dispatch remains
-  // owned by the amux daemon path.
+  // Probe daemon HTTP — required on desktop; no OpenCode sidecar fallback.
   useEffect(() => {
-    if (!workspacePath) return;
+    if (!workspacePath) {
+      setDaemonHttpReady(false);
+      return;
+    }
 
     setOpenCodeError(null);
 
     if (!isTauri()) {
-      const url = "http://127.0.0.1:4096";
-      initOpenCodeClient({ baseUrl: url, workspacePath });
-      setOpenCodeBootstrapped(true, url);
-      setOpenCodeReady(true, url);
+      setOpenCodeBootstrapped(true);
+      setOpenCodeReady(true);
+      setDaemonHttpReady(true);
       return;
     }
 
-    const alreadyPreloading = hasPreloadFor(workspacePath);
-    if (!alreadyPreloading) {
-      setOpenCodeBootstrapped(false);
-    }
-
     let cancelled = false;
-    const explicitPort =
-      windowParams && windowParams.workspace === workspacePath ? windowParams.port : undefined;
-
-    waitForOpenCodeBootstrapped(workspacePath, explicitPort)
-      .then((status) => {
-        if (cancelled) return;
-        initOpenCodeClient({ baseUrl: status.url, workspacePath });
+    void (async () => {
+      const probe = await probeDaemonHttp();
+      if (cancelled) return;
+      const ready = probe.ok;
+      setDaemonHttpReady(ready);
+      if (ready) {
+        setOpenCodeBootstrapped(true);
+        setOpenCodeReady(true);
         setOpenCodeError(null);
-        setOpenCodeBootstrapped(true, status.url);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.warn("[OpenCode] Failed waiting for bootstrap event:", error);
-      });
-
-    startOpenCode(workspacePath, explicitPort)
-      .then((status) => {
-        if (cancelled) return;
-        initOpenCodeClient({ baseUrl: status.url, workspacePath });
-        setOpenCodeError(null);
-        setOpenCodeBootstrapped(true, status.url);
-        setOpenCodeReady(true, status.url);
-        performance.mark('opencode-ready');
-        if (performance.getEntriesByName('react-mount').length) {
-          performance.measure('startup-total', 'react-mount', 'opencode-ready');
-          const total = performance.getEntriesByName('startup-total')[0];
-          console.log(`[Startup] react→ready: ${Math.round(total.duration)}ms`);
-        }
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("[OpenCode] Failed to start server:", error);
+        performance.mark("daemon-ready");
+      } else {
         setOpenCodeBootstrapped(false);
-        setOpenCodeError(String(error));
-      });
+        setOpenCodeReady(false);
+        const message =
+          probe.reason === "port_file_missing"
+            ? "amuxd daemon 未连接：HTTP 控制面未就绪（~/.amuxd/amuxd.http.port 不存在）。请重启 amuxd，或确认运行的是本分支构建的版本。"
+            : probe.reason === "token_exchange_failed"
+              ? "amuxd daemon HTTP 已启动但鉴权失败：请重启 amuxd 后重试。"
+              : probe.reason === "health_check_failed"
+                ? "amuxd daemon HTTP 无响应：请确认 amuxd 进程仍在运行。"
+                : "amuxd daemon 未连接：请确认 amuxd 已启动且 HTTP 控制面可用";
+        setOpenCodeError(message);
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [workspacePath, setOpenCodeBootstrapped, setOpenCodeReady]);
+  }, [workspacePath, setOpenCodeBootstrapped, setOpenCodeReady, setDaemonHttpReady]);
 
   useEffect(() => {
     if (!workspacePath || !isTauri()) return;
@@ -330,15 +310,7 @@ export function useWorkspaceInit() {
 }
 
 export function useOpenCodePreload() {
-  useEffect(() => {
-    if (!isTauri()) return;
-    const savedPath = localStorage.getItem(`${appShortName}-workspace-path`);
-    if (savedPath) {
-      startOpenCode(savedPath).catch((err) =>
-        console.warn("[Preload] OpenCode pre-start failed (will retry later):", err),
-      );
-    }
-  }, []);
+  // OpenCode sidecar preload removed — daemon HTTP is probed in useWorkspaceInit.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -347,7 +319,7 @@ export function useOpenCodePreload() {
 
 export function useChannelGatewayInit() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = useWorkspaceStore((s) => s.openCodeReady);
+  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady);
   const {
     autoStartEnabledGateways,
     loadConfig: loadChannelsConfig,
@@ -600,7 +572,7 @@ export function useGitReposInit() {
 
 export function useCronInit() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = useWorkspaceStore((s) => s.openCodeReady);
+  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady);
 
   useEffect(() => {
     if (!isTauri() || !workspacePath || !workspaceReady) return;

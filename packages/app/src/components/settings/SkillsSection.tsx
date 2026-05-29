@@ -30,7 +30,14 @@ import {
 import { invoke } from '@tauri-apps/api/core'
 import { SKILLS_CHANGED_EVENT } from '@/hooks/useAppInit'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { restartOpencode } from '@/lib/opencode/restart'
+import {
+  encodeWorkspaceId,
+  getDaemonPermissions,
+  putDaemonPermissions,
+  reloadDaemonRuntime,
+  putDaemonSkill,
+  deleteDaemonSkill,
+} from '@/lib/daemon-local-client'
 import { cn } from '@/lib/utils'
 import { buildConfig } from '@/lib/build-config'
 import { Button } from '@/components/ui/button'
@@ -53,12 +60,7 @@ import {
 } from '@/components/ui/dialog'
 import { SettingCard, SectionHeader } from './shared'
 import type { SkillPermission, SkillPermissionMap } from '@/lib/opencode/config'
-import {
-  readSkillPermissions,
-  writeSkillPermission,
-  removeSkillPermission,
-  resolveSkillPermission,
-} from '@/lib/opencode/config'
+import { resolveSkillPermission } from '@/lib/opencode/config'
 import type { SkillSource } from '@/lib/git/types'
 import { INHERENT_SKILL_NAMES } from '@/lib/git/types'
 import { SkillsMarketplace } from './SkillsMarketplace'
@@ -218,8 +220,9 @@ export const SkillsSection = React.memo(function SkillsSection({
   const loadPermissions = React.useCallback(async () => {
     if (!workspacePath) return
     try {
-      const perms = await readSkillPermissions(workspacePath)
-      setSkillPermissions(perms)
+      const wid = encodeWorkspaceId(workspacePath)
+      const perms = await getDaemonPermissions(wid)
+      if (perms !== null) setSkillPermissions(perms as SkillPermissionMap)
     } catch (err) {
       console.error('[SkillsSection] Failed to load permissions:', err)
     }
@@ -232,12 +235,6 @@ export const SkillsSection = React.memo(function SkillsSection({
     setError(null)
 
     try {
-      const { exists, mkdir } = await import('@tauri-apps/plugin-fs')
-      const skillsDir = `${workspacePath}/.opencode/skills`
-
-      if (!(await exists(skillsDir))) {
-        await mkdir(skillsDir, { recursive: true })
-      }
       const { loadRolesSkillsWorkspaceState } = await import('@/lib/roles/loader')
       const [workspaceState] = await Promise.all([
         loadRolesSkillsWorkspaceState(workspacePath),
@@ -301,7 +298,8 @@ export const SkillsSection = React.memo(function SkillsSection({
   const restartOpenCodeInstance = React.useCallback(
     async (options?: RestartOptions) => {
       if (!workspacePath) return
-      await restartOpencode(workspacePath)
+      const wid = encodeWorkspaceId(workspacePath)
+      await reloadDaemonRuntime(wid)
       if (!options?.preserveChangeFlag) {
         setHasChanges(false)
       }
@@ -368,32 +366,8 @@ export const SkillsSection = React.memo(function SkillsSection({
     setError(null)
 
     try {
-      const { writeTextFile, exists, mkdir } = await import('@tauri-apps/plugin-fs')
-      const { homeDir } = await import('@tauri-apps/api/path')
-
-      // Determine base directory based on install location
-      let skillsDir: string
-      if (editingSkill?.dirPath) {
-        skillsDir = editingSkill.dirPath
-      } else if (installLocation === 'global') {
-        const home = await homeDir()
-        skillsDir = `${home.replace(/\/$/, '')}/.config/opencode/skills`
-      } else {
-        skillsDir = `${workspacePath}/.opencode/skills`
-      }
-
-      if (!(await exists(skillsDir))) {
-        await mkdir(skillsDir, { recursive: true })
-      }
-
       const skillDirName = editingSkill?.filename ||
         skillName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-
-      const skillDir = `${skillsDir}/${skillDirName}`
-
-      if (!(await exists(skillDir))) {
-        await mkdir(skillDir, { recursive: true })
-      }
 
       let finalContent = skillContent.trim()
       if (!finalContent.startsWith('---')) {
@@ -406,6 +380,51 @@ description: ${description.replace(/\n/g, ' ')}
 # ${skillName}
 
 ${skillContent.trim()}`
+      }
+
+      if (workspacePath && installLocation === 'workspace') {
+        const saved = await putDaemonSkill(encodeWorkspaceId(workspacePath), skillDirName, {
+          content: finalContent,
+          skillName,
+          installLocation,
+          dirPath: editingSkill?.dirPath,
+          filename: editingSkill?.filename,
+        })
+        if (saved) {
+          await loadSkills()
+          onDataChange?.()
+          setHasSkillRuntimeChanges(true)
+          setDialogOpen(false)
+          setEditingSkill(null)
+          setSkillDialogMode('create')
+          setSkillName('')
+          setSkillContent('')
+          setInstallLocation('workspace')
+          return
+        }
+      }
+
+      const { writeTextFile, exists, mkdir } = await import('@tauri-apps/plugin-fs')
+      const { homeDir } = await import('@tauri-apps/api/path')
+
+      let skillsDir: string
+      if (editingSkill?.dirPath) {
+        skillsDir = editingSkill.dirPath
+      } else if (installLocation === 'global') {
+        const home = await homeDir()
+        skillsDir = `${home.replace(/\/$/, '')}/.config/opencode/skills`
+      } else {
+        skillsDir = `${workspacePath}/.teamclaw/skills`
+      }
+
+      if (!(await exists(skillsDir))) {
+        await mkdir(skillsDir, { recursive: true })
+      }
+
+      const skillDir = `${skillsDir}/${skillDirName}`
+
+      if (!(await exists(skillDir))) {
+        await mkdir(skillDir, { recursive: true })
       }
 
       await writeTextFile(`${skillDir}/SKILL.md`, finalContent)
@@ -446,9 +465,16 @@ ${skillContent.trim()}`
           slug: targetSkill.filename,
         })
       } else {
-        const { remove } = await import('@tauri-apps/plugin-fs')
-        const baseDir = targetSkill.dirPath ?? `${workspacePath}/.opencode/skills`
-        await remove(`${baseDir}/${targetSkill.filename}`, { recursive: true })
+        const deleted = await deleteDaemonSkill(
+          encodeWorkspaceId(workspacePath),
+          targetSkill.filename,
+          targetSkill.dirPath,
+        )
+        if (!deleted) {
+          const { remove } = await import('@tauri-apps/plugin-fs')
+          const baseDir = targetSkill.dirPath ?? `${workspacePath}/.teamclaw/skills`
+          await remove(`${baseDir}/${targetSkill.filename}`, { recursive: true })
+        }
       }
 
       setDeleteConfirmOpen(false)
@@ -558,8 +584,10 @@ ${skillContent.trim()}`
   const handleDefaultPermissionChange = async (value: SkillPermission) => {
     if (!workspacePath) return
     try {
-      await writeSkillPermission(workspacePath, '*', value)
-      setSkillPermissions(prev => ({ ...prev, '*': value }))
+      const wid = encodeWorkspaceId(workspacePath)
+      const updated: SkillPermissionMap = { ...skillPermissions, '*': value }
+      await putDaemonPermissions(wid, updated)
+      setSkillPermissions(updated)
       setHasChanges(true)
     } catch (err) {
       console.error('[SkillsSection] Failed to update default permission:', err)
@@ -569,17 +597,16 @@ ${skillContent.trim()}`
   const handleSkillPermissionChange = async (skillName: string, value: string) => {
     if (!workspacePath) return
     try {
+      const wid = encodeWorkspaceId(workspacePath)
+      let updated: SkillPermissionMap
       if (value === '__inherited__') {
-        await removeSkillPermission(workspacePath, skillName)
-        setSkillPermissions(prev => {
-          const next = { ...prev }
-          delete next[skillName]
-          return next
-        })
+        updated = { ...skillPermissions }
+        delete updated[skillName]
       } else {
-        await writeSkillPermission(workspacePath, skillName, value as SkillPermission)
-        setSkillPermissions(prev => ({ ...prev, [skillName]: value as SkillPermission }))
+        updated = { ...skillPermissions, [skillName]: value as SkillPermission }
       }
+      await putDaemonPermissions(wid, updated)
+      setSkillPermissions(updated)
       setHasChanges(true)
     } catch (err) {
       console.error('[SkillsSection] Failed to update skill permission:', err)

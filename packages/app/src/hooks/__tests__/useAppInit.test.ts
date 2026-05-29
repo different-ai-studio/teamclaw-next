@@ -53,6 +53,12 @@ const workspaceState = {
   setWorkspace: mockSetWorkspace,
   setWorkspaceBootstrapped: mockSetWorkspaceBootstrapped,
   setWorkspaceReady: mockSetWorkspaceReady,
+  // useAppInit selects these runtime-readiness actions; the daemon-control
+  // migration replaced OpenCode lifecycle selectors with these.
+  setOpenCodeBootstrapped: vi.fn(),
+  setOpenCodeReady: vi.fn(),
+  setDaemonHttpReady: vi.fn(),
+  daemonHttpReady: false,
   workspaceBootstrapped: false,
   workspaceReady: false,
   openPanel: vi.fn(),

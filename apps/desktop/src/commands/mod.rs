@@ -1,4 +1,5 @@
 pub mod clawhub;
+pub mod daemon_http;
 pub mod cron;
 pub mod daemon_installer;
 pub mod deps;

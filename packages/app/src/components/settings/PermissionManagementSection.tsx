@@ -14,10 +14,8 @@ import {
   Save,
   Database,
 } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { restartOpencode } from '@/lib/opencode/restart'
-import { cn, isTauri } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -28,44 +26,20 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { SettingCard, SectionHeader } from './shared'
-import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs'
 import { invalidatePermissionConfigCache } from '@/stores/session-permissions'
+import {
+  encodeWorkspaceId,
+  getDaemonToolPermissions,
+  putDaemonToolPermissions,
+  getDaemonAllowlist,
+  putDaemonAllowlist,
+  type DaemonAllowlistRule,
+  type DaemonPermissionMap,
+} from '@/lib/daemon-local-client'
 
 type PermissionAction = 'allow' | 'ask' | 'deny'
 
-interface PermissionRule {
-  permission: string
-  pattern: string
-  action: string
-}
-
-interface AllowlistRow {
-  project_id: string
-  rules: PermissionRule[]
-  time_created?: number
-  time_updated?: number
-}
-
-interface PermissionConfig {
-  read?: PermissionAction
-  glob?: PermissionAction
-  grep?: PermissionAction
-  list?: PermissionAction
-  codesearch?: PermissionAction
-  todoread?: PermissionAction
-  todowrite?: PermissionAction
-  question?: PermissionAction
-  webfetch?: PermissionAction
-  websearch?: PermissionAction
-  edit?: PermissionAction
-  write?: PermissionAction
-  bash?: PermissionAction
-  task?: PermissionAction
-  lsp?: PermissionAction
-  skill?: PermissionAction
-  external_directory?: PermissionAction
-  doom_loop?: PermissionAction
-}
+type PermissionConfig = DaemonPermissionMap
 
 // TeamClaw defaults: destructive operations require approval, read-only auto-approved.
 // These are written to opencode.json on first launch if no permission section exists.
@@ -115,10 +89,9 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
   const { t } = useTranslation()
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
-  // DB allowlist state
-  const [allowlistRows, setAllowlistRows] = React.useState<AllowlistRow[]>([])
+  // Allowlist state (flat list from daemon)
+  const [allowlistRules, setAllowlistRules] = React.useState<DaemonAllowlistRule[]>([])
   const [loadingAllowlist, setLoadingAllowlist] = React.useState(false)
-  const [currentProjectId, setCurrentProjectId] = React.useState<string | null>(null)
 
   // Permission config state
   const [permissionConfig, setPermissionConfig] = React.useState<PermissionConfig>({})
@@ -126,157 +99,75 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
   const [savingConfig, setSavingConfig] = React.useState(false)
   const [configModified, setConfigModified] = React.useState(false)
 
-  // Look up project_id from the DB project table based on workspace path
-  const fetchProjectId = React.useCallback(async () => {
-    if (!workspacePath || !isTauri()) return
-    try {
-      const pid = await invoke<string>('get_opencode_project_id', { workspacePath })
-      setCurrentProjectId(pid)
-    } catch (error) {
-      console.error('[PermissionManagement] Failed to fetch project ID:', error)
-      setCurrentProjectId('global')
-    }
-  }, [workspacePath])
+  const workspaceId = React.useMemo(
+    () => (workspacePath ? encodeWorkspaceId(workspacePath) : null),
+    [workspacePath],
+  )
 
-  // Load allowlist from opencode.db via Tauri command
   const loadAllowlist = React.useCallback(async () => {
-    if (!isTauri() || !workspacePath) return
-
+    if (!workspaceId) return
     setLoadingAllowlist(true)
     try {
-      const rows = await invoke<AllowlistRow[]>('read_opencode_allowlist', { workspacePath })
-      setAllowlistRows(rows)
+      const rules = await getDaemonAllowlist(workspaceId)
+      setAllowlistRules(rules ?? [])
     } catch (error) {
-      console.error('[PermissionManagement] Failed to load allowlist from DB:', error)
-      setAllowlistRows([])
+      console.error('[PermissionManagement] Failed to load allowlist:', error)
+      setAllowlistRules([])
     } finally {
       setLoadingAllowlist(false)
     }
-  }, [workspacePath])
+  }, [workspaceId])
 
-  // Remove a single rule
-  const removeRule = React.useCallback(async (projectId: string, ruleIndex: number) => {
-    const row = allowlistRows.find((r) => r.project_id === projectId)
-    if (!row) return
+  const removeRule = React.useCallback(
+    async (index: number) => {
+      if (!workspaceId) return
+      const updated = allowlistRules.filter((_, i) => i !== index)
+      try {
+        await putDaemonAllowlist(workspaceId, updated)
+        setAllowlistRules(updated)
+      } catch (error) {
+        console.error('[PermissionManagement] Failed to remove rule:', error)
+      }
+    },
+    [allowlistRules, workspaceId],
+  )
 
-    try {
-      const updatedRules = row.rules.filter((_, i) => i !== ruleIndex)
-      await invoke('write_opencode_allowlist', {
-        workspacePath,
-        projectId,
-        rules: updatedRules,
-      })
-      await loadAllowlist()
-    } catch (error) {
-      console.error('[PermissionManagement] Failed to remove rule:', error)
-    }
-  }, [allowlistRows, loadAllowlist, workspacePath])
-
-  // Load permission config from opencode.json
   const loadPermissionConfig = React.useCallback(async () => {
-    if (!workspacePath) return
-
+    if (!workspaceId) return
     setLoadingConfig(true)
     try {
-      const configPath = `${workspacePath}/opencode.json`
-      if (!(await exists(configPath))) {
-        setPermissionConfig({})
-        return
-      }
-
-      const content = await readTextFile(configPath)
-      const config = JSON.parse(content)
-
-      if (config.permission && typeof config.permission === 'object') {
-        setPermissionConfig(config.permission as PermissionConfig)
-      } else {
-        setPermissionConfig({})
-      }
+      const cfg = await getDaemonToolPermissions(workspaceId)
+      setPermissionConfig(cfg ?? {})
     } catch (error) {
-      console.error('[PermissionManagement] Failed to load config:', error)
+      console.error('[PermissionManagement] Failed to load permissions:', error)
     } finally {
       setLoadingConfig(false)
     }
-  }, [workspacePath])
+  }, [workspaceId])
 
-  // Save permission config to opencode.json and restart OpenCode to apply
   const savePermissionConfig = React.useCallback(async () => {
-    if (!workspacePath) return
-
+    if (!workspaceId) return
     setSavingConfig(true)
     try {
-      const configPath = `${workspacePath}/opencode.json`
-
-      let config: Record<string, unknown> = {}
-      if (await exists(configPath)) {
-        const content = await readTextFile(configPath)
-        config = JSON.parse(content)
-      }
-
-      config.permission = permissionConfig
-
-      await writeTextFile(configPath, JSON.stringify(config, null, 2))
+      await putDaemonToolPermissions(workspaceId, permissionConfig)
       setConfigModified(false)
       invalidatePermissionConfigCache()
-
-      try {
-        await restartOpencode(workspacePath)
-      } catch (restartErr) {
-        console.error('[PermissionManagement] Failed to restart OpenCode:', restartErr)
-      }
     } catch (error) {
-      console.error('[PermissionManagement] Failed to save config:', error)
+      console.error('[PermissionManagement] Failed to save permissions:', error)
     } finally {
       setSavingConfig(false)
     }
-  }, [workspacePath, permissionConfig])
+  }, [workspaceId, permissionConfig])
 
-  // Update a single permission
-  const updatePermission = React.useCallback((key: keyof PermissionConfig, value: PermissionAction) => {
+  const updatePermission = React.useCallback((key: string, value: PermissionAction) => {
     setPermissionConfig((prev) => ({ ...prev, [key]: value }))
     setConfigModified(true)
   }, [])
 
-  // Load data on mount
   React.useEffect(() => {
-    fetchProjectId()
     loadAllowlist()
     loadPermissionConfig()
-  }, [fetchProjectId, loadAllowlist, loadPermissionConfig])
-
-  // Only show rules for the current workspace project (and global), deduplicated.
-  // Project-specific rules take precedence over global ones.
-  const allRules = React.useMemo(() => {
-    const result: Array<{ projectId: string; rule: PermissionRule; index: number }> = []
-    const seen = new Set<string>()
-
-    // Add project-specific rules first (higher priority)
-    for (const row of allowlistRows) {
-      if (row.project_id === 'global') continue
-      if (currentProjectId && row.project_id !== currentProjectId) continue
-      row.rules.forEach((rule, idx) => {
-        const key = `${rule.permission}|${rule.pattern}|${rule.action}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          result.push({ projectId: row.project_id, rule, index: idx })
-        }
-      })
-    }
-
-    // Then add global rules that aren't already covered
-    for (const row of allowlistRows) {
-      if (row.project_id !== 'global') continue
-      row.rules.forEach((rule, idx) => {
-        const key = `${rule.permission}|${rule.pattern}|${rule.action}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          result.push({ projectId: row.project_id, rule, index: idx })
-        }
-      })
-    }
-
-    return result
-  }, [allowlistRows, currentProjectId])
+  }, [loadAllowlist, loadPermissionConfig])
 
   if (!workspacePath) {
     return (
@@ -335,43 +226,42 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : allRules.length === 0 ? (
+        ) : allowlistRules.length === 0 ? (
           <div className="text-center py-8 text-[13px] text-muted-foreground">
             {t('settings.permissions.noAllowlist', 'No commands have been allowlisted yet')}
           </div>
         ) : (
           <div className="relative">
             <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2">
-              {allRules.map((entry) => (
+              {allowlistRules.map((rule, index) => (
                 <div
-                  key={`${entry.projectId}-${entry.index}`}
+                  key={index}
                   className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30"
                 >
                   <Terminal className="h-4 w-4 text-amber-500 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <code className="text-[13px] font-mono">{entry.rule.permission}: {entry.rule.pattern}</code>
+                    <code className="text-[13px] font-mono">{rule.permission}: {rule.pattern}</code>
                   </div>
                   <Badge
-                    variant={entry.rule.action === 'allow' ? 'default' : 'destructive'}
+                    variant={rule.decision === 'allow' ? 'default' : 'destructive'}
                     className={cn(
                       'text-xs shrink-0',
-                      entry.rule.action === 'allow' && 'bg-green-500/15 text-green-600 dark:text-green-400 border-green-500/20'
+                      rule.decision === 'allow' && 'bg-green-500/15 text-green-600 dark:text-green-400 border-green-500/20'
                     )}
                   >
-                    {entry.rule.action}
+                    {rule.decision}
                   </Badge>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => removeRule(entry.projectId, entry.index)}
+                    onClick={() => removeRule(index)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}
             </div>
-            {/* Bottom fade gradient overlay */}
             <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-card to-transparent pointer-events-none" />
           </div>
         )}
@@ -429,9 +319,9 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
           </div>
         ) : (
           <div className="space-y-3">
-            {(Object.keys(PERMISSION_LABELS) as Array<keyof PermissionConfig>).map((key) => {
+            {(Object.keys(PERMISSION_LABELS) as Array<keyof typeof PERMISSION_LABELS>).map((key) => {
               const { label, desc, icon: Icon } = PERMISSION_LABELS[key]
-              const value = permissionConfig[key] || PERMISSION_DEFAULTS[key] || 'allow'
+              const value = (permissionConfig[key] || PERMISSION_DEFAULTS[key] || 'allow') as PermissionAction
 
               return (
                 <div
@@ -447,7 +337,7 @@ export const PermissionManagementSection = React.memo(function PermissionManagem
                   </div>
                   <Select
                     value={value}
-                    onValueChange={(v) => updatePermission(key, v as PermissionAction)}
+                    onValueChange={(v) => updatePermission(key as string, v as PermissionAction)}
                   >
                     <SelectTrigger className="w-32">
                       <SelectValue />

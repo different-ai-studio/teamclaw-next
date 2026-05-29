@@ -11,6 +11,7 @@ import { Toaster } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
 import {
+  AlertCircle,
   BookOpen,
   FolderGit,
   ChevronLeft,
@@ -630,7 +631,8 @@ function AppContent() {
   // Resolved by the MQTT-connect effect; passed to the notification dispatcher.
   const [myActorId, setMyActorId] = useState<string | null>(null);
   // Extracted hooks — initialization, panel state, keyboard shortcuts
-  const { initialWorkspaceResolved } = useWorkspaceInit();
+  const { initialWorkspaceResolved, openCodeError } = useWorkspaceInit();
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
   useDesktopNotifications(myActorId);
   useChannelGatewayInit();
   useGitReposInit();
@@ -664,14 +666,16 @@ function AppContent() {
   // session-event-bus.ts is bypassed: we write straight to the store the UI
   // reads from.
   const userId = useAuthStore((s) => s.session?.user.id ?? null);
-  // Wait for session list to populate so we have a real team_id for LWT —
-  // the broker's ACL is keyed on team_id and rejects placeholders.
-  const firstTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null);
+  // Wait for a team id for MQTT ACL. Prefer the active team from settings;
+  // fall back to the first row in the session list for older boot paths.
+  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null);
+  const sessionListTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null);
+  const mqttTeamId = currentTeamId ?? sessionListTeamId;
   const mqttAccessToken = useAuthStore((s) => s.session?.access_token ?? null);
   const mqttReconnectNonce = useMqttReconnectStore((s) => s.nonce);
   const mqttAuthKey = mqttConnectionKey({
     userId,
-    teamId: firstTeamId,
+    teamId: mqttTeamId,
     accessToken: mqttAccessToken,
   });
   const pendingStreamRepliesRef = useRef<Record<string, TeamclawMessage>>({});
@@ -748,7 +752,7 @@ function AppContent() {
   }
 
   useEffect(() => {
-    if (!mqttAuthKey || !userId || !firstTeamId || !mqttAccessToken) return;
+    if (!mqttAuthKey || !userId || !mqttTeamId || !mqttAccessToken) return;
     let cancelled = false;
     let unlisten: (() => void) | null = null;
 
@@ -757,12 +761,12 @@ function AppContent() {
         // amuxd convention: MQTT username = actor_id, password = JWT
         // (see amux/daemon/src/mqtt/client.rs + daemon/server.rs).
         // EMQX validates the JWT and uses actor_id for topic ACL.
-        const actorId = await resolveCurrentMemberActorId(firstTeamId, userId, {
+        const actorId = await resolveCurrentMemberActorId(mqttTeamId, userId, {
           currentTeamId: useCurrentTeamStore.getState().team?.id ?? null,
           currentMemberId: useCurrentTeamStore.getState().currentMember?.id ?? null,
         });
         if (!actorId) {
-          console.warn("[MQTT] no actor for user in team", firstTeamId, "— skipping connect");
+          console.warn("[MQTT] no actor for user in team", mqttTeamId, "— skipping connect");
           return;
         }
         if (cancelled) return;
@@ -779,7 +783,7 @@ function AppContent() {
           brokerHost,
           brokerPort,
           useTls,
-          teamId: firstTeamId,
+          teamId: mqttTeamId,
           actorId,
         });
 
@@ -793,7 +797,7 @@ function AppContent() {
           username: useConfiguredMqttCredentials ? configuredMqttUsername! : actorId,
           password: useConfiguredMqttCredentials ? configuredMqttPassword! : mqttAccessToken,
           clientId: `teamclaw-${actorId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`,
-          teamId: firstTeamId,
+          teamId: mqttTeamId,
           useTls,
         });
         resetSessionLiveSubscriptionState();
@@ -860,7 +864,7 @@ function AppContent() {
           ) {
             const teamId =
               useSessionListStore.getState().rows.find((r) => r.id === sid)
-                ?.team_id ?? firstTeamId;
+                ?.team_id ?? mqttTeamId;
             void useSessionParticipantStore
               .getState()
               .refreshSession(sid, teamId)
@@ -1104,7 +1108,7 @@ function AppContent() {
         // broker still has older ACL claims.
         const recentAtBoot = useSessionListStore.getState().rows.slice(0, RECENT_SESSION_SUBSCRIBE_CAP);
         try {
-          await ensureTeamSessionLiveSubscribed(firstTeamId);
+          await ensureTeamSessionLiveSubscribed(mqttTeamId);
           console.log('[MQTT] receiver wired: subscribed to team session/live wildcard');
         } catch (e) {
           console.warn('[MQTT] team session/live wildcard subscribe failed; falling back to recent sessions', e);
@@ -1119,32 +1123,32 @@ function AppContent() {
         }
 
         // RPC client: subscribe to the team's rpc/res topic and start correlating.
-        await initTeamclawRpc(firstTeamId);
-        console.log('[teamclaw-rpc] initialized for team', firstTeamId);
+        await initTeamclawRpc(mqttTeamId);
+        console.log('[teamclaw-rpc] initialized for team', mqttTeamId);
 
         // Runtime state store: subscribe to daemon-published RuntimeInfo retains.
-        await initRuntimeStateStore(firstTeamId);
-        console.log('[runtime-state] initialized for team', firstTeamId);
+        await initRuntimeStateStore(mqttTeamId);
+        console.log('[runtime-state] initialized for team', mqttTeamId);
 
         // Device presence: subscribe to daemon LWT-backed online/offline state.
-        await initDevicePresenceStore(firstTeamId);
-        console.log('[device-presence] initialized for team', firstTeamId);
+        await initDevicePresenceStore(mqttTeamId);
+        console.log('[device-presence] initialized for team', mqttTeamId);
 
         // Background: sync actor directory into local cache so display-name
         // lookups hit libsql instead of Supabase on subsequent renders.
-        void syncActorsForTeam(firstTeamId).catch((e) =>
+        void syncActorsForTeam(mqttTeamId).catch((e) =>
           console.warn('[cache-sync] actor sync failed:', e),
         );
 
         // Background: sync ideas into local cache.
-        void syncIdeasForTeam(firstTeamId).catch((e) =>
+        void syncIdeasForTeam(mqttTeamId).catch((e) =>
           console.warn('[cache-sync] idea sync failed:', e),
         );
 
         // Background: sync sessions into local cache. E2E control owns the
         // session-list rows while active, so skip normal hydration/reloads.
         if (!isV2E2EControlActive()) {
-          void syncSessionsForTeam(firstTeamId).then(() => {
+          void syncSessionsForTeam(mqttTeamId).then(() => {
             if (isV2E2EControlActive()) return;
             // Reload session list from merged local cache after sync finishes.
             void useSessionListStore.getState().load();
@@ -1167,7 +1171,7 @@ function AppContent() {
       disposeRuntimeStateStore();
       disposeDevicePresenceStore();
     };
-  }, [mqttAuthKey, userId, firstTeamId, mqttAccessToken, mqttReconnectNonce]);
+  }, [mqttAuthKey, userId, mqttTeamId, mqttAccessToken, mqttReconnectNonce]);
 
   // Keep session/live subscriptions in sync with the user's most-recent
   // sessions. Rows are sorted by last_message_at DESC, so we slice the top
@@ -1177,8 +1181,8 @@ function AppContent() {
   // user activates one (see the activeSessionId effect below).
   const sessionRowsForSubscribe = useSessionListStore((s) => s.rows);
   useEffect(() => {
-    if (!userId || !firstTeamId) return;
-    if (hasTeamSessionLiveSubscription(firstTeamId)) return;
+    if (!userId || !mqttTeamId) return;
+    if (hasTeamSessionLiveSubscription(mqttTeamId)) return;
     let cancelled = false;
     const recent = sessionRowsForSubscribe.slice(0, RECENT_SESSION_SUBSCRIBE_CAP);
     void (async () => {
@@ -1190,7 +1194,7 @@ function AppContent() {
       }
     })();
     return () => { cancelled = true; };
-  }, [sessionRowsForSubscribe, userId, firstTeamId]);
+  }, [sessionRowsForSubscribe, userId, mqttTeamId]);
 
   // Lazy-subscribe on session activation. When the user opens a session
   // that's outside the most-recent slice, subscribe to its live topic so
@@ -1205,13 +1209,13 @@ function AppContent() {
       : null,
   );
   useEffect(() => {
-    if (!activeSessionIdForSubscribe || !userId || !firstTeamId) return;
+    if (!activeSessionIdForSubscribe || !userId || !mqttTeamId) return;
     if (!activeSessionTeamId) return;
     void ensureSessionLiveSubscribed(
       activeSessionTeamId,
       activeSessionIdForSubscribe,
     );
-  }, [activeSessionIdForSubscribe, activeSessionTeamId, userId, firstTeamId]);
+  }, [activeSessionIdForSubscribe, activeSessionTeamId, userId, mqttTeamId]);
 
   // v2 Phase 1 → local-first: load message history whenever the active
   // session changes.
@@ -1470,6 +1474,56 @@ function AppContent() {
     );
   }
 
+  if (isTauri() && workspacePath && !daemonHttpReady) {
+    return (
+      <>
+        <AppSidebar />
+        <SidebarInset className="flex h-svh flex-col overflow-hidden">
+          <header
+            className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background px-4"
+            data-tauri-drag-region
+          >
+            {collapsedInsetLeading}
+            <span className="font-medium">{buildConfig.app.name}</span>
+          </header>
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+            {openCodeError ? (
+              <>
+                <AlertCircle className="h-10 w-10 text-destructive" />
+                <p className="max-w-md text-[15px] font-medium text-foreground">
+                  {openCodeError}
+                </p>
+                <p className="max-w-md text-[13px] text-muted-foreground">
+                  {t(
+                    "workspace.daemonUnavailableHint",
+                    "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
+                  )}
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => window.location.reload()}
+                >
+                  <RotateCw className="mr-2 h-3.5 w-3.5" />
+                  {t("common.retry", "重试")}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <p className="text-[13px] text-muted-foreground">
+                  {t("workspace.connectingDaemon", "正在连接 amuxd daemon…")}
+                </p>
+              </>
+            )}
+          </div>
+        </SidebarInset>
+        {settingsModal}
+      </>
+    );
+  }
+
   return (
     <>
       <AppSidebar />
@@ -1714,8 +1768,8 @@ function App() {
   useTauriBodyClass();
   useOpenCodePreload();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const openCodeReady = useWorkspaceStore((s) => s.openCodeReady);
-  const setupReady = !workspacePath || openCodeReady || !isTauri();
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
+  const setupReady = !workspacePath || daemonHttpReady || !isTauri();
   const { showSetupGuide, dependencies, handleRecheck, handleSetupContinue } = useSetupGuide(setupReady);
   const { showConsentDialog, setShowConsentDialog } = useTelemetryConsent(showSetupGuide);
 
