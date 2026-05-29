@@ -231,17 +231,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
 
   removeFeedback: async (sessionId: string, messageId: string) => {
     try {
-      const teamId = useCurrentTeamStore.getState().team?.id
-      if (!teamId) return
-      const actorId = await resolveActorId(teamId)
-      if (!actorId) return
-
-      await getBackend().telemetry.deleteFeedback({
-        actor_id: actorId,
-        team_id: teamId,
-        message_id: messageId,
-        kind: 'thumb',
-      })
+      await getBackend().telemetry.deleteFeedback({ messageId })
 
       set((state) => {
         const cache = new Map(state.feedbackCache)
@@ -295,12 +285,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       if (!actorId) return
 
       // Delete any prior star_rating row for this message (idempotent re-rate)
-      await getBackend().telemetry.deleteFeedback({
-        actor_id: actorId,
-        team_id: teamId,
-        message_id: messageId,
-        kind: 'star',
-      })
+      await getBackend().telemetry.deleteFeedback({ messageId })
 
       await insertFeedback({
         actorId,
@@ -337,17 +322,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
 
   removeStarRating: async (sessionId: string, messageId: string) => {
     try {
-      const teamId = useCurrentTeamStore.getState().team?.id
-      if (!teamId) return
-      const actorId = await resolveActorId(teamId)
-      if (!actorId) return
-
-      await getBackend().telemetry.deleteFeedback({
-        actor_id: actorId,
-        team_id: teamId,
-        message_id: messageId,
-        kind: 'star',
-      })
+      await getBackend().telemetry.deleteFeedback({ messageId })
 
       set((state) => {
         const cache = new Map(state.starRatingCache)
