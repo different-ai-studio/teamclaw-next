@@ -10,6 +10,7 @@ import { useWorkspaceStore, type FileNode } from "@/stores/workspace";
 import { useGitStatus } from "@/hooks/use-git-status";
 import { useGitSettingsStore } from "@/stores/git-settings";
 import { useTeamModeStore } from "@/stores/team-mode";
+import { useOssSyncStore } from "@/stores/oss-sync";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +36,10 @@ import {
   readFileContent,
 } from "./file-tree-operations";
 import { TEAM_REPO_DIR, appShortName } from "@/lib/build-config";
+
+// Team-file sync coloring states (shared by git + OSS modes). `conflict` is
+// OSS-only; git mode never produces it.
+type FileSyncStatusKind = 'modified' | 'new' | 'conflict';
 
 // Flattened tree node for virtualization
 interface FlatTreeNode {
@@ -349,24 +354,49 @@ export function FileTree({
   }, [effectiveShowGitStatus, gitStatuses, workspacePath]);
 
   // Pre-compute sync status data for team files.
+  // Both team modes feed the same coloring path:
+  //   - git    → teamGitFileSyncStatusMap ('modified' | 'new')
+  //   - webdav → OSS per-file statuses     ('modified' | 'new' | 'conflict')
   const teamGitFileSyncStatusMap = useTeamModeStore(s => s.teamGitFileSyncStatusMap);
   const teamModeType = useTeamModeStore(s => s.teamModeType);
   const teamGitSyncing = useTeamModeStore(s => s.teamGitSyncing);
   const teamGitLastSyncAt = useTeamModeStore(s => s.teamGitLastSyncAt);
-  const fileSyncStatusMap =
-    teamModeType === 'git' ? teamGitFileSyncStatusMap : {};
+  const ossFileStatusMap = useOssSyncStore(s => s.fileStatusMap);
+  const ossSyncing = useOssSyncStore(s => s.syncing);
+  const ossLastSyncAt = useOssSyncStore(s => s.lastSyncAt);
+
+  const fileSyncStatusMap = useMemo<Record<string, FileSyncStatusKind>>(() => {
+    if (teamModeType === 'git') {
+      return teamGitFileSyncStatusMap;
+    }
+    if (teamModeType === 'webdav') {
+      const map: Record<string, FileSyncStatusKind> = {};
+      for (const [relPath, entry] of Object.entries(ossFileStatusMap)) {
+        if (entry.status === 'synced') continue;
+        map[relPath] = entry.status;
+      }
+      return map;
+    }
+    return {};
+  }, [teamModeType, teamGitFileSyncStatusMap, ossFileStatusMap]);
+
+  // Which mode drives the teamclaw-team folder spinner / last-sync tooltip.
+  const teamSyncing = teamModeType === 'webdav' ? ossSyncing : teamGitSyncing;
+  const teamLastSyncAt = teamModeType === 'webdav' ? ossLastSyncAt : teamGitLastSyncAt;
+
   const syncDirtyDirectories = useMemo(() => {
-    const dirtyDirs = new Map<string, 'modified' | 'new'>();
+    const dirtyDirs = new Map<string, FileSyncStatusKind>();
     if (!workspacePath) return dirtyDirs;
 
+    // conflict > modified > new priority
+    const rank: Record<FileSyncStatusKind, number> = { new: 0, modified: 1, conflict: 2 };
     for (const [relPath, status] of Object.entries(fileSyncStatusMap)) {
       // Build absolute path and propagate to parent directories
       const absPath = `${workspacePath}/${TEAM_REPO_DIR}/${relPath}`;
       let dir = absPath.substring(0, absPath.lastIndexOf("/"));
       while (dir && dir.length > workspacePath.length) {
         const existing = dirtyDirs.get(dir);
-        // modified > new > synced priority
-        if (!existing || (status === 'modified' && existing === 'new')) {
+        if (!existing || rank[status] > rank[existing]) {
           dirtyDirs.set(dir, status);
         }
         dir = dir.substring(0, dir.lastIndexOf("/"));
@@ -1219,8 +1249,8 @@ export function FileTree({
     isRenaming: renamingPath === node.path,
     isDragOver: dragOverPath === node.path,
     isTeamClawTeam: node.name === TEAM_REPO_DIR && node.type === "directory" && level === 0,
-    teamSyncing: node.name === TEAM_REPO_DIR && node.type === "directory" && level === 0 ? teamGitSyncing : undefined,
-    teamLastSyncAt: node.name === TEAM_REPO_DIR && node.type === "directory" && level === 0 ? teamGitLastSyncAt : undefined,
+    teamSyncing: node.name === TEAM_REPO_DIR && node.type === "directory" && level === 0 ? teamSyncing : undefined,
+    teamLastSyncAt: node.name === TEAM_REPO_DIR && node.type === "directory" && level === 0 ? teamLastSyncAt : undefined,
     syncStatus: (() => {
       if (!node.path.includes(`/${TEAM_REPO_DIR}/`)) return null;
       if (node.type === 'directory') {

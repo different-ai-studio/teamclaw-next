@@ -108,6 +108,16 @@ pub async fn oss_sync_set_jwt(workspace_path: String, jwt: String) -> Result<(),
 // Result types for Tauri commands
 // ---------------------------------------------------------------------------
 
+/// Per-file sync status, for coloring the file tree (mirrors git-mode coloring).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSyncStatus {
+    /// Relative path from the workspace root (forward slashes).
+    pub path: String,
+    /// One of: `synced` | `modified` | `new` | `conflict`.
+    pub status: String,
+}
+
 /// Current sync status for the workspace.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +127,8 @@ pub struct SyncStatus {
     pub last_sync_at: String,
     pub dirty_count: usize,
     pub total_files: usize,
+    /// Per-file status for tree coloring. Only non-trivial in OSS (webdav) mode.
+    pub file_states: Vec<FileSyncStatus>,
 }
 
 /// Conflict resolution choices.
@@ -150,14 +162,50 @@ pub async fn oss_sync_status(workspace_path: String) -> Result<SyncStatus, Strin
     let team_id = get_team_id(&workspace_path).ok();
     let tid = team_id.as_deref().unwrap_or("unknown");
     let state = LocalSyncState::load(&workspace_path, tid)?;
-    let dirty_count = state.files.values().filter(|f| f.dirty).count();
-    let total_files = state.files.len();
+
+    // Fresh scan so coloring reflects edits made since the last sync tick,
+    // mirroring how git_status re-runs on each file-tree poll.
+    let scanned = scanner::scan_workspace(&workspace_path, &state);
+    let mut statuses: std::collections::HashMap<String, &'static str> =
+        std::collections::HashMap::with_capacity(scanned.len());
+    for f in &scanned {
+        let status = if !f.dirty {
+            "synced"
+        } else if state.files.contains_key(&f.rel_path) {
+            // Tracked before → locally edited.
+            "modified"
+        } else {
+            // Never synced → brand-new local file.
+            "new"
+        };
+        statuses.insert(f.rel_path.clone(), status);
+    }
+
+    // Conflict sidecars on disk → mark their originals as conflicted (highest
+    // precedence; overrides modified/new/synced).
+    for conflict_rel in scanner::scan_conflict_files(&workspace_path) {
+        if let Some(orig) = conflict::original_from_conflict(&conflict_rel) {
+            statuses.insert(orig, "conflict");
+        }
+    }
+
+    let dirty_count = statuses.values().filter(|s| **s != "synced").count();
+    let total_files = statuses.len();
+    let file_states = statuses
+        .into_iter()
+        .map(|(path, status)| FileSyncStatus {
+            path,
+            status: status.to_string(),
+        })
+        .collect();
+
     Ok(SyncStatus {
         team_id,
         last_server_seq: state.last_server_seq,
         last_sync_at: state.last_sync_at.clone(),
         dirty_count,
         total_files,
+        file_states,
     })
 }
 

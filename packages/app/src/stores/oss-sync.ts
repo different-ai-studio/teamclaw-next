@@ -19,8 +19,11 @@ export interface VersionInfo {
   message: string | null
 }
 
+// Per-file sync status, aligned with git-mode file-tree coloring
+// (`modified`/`new`) plus OSS-only `conflict`. `synced` files are omitted from
+// the map by `refresh()` (no color), matching git-mode behavior.
 export interface OssSyncFileStatus {
-  status: 'synced' | 'dirty' | 'syncing' | 'conflict'
+  status: 'synced' | 'modified' | 'new' | 'conflict'
   syncedVersion?: number
   conflicts?: string[] // sibling .conflict.* file paths
 }
@@ -69,6 +72,12 @@ interface SyncStatusResult {
   lastSyncAt: string
   dirtyCount: number
   totalFiles: number
+  // Per-file status from the Rust scan. `synced` entries are kept out of the
+  // store map (no color). Optional for backward-compat with older binaries.
+  fileStates?: Array<{
+    path: string
+    status: 'synced' | 'modified' | 'new' | 'conflict'
+  }>
 }
 
 interface SyncNowResult {
@@ -95,9 +104,17 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
       const status = await invoke<SyncStatusResult>('oss_sync_status', {
         workspacePath,
       })
+      // Build the per-file status map for file-tree coloring. Drop `synced`
+      // entries so the map only carries files that should be colored.
+      const fileStatusMap: Record<string, OssSyncFileStatus> = {}
+      for (const f of status.fileStates ?? []) {
+        if (f.status === 'synced') continue
+        fileStatusMap[f.path] = { status: f.status }
+      }
       set({
         teamId: status.teamId,
         lastSyncAt: status.lastSyncAt,
+        fileStatusMap,
       })
     } catch (e) {
       set({ lastError: String(e) })
