@@ -23,7 +23,7 @@ use crate::commands::oss_sync::error::SyncError;
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
 use crate::commands::team_share::custom_git;
-use crate::commands::{env_vars, team_secret_store, TEAM_REPO_DIR};
+use crate::commands::{team_secret_store, TEAM_REPO_DIR};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,32 +61,6 @@ fn ensure_team_repo_dir(workspace_path: &str) -> Result<(), String> {
     let dir = std::path::Path::new(workspace_path).join(TEAM_REPO_DIR);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("create_dir_all({}) failed: {e}", dir.display()))
-}
-
-fn set_teamclaw_fields(
-    workspace_path: &str,
-    team_id: &str,
-    share_mode: &str,
-    git_remote_url: Option<&str>,
-) -> Result<(), String> {
-    let mut json = env_vars::read_teamclaw_json(workspace_path)?;
-    if let Some(obj) = json.as_object_mut() {
-        obj.insert(
-            "oss_team_id".to_string(),
-            serde_json::Value::String(team_id.to_string()),
-        );
-        obj.insert(
-            "share_mode".to_string(),
-            serde_json::Value::String(share_mode.to_string()),
-        );
-        if let Some(url) = git_remote_url {
-            obj.insert(
-                "git_remote_url".to_string(),
-                serde_json::Value::String(url.to_string()),
-            );
-        }
-    }
-    env_vars::write_teamclaw_json(workspace_path, &json)
 }
 
 fn team_repo_path(workspace_path: &str) -> std::path::PathBuf {
@@ -167,7 +141,6 @@ pub async fn enable_oss_impl(
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
     ensure_team_repo_dir(&workspace_path)?;
-    set_teamclaw_fields(&workspace_path, &team_id, "oss", None)?;
 
     Ok(EnableShareResult {
         team_id,
@@ -229,7 +202,6 @@ pub async fn enable_managed_git_impl(
 
     ensure_team_repo_dir(&workspace_path)?;
     let clone_warning = try_clone_team_repo(&workspace_path, &repo_url, &cred_ref, "https_token");
-    set_teamclaw_fields(&workspace_path, &team_id, "managed_git", Some(&repo_url))?;
 
     Ok(EnableShareResult {
         team_id,
@@ -298,12 +270,6 @@ pub async fn enable_custom_git_impl(
         &cred_ref,
         &input.auth_kind,
     );
-    set_teamclaw_fields(
-        &workspace_path,
-        &team_id,
-        "custom_git",
-        Some(&input.remote_url),
-    )?;
 
     Ok(EnableShareResult {
         team_id,

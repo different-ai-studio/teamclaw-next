@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
-use crate::commands::{env_vars, TEAM_REPO_DIR};
+use crate::commands::TEAM_REPO_DIR;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,33 +61,10 @@ pub async fn team_share_join_existing_impl(
     std::fs::create_dir_all(&team_repo)
         .map_err(|e| format!("create_dir_all({}) failed: {e}", team_repo.display()))?;
 
-    // Merge fields into teamclaw.json.
-    let mut tc = env_vars::read_teamclaw_json(&workspace_path)?;
-    if let Some(obj) = tc.as_object_mut() {
-        obj.insert(
-            "oss_team_id".to_string(),
-            serde_json::Value::String(team_id.clone()),
-        );
-        if let Some(m) = share_mode.as_ref() {
-            obj.insert(
-                "share_mode".to_string(),
-                serde_json::Value::String(m.clone()),
-            );
-        }
-        if let Some(u) = cfg.get("gitRemoteUrl").and_then(|v| v.as_str()) {
-            obj.insert(
-                "git_remote_url".to_string(),
-                serde_json::Value::String(u.to_string()),
-            );
-        }
-        if let Some(l) = cfg.get("litellmTeamId").and_then(|v| v.as_str()) {
-            obj.insert(
-                "litellm_team_id".to_string(),
-                serde_json::Value::String(l.to_string()),
-            );
-        }
-    }
-    env_vars::write_teamclaw_json(&workspace_path, &tc)?;
+    // NOTE: team_id / share_mode / git_remote_url / litellm_team_id are NOT
+    // written to teamclaw.json anymore. They duplicated the Cloud API (teams /
+    // workspace-config) and drifted from the active team; the single source of
+    // truth is the current-team store (OSS sync takes team_id from there).
 
     Ok(JoinExistingResult {
         initialized: true,
