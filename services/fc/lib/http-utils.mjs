@@ -76,17 +76,15 @@ export function jsonResponse(statusCode, body, requestId, headers = {}) {
 
 export function errorResponse(error, requestId) {
   const normalized = normalizeError(error);
-  return jsonResponse(
-    normalized.statusCode,
-    {
-      error: {
-        code: normalized.code,
-        message: normalized.message,
-        requestId,
-      },
-    },
+  const body = {
+    code: normalized.code,
+    message: normalized.message,
     requestId,
-  );
+  };
+  // Surface structured details (e.g. the underlying db/PostgREST code) when we
+  // have them so the client/operator can diagnose without grepping FC logs.
+  if (normalized.details !== undefined) body.details = normalized.details;
+  return jsonResponse(normalized.statusCode, { error: body }, requestId);
 }
 
 export function normalizeError(error) {
@@ -99,13 +97,42 @@ export function normalizeError(error) {
   // silently surfacing as opaque "internal" 500s.
   try { console.error("[business-api] unclassified error:", error?.message, error?.name, error?.stack?.split("\n").slice(0,5).join(" | ")); } catch {}
 
-  return new ApiError(500, "internal", "Internal server error", { cause: error });
+  // Surface the real cause instead of an opaque "Internal server error". These
+  // are TeamClaw's own clients hitting our Cloud API; swallowing the message
+  // forced a round-trip through FC logs on every incident. Keep status 500 but
+  // make the body self-describing: include the underlying message and any
+  // db/PostgREST code (e.g. PGRST202 = function/schema-cache miss).
+  const rawMessage = typeof error?.message === "string" ? error.message.trim() : "";
+  const upstreamCode = error?.code || error?.details?.code || null;
+  return new ApiError(500, "internal", rawMessage || "Internal server error", {
+    cause: error,
+    details: upstreamCode ? { upstreamCode } : undefined,
+  });
 }
 
 export function mapSupabaseError(error) {
   const pgCode = error?.code || error?.details?.code;
   const httpStatus = Number(error?.status || error?.statusCode || error?.httpStatus);
   const message = error?.message || "Supabase request failed";
+
+  // PostgREST-level errors carry a string `code` like "PGRST202" plus a
+  // descriptive `message`, but NO numeric HTTP status — so the httpStatus
+  // branches below never catch them and they used to fall through to an opaque
+  // 500 with the cause hidden in FC logs. Classify them explicitly.
+  if (typeof pgCode === "string" && pgCode.startsWith("PGRST")) {
+    // PGRST116: no rows where one was required → genuine not-found.
+    if (pgCode === "PGRST116") {
+      return new ApiError(404, "not_found", message, { cause: error });
+    }
+    // PGRST202 (function not found in schema cache), PGRST203 (ambiguous
+    // overload), PGRST204 (column not found), etc. almost always mean
+    // server-side schema drift / a missing migration. Surface the cause and
+    // the code so it is diagnosable straight from the API response.
+    return new ApiError(500, "schema_drift", message, {
+      cause: error,
+      details: { upstreamCode: pgCode },
+    });
+  }
 
   if (pgCode === "42501" || httpStatus === 403) {
     return new ApiError(403, "forbidden", message, { cause: error });
