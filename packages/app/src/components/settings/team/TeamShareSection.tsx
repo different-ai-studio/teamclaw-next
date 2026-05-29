@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTeamShareStore, type ShareMode } from '@/stores/team-share'
 import { useAuthStore } from '@/stores/auth-store'
+import { isNotLoggedInError } from '@/lib/fc-error'
 import { EnableShareWizard } from './EnableShareWizard'
 
 interface Props {
@@ -46,9 +47,7 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
   // Don't echo the backend's not-logged-in error in red — it's an expected
   // signed-out state, handled with a friendly message instead.
   const visibleError =
-    lastError && !/not logged in|supabase_jwt/i.test(lastError)
-      ? lastError
-      : null
+    lastError && !isNotLoggedInError(lastError) ? lastError : null
 
   return (
     <section className="rounded-xl border border-border-soft bg-panel p-4 space-y-3">

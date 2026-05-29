@@ -20,6 +20,7 @@ import {
   saveTeamProviderFile,
 } from '@/lib/team-provider'
 import { isTauri } from '@/lib/utils'
+import { humanizeFcError } from '@/lib/fc-error'
 
 interface Props {
   open: boolean
@@ -115,7 +116,7 @@ export function TeamSharedLlmPane({ open, onOpenChange, workspacePath, onSaved }
       onSaved?.()
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(humanizeFcError(err))
     } finally {
       setSaving(false)
     }
