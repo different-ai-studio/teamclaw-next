@@ -19,12 +19,14 @@ import {
   Copy,
   Check,
   FolderOpen,
+  Users,
 } from 'lucide-react'
 import { useProviderStore } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTeamModeStore } from '@/stores/team-mode'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { TeamLiteLlmSection } from './llm/TeamLiteLlmSection'
+import { TeamSharedLlmPane } from './llm/TeamSharedLlmPane'
 import { initOpenCodeClient } from '@/lib/opencode/sdk-client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -154,6 +156,9 @@ export const LLMSection = React.memo(function LLMSection() {
 
   // Detail view for connected provider
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null)
+
+  // Team-shared ("host") LLM config pane
+  const [teamSharedLlmOpen, setTeamSharedLlmOpen] = React.useState(false)
 
   // Collapsible other providers
   const [showAllProviders, setShowAllProviders] = React.useState(false)
@@ -614,6 +619,18 @@ export const LLMSection = React.memo(function LLMSection() {
           iconColor="text-purple-500"
         />
         <div className="flex items-center gap-1.5">
+          {workspacePath && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setTeamSharedLlmOpen(true)}
+              className="h-8 gap-1.5 text-xs text-muted-foreground"
+              title={t('settings.llm.teamSharedModelTooltip', 'Configure the team-shared AI model proxy and model list')}
+            >
+              <Users className="h-3.5 w-3.5" />
+              {t('settings.llm.teamSharedModel', '团队共享模型')}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -658,6 +675,14 @@ export const LLMSection = React.memo(function LLMSection() {
       )}
 
       {teamWorkspaceSwitchDialog}
+
+      {workspacePath && (
+        <TeamSharedLlmPane
+          open={teamSharedLlmOpen}
+          onOpenChange={setTeamSharedLlmOpen}
+          workspacePath={workspacePath}
+        />
+      )}
 
       {/* Provider List */}
       {!providersLoading || providers.length > 0 ? (
