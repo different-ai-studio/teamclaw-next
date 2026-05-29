@@ -23,11 +23,21 @@ async function authenticateSyncCallTestable({ headers, teamId }, supabase) {
     p_user_id: userId, p_team_id: teamId,
   });
   if (error) return { ok: false, status: 403, error: `actor lookup failed: ${error.message}` };
-  if (!rows || rows.length === 0 || rows[0] == null) {
+  if (rows == null || (Array.isArray(rows) && rows.length === 0)) {
     return { ok: false, status: 403, error: 'caller is not a member of this team' };
   }
-  const actorId = typeof rows[0] === 'object' ? Object.values(rows[0])[0] : rows[0];
-  if (!actorId) return { ok: false, status: 403, error: 'caller has no actor in this team' };
+  let actorId = null;
+  if (typeof rows === 'string') {
+    actorId = rows;
+  } else if (Array.isArray(rows)) {
+    const first = rows[0];
+    actorId = first && typeof first === 'object' ? Object.values(first)[0] : first;
+  } else if (typeof rows === 'object') {
+    actorId = Object.values(rows)[0];
+  }
+  if (!actorId || typeof actorId !== 'string') {
+    return { ok: false, status: 403, error: 'caller has no actor in this team' };
+  }
   return { ok: true, userId, teamId, actorId };
 }
 
@@ -134,4 +144,19 @@ test('ok with object-shaped row from RPC', async () => {
   );
   assert.equal(r.ok, true);
   assert.equal(r.actorId, 'actor-uuid-789');
+});
+
+test('ok with scalar uuid string returned directly (regression: not the first char)', async () => {
+  // actor_id_for_user_in_team `returns uuid` → supabase-js returns the string
+  // directly. Previously rows[0] grabbed "f" (first char) and broke uploads.
+  const sb = sbWithUser('user-uuid-123', async () => ({
+    data: 'f1a2b3c4-5d6e-7f80-9012-abcdef012345',
+    error: null,
+  }));
+  const r = await authenticateSyncCallTestable(
+    { headers: { authorization: 'Bearer t' }, teamId: 'team-uuid-456' },
+    sb,
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.actorId, 'f1a2b3c4-5d6e-7f80-9012-abcdef012345');
 });
