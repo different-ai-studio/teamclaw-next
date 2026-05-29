@@ -937,6 +937,10 @@ async heartbeat() {
     },
 
     async submitSessionReport(body) {
+      // Not transactional: the report row may be written even if the
+      // subsequent skill-usage insert fails. Acceptable for best-effort
+      // telemetry — a throw here means the caller sees failure, but the
+      // report row can still exist. supabase-js has no multi-table txn.
       const reportRow = {
         actor_id: body.actorId,
         team_id: body.teamId,
@@ -982,6 +986,10 @@ async heartbeat() {
     },
 
     async listFeedbackSummary(teamId) {
+      // TODO: replace with a DB-side GROUP BY aggregate (or a view/rpc) when
+      // per-team feedback row counts grow — this fetches all rows and reduces
+      // in JS. displayName is left null here; callers resolve it separately
+      // (the leaderboard rpc already returns display_name).
       const { data, error } = await supabase
         .from("actor_message_feedback")
         .select("actor_id, kind")
