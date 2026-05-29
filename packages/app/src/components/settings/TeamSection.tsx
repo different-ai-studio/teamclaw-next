@@ -164,14 +164,43 @@ export function TeamSection() {
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const shareMode = useTeamShareStore((s) => s.status.mode)
+  const refreshShare = useTeamShareStore((s) => s.refresh)
   const { isOwner } = useTeamPermissions()
+
+  // Resolve the FC share mode before deciding which page to render. Without
+  // this, a configured team starts with shareMode === null and would flash the
+  // onboarding wizard until some child component happened to refresh — which
+  // read like "it jumped back to setup". Gate the decision on shareResolved so
+  // we show a spinner instead of the wrong screen during that window.
+  const [shareResolved, setShareResolved] = React.useState(false)
+  React.useEffect(() => {
+    if (!teamId || !workspacePath || !isTauri()) {
+      setShareResolved(true)
+      return
+    }
+    let cancelled = false
+    setShareResolved(false)
+    void refreshShare(teamId, workspacePath).finally(() => {
+      if (!cancelled) setShareResolved(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [teamId, workspacePath, refreshShare])
 
   // Two notions of "mode" coexist:
   //   - teamModeType ('git' | 'webdav' | null): legacy, from local teamclaw.json
   //   - shareMode ('oss' | 'managed_git' | 'custom_git' | null): the FC-locked share mode
   // A team is "already configured" if either source reports a mode. New teams (PR #213
   // no longer auto-create team-share) report neither — those land in the onboarding wizard.
-  const isOss = teamModeType === 'webdav'
+  //
+  // Route on the FC shareMode first: a team that locked 'oss' via the share-mode
+  // flow has shareMode === 'oss' but its local teamModeType is still null until
+  // the OSS directory is configured locally. Keying isOss on teamModeType alone
+  // sent those freshly-OSS-enabled teams to the Git config form. Fall back to the
+  // legacy teamModeType only when shareMode is absent (older teams).
+  const isOss =
+    shareMode === 'oss' || (shareMode === null && teamModeType === 'webdav')
   const isConfigured = shareMode !== null || teamModeType !== null
 
   return (
@@ -185,7 +214,14 @@ export function TeamSection() {
         )}
       />
 
-      {!isConfigured ? (
+      {teamId && workspacePath && !shareResolved ? (
+        // Prereqs present but the FC share mode is still loading — show a spinner
+        // rather than briefly flashing the wizard / git form before we know it.
+        <div className="flex items-center gap-2 py-8 text-[13px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t('settings.team.loadingShareMode', 'Loading team share status…')}
+        </div>
+      ) : !isConfigured ? (
         // New team (PR #213 no longer auto-creates team-share): show the onboarding
         // wizard so the owner can lock in oss / managed_git / custom_git. This needs a
         // team + workspace to target; without them, surface the missing prerequisite

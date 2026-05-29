@@ -61,6 +61,18 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
       set({ loading: false, error: error instanceof Error ? error.message : String(error) });
       return;
     }
+    // RLS replica lag guard: AuthGate auto-creates/joins a team for a fresh
+    // (e.g. anonymous) session and populates this store via setActiveTeam, but
+    // the just-written membership row is not always visible to this follow-up
+    // listCurrentUserTeams() yet. When that race returns an empty list, do NOT
+    // clobber the team AuthGate just set to null — that left the team-share
+    // settings page unable to see the team (showing the git form / prereq
+    // notice even after OSS was enabled). A genuinely team-less session keeps
+    // team === null, so this only preserves a team we already hold.
+    if (!row && get().team) {
+      set({ loading: false });
+      return;
+    }
     const activeTeam = row ? { id: row.id, name: row.name, slug: row.slug ?? "" } : null;
     await setLocalCacheTeamGate(activeTeam?.id ?? null);
     const currentMember = activeTeam
