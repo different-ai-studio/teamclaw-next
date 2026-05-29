@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useTeamShareStore } from '@/stores/team-share'
+import { humanizeFcError } from '@/lib/fc-error'
 
 type Mode = 'oss' | 'managed_git' | 'custom_git'
 type AuthKind = 'ssh_key' | 'https_token'
@@ -79,7 +80,7 @@ export function EnableShareWizard({
       reset()
       onOpenChange(false)
     } catch (e) {
-      setError(String(e))
+      setError(humanizeFcError(e))
     } finally {
       setSubmitting(false)
     }

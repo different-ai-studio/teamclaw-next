@@ -6,6 +6,9 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 // Hoisted mocks
 // ---------------------------------------------------------------------------
 const mockInvoke = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({
+  session: { user: { id: 'u1' } } as unknown,
+}))
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
@@ -17,6 +20,11 @@ vi.mock('@/lib/utils', async () => {
   )
   return { ...actual, isTauri: () => true }
 })
+
+// TeamShareSection gates its status fetch on a logged-in session.
+vi.mock('@/stores/auth-store', () => ({
+  useAuthStore: (sel: (s: { session: unknown }) => unknown) => sel(authState),
+}))
 
 // ---------------------------------------------------------------------------
 // SUT — imported after mocks
@@ -42,6 +50,20 @@ describe('TeamShareSection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetStore()
+    authState.session = { user: { id: 'u1' } }
+  })
+
+  it('shows a sign-in prompt and skips the status fetch when signed out', async () => {
+    authState.session = null
+    mockInvoke.mockResolvedValue({ mode: null })
+
+    render(
+      <TeamShareSection teamId="team-1" workspacePath="/workspace" isOwner={true} />,
+    )
+
+    expect(screen.getByText(/请先登录/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /开通/ })).toBeNull()
+    expect(mockInvoke).not.toHaveBeenCalledWith('team_share_get_status', expect.anything())
   })
 
   it('renders "团队共享未开通" when mode is null', async () => {

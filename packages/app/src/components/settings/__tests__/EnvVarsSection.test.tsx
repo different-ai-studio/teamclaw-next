@@ -73,10 +73,17 @@ vi.mock('@/stores/team-members', () => ({
   useTeamMembersStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
       currentNodeId: null,
-      myRole: null,
-      loadMyRole: vi.fn(),
       loadCurrentNodeId: vi.fn(),
     }),
+}))
+
+vi.mock('@/lib/team-permissions', () => ({
+  useTeamPermissions: () => ({
+    role: null,
+    isOwner: false,
+    canManageTeam: false,
+    canEditFiles: false,
+  }),
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({

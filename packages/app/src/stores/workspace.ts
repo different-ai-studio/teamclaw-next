@@ -399,7 +399,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         teamModeType: null,
         teamModelConfig: null,
         _appliedConfigKey: null,
-        myRole: null,
         teamGitSyncing: false,
       });
       // Load team config immediately so sidebar shows team tag on startup
@@ -501,7 +500,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         teamModeType: null,
         teamModelConfig: null,
         _appliedConfigKey: null,
-        myRole: null,
         teamGitSyncing: false,
       });
     } catch { /* ignore */ }
