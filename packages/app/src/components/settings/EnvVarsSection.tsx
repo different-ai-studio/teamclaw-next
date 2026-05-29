@@ -16,8 +16,7 @@ import { SettingCard, SectionHeader } from './shared'
 import { useEnvVarsStore } from '@/stores/env-vars'
 import { useSharedSecretsStore } from '@/stores/shared-secrets'
 import { useTeamMembersStore } from '@/stores/team-members'
-// `myRole` is null until the user joins a team; gate team-shared UI on it so
-// users without a team don't hit the backend's `secrets not initialized` error.
+import { useTeamPermissions } from '@/lib/team-permissions'
 import { listen } from '@tauri-apps/api/event'
 
 // ─── Unified type for the combined list ─────────────────────────────────
@@ -40,8 +39,8 @@ interface EnvVarDialogProps {
 
 function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialogProps) {
   const { t } = useTranslation()
-  const myRole = useTeamMembersStore((s) => s.myRole)
-  const teamAvailable = myRole !== null
+  const { role } = useTeamPermissions()
+  const teamAvailable = role !== null
   const [key, setKey] = React.useState('')
   const [value, setValue] = React.useState('')
   const [description, setDescription] = React.useState('')
@@ -462,13 +461,9 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
   const { envVars, isLoading: envLoading, loadEnvVars, setEnvVar, deleteEnvVar } = useEnvVarsStore()
   const { secrets, isLoading: secretsLoading, loadSecrets, setSecret, deleteSecret, listenForChanges } = useSharedSecretsStore()
   const currentNodeId = useTeamMembersStore((s) => s.currentNodeId)
-  const myRole = useTeamMembersStore((s) => s.myRole)
-  // `myRole` / `currentNodeId` are usually hydrated by TeamMemberList when the
-  // user opens the Team settings panel. Env-Vars can be reached without ever
-  // visiting that panel, so load them here too — otherwise the "Share with team"
-  // gate stays closed for users who are actually in a team.
-  const loadMyRole = useTeamMembersStore((s) => s.loadMyRole)
+  // currentNodeId is hydrated here (and via useAppInit) since the Team panel no longer owns it.
   const loadCurrentNodeId = useTeamMembersStore((s) => s.loadCurrentNodeId)
+  const { isOwner } = useTeamPermissions()
 
   const [addDialogOpen, setAddDialogOpen] = React.useState(false)
   const [editingEntry, setEditingEntry] = React.useState<UnifiedEntry | null>(null)
@@ -480,7 +475,6 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
   React.useEffect(() => {
     loadEnvVars()
     loadSecrets()
-    loadMyRole()
     loadCurrentNodeId()
     let unlisten: (() => void) | undefined
     listenForChanges().then((fn) => { unlisten = fn })
@@ -499,7 +493,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
       unlisten?.()
       unlistenSync?.()
     }
-  }, [loadEnvVars, loadSecrets, listenForChanges, loadMyRole, loadCurrentNodeId])
+  }, [loadEnvVars, loadSecrets, listenForChanges, loadCurrentNodeId])
 
   // Build unified list: personal env vars + team secrets, with `system-shared`
   // system defs surfaced as either the matching team secret (uppercase key) or
@@ -580,7 +574,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
   const handleDelete = async () => {
     if (!deleteTarget) return
     if (deleteTarget.scope === 'team') {
-      await deleteSecret(deleteTarget.key, currentNodeId ?? '', myRole ?? '')
+      await deleteSecret(deleteTarget.key, currentNodeId ?? '', isOwner ? 'owner' : 'member')
     } else if (deleteTarget.scope === 'personal') {
       await deleteEnvVar(deleteTarget.key)
     }
@@ -594,7 +588,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
     if (entry.scope === 'personal' && (entry.category === 'system' || entry.category === 'system-shared')) return false
     if (entry.scope === 'personal') return true
     if (entry.scope === 'team' && entry.category === 'system-shared') return false
-    if (myRole === 'owner') return true
+    if (isOwner) return true
     if (entry.scope === 'team' && entry.createdBy === currentNodeId) return true
     return false
   }
