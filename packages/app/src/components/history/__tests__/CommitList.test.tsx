@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { CommitList } from '../CommitList'
-import type { GitLogEntry } from '@/lib/git/types'
+import type { HistoryEntry } from '@/lib/history/types'
 
 vi.mock('react-i18next', () => ({
   useTranslation: (() => {
@@ -16,29 +16,31 @@ vi.mock('react-i18next', () => ({
   })(),
 }))
 
-const sample: GitLogEntry[] = [
+const sample: HistoryEntry[] = [
   {
-    sha: 'a'.repeat(40),
-    parentSha: 'b'.repeat(40),
+    ref: 'a'.repeat(40),
+    parentRef: 'b'.repeat(40),
+    label: 'a'.repeat(7),
     author: 'Alice',
-    isoTime: '2026-04-27T10:00:00+00:00',
-    subject: 'second',
+    timestamp: '2026-04-27T10:00:00+00:00',
+    message: 'second',
   },
   {
-    sha: 'b'.repeat(40),
-    parentSha: '',
+    ref: 'b'.repeat(40),
+    parentRef: '',
+    label: 'b'.repeat(7),
     author: 'Bob',
-    isoTime: '2026-04-26T10:00:00+00:00',
-    subject: 'first',
+    timestamp: '2026-04-26T10:00:00+00:00',
+    message: 'first',
   },
 ]
 
 describe('CommitList', () => {
-  it('renders a row per commit with subject and author', () => {
+  it('renders a row per entry with message and author', () => {
     render(
       <CommitList
-        commits={sample}
-        selectedSha={null}
+        entries={sample}
+        selectedRef={null}
         onSelect={() => {}}
         onLoadMore={() => {}}
         hasMore={false}
@@ -51,12 +53,12 @@ describe('CommitList', () => {
     expect(screen.getByText(/Bob/)).toBeDefined()
   })
 
-  it('calls onSelect with the row sha when clicked', () => {
+  it('calls onSelect with the row ref when clicked', () => {
     const onSelect = vi.fn()
     render(
       <CommitList
-        commits={sample}
-        selectedSha={null}
+        entries={sample}
+        selectedRef={null}
         onSelect={onSelect}
         onLoadMore={() => {}}
         hasMore={false}
@@ -64,15 +66,15 @@ describe('CommitList', () => {
       />,
     )
     fireEvent.click(screen.getByText('first'))
-    expect(onSelect).toHaveBeenCalledWith(sample[1].sha)
+    expect(onSelect).toHaveBeenCalledWith(sample[1].ref)
   })
 
   it('renders the "load more" button when hasMore=true and triggers onLoadMore', () => {
     const onLoadMore = vi.fn()
     render(
       <CommitList
-        commits={sample}
-        selectedSha={null}
+        entries={sample}
+        selectedRef={null}
         onSelect={() => {}}
         onLoadMore={onLoadMore}
         hasMore={true}
@@ -87,8 +89,8 @@ describe('CommitList', () => {
   it('hides the "load more" button when hasMore=false', () => {
     render(
       <CommitList
-        commits={sample}
-        selectedSha={null}
+        entries={sample}
+        selectedRef={null}
         onSelect={() => {}}
         onLoadMore={() => {}}
         hasMore={false}
@@ -101,8 +103,8 @@ describe('CommitList', () => {
   it('disables the "load more" button while loadingMore', () => {
     render(
       <CommitList
-        commits={sample}
-        selectedSha={null}
+        entries={sample}
+        selectedRef={null}
         onSelect={() => {}}
         onLoadMore={() => {}}
         hasMore={true}

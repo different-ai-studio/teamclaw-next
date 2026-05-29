@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
-import type { GitLogEntry } from '@/lib/git/types'
+import type { HistoryEntry } from '@/lib/history/types'
 
 interface CommitListProps {
-  commits: GitLogEntry[]
-  selectedSha: string | null
-  onSelect: (sha: string) => void
+  entries: HistoryEntry[]
+  selectedRef: string | null
+  onSelect: (ref: string) => void
   onLoadMore: () => void
   hasMore: boolean
   loadingMore: boolean
@@ -24,8 +24,8 @@ function formatRelative(iso: string, language: string): string {
 }
 
 export function CommitList({
-  commits,
-  selectedSha,
+  entries,
+  selectedRef,
   onSelect,
   onLoadMore,
   hasMore,
@@ -35,21 +35,22 @@ export function CommitList({
 
   return (
     <div className="flex flex-col h-full overflow-y-auto">
-      {commits.map((c) => {
-        const active = c.sha === selectedSha
+      {entries.map((e) => {
+        const active = e.ref === selectedRef
         return (
           <button
-            key={c.sha}
+            key={e.ref || e.label}
             type="button"
-            onClick={() => onSelect(c.sha)}
+            onClick={() => onSelect(e.ref)}
             className={`text-left px-3 py-2 border-b border-border/50 transition-colors ${
               active ? 'text-primary bg-primary/10' : 'hover:bg-muted'
             }`}
           >
             <div className="text-xs text-muted-foreground truncate">
-              {formatRelative(c.isoTime, i18n.language)} · {c.author}
+              {formatRelative(e.timestamp, i18n.language)}
+              {e.author ? ` · ${e.author}` : ''}
             </div>
-            <div className="text-sm truncate">{c.subject}</div>
+            <div className="text-sm truncate">{e.message || e.label}</div>
           </button>
         )
       })}

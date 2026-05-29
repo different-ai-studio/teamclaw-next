@@ -13,7 +13,11 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-const isTauriMock = vi.fn(() => false)
+// Hoisted so it is initialized before any vi.mock factory runs. FileEditor now
+// imports the OSS history provider, which transitively loads the oss-sync store;
+// that store calls isTauri() at module-eval time, invoking this mock during the
+// hoisted import phase — before a plain `const` would be initialized (TDZ).
+const { isTauriMock } = vi.hoisted(() => ({ isTauriMock: vi.fn(() => false) }))
 vi.mock('@/lib/utils', () => ({
   isTauri: () => isTauriMock(),
   cn: (...args: unknown[]) => args.filter(Boolean).join(' '),
@@ -43,6 +47,13 @@ vi.mock('@/stores/ui', () => ({
 
 vi.mock('@/hooks/use-git-status', () => ({
   useGitStatus: () => ({ gitStatuses: new Map() }),
+}))
+
+// Team mode drives which history provider FileEditor builds. 'git' selects the
+// GitHistoryProvider, which uses the mocked gitManager above (logFile -> []).
+vi.mock('@/stores/team-mode', () => ({
+  useTeamModeStore: (sel: (s: Record<string, unknown>) => unknown) =>
+    sel({ teamModeType: 'git' }),
 }))
 
 vi.mock('@/lib/git/manager', () => ({
