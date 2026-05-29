@@ -209,6 +209,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     await getBackend().auth.signOut();
     set({ session: null, authFlow: "idle", otpEmail: null, upgradeEmail: null });
+    // Reset the current team so the NEXT (e.g. anonymous) login doesn't inherit
+    // the previous user's team. Without this the current-team store kept the old
+    // team (its RLS-lag guard preserves it while the new user's team list is
+    // momentarily empty), and AuthGate's `if (team) return` then skipped
+    // switching — so team actions (e.g. enable OSS share) targeted the previous
+    // user's already-locked team and failed with "share mode already locked".
+    try {
+      const { useCurrentTeamStore } = await import("@/stores/current-team");
+      useCurrentTeamStore.setState({
+        team: null,
+        currentMember: null,
+        loading: false,
+        error: null,
+      });
+    } catch (error) {
+      console.warn("[auth] reset current-team on signOut failed:", error);
+    }
     try {
       const { useWorkspaceStore } = await import("@/stores/workspace");
       await useWorkspaceStore.getState().clearWorkspace();

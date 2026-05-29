@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isTauri } from '@/lib/utils'
+import { useCurrentTeamStore } from '@/stores/current-team'
+
+// Single source of truth for the active team id: the current-team store
+// (backed by the Cloud API), NOT a local teamclaw.json field. OSS sync commands
+// now take teamId explicitly so it can never drift from the active team.
+function activeTeamId(): string | null {
+  return useCurrentTeamStore.getState().team?.id ?? null
+}
 
 // ---------------------------------------------------------------------------
 // Types (matching Rust VersionInfo serde camelCase output)
@@ -35,6 +43,15 @@ export interface OssSyncConflict {
   timestamp: number
 }
 
+// Mirrors Rust SyncedFile (oss_sync_status -> recentFiles).
+export interface SyncedFile {
+  path: string
+  syncedVersion: number
+  dirty: boolean
+  /** Local mtime in unix seconds. */
+  mtime: number
+}
+
 // ---------------------------------------------------------------------------
 // State interface
 // ---------------------------------------------------------------------------
@@ -43,6 +60,9 @@ export interface OssSyncState {
   syncing: boolean
   lastSyncAt: string | null
   teamId: string | null
+  dirtyCount: number
+  totalFiles: number
+  recentFiles: SyncedFile[]
   fileStatusMap: Record<string, OssSyncFileStatus>
   conflicts: OssSyncConflict[]
   lastError: string | null
@@ -78,6 +98,7 @@ interface SyncStatusResult {
     path: string
     status: 'synced' | 'modified' | 'new' | 'conflict'
   }>
+  recentFiles?: SyncedFile[]
 }
 
 interface SyncNowResult {
@@ -94,15 +115,25 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   syncing: false,
   lastSyncAt: null,
   teamId: null,
+  dirtyCount: 0,
+  totalFiles: 0,
+  recentFiles: [],
   fileStatusMap: {},
   conflicts: [],
   lastError: null,
 
   async refresh(workspacePath: string) {
     if (!isTauri()) return
+    const teamId = activeTeamId()
+    if (!teamId) {
+      // No active team → nothing to report; keep an empty, non-error status.
+      set({ teamId: null, dirtyCount: 0, totalFiles: 0, recentFiles: [] })
+      return
+    }
     try {
       const status = await invoke<SyncStatusResult>('oss_sync_status', {
         workspacePath,
+        teamId,
       })
       // Build the per-file status map for file-tree coloring. Drop `synced`
       // entries so the map only carries files that should be colored.
@@ -115,6 +146,9 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
         teamId: status.teamId,
         lastSyncAt: status.lastSyncAt,
         fileStatusMap,
+        dirtyCount: status.dirtyCount,
+        totalFiles: status.totalFiles,
+        recentFiles: status.recentFiles ?? [],
       })
     } catch (e) {
       set({ lastError: String(e) })
@@ -123,9 +157,14 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
 
   async syncNow(workspacePath: string) {
     if (!isTauri()) return
+    const teamId = activeTeamId()
+    if (!teamId) {
+      set({ lastError: 'No active team to sync. Open a team workspace first.' })
+      return
+    }
     set({ syncing: true, lastError: null })
     try {
-      await invoke<SyncNowResult>('oss_sync_now', { workspacePath })
+      await invoke<SyncNowResult>('oss_sync_now', { workspacePath, teamId })
       // Re-fetch status to get fresh lastSyncAt and team info.
       await get().refresh(workspacePath)
     } catch (e) {
@@ -138,6 +177,7 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   async listVersions(workspacePath: string, path: string) {
     return invoke<VersionInfo[]>('oss_sync_list_versions', {
       workspacePath,
+      teamId: activeTeamId(),
       path,
     })
   },
@@ -145,6 +185,7 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   async restoreVersion(workspacePath: string, path: string, contentHash: string) {
     await invoke<void>('oss_sync_restore_version', {
       workspacePath,
+      teamId: activeTeamId(),
       path,
       contentHash,
     })
@@ -157,6 +198,7 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   ) {
     await invoke<void>('oss_sync_resolve_conflict', {
       workspacePath,
+      teamId: activeTeamId(),
       path,
       // Rust expects camelCase enum variant (serde rename_all = "camelCase")
       choice: choice === 'keepRemote' ? 'keepRemote' : 'keepLocal',

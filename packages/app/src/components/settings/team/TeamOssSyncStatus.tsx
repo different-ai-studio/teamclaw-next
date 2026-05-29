@@ -1,0 +1,152 @@
+import * as React from 'react'
+import { useTranslation } from 'react-i18next'
+import { RefreshCw, Loader2 } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { useOssSyncStore } from '@/stores/oss-sync'
+import { useCurrentTeamStore } from '@/stores/current-team'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { isTauri } from '@/lib/utils'
+
+/**
+ * OSS sync status panel — shown when a team's share mode is locked to 'oss'.
+ * Replaces the old WebDAV credential form: an OSS team syncs through the
+ * managed pipeline, so the owner doesn't enter a WebDAV URL/password — they
+ * just need to see sync state (last sync time, file counts, pending changes)
+ * and trigger a manual sync.
+ *
+ * Version history + conflict resolution will hang off this panel once the
+ * backend exposes list-files / list-conflicts commands (currently only
+ * per-file listVersions and per-file resolveConflict exist).
+ */
+function formatTimestamp(raw: string | null, locale: string | undefined): string | null {
+  if (!raw) return null
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat(locale || undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-1.5 text-[13px]">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
+    </div>
+  )
+}
+
+export function TeamOssSyncStatus() {
+  const { t, i18n } = useTranslation()
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const lastSyncAt = useOssSyncStore((s) => s.lastSyncAt)
+  const dirtyCount = useOssSyncStore((s) => s.dirtyCount)
+  const totalFiles = useOssSyncStore((s) => s.totalFiles)
+  const recentFiles = useOssSyncStore((s) => s.recentFiles)
+  const syncing = useOssSyncStore((s) => s.syncing)
+  const lastError = useOssSyncStore((s) => s.lastError)
+  const refresh = useOssSyncStore((s) => s.refresh)
+  const syncNow = useOssSyncStore((s) => s.syncNow)
+
+  React.useEffect(() => {
+    if (!workspacePath || !isTauri()) return
+    void refresh(workspacePath)
+  }, [workspacePath, teamId, refresh])
+
+  const synced = dirtyCount === 0
+  const lastSyncLabel =
+    formatTimestamp(lastSyncAt, i18n?.language) ??
+    t('settings.team.oss.never', 'Not synced yet')
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-card/50 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="text-[13px] font-medium text-foreground/80">
+          {t('settings.team.oss.title', 'OSS sync')}
+        </h4>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={syncing || !workspacePath}
+          onClick={() => workspacePath && void syncNow(workspacePath)}
+          data-testid="oss-sync-now"
+        >
+          {syncing ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          {t('settings.team.oss.syncNow', 'Sync now')}
+        </Button>
+      </div>
+
+      <div className="divide-y divide-border/40">
+        <StatRow
+          label={t('settings.team.oss.status', 'Status')}
+          value={
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`h-2 w-2 rounded-full ${synced ? 'bg-emerald-500' : 'bg-amber-500'}`}
+              />
+              {synced
+                ? t('settings.team.oss.synced', 'Synced')
+                : t('settings.team.oss.pending', 'Out of sync')}
+            </span>
+          }
+        />
+        <StatRow label={t('settings.team.oss.lastSync', 'Last sync')} value={lastSyncLabel} />
+        <StatRow
+          label={t('settings.team.oss.syncedFiles', 'Synced files')}
+          value={totalFiles}
+        />
+        <StatRow
+          label={t('settings.team.oss.pendingChanges', 'Pending changes')}
+          value={dirtyCount}
+        />
+      </div>
+
+      {recentFiles.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-1.5 text-[12px] font-medium text-foreground/70">
+            {t('settings.team.oss.recentFiles', 'Recently synced files')}
+          </div>
+          <ul className="divide-y divide-border/40 rounded-md border border-border/40">
+            {recentFiles.map((f) => (
+              <li
+                key={f.path}
+                className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-[12px]"
+              >
+                <span className="truncate font-mono text-foreground/90" title={f.path}>
+                  {f.path}
+                </span>
+                <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+                  {f.dirty && (
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                      {t('settings.team.oss.fileDirty', 'pending')}
+                    </span>
+                  )}
+                  <span className="tabular-nums">
+                    {formatTimestamp(
+                      new Date(f.mtime * 1000).toISOString(),
+                      i18n?.language,
+                    )}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {lastError && (
+        <p className="mt-3 text-[12px] text-destructive">{lastError}</p>
+      )}
+    </div>
+  )
+}
