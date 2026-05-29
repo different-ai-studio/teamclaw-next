@@ -12,6 +12,8 @@ use super::global_team_store::{self, TEAM_LINK_NAME};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkKind {
     Symlink,
+    /// Windows directory junction (created when symlink privileges are absent).
+    #[cfg_attr(not(windows), allow(dead_code))]
     Junction,
 }
 
@@ -109,24 +111,36 @@ fn junction_create(link: &Path, target: &Path) -> std::io::Result<()> {
 /// changes, consolidate it into the global dir and replace it with a symlink.
 /// If it is dirty, leave it untouched and report it for the UI to resolve.
 fn migrate_legacy_dir(link: &Path, target: &Path) -> LinkStatus {
-    if is_dirty(link) {
+    let is_git = link.join(".git").exists();
+
+    // A git repo with a dirty working tree has unsynced edits → never touch.
+    if is_git && git_is_dirty(link) {
         return LinkStatus::LegacyDirRetained {
             reason: "uncommitted or unsynced changes".into(),
         };
     }
 
-    // Seed the global dir from the legacy content only when global is still
-    // empty (first workspace wins); otherwise the global copy is authoritative.
     if global_is_empty(target) {
+        // First workspace wins: seed the global copy from the legacy content.
+        // Nothing is lost because the content is copied before removal.
         if let Err(e) = copy_dir_contents(link, target) {
             tracing::warn!("seed global from legacy {} failed: {e}", link.display());
             return LinkStatus::LegacyDirRetained {
                 reason: format!("seed-global failed: {e}"),
             };
         }
+    } else if !is_git {
+        // Global is already populated AND this is a non-git dir, so we cannot
+        // prove its contents are already synced upstream. Removing it would
+        // risk discarding unsynced (e.g. OSS-mode) edits — retain instead and
+        // let the UI surface it for the user to resolve.
+        return LinkStatus::LegacyDirRetained {
+            reason: "non-git dir with populated global; cannot verify synced".into(),
+        };
     }
 
-    // Remove the now-redundant clean legacy dir and replace with a link.
+    // Safe to replace: either a clean git dir (content lives in git → global)
+    // or a dir we just seeded into an empty global.
     if let Err(e) = std::fs::remove_dir_all(link) {
         tracing::warn!("remove legacy dir {} failed: {e}", link.display());
         return LinkStatus::LegacyDirRetained {
@@ -136,21 +150,18 @@ fn migrate_legacy_dir(link: &Path, target: &Path) -> LinkStatus {
     create_link(link, target)
 }
 
-/// Dirty = a git repo with `git status --porcelain` output. Non-git dirs are
-/// treated as clean here (their content seeds/defers to the global copy).
-fn is_dirty(dir: &Path) -> bool {
-    if dir.join(".git").exists() {
-        let out = std::process::Command::new("git")
-            .args(["status", "--porcelain"])
-            .current_dir(dir)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .output();
-        return match out {
-            Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
-            Err(_) => true, // can't tell → keep it
-        };
+/// True when a git repo has a non-empty `git status --porcelain` (uncommitted
+/// changes). Callers must confirm the dir is a git repo first.
+fn git_is_dirty(dir: &Path) -> bool {
+    let out = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output();
+    match out {
+        Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
+        Err(_) => true, // can't tell → keep it
     }
-    false
 }
 
 /// The global dir counts as empty when it is missing, has no entries, or holds
@@ -287,6 +298,36 @@ mod tests {
         assert_eq!(std::fs::read(global.join("skills/a.md")).unwrap(), b"hello");
         // Workspace entry is now a symlink, not a real dir.
         assert!(std::fs::symlink_metadata(&legacy)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retains_non_git_legacy_dir_when_global_already_populated() {
+        let (_home, _guard) = temp_home();
+        // Pre-populate the global dir for this team with real content.
+        let global = global_team_store::ensure_initialized("team-pop").unwrap();
+        std::fs::write(global.join("skills/existing.md"), b"already here").unwrap();
+
+        // A non-git legacy dir with its own (possibly unsynced) content.
+        let ws = tempfile::tempdir().unwrap();
+        let legacy = ws.path().join("teamclaw-team");
+        std::fs::create_dir_all(legacy.join("skills")).unwrap();
+        std::fs::write(legacy.join("skills/unsynced.md"), b"do not lose").unwrap();
+
+        let status = ensure_workspace_link(ws.path(), "team-pop");
+        match status {
+            LinkStatus::LegacyDirRetained { .. } => {}
+            other => panic!("expected LegacyDirRetained, got {other:?}"),
+        }
+        // Legacy content preserved, not deleted.
+        assert_eq!(
+            std::fs::read(legacy.join("skills/unsynced.md")).unwrap(),
+            b"do not lose"
+        );
+        assert!(!std::fs::symlink_metadata(&legacy)
             .unwrap()
             .file_type()
             .is_symlink());

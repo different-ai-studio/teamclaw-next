@@ -32,6 +32,11 @@ pub fn global_team_dir(team_id: &str) -> PathBuf {
 }
 
 /// `~/.amuxd/teams/<team_id>/sync/state.json` — OSS sync state, one per team.
+///
+/// Defines the canonical per-team sync-state location. Not yet consumed inside
+/// the daemon (OSS sync currently runs in the desktop crate); used once the
+/// daemon drives OSS global sync.
+#[allow(dead_code)]
 pub fn global_sync_state_path(team_id: &str) -> PathBuf {
     DaemonConfig::config_dir()
         .join("teams")
