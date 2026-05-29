@@ -894,9 +894,11 @@ async heartbeat() {
       const row = {
         message_id: body.messageId,
         actor_id: body.actorId,
+        team_id: body.teamId,
+        session_id: body.sessionId ?? null,
         kind: body.kind,
         star_rating: body.starRating ?? null,
-        note: body.note ?? null,
+        skill: body.skill ?? null,
       };
       const { data, error } = await supabase
         .from("actor_message_feedback")
@@ -928,13 +930,72 @@ async heartbeat() {
 
     async getTeamLeaderboard(teamId, { period = "week" } = {}) {
       const { data, error } = await supabase
-        .from("team_leaderboard")
-        .select("*")
-        .eq("team_id", teamId)
-        .eq("period", period)
-        .order("score", { ascending: false });
+        .rpc("team_leaderboard", { p_team_id: teamId, p_period: period });
       if (error) throw error;
-      return { items: (data ?? []).map(mapLeaderboardRow) };
+      const rows = (data ?? []).slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      return { items: rows.map(mapLeaderboardRow) };
+    },
+
+    async submitSessionReport(body) {
+      const reportRow = {
+        actor_id: body.actorId,
+        team_id: body.teamId,
+        session_id: body.sessionId ?? null,
+        tokens_used: body.tokensUsed ?? 0,
+        cost_usd: body.costUsd ?? 0,
+        model: body.model ?? null,
+        agent_kind: body.agentKind ?? null,
+        ended_at: body.endedAt ?? null,
+      };
+      const { error: reportErr } = await supabase
+        .from("actor_session_report")
+        .insert(reportRow);
+      if (reportErr) throw reportErr;
+
+      const skillRows = Object.entries(body.skillUsage ?? {})
+        .filter(([, count]) => Number(count) > 0)
+        .map(([skill, count]) => ({
+          actor_id: body.actorId,
+          team_id: body.teamId,
+          session_id: body.sessionId ?? null,
+          skill,
+          count: Number(count),
+        }));
+      if (skillRows.length > 0) {
+        const { error: skillErr } = await supabase
+          .from("actor_skill_usage")
+          .insert(skillRows);
+        if (skillErr) throw skillErr;
+      }
+    },
+
+    async submitSkillUsage(body) {
+      const row = {
+        actor_id: body.actorId,
+        team_id: body.teamId,
+        session_id: body.sessionId ?? null,
+        skill: body.skill,
+        count: Number(body.count ?? 1),
+      };
+      const { error } = await supabase.from("actor_skill_usage").insert(row);
+      if (error) throw error;
+    },
+
+    async listFeedbackSummary(teamId) {
+      const { data, error } = await supabase
+        .from("actor_message_feedback")
+        .select("actor_id, kind")
+        .eq("team_id", teamId);
+      if (error) throw error;
+      const byActor = new Map();
+      for (const r of data ?? []) {
+        const e = byActor.get(r.actor_id) ?? { actorId: r.actor_id, displayName: null, positive: 0, negative: 0, total: 0 };
+        if (r.kind === "positive") e.positive += 1;
+        if (r.kind === "negative") e.negative += 1;
+        e.total += 1;
+        byActor.set(r.actor_id, e);
+      }
+      return { items: [...byActor.values()] };
     },
 
     // --- Directory resolution (frontend supabase delegate parity) ---
@@ -2071,11 +2132,12 @@ function mapFeedbackRow(row) {
   return {
     messageId: requiredString(row?.message_id, "feedback.mapFeedbackRow", "message_id"),
     actorId: requiredString(row?.actor_id, "feedback.mapFeedbackRow", "actor_id"),
+    teamId: row?.team_id ?? null,
+    sessionId: row?.session_id ?? null,
     kind: requiredString(row?.kind, "feedback.mapFeedbackRow", "kind"),
     starRating: row?.star_rating ?? null,
-    note: row?.note ?? null,
+    skill: row?.skill ?? null,
     createdAt: row?.created_at ?? null,
-    updatedAt: row?.updated_at ?? null,
   };
 }
 
@@ -2083,9 +2145,14 @@ function mapLeaderboardRow(row) {
   return {
     actorId: requiredString(row?.actor_id, "leaderboard.mapLeaderboardRow", "actor_id"),
     teamId: row?.team_id ?? null,
-    period: requiredString(row?.period, "leaderboard.mapLeaderboardRow", "period"),
-    score: row?.score ?? 0,
-    rank: row?.rank ?? null,
     displayName: row?.display_name ?? null,
+    period: requiredString(row?.period, "leaderboard.mapLeaderboardRow", "period"),
+    tokensUsed: Number(row?.tokens_used ?? 0),
+    costUsd: Number(row?.cost_usd ?? 0),
+    positiveFeedback: Number(row?.positive_feedback ?? 0),
+    negativeFeedback: Number(row?.negative_feedback ?? 0),
+    sessionCount: Number(row?.session_count ?? 0),
+    skillUsage: row?.skill_usage ?? {},
+    score: Number(row?.score ?? 0),
   };
 }
