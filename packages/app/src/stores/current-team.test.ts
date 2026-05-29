@@ -50,6 +50,7 @@ beforeEach(() => {
   useCurrentTeamStore.setState({
     team: null,
     currentMember: null,
+    teamUserId: null,
     loading: false,
     saving: false,
     error: null,
@@ -58,8 +59,13 @@ beforeEach(() => {
 
 describe("useCurrentTeamStore.load", () => {
   it("does not clobber an already-active team when the list comes back empty (RLS replica lag)", async () => {
-    // AuthGate already populated the store with the freshly auto-created team.
-    useCurrentTeamStore.setState({ team: ACTIVE_TEAM, currentMember: ACTIVE_MEMBER });
+    // AuthGate already populated the store with the freshly auto-created team
+    // for THIS user (teamUserId matches the session).
+    useCurrentTeamStore.setState({
+      team: ACTIVE_TEAM,
+      currentMember: ACTIVE_MEMBER,
+      teamUserId: "anon-1",
+    });
     // The follow-up list query can't see the just-written membership yet.
     teamsMock.listCurrentUserTeams.mockResolvedValueOnce([]);
 
@@ -71,6 +77,24 @@ describe("useCurrentTeamStore.load", () => {
     expect(state.loading).toBe(false);
     // We bailed before re-fetching the member.
     expect(directoryMock.getCurrentTeamMember).not.toHaveBeenCalled();
+  });
+
+  it("does NOT preserve a team belonging to a different user (logout + re-login)", async () => {
+    // Previous user's team still in the store, new session is a different user.
+    useCurrentTeamStore.setState({
+      team: ACTIVE_TEAM,
+      currentMember: ACTIVE_MEMBER,
+      teamUserId: "prev-user",
+    });
+    authState.session = { user: { id: "anon-1" } };
+    teamsMock.listCurrentUserTeams.mockResolvedValueOnce([]);
+
+    await useCurrentTeamStore.getState().load();
+
+    // The foreign team must be cleared, not carried into the new user's session.
+    const state = useCurrentTeamStore.getState();
+    expect(state.team).toBeNull();
+    expect(state.currentMember).toBeNull();
   });
 
   it("clears the team for a genuinely team-less session (empty list, no prior team)", async () => {
