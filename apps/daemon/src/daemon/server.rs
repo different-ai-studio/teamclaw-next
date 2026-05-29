@@ -145,6 +145,19 @@ pub(crate) fn group_workspaces_by_team(
     by_team.into_iter().collect()
 }
 
+/// Pure policy for which team_id (if any) to stamp on a freshly-added
+/// workspace: an existing team_id always wins; otherwise inherit the daemon's
+/// team. An empty/whitespace daemon team yields none.
+pub(crate) fn team_id_to_stamp(existing: Option<&str>, daemon_team: Option<&str>) -> Option<String> {
+    if existing.is_some() {
+        return None;
+    }
+    daemon_team
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+}
+
 /// Per-session plan emitted by
 /// [`DaemonServer::plan_auto_restart_offline_sessions`]. Sessions that pass
 /// every filter (have a prior runtime, have unread from someone other than
@@ -1615,6 +1628,10 @@ impl DaemonServer {
             Ok(outcome) => {
                 let mut workspace = outcome.workspace;
                 let mut should_save = outcome.inserted;
+
+                if self.stamp_daemon_team(&mut workspace) {
+                    should_save = true;
+                }
 
                 if self.sync_workspace_to_cloud(&mut workspace).await {
                     should_save = true;
@@ -3818,6 +3835,20 @@ impl DaemonServer {
         }
     }
 
+    /// Stamp the daemon's team onto a freshly-added workspace so the
+    /// team-share sweep can group + link it. `AddWorkspace` carries no
+    /// team_id, so the daemon-level team is authoritative. Returns true if a
+    /// team_id was set (caller should persist).
+    fn stamp_daemon_team(&self, ws: &mut crate::config::StoredWorkspace) -> bool {
+        match team_id_to_stamp(ws.team_id.as_deref(), self.config.team_id.as_deref()) {
+            Some(team_id) => {
+                ws.team_id = Some(team_id);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Applies a workspace add. Returns (success, error_text, resulting_workspace_if_any).
     /// Caller publishes any collab event or Notify hint.
     async fn apply_add_workspace(
@@ -3828,6 +3859,9 @@ impl DaemonServer {
             Ok(outcome) => {
                 let mut ws = outcome.workspace;
                 let mut should_save = outcome.inserted;
+                if self.stamp_daemon_team(&mut ws) {
+                    should_save = true;
+                }
                 if self.sync_workspace_to_cloud(&mut ws).await {
                     should_save = true;
                 }
@@ -5044,6 +5078,21 @@ mod tests {
         assert_eq!(t1.1, vec!["/a".to_string(), "/b".to_string()]);
         let t2 = grouped.iter().find(|(t, _)| t == "team-2").unwrap();
         assert_eq!(t2.1, vec!["/c".to_string()]);
+    }
+
+    #[test]
+    fn team_id_to_stamp_inherits_daemon_team_only_when_unset() {
+        // Existing team always wins → no stamp.
+        assert_eq!(team_id_to_stamp(Some("team-x"), Some("team-d")), None);
+        // No existing → inherit daemon team.
+        assert_eq!(
+            team_id_to_stamp(None, Some("team-d")),
+            Some("team-d".to_string())
+        );
+        // No daemon team → nothing to stamp.
+        assert_eq!(team_id_to_stamp(None, None), None);
+        // Empty/whitespace daemon team → nothing to stamp.
+        assert_eq!(team_id_to_stamp(None, Some("   ")), None);
     }
 
     struct TestServer {
