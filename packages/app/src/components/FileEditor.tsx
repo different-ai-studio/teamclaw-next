@@ -31,7 +31,7 @@ import { useAutoSave } from "@/components/editors/useAutoSave";
 import { ConflictBanner } from "@/components/editors/ConflictBanner";
 import { useSessionStore } from "@/stores/session";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useTeamModeStore } from "@/stores/team-mode";
+import { useTeamPermissions } from "@/lib/team-permissions";
 import { gitManager } from "@/lib/git/manager";
 import { Button } from "@/components/ui/button";
 import {
@@ -364,9 +364,9 @@ export function FileEditor({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const myRole = useTeamModeStore((s) => s.myRole)
+  const { canEditFiles } = useTeamPermissions()
   const isTeamFile = filePath?.includes(`/${TEAM_REPO_DIR}/`) ?? false
-  const isViewerReadOnly = isTeamFile && myRole === 'viewer'
+  const isViewerReadOnly = isTeamFile && !canEditFiles
   const targetLine = useWorkspaceStore((s) => s.targetLine);
   const targetHeading = useWorkspaceStore((s) => s.targetHeading);
   const [currentContent, setCurrentContent] = useState(content);
