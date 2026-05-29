@@ -17,21 +17,14 @@ It came from the Claude Design handoff at
 `https://api.anthropic.com/v1/design/h/OLWqffBkDMYRHp_p7cFRNg` (Direction B).
 The local prototype copy lives in `/tmp/design-OLWqff/` when fetched.
 
-> **Git note:** All AI-made changes must happen in a project-local
-> `.worktrees/<task-slug>` worktree. Do not edit the stable repo checkout
-> directly, and do not switch branches in an existing checkout to start work.
-> Create the worktree with `scripts/create-agent-worktree.sh <task-slug>
-> <base-ref>` so local env files are copied for preview/self-test, then work
-> only there. For multi-agent preview, keep a single
-> `.worktrees/preview-integration` hot-reload worktree and apply selected
-> candidate diffs into it as WIP commits. See `CLAUDE.md` → Git Workflow for
-> the full rule.
+> **Git note:** Work on a task-scoped branch, never on `main`, and never push
+> to `main` directly. See `CLAUDE.md` → Git Workflow for the full rule. If
+> `docs/SDLC.md` exists in this checkout, it may add personal worktree /
+> preview-integration conventions on top.
 >
 > **PR rule:** Do **not** push the branch or run `gh pr create` on your own
-> initiative. The flow is: worktree-develop → patch diff into
-> `preview-integration` → user verifies live → user explicitly says "open the
-> PR" / "ship it" / "提 PR". Until that explicit prompt arrives, stop after
-> the preview-integration commit and report back — even if everything looks
+> initiative. Until the user explicitly says "open the PR" / "ship it" /
+> "提 PR", stop after committing and report back — even if everything looks
 > "done", tests pass, and the user previously approved the diff.
 
 ---
