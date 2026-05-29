@@ -871,24 +871,28 @@ impl DaemonServer {
     async fn sync_team_shared_dirs_for_known_workspaces(&self) {
         let grouped = group_workspaces_by_team(&self.workspaces.workspaces);
         for (team_id, workspace_paths) in grouped {
-            // 1. Sync the single global copy for this team (git modes). The
-            //    OSS-mode global state lives at global_sync_state_path(team_id);
-            //    git modes sync the working tree here.
-            let global_dir =
-                match crate::config::global_team_store::ensure_initialized(&team_id) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        warn!(team_id, "global team dir init failed: {e}");
-                        continue;
-                    }
-                };
-            // Pull git config from the first member workspace's .teamclaw config.
-            if let Some(first) = workspace_paths.first() {
-                if let Some(config) = load_team_shared_config_for_workspace(Path::new(first)) {
-                    if let Err(e) = crate::team_shared_git::sync_git_dir(&global_dir, &config) {
-                        warn!(team_id, "global git sync failed: {e}");
-                    }
+            // 1. Sync the single global copy for this team.
+            //    `load_team_shared_config_for_workspace` only returns Some for
+            //    git modes (it requires a non-empty git_url), so a git-backed
+            //    team is cloned/pulled into the global dir FIRST — `git clone`
+            //    needs an absent/empty target, so we must not pre-create the
+            //    fixed scaffold before cloning. OSS / unconfigured teams skip
+            //    this and just get the scaffold below.
+            let global_dir = crate::config::global_team_store::global_team_dir(&team_id);
+            let config = workspace_paths
+                .first()
+                .and_then(|first| load_team_shared_config_for_workspace(Path::new(first)));
+            if let Some(config) = &config {
+                if let Err(e) = crate::team_shared_git::sync_git_dir(&global_dir, config) {
+                    warn!(team_id, "global git sync failed: {e}");
                 }
+            }
+            // Ensure the fixed shared layout exists (idempotent). For OSS this
+            // creates the scaffold; for a freshly-cloned git repo it tops up any
+            // missing dirs (git ignores the empty ones).
+            if let Err(e) = crate::config::global_team_store::ensure_initialized(&team_id) {
+                warn!(team_id, "global team dir init failed: {e}");
+                continue;
             }
             // 2. Ensure every member workspace links to the global dir.
             for ws_path in &workspace_paths {
