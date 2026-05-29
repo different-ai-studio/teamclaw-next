@@ -255,28 +255,11 @@ export async function createSessionWithFirstMessage(
     messageId,
   })
 
-  if (args.agentActorIds.length > 0) {
-    sessionFlowLog('session_with_first_message.runtime_start.begin', {
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-      agentType: args.agentType,
-      modelId: args.modelId,
-    })
-    await startAgentRuntimesAsync({
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-      agentType: args.agentType,
-      modelId: args.modelId,
-    })
-    sessionFlowLog('session_with_first_message.runtime_start.done', {
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-    })
-  }
-
+  // Publish the opening message to the live topic BEFORE spawning runtimes.
+  // The message is already persisted (insertOutgoingMessage above), so the
+  // daemon's post-attach catchup query will find it regardless of MQTT
+  // ordering; publishing first lets any already-subscribed runtime/client see
+  // it without waiting on the (slower) runtimeStart round-trip.
   sessionFlowLog('session_with_first_message.mqtt_publish.begin', {
     sessionId,
     teamId: args.teamId,
@@ -300,6 +283,39 @@ export async function createSessionWithFirstMessage(
     teamId: args.teamId,
     messageId,
   })
+
+  // Fire-and-forget runtime spawn. The caller (new-session dialog / chat
+  // panel) navigates into the session immediately; runtime readiness arrives
+  // asynchronously via RuntimeInfo retain (Starting -> Active). Awaiting here
+  // would block the UI on ACP startup, which is the latency we are removing.
+  if (args.agentActorIds.length > 0) {
+    sessionFlowLog('session_with_first_message.runtime_start.begin', {
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      agentType: args.agentType,
+      modelId: args.modelId,
+    })
+    void startAgentRuntimesAsync({
+      sessionId,
+      teamId: args.teamId,
+      agentActorIds: args.agentActorIds,
+      agentType: args.agentType,
+      modelId: args.modelId,
+    }).then(() => {
+      sessionFlowLog('session_with_first_message.runtime_start.done', {
+        sessionId,
+        teamId: args.teamId,
+        agentActorIds: args.agentActorIds,
+      })
+    }).catch((runtimeErr) => {
+      sessionFlowError('session_with_first_message.runtime_start.failed', runtimeErr, {
+        sessionId,
+        teamId: args.teamId,
+        agentActorIds: args.agentActorIds,
+      })
+    })
+  }
 
   sessionFlowLog('session_with_first_message.ok', {
     sessionId,
