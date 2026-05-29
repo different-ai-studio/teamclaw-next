@@ -28,12 +28,14 @@ use super::tokens::{self, TokenStore};
 /// and for clients that need to log it.
 pub struct HttpHandle {
     pub local_addr: SocketAddr,
+    #[allow(dead_code)]
     pub tokens: TokenStore,
     join: JoinHandle<()>,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
 impl HttpHandle {
+    #[allow(dead_code)]
     pub async fn shutdown(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());

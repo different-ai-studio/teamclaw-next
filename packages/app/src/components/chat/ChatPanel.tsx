@@ -58,7 +58,6 @@ import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
-import { ensureAgentRuntimesForSession } from "@/lib/teamclaw/ensure-agent-runtime";
 import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
 import { selectAgentModel } from "@/lib/runtime-state-resolve";
 import { useAgentModelPickStore } from "@/stores/agent-model-pick-store";
@@ -647,11 +646,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
     const { loadTeamConfig, applyTeamModel } = useTeamModeStore.getState();
     loadTeamConfig(workspacePath).then(async () => {
-      if (useTeamModeStore.getState().teamMode) {
-        // Team mode: apply team config (restarts the agent), then init providers.
-        // applyTeamModel is idempotent — skips if config key unchanged.
-        await applyTeamModel(workspacePath);
-      }
+      // applyTeamModel is idempotent and self-noops when no team config is loaded.
+      await applyTeamModel(workspacePath);
       initProviderStore();
     });
   }, [workspaceReady, workspacePath, initProviderStore]);
@@ -705,17 +701,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         debounceTimer = setTimeout(async () => {
           console.log('[TeamMode] Team config changed, reloading team config');
           const store = useTeamModeStore.getState();
-          const wasTeamMode = store.teamMode;
+          const hadTeamConfig = store.teamModelConfig != null;
           await store.loadTeamConfig(workspacePath);
-          const isTeamMode = useTeamModeStore.getState().teamMode;
-          
-          if (isTeamMode) {
+          const hasTeamConfig = useTeamModeStore.getState().teamModelConfig != null;
+
+          if (hasTeamConfig) {
             await store.applyTeamModel(workspacePath);
-          } else if (wasTeamMode && !isTeamMode) {
-            // Ensure provider store is refreshed if team mode was cleared
+          } else if (hadTeamConfig) {
+            // Team config was cleared — refresh provider store so UI drops the team provider
             await useProviderStore.getState().initAll();
-            // Force a re-render by triggering a state update
-            useTeamModeStore.setState({ teamMode: false, teamModelConfig: null });
           }
         }, 1000);
       });
@@ -1194,60 +1188,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             teamId: teamIdForSend,
           });
 
-          if (agentRuntimeIdsForSend.length > 0) {
-            const byRuntimeId = useRuntimeStateStore.getState().byRuntimeId;
-            const pickStore = useAgentModelPickStore.getState();
-            const modelIdByAgent: Record<string, string> = {};
-            for (const agentId of agentRuntimeIdsForSend) {
-              const pick = pickStore.getPick(sid, agentId);
-              if (pick) modelIdByAgent[agentId] = pick;
-            }
-            const primaryAgentId = agentRuntimeIdsForSend[0];
-            const runtimeModelId = selectAgentModel({
-              sessionId: sid,
-              agentId: primaryAgentId,
-              available: [],
-              byRuntimeId,
-              providerFallback: selectedModelOption?.id,
-            }).modelId || undefined;
-            sessionFlowLog("send.runtime_ensure.begin", {
-              sessionId: sid,
-              teamId: teamIdForSend,
-              agentActorIds: agentRuntimeIdsForSend,
-              modelId: runtimeModelId ?? null,
-              modelIdByAgent,
-            });
-            try {
-              await ensureAgentRuntimesForSession({
-                sessionId: sid,
-                teamId: teamIdForSend,
-                agentActorIds: agentRuntimeIdsForSend,
-                modelId: runtimeModelId,
-                modelIdByAgent,
-                reason: "send_message",
-              });
-              sessionFlowLog("send.runtime_ensure.ok", {
-                sessionId: sid,
-                teamId: teamIdForSend,
-                agentActorIds: agentRuntimeIdsForSend,
-              });
-            } catch (runtimeEnsureError) {
-              sessionFlowError("send.runtime_ensure.failed", runtimeEnsureError, {
-                sessionId: sid,
-                teamId: teamIdForSend,
-                agentActorIds: agentRuntimeIdsForSend,
-              });
-              const { toast } = await import("sonner");
-              toast.error("Agent runtime 未就绪", {
-                description:
-                  runtimeEnsureError instanceof Error
-                    ? runtimeEnsureError.message
-                    : String(runtimeEnsureError),
-              });
-              return;
-            }
-          }
-
           sessionFlowLog("send.resolve_sender.begin", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1308,10 +1248,18 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             model: outgoingModel,
           });
 
-          // 1. Optimistic UI append — bubble renders before the network
-          //    round-trip. dedup-by-id in session-message-store means the
-          //    eventual live echo (same messageId) is a no-op.
+          // 1. Optimistic UI append.
+          //    dedup-by-id in session-message-store means the eventual live
+          //    echo (same messageId) is a no-op.
           useSessionMessageStore.getState().appendMessage(sid, msg);
+          if (displaySessionId !== sid) {
+            setDisplaySessionId(sid);
+            setSessionFadeOpacity(1);
+          }
+          // Scroll so afterMessages separator aligns with viewport bottom:
+          // new user bubble is fully visible, agent stream UI stays below the fold.
+          // isAtBottom is force-enabled so ResizeObserver follows agent replies.
+          messageListRef.current?.scrollToLatestMessage();
           sessionFlowLog("send.optimistic_append.ok", {
             sessionId: sid,
             messageId,
@@ -1319,9 +1267,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
               useSessionMessageStore.getState().messages[sid]?.length ?? 0,
           });
 
-          // 2. Enqueue to outbox — write-through to libsql so a crash
-          //    before the first send attempt doesn't lose the message.
-          //    `outbox-sender` (started in App.tsx) picks it up on next tick.
+          // 2. Enqueue to outbox — status dot beside the bubble tracks
+          //    pending/inFlight/delivered. Network + runtime work continue
+          //    asynchronously after the bubble is visible.
           sessionFlowLog("send.outbox_enqueue.begin", {
             sessionId: sid,
             teamId: teamIdForSend,
@@ -1343,6 +1291,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             teamId: teamIdForSend,
             messageId,
           });
+
+          // Runtime ensure + MQTT publish happen inside the outbox sender
+          // (insert → runtimeStart/catchup → mqtt). Do not fire a parallel
+          // ensure here — it races ahead of persistence and triggers catchup
+          // before the @-mentioned row exists in the backend.
         } catch (e) {
           sessionFlowError("send.failed_before_outbox", e, {
             sessionId: sid,

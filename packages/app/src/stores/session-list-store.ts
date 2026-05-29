@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "./auth-store";
+import { useCurrentTeamStore } from "./current-team";
 import { isTauri } from "@/lib/utils";
 import { loadPinnedSessionIds, savePinnedSessionIds } from "./session-pins";
 import {
   loadSessionsForTeam,
+  softDeleteSession,
   upsertSessionsBatch,
   type SessionRow,
 } from "@/lib/local-cache";
@@ -14,6 +16,37 @@ import {
 // `teamId` is null until the first Supabase RPC returns, defeating the
 // "instant render from cache" path on cold start.
 const LAST_TEAM_ID_KEY = "teamclaw.sessionList.lastTeamId";
+const ARCHIVED_SESSION_IDS_KEY = "teamclaw.sessionList.archivedIds";
+
+function readArchivedSessionIds(): Set<string> {
+  try {
+    if (typeof localStorage === "undefined") return new Set();
+    const raw = localStorage.getItem(ARCHIVED_SESSION_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberArchivedSessionId(sessionId: string): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const ids = readArchivedSessionIds();
+    ids.add(sessionId);
+    localStorage.setItem(ARCHIVED_SESSION_IDS_KEY, JSON.stringify([...ids]));
+  } catch {
+    // localStorage unavailable — non-fatal.
+  }
+}
+
+function filterArchivedEntries(entries: SessionListEntry[]): SessionListEntry[] {
+  const archived = readArchivedSessionIds();
+  if (archived.size === 0) return entries;
+  return entries.filter((row) => !archived.has(row.id));
+}
 
 function readLastTeamId(): string | null {
   try {
@@ -153,13 +186,24 @@ export const useSessionListStore = create<State>((set, get) => ({
     //      still gets phase-1 instant render before the Supabase RPC).
     // The Supabase RPC below populates either path going forward.
     const existingRows = useSessionListStore.getState().rows;
-    const teamId = existingRows[0]?.team_id ?? readLastTeamId();
+    // Prefer the active team from current-team store. Falling back to
+    // localStorage when it's still null lets phase-1 hydrate fire on cold
+    // boot, but using it once current-team is known would cause a
+    // local_cache team-gate mismatch panic after switching accounts/teams.
+    const activeTeamId = useCurrentTeamStore.getState().team?.id ?? null;
+    const teamId = activeTeamId ?? existingRows[0]?.team_id ?? readLastTeamId();
 
     // ── Phase 1: hydrate instantly from local cache (Tauri only) ──────────
-    if (isTauri() && teamId) {
+    // Skip when we already have RPC rows — reloading would flash archived
+    // sessions that still sit in libsql until soft-deleted.
+    if (isTauri() && teamId && existingRows.length === 0) {
       const localRows = await loadSessionsForTeam(teamId);
       if (localRows.length > 0) {
-        set({ rows: sortEntries(localRows.map(mapCacheToEntry)) });
+        set({
+          rows: filterArchivedEntries(
+            sortEntries(localRows.map(mapCacheToEntry)),
+          ),
+        });
       }
     }
 
@@ -198,7 +242,7 @@ export const useSessionListStore = create<State>((set, get) => ({
     }
 
     set({
-      rows: sortEntries(rows),
+      rows: filterArchivedEntries(sortEntries(rows)),
       loading: false,
       hasMore: rows.length === limit,
       nextCursor: cursorFromRows(rows),
@@ -218,7 +262,7 @@ export const useSessionListStore = create<State>((set, get) => ({
       set({ loading: false, error: error instanceof Error ? error.message : String(error) });
       return;
     }
-    const nextRows = mergeRows(get().rows, rows);
+    const nextRows = filterArchivedEntries(mergeRows(get().rows, rows));
     set({
       rows: nextRows,
       loading: false,
@@ -284,6 +328,10 @@ export const useSessionListStore = create<State>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
       return;
+    }
+    rememberArchivedSessionId(sessionId);
+    if (isTauri()) {
+      await softDeleteSession(sessionId, archivedAt).catch(() => {});
     }
     get().removeRow(sessionId);
   },

@@ -62,10 +62,15 @@ select has_column('public', 'team_workspace_config', 'env_secret', 'has env_secr
 select has_column('public', 'team_workspace_config', 'last_sync_at', 'has last_sync_at');
 select has_column('public', 'team_workspace_config', 'last_sync_error', 'has last_sync_error');
 
--- 10. Member can insert
-insert into public.team_workspace_config (team_id, git_url, git_branch, git_token, ai_gateway_endpoint)
-  values ((select team_id from ctx), 'https://github.com/x/y.git', 'main', 'ghp_abc', 'https://gw.example');
-select pass('owner can insert own team_workspace_config');
+-- 10. Owner can write own team_workspace_config (the create_team RPC seeds an
+-- empty row at team creation; the owner fills it in via UPDATE).
+update public.team_workspace_config
+   set git_url             = 'https://github.com/x/y.git',
+       git_branch          = 'main',
+       git_token           = 'ghp_abc',
+       ai_gateway_endpoint = 'https://gw.example'
+ where team_id = (select team_id from ctx);
+select pass('owner can update own team_workspace_config');
 
 -- 11. Member can read
 select results_eq(
@@ -107,14 +112,17 @@ select is_empty(
   'stranger cannot read'
 );
 
--- 16. Stranger cannot insert
-select throws_ok(
-  $$ insert into public.team_workspace_config (team_id, git_url) values
-       ((select team_id from ctx), 'https://github.com/h/h.git') $$,
-  '42501',
-  null,
-  'stranger insert rejected'
+-- 16. Stranger UPDATE is silently filtered (RLS USING returns no row), so
+-- the owner's row is unchanged.
+update public.team_workspace_config set git_url = 'https://stolen.example'
+  where team_id = (select team_id from ctx);
+select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');
+select results_eq(
+  $$ select git_url from public.team_workspace_config where team_id = (select team_id from ctx) $$,
+  $$ values ('https://github.com/x/y.git'::text) $$,
+  'stranger UPDATE silently filtered (RLS)'
 );
+select pg_temp.as_user('c3333333-3333-3333-3333-333333333333');
 
 -- 17. enabled defaults true (after switching back to alice)
 select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');

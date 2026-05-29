@@ -116,6 +116,13 @@ export function mapSupabaseError(error) {
   if (pgCode === "23514" || pgCode === "22P02" || httpStatus === 400) {
     return new ApiError(400, "validation_failed", message, { cause: error });
   }
+  // 23502 not_null_violation: a required column was omitted (e.g. team_id).
+  // 42P10 invalid_column_reference: an ON CONFLICT target with no matching
+  // unique constraint. Both signal a bad request / server-side drift rather
+  // than an opaque internal error — map them to 400 so the cause is visible.
+  if (pgCode === "23502" || pgCode === "42P10") {
+    return new ApiError(400, "bad_request", message, { cause: error });
+  }
   if (httpStatus === 404) {
     return new ApiError(404, "not_found", message, { cause: error });
   }

@@ -89,6 +89,7 @@ pub struct SessionResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct StreamQuery {
     #[serde(default)]
     pub access_token: Option<String>,

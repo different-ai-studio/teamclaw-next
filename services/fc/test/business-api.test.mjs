@@ -257,11 +257,11 @@ test("repository Supabase errors are normalized", async () => {
   assert.equal(JSON.parse(response.body).error.code, "conflict");
 });
 
-test("GET /v1/teams/:teamId/workspace-config returns 404 when not set", async () => {
+test("GET /v1/teams/:teamId/workspace-defaults returns 404 when not set", async () => {
   const repo = fakeRepo();
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
-    path: "/v1/teams/team-1/workspace-config",
+    path: "/v1/teams/team-1/workspace-defaults",
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
 
@@ -270,7 +270,7 @@ test("GET /v1/teams/:teamId/workspace-config returns 404 when not set", async ()
   assert.deepEqual(repo.calls[0], { method: "getTeamWorkspaceConfig", teamId: "team-1" });
 });
 
-test("GET /v1/teams/:teamId/workspace-config returns config when set", async () => {
+test("GET /v1/teams/:teamId/workspace-defaults returns config when set", async () => {
   const repo = fakeRepo({
     teamWorkspaceConfigs: {
       "team-1": {
@@ -283,7 +283,7 @@ test("GET /v1/teams/:teamId/workspace-config returns config when set", async () 
   });
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
-    path: "/v1/teams/team-1/workspace-config",
+    path: "/v1/teams/team-1/workspace-defaults",
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
 
@@ -328,6 +328,51 @@ test("POST /v1/heartbeat calls repository.heartbeat", async () => {
 
   assert.equal(response.statusCode, 204);
   assert.deepEqual(repo.calls[0], { method: "heartbeat" });
+});
+
+test("POST /v1/presence/foreground upserts client_presence", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/presence/foreground",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "device-1", foregroundUntil: "2026-05-28T01:00:00Z" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "writeForegroundPresence",
+    input: { deviceId: "device-1", foregroundUntil: "2026-05-28T01:00:00Z" },
+  });
+});
+
+test("POST /v1/presence/foreground rejects missing deviceId with 400", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/presence/foreground",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ foregroundUntil: "2026-05-28T01:00:00Z" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
+  assert.equal(repo.calls.length, 0);
+});
+
+test("POST /v1/presence/foreground rejects non-ISO foregroundUntil with 400", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/presence/foreground",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "d", foregroundUntil: "not-a-date" }),
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
 });
 
 test("GET /v1/workspaces returns 400 without teamId", async () => {
@@ -721,6 +766,39 @@ test("DELETE /v1/sessions/:sessionId/mute unmutes session", async () => {
     method: "unmuteSession",
     sessionId: "session-1",
   });
+});
+
+test("POST /v1/teams creates team without LiteLLM (provisioning extracted)", async () => {
+  // Post Task 3 of the share-onboarding refactor: POST /v1/teams no longer
+  // provisions LiteLLM. The route just writes the teams row; the client must
+  // call POST /v1/teams/:id/litellm/setup explicitly to provision later.
+  // aiGatewayEndpoint + litellmKey are still in the response for back-compat
+  // with the Rust client (Option<String>) but are always null here.
+  const prevMaster = process.env.LITELLM_MASTER_KEY;
+  process.env.LITELLM_MASTER_KEY = "would-have-provisioned-pre-refactor";
+  try {
+    const repo = fakeRepo();
+    const response = await handleBusinessApiRequest({
+      httpMethod: "POST",
+      path: "/v1/teams",
+      headers: { Authorization: "Bearer token" },
+      body: JSON.stringify({ name: "Acme" }),
+    }, { createRepository: () => repo });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.id, "team-1");
+    assert.equal(body.name, "Acme");
+    assert.equal(body.aiGatewayEndpoint, null);
+    assert.equal(body.litellmKey, null);
+    assert.deepEqual(repo.calls[0], {
+      method: "createTeam",
+      input: { name: "Acme", slug: null, litellmTeamId: null, aiGatewayEndpoint: null },
+    });
+  } finally {
+    if (prevMaster === undefined) delete process.env.LITELLM_MASTER_KEY;
+    else process.env.LITELLM_MASTER_KEY = prevMaster;
+  }
 });
 
 test("PATCH /v1/teams/:teamId renames team", async () => {
@@ -1206,8 +1284,45 @@ test("POST /v1/attachments uploads binary body and returns path + url", async ()
   assert.ok(typeof parsed.url === "string");
   assert.deepEqual(repo.calls[0], {
     method: "uploadAttachment",
-    input: { path: "foo/bar.png", mime: "image/png", bytes: body },
+    input: { path: "foo/bar.png", mime: "image/png", bytes: body, bucket: "attachments" },
   });
+});
+
+test("POST /v1/attachments?bucket=avatars routes to avatars bucket and returns avatars url", async () => {
+  const repo = fakeRepo();
+  const body = Buffer.from("avatar-bytes");
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/attachments",
+    headers: { Authorization: "Bearer token", "Content-Type": "image/jpeg" },
+    queryStringParameters: { path: "actor-1/avatar-1.jpg", bucket: "avatars" },
+    body: body.toString("base64"),
+    isBase64Encoded: true,
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.path, "actor-1/avatar-1.jpg");
+  assert.ok(parsed.url.includes("/avatars/"));
+  assert.deepEqual(repo.calls[0], {
+    method: "uploadAttachment",
+    input: { path: "actor-1/avatar-1.jpg", mime: "image/jpeg", bytes: body, bucket: "avatars" },
+  });
+});
+
+test("POST /v1/attachments rejects unknown bucket with 400", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/attachments",
+    headers: { Authorization: "Bearer token", "Content-Type": "image/png" },
+    queryStringParameters: { path: "x.png", bucket: "secrets" },
+    body: Buffer.from("x").toString("base64"),
+    isBase64Encoded: true,
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "invalid_request");
+  assert.equal(repo.calls.length, 0);
 });
 
 test("POST /v1/attachments returns 400 when path query param is missing", async () => {
@@ -1237,7 +1352,7 @@ test("GET /v1/attachments/:path returns binary response", async () => {
   assert.equal(response.headers["Content-Type"], "image/png");
   const decoded = Buffer.from(response.body, "base64");
   assert.deepEqual(decoded, Buffer.from("fake-image-bytes"));
-  assert.deepEqual(repo.calls[0], { method: "downloadAttachment", path: "foo%2Fbar.png" });
+  assert.deepEqual(repo.calls[0], { method: "downloadAttachment", path: "foo%2Fbar.png", options: { bucket: "attachments" } });
 });
 
 test("GET /v1/attachments/:path returns 404 when attachment missing", async () => {
@@ -1283,12 +1398,12 @@ test("POST /v1/feedback happy path returns 201", async () => {
     httpMethod: "POST",
     path: "/v1/feedback",
     headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
-    body: JSON.stringify({ messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "star", starRating: 5, note: "great" }),
+    body: JSON.stringify({ messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", teamId: "00000000-0000-0000-0000-000000000003", kind: "positive", starRating: 5, note: "great" }),
   }, { createRepository: () => repo });
   assert.equal(response.statusCode, 201);
   const parsed = JSON.parse(response.body);
-  assert.equal(parsed.kind, "star");
-  assert.deepEqual(repo.calls[0], { method: "submitFeedback", body: { messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", kind: "star", starRating: 5, note: "great" } });
+  assert.equal(parsed.kind, "positive");
+  assert.deepEqual(repo.calls[0], { method: "submitFeedback", body: { messageId: "00000000-0000-0000-0000-000000000001", actorId: "00000000-0000-0000-0000-000000000002", teamId: "00000000-0000-0000-0000-000000000003", kind: "positive", starRating: 5, note: "great" } });
 });
 
 test("GET /v1/feedback returns 400 when sessionId is missing", async () => {
@@ -1393,6 +1508,7 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async getTeamWorkspaceConfig(teamId) { calls.push({ method: "getTeamWorkspaceConfig", teamId }); if (error) throw error; return configs[teamId] ?? null; },
     async putTeamWorkspaceConfig(teamId, input) { calls.push({ method: "putTeamWorkspaceConfig", teamId, input }); if (error) throw error; configs[teamId] = { teamId, defaultWorkspaceId: input.defaultWorkspaceId ?? null, pinnedWorkspaceIds: input.pinnedWorkspaceIds ?? [], updatedAt: "2026-05-27T01:00:00Z" }; return configs[teamId]; },
     async heartbeat() { calls.push({ method: "heartbeat" }); if (error) throw error; },
+    async writeForegroundPresence(input) { calls.push({ method: "writeForegroundPresence", input }); if (error) throw error; },
     async listWorkspaces(args) { calls.push({ method: "listWorkspaces", args }); if (error) throw error; return { items: workspaceStore }; },
     async upsertWorkspace(input) { calls.push({ method: "upsertWorkspace", input }); if (error) throw error; const existing = workspaceStore.find(w => w.id === input.id); if (existing) { Object.assign(existing, input); return existing; } const newW = { id: input.id ?? "workspace-new", teamId: input.teamId, name: input.name, slug: input.slug ?? null, archived: input.archived ?? false, metadata: input.metadata ?? null, createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }; workspaceStore.push(newW); return newW; },
     async getWorkspace(workspaceId) { calls.push({ method: "getWorkspace", workspaceId }); if (error) throw error; return workspaceStore.find(w => w.id === workspaceId) ?? null; },
@@ -1426,8 +1542,8 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async updateRuntimeCursor(runtimeRowId, input) { calls.push({ method: "updateRuntimeCursor", runtimeRowId, input }); if (error) throw error; },
     async ensureAgentTypes(input) { calls.push({ method: "ensureAgentTypes", input }); if (error) throw error; },
     async setAgentDeviceId(agentActorId, input) { calls.push({ method: "setAgentDeviceId", agentActorId, input }); if (error) throw error; },
-    async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/attachments/${input.path}` }; },
-    async downloadAttachment(path) { calls.push({ method: "downloadAttachment", path }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
+    async uploadAttachment(input) { calls.push({ method: "uploadAttachment", input }); if (error) throw error; const bucket = input.bucket ?? "attachments"; return { path: input.path, url: `https://supabase.example.com/storage/v1/object/public/${bucket}/${input.path}` }; },
+    async downloadAttachment(path, options) { calls.push({ method: "downloadAttachment", path, options }); if (error) throw error; if (path === "missing/file.bin" || path === "missing%2Ffile.bin") return null; return { mime: "image/png", bytes: Buffer.from("fake-image-bytes") }; },
     async submitFeedback(body) { calls.push({ method: "submitFeedback", body }); if (error) throw error; return { messageId: body.messageId, actorId: body.actorId, kind: body.kind, starRating: body.starRating ?? null, note: body.note ?? null, createdAt: "2026-05-28T00:00:00Z", updatedAt: null }; },
     async listFeedback(args) { calls.push({ method: "listFeedback", args }); if (error) throw error; return { items: [] }; },
     async deleteFeedback(messageId, actorId) { calls.push({ method: "deleteFeedback", messageId, actorId }); if (error) throw error; },

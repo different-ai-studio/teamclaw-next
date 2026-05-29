@@ -80,6 +80,9 @@
     ],
     "externalBin": [
       "binaries/teamclaw-introspect"
+    ],
+    "resources": [
+      "binaries/teamclaw-askpass.sh"
     ]
   }
 }

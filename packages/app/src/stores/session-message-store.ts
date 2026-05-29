@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { Message } from "@/lib/proto/teamclaw_pb";
-import { useSessionListStore } from "./session-list-store";
 import { useSessionSelectionStore } from "./session-selection-store";
 
 const EMPTY_MESSAGES: Message[] = [];
@@ -31,7 +30,6 @@ export const useSessionMessageStore = create<SessionMessageState>((set, get) => 
     return get().messages[sessionId] ?? EMPTY_MESSAGES;
   },
   reloadActiveSessionMessages: async () => {
-    await useSessionListStore.getState().load();
     set({ messageRefreshTrigger: get().messageRefreshTrigger + 1 });
   },
 }));

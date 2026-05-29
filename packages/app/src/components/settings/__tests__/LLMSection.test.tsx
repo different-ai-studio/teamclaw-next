@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => {
     setOpenCodeBootstrapped: vi.fn(),
     setWorkspace: vi.fn(),
   }
-  const teamModeState = { teamMode: false, teamModelConfig: null as null | { model: string; modelName: string; baseUrl: string }, devUnlocked: false, teamModelOptions: [] as Array<{ id: string; name: string }>, switchTeamModel: vi.fn() }
+  const teamModeState = { teamModeType: null as string | null, teamModelConfig: null as null | { model: string; modelName: string; baseUrl: string }, devUnlocked: false, teamModelOptions: [] as Array<{ id: string; name: string }>, switchTeamModel: vi.fn() }
   return {
     providerState,
     workspaceState,
@@ -63,11 +63,14 @@ vi.mock('@/stores/team-mode', () => ({
     return sel(mocks.teamModeState)
   }),
 }))
+vi.mock('@/lib/team-permissions', () => ({
+  useTeamPermissions: () => ({ role: 'owner', isOwner: true, canManageTeam: true, canEditFiles: true }),
+}))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: mocks.shellOpen }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.dialogOpen }))
 vi.mock('@/lib/opencode/restart', () => ({ restartOpencode: mocks.restartOpencode }))
-vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' ') }))
+vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' '), isTauri: () => false }))
 vi.mock('../shared', () => ({
   SettingCard: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SectionHeader: ({ title }: { title: string }) => <h2>{title}</h2>,
@@ -87,7 +90,7 @@ describe('LLMSection', () => {
     mocks.workspaceState.openCodeReady = true
     mocks.workspaceState.daemonHttpReady = true
     mocks.workspaceState.setWorkspace.mockReset()
-    mocks.teamModeState.teamMode = false
+    mocks.teamModeState.teamModeType = null
     mocks.teamModeState.teamModelConfig = null
     mocks.teamModeState.devUnlocked = false
     mocks.teamModeState.teamModelOptions = []

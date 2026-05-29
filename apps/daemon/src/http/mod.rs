@@ -41,4 +41,4 @@ pub mod workspaces;
 mod routes;
 pub mod server;
 
-pub use server::{spawn, HttpHandle};
+pub use server::spawn;

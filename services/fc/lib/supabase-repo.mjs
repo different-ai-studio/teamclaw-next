@@ -10,7 +10,7 @@ import { ApiError } from "./http-utils.mjs";
 // subscribed, which we never do.
 const REALTIME_TRANSPORT_OPTS = { transport: WebSocket };
 
-const ATTACHMENTS_BUCKET = "attachments";
+const DEFAULT_ATTACHMENT_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
@@ -22,6 +22,7 @@ export function createSupabaseBusinessRepository(options) {
     publishableKey,
     accessToken,
     createClient = defaultCreateClient,
+    provisionLiteLlm,
   } = options;
 
   if (!supabaseUrl) throw new Error("SUPABASE_URL is required");
@@ -52,6 +53,8 @@ export function createSupabaseBusinessRepository(options) {
     async createTeam(input) {
       const args = { p_name: input.name };
       if (input.slug !== undefined) args.p_slug = input.slug;
+      if (input.litellmTeamId !== undefined) args.p_litellm_team_id = input.litellmTeamId;
+      if (input.aiGatewayEndpoint !== undefined) args.p_ai_gateway_endpoint = input.aiGatewayEndpoint;
       const { data, error } = await supabase.rpc("create_team", args);
       if (error) throw error;
       const row = requiredRow(data, "teams.createTeam");
@@ -102,6 +105,104 @@ export function createSupabaseBusinessRepository(options) {
     async removeTeamActor(_teamId, actorId) {
       const { error } = await supabase.rpc("remove_team_actor", { p_actor_id: actorId });
       if (error) throw error;
+    },
+
+    // --- Team share mode (Task 3 of share-onboarding refactor) ---
+
+    async enableShareMode(teamId, mode, gitConfig) {
+      const args = {
+        p_team_id: teamId,
+        p_mode: mode,
+        p_git_remote_url: gitConfig?.remoteUrl ?? null,
+        p_git_auth_kind: gitConfig?.authKind ?? null,
+        p_git_credential_ref: gitConfig?.credentialRef ?? null,
+      };
+      const { data, error } = await supabase.rpc("enable_team_share", args);
+      if (error) throw error;
+      const row = requiredRow(data, "teams.enableShareMode");
+      return mapTeam(row);
+    },
+
+    async getShareMode(teamId) {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("share_mode, share_enabled_at, git_remote_url, git_auth_kind")
+        .eq("id", teamId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        return {
+          mode: null,
+          enabledAt: null,
+          gitRemoteUrl: null,
+          gitAuthKind: null,
+        };
+      }
+      return {
+        mode: data.share_mode ?? null,
+        enabledAt: data.share_enabled_at ?? null,
+        gitRemoteUrl: data.git_remote_url ?? null,
+        gitAuthKind: data.git_auth_kind ?? null,
+      };
+    },
+
+    async setupLiteLlm(teamId) {
+      // Lazy import keeps the LiteLLM client out of cold-path repo constructors
+      // and makes it trivial to inject in tests via options.provisionLiteLlm.
+      const provisioner = provisionLiteLlm ?? (await import("./team-provisioning.mjs")).provisionTeamLiteLLM;
+      // The provisioner uses the team name as an alias; we read the team row
+      // (already RLS-scoped to the caller) to pass a stable display name.
+      const { data: teamRow, error: teamErr } = await supabase
+        .from("teams")
+        .select("id, name")
+        .eq("id", teamId)
+        .single();
+      if (teamErr) throw teamErr;
+      const provisioning = await provisioner(teamRow?.name ?? teamId);
+      if (!provisioning) {
+        throw new ApiError(
+          503,
+          "litellm_unavailable",
+          "LiteLLM provisioning is not configured (LITELLM_MASTER_KEY missing)",
+        );
+      }
+      // Persist litellm_team_id + ai_gateway_endpoint via SECURITY DEFINER
+      // RPC because team_workspace_config.litellm_team_id is guarded against
+      // direct authenticated UPDATEs (see 20260527000004 guard trigger).
+      const { error: rpcErr } = await supabase.rpc("update_team_litellm", {
+        p_team_id: teamId,
+        p_litellm_team_id: provisioning.litellmTeamId,
+        p_ai_gateway_endpoint: provisioning.aiGatewayEndpoint,
+      });
+      if (rpcErr) throw rpcErr;
+      return {
+        aiGatewayEndpoint: provisioning.aiGatewayEndpoint,
+        litellmKey: provisioning.litellmKey,
+      };
+    },
+
+    async getWorkspaceConfig(teamId) {
+      const [teamRes, configRes] = await Promise.all([
+        supabase
+          .from("teams")
+          .select("share_mode, git_remote_url, git_auth_kind")
+          .eq("id", teamId)
+          .maybeSingle(),
+        supabase
+          .from("team_workspace_config")
+          .select("sync_mode, litellm_team_id")
+          .eq("team_id", teamId)
+          .maybeSingle(),
+      ]);
+      if (teamRes.error) throw teamRes.error;
+      if (configRes.error) throw configRes.error;
+      return {
+        shareMode: teamRes.data?.share_mode ?? null,
+        gitRemoteUrl: teamRes.data?.git_remote_url ?? null,
+        gitAuthKind: teamRes.data?.git_auth_kind ?? null,
+        syncMode: configRes.data?.sync_mode ?? null,
+        litellmTeamId: configRes.data?.litellm_team_id ?? null,
+      };
     },
 
     async listTeamActors(teamId, { kind = null, limit = 500 } = {}) {
@@ -302,6 +403,22 @@ export function createSupabaseBusinessRepository(options) {
 
 async heartbeat() {
       const { error } = await supabase.rpc("update_actor_last_active");
+      if (error) throw error;
+    },
+
+    async writeForegroundPresence({ deviceId, foregroundUntil }) {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) {
+        throw new ApiError(401, "unauthorized", "no authenticated user");
+      }
+      const { error } = await supabase
+        .from("client_presence")
+        .upsert(
+          { user_id: userId, device_id: deviceId, foreground_until: foregroundUntil },
+          { onConflict: "user_id,device_id" }
+        );
       if (error) throw error;
     },
 
@@ -673,9 +790,31 @@ async heartbeat() {
     },
 
     async upsertAgentRuntime(body) {
+      // team_id is NOT NULL on public.agent_runtimes, but the daemon does not
+      // send teamId in its request body. Derive it server-side from the agent
+      // actor (actors.team_id) when the caller omits it. This Supabase client
+      // is bound to the caller's bearer token, so the read runs under the
+      // agent's RLS context (an agent can read its own actor row).
+      let teamId = body.teamId;
+      if (!teamId) {
+        const { data: actorRow, error: actorErr } = await supabase
+          .from("actors")
+          .select("team_id")
+          .eq("id", body.agentActorId)
+          .maybeSingle();
+        if (actorErr) throw actorErr;
+        teamId = actorRow?.team_id ?? null;
+      }
+      if (!teamId) {
+        throw new ApiError(
+          400,
+          "missing_team",
+          "Unable to resolve team_id for agent runtime: agent actor not found or not visible",
+        );
+      }
       const row = {
         id: body.id ?? randomUUID(),
-        team_id: body.teamId,
+        team_id: teamId,
         agent_id: body.agentActorId,
         session_id: body.sessionId,
         runtime_id: body.runtimeId,
@@ -686,9 +825,12 @@ async heartbeat() {
         current_model: body.currentModel ?? null,
         updated_at: new Date().toISOString(),
       };
+      // The only matching unique index is agent_runtimes_agent_backend_uniq on
+      // (agent_id, backend_session_id) (migration 202604220027). onConflict must
+      // name a real unique constraint or Postgres raises 42P10.
       const { data, error } = await supabase
         .from("agent_runtimes")
-        .upsert(row, { onConflict: "session_id,runtime_id,backend_session_id" })
+        .upsert(row, { onConflict: "agent_id,backend_session_id" })
         .select("id")
         .single();
       if (error) throw error;
@@ -763,20 +905,22 @@ async heartbeat() {
       if (error) throw error;
     },
 
-    async uploadAttachment({ path, mime, bytes }) {
+    async uploadAttachment({ path, mime, bytes, bucket }) {
+      const targetBucket = bucket || DEFAULT_ATTACHMENT_BUCKET;
       const { error } = await supabase.storage
-        .from(ATTACHMENTS_BUCKET)
+        .from(targetBucket)
         .upload(path, bytes, { contentType: mime, upsert: true });
       if (error) throw error;
       return {
         path,
-        url: `${supabaseUrl}/storage/v1/object/public/${ATTACHMENTS_BUCKET}/${path}`,
+        url: `${supabaseUrl}/storage/v1/object/public/${targetBucket}/${path}`,
       };
     },
 
-    async downloadAttachment(path) {
+    async downloadAttachment(path, { bucket } = {}) {
+      const targetBucket = bucket || DEFAULT_ATTACHMENT_BUCKET;
       const { data, error } = await supabase.storage
-        .from(ATTACHMENTS_BUCKET)
+        .from(targetBucket)
         .download(path);
       if (error) {
         const status = Number(error?.status || error?.statusCode || 0);
@@ -793,9 +937,11 @@ async heartbeat() {
       const row = {
         message_id: body.messageId,
         actor_id: body.actorId,
+        team_id: body.teamId,
+        session_id: body.sessionId ?? null,
         kind: body.kind,
         star_rating: body.starRating ?? null,
-        note: body.note ?? null,
+        skill: body.skill ?? null,
       };
       const { data, error } = await supabase
         .from("actor_message_feedback")
@@ -827,13 +973,80 @@ async heartbeat() {
 
     async getTeamLeaderboard(teamId, { period = "week" } = {}) {
       const { data, error } = await supabase
-        .from("team_leaderboard")
-        .select("*")
-        .eq("team_id", teamId)
-        .eq("period", period)
-        .order("score", { ascending: false });
+        .rpc("team_leaderboard", { p_team_id: teamId, p_period: period });
       if (error) throw error;
-      return { items: (data ?? []).map(mapLeaderboardRow) };
+      const rows = (data ?? []).slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      return { items: rows.map(mapLeaderboardRow) };
+    },
+
+    async submitSessionReport(body) {
+      // Not transactional: the report row may be written even if the
+      // subsequent skill-usage insert fails. Acceptable for best-effort
+      // telemetry — a throw here means the caller sees failure, but the
+      // report row can still exist. supabase-js has no multi-table txn.
+      const reportRow = {
+        actor_id: body.actorId,
+        team_id: body.teamId,
+        session_id: body.sessionId ?? null,
+        tokens_used: body.tokensUsed ?? 0,
+        cost_usd: body.costUsd ?? 0,
+        model: body.model ?? null,
+        agent_kind: body.agentKind ?? null,
+        ended_at: body.endedAt ?? null,
+      };
+      const { error: reportErr } = await supabase
+        .from("actor_session_report")
+        .insert(reportRow);
+      if (reportErr) throw reportErr;
+
+      const skillRows = Object.entries(body.skillUsage ?? {})
+        .filter(([, count]) => Number(count) > 0)
+        .map(([skill, count]) => ({
+          actor_id: body.actorId,
+          team_id: body.teamId,
+          session_id: body.sessionId ?? null,
+          skill,
+          count: Number(count),
+        }));
+      if (skillRows.length > 0) {
+        const { error: skillErr } = await supabase
+          .from("actor_skill_usage")
+          .insert(skillRows);
+        if (skillErr) throw skillErr;
+      }
+    },
+
+    async submitSkillUsage(body) {
+      const row = {
+        actor_id: body.actorId,
+        team_id: body.teamId,
+        session_id: body.sessionId ?? null,
+        skill: body.skill,
+        count: Number(body.count ?? 1),
+      };
+      const { error } = await supabase.from("actor_skill_usage").insert(row);
+      if (error) throw error;
+    },
+
+    async listFeedbackSummary(teamId) {
+      // TODO: replace with a DB-side GROUP BY aggregate (or a view/rpc) when
+      // per-team feedback row counts grow — this fetches all rows and reduces
+      // in JS. displayName is left null here; callers resolve it separately
+      // (the leaderboard rpc already returns display_name).
+      const { data, error } = await supabase
+        .from("actor_message_feedback")
+        .select("actor_id, kind")
+        .eq("team_id", teamId);
+      if (error) throw error;
+      const byActor = new Map();
+      for (const r of data ?? []) {
+        const e = byActor.get(r.actor_id) ?? { actorId: r.actor_id, displayName: null, positive: 0, negative: 0, total: 0 };
+        if (r.kind === "positive") e.positive += 1;
+        if (r.kind === "negative") e.negative += 1;
+        e.total += 1;
+        byActor.set(r.actor_id, e);
+      }
+      return { items: [...byActor.values()] };
     },
 
     // --- Directory resolution (frontend supabase delegate parity) ---
@@ -1796,6 +2009,10 @@ function mapTeam(row) {
     name: requiredString(row?.name, "teams.mapTeam", "name"),
     slug: row?.slug ?? null,
     createdAt: row?.created_at ?? null,
+    shareMode: row?.share_mode ?? null,
+    shareEnabledAt: row?.share_enabled_at ?? null,
+    gitRemoteUrl: row?.git_remote_url ?? null,
+    gitAuthKind: row?.git_auth_kind ?? null,
   };
 }
 
@@ -1966,11 +2183,12 @@ function mapFeedbackRow(row) {
   return {
     messageId: requiredString(row?.message_id, "feedback.mapFeedbackRow", "message_id"),
     actorId: requiredString(row?.actor_id, "feedback.mapFeedbackRow", "actor_id"),
+    teamId: row?.team_id ?? null,
+    sessionId: row?.session_id ?? null,
     kind: requiredString(row?.kind, "feedback.mapFeedbackRow", "kind"),
     starRating: row?.star_rating ?? null,
-    note: row?.note ?? null,
+    skill: row?.skill ?? null,
     createdAt: row?.created_at ?? null,
-    updatedAt: row?.updated_at ?? null,
   };
 }
 
@@ -1978,9 +2196,14 @@ function mapLeaderboardRow(row) {
   return {
     actorId: requiredString(row?.actor_id, "leaderboard.mapLeaderboardRow", "actor_id"),
     teamId: row?.team_id ?? null,
-    period: requiredString(row?.period, "leaderboard.mapLeaderboardRow", "period"),
-    score: row?.score ?? 0,
-    rank: row?.rank ?? null,
     displayName: row?.display_name ?? null,
+    period: requiredString(row?.period, "leaderboard.mapLeaderboardRow", "period"),
+    tokensUsed: Number(row?.tokens_used ?? 0),
+    costUsd: Number(row?.cost_usd ?? 0),
+    positiveFeedback: Number(row?.positive_feedback ?? 0),
+    negativeFeedback: Number(row?.negative_feedback ?? 0),
+    sessionCount: Number(row?.session_count ?? 0),
+    skillUsage: row?.skill_usage ?? {},
+    score: Number(row?.score ?? 0),
   };
 }

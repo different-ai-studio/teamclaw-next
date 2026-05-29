@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// Server-side RPC handler: receives requests and sends responses.
+#[allow(dead_code)]
 pub struct RpcServer {
     pub client: Arc<dyn MessagePublisher>,
     pub team_id: String,
@@ -25,6 +26,7 @@ impl RpcServer {
     /// Parses an MQTT topic and payload into a (request_id, RpcRequest) pair.
     ///
     /// Expected topic format: `amux/{teamId}/device/{targetDeviceId}/rpc/req`
+    #[allow(dead_code)]
     pub fn parse_request(topic: &str, payload: &[u8]) -> Option<(String, RpcRequest)> {
         let parts: Vec<&str> = topic.split('/').collect();
         // amux / {teamId} / device / {targetDeviceId} / rpc / req
@@ -44,6 +46,7 @@ impl RpcServer {
     /// Publishes an RPC response back to the sender's device.
     ///
     /// Response topic: `amux/{teamId}/device/{senderDeviceId}/rpc/res`
+    #[allow(dead_code)]
     pub async fn respond(&self, request: &RpcRequest, response: RpcResponse) {
         let topic = format!(
             "amux/{}/device/{}/rpc/res",
@@ -61,6 +64,7 @@ impl RpcServer {
 }
 
 /// Client-side RPC handler: sends requests and waits for responses via oneshot channels.
+#[allow(dead_code)]
 pub struct RpcClient {
     pub client: Arc<dyn MessagePublisher>,
     pub team_id: String,
@@ -68,6 +72,7 @@ pub struct RpcClient {
     pub pending: HashMap<String, oneshot::Sender<RpcResponse>>,
 }
 
+#[allow(dead_code)]
 impl RpcClient {
     pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, device_id: String) -> Self {
         Self {

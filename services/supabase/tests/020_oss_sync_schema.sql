@@ -91,8 +91,11 @@ select has_column('public', 'team_workspace_config', 'litellm_team_id',
                   'team_workspace_config.litellm_team_id exists');
 
 -- Check constraint rejects unknown sync_mode values (run as postgres to bypass RLS).
+-- The create_team RPC already seeded a row for this team, so delete it first
+-- to exercise the INSERT path against the sync_mode check constraint.
 set local role postgres;
 set local row_security = off;
+delete from public.team_workspace_config where team_id = (select team_id from ctx);
 prepare bad_sync_mode as
   insert into public.team_workspace_config (team_id, sync_mode)
   values ((select team_id from ctx), 'lolwhat');
@@ -246,8 +249,10 @@ select pg_temp.as_user((select alice from ctx));
 -- waterline / sync_mode / litellm_team_id.
 -- ---------------------------------------------------------------------------
 
--- Insert a team_workspace_config row for the test team so the trigger fires.
--- (create_team does not insert one automatically.)
+-- Ensure a team_workspace_config row exists for the test team so the trigger
+-- has something to fire on. The create_team RPC seeds one at team creation,
+-- but the earlier sync_mode-check-constraint sub-test deletes it; re-insert
+-- here to make this block robust to either path.
 set local role postgres;
 set local row_security = off;
 insert into public.team_workspace_config (team_id)

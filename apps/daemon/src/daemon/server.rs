@@ -9,7 +9,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::backend::{AgentRuntimeUpsert, Backend, WorkspaceUpsert};
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
@@ -22,6 +22,7 @@ use crate::daemon::runtime_resolution::{
 };
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids,
+    resolve_mention_actor_ids,
 };
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
@@ -42,6 +43,7 @@ struct StartRuntimeOutcome {
 }
 
 struct StartRuntimeError {
+    #[allow(dead_code)]
     error_code: String,
     error_message: String,
     failed_stage: String,
@@ -131,6 +133,40 @@ pub(crate) struct OfflineRestartPlan {
     pub backend: amux::AgentType,
     pub local_workspace_id: String,
     pub unread_count: usize,
+}
+
+/// Pure decision half of [`DaemonServer::resume_historical_runtimes_for_session`].
+///
+/// Given every resumable `StoredSession` for one conversation, keep only the
+/// single most-recent (`created_at`) row and report the rest as superseded
+/// `runtime_id`s. The daemon is a single actor/participant in a session, so it
+/// must hold at most one live runtime per conversation regardless of
+/// agent_type / workspace. Each desktop session-start / model-switch /
+/// workspace-change spawns a fresh `runtime_id`, so a session accumulates
+/// several non-stopped historical rows across restarts; resuming more than one
+/// brings up multiple live agents that each answer the same @mention (the
+/// duplicate-reply bug — including the case where the duplicates live in
+/// different workspaces). Exposed as a free fn so the invariant is
+/// unit-testable without spawning ACP processes.
+pub(crate) fn dedup_resumable_runtimes(
+    stored_sessions: Vec<StoredSession>,
+) -> (Vec<StoredSession>, Vec<String>) {
+    let mut keep: Option<StoredSession> = None;
+    let mut superseded: Vec<String> = Vec::new();
+    for stored in stored_sessions {
+        match keep.take() {
+            Some(existing) if existing.created_at >= stored.created_at => {
+                superseded.push(stored.runtime_id.clone());
+                keep = Some(existing);
+            }
+            Some(existing) => {
+                superseded.push(existing.runtime_id.clone());
+                keep = Some(stored);
+            }
+            None => keep = Some(stored),
+        }
+    }
+    (keep.into_iter().collect(), superseded)
 }
 
 pub struct DaemonServer {
@@ -819,6 +855,11 @@ impl DaemonServer {
         // channel doesn't delay collab connectivity.
         self.start_channels().await;
         self.sync_team_shared_dirs_for_known_workspaces().await;
+
+        {
+            let mut mgr = self.agents.lock().await;
+            mgr.prewarm_acp_hosts().await;
+        }
 
         // Optional browser-facing HTTP+SSE listener. Skipped silently when
         // `[http]` is absent from daemon.toml so existing deployments keep
@@ -1943,7 +1984,7 @@ impl DaemonServer {
             if raw.method == "tool_title_update" {
                 // Format: "tool_id|new_title"
                 let payload = String::from_utf8_lossy(&raw.json_payload);
-                if let Some((tool_id, new_title)) = payload.split_once('|') {
+                if let Some((_tool_id, _new_title)) = payload.split_once('|') {
                     // Forward as a ToolUse event so iOS updates the tool name
                     let update_event = amux::AcpEvent {
                         event: Some(amux::acp_event::Event::Raw(amux::AcpRawJson {
@@ -2189,6 +2230,45 @@ impl DaemonServer {
         self.publish_envelope_to_sessions(agent_id, &envelope).await;
     }
 
+    /// Enforce the one-live-runtime-per-session invariant at message-routing
+    /// time. If multiple handles leaked into memory (race, stale resume, etc.),
+    /// keep the newest and stop the rest before fanning out a prompt.
+    async fn coalesce_session_runtimes(&mut self, session_id: &str) -> Vec<String> {
+        let ids = self
+            .agents
+            .lock()
+            .await
+            .runtime_ids_for_session(session_id);
+        if ids.len() <= 1 {
+            return ids;
+        }
+        let keep = self
+            .agents
+            .lock()
+            .await
+            .newest_runtime_id_for_session(session_id);
+        let Some(keep) = keep else {
+            return ids;
+        };
+        let superseded: Vec<String> = ids.into_iter().filter(|id| id != &keep).collect();
+        warn!(
+            session_id = %session_id,
+            keep = %keep,
+            superseded = ?superseded,
+            "coalesce_session_runtimes: stopping duplicate live runtimes before fanout"
+        );
+        for rid in &superseded {
+            self.agents.lock().await.stop_agent(rid).await;
+            if let Some(s) = self.sessions.find_by_id_mut(rid) {
+                s.status = amux::AgentStatus::Stopped as i32;
+            }
+        }
+        if !superseded.is_empty() {
+            let _ = self.sessions.save(&self.sessions_path);
+        }
+        vec![keep]
+    }
+
     /// Route an inbound `message.created` from `session/{sid}/live` to the
     /// appropriate runtimes: mentioned runtimes receive a real prompt (which
     /// flushes any queued silent context first); un-mentioned runtimes have
@@ -2208,7 +2288,7 @@ impl DaemonServer {
             return;
         }
 
-        let runtime_ids = self.agents.lock().await.runtime_ids_for_session(session_id);
+        let runtime_ids = self.coalesce_session_runtimes(session_id).await;
         if runtime_ids.is_empty() {
             if self
                 .resume_historical_runtimes_for_session(session_id)
@@ -2217,7 +2297,7 @@ impl DaemonServer {
                 return;
             }
 
-            let runtime_ids = self.agents.lock().await.runtime_ids_for_session(session_id);
+            let runtime_ids = self.coalesce_session_runtimes(session_id).await;
             if !runtime_ids.is_empty() {
                 self.route_session_message_to_runtimes(
                     session_id,
@@ -2248,7 +2328,7 @@ impl DaemonServer {
 
     async fn route_session_message_to_runtimes(
         &mut self,
-        _session_id: &str,
+        session_id: &str,
         message: &crate::proto::teamclaw::Message,
         mention_actor_ids: &[String],
         runtime_ids: Vec<String>,
@@ -2257,6 +2337,28 @@ impl DaemonServer {
 
         if message.sender_actor_id == self.actor_id {
             return;
+        }
+
+        // Single dedup gate for ALL ingestion paths. A freshly-sent message
+        // reaches the daemon twice — once via live MQTT `message.created` and
+        // once via the runtimeStart→catchup replay (it is already persisted by
+        // the time the client fires runtimeStart). Both funnel through this
+        // sink, so deduping here (keyed by message_id) guarantees each message
+        // is prompted/queued exactly once regardless of which path wins the
+        // race. The in-memory cache is also seeded across restarts by the
+        // persisted `last_processed_message_id` cursor, so cold starts replay
+        // only genuinely-new rows.
+        if !message.message_id.is_empty() {
+            if let Some(tc) = self.teamclaw.as_mut() {
+                if !tc.should_process_message(session_id, &message.message_id) {
+                    debug!(
+                        session_id = %session_id,
+                        message_id = %message.message_id,
+                        "route_session_message: already processed; skipping (dedup gate)"
+                    );
+                    return;
+                }
+            }
         }
 
         let sender_display = self
@@ -2274,6 +2376,13 @@ impl DaemonServer {
                 message_id = %message.message_id,
                 daemon_actor_id = %self.actor_id,
                 "route_session_message: empty mention_actor_ids; message will be silent-queued"
+            );
+        } else if !mentioned_actor {
+            debug!(
+                message_id = %message.message_id,
+                daemon_actor_id = %self.actor_id,
+                mention_actor_ids = ?mention_actor_ids,
+                "route_session_message: mention_actor_ids present but not this daemon; silent-queued"
             );
         }
         let attachment_urls = message_attachment_urls(message);
@@ -2293,6 +2402,12 @@ impl DaemonServer {
                     );
                     continue;
                 }
+                info!(
+                    runtime_id = %runtime_id,
+                    message_id = %message.message_id,
+                    mention_actor_ids = ?mention_actor_ids,
+                    "route_session_message: @ mention matched; sending prompt"
+                );
                 // Real prompt — flush_pending_silent inside send_prompt does the prefix work.
                 let send_res = self
                     .agents
@@ -2312,7 +2427,11 @@ impl DaemonServer {
                     }
                 };
 
-                // Cursor advances to this message id.
+                // Cursor advances to this message id (in-memory + backend).
+                self.agents.lock().await.advance_message_cursor(
+                    &runtime_id,
+                    &message.message_id,
+                );
                 let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
                     let sb = self.backend.clone();
@@ -2337,6 +2456,10 @@ impl DaemonServer {
                         });
                     }
                 }
+                self.agents.lock().await.advance_message_cursor(
+                    &runtime_id,
+                    &message.message_id,
+                );
                 let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
                 if let Some(row_id) = row_id_opt {
                     let sb = self.backend.clone();
@@ -2358,8 +2481,34 @@ impl DaemonServer {
             return false;
         }
 
+        // Collapse to a single runtime per session. `StoredSession`s are keyed
+        // by runtime_id and every desktop session-start / model-switch /
+        // workspace-change spawns a fresh runtime_id, so a single conversation
+        // accumulates several non-stopped historical rows across restarts.
+        // Resuming more than one brings up multiple live agents for one session
+        // — each then answers the same @mention, which is the duplicate-reply
+        // the user sees after restart (including duplicates that live in
+        // different workspaces). Keep only the most recent row; the rest are
+        // superseded and marked Stopped so they neither resume now nor linger
+        // as resumable on disk.
+        let (keep, superseded) = dedup_resumable_runtimes(stored_sessions);
+
+        if !superseded.is_empty() {
+            for runtime_id in &superseded {
+                if let Some(s) = self.sessions.find_by_id_mut(runtime_id) {
+                    s.status = amux::AgentStatus::Stopped as i32;
+                }
+            }
+            let _ = self.sessions.save(&self.sessions_path);
+            info!(
+                session_id = %session_id,
+                superseded = ?superseded,
+                "resume_historical: marked superseded duplicate runtimes Stopped (one live runtime per session)"
+            );
+        }
+
         let mut resumed_any = false;
-        for stored in stored_sessions {
+        for stored in keep {
             if self
                 .agents
                 .lock()
@@ -2779,24 +2928,17 @@ impl DaemonServer {
                                 );
                                 return;
                             };
-                            if !msg.message_id.is_empty() {
-                                if let Some(tc) = self.teamclaw.as_mut() {
-                                    if !tc.should_process_message(&session_id, &msg.message_id) {
-                                        info!(
-                                            session_id = %session_id,
-                                            session_title = %session_title,
-                                            daemon_device_id = %daemon_device_id,
-                                            daemon_actor_id = %daemon_actor_id,
-                                            daemon_team_id = %daemon_team_id,
-                                            message_id = %msg.message_id,
-                                            "duplicate session/live message.created dropped"
-                                        );
-                                        return;
-                                    }
-                                }
-                            }
-                            self.route_session_message(&session_id, msg, &env.mention_actor_ids)
-                                .await;
+                            // Dedup is enforced centrally in
+                            // `route_session_message_to_runtimes` (the single
+                            // routing sink) so the live path and the
+                            // catchup-replay path share one message_id gate and
+                            // a freshly-sent message can't be prompted twice.
+                            self.route_session_message(
+                                &session_id,
+                                msg,
+                                &resolve_mention_actor_ids(&env.mention_actor_ids, &msg.metadata_json),
+                            )
+                            .await;
                         }
                         "idea.created" | "idea.updated" => {
                             if let Ok(event) =
@@ -3242,13 +3384,26 @@ impl DaemonServer {
             amux::acp_command::Command::GrantPermission(grant) => {
                 if self.permissions.try_resolve_permission(&grant.request_id) {
                     // Resolve via ACP permission response
-                    let _ = self
+                    match self
                         .agents
                         .lock()
                         .await
-                        .resolve_permission(agent_id, &grant.request_id, true)
-                        .await;
-                    info!(request_id = %grant.request_id, peer_id, "permission granted via ACP");
+                        .resolve_permission_for_topic(agent_id, &grant.request_id, true)
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(request_id = %grant.request_id, peer_id, agent_id, "permission granted via ACP");
+                        }
+                        Err(e) => {
+                            warn!(
+                                request_id = %grant.request_id,
+                                peer_id,
+                                agent_id,
+                                error = %e,
+                                "resolve_permission failed after grant; ACP may stay blocked"
+                            );
+                        }
+                    }
                     self.publish_session_event(
                         agent_id,
                         amux::SessionEvent {
@@ -3268,13 +3423,26 @@ impl DaemonServer {
             amux::acp_command::Command::DenyPermission(deny) => {
                 if self.permissions.try_resolve_permission(&deny.request_id) {
                     // Resolve via ACP permission response
-                    let _ = self
+                    match self
                         .agents
                         .lock()
                         .await
-                        .resolve_permission(agent_id, &deny.request_id, false)
-                        .await;
-                    info!(request_id = %deny.request_id, peer_id, "permission denied via ACP");
+                        .resolve_permission_for_topic(agent_id, &deny.request_id, false)
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(request_id = %deny.request_id, peer_id, agent_id, "permission denied via ACP");
+                        }
+                        Err(e) => {
+                            warn!(
+                                request_id = %deny.request_id,
+                                peer_id,
+                                agent_id,
+                                error = %e,
+                                "resolve_permission failed after deny"
+                            );
+                        }
+                    }
                     self.publish_session_event(
                         agent_id,
                         amux::SessionEvent {
@@ -3846,16 +4014,58 @@ impl DaemonServer {
 
         let remote_workspace_id = remote_workspace_id_owned.as_deref();
 
-        // Idempotency: if a live runtime already exists for the same
-        // (session_id, agent_type, workspace_id) tuple, return its id
-        // instead of spawning a duplicate. Protects against misbehaving
-        // clients that fire RuntimeStart twice (e.g. picker + inline
+        // Invariant: a conversation has at most one live runtime *on this
+        // daemon*. The daemon is a single actor/participant in the session, so
+        // it must answer an @mention exactly once. Historically each desktop
+        // session-start / model-switch / workspace-change spawned a fresh
+        // runtime_id keyed by (session_id, agent_type, workspace_id); several
+        // could end up live at the same time (e.g. one resumed-on-restart in
+        // workspace A plus one freshly started in workspace B) and *each* then
+        // replied to the same prompt — the duplicate-reply bug.
+        //
+        // Collapse to one: among this session's live runtimes, reuse the one
+        // that exactly matches the requested (agent_type, workspace_id) and
+        // supersede (stop) every other one so the latest client intent wins
+        // and only a single runtime remains to answer. Also protects against
+        // misbehaving clients that fire RuntimeStart twice (picker + inline
         // mention race on the desktop client pre-4210aad8).
-        let existing_runtime = self
-            .agents
-            .lock()
-            .await
-            .find_active_runtime_for(session_id, agent_type, &ws_id);
+        let (existing_runtime, superseded): (Option<String>, Vec<String>) =
+            if session_id.is_empty() {
+                (None, Vec::new())
+            } else {
+                let agents = self.agents.lock().await;
+                let mut reuse: Option<String> = None;
+                let mut stale: Vec<String> = Vec::new();
+                for rid in agents.runtime_ids_for_session(session_id) {
+                    match agents.get_handle(&rid) {
+                        Some(h)
+                            if reuse.is_none()
+                                && h.agent_type == agent_type
+                                && h.workspace_id == ws_id =>
+                        {
+                            reuse = Some(rid);
+                        }
+                        _ => stale.push(rid),
+                    }
+                }
+                (reuse, stale)
+            };
+
+        if !superseded.is_empty() {
+            for rid in &superseded {
+                self.agents.lock().await.stop_agent(rid).await;
+                if let Some(s) = self.sessions.find_by_id_mut(rid) {
+                    s.status = amux::AgentStatus::Stopped as i32;
+                }
+            }
+            let _ = self.sessions.save(&self.sessions_path);
+            info!(
+                session_id,
+                superseded = ?superseded,
+                "apply_start_runtime: superseded stale runtimes for session (one live runtime per session)"
+            );
+        }
+
         if let Some(existing) = existing_runtime {
             info!(
                 session_id,
@@ -3867,6 +4077,21 @@ impl DaemonServer {
             // original retain (late subscribe, reconnect) still populate the
             // model picker without spawning a duplicate process.
             self.publish_runtime_state_by_id(&existing).await;
+            if !session_id.is_empty() {
+                if let Some(tc) = self.teamclaw.as_mut() {
+                    if let Err(e) = tc.ensure_session_live_subscription(session_id).await {
+                        warn!(
+                            session_id,
+                            err = %e,
+                            "apply_start_runtime: ensure_session_live_subscription failed (dedup)"
+                        );
+                    }
+                }
+            }
+            // Live MQTT can miss messages that landed in the backend after the
+            // initial attach catchup (e.g. client dedup runtimeStart on send).
+            // Replay from the cursor so @-mentioned rows still reach send_prompt.
+            self.catchup_runtime(&existing).await;
             return Ok(StartRuntimeOutcome {
                 runtime_id: existing,
                 session_id: session_id.to_string(),
@@ -3885,7 +4110,19 @@ impl DaemonServer {
                 .fetch_session_with_participants(session_id)
                 .await
             {
-                Ok(snap) => {
+                Ok(mut snap) => {
+                    if !snap
+                        .participants
+                        .iter()
+                        .any(|p| p.actor_id == self.actor_id)
+                    {
+                        snap.participants.push(crate::backend::BackendParticipantRow {
+                            session_id: session_id.to_string(),
+                            actor_id: self.actor_id.clone(),
+                            role: Some("agent".to_string()),
+                            joined_at: chrono::Utc::now(),
+                        });
+                    }
                     if let Some(tc) = self.teamclaw.as_mut() {
                         if let Err(e) = tc
                             .insert_session_from_backend(&snap.session, &snap.participants)
@@ -3896,6 +4133,13 @@ impl DaemonServer {
                                 error_message: format!("insert_session_from_backend failed: {}", e),
                                 failed_stage: "session_subscribe".to_string(),
                             });
+                        }
+                        if let Err(e) = tc.ensure_session_live_subscription(session_id).await {
+                            warn!(
+                                session_id,
+                                err = %e,
+                                "apply_start_runtime: ensure_session_live_subscription failed"
+                            );
                         }
                     } else {
                         return Err(StartRuntimeError {
@@ -5357,6 +5601,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn catchup_runtime_does_not_replay_after_cursor_advanced_in_memory() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_messages_response(
+            &srv,
+            "session-1",
+            serde_json::json!([make_message_row(
+                "msg-a",
+                "session-1",
+                "human-1",
+                &["agent-actor"],
+                "ask once",
+                "2025-05-22T01:00:01Z",
+            ),]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
+        assert!(fixture.server.catchup_runtime("rt1").await);
+        {
+            let agents = fixture.server.agents.lock().await;
+            assert_eq!(
+                agents.last_sent_to("rt1").as_deref(),
+                Some("ask once"),
+            );
+            assert_eq!(
+                agents
+                    .get_handle("rt1")
+                    .unwrap()
+                    .last_processed_message_id
+                    .as_deref(),
+                Some("msg-a"),
+            );
+        }
+
+        // Session refresh → runtimeStart dedup → catchup must not re-prompt.
+        assert!(!fixture.server.catchup_runtime("rt1").await);
+        let agents = fixture.server.agents.lock().await;
+        assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("ask once"));
+    }
+
+    #[tokio::test]
     async fn catchup_runtime_with_no_mentions_routes_everything_silent() {
         let srv = MockServer::start().await;
         auth_token_mock(&srv).await;
@@ -5396,6 +5682,83 @@ mod tests {
             agents.get_handle("rt1").unwrap().pending_silent.len(),
             2,
             "both messages should land in silent context"
+        );
+    }
+
+    fn make_stored_session(
+        runtime_id: &str,
+        session_id: &str,
+        agent_type: amux::AgentType,
+        workspace_id: &str,
+        created_at: i64,
+    ) -> StoredSession {
+        StoredSession {
+            runtime_id: runtime_id.to_string(),
+            acp_session_id: format!("acp-{runtime_id}"),
+            session_id: session_id.to_string(),
+            agent_type: agent_type as i32,
+            workspace_id: workspace_id.to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: amux::AgentStatus::Active as i32,
+            created_at,
+            last_prompt: String::new(),
+            last_output_summary: String::new(),
+            tool_use_count: 0,
+        }
+    }
+
+    #[test]
+    fn dedup_resumable_runtimes_keeps_only_newest_for_session() {
+        // Same conversation accumulated several historical runtimes across
+        // restarts / model-switches / workspace-changes. The daemon is one
+        // participant, so only the single newest may resume; everything else
+        // is superseded — including runtimes for other agent_types/workspaces.
+        let stored = vec![
+            make_stored_session("rt-old", "s1", amux::AgentType::ClaudeCode, "ws-1", 100),
+            make_stored_session("rt-mid", "s1", amux::AgentType::ClaudeCode, "ws-1", 200),
+            make_stored_session("rt-new", "s1", amux::AgentType::ClaudeCode, "ws-1", 300),
+            make_stored_session("rt-other", "s1", amux::AgentType::Codex, "ws-1", 150),
+        ];
+
+        let (keep, mut superseded) = dedup_resumable_runtimes(stored);
+        superseded.sort();
+
+        assert_eq!(
+            keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
+            vec!["rt-new"],
+            "keep only the single newest runtime for the session"
+        );
+        assert_eq!(
+            superseded,
+            vec![
+                "rt-mid".to_string(),
+                "rt-old".to_string(),
+                "rt-other".to_string()
+            ],
+            "every other runtime is superseded regardless of agent_type/workspace"
+        );
+    }
+
+    #[test]
+    fn dedup_resumable_runtimes_collapses_across_workspaces() {
+        // Two live runtimes in different workspaces for the same conversation
+        // each answered the same @mention (the duplicate-reply bug). Only the
+        // newest survives; the cross-workspace duplicate is superseded.
+        let stored = vec![
+            make_stored_session("rt-a", "s1", amux::AgentType::ClaudeCode, "ws-1", 100),
+            make_stored_session("rt-b", "s1", amux::AgentType::ClaudeCode, "ws-2", 50),
+        ];
+
+        let (keep, superseded) = dedup_resumable_runtimes(stored);
+        assert_eq!(
+            keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
+            vec!["rt-a"],
+            "newest runtime wins across workspaces"
+        );
+        assert_eq!(
+            superseded,
+            vec!["rt-b".to_string()],
+            "older cross-workspace duplicate is superseded"
         );
     }
 

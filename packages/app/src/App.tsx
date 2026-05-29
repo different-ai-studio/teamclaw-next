@@ -110,6 +110,7 @@ import {
 } from "@/lib/live-agent-stream";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useLocalStatsStore } from "@/stores/local-stats";
 import { useTabsStore, selectActiveTab, selectHasHiddenTabs } from "@/stores/tabs";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { TabBar } from "@/components/tab-bar/TabBar";
@@ -1023,6 +1024,15 @@ function AppContent() {
                 params: tu.params,
                 toolKind: tu.toolKind,
               });
+              // Capture skill invocations for local stats + cloud leaderboard.
+              // tu.toolName is "skill" for Skill tool calls; tu.params.name is
+              // the skill slug (e.g. "sentry-fix").
+              if (tu.toolName.toLowerCase() === "skill" && tu.params?.name) {
+                const wp = useWorkspaceStore.getState().workspacePath;
+                if (wp) {
+                  void useLocalStatsStore.getState().incrementSkillUsage(wp, tu.params.name);
+                }
+              }
             } else if (event?.case === "toolResult") {
               const tr = normalizeToolResultEvent(event.value);
               useV2StreamingStore.getState().completeToolUse(sid, actorId, {
@@ -1682,6 +1692,11 @@ function App() {
         try {
           const claim = await claimInviteToken(token);
           await useCurrentTeamStore.getState().reloadAndSwitchTo(claim.teamId);
+          // TODO(Task 12): surface <JoinTeamFlow teamId={claim.teamId}
+          //   workspacePath={currentWorkspacePath} /> in an onboarding sheet
+          //   here so the joiner auto-pulls workspace config and enters the
+          //   team secret. Component lives at
+          //   packages/app/src/components/onboarding/JoinTeamFlow.tsx.
         } catch (err) {
           console.error('[invite] claim failed', err);
         }

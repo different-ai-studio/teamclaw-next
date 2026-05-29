@@ -6,10 +6,12 @@ mod workspace_store;
 pub mod workspace_control;
 
 pub use daemon_config::{
-    AgentBackendConfig, AgentsConfig, ChannelsConfig, DaemonConfig, DeviceConfig, DiscordChannel,
-    EmailChannel, FeishuChannel, HttpConfig, KookChannel, MqttConfig, TransportConfig,
-    TransportKind, WeChatChannel, WeComChannel,
+    AgentsConfig, DaemonConfig, DeviceConfig, DiscordChannel, EmailChannel, FeishuChannel,
+    HttpConfig, KookChannel, MqttConfig, TransportKind, WeChatChannel, WeComChannel,
 };
+// Constructed only by the test suite (runtime_resolution / server tests).
+#[cfg(test)]
+pub use daemon_config::{AgentBackendConfig, ChannelsConfig};
 pub use member_store::{MemberStore, PendingInvite, StoredMember};
 pub use session_store::{SessionStore, StoredSession};
 pub use workspace_store::{AddWorkspaceOutcome, StoredWorkspace, WorkspaceStore};

@@ -6,14 +6,32 @@ export function registerTeams(router) {
     return { body: { items, nextCursor: null } };
   });
 
+  // POST /v1/teams — slim team creation (Task 3 of share-onboarding refactor).
+  //
+  // LiteLLM provisioning is now an explicit second step that the client
+  // triggers via POST /v1/teams/:teamId/litellm/setup. This route only writes
+  // the teams row + the bare team_workspace_config row (sync_mode=NULL,
+  // litellm_team_id=NULL). The response still includes aiGatewayEndpoint and
+  // litellmKey as null fields for back-compat with the Rust client
+  // (`Option<String>` — see apps/desktop/src/commands/oss_sync/fc_client.rs).
   router.post("/v1/teams", async (ctx) => {
     const body = ctx.json;
     requireString(body.name, "name");
+
     const team = await ctx.repository.createTeam({
       name: body.name,
       slug: optionalStringOrNull(body.slug, "slug"),
+      litellmTeamId: null,
+      aiGatewayEndpoint: null,
     });
-    return { body: team };
+
+    return {
+      body: {
+        ...team,
+        aiGatewayEndpoint: null,
+        litellmKey: null,
+      },
+    };
   });
 
   router.get("/v1/teams/:id", async (ctx) => {

@@ -78,14 +78,22 @@ pub struct VersionInfo {
     pub message: Option<String>,
 }
 
-/// Result of /sync/create-team.
+/// Result of POST /v1/teams.
+///
+/// The Cloud API response shape: `{ id, name, slug, createdAt, aiGatewayEndpoint, litellmKey }`.
+/// `aiGatewayEndpoint` and `litellmKey` are nullable when LiteLLM provisioning
+/// is skipped (e.g. local dev with LITELLM_MASTER_KEY unset).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTeamResult {
+    #[serde(rename = "id")]
     pub team_id: String,
+    #[serde(rename = "slug")]
     pub team_slug: String,
-    pub ai_gateway_endpoint: String,
-    pub litellm_key: String,
+    #[serde(default)]
+    pub ai_gateway_endpoint: Option<String>,
+    #[serde(default)]
+    pub litellm_key: Option<String>,
 }
 
 pub struct FcClient {
@@ -103,19 +111,20 @@ impl FcClient {
         }
     }
 
-    /// POST /sync/create-team
+    /// POST /v1/teams — unified team creation. Provisions LiteLLM team + key
+    /// server-side and seeds team_workspace_config in one call. The legacy
+    /// `/sync/create-team` endpoint was removed in 2026-05.
+    ///
+    /// `node_id` is accepted for backward compatibility with the previous
+    /// signature but is no longer forwarded — the /v1/teams handler derives
+    /// the owning actor's node from the JWT-authenticated user.
     pub async fn create_team(
         &self,
         team_name: &str,
-        node_id: Option<&str>,
+        _node_id: Option<&str>,
     ) -> Result<CreateTeamResult, SyncError> {
-        let mut body = serde_json::json!({ "teamName": team_name });
-        if let Some(nid) = node_id {
-            body["nodeId"] = Value::String(nid.to_string());
-        }
-        let resp = self
-            .post("/sync/create-team", &body)
-            .await?;
+        let body = serde_json::json!({ "name": team_name });
+        let resp = self.post("/v1/teams", &body).await?;
         Ok(resp)
     }
 
@@ -304,28 +313,44 @@ impl FcClient {
     }
 
     /// POST /sync/set-mode — owner-only sync_mode switch (Tranche 5).
-    pub async fn set_team_sync_mode(
-        &self,
-        team_id: &str,
-        mode: &str,
-    ) -> Result<String, SyncError> {
+    pub async fn set_team_sync_mode(&self, team_id: &str, mode: &str) -> Result<String, SyncError> {
         let body = serde_json::json!({ "teamId": team_id, "mode": mode });
         #[derive(serde::Deserialize)]
-        struct ModeResp { mode: String }
+        struct ModeResp {
+            mode: String,
+        }
         let resp: ModeResp = self.post("/sync/set-mode", &body).await?;
         Ok(resp.mode)
     }
 
     /// POST /sync/team-mode — read sync_mode (Tranche 5).
-    pub async fn get_team_sync_mode(
-        &self,
-        team_id: &str,
-    ) -> Result<Option<String>, SyncError> {
+    pub async fn get_team_sync_mode(&self, team_id: &str) -> Result<Option<String>, SyncError> {
         let body = serde_json::json!({ "teamId": team_id });
         #[derive(serde::Deserialize)]
-        struct ModeResp { mode: Option<String> }
+        struct ModeResp {
+            mode: Option<String>,
+        }
         let resp: ModeResp = self.post("/sync/team-mode", &body).await?;
         Ok(resp.mode)
+    }
+
+    /// Generic POST helper for ad-hoc endpoints (e.g. team_share enable flow).
+    /// Returns the raw JSON value on 2xx; surfaces FC error envelope on non-2xx.
+    pub async fn post_json(&self, path: &str, body: &Value) -> Result<Value, SyncError> {
+        self.post(path, body).await
+    }
+
+    /// Generic GET helper. Returns raw JSON value on 2xx.
+    pub async fn get_json(&self, path: &str) -> Result<Value, SyncError> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.jwt))
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+        map_fc_response(resp).await
     }
 
     /// Internal POST helper with JWT injection and error mapping.
@@ -368,10 +393,7 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
         let reason = body["reason"].as_str().unwrap_or("");
 
         // 409 CAS mismatch
-        if status.as_u16() == 409
-            || code == "P0409"
-            || reason == "cas-mismatch"
-        {
+        if status.as_u16() == 409 || code == "P0409" || reason == "cas-mismatch" {
             let remote_version = body["remoteVersion"].as_i64().map(|v| v as i32);
             let remote_cipher_hash = body["remoteHash"].as_str().map(|s| s.to_string());
             return Err(SyncError::Conflict {
@@ -390,7 +412,10 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
         // Session expired / gone
         if status.as_u16() == 410 || code == "P0410" {
             return Err(SyncError::SessionExpired(
-                body["error"].as_str().unwrap_or("session expired").to_string(),
+                body["error"]
+                    .as_str()
+                    .unwrap_or("session expired")
+                    .to_string(),
             ));
         }
 

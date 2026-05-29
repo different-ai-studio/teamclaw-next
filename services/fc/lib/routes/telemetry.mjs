@@ -1,7 +1,7 @@
 import { ApiError } from "../http-utils.mjs";
 import { requireString } from "../router.mjs";
 
-const VALID_KINDS = new Set(["up", "down", "star"]);
+const VALID_KINDS = new Set(["positive", "negative"]);
 const VALID_PERIODS = new Set(["day", "week", "month"]);
 
 export function registerTelemetry(router) {
@@ -9,9 +9,10 @@ export function registerTelemetry(router) {
     const body = ctx.json ?? {};
     requireString(body.messageId, "messageId");
     requireString(body.actorId, "actorId");
+    requireString(body.teamId, "teamId");
     requireString(body.kind, "kind");
     if (!VALID_KINDS.has(body.kind)) {
-      throw new ApiError(400, "validation_failed", "kind must be one of: up, down, star");
+      throw new ApiError(400, "validation_failed", "kind must be one of: positive, negative");
     }
     if (body.starRating !== undefined && body.starRating !== null) {
       const r = Number(body.starRating);
@@ -34,6 +35,39 @@ export function registerTelemetry(router) {
     const messageId = decodeURIComponent(ctx.params.messageId);
     await ctx.repository.deleteFeedback(messageId, null);
     return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/feedback-summary", async (ctx) => {
+    const teamId = ctx.query.get("teamId");
+    if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required");
+    // listFeedbackSummary already returns { items: [...] }; pass it through
+    // (do NOT re-wrap — that would double-nest the items array).
+    const result = await ctx.repository.listFeedbackSummary(teamId);
+    return { body: result };
+  });
+
+  router.post("/v1/session-report", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.actorId, "actorId");
+    requireString(body.teamId, "teamId");
+    requireString(body.sessionId, "sessionId");
+    await ctx.repository.submitSessionReport(body);
+    return { statusCode: 201, body: null };
+  });
+
+  router.post("/v1/skill-usage", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.actorId, "actorId");
+    requireString(body.teamId, "teamId");
+    requireString(body.skill, "skill");
+    if (body.count !== undefined && body.count !== null) {
+      const c = Number(body.count);
+      if (!Number.isInteger(c) || c < 1) {
+        throw new ApiError(400, "validation_failed", "count must be a positive integer");
+      }
+    }
+    await ctx.repository.submitSkillUsage(body);
+    return { statusCode: 201, body: null };
   });
 
   router.get("/v1/teams/:teamId/leaderboard", async (ctx) => {

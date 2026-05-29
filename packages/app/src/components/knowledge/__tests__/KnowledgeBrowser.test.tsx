@@ -11,7 +11,6 @@ const workspaceState = vi.hoisted(() => ({
 }))
 
 const teamModeState = vi.hoisted(() => ({
-  teamMode: true,
   teamModeType: null as string | null,
 }))
 
@@ -64,7 +63,6 @@ describe('KnowledgeBrowser', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     workspaceState.workspacePath = '/workspace'
-    teamModeState.teamMode = true
     teamModeState.teamModeType = null
   })
 

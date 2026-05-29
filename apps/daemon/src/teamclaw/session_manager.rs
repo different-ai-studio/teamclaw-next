@@ -20,6 +20,7 @@ pub struct SessionManager {
     client: Arc<dyn MessagePublisher>,
     live_publisher: LivePublisher,
     notify_publisher: NotifyPublisher,
+    #[allow(dead_code)]
     rpc_server: RpcServer,
     pub(crate) sessions: TeamclawSessionStore,
     sessions_path: PathBuf,
@@ -1067,6 +1068,7 @@ impl SessionManager {
     ///
     /// If there's only one agent in the session, all messages are relevant.
     /// Otherwise, only agents that are explicitly mentioned.
+    #[allow(dead_code)]
     pub fn agents_to_activate(&self, session_id: &str, message: &teamclaw::Message) -> Vec<String> {
         let session = match self.sessions.find_by_id(session_id) {
             Some(s) => s,
@@ -1134,6 +1136,7 @@ impl SessionManager {
     }
 
     /// Get session_ids where this agent participates.
+    #[allow(dead_code)]
     pub fn sessions_for_agent(&self, agent_actor_id: &str) -> Vec<String> {
         self.sessions
             .sessions
@@ -1163,6 +1166,7 @@ impl SessionManager {
     /// `model` is the model id the agent was running on when it produced this
     /// reply (looked up from `RuntimeManager.current_model` by the caller).
     /// Pass an empty string for legacy / unknown.
+    #[allow(dead_code)]
     pub async fn publish_agent_message(
         &self,
         session_id: &str,
@@ -1284,6 +1288,7 @@ impl SessionManager {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn publish_live_message(
         &self,
         session_id: &str,
@@ -1298,11 +1303,31 @@ impl SessionManager {
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn ensure_session_subscription(
         &mut self,
         _session_id: &str,
     ) -> crate::error::Result<()> {
         self.refresh_membership_subscriptions().await
+    }
+
+    /// Subscribe to `session/{sid}/live` when attaching a runtime. Unlike
+    /// `refresh_membership_subscriptions`, this does not depend on the local
+    /// participant cache being complete — a race where the backend fetch omits
+    /// the daemon actor must not leave us deaf to inbound @-mentions.
+    pub async fn ensure_session_live_subscription(
+        &mut self,
+        session_id: &str,
+    ) -> crate::error::Result<()> {
+        if session_id.is_empty() {
+            return Ok(());
+        }
+        if self.subscribed_live_sessions.contains(session_id) {
+            return Ok(());
+        }
+        self.subscribe_session_live(session_id).await?;
+        self.subscribed_live_sessions.insert(session_id.to_string());
+        Ok(())
     }
 
     pub async fn refresh_membership_subscriptions(&mut self) -> crate::error::Result<()> {
@@ -1342,6 +1367,7 @@ impl SessionManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn subscribed_live_sessions(&self) -> Vec<String> {
         self.subscribed_live_sessions.iter().cloned().collect()
     }
@@ -1458,7 +1484,7 @@ impl SessionManager {
 
     fn membership_refresh_targets(
         &self,
-        session_id: &str,
+        _session_id: &str,
         requester_device_id: Option<&str>,
     ) -> Vec<String> {
         let mut targets = Vec::new();
@@ -1736,6 +1762,19 @@ mod tests {
             created_at: Utc::now().timestamp(),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_session_live_subscription_subscribes_without_membership_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let mut sm = dummy_session_manager(tmp.path());
+        sm.skip_live_subscription_io = true;
+
+        sm.ensure_session_live_subscription("sess-new")
+            .await
+            .unwrap();
+
+        assert!(sm.subscribed_live_sessions().contains(&"sess-new".to_string()));
     }
 
     #[tokio::test]

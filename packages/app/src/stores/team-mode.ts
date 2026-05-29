@@ -73,13 +73,11 @@ export interface TeamModelConfig {
 }
 
 interface TeamModeState {
-  teamMode: boolean
-  teamModeType: string | null // "git" | "webdav" — from teamclaw.json
+  teamModeType: string | null // "git" | "webdav" — from teamclaw.json, null when workspace has no team config
   teamModelConfig: TeamModelConfig | null
   teamModelOptions: TeamModelOption[] // available model choices from build config
   _appliedConfigKey: string | null // fingerprint of last applied config to avoid redundant apply
   devUnlocked: boolean // hidden dev mode: unlocks model selector & hidden dirs in team mode
-  myRole: 'owner' | 'editor' | 'viewer' | null
   teamGitFileSyncStatusMap: Record<string, 'modified' | 'new'>
   /** True while a Git team sync is in progress (for file tree loading indicator) */
   teamGitSyncing: boolean
@@ -119,13 +117,11 @@ async function fetchTeamStatus(workspacePath?: string): Promise<TeamStatusRespon
 
 
 export const useTeamModeStore = create<TeamModeState>((set, get) => ({
-  teamMode: false,
   teamModeType: null,
   teamModelConfig: null,
   teamModelOptions: buildConfig.team.llm.models ?? [],
   _appliedConfigKey: null,
   devUnlocked: true,
-  myRole: null,
   teamGitSyncing: false,
   teamGitLastSyncAt: null,
   teamGitFileSyncStatusMap: {},
@@ -145,7 +141,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     const isTeamMode = !!status?.active
 
     if (isTeamMode) {
-      set({ teamMode: true, teamModeType: status?.mode ?? null })
+      set({ teamModeType: status?.mode ?? null })
       if (status?.mode === 'git' && _workspacePath) {
         // Fire-and-forget; errors swallowed inside action
         get().loadTeamGitFileSyncStatus(_workspacePath)
@@ -189,15 +185,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
         set({ teamModelConfig: null })
       }
     } else {
-      set({ teamMode: false, teamModeType: null, teamModelConfig: null })
-    }
-    // Load user's role (non-critical)
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const role = await invoke<string | null>('unified_team_get_my_role')
-      set({ myRole: role as any })
-    } catch {
-      // Non-critical, role can be loaded later
+      set({ teamModeType: null, teamModelConfig: null })
     }
   },
 
@@ -307,7 +295,7 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     if (buildConfig.team.lockLlmConfig) return
 
     // Set state immediately to trigger UI updates
-    set({ teamMode: false, teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, teamGitFileSyncStatusMap: {} })
+    set({ teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, teamGitFileSyncStatusMap: {} })
 
     // Remove team provider from teamclaw config
     if (workspacePath) {

@@ -25,6 +25,7 @@ pub struct AddWorkspaceOutcome {
 }
 
 impl WorkspaceStore {
+    #[allow(dead_code)]
     pub fn default_path() -> PathBuf {
         super::DaemonConfig::migrate_legacy_file("workspaces.toml")
     }

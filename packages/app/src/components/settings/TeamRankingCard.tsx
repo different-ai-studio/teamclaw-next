@@ -1,40 +1,15 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Trophy, Flame, MessageSquareHeart, ChevronRight } from 'lucide-react'
-import { cn, isTauri } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import { buildSharedRankMap } from '@/lib/team-leaderboard-ranks'
 import { useTeamModeStore } from '@/stores/team-mode'
-import { useTeamMembersStore } from '@/stores/team-members'
-
-async function tauriInvoke<T>(
-  cmd: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  const { invoke } = await import("@tauri-apps/api/core")
-  return invoke<T>(cmd, args)
-}
-
-interface LeaderboardStats {
-  totalFeedbacks: number
-  positiveCount: number
-  negativeCount: number
-  totalTokens: number
-  totalCost: number
-  sessionCount: number
-}
-
-interface MemberLeaderboardExport {
-  memberId: string
-  memberName: string
-  exportedAt: string
-  updateAt: string
-  workspaces: Record<string, LeaderboardStats>  // workspace path -> stats
-}
-
-interface TeamLeaderboard {
-  members: MemberLeaderboardExport[]
-}
+import { useCurrentTeamStore } from '@/stores/current-team'
+import { useAuthStore } from '@/stores/auth-store'
+import { fetchTeamLeaderboard } from '@/lib/telemetry/cloud-leaderboard'
+import { resolveCurrentMemberActorId } from '@/lib/current-actor'
+import type { TeamLeaderboard } from '@/components/settings/LeaderboardSection'
 
 function getRankEmoji(rank: number) {
   if (rank === 1) return '🥇'
@@ -50,47 +25,47 @@ interface TeamRankingCardProps {
 export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
   const { t } = useTranslation()
   const [leaderboard, setLeaderboard] = React.useState<TeamLeaderboard | null>(null)
-  const [currentMemberName, setCurrentMemberName] = React.useState<string | null>(null)
-  const teamMode = useTeamModeStore((s) => s.teamMode)
-  const teamMembers = useTeamMembersStore((s) => s.members)
+  const [currentActorId, setCurrentActorId] = React.useState<string | null>(null)
+  const teamModeType = useTeamModeStore((s) => s.teamModeType)
 
   React.useEffect(() => {
     const load = async () => {
-      if (!isTauri()) return
+      const teamId = useCurrentTeamStore.getState().team?.id
+      if (!teamId) return
       try {
-        const [leaderboardResult, hostname] = await Promise.all([
-          tauriInvoke<TeamLeaderboard>("telemetry_get_team_leaderboard"),
-          tauriInvoke<string>("get_device_hostname"),
-        ])
+        const leaderboardResult = await fetchTeamLeaderboard(teamId, "week")
         setLeaderboard(leaderboardResult)
-        const me = teamMembers.find((m) => m.hostname === hostname)
-        setCurrentMemberName(me?.name || hostname)
+        const userId = useAuthStore.getState().session?.user?.id
+        if (userId) {
+          const actorId = await resolveCurrentMemberActorId(teamId, userId)
+          if (actorId) {
+            setCurrentActorId(actorId)
+          }
+        }
       } catch {
         // Ignore errors
       }
     }
     load()
 
-    const handler = () => {
-      load()
-    }
+    const handler = () => { load() }
     window.addEventListener(TEAM_SYNCED_EVENT, handler)
     return () => window.removeEventListener(TEAM_SYNCED_EVENT, handler)
-  }, [teamMembers])
+  }, [])
 
   // Clear leaderboard data when team mode is disabled
   React.useEffect(() => {
-    if (!teamMode) {
+    if (!teamModeType) {
       setLeaderboard(null)
-      setCurrentMemberName(null)
+      setCurrentActorId(null)
     }
-  }, [teamMode])
+  }, [teamModeType])
 
   // Calculate current user's rank
   const currentMember = React.useMemo(() => {
-    if (!leaderboard?.members || !currentMemberName) return null
-    return leaderboard.members.find((m) => m.memberName === currentMemberName)
-  }, [leaderboard, currentMemberName])
+    if (!leaderboard?.members || !currentActorId) return null
+    return leaderboard.members.find((m) => m.memberId === currentActorId)
+  }, [leaderboard, currentActorId])
 
   const ranks = React.useMemo(() => {
     if (!leaderboard?.members || !currentMember) {
@@ -115,28 +90,28 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
 
     const tokenRanks = buildSharedRankMap({
       items: membersWithAggregated,
-      getKey: (member) => member.memberName,
+      getKey: (member) => member.memberId,
       getScore: (member) => member.aggregated.totalTokens,
     })
     const feedbackRanks = buildSharedRankMap({
       items: membersWithAggregated,
-      getKey: (member) => member.memberName,
+      getKey: (member) => member.memberId,
       getScore: (member) => member.aggregated.totalFeedbacks,
     })
 
     // Overall rank is still based on the average metric rank, but tied averages now share the same place.
     const memberRanks = membersWithAggregated.map((member) => ({
-      memberName: member.memberName,
-      avgRank: ((tokenRanks.get(member.memberName) ?? 0) + (feedbackRanks.get(member.memberName) ?? 0)) / 2,
+      memberId: member.memberId,
+      avgRank: ((tokenRanks.get(member.memberId) ?? 0) + (feedbackRanks.get(member.memberId) ?? 0)) / 2,
     }))
     const overallRanks = buildSharedRankMap({
       items: memberRanks,
-      getKey: (member) => member.memberName,
+      getKey: (member) => member.memberId,
       getScore: (member) => member.avgRank,
       direction: 'asc',
     })
 
-    const currentMemberKey = currentMemberName ?? ''
+    const currentMemberKey = currentActorId ?? ''
     const tokenRank = tokenRanks.get(currentMemberKey) ?? 0
     const feedbackRank = feedbackRanks.get(currentMemberKey) ?? 0
     const overallRank = overallRanks.get(currentMemberKey) ?? 0
@@ -147,7 +122,7 @@ export function TeamRankingCard({ onClick }: TeamRankingCardProps) {
       overallRank,
       totalMembers: leaderboard.members.length,
     }
-  }, [leaderboard, currentMember, currentMemberName])
+  }, [leaderboard, currentMember, currentActorId])
 
   const { overallRank, totalMembers, tokenRank, feedbackRank } = ranks
 

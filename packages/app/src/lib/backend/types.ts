@@ -65,6 +65,7 @@ export interface SessionSyncRow {
   created_by_actor_id?: string | null;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
 }
 
 export interface SessionListCursor {
@@ -213,6 +214,7 @@ export interface DaemonRuntimeBackendRow {
 
 export interface RuntimeBackend {
   listLatestAgentRuntimeHints(teamId: string, agentActorIds: string[]): Promise<AgentRuntimeHintRow[]>;
+  fetchLatestRuntimeForSession(agentActorId: string, sessionId: string): Promise<DaemonRuntimeBackendRow | null>;
   listAgentDefaults(agentActorIds: string[]): Promise<AgentDefaultRow[]>;
   updateRuntimeModel(runtimeId: string, model: string): Promise<void>;
   listSessionRuntimeModels(sessionId: string): Promise<SessionRuntimeModelRow[]>;
@@ -630,10 +632,7 @@ export interface SyncBackend {
 }
 
 export interface TelemetryFeedbackDeleteInput {
-  actor_id: string;
-  team_id: string;
-  message_id: string;
-  kind: "thumb" | "star";
+  messageId: string;
 }
 
 export interface TelemetryBackend {
@@ -642,7 +641,8 @@ export interface TelemetryBackend {
   listFeedbacks(input: { teamId: string; sessionId: string }): Promise<Array<Record<string, unknown>>>;
   listFeedbackSummary(teamId: string): Promise<Array<Record<string, unknown>>>;
   insertSessionReport(input: Record<string, unknown>): Promise<void>;
-  listLeaderboard(teamId: string): Promise<Array<Record<string, unknown>>>;
+  insertSkillUsage(input: Record<string, unknown>): Promise<void>;
+  listLeaderboard(teamId: string, period?: "day" | "week" | "month"): Promise<Array<Record<string, unknown>>>;
 }
 
 export interface TeamClawBackend {

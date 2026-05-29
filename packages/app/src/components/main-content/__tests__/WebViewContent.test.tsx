@@ -1,7 +1,7 @@
 import { render, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WebViewContent } from "../WebViewContent"
-import { useTeamMembersStore } from "@/stores/team-members"
+import { useCurrentTeamStore } from "@/stores/current-team"
 import { useTeamModeStore } from "@/stores/team-mode"
 
 const invokeMock = vi.hoisted(() => vi.fn())
@@ -34,17 +34,17 @@ describe("WebViewContent", () => {
       height: 600,
       toJSON: () => {},
     })
-    useTeamModeStore.setState({ teamMode: true })
-    useTeamMembersStore.setState({ members: [] })
+    useTeamModeStore.setState({ teamModeType: "git" })
+    useCurrentTeamStore.setState({ currentMember: null })
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it("uses team member display name when teamMode is on and member matches", async () => {
-    useTeamMembersStore.setState({
-      members: [{ nodeId: "node-123", name: "Matt", role: "owner" } as never],
+  it("uses team member display name from cloud profile when available", async () => {
+    useCurrentTeamStore.setState({
+      currentMember: { id: "member-1", displayName: "Matt", role: "owner", joinedAt: null },
     })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
@@ -92,7 +92,7 @@ describe("WebViewContent", () => {
   })
 
   it("uses device hostname with the persistent device id outside team mode", async () => {
-    useTeamModeStore.setState({ teamMode: false })
+    useTeamModeStore.setState({ teamModeType: null })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
       if (command === "get_persistent_device_id") return Promise.resolve("persisted-node")
@@ -116,7 +116,7 @@ describe("WebViewContent", () => {
   })
 
   it("still passes deviceNo when get_device_hostname fails (does not gate injection on name)", async () => {
-    useTeamModeStore.setState({ teamMode: false })
+    useTeamModeStore.setState({ teamModeType: null })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
       if (command === "get_persistent_device_id") return Promise.resolve("persisted-node")

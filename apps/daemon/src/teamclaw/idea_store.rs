@@ -119,6 +119,7 @@ impl IdeaStore {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn ideas_claimed_by(&self, actor_id: &str) -> Vec<&StoredIdea> {
         let claimed_ids: std::collections::HashSet<&str> = self
             .claims

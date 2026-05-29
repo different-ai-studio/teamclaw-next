@@ -1,0 +1,172 @@
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::time::Duration;
+
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::timeout;
+use tracing::{info, warn};
+
+use super::adapter::{self, AcpCommand, AcpStartupMetadata};
+use super::manager::AgentLaunchConfig;
+use crate::proto::amux;
+
+const HOST_INIT_TIMEOUT: Duration = Duration::from_secs(60);
+const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct HostKey {
+    agent_type: amux::AgentType,
+    env_fingerprint: u64,
+}
+
+fn env_fingerprint(extra_env: &HashMap<String, String>) -> u64 {
+    let mut sorted: Vec<_> = extra_env.iter().collect();
+    sorted.sort_by_key(|(k, _)| *k);
+    let mut hasher = DefaultHasher::new();
+    for (k, v) in sorted {
+        k.hash(&mut hasher);
+        v.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+struct HostEntry {
+    cmd_tx: mpsc::Sender<AcpCommand>,
+}
+
+/// Pool of long-lived ACP hosts — one `initialize` per host, many `session/new`.
+pub struct AcpHostPool {
+    hosts: HashMap<HostKey, HostEntry>,
+}
+
+impl AcpHostPool {
+    pub fn new() -> Self {
+        Self {
+            hosts: HashMap::new(),
+        }
+    }
+
+    /// Pre-warm one host per configured agent type (empty team env).
+    pub async fn prewarm(&mut self, launch_configs: &HashMap<amux::AgentType, AgentLaunchConfig>) {
+        for (&agent_type, launch) in launch_configs {
+            if let Err(e) = self
+                .ensure_host(agent_type, launch, HashMap::new())
+                .await
+            {
+                warn!(?agent_type, error = %e, "ACP host prewarm failed");
+            } else {
+                info!(?agent_type, "ACP host prewarmed");
+            }
+        }
+    }
+
+    async fn ensure_host(
+        &mut self,
+        agent_type: amux::AgentType,
+        launch: &AgentLaunchConfig,
+        extra_env: HashMap<String, String>,
+    ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
+        let key = HostKey {
+            agent_type,
+            env_fingerprint: env_fingerprint(&extra_env),
+        };
+        if let Some(entry) = self.hosts.get(&key) {
+            return Ok(entry.cmd_tx.clone());
+        }
+
+        let (host_ready_tx, host_ready_rx) = oneshot::channel();
+        let cmd_tx = adapter::spawn_acp_host(
+            launch.binary.clone(),
+            launch.args.clone(),
+            agent_type,
+            extra_env,
+            host_ready_tx,
+        )?;
+
+        match timeout(HOST_INIT_TIMEOUT, host_ready_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(details))) => {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "ACP host init failed: {details}"
+                )));
+            }
+            Ok(Err(_)) => {
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP host init channel closed".into(),
+                ));
+            }
+            Err(_) => {
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP host init timed out".into(),
+                ));
+            }
+        }
+
+        self.hosts.insert(key, HostEntry {
+            cmd_tx: cmd_tx.clone(),
+        });
+        Ok(cmd_tx)
+    }
+
+    /// Bind a TeamClaw runtime to a shared host via `session/new`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn attach_session(
+        &mut self,
+        agent_type: amux::AgentType,
+        launch: &AgentLaunchConfig,
+        extra_env: HashMap<String, String>,
+        worktree: String,
+        resume_acp_session_id: Option<String>,
+        mcp_config_path: Option<std::path::PathBuf>,
+        initial_model_override: Option<String>,
+        initial_prompt: String,
+        event_tx: mpsc::Sender<amux::AcpEvent>,
+        is_gateway: bool,
+    ) -> crate::error::Result<(mpsc::Sender<AcpCommand>, AcpStartupMetadata)> {
+        let host_cmd = self.ensure_host(agent_type, launch, extra_env).await?;
+        let (startup_tx, startup_rx) =
+            oneshot::channel::<Result<AcpStartupMetadata, String>>();
+
+        host_cmd
+            .send(AcpCommand::AttachSession {
+                worktree,
+                resume_acp_session_id,
+                mcp_config_path,
+                initial_model_override,
+                initial_prompt,
+                event_tx,
+                startup_tx,
+                is_gateway,
+            })
+            .await
+            .map_err(|_| crate::error::AmuxError::Agent("ACP host command channel closed".into()))?;
+
+        let startup = match timeout(ATTACH_TIMEOUT, startup_rx).await {
+            Ok(Ok(Ok(meta))) => meta,
+            Ok(Ok(Err(details))) => {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "ACP attach failed: {details}"
+                )));
+            }
+            Ok(Err(_)) => {
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP attach channel closed before ready".into(),
+                ));
+            }
+            Err(_) => {
+                return Err(crate::error::AmuxError::Agent(
+                    "ACP attach timed out before ready".into(),
+                ));
+            }
+        };
+
+        Ok((host_cmd, startup))
+    }
+}
+
+impl Default for AcpHostPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}

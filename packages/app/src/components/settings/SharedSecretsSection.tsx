@@ -21,6 +21,7 @@ import {
 import { SettingCard, SectionHeader } from './shared'
 import { useSharedSecretsStore, type SecretMeta } from '@/stores/shared-secrets'
 import { useTeamMembersStore } from '@/stores/team-members'
+import { useTeamPermissions } from '@/lib/team-permissions'
 
 // ─── Category options ────────────────────────────────────────────────────
 
@@ -307,7 +308,7 @@ interface SharedSecretsSectionProps {
 export const SharedSecretsSection = React.memo(function SharedSecretsSection({ nodeId }: SharedSecretsSectionProps) {
   const { t } = useTranslation()
   const { secrets, isLoading, loadSecrets, setSecret, deleteSecret, listenForChanges } = useSharedSecretsStore()
-  const myRole = useTeamMembersStore((s) => s.myRole)
+  const { role } = useTeamPermissions()
 
   const [addDialogOpen, setAddDialogOpen] = React.useState(false)
   const [editingEntry, setEditingEntry] = React.useState<SecretMeta | null>(null)
@@ -326,7 +327,7 @@ export const SharedSecretsSection = React.memo(function SharedSecretsSection({ n
 
   const handleDelete = async () => {
     if (deleteKeyId) {
-      await deleteSecret(deleteKeyId, nodeId, myRole ?? 'editor')
+      await deleteSecret(deleteKeyId, nodeId, role ?? '')
       setDeleteKeyId(null)
     }
   }

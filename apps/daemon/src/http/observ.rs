@@ -18,7 +18,7 @@ use std::time::Instant;
 pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
 #[derive(Clone, Debug)]
-pub struct RequestId(pub String);
+pub struct RequestId(#[allow(dead_code)] pub String);
 
 /// Generate a Crockford-base32 ULID-shaped id without pulling the `ulid`
 /// crate. 26 chars = 130 bits of randomness; good enough for log
@@ -70,6 +70,7 @@ pub async fn request_id_layer(mut req: Request<Body>, next: Next) -> Response {
 
 /// Helper accessor used by handlers that want to embed the id in a body
 /// (e.g. problem+json) — the id was inserted by the middleware above.
+#[allow(dead_code)]
 pub fn request_id_of(req: &Request<Body>) -> Option<&str> {
     req.extensions()
         .get::<RequestId>()
@@ -78,6 +79,7 @@ pub fn request_id_of(req: &Request<Body>) -> Option<&str> {
 
 /// Header sentinel re-exported here so other modules don't need to import
 /// `axum::http::header` directly.
+#[allow(dead_code)]
 pub const X_REQUEST_ID: HeaderName = REQUEST_ID_HEADER;
 #[allow(dead_code)]
 pub const HEADER_CONTENT_TYPE: HeaderName = header::CONTENT_TYPE;

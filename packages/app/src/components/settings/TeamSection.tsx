@@ -3,15 +3,18 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
-import { Users, ArrowRightLeft, Loader2 } from 'lucide-react'
+import { Users, ArrowRightLeft, Loader2, AlertCircle } from 'lucide-react'
 
 import { TeamGitConfig } from './team/TeamGitConfig'
 import { TeamWebDavConfig } from './team/TeamWebDavConfig'
+import { TeamShareSection } from './team/TeamShareSection'
 import { Button } from '@/components/ui/button'
 import { useTeamModeStore } from '@/stores/team-mode'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useTeamShareStore } from '@/stores/team-share'
 import { isTauri } from '@/lib/utils'
+import { useTeamPermissions } from '@/lib/team-permissions'
 
 // ─── Section Header ──────────────────────────────────────────────────────────
 
@@ -109,19 +112,67 @@ function SwitchToGitEntry() {
   )
 }
 
+// ─── Missing prerequisite notice ─────────────────────────────────────────────
+// Shown when team-share is not yet configured but we lack a team and/or workspace
+// to target. Previously this case fell through to the legacy Git config form,
+// which was misleading — surface the actual missing prerequisite instead.
+
+function MissingPrereqNotice({
+  teamId,
+  workspacePath,
+}: {
+  teamId: string | null
+  workspacePath: string | null
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <section className="rounded-xl border border-border-soft bg-panel p-4">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="space-y-1.5">
+          <h4 className="text-[13.5px] font-semibold">
+            {t('settings.team.prereqTitle', '暂无法配置团队共享')}
+          </h4>
+          {!teamId && (
+            <p className="text-[12px] leading-5 text-muted-foreground">
+              {t(
+                'settings.team.prereqNoTeam',
+                '尚未创建或选择团队，请先创建/选择一个团队后再配置团队共享。',
+              )}
+            </p>
+          )}
+          {!workspacePath && (
+            <p className="text-[12px] leading-5 text-muted-foreground">
+              {t(
+                'settings.team.prereqNoWorkspace',
+                'workspacePath 为空，请先打开一个工作区。',
+              )}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function TeamSection() {
   const { t } = useTranslation()
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
-  const myRole = useTeamModeStore((s) => s.myRole)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const shareMode = useTeamShareStore((s) => s.status.mode)
+  const { isOwner } = useTeamPermissions()
 
-  // teamModeType: 'git' | 'webdav' (oss) | null
-  // Per product spec: git → only git info; oss → oss info + (owner only) switch-to-git entry.
-  // null (no team configured yet) → fall back to the Git config UI, which has its own
-  // empty-state and is the documented entry point for setting a team up.
+  // Two notions of "mode" coexist:
+  //   - teamModeType ('git' | 'webdav' | null): legacy, from local teamclaw.json
+  //   - shareMode ('oss' | 'managed_git' | 'custom_git' | null): the FC-locked share mode
+  // A team is "already configured" if either source reports a mode. New teams (PR #213
+  // no longer auto-create team-share) report neither — those land in the onboarding wizard.
   const isOss = teamModeType === 'webdav'
-  const isOwner = myRole === 'owner'
+  const isConfigured = shareMode !== null || teamModeType !== null
 
   return (
     <div className="space-y-6">
@@ -134,7 +185,21 @@ export function TeamSection() {
         )}
       />
 
-      {isOss ? (
+      {!isConfigured ? (
+        // New team (PR #213 no longer auto-creates team-share): show the onboarding
+        // wizard so the owner can lock in oss / managed_git / custom_git. This needs a
+        // team + workspace to target; without them, surface the missing prerequisite
+        // instead of falling through to the (misleading) legacy Git config form.
+        teamId && workspacePath ? (
+          <TeamShareSection
+            teamId={teamId}
+            workspacePath={workspacePath}
+            isOwner={isOwner}
+          />
+        ) : (
+          <MissingPrereqNotice teamId={teamId} workspacePath={workspacePath} />
+        )
+      ) : isOss ? (
         <>
           {isOwner && <SwitchToGitEntry />}
           <TeamWebDavConfig />

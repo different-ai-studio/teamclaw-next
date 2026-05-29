@@ -1,0 +1,77 @@
+name: FC Deploy
+
+# Deploys the teamclaw-sync Function Compute function (Alibaba Cloud cn-shenzhen)
+# from services/fc using Serverless Devs (s deploy). Mirrors
+# .claude/skills/fc-deploy/deploy.sh, but reads credentials from repo secrets.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/fc/**"
+      - ".github/workflows/fc-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: fc-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/fc
+
+    env:
+      # Aliyun credentials (also consumed by s config add below)
+      ACCESS_KEY_ID: ${{ secrets.ACCESS_KEY_ID }}
+      ACCESS_KEY_SECRET: ${{ secrets.ACCESS_KEY_SECRET }}
+      ROLE_ARN: ${{ secrets.ROLE_ARN }}
+      # Function runtime environment variables (see services/fc/s.yaml)
+      PUSH_WEBHOOK_SECRET: ${{ secrets.PUSH_WEBHOOK_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      APNS_PRIVATE_KEY_P8: ${{ secrets.APNS_PRIVATE_KEY_P8 }}
+      APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+      APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+      APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
+      APNS_ENV: ${{ secrets.APNS_ENV }}
+      MQTT_BROKER_URL: ${{ secrets.MQTT_BROKER_URL }}
+      MQTT_USERNAME: ${{ secrets.MQTT_USERNAME }}
+      MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
+      MQTT_USE_TLS: ${{ secrets.MQTT_USE_TLS }}
+      # Optional (s.yaml provides defaults when unset)
+      LITELLM_URL: ${{ secrets.LITELLM_URL }}
+      LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
+      LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD: ${{ secrets.LITELLM_DEFAULT_TEAM_MAX_BUDGET_USD }}
+      CODEUP_ORG_ID: ${{ secrets.CODEUP_ORG_ID }}
+      CODEUP_PAT: ${{ secrets.CODEUP_PAT }}
+      CODEUP_BOT_USERNAME: ${{ secrets.CODEUP_BOT_USERNAME }}
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure Aliyun access (default)
+        run: |
+          s config add \
+            --AccessKeyID "$ACCESS_KEY_ID" \
+            --AccessKeySecret "$ACCESS_KEY_SECRET" \
+            -a default -f
+
+      - name: Install function dependencies
+        run: npm install --omit=dev
+
+      - name: Deploy
+        run: s deploy -y

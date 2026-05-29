@@ -10,7 +10,6 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { useSessionStore } from '@/stores/session'
-import { useProviderStore } from '@/stores/provider'
 import { resolveCurrentMemberActorId } from '@/lib/current-actor'
 import { loadActorsForTeam } from '@/lib/local-cache'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
@@ -18,23 +17,14 @@ import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { createSessionWithFirstMessage } from '@/lib/session-create'
 import { ensureSessionLiveSubscribed } from '@/lib/session-live-subscriptions'
+import { useEngagedAgentStore } from '@/stores/engaged-agent-store'
 import { cn } from '@/lib/utils'
-import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 type Candidate = {
   id: string
   actor_type: 'member' | 'agent'
   display_name: string
 }
-
-const RUNTIME_BACKENDS = new Set(['claude-code', 'opencode', 'codex'])
 
 export function NewSessionDialog() {
   const { t } = useTranslation()
@@ -51,13 +41,7 @@ export function NewSessionDialog() {
   const [picked, setPicked] = React.useState<Set<string>>(new Set())
   const [query, setQuery] = React.useState('')
   const [message, setMessage] = React.useState('')
-  const [selectedBackend, setSelectedBackend] = React.useState('')
-  const [selectedModelKey, setSelectedModelKey] = React.useState('')
   const [submitting, setSubmitting] = React.useState(false)
-
-  const models = useProviderStore((s) => s.models)
-  const currentModelKey = useProviderStore((s) => s.currentModelKey)
-  const selectModel = useProviderStore((s) => s.selectModel)
 
   React.useEffect(() => {
     if (open) setMessage(initialMessage ?? '')
@@ -136,48 +120,6 @@ export function NewSessionDialog() {
     () => candidates.filter((c) => picked.has(c.id)),
     [candidates, picked],
   )
-  const runtimeModels = React.useMemo(
-    () => models.filter((m) => RUNTIME_BACKENDS.has(m.provider)),
-    [models],
-  )
-  const backends = React.useMemo(
-    () => Array.from(new Set(runtimeModels.map((m) => m.provider))),
-    [runtimeModels],
-  )
-  const backendModels = React.useMemo(
-    () => runtimeModels.filter((m) => m.provider === selectedBackend),
-    [runtimeModels, selectedBackend],
-  )
-
-  React.useEffect(() => {
-    if (!open) return
-    if (selectedBackend && backends.includes(selectedBackend)) return
-    const currentBackend = currentModelKey?.split('/')[0]
-    if (currentBackend && backends.includes(currentBackend)) {
-      setSelectedBackend(currentBackend)
-      return
-    }
-    setSelectedBackend(backends[0] ?? '')
-  }, [open, backends, currentModelKey, selectedBackend])
-
-  React.useEffect(() => {
-    if (!open) return
-    if (selectedModelKey && backendModels.some((m) => `${m.provider}/${m.id}` === selectedModelKey)) return
-    const currentInBackend =
-      currentModelKey && backendModels.some((m) => `${m.provider}/${m.id}` === currentModelKey)
-        ? currentModelKey
-        : ''
-    setSelectedModelKey(currentInBackend || (backendModels[0] ? `${backendModels[0].provider}/${backendModels[0].id}` : ''))
-  }, [open, backendModels, currentModelKey, selectedModelKey])
-
-  const selectedModel = React.useMemo(() => {
-    if (!selectedModelKey) return null
-    const idx = selectedModelKey.indexOf('/')
-    if (idx < 0) return null
-    const provider = selectedModelKey.slice(0, idx)
-    const id = selectedModelKey.slice(idx + 1)
-    return runtimeModels.find((m) => m.provider === provider && m.id === id) ?? null
-  }, [runtimeModels, selectedModelKey])
 
   const togglePick = (id: string) =>
     setPicked((prev) => {
@@ -217,21 +159,26 @@ export function NewSessionDialog() {
       }
       const additionalActorIds = Array.from(picked)
       const agentActorIds = pickedActors.filter((p) => p.actor_type === 'agent').map((p) => p.id)
-      if (selectedModel) {
-        await selectModel(selectedModel.provider, selectedModel.id, selectedModel.name)
-      }
       const { sessionId } = await createSessionWithFirstMessage({
         teamId,
         creatorActorId,
         additionalActorIds,
         agentActorIds,
         messageText: message,
-        agentType: selectedModel ? resolveAmuxAgentType(selectedModel.provider) : undefined,
-        modelId: selectedModel?.id,
       })
       await ensureSessionLiveSubscribed(teamId, sessionId).catch((e) => {
         console.warn('[NewSessionDialog] live subscribe failed (non-fatal):', e)
       })
+      const agentPicks = pickedActors.filter((p) => p.actor_type === 'agent')
+      if (agentPicks.length > 0) {
+        useEngagedAgentStore.getState().setAgents(
+          sessionId,
+          agentPicks.map((p) => ({
+            id: p.id,
+            displayName: p.display_name || 'AI',
+          })),
+        )
+      }
       await useSessionListStore.getState().load()
       useSessionStore.getState().addHighlightedSession(sessionId)
       await useUIStore.getState().switchToSession(sessionId)
@@ -318,59 +265,6 @@ export function NewSessionDialog() {
               className="h-9 w-full rounded-lg border border-border bg-muted/30 pl-9 pr-3 text-[13px] outline-none placeholder:text-muted-foreground focus:border-foreground/30"
             />
           </div>
-        </div>
-
-        {/* Backend + Model */}
-        <div className="border-t border-border-soft px-5 py-3">
-          {runtimeModels.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)]">
-              <div>
-                <label className="block pb-1.5 text-[12px] text-muted-foreground">
-                  {t('chat.newSessionDialog.backend', 'Backend')}
-                </label>
-                <Select value={selectedBackend} onValueChange={setSelectedBackend}>
-                  <SelectTrigger className="h-9 rounded-lg border-border bg-muted/20 text-[13px]">
-                    <SelectValue placeholder={t('chat.newSessionDialog.backendPlaceholder', '选择 backend')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {backends.map((backend) => (
-                      <SelectItem key={backend} value={backend}>
-                        <span className="font-mono text-[12px]">{backend}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="block pb-1.5 text-[12px] text-muted-foreground">
-                  {t('chat.newSessionDialog.model', '模型')}
-                </label>
-                <Select
-                  value={selectedModelKey}
-                  onValueChange={setSelectedModelKey}
-                  disabled={!selectedBackend || backendModels.length === 0}
-                >
-                  <SelectTrigger className="h-9 rounded-lg border-border bg-muted/20 text-[13px]">
-                    <SelectValue placeholder={t('chat.newSessionDialog.modelPlaceholder', '选择模型')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {backendModels.map((model) => {
-                      const key = `${model.provider}/${model.id}`
-                      return (
-                        <SelectItem key={key} value={key}>
-                          {model.name}
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-[12px] text-muted-foreground">
-              {t('chat.newSessionDialog.noModels', '等待 daemon 上报可用模型…')}
-            </div>
-          )}
         </div>
 
         {/* Candidate list */}

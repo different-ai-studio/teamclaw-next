@@ -15,6 +15,8 @@ import { registerTelemetry } from "./telemetry.mjs";
 import { registerConfig } from "./config.mjs";
 import { registerDirectory } from "./directory.mjs";
 import { registerSync } from "./sync.mjs";
+import { registerTeamShare } from "./team-share.mjs";
+import { registerTeamLiteLlm } from "./team-litellm.mjs";
 
 export function registerAllRoutes(router) {
   registerAuth(router);
@@ -22,6 +24,12 @@ export function registerAllRoutes(router) {
   registerSessions(router);
   registerMessages(router);
   registerInvites(router);
+  // team-share routes must be registered BEFORE workspaces so the new merged
+  // GET /v1/teams/:teamId/workspace-config (share+litellm shape) wins over
+  // the legacy default/pinned-workspace GET in workspaces.mjs. The legacy
+  // PUT remains reachable since it's a distinct verb.
+  registerTeamShare(router);
+  registerTeamLiteLlm(router);
   registerWorkspaces(router);
   registerSystem(router);
   registerActors(router);

@@ -63,7 +63,13 @@ export function registerWorkspaces(router) {
     return { body: w };
   });
 
-  router.get("/v1/teams/:teamId/workspace-config", async (ctx) => {
+  // NOTE: GET /v1/teams/:teamId/workspace-config now lives in
+  // routes/team-share.mjs and returns the merged share+litellm shape
+  // (shareMode, gitRemoteUrl, gitAuthKind, syncMode, litellmTeamId).
+  // The legacy { defaultWorkspaceId, pinnedWorkspaceIds } shape is now
+  // exposed via GET /v1/teams/:teamId/workspace-defaults so the merged
+  // share-mode endpoint can own the canonical path.
+  router.get("/v1/teams/:teamId/workspace-defaults", async (ctx) => {
     const teamId = decodeURIComponent(ctx.params.teamId);
     const cfg = await ctx.repository.getTeamWorkspaceConfig(teamId);
     if (!cfg) {

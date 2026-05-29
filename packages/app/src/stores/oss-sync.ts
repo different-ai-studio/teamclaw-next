@@ -46,10 +46,6 @@ export interface OssSyncState {
 
   refresh(workspacePath: string): Promise<void>
   syncNow(workspacePath: string): Promise<void>
-  createTeam(
-    name: string,
-    workspacePath: string,
-  ): Promise<{ teamSecret: string; teamId: string }>
   listVersions(workspacePath: string, path: string): Promise<VersionInfo[]>
   restoreVersion(
     workspacePath: string,
@@ -79,14 +75,6 @@ interface SyncNowResult {
   pulled: number
   pushed: number
   conflicts: number
-}
-
-interface CreateTeamResult {
-  teamId: string
-  teamSlug: string
-  aiGatewayEndpoint: string
-  litellmKey: string
-  teamSecret: string
 }
 
 // ---------------------------------------------------------------------------
@@ -130,15 +118,6 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
     }
   },
 
-  async createTeam(name: string, workspacePath: string) {
-    const r = await invoke<CreateTeamResult>('oss_sync_create_team', {
-      name,
-      workspacePath,
-    })
-    set({ teamId: r.teamId })
-    return { teamSecret: r.teamSecret, teamId: r.teamId }
-  },
-
   async listVersions(workspacePath: string, path: string) {
     return invoke<VersionInfo[]>('oss_sync_list_versions', {
       workspacePath,
@@ -168,34 +147,10 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   },
 }))
 
-// ---------------------------------------------------------------------------
-// JWT bridge — push Supabase access_token into teamclaw.json so that the
-// Rust oss_sync commands can authenticate against FC.
-//
-// Subscribes to the auth store; whenever the session access_token changes
-// (login, token refresh, logout) we call oss_sync_set_jwt for every open
-// workspace. In practice there is usually one workspace, so we read it from
-// the workspace store to avoid importing the full workspace store module here.
-// ---------------------------------------------------------------------------
-
-if (isTauri()) {
-  // Lazy import to avoid circular deps at module init time.
-  import('./auth-store').then(({ useAuthStore }) => {
-    useAuthStore.subscribe(async (state) => {
-      const jwt = state.session?.access_token ?? null
-      if (!jwt) return
-
-      try {
-        const { useWorkspaceStore } = await import('./workspace')
-        const workspacePath = useWorkspaceStore.getState().workspacePath
-        if (!workspacePath) return
-        await invoke('oss_sync_set_jwt', { workspacePath, jwt })
-      } catch (e) {
-        console.warn('[oss-sync] JWT bridge failed', e)
-      }
-    })
-  }).catch((e) => console.warn('[oss-sync] JWT bridge subscribe failed', e))
-}
+// JWT bridge note: pushing the Supabase token into teamclaw.json now lives in
+// `@/lib/jwt-bridge` (initialized at app startup from main.tsx). It used to live
+// here, but this store only loads when the Version History UI opens, so flows
+// that never touch OSS sync (team-share, LiteLLM) ran without a JWT.
 
 // ---------------------------------------------------------------------------
 // Tauri event listener — auto-update store on each engine tick.

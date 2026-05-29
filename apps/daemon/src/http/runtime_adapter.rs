@@ -42,10 +42,12 @@ pub struct CreateSessionParams {
     #[serde(default)]
     pub workspace_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub model: Option<String>,
     #[serde(default)]
     pub initial_prompt: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -78,10 +80,13 @@ pub enum SessionState {
 pub struct PromptParams {
     pub text: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub attachments: Vec<serde_json::Value>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub mentions: Vec<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub metadata: Option<serde_json::Value>,
 }
 

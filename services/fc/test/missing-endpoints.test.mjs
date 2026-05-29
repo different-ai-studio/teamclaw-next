@@ -17,6 +17,13 @@ function makeRepo(overrides = {}) {
     listSessionIdsForActor: record("listSessionIdsForActor"),
     listWorkspacesByIdsSlim: record("listWorkspacesByIdsSlim"),
     listShortcutRoleBindings: record("listShortcutRoleBindings"),
+    submitFeedback: record("submitFeedback"),
+    listFeedback: record("listFeedback"),
+    deleteFeedback: record("deleteFeedback"),
+    submitSessionReport: record("submitSessionReport"),
+    submitSkillUsage: record("submitSkillUsage"),
+    listFeedbackSummary: record("listFeedbackSummary"),
+    getTeamLeaderboard: record("getTeamLeaderboard"),
   };
 }
 
@@ -155,4 +162,127 @@ test("GET /v1/teams/:teamId/shortcut-role-bindings returns items", async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(repo.calls[0].args, ["team-1"]);
   assert.equal(JSON.parse(res.body).items[0].resource_id, "sc1");
+});
+
+// Telemetry route tests
+
+test("POST /v1/feedback accepts kind=positive and returns 201", async () => {
+  const repo = makeRepo({
+    submitFeedback: () => ({ id: "fb1", kind: "positive" }),
+  });
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/feedback",
+    body: { messageId: "m1", actorId: "a1", teamId: "t1", kind: "positive" },
+  });
+  assert.equal(res.statusCode, 201);
+  assert.equal(repo.calls[0].method, "submitFeedback");
+});
+
+test("POST /v1/feedback accepts kind=negative and returns 201", async () => {
+  const repo = makeRepo({
+    submitFeedback: () => ({ id: "fb2", kind: "negative" }),
+  });
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/feedback",
+    body: { messageId: "m2", actorId: "a1", teamId: "t1", kind: "negative" },
+  });
+  assert.equal(res.statusCode, 201);
+});
+
+test("POST /v1/feedback rejects kind=up with 400", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/feedback",
+    body: { messageId: "m3", actorId: "a1", teamId: "t1", kind: "up" },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = JSON.parse(res.body);
+  assert.equal(body.error.code, "validation_failed");
+});
+
+test("POST /v1/feedback rejects kind=star with 400", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/feedback",
+    body: { messageId: "m4", actorId: "a1", teamId: "t1", kind: "star" },
+  });
+  assert.equal(res.statusCode, 400);
+});
+
+test("POST /v1/session-report routes to submitSessionReport and returns 201", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/session-report",
+    body: { actorId: "a1", teamId: "t1", sessionId: "s1", duration: 120 },
+  });
+  assert.equal(res.statusCode, 201);
+  assert.equal(repo.calls[0].method, "submitSessionReport");
+  assert.equal(repo.calls[0].args[0].sessionId, "s1");
+});
+
+test("POST /v1/session-report requires sessionId", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/session-report",
+    body: { actorId: "a1", teamId: "t1" },
+  });
+  assert.equal(res.statusCode, 400);
+});
+
+test("POST /v1/skill-usage routes to submitSkillUsage and returns 201", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/skill-usage",
+    body: { actorId: "a1", teamId: "t1", skill: "my-skill" },
+  });
+  assert.equal(res.statusCode, 201);
+  assert.equal(repo.calls[0].method, "submitSkillUsage");
+  assert.equal(repo.calls[0].args[0].skill, "my-skill");
+});
+
+test("POST /v1/skill-usage requires skill", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "POST",
+    path: "/v1/skill-usage",
+    body: { actorId: "a1", teamId: "t1" },
+  });
+  assert.equal(res.statusCode, 400);
+});
+
+test("GET /v1/feedback-summary returns items from listFeedbackSummary", async () => {
+  // Stub mirrors the real repo, which returns { items: [...] } (NOT a bare
+  // array) — so this guards against the route double-wrapping the result.
+  const repo = makeRepo({
+    listFeedbackSummary: () => ({ items: [{ actorId: "a1", displayName: null, positive: 3, negative: 1, total: 4 }] }),
+  });
+  const res = await request(repo, {
+    method: "GET",
+    path: "/v1/feedback-summary",
+    query: { teamId: "t1" },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(repo.calls[0].method, "listFeedbackSummary");
+  assert.deepEqual(repo.calls[0].args, ["t1"]);
+  const body = JSON.parse(res.body);
+  assert.equal(body.items[0].actorId, "a1");
+  assert.equal(body.items[0].total, 4);
+  assert.ok(!Array.isArray(body.items[0]), "items[0] must be an object, not a nested array (no double-wrap)");
+});
+
+test("GET /v1/feedback-summary requires teamId", async () => {
+  const repo = makeRepo();
+  const res = await request(repo, {
+    method: "GET",
+    path: "/v1/feedback-summary",
+    query: {},
+  });
+  assert.equal(res.statusCode, 400);
 });

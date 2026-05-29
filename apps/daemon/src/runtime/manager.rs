@@ -5,6 +5,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use super::acp_host::AcpHostPool;
 use super::adapter;
 use super::handle::RuntimeHandle;
 use std::sync::Arc;
@@ -40,8 +41,6 @@ pub struct CheckedOutTurn {
     pub agent_id: String,
     pub event_rx: mpsc::Receiver<amux::AcpEvent>,
 }
-
-const ACP_STARTUP_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Sanitise an arbitrary logical-session-id string into a filename-safe
 /// component. The gateway-minted acp_session_id values that drive the
@@ -134,6 +133,7 @@ pub struct RuntimeManager {
     agents: HashMap<String, RuntimeHandle>,
     pub aggregators: std::collections::HashMap<String, TurnAggregator>,
     launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
+    acp_host_pool: AcpHostPool,
     /// Tracks the model id currently applied to each agent's ACP session.
     /// Populated on spawn (after the adapter sends the initial set_model)
     /// and updated whenever set_current_model is called. The adapter is
@@ -170,6 +170,7 @@ impl RuntimeManager {
             agents: HashMap::new(),
             aggregators: std::collections::HashMap::new(),
             launch_configs,
+            acp_host_pool: AcpHostPool::new(),
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
             backend,
@@ -218,6 +219,14 @@ impl RuntimeManager {
             .unwrap_or_else(|| AgentLaunchConfig::new("claude", Vec::new(), "claude"))
     }
 
+    /// Pre-warm shared ACP hosts so the first `runtimeStart` only pays for
+    /// `session/new`, not process spawn + `initialize`.
+    pub async fn prewarm_acp_hosts(&mut self) {
+        self.acp_host_pool
+            .prewarm(&self.launch_configs)
+            .await;
+    }
+
     /// Records the latest slash-command list for an agent. Callers feed
     /// this from the adapter's translated `AvailableCommands` events so
     /// `to_proto_info` can include them in retained state.
@@ -255,6 +264,7 @@ impl RuntimeManager {
         self.aggregators.get(agent_id)
     }
 
+    #[allow(dead_code)]
     pub async fn spawn_agent(
         &mut self,
         agent_type: amux::AgentType,
@@ -309,55 +319,31 @@ impl RuntimeManager {
         handle.session_id = remote_session_id.unwrap_or_default().to_string();
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
-        let (startup_tx, startup_rx) =
-            tokio::sync::oneshot::channel::<Result<adapter::AcpStartupMetadata, String>>();
-
         let launch = self.launch_config_for(agent_type);
-        let cmd_tx = adapter::spawn_acp_agent(
-            launch.binary.clone(),
-            launch.args.clone(),
-            worktree.to_string(),
-            prompt.to_string(),
-            agent_type,
-            handle.event_tx.clone(),
-            None,
-            startup_tx,
-            initial_model_override.clone(),
-            mcp_config_path,
-            extra_env,
-        )?;
+        let is_gateway = mcp_config_path.is_some();
+        let (cmd_tx, startup) = self
+            .acp_host_pool
+            .attach_session(
+                agent_type,
+                &launch,
+                extra_env,
+                worktree.to_string(),
+                None,
+                mcp_config_path,
+                initial_model_override.clone(),
+                prompt.to_string(),
+                handle.event_tx.clone(),
+                is_gateway,
+            )
+            .await?;
 
         handle.cmd_tx = Some(cmd_tx);
 
-        info!(agent_id, worktree, "agent spawned via ACP");
+        info!(agent_id, worktree, "agent attached via shared ACP host");
         self.agents.insert(agent_id.clone(), handle);
         self.aggregators
             .insert(agent_id.clone(), TurnAggregator::new());
 
-        let startup = match timeout(ACP_STARTUP_READY_TIMEOUT, startup_rx).await {
-            Ok(Ok(Ok(meta))) => meta,
-            Ok(Ok(Err(details))) => {
-                self.agents.remove(&agent_id);
-                self.aggregators.remove(&agent_id);
-                return Err(crate::error::AmuxError::Agent(format!(
-                    "ACP startup failed: {details}"
-                )));
-            }
-            Ok(Err(_)) => {
-                self.agents.remove(&agent_id);
-                self.aggregators.remove(&agent_id);
-                return Err(crate::error::AmuxError::Agent(
-                    "ACP startup channel closed before ready".into(),
-                ));
-            }
-            Err(_) => {
-                self.agents.remove(&agent_id);
-                self.aggregators.remove(&agent_id);
-                return Err(crate::error::AmuxError::Agent(
-                    "ACP startup timed out before ready".into(),
-                ));
-            }
-        };
         if let Some(h) = self.agents.get_mut(&agent_id) {
             h.available_models = startup.available_models;
             h.acp_session_id = startup.acp_session_id;
@@ -480,56 +466,32 @@ impl RuntimeManager {
         );
         handle.session_id = remote_session_id.unwrap_or_default().to_string();
 
-        let (startup_tx, startup_rx) =
-            tokio::sync::oneshot::channel::<Result<adapter::AcpStartupMetadata, String>>();
-
         let launch = self.launch_config_for(agent_type);
-        let cmd_tx = adapter::spawn_acp_agent(
-            launch.binary.clone(),
-            launch.args.clone(),
-            worktree.to_string(),
-            prompt.to_string(),
-            agent_type,
-            handle.event_tx.clone(),
-            Some(acp_session_id.to_string()),
-            startup_tx,
-            None,
-            None,
-            HashMap::new(),
-        )?;
+        let (cmd_tx, startup) = self
+            .acp_host_pool
+            .attach_session(
+                agent_type,
+                &launch,
+                HashMap::new(),
+                worktree.to_string(),
+                Some(acp_session_id.to_string()),
+                None,
+                None,
+                prompt.to_string(),
+                handle.event_tx.clone(),
+                false,
+            )
+            .await?;
+
         handle.cmd_tx = Some(cmd_tx);
         handle.current_prompt = prompt.to_string();
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
-        info!(agent_id, worktree, "agent resumed via ACP");
+        info!(agent_id, worktree, "agent resumed via shared ACP host");
         self.agents.insert(agent_id.to_string(), handle);
         self.aggregators
             .insert(agent_id.to_string(), TurnAggregator::new());
 
-        let startup = match timeout(ACP_STARTUP_READY_TIMEOUT, startup_rx).await {
-            Ok(Ok(Ok(meta))) => meta,
-            Ok(Ok(Err(details))) => {
-                self.agents.remove(agent_id);
-                self.aggregators.remove(agent_id);
-                return Err(crate::error::AmuxError::Agent(format!(
-                    "ACP startup failed: {details}"
-                )));
-            }
-            Ok(Err(_)) => {
-                self.agents.remove(agent_id);
-                self.aggregators.remove(agent_id);
-                return Err(crate::error::AmuxError::Agent(
-                    "ACP startup channel closed before ready".into(),
-                ));
-            }
-            Err(_) => {
-                self.agents.remove(agent_id);
-                self.aggregators.remove(agent_id);
-                return Err(crate::error::AmuxError::Agent(
-                    "ACP startup timed out before ready".into(),
-                ));
-            }
-        };
         let new_acp_sid = startup.acp_session_id.clone();
         if let Some(h) = self.agents.get_mut(agent_id) {
             h.available_models = startup.available_models;
@@ -539,6 +501,9 @@ impl RuntimeManager {
         if let Some(model_id) = startup.initial_model {
             self.set_current_model(agent_id, &model_id);
         }
+
+        self.seed_cursor_from_prior_runtime(agent_id, remote_session_id)
+            .await;
 
         // Upsert agent_runtimes with status="starting" on resume
         if let Some(sb) = &self.backend {
@@ -817,6 +782,7 @@ impl RuntimeManager {
             .ok_or_else(|| crate::error::AmuxError::Agent("no ACP command channel".into()))?;
         #[cfg(not(test))]
         tx.send(adapter::AcpCommand::SetModel {
+            acp_session_id: handle.acp_session_id.clone(),
             model_id: model_id.to_string(),
         })
         .await
@@ -939,6 +905,55 @@ impl RuntimeManager {
         }
     }
 
+    /// Map a command-topic runtime id to a live agent key. Desktop clients can
+    /// target a stale spawn id from an old MQTT retain; when exactly one
+    /// active runtime exists, route the grant/deny there instead.
+    pub fn resolve_permission_runtime_key(&self, topic_runtime_id: &str) -> Option<String> {
+        if self.agents.contains_key(topic_runtime_id) {
+            return Some(topic_runtime_id.to_string());
+        }
+        let active: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, h)| {
+                matches!(
+                    h.status,
+                    amux::AgentStatus::Starting
+                        | amux::AgentStatus::Active
+                        | amux::AgentStatus::Idle
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if active.len() == 1 {
+            return Some(active[0].clone());
+        }
+        None
+    }
+
+    /// Like [`resolve_permission`] but retargets stale topic runtime ids.
+    pub async fn resolve_permission_for_topic(
+        &mut self,
+        topic_runtime_id: &str,
+        request_id: &str,
+        granted: bool,
+    ) -> crate::error::Result<()> {
+        let agent_key = self
+            .resolve_permission_runtime_key(topic_runtime_id)
+            .ok_or_else(|| {
+                crate::error::AmuxError::Agent(format!("agent {} not found", topic_runtime_id))
+            })?;
+        if agent_key != topic_runtime_id {
+            tracing::warn!(
+                requested_runtime_id = topic_runtime_id,
+                resolved_runtime_id = %agent_key,
+                "permission response retargeted to active runtime"
+            );
+        }
+        self.resolve_permission(&agent_key, request_id, granted)
+            .await
+    }
+
     pub fn get_handle(&self, agent_id: &str) -> Option<&RuntimeHandle> {
         self.agents.get(agent_id)
     }
@@ -952,6 +967,13 @@ impl RuntimeManager {
     /// so anything present here is by definition still tracked; the caller
     /// reads `AgentStatus` off the retained state topic if it cares about
     /// liveness.
+    /// Tuple-exact lookup `(session_id, agent_type, workspace_id)`.
+    ///
+    /// Retained for reference/tests: `apply_start_runtime` now enforces the
+    /// stronger "one live runtime per session" invariant directly (reuse the
+    /// tuple-exact match, supersede the rest), so this is no longer on the
+    /// runtime-start hot path.
+    #[allow(dead_code)]
     pub fn find_active_runtime_for(
         &self,
         session_id: &str,
@@ -979,6 +1001,18 @@ impl RuntimeManager {
 
     pub fn get_handle_mut(&mut self, agent_id: &str) -> Option<&mut RuntimeHandle> {
         self.agents.get_mut(agent_id)
+    }
+
+    /// Advance the in-memory replay cursor after routing a session message.
+    /// The backend row is updated separately; both must stay in sync so a
+    /// later dedup catchup does not re-prompt already-handled rows.
+    pub fn advance_message_cursor(&mut self, runtime_id: &str, message_id: &str) {
+        if message_id.is_empty() {
+            return;
+        }
+        if let Some(h) = self.agents.get_mut(runtime_id) {
+            h.last_processed_message_id = Some(message_id.to_string());
+        }
     }
 
     /// Drain events from all agents, returns (agent_id, event) pairs.
@@ -1080,6 +1114,7 @@ impl RuntimeManager {
         Some(handle.to_proto_info(current, commands))
     }
 
+    #[allow(dead_code)]
     pub fn agent_ids(&self) -> Vec<String> {
         self.agents.keys().cloned().collect()
     }
@@ -1091,6 +1126,17 @@ impl RuntimeManager {
             .filter(|(_, h)| h.session_id == session_id)
             .map(|(rid, _)| rid.clone())
             .collect()
+    }
+
+    /// Among in-memory runtimes bound to `session_id`, return the one with
+    /// the greatest `started_at`. Defense-in-depth when multiple runtimes
+    /// leaked despite the one-runtime-per-session invariant.
+    pub fn newest_runtime_id_for_session(&self, session_id: &str) -> Option<String> {
+        self.agents
+            .iter()
+            .filter(|(_, h)| h.session_id == session_id)
+            .max_by_key(|(_, h)| h.started_at)
+            .map(|(id, _)| id.clone())
     }
 
     /// Return the `agent_id` stored on the handle for the given runtime key.
@@ -1150,6 +1196,7 @@ impl RuntimeManager {
     /// real ACP UUID (for gateway sessions this is the SQL-minted
     /// `acp_session_id` hex). It's used to name the per-session MCP config
     /// file and is forwarded back to amuxd by the spawned `mcp-server`.
+    #[allow(dead_code)]
     pub async fn create_gateway_session(
         &mut self,
         team_id: &str,
@@ -1791,7 +1838,12 @@ mod tests {
             .await;
 
         let err = result.expect_err("missing ACP binary should fail startup");
-        assert!(err.to_string().contains("ACP startup failed"), "got: {err}");
+        assert!(
+            err.to_string().contains("ACP host init")
+                || err.to_string().contains("ACP attach failed")
+                || err.to_string().contains("spawn ACP host"),
+            "got: {err}"
+        );
         assert_eq!(mgr.agent_count(), 0);
     }
 
@@ -1809,6 +1861,37 @@ mod tests {
         assert_eq!(ids, vec!["rt1", "rt2"]);
         assert_eq!(mgr.runtime_ids_for_session("session_OTHER"), vec!["rt3"]);
         assert!(mgr.runtime_ids_for_session("unknown").is_empty());
+    }
+
+    #[test]
+    fn newest_runtime_id_for_session_picks_latest_started_at() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        mgr.add_test_runtime("rt-old", "agent_A", "session_S");
+        mgr.add_test_runtime("rt-new", "agent_B", "session_S");
+        mgr.get_handle_mut("rt-old").unwrap().started_at = 100;
+        mgr.get_handle_mut("rt-new").unwrap().started_at = 200;
+
+        assert_eq!(
+            mgr.newest_runtime_id_for_session("session_S"),
+            Some("rt-new".to_string())
+        );
+        assert_eq!(mgr.newest_runtime_id_for_session("missing"), None);
+    }
+
+    #[test]
+    fn resolve_permission_runtime_key_retargets_stale_topic_to_sole_active_runtime() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        mgr.add_test_runtime("cd073767", "agent-x", "session-s");
+        mgr.get_handle_mut("cd073767").unwrap().status = amux::AgentStatus::Active;
+
+        assert_eq!(
+            mgr.resolve_permission_runtime_key("ff679fef").as_deref(),
+            Some("cd073767")
+        );
+        assert_eq!(
+            mgr.resolve_permission_runtime_key("cd073767").as_deref(),
+            Some("cd073767")
+        );
     }
 
     #[test]

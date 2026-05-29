@@ -24,7 +24,6 @@ const workspaceStoreMocks = vi.hoisted(() => ({
 }))
 
 const teamModeStoreMocks = vi.hoisted(() => ({
-  teamMode: false,
   teamModeType: null as string | null,
   loadTeamGitFileSyncStatus: vi.fn(),
 }))
@@ -260,7 +259,7 @@ describe('AppSidebar', () => {
     workspaceStoreMocks.activeTab = 'shortcuts'
     workspaceStoreMocks.openPanel = vi.fn()
     workspaceStoreMocks.closePanel = vi.fn()
-    teamModeStoreMocks.teamMode = false
+    teamModeStoreMocks.teamModeType = null
     authStoreMocks.session = {
       user: {
         id: 'user-1',

@@ -403,11 +403,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         useGitReposStore.getState().reset();
       } catch { /* ignore */ }
       useTeamModeStore.setState({
-        teamMode: false,
         teamModeType: null,
         teamModelConfig: null,
         _appliedConfigKey: null,
-        myRole: null,
         teamGitSyncing: false,
       });
       // Load team config immediately so sidebar shows team tag on startup
@@ -506,11 +504,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const { useTeamModeStore } = await import("./team-mode");
       useTeamMembersStore.getState().reset();
       useTeamModeStore.setState({
-        teamMode: false,
         teamModeType: null,
         teamModelConfig: null,
         _appliedConfigKey: null,
-        myRole: null,
         teamGitSyncing: false,
       });
     } catch { /* ignore */ }

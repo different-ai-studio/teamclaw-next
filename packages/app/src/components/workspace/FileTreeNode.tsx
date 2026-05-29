@@ -23,7 +23,7 @@ import {
 import { cn } from '@/lib/utils';
 import { TEAM_REPO_DIR } from '@/lib/build-config';
 import { ObsidianIcon } from '@/components/knowledge/ObsidianIcon';
-import { useTeamModeStore } from '@/stores/team-mode';
+import { useTeamPermissions } from '@/lib/team-permissions';
 import { useTabsStore } from '@/stores/tabs';
 import { getFileIcon } from '@/lib/file-icons';
 import { getGitStatusIndicator, getGitStatusTextColor } from '@/lib/git-status-utils';
@@ -254,9 +254,9 @@ export const FileTreeItem = React.memo(function FileTreeItem({
 }: FileTreeItemProps) {
   const { t } = useTranslation();
   const isDirectory = node.type === "directory";
-  const myRole = useTeamModeStore((s) => s.myRole)
+  const { canEditFiles } = useTeamPermissions()
   const isTeamFile = node.path.includes(`/${TEAM_REPO_DIR}/`)
-  const isViewerRestricted = isTeamFile && myRole === 'viewer'
+  const isViewerRestricted = isTeamFile && !canEditFiles
   const isCutTarget = clipboardPaths?.includes(node.path) && isClipboardCut;
   const displayName = compactName || node.name;
   const contextMenuOpenedAtRef = useRef(0);

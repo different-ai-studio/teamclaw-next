@@ -26,6 +26,7 @@ impl<'a> Publisher<'a> {
     }
 
     /// Convenience constructor for the MQTT path.
+    #[allow(dead_code)]
     pub fn new(mqtt: &'a super::MqttClient) -> Self {
         Self {
             client: Arc::new(mqtt.client.clone()),
@@ -50,7 +51,6 @@ impl<'a> Publisher<'a> {
         agent_id: &str,
         info: &amux::RuntimeInfo,
     ) -> Result<(), teamclaw_transport::PublisherError> {
-        use prost::Message;
         let payload = info.encode_to_vec();
         self.publish_message(self.topics.runtime_state(agent_id), true, payload)
             .await
@@ -74,7 +74,6 @@ impl<'a> Publisher<'a> {
         &self,
         state: &amux::DeviceState,
     ) -> Result<(), teamclaw_transport::PublisherError> {
-        use prost::Message;
         let payload = state.encode_to_vec();
         self.publish_message(self.topics.device_state(), true, payload)
             .await
@@ -109,7 +108,6 @@ impl<'a> Publisher<'a> {
         event_type: &str,
         refresh_hint: &str,
     ) -> Result<(), teamclaw_transport::PublisherError> {
-        use prost::Message;
         let notify = teamclaw::Notify {
             event_type: event_type.to_string(),
             refresh_hint: refresh_hint.to_string(),

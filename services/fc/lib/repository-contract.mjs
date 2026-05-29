@@ -643,19 +643,40 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.equal(out, null);
   });
 
+  test("repository contract: attachments bucket is isolated from avatars bucket", async () => {
+    const repo = createRepository();
+    const attachmentBytes = Buffer.from("attachment payload");
+    const avatarBytes = Buffer.from("avatar payload");
+    await repo.uploadAttachment({ path: "iso/x.bin", mime: "application/octet-stream", bytes: attachmentBytes });
+    await repo.uploadAttachment({ path: "iso/x.bin", mime: "image/png", bytes: avatarBytes, bucket: "avatars" });
+
+    const attachmentOut = await repo.downloadAttachment("iso/x.bin");
+    assert.ok(attachmentOut);
+    assert.deepEqual(attachmentOut.bytes, attachmentBytes);
+
+    const avatarOut = await repo.downloadAttachment("iso/x.bin", { bucket: "avatars" });
+    assert.ok(avatarOut);
+    assert.deepEqual(avatarOut.bytes, avatarBytes);
+
+    const avatarUpload = await repo.uploadAttachment({ path: "iso/url.png", mime: "image/png", bytes: avatarBytes, bucket: "avatars" });
+    assert.ok(avatarUpload.url.includes("/avatars/"), "avatars bucket url must reference avatars/");
+  });
+
   test("repository contract: submitFeedback returns feedback object", async () => {
     const repo = createRepository();
     const out = await repo.submitFeedback({
       messageId: "00000000-0000-0000-0000-000000000001",
       actorId: "00000000-0000-0000-0000-000000000002",
-      kind: "up",
+      teamId: "00000000-0000-0000-0000-000000000004",
+      sessionId: "00000000-0000-0000-0000-000000000003",
+      kind: "positive",
       starRating: null,
-      note: null,
+      skill: null,
     });
     assert.ok(out, "result must be returned");
     assert.equal(out.messageId, "00000000-0000-0000-0000-000000000001");
     assert.equal(out.actorId, "00000000-0000-0000-0000-000000000002");
-    assert.equal(out.kind, "up");
+    assert.equal(out.kind, "positive");
   });
 
   test("repository contract: listFeedback returns items array", async () => {
@@ -670,11 +691,186 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     await repo.deleteFeedback("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002");
   });
 
-  test("repository contract: getTeamLeaderboard returns items array", async () => {
+  test("repository contract: getTeamLeaderboard returns enriched items", async () => {
     const repo = createRepository();
     const out = await repo.getTeamLeaderboard("00000000-0000-0000-0000-000000000004", { period: "week" });
     assert.ok(out, "result must be returned");
     assert.ok(Array.isArray(out.items), "items must be an array");
+    if (out.items.length > 0) {
+      const row = out.items[0];
+      assert.deepEqual(Object.keys(row).sort(), [
+        "actorId", "costUsd", "displayName", "negativeFeedback", "period",
+        "positiveFeedback", "score", "sessionCount", "skillUsage", "teamId", "tokensUsed",
+      ].sort());
+      assert.equal(row.period, "week");
+      assert.equal(typeof row.skillUsage, "object");
+    }
+  });
+
+  test("repository contract: submitSessionReport stores report and skill usage", async () => {
+    const repo = createRepository();
+    await repo.submitSessionReport({
+      actorId: "00000000-0000-0000-0000-000000000002",
+      teamId: "00000000-0000-0000-0000-000000000004",
+      sessionId: "00000000-0000-0000-0000-000000000003",
+      tokensUsed: 1234,
+      costUsd: 0.5,
+      model: "claude-opus-4-8",
+      agentKind: "code",
+      endedAt: "2026-05-29T00:00:00Z",
+      skillUsage: { "sentry-fix": 2 },
+    });
+  });
+
+  test("repository contract: submitSkillUsage succeeds", async () => {
+    const repo = createRepository();
+    await repo.submitSkillUsage({
+      actorId: "00000000-0000-0000-0000-000000000002",
+      teamId: "00000000-0000-0000-0000-000000000004",
+      sessionId: null,
+      skill: "superpowers:brainstorming",
+      count: 1,
+    });
+  });
+
+  test("repository contract: listFeedbackSummary returns items array", async () => {
+    const repo = createRepository();
+    const out = await repo.listFeedbackSummary("00000000-0000-0000-0000-000000000004");
+    assert.ok(out, "result must be returned");
+    assert.ok(Array.isArray(out.items), "items must be an array");
+  });
+
+  test("repository contract: telemetry round-trip aggregates into leaderboard + summary", async () => {
+    const repo = createRepository();
+    const TEAM = "00000000-0000-0000-0000-0000000000aa";
+    const ACTOR = "00000000-0000-0000-0000-0000000000bb";
+
+    await repo.submitSessionReport({
+      actorId: ACTOR, teamId: TEAM, sessionId: "00000000-0000-0000-0000-0000000000c1",
+      tokensUsed: 1000, costUsd: 0.5, model: "m", agentKind: "code",
+      endedAt: "2026-05-29T00:00:00Z", skillUsage: { "sentry-fix": 2 },
+    });
+    await repo.submitSkillUsage({ actorId: ACTOR, teamId: TEAM, sessionId: null, skill: "brainstorm", count: 3 });
+    await repo.submitFeedback({
+      messageId: "00000000-0000-0000-0000-0000000000d1", actorId: ACTOR, teamId: TEAM,
+      sessionId: "00000000-0000-0000-0000-0000000000c1", kind: "positive", starRating: null, skill: null,
+    });
+    await repo.submitFeedback({
+      messageId: "00000000-0000-0000-0000-0000000000d2", actorId: ACTOR, teamId: TEAM,
+      sessionId: "00000000-0000-0000-0000-0000000000c1", kind: "negative", starRating: null, skill: null,
+    });
+
+    const lb = await repo.getTeamLeaderboard(TEAM, { period: "week" });
+    assert.ok(lb.items.length > 0, "leaderboard must include the actor after a report");
+    const row = lb.items.find((r) => r.actorId === ACTOR);
+    assert.ok(row, "submitted actor must appear in leaderboard");
+    assert.deepEqual(Object.keys(row).sort(), [
+      "actorId", "costUsd", "displayName", "negativeFeedback", "period",
+      "positiveFeedback", "score", "sessionCount", "skillUsage", "teamId", "tokensUsed",
+    ].sort());
+    assert.equal(row.tokensUsed, 1000);
+    assert.equal(row.sessionCount, 1);
+    assert.equal(row.positiveFeedback, 1);
+    assert.equal(row.negativeFeedback, 1);
+    assert.equal(row.skillUsage["sentry-fix"], 2);
+    assert.equal(row.skillUsage["brainstorm"], 3);
+
+    const summary = await repo.listFeedbackSummary(TEAM);
+    const sRow = summary.items.find((s) => s.actorId === ACTOR);
+    assert.ok(sRow, "summary must include the actor");
+    assert.deepEqual(Object.keys(sRow).sort(), ["actorId", "displayName", "negative", "positive", "total"].sort());
+    assert.equal(sRow.positive, 1);
+    assert.equal(sRow.negative, 1);
+    assert.equal(sRow.total, 2);
+  });
+
+  test("repository contract: enableShareMode locks team to an oss share mode", async () => {
+    const repo = createRepository();
+    const out = await repo.enableShareMode("team-share-1", "oss", null);
+    assert.ok(out, "result must be returned");
+    assert.equal(out.id, "team-share-1");
+    assert.equal(out.shareMode, "oss");
+    assert.ok(out.shareEnabledAt, "shareEnabledAt must be set");
+  });
+
+  test("repository contract: enableShareMode accepts custom_git gitConfig", async () => {
+    const repo = createRepository();
+    const out = await repo.enableShareMode("team-share-2", "custom_git", {
+      remoteUrl: "git@example.com:team/repo.git",
+      authKind: "ssh_key",
+      credentialRef: "keychain://team-share-2/ssh",
+    });
+    assert.ok(out, "result must be returned");
+    assert.equal(out.shareMode, "custom_git");
+    assert.equal(out.gitRemoteUrl, "git@example.com:team/repo.git");
+    assert.equal(out.gitAuthKind, "ssh_key");
+  });
+
+  test("repository contract: enableShareMode rejects a second enable on the same team", async () => {
+    const repo = createRepository();
+    await repo.enableShareMode("team-share-3", "managed_git", null);
+    await assert.rejects(
+      () => repo.enableShareMode("team-share-3", "oss", null),
+      (error) => /share_mode|locked|already/i.test(error?.message ?? ""),
+    );
+  });
+
+  test("repository contract: getShareMode returns null mode for fresh team", async () => {
+    const repo = createRepository();
+    const out = await repo.getShareMode("team-share-fresh");
+    assert.ok(out, "result must be returned");
+    assert.equal(out.mode, null);
+    assert.equal(out.enabledAt, null);
+    assert.equal(out.gitRemoteUrl, null);
+    assert.equal(out.gitAuthKind, null);
+  });
+
+  test("repository contract: getShareMode reflects a previously enabled share mode", async () => {
+    const repo = createRepository();
+    await repo.enableShareMode("team-share-4", "managed_git", null);
+    const out = await repo.getShareMode("team-share-4");
+    assert.equal(out.mode, "managed_git");
+    assert.ok(out.enabledAt, "enabledAt must be set once mode is enabled");
+  });
+
+  test("repository contract: setupLiteLlm returns gateway endpoint and key", async () => {
+    const repo = createRepository();
+    const out = await repo.setupLiteLlm("team-share-1");
+    assert.ok(out, "result must be returned");
+    assert.equal(typeof out.aiGatewayEndpoint, "string");
+    assert.ok(out.aiGatewayEndpoint.length > 0, "aiGatewayEndpoint must be non-empty");
+    assert.equal(typeof out.litellmKey, "string");
+    assert.ok(out.litellmKey.length > 0, "litellmKey must be non-empty");
+  });
+
+  test("repository contract: getWorkspaceConfig merges share + workspace fields", async () => {
+    const repo = createRepository();
+    await repo.enableShareMode("team-share-5", "custom_git", {
+      remoteUrl: "https://example.com/team/repo.git",
+      authKind: "https_token",
+      credentialRef: "keychain://team-share-5/token",
+    });
+    const out = await repo.getWorkspaceConfig("team-share-5");
+    assert.ok(out, "result must be returned");
+    assert.deepEqual(Object.keys(out).sort(), [
+      "gitAuthKind",
+      "gitRemoteUrl",
+      "litellmTeamId",
+      "shareMode",
+      "syncMode",
+    ].sort());
+    assert.equal(out.shareMode, "custom_git");
+    assert.equal(out.gitRemoteUrl, "https://example.com/team/repo.git");
+    assert.equal(out.gitAuthKind, "https_token");
+  });
+
+  test("repository contract: getWorkspaceConfig returns null share for fresh team", async () => {
+    const repo = createRepository();
+    const out = await repo.getWorkspaceConfig("team-share-fresh-2");
+    assert.ok(out, "result must be returned");
+    assert.equal(out.shareMode, null);
+    assert.equal(out.gitRemoteUrl, null);
+    assert.equal(out.gitAuthKind, null);
   });
 }
 

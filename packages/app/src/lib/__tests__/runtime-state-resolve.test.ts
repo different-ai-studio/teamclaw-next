@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { AgentType } from "@/lib/proto/amux_pb";
 import type { RuntimeStateEntry } from "@/stores/runtime-state-store";
 import {
+  agentModelDisplayLabel,
   agentModelIdsMatch,
   backendTypeFromRuntimeEntry,
   normalizeAgentModelId,
+  resolvePermissionCommandTarget,
   resolveRuntimeIdForAgent,
   resolveRuntimeStateEntryForAgent,
   resolveSetModelId,
@@ -103,6 +105,18 @@ describe("agentModelIdsMatch", () => {
   });
 });
 
+describe("agentModelDisplayLabel", () => {
+  it("prefers exact id row over earlier fuzzy alias in the list", () => {
+    const available = [
+      { id: "alibaba-cn/qwen3-coder-plus", displayName: "Alibaba (China)/QwQ Plus" },
+      { id: "opencode/mimo-v2.5-free (medium)", displayName: "OpenCode Zen/MiMo V2.5 Free (medium)" },
+    ];
+    expect(agentModelDisplayLabel("opencode/mimo-v2.5-free (medium)", available)).toBe(
+      "OpenCode Zen/MiMo V2.5 Free (medium)",
+    );
+  });
+});
+
 describe("selectAgentModel — canonical model resolver", () => {
   const agentUuid = "agent-mac";
   const sessionId = "session-1";
@@ -196,6 +210,24 @@ describe("resolveSetModelId", () => {
     expect(resolveSetModelId("agent-mac", "opencode/big-pickle", byRuntimeId)).toBe(
       "big-pickle",
     );
+  });
+});
+
+describe("resolvePermissionCommandTarget", () => {
+  it("prefers session runtime row over fresher stale retain", () => {
+    const byRuntimeId = {
+      "stale-spawn": {
+        ...entry("agent-a", "stale-spawn"),
+        lastUpdated: Date.now() + 10_000,
+      },
+      "live-spawn": entry("agent-a", "live-spawn"),
+    };
+    const target = resolvePermissionCommandTarget({
+      agentActorId: "agent-a",
+      sessionRuntimeRows: [{ agent_id: "agent-a", runtime_id: "live-spawn" }],
+      byRuntimeId,
+    });
+    expect(target).toEqual({ deviceId: "agent-a", runtimeId: "live-spawn" });
   });
 });
 
