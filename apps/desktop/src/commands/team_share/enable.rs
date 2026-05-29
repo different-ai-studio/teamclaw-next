@@ -60,7 +60,16 @@ fn generate_team_secret_hex() -> Result<String, String> {
 fn ensure_team_repo_dir(workspace_path: &str) -> Result<(), String> {
     let dir = std::path::Path::new(workspace_path).join(TEAM_REPO_DIR);
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("create_dir_all({}) failed: {e}", dir.display()))
+        .map_err(|e| format!("create_dir_all({}) failed: {e}", dir.display()))?;
+    // Initialize the fixed shared layout so every team-share mode (oss /
+    // managed_git / custom_git) starts with the same top-level directories the
+    // sync engine watches: skills/ knowledge/ .mcp/ _meta/ _secrets/ _feedback/.
+    for prefix in crate::commands::oss_sync::path_validator::ALLOWED_PREFIXES {
+        let sub = dir.join(prefix.trim_end_matches('/'));
+        std::fs::create_dir_all(&sub)
+            .map_err(|e| format!("create_dir_all({}) failed: {e}", sub.display()))?;
+    }
+    Ok(())
 }
 
 fn team_repo_path(workspace_path: &str) -> std::path::PathBuf {

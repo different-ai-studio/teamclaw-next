@@ -40,6 +40,15 @@ pub async fn tick(
         .map_err(|e| SyncError::State(format!("load team_secret: {e}")))?;
     let key = derive_key(&team_secret).map_err(SyncError::Crypto)?;
 
+    // Synced content lives in the team shared dir (<workspace>/teamclaw-team),
+    // not the workspace root. Scan / upload / download all operate under this
+    // content root; team secret, JWT and local sync state stay at the workspace
+    // root (.teamclaw/...).
+    let content_root = Path::new(workspace_path)
+        .join(crate::commands::TEAM_REPO_DIR)
+        .to_string_lossy()
+        .into_owned();
+
     let mut state = LocalSyncState::load(workspace_path, team_id)
         .map_err(|e| SyncError::State(e))?;
 
@@ -68,10 +77,10 @@ pub async fn tick(
         // Spec §4.3: path-validate all manifest items (defense vs. malicious remote).
         validate(&item.path).map_err(SyncError::from)?;
 
-        let abs_path = Path::new(workspace_path).join(&item.path);
+        let abs_path = Path::new(&content_root).join(&item.path);
 
         if let Some(parent) = abs_path.parent() {
-            validate_no_symlink_escape(Path::new(workspace_path), &abs_path)
+            validate_no_symlink_escape(Path::new(&content_root), &abs_path)
                 .map_err(SyncError::from)?;
             let _ = parent; // ensure compiler doesn't strip the validation
         }
@@ -124,7 +133,7 @@ pub async fn tick(
 
         // Download and overwrite.
         match download_and_write(
-            workspace_path,
+            &content_root,
             &item.path,
             &remote_cipher_hash,
             item.version,
@@ -146,7 +155,7 @@ pub async fn tick(
 
     // ── PUSH ─────────────────────────────────────────────────────────────────
     // Re-scan to pick up current mtime/size/dirty flags.
-    let scan = scan_workspace(workspace_path, &state);
+    let scan = scan_workspace(&content_root, &state);
 
     // Apply scan results back into state.
     for scanned in &scan {
@@ -184,7 +193,7 @@ pub async fn tick(
     let mut push_conflicts = 0u32;
 
     for path in all_dirty {
-        match upload_one(workspace_path, &path, team_id, &key, fc, &mut state).await {
+        match upload_one(&content_root, &path, team_id, &key, fc, &mut state).await {
             Ok(_) => pushed += 1,
             Err(SyncError::Conflict {
                 remote_version,
@@ -197,7 +206,7 @@ pub async fn tick(
                     remote_version
                 );
                 // Write local content as conflict sidecar.
-                let abs_path = Path::new(workspace_path).join(&path);
+                let abs_path = Path::new(&content_root).join(&path);
                 if let Ok(local_bytes) = std::fs::read(&abs_path) {
                     let local_cipher_hash = state
                         .files
@@ -211,7 +220,7 @@ pub async fn tick(
                 if let Some(hash) = remote_cipher_hash {
                     let version = remote_version.unwrap_or(0);
                     let _ = download_and_write(
-                        workspace_path,
+                        &content_root,
                         &path,
                         &hash,
                         version,
@@ -255,7 +264,7 @@ pub async fn tick(
 /// Download a remote blob, verify cipher_hash, decrypt, write to disk,
 /// and update state to non-dirty.
 pub async fn download_and_write(
-    workspace_path: &str,
+    content_root: &str,
     rel_path: &str,
     remote_cipher_hash: &str,
     version: i32,
@@ -270,7 +279,7 @@ pub async fn download_and_write(
     let plaintext = decrypt_blob(&blob, key).map_err(SyncError::Crypto)?;
     let plain_hash = sha256_hex(&plaintext);
 
-    let abs_path = Path::new(workspace_path).join(rel_path);
+    let abs_path = Path::new(content_root).join(rel_path);
     if let Some(parent) = abs_path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -305,14 +314,14 @@ pub async fn download_and_write(
 
 /// Encrypt and upload one dirty local file.
 async fn upload_one(
-    workspace_path: &str,
+    content_root: &str,
     rel_path: &str,
     team_id: &str,
     key: &[u8; 32],
     fc: &FcClient,
     state: &mut LocalSyncState,
 ) -> Result<(), SyncError> {
-    let abs_path = Path::new(workspace_path).join(rel_path);
+    let abs_path = Path::new(content_root).join(rel_path);
     let plaintext = tokio::fs::read(&abs_path)
         .await
         .map_err(|e| SyncError::Io(e.to_string()))?;

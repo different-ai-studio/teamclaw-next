@@ -169,9 +169,16 @@ pub async fn oss_sync_status(
 ) -> Result<SyncStatus, String> {
     let state = LocalSyncState::load(&workspace_path, &team_id)?;
 
+    // Synced content lives under the team shared dir, not the workspace root —
+    // scan there so coloring / counts match what oss_sync_now actually syncs.
+    let content_root = std::path::Path::new(&workspace_path)
+        .join(crate::commands::TEAM_REPO_DIR)
+        .to_string_lossy()
+        .into_owned();
+
     // Fresh scan so coloring reflects edits made since the last sync tick,
     // mirroring how git_status re-runs on each file-tree poll.
-    let scanned = scanner::scan_workspace(&workspace_path, &state);
+    let scanned = scanner::scan_workspace(&content_root, &state);
     let mut statuses: std::collections::HashMap<String, &'static str> =
         std::collections::HashMap::with_capacity(scanned.len());
     for f in &scanned {
@@ -189,7 +196,7 @@ pub async fn oss_sync_status(
 
     // Conflict sidecars on disk → mark their originals as conflicted (highest
     // precedence; overrides modified/new/synced).
-    for conflict_rel in scanner::scan_conflict_files(&workspace_path) {
+    for conflict_rel in scanner::scan_conflict_files(&content_root) {
         if let Some(orig) = conflict::original_from_conflict(&conflict_rel) {
             statuses.insert(orig, "conflict");
         }
@@ -275,7 +282,10 @@ pub async fn oss_sync_restore_version(
         crate::commands::oss_sync::crypto::decrypt_blob(&blob, &key).map_err(|e| e.to_string())?;
     let plain_hash = crate::commands::oss_sync::crypto::sha256_hex(&plaintext);
 
-    let abs_path = std::path::Path::new(&workspace_path).join(&path);
+    // Synced content lives under the team shared dir, not the workspace root.
+    let abs_path = std::path::Path::new(&workspace_path)
+        .join(crate::commands::TEAM_REPO_DIR)
+        .join(&path);
     if let Some(parent) = abs_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
