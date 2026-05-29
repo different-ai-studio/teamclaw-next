@@ -3,6 +3,8 @@ mod member_store;
 mod roles_skills;
 mod session_store;
 mod workspace_store;
+pub mod global_team_store;
+pub mod workspace_link;
 pub mod workspace_control;
 
 pub use daemon_config::{

@@ -9,11 +9,19 @@ import { ensureJwtSynced } from '@/lib/jwt-bridge'
 
 export type ShareMode = 'oss' | 'managed_git' | 'custom_git' | null
 
+// What the workspace `teamclaw-team` entry currently is, as reported by the
+// daemon-aware `team_share_get_status` command.
+export type LinkStatus = 'symlink' | 'real_dir' | 'missing'
+
 export interface ShareStatus {
   mode: ShareMode
   gitRemoteUrl?: string | null
   gitAuthKind?: string | null
   enabledAt?: string | null
+  // Per-workspace link to the daemon's single global copy, and where that
+  // global copy lives on disk (~/.amuxd/teams/<team_id>/teamclaw-team).
+  linkStatus?: LinkStatus
+  globalPath?: string | null
 }
 
 export interface CustomGitInput {
@@ -86,6 +94,8 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
           gitRemoteUrl: raw?.gitRemoteUrl ?? null,
           gitAuthKind: raw?.gitAuthKind ?? null,
           enabledAt: raw?.enabledAt ?? null,
+          linkStatus: raw?.linkStatus,
+          globalPath: raw?.globalPath ?? null,
         },
       })
     } catch (e) {

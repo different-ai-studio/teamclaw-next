@@ -7,14 +7,13 @@
 //!      `team_secret_store`.
 //!   2. POST `/v1/teams/{teamId}/share-mode` on FC with the chosen mode +
 //!      (for git modes) the `gitConfig` payload.
-//!   3. Ensure the workspace `teamclaw-team/` repo dir exists.
-//!   4. Update `.teamclaw/teamclaw.json` with `oss_team_id`, `share_mode`,
-//!      and (for git modes) `git_remote_url`.
 //!
-//! Actual `git clone` for managed_git / custom_git is intentionally deferred
-//! to Task 7, along with the proper credential-storage helper. For now,
-//! credentials are stashed directly into the env blob under
-//! `_git_credential.{mode}:{team_id}` with a TODO marker.
+//! The team shared directory is created and linked by the daemon (one global
+//! copy per team under `~/.amuxd/teams/<team_id>/teamclaw-team`, exposed via a
+//! `teamclaw-team` symlink in each workspace); these commands no longer create
+//! a per-workspace real dir. Team identifiers (team_id / share_mode / git URL)
+//! are NOT persisted to `teamclaw.json` — the single source of truth is the
+//! Cloud API current-team store.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -57,18 +56,14 @@ fn generate_team_secret_hex() -> Result<String, String> {
     Ok(hex::encode(bytes))
 }
 
-fn ensure_team_repo_dir(workspace_path: &str) -> Result<(), String> {
-    let dir = std::path::Path::new(workspace_path).join(TEAM_REPO_DIR);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("create_dir_all({}) failed: {e}", dir.display()))?;
-    // Initialize the fixed shared layout so every team-share mode (oss /
-    // managed_git / custom_git) starts with the same top-level directories the
-    // sync engine watches: skills/ knowledge/ .mcp/ _meta/ _secrets/ _feedback/.
-    for prefix in crate::commands::oss_sync::path_validator::ALLOWED_PREFIXES {
-        let sub = dir.join(prefix.trim_end_matches('/'));
-        std::fs::create_dir_all(&sub)
-            .map_err(|e| format!("create_dir_all({}) failed: {e}", sub.display()))?;
-    }
+/// The team shared directory is now created and linked by the daemon
+/// (one global copy per team under `~/.amuxd/teams/<team_id>/teamclaw-team`,
+/// exposed via a `teamclaw-team` symlink in each workspace). Desktop no longer
+/// eagerly creates a per-workspace real directory here; if a real dir is
+/// created later (git clone / OSS engine first write), the daemon consolidates
+/// it into the global copy and replaces it with a symlink. Kept as a no-op so
+/// the enable_* call sites are unchanged and to document the ownership move.
+fn ensure_team_repo_dir(_workspace_path: &str) -> Result<(), String> {
     Ok(())
 }
 
@@ -321,6 +316,32 @@ pub async fn team_share_set_team_secret(
 
 // ─── get_share_status ────────────────────────────────────────────────────
 
+/// What the workspace `teamclaw-team` entry currently is:
+/// `"symlink"` (linked to the daemon's global copy — a Windows junction also
+/// reports as a symlink to symlink_metadata), `"real_dir"` (legacy local dir,
+/// awaiting daemon consolidation), or `"missing"` (not linked yet).
+pub(crate) fn detect_link_status(workspace_path: &str) -> &'static str {
+    let link = std::path::Path::new(workspace_path).join(TEAM_REPO_DIR);
+    match std::fs::symlink_metadata(&link) {
+        Ok(m) if m.file_type().is_symlink() => "symlink",
+        Ok(m) if m.is_dir() => "real_dir",
+        _ => "missing",
+    }
+}
+
+/// `~/.amuxd/teams/<team_id>/teamclaw-team` — the daemon's global copy path,
+/// shown in the UI so users can see where synced content actually lives.
+pub(crate) fn global_team_dir_display(team_id: &str) -> Option<String> {
+    dirs::home_dir().map(|h| {
+        h.join(".amuxd")
+            .join("teams")
+            .join(team_id)
+            .join(TEAM_REPO_DIR)
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
 pub async fn get_share_status_impl(
     team_id: String,
     workspace_path: String,
@@ -328,7 +349,20 @@ pub async fn get_share_status_impl(
     let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
     let fc = FcClient::new(base_url, jwt);
     let path = format!("/v1/teams/{}/share-mode", team_id);
-    fc.get_json(&path).await.map_err(|e| e.to_string())
+    let mut value = fc.get_json(&path).await.map_err(|e| e.to_string())?;
+    // Augment the server share-mode payload with local link + global-path info
+    // so the settings UI can show where synced content lives and whether this
+    // workspace is linked. camelCase to match the existing payload shape.
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "linkStatus".to_string(),
+            json!(detect_link_status(&workspace_path)),
+        );
+        if let Some(p) = global_team_dir_display(&team_id) {
+            obj.insert("globalPath".to_string(), json!(p));
+        }
+    }
+    Ok(value)
 }
 
 #[tauri::command]
@@ -337,4 +371,40 @@ pub async fn team_share_get_status(
     workspace_path: String,
 ) -> Result<serde_json::Value, String> {
     get_share_status_impl(team_id, workspace_path).await
+}
+
+#[cfg(test)]
+mod link_status_tests {
+    use super::*;
+
+    #[test]
+    fn reports_missing_when_absent() {
+        let ws = tempfile::tempdir().unwrap();
+        assert_eq!(detect_link_status(ws.path().to_str().unwrap()), "missing");
+    }
+
+    #[test]
+    fn reports_real_dir_for_plain_directory() {
+        let ws = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(ws.path().join(TEAM_REPO_DIR)).unwrap();
+        assert_eq!(detect_link_status(ws.path().to_str().unwrap()), "real_dir");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_symlink_when_present() {
+        let ws = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(target.path(), ws.path().join(TEAM_REPO_DIR)).unwrap();
+        assert_eq!(detect_link_status(ws.path().to_str().unwrap()), "symlink");
+    }
+
+    #[test]
+    fn global_path_contains_team_and_amuxd() {
+        if let Some(p) = global_team_dir_display("team-xyz") {
+            assert!(p.contains("team-xyz"));
+            assert!(p.contains(".amuxd"));
+            assert!(p.ends_with(TEAM_REPO_DIR));
+        }
+    }
 }

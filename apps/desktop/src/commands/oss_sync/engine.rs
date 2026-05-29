@@ -21,6 +21,16 @@ use super::{
 use crate::commands::shared_secrets_crypto::derive_key;
 use crate::commands::team_secret_store::load_team_secret;
 
+/// The directory the OSS engine scans for this workspace. It is the
+/// `teamclaw-team` entry (a symlink to the team's global copy once the daemon
+/// has linked it). Returned as an owned String to match existing call sites.
+pub(crate) fn team_content_root(workspace_path: &str) -> String {
+    Path::new(workspace_path)
+        .join(crate::commands::TEAM_REPO_DIR)
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// Summary returned by `tick()`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TickResult {
@@ -44,10 +54,7 @@ pub async fn tick(
     // not the workspace root. Scan / upload / download all operate under this
     // content root; team secret, JWT and local sync state stay at the workspace
     // root (.teamclaw/...).
-    let content_root = Path::new(workspace_path)
-        .join(crate::commands::TEAM_REPO_DIR)
-        .to_string_lossy()
-        .into_owned();
+    let content_root = team_content_root(workspace_path);
 
     let mut state = LocalSyncState::load(workspace_path, team_id)
         .map_err(|e| SyncError::State(e))?;
@@ -377,4 +384,20 @@ async fn upload_one(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod content_root_tests {
+    use super::*;
+
+    #[test]
+    fn content_root_is_team_repo_dir_under_workspace() {
+        let root = team_content_root("/tmp/ws");
+        assert_eq!(
+            root,
+            Path::new("/tmp/ws")
+                .join(crate::commands::TEAM_REPO_DIR)
+                .to_string_lossy()
+        );
+    }
 }

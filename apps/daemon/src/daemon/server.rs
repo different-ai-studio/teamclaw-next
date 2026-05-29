@@ -123,6 +123,41 @@ fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSh
     })
 }
 
+/// Group registered workspaces by their `team_id`. Workspaces without a
+/// team_id are skipped. Returns `(team_id, Vec<workspace_path>)` pairs so the
+/// sweep syncs each team's global dir once, then links every member workspace.
+pub(crate) fn group_workspaces_by_team(
+    workspaces: &[crate::config::StoredWorkspace],
+) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
+    let mut by_team: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for w in workspaces {
+        if w.path.trim().is_empty() {
+            continue;
+        }
+        if let Some(team_id) = w.team_id.as_deref().filter(|t| !t.trim().is_empty()) {
+            by_team
+                .entry(team_id.to_string())
+                .or_default()
+                .push(w.path.clone());
+        }
+    }
+    by_team.into_iter().collect()
+}
+
+/// Pure policy for which team_id (if any) to stamp on a freshly-added
+/// workspace: an existing team_id always wins; otherwise inherit the daemon's
+/// team. An empty/whitespace daemon team yields none.
+pub(crate) fn team_id_to_stamp(existing: Option<&str>, daemon_team: Option<&str>) -> Option<String> {
+    if existing.is_some() {
+        return None;
+    }
+    daemon_team
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+}
+
 /// Per-session plan emitted by
 /// [`DaemonServer::plan_auto_restart_offline_sessions`]. Sessions that pass
 /// every filter (have a prior runtime, have unread from someone other than
@@ -834,13 +869,46 @@ impl DaemonServer {
     }
 
     async fn sync_team_shared_dirs_for_known_workspaces(&self) {
-        for workspace in &self.workspaces.workspaces {
-            if workspace.path.trim().is_empty() {
+        let grouped = group_workspaces_by_team(&self.workspaces.workspaces);
+        for (team_id, workspace_paths) in grouped {
+            // 1. Sync the single global copy for this team.
+            //    `load_team_shared_config_for_workspace` only returns Some for
+            //    git modes (it requires a non-empty git_url), so a git-backed
+            //    team is cloned/pulled into the global dir FIRST — `git clone`
+            //    needs an absent/empty target, so we must not pre-create the
+            //    fixed scaffold before cloning. OSS / unconfigured teams skip
+            //    this and just get the scaffold below.
+            let global_dir = crate::config::global_team_store::global_team_dir(&team_id);
+            let config = workspace_paths
+                .first()
+                .and_then(|first| load_team_shared_config_for_workspace(Path::new(first)));
+            if let Some(config) = &config {
+                if let Err(e) = crate::team_shared_git::sync_git_dir(&global_dir, config) {
+                    warn!(team_id, "global git sync failed: {e}");
+                }
+            }
+            // Ensure the fixed shared layout exists (idempotent). For OSS this
+            // creates the scaffold; for a freshly-cloned git repo it tops up any
+            // missing dirs (git ignores the empty ones).
+            if let Err(e) = crate::config::global_team_store::ensure_initialized(&team_id) {
+                warn!(team_id, "global team dir init failed: {e}");
                 continue;
             }
-            let workspace_root = Path::new(&workspace.path);
-            if let Some(config) = load_team_shared_config_for_workspace(workspace_root) {
-                sync_team_shared_dir_for_workspace(workspace_root, &config);
+            // 2. Ensure every member workspace links to the global dir.
+            for ws_path in &workspace_paths {
+                let ws_root = Path::new(ws_path);
+                let status =
+                    crate::config::workspace_link::ensure_workspace_link(ws_root, &team_id);
+                // The effective dir agents read from — the in-workspace link
+                // normally, or the global dir under the no-link fallback.
+                let effective =
+                    crate::config::global_team_store::resolve_team_dir(ws_root, &team_id);
+                info!(
+                    team_id,
+                    workspace = %ws_path,
+                    effective = %effective.display(),
+                    "team link: {status:?}"
+                );
             }
         }
     }
@@ -1572,6 +1640,10 @@ impl DaemonServer {
             Ok(outcome) => {
                 let mut workspace = outcome.workspace;
                 let mut should_save = outcome.inserted;
+
+                if self.stamp_daemon_team(&mut workspace) {
+                    should_save = true;
+                }
 
                 if self.sync_workspace_to_cloud(&mut workspace).await {
                     should_save = true;
@@ -3775,6 +3847,20 @@ impl DaemonServer {
         }
     }
 
+    /// Stamp the daemon's team onto a freshly-added workspace so the
+    /// team-share sweep can group + link it. `AddWorkspace` carries no
+    /// team_id, so the daemon-level team is authoritative. Returns true if a
+    /// team_id was set (caller should persist).
+    fn stamp_daemon_team(&self, ws: &mut crate::config::StoredWorkspace) -> bool {
+        match team_id_to_stamp(ws.team_id.as_deref(), self.config.team_id.as_deref()) {
+            Some(team_id) => {
+                ws.team_id = Some(team_id);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Applies a workspace add. Returns (success, error_text, resulting_workspace_if_any).
     /// Caller publishes any collab event or Notify hint.
     async fn apply_add_workspace(
@@ -3785,6 +3871,9 @@ impl DaemonServer {
             Ok(outcome) => {
                 let mut ws = outcome.workspace;
                 let mut should_save = outcome.inserted;
+                if self.stamp_daemon_team(&mut ws) {
+                    should_save = true;
+                }
                 if self.sync_workspace_to_cloud(&mut ws).await {
                     should_save = true;
                 }
@@ -4977,6 +5066,46 @@ mod tests {
     use rumqttc::{AsyncClient, MqttOptions};
     use std::io;
     use tempfile::TempDir;
+
+    #[test]
+    fn group_workspaces_by_team_dedups_and_skips_unteamed() {
+        use crate::config::StoredWorkspace;
+        let mk = |path: &str, team: Option<&str>| StoredWorkspace {
+            workspace_id: "id".into(),
+            remote_workspace_id: String::new(),
+            path: path.into(),
+            display_name: "ws".into(),
+            team_id: team.map(|t| t.to_string()),
+        };
+        let ws = vec![
+            mk("/a", Some("team-1")),
+            mk("/b", Some("team-1")),
+            mk("/c", Some("team-2")),
+            mk("/d", None),
+            mk("", Some("team-1")),
+        ];
+        let grouped = group_workspaces_by_team(&ws);
+        assert_eq!(grouped.len(), 2);
+        let t1 = grouped.iter().find(|(t, _)| t == "team-1").unwrap();
+        assert_eq!(t1.1, vec!["/a".to_string(), "/b".to_string()]);
+        let t2 = grouped.iter().find(|(t, _)| t == "team-2").unwrap();
+        assert_eq!(t2.1, vec!["/c".to_string()]);
+    }
+
+    #[test]
+    fn team_id_to_stamp_inherits_daemon_team_only_when_unset() {
+        // Existing team always wins → no stamp.
+        assert_eq!(team_id_to_stamp(Some("team-x"), Some("team-d")), None);
+        // No existing → inherit daemon team.
+        assert_eq!(
+            team_id_to_stamp(None, Some("team-d")),
+            Some("team-d".to_string())
+        );
+        // No daemon team → nothing to stamp.
+        assert_eq!(team_id_to_stamp(None, None), None);
+        // Empty/whitespace daemon team → nothing to stamp.
+        assert_eq!(team_id_to_stamp(None, Some("   ")), None);
+    }
 
     struct TestServer {
         server: DaemonServer,
