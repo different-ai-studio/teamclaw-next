@@ -286,13 +286,13 @@ impl FcClient {
         Ok(())
     }
 
-    /// GET /sync/versions
+    /// GET /sync/versions — returns (versions, nextCursor).
     pub async fn list_versions(
         &self,
         team_id: &str,
         path: &str,
         cursor: Option<String>,
-    ) -> Result<Vec<VersionInfo>, SyncError> {
+    ) -> Result<(Vec<VersionInfo>, Option<String>), SyncError> {
         let mut url = format!(
             "{}/sync/versions?teamId={}&path={}",
             self.base_url,
@@ -309,7 +309,16 @@ impl FcClient {
             .send()
             .await
             .map_err(|e| SyncError::Network(e.to_string()))?;
-        map_fc_response(resp).await
+
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct VersionsResp {
+            versions: Vec<VersionInfo>,
+            #[serde(default)]
+            next_cursor: Option<String>,
+        }
+        let parsed: VersionsResp = map_fc_response(resp).await?;
+        Ok((parsed.versions, parsed.next_cursor))
     }
 
     /// POST /sync/set-mode — owner-only sync_mode switch (Tranche 5).
