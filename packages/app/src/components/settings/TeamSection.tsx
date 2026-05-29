@@ -118,6 +118,7 @@ export function TeamSection() {
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const myRole = useTeamModeStore((s) => s.myRole)
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const currentMemberRole = useCurrentTeamStore((s) => s.currentMember?.role ?? null)
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const shareMode = useTeamShareStore((s) => s.status.mode)
 
@@ -127,7 +128,12 @@ export function TeamSection() {
   // A team is "already configured" if either source reports a mode. New teams (PR #213
   // no longer auto-create team-share) report neither — those land in the onboarding wizard.
   const isOss = teamModeType === 'webdav'
-  const isOwner = myRole === 'owner'
+  // Ownership for the "enable team-share" action comes from the cloud membership
+  // role, which is set the moment a team exists (e.g. an anonymous user is the
+  // owner of their own team). team-mode's myRole only resolves once team-share
+  // is already active, so relying on it alone hid the 开通 button from owners of
+  // not-yet-configured teams.
+  const isOwner = currentMemberRole === 'owner' || myRole === 'owner'
   const isConfigured = shareMode !== null || teamModeType !== null
 
   return (

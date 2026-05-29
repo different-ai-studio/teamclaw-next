@@ -25,7 +25,6 @@ import { useProviderStore } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTeamModeStore } from '@/stores/team-mode'
 import { useCurrentTeamStore } from '@/stores/current-team'
-import { TeamLiteLlmSection } from './llm/TeamLiteLlmSection'
 import { TeamSharedLlmPane } from './llm/TeamSharedLlmPane'
 import type { LlmModelEntry } from './team/HostLlmConfig'
 import { loadTeamProviderFormState, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'
@@ -97,7 +96,7 @@ export const LLMSection = React.memo(function LLMSection() {
   const teamModelConfig = useTeamModeStore((s) => s.teamModelConfig)
   const devUnlocked = useTeamModeStore((s) => s.devUnlocked)
   const myRole = useTeamModeStore((s) => s.myRole)
-  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const currentMemberRole = useCurrentTeamStore((s) => s.currentMember?.role ?? null)
   const providers = useProviderStore((s) => s.providers)
   const providersLoading = useProviderStore((s) => s.providersLoading)
   const configuredProviders = useProviderStore((s) => s.configuredProviders)
@@ -160,8 +159,10 @@ export const LLMSection = React.memo(function LLMSection() {
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null)
 
   // Team-shared ("host") LLM config — owner-only edit, surfaced as a pinned
-  // card at the top of the provider list for everyone.
-  const isTeamOwner = myRole === 'owner'
+  // card at the top of the provider list for everyone. Ownership comes from the
+  // cloud membership role (available before team-share is set up); team-mode's
+  // myRole only resolves once team-share is active, so it's a fallback.
+  const isTeamOwner = currentMemberRole === 'owner' || myRole === 'owner'
   const [teamSharedLlmOpen, setTeamSharedLlmOpen] = React.useState(false)
   const [teamSharedModel, setTeamSharedModel] = React.useState<{
     baseUrl: string
@@ -588,13 +589,6 @@ export const LLMSection = React.memo(function LLMSection() {
           iconColor="text-purple-500"
         />
         <WorkspacePathCard path={workspacePath} t={t} onSwitch={handleSwitchWorkspace} switching={switchingWorkspace} />
-        {currentTeamId && workspacePath && (
-          <TeamLiteLlmSection
-            teamId={currentTeamId}
-            workspacePath={workspacePath}
-            isOwner={myRole === 'owner'}
-          />
-        )}
         <SettingCard>
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400">
@@ -687,14 +681,6 @@ export const LLMSection = React.memo(function LLMSection() {
       </div>
 
       <WorkspacePathCard path={workspacePath} t={t} onSwitch={handleSwitchWorkspace} switching={switchingWorkspace} />
-
-      {currentTeamId && workspacePath && (
-        <TeamLiteLlmSection
-          teamId={currentTeamId}
-          workspacePath={workspacePath}
-          isOwner={myRole === 'owner'}
-        />
-      )}
 
       {/* Loading State */}
       {providersLoading && providers.length === 0 && (
