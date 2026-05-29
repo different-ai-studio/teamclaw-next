@@ -74,8 +74,16 @@ pub fn build(state: HttpState) -> Router {
             get(workspaces::get_skills),
         )
         .route(
+            "/v1/workspaces/:id/skills/:slug",
+            put(workspaces::put_skill).delete(workspaces::delete_skill),
+        )
+        .route(
             "/v1/workspaces/:id/roles",
             get(workspaces::get_roles),
+        )
+        .route(
+            "/v1/workspaces/:id/roles/:slug",
+            put(workspaces::put_role).delete(workspaces::delete_role),
         )
         .route(
             "/v1/workspaces/:id/runtime",

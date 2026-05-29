@@ -12,7 +12,7 @@ import type {
 import { loadAllSkills } from "@/lib/git/skill-loader"
 import type { SkillSource } from "@/lib/git/types"
 import { isTauri } from "@/lib/utils"
-import { encodeWorkspaceId, getDaemonRolesSkillsState } from "@/lib/daemon-local-client"
+import { encodeWorkspaceId, getDaemonRolesSkillsState, putDaemonRole, deleteDaemonRole } from "@/lib/daemon-local-client"
 
 const ROLE_ROOT = ".teamclaw/roles"
 const ROLE_SKILL_DIR = ".teamclaw/roles/skills"
@@ -385,24 +385,52 @@ export async function loadRolesSkillsWorkspaceState(workspacePath: string | null
 }
 
 export async function saveRole(workspacePath: string, editor: RoleEditorState, targetFilePath?: string): Promise<RoleRecord> {
-  await ensureRolesRoot(workspacePath)
   const slug = editor.slug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
   if (!slug) {
     throw new Error("Role name is required")
   }
 
+  const markdown = serializeRoleMarkdown({ ...editor, slug })
+
+  if (isTauri()) {
+    try {
+      const saved = await putDaemonRole(encodeWorkspaceId(workspacePath), slug, {
+        rawMarkdown: markdown,
+        targetFilePath,
+      })
+      if (saved) {
+        return saved as RoleRecord
+      }
+    } catch (err) {
+      console.warn("[roles/loader] daemon role save failed, falling back to FS:", err)
+    }
+  }
+
+  await ensureRolesRoot(workspacePath)
   const rolePath = targetFilePath ?? `${workspacePath}/${ROLE_ROOT}/${slug}/ROLE.md`
   const roleDir = rolePath.slice(0, rolePath.lastIndexOf("/"))
   if (!(await exists(roleDir))) {
     await mkdir(roleDir, { recursive: true })
   }
 
-  const markdown = serializeRoleMarkdown({ ...editor, slug })
   await writeTextFile(rolePath, markdown)
   return parseRoleMarkdown(markdown, slug, rolePath)
 }
 
 export async function deleteRole(workspacePath: string, roleSlug: string, roleFilePath?: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const deleted = await deleteDaemonRole(
+        encodeWorkspaceId(workspacePath),
+        roleSlug,
+        roleFilePath,
+      )
+      if (deleted) return
+    } catch (err) {
+      console.warn("[roles/loader] daemon role delete failed, falling back to FS:", err)
+    }
+  }
+
   if (roleFilePath) {
     const roleDirFromPath = roleFilePath.slice(0, roleFilePath.lastIndexOf("/"))
     if (await exists(roleDirFromPath)) {

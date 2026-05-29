@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+const DEFAULT_CLOUD_API_URL: &str = "https://cloud.ucar.cc";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
     CloudApi,
@@ -34,13 +36,77 @@ impl ProviderConfig {
     }
 
     pub fn load_from_path(backend_path: &Path) -> Result<Self, ProviderConfigError> {
-        if !backend_path.exists() {
+        if backend_path.exists() {
+            return Self::load_backend_toml(backend_path);
+        }
+
+        let legacy_supabase_path = backend_path
+            .parent()
+            .map(|dir| dir.join("supabase.toml"))
+            .ok_or_else(|| {
+                ProviderConfigError::Config("backend.toml has no parent directory".to_string())
+            })?;
+
+        if legacy_supabase_path.exists() {
+            let migrated = Self::migrate_legacy_supabase_toml(&legacy_supabase_path)?;
+            Self::write_backend_toml(backend_path, &migrated)?;
+            tracing::info!(
+                backend = %backend_path.display(),
+                legacy = %legacy_supabase_path.display(),
+                "migrated legacy supabase.toml to backend.toml (kind = cloud_api)"
+            );
+            return Ok(ProviderConfig::CloudApi(migrated));
+        }
+
+        Err(ProviderConfigError::Config(format!(
+            "backend.toml not found at {} (legacy supabase.toml also missing at {})",
+            backend_path.display(),
+            legacy_supabase_path.display()
+        )))
+    }
+
+    fn migrate_legacy_supabase_toml(path: &Path) -> Result<CloudApiConfig, ProviderConfigError> {
+        let text = std::fs::read_to_string(path)?;
+        let legacy: LegacySupabaseToml = toml::from_str(&text).map_err(|e| {
+            ProviderConfigError::Config(format!(
+                "parse legacy supabase.toml at {}: {e}",
+                path.display()
+            ))
+        })?;
+        if legacy.refresh_token.trim().is_empty() {
             return Err(ProviderConfigError::Config(format!(
-                "backend.toml not found at {}",
-                backend_path.display()
+                "legacy supabase.toml at {} is missing refresh_token",
+                path.display()
             )));
         }
-        Self::load_backend_toml(backend_path)
+        Ok(CloudApiConfig {
+            url: resolve_cloud_api_url(),
+            refresh_token: legacy.refresh_token,
+            team_id: legacy.team_id,
+            actor_id: legacy.actor_id,
+        })
+    }
+
+    fn write_backend_toml(path: &Path, cfg: &CloudApiConfig) -> Result<(), ProviderConfigError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let text = format!(
+            r#"kind = "cloud_api"
+
+[cloud_api]
+url = {url}
+refresh_token = {refresh_token}
+team_id = {team_id}
+actor_id = {actor_id}
+"#,
+            url = toml_quote(&cfg.url),
+            refresh_token = toml_quote(&cfg.refresh_token),
+            team_id = toml_quote(&cfg.team_id),
+            actor_id = toml_quote(&cfg.actor_id),
+        );
+        std::fs::write(path, text)?;
+        Ok(())
     }
 
     fn load_backend_toml(path: &Path) -> Result<Self, ProviderConfigError> {
@@ -64,6 +130,33 @@ struct BackendConfigFile {
     kind: String,
     #[serde(default)]
     cloud_api: Option<CloudApiConfig>,
+}
+
+/// Flat `~/.amuxd/supabase.toml` written by older `amuxd init` flows.
+#[derive(Debug, Deserialize)]
+struct LegacySupabaseToml {
+    #[allow(dead_code)]
+    url: Option<String>,
+    #[allow(dead_code)]
+    anon_key: Option<String>,
+    refresh_token: String,
+    team_id: String,
+    actor_id: String,
+}
+
+fn resolve_cloud_api_url() -> String {
+    if let Ok(url) = std::env::var("TEAMCLAW_CLOUD_API_URL") {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    DEFAULT_CLOUD_API_URL.to_string()
+}
+
+fn toml_quote(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,11 +202,39 @@ actor_id = "agent-1"
     }
 
     #[test]
-    fn rejects_missing_backend_toml() {
+    fn migrates_legacy_supabase_toml_when_backend_toml_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend_path = dir.path().join("backend.toml");
+        let legacy_path = dir.path().join("supabase.toml");
+        std::fs::write(
+            &legacy_path,
+            r#"
+url = "https://project.supabase.co"
+anon_key = "anon"
+refresh_token = "refresh"
+team_id = "team-1"
+actor_id = "agent-1"
+"#,
+        )
+        .unwrap();
+
+        let loaded = ProviderConfig::load_from_path(&backend_path).unwrap();
+        assert!(backend_path.exists());
+        assert_eq!(loaded.kind(), ProviderKind::CloudApi);
+        let ProviderConfig::CloudApi(config) = loaded;
+        assert_eq!(config.refresh_token, "refresh");
+        assert_eq!(config.team_id, "team-1");
+        assert_eq!(config.actor_id, "agent-1");
+        assert_eq!(config.url, DEFAULT_CLOUD_API_URL);
+    }
+
+    #[test]
+    fn rejects_when_backend_and_legacy_supabase_toml_are_missing() {
         let dir = tempfile::tempdir().unwrap();
         let backend_path = dir.path().join("backend.toml");
         let err = ProviderConfig::load_from_path(&backend_path).expect_err("missing should fail");
         assert!(err.to_string().contains("backend.toml not found"));
+        assert!(err.to_string().contains("supabase.toml also missing"));
     }
 
     #[test]

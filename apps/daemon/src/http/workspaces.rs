@@ -10,7 +10,7 @@
 //! tests run without a workspace store.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::config::workspace_control::{
     AllowlistRule, ApplyOutcome, ManagedSkillDto, McpServerConfig, PermissionConfig,
     ProviderAuthRequest, ProviderInfo, RoleRecordDto, RolesSkillsStateDto, RuntimeStatus,
-    WorkspaceControlError, WorkspaceControlStore,
+    UpsertRoleRequest, UpsertSkillRequest, WorkspaceControlError, WorkspaceControlStore,
 };
 use std::collections::HashMap;
 
@@ -44,6 +44,7 @@ fn map_control_err(e: WorkspaceControlError) -> HttpError {
         WorkspaceControlError::WorkspaceNotFound(id) => {
             HttpError::not_found(format!("workspace {id} not found"))
         }
+        WorkspaceControlError::NotFound(msg) => HttpError::not_found(msg),
         WorkspaceControlError::Io(e) => HttpError::internal(format!("io error: {e}")),
         WorkspaceControlError::Parse(e) => HttpError::internal(format!("parse error: {e}")),
     }
@@ -238,6 +239,92 @@ pub async fn get_roles(
     let store = resolve_store(&state)?;
     let roles = store.get_roles(&workspace_id).map_err(map_control_err)?;
     Ok(Json(roles))
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeleteSkillQuery {
+    #[serde(default, rename = "dirPath")]
+    dir_path: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeleteRoleQuery {
+    #[serde(default, rename = "filePath")]
+    file_path: Option<String>,
+}
+
+/// `PUT /v1/workspaces/:id/skills/:slug`
+pub async fn put_skill(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path((workspace_id, slug)): Path<(String, String)>,
+    Json(body): Json<UpsertSkillRequest>,
+) -> Result<Json<ManagedSkillDto>, HttpError> {
+    require_scope(&principal, "workspace:write")?;
+    if body.content.trim().is_empty() {
+        return Err(HttpError::validation("content must not be empty"));
+    }
+    let store = resolve_store(&state)?;
+    let skill = store
+        .put_skill(&workspace_id, &slug, body)
+        .map_err(map_control_err)?;
+    Ok(Json(skill))
+}
+
+/// `DELETE /v1/workspaces/:id/skills/:slug`
+pub async fn delete_skill(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path((workspace_id, slug)): Path<(String, String)>,
+    Query(query): Query<DeleteSkillQuery>,
+) -> Result<Json<ApplyResponse>, HttpError> {
+    require_scope(&principal, "workspace:write")?;
+    let store = resolve_store(&state)?;
+    let outcome = store
+        .delete_skill(
+            &workspace_id,
+            &slug,
+            query.dir_path.as_deref(),
+        )
+        .map_err(map_control_err)?;
+    Ok(apply_ok(outcome))
+}
+
+/// `PUT /v1/workspaces/:id/roles/:slug`
+pub async fn put_role(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path((workspace_id, slug)): Path<(String, String)>,
+    Json(body): Json<UpsertRoleRequest>,
+) -> Result<Json<RoleRecordDto>, HttpError> {
+    require_scope(&principal, "workspace:write")?;
+    if body.raw_markdown.trim().is_empty() {
+        return Err(HttpError::validation("raw_markdown must not be empty"));
+    }
+    let store = resolve_store(&state)?;
+    let role = store
+        .put_role(&workspace_id, &slug, body)
+        .map_err(map_control_err)?;
+    Ok(Json(role))
+}
+
+/// `DELETE /v1/workspaces/:id/roles/:slug`
+pub async fn delete_role(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path((workspace_id, slug)): Path<(String, String)>,
+    Query(query): Query<DeleteRoleQuery>,
+) -> Result<Json<ApplyResponse>, HttpError> {
+    require_scope(&principal, "workspace:write")?;
+    let store = resolve_store(&state)?;
+    let outcome = store
+        .delete_role(
+            &workspace_id,
+            &slug,
+            query.file_path.as_deref(),
+        )
+        .map_err(map_control_err)?;
+    Ok(apply_ok(outcome))
 }
 
 // ── Runtime status handlers ───────────────────────────────────────────────────

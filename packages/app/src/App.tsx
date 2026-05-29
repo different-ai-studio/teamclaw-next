@@ -1699,8 +1699,9 @@ function App() {
   useTauriBodyClass();
   useOpenCodePreload();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
   const openCodeReady = useWorkspaceStore((s) => s.openCodeReady);
-  const setupReady = !workspacePath || openCodeReady || !isTauri();
+  const setupReady = !workspacePath || daemonHttpReady || openCodeReady || !isTauri();
   const { showSetupGuide, dependencies, handleRecheck, handleSetupContinue } = useSetupGuide(setupReady);
   const { showConsentDialog, setShowConsentDialog } = useTelemetryConsent(showSetupGuide);
 

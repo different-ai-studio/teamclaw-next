@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::workspace_control::WorkspaceControlError;
 
@@ -577,6 +577,201 @@ pub fn scan_roles_skills_state(workspace_path: &Path) -> Result<RolesSkillsState
     })
 }
 
+// ── Write API ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertSkillRequest {
+    pub content: String,
+    #[serde(default)]
+    pub skill_name: Option<String>,
+    #[serde(default)]
+    pub install_location: Option<String>,
+    #[serde(default)]
+    pub dir_path: Option<String>,
+    #[serde(default)]
+    pub filename: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertRoleRequest {
+    pub raw_markdown: String,
+    #[serde(default)]
+    pub target_file_path: Option<String>,
+}
+
+fn slugify(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect()
+}
+
+fn ensure_frontmatter(content: &str, slug: &str, display_name: &str) -> String {
+    let trimmed = content.trim();
+    if trimmed.starts_with("---") {
+        return format!("{trimmed}\n");
+    }
+    let description = trimmed
+        .lines()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(200)
+        .collect::<String>();
+    format!(
+        "---\nname: {slug}\ndescription: {description}\n---\n\n# {display_name}\n\n{trimmed}\n"
+    )
+}
+
+fn skills_dir_for_request(
+    workspace_path: &Path,
+    home: &Path,
+    req: &UpsertSkillRequest,
+) -> PathBuf {
+    if let Some(dir) = req.dir_path.as_deref().filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    if req.install_location.as_deref() == Some("global") {
+        return home.join(".config/opencode/skills");
+    }
+    workspace_path.join(".teamclaw/skills")
+}
+
+pub fn upsert_skill(
+    workspace_path: &Path,
+    slug: &str,
+    req: &UpsertSkillRequest,
+) -> Result<ManagedSkillDto, WorkspaceControlError> {
+    let home = dirs::home_dir().ok_or_else(|| {
+        WorkspaceControlError::Io("home directory not found".to_owned())
+    })?;
+    let skills_dir = skills_dir_for_request(workspace_path, &home, req);
+    std::fs::create_dir_all(&skills_dir).map_err(io_err)?;
+
+    let dir_name = req
+        .filename
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            req.skill_name
+                .as_deref()
+                .map(slugify)
+                .filter(|v| !v.is_empty())
+        })
+        .unwrap_or_else(|| slug.to_owned());
+
+    let display_name = req
+        .skill_name
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .unwrap_or(slug);
+
+    let skill_dir = skills_dir.join(&dir_name);
+    std::fs::create_dir_all(&skill_dir).map_err(io_err)?;
+    let final_content = ensure_frontmatter(&req.content, &dir_name, display_name);
+    std::fs::write(skill_dir.join("SKILL.md"), final_content.as_bytes()).map_err(io_err)?;
+
+    let state = scan_roles_skills_state(workspace_path)?;
+    state
+        .skills
+        .into_iter()
+        .find(|skill| skill.filename == dir_name && skill.dir_path == skills_dir.to_string_lossy())
+        .ok_or_else(|| {
+            WorkspaceControlError::NotFound(format!("skill {dir_name} not found after write"))
+        })
+}
+
+pub fn delete_skill(
+    workspace_path: &Path,
+    slug: &str,
+    dir_path: Option<&str>,
+) -> Result<(), WorkspaceControlError> {
+    let home = dirs::home_dir().ok_or_else(|| {
+        WorkspaceControlError::Io("home directory not found".to_owned())
+    })?;
+    let candidates: Vec<PathBuf> = if let Some(dir) = dir_path.filter(|d| !d.is_empty()) {
+        vec![PathBuf::from(dir).join(slug)]
+    } else {
+        vec![
+            workspace_path.join(".teamclaw/skills").join(slug),
+            workspace_path.join(".opencode/skills").join(slug),
+            workspace_path.join(".teamclaw/roles/skills").join(slug),
+            home.join(".config/opencode/skills").join(slug),
+        ]
+    };
+
+    for path in candidates {
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(io_err)?;
+            return Ok(());
+        }
+    }
+    Err(WorkspaceControlError::NotFound(format!("skill {slug} not found")))
+}
+
+pub fn upsert_role(
+    workspace_path: &Path,
+    slug: &str,
+    req: &UpsertRoleRequest,
+) -> Result<RoleRecordDto, WorkspaceControlError> {
+    let role_path = req
+        .target_file_path
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_path.join(ROLE_ROOT).join(slug).join("ROLE.md"));
+
+    if let Some(parent) = role_path.parent() {
+        std::fs::create_dir_all(parent).map_err(io_err)?;
+    }
+    let markdown = if req.raw_markdown.ends_with('\n') {
+        req.raw_markdown.clone()
+    } else {
+        format!("{}\n", req.raw_markdown)
+    };
+    std::fs::write(&role_path, markdown.as_bytes()).map_err(io_err)?;
+    let parsed_slug = role_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or(slug);
+    Ok(parse_role_markdown(&markdown, parsed_slug, &role_path))
+}
+
+pub fn delete_role(
+    workspace_path: &Path,
+    slug: &str,
+    file_path: Option<&str>,
+) -> Result<(), WorkspaceControlError> {
+    if let Some(path) = file_path.filter(|p| !p.is_empty()) {
+        let role_path = PathBuf::from(path);
+        if let Some(role_dir) = role_path.parent() {
+            if role_dir.is_dir() {
+                std::fs::remove_dir_all(role_dir).map_err(io_err)?;
+                return Ok(());
+            }
+        }
+    }
+
+    for root in role_roots(workspace_path) {
+        let role_dir = root.join(slug);
+        if role_dir.is_dir() {
+            std::fs::remove_dir_all(&role_dir).map_err(io_err)?;
+            return Ok(());
+        }
+    }
+    Err(WorkspaceControlError::NotFound(format!("role {slug} not found")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -616,5 +811,23 @@ mod tests {
         assert_eq!(state.roles[0].slug, "reviewer");
         assert_eq!(state.skills.len(), 1);
         assert_eq!(state.skills[0].filename, "demo-skill");
+    }
+
+    #[test]
+    fn upsert_and_delete_skill_round_trip() {
+        let ws = tempfile::tempdir().unwrap();
+        let req = UpsertSkillRequest {
+            content: "# Demo\n\nBody".to_owned(),
+            skill_name: Some("Demo Skill".to_owned()),
+            install_location: Some("workspace".to_owned()),
+            dir_path: None,
+            filename: None,
+        };
+        let saved = upsert_skill(ws.path(), "demo-skill", &req).unwrap();
+        assert_eq!(saved.filename, "demo-skill");
+
+        delete_skill(ws.path(), "demo-skill", None).unwrap();
+        let state = scan_roles_skills_state(ws.path()).unwrap();
+        assert!(state.skills.is_empty());
     }
 }

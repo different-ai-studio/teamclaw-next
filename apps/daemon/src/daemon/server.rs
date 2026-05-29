@@ -828,14 +828,11 @@ impl DaemonServer {
         let _http_handle = match self.config.http.clone() {
             Some(http_cfg) => {
                 let meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
-                // Until the RuntimeManager adapter ships, the HTTP layer
-                // runs against the StubRuntimeAdapter — useful for
-                // browser dev integration but does not drive real agent
-                // processes. The follow-up to PR8 replaces this with a
-                // real `RuntimeManagerAdapter::new(self.agents.clone())`.
-                let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(
-                    http_cfg.max_event_backlog,
-                );
+                let runtime: Arc<dyn crate::http::runtime_adapter::RuntimeAdapter> =
+                    crate::http::runtime_adapter::RuntimeManagerAdapter::new(
+                        self.agents.clone(),
+                        http_cfg.max_event_backlog,
+                    );
                 let workspace_control: Option<std::sync::Arc<dyn crate::config::WorkspaceControlStore>> =
                     Some(std::sync::Arc::new(
                         crate::config::OpenCodeCompatStore::new(),

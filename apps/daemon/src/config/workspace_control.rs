@@ -10,7 +10,8 @@
 //! implementation.
 
 pub use super::roles_skills::{
-    ManagedSkillDto, RoleRecordDto, RolesSkillsStateDto, scan_roles_skills_state,
+    delete_role, delete_skill, upsert_role, upsert_skill, ManagedSkillDto, RoleRecordDto,
+    RolesSkillsStateDto, UpsertRoleRequest, UpsertSkillRequest, scan_roles_skills_state,
 };
 
 use std::collections::HashMap;
@@ -24,6 +25,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug)]
 pub enum WorkspaceControlError {
     WorkspaceNotFound(String),
+    NotFound(String),
     Io(String),
     Parse(String),
 }
@@ -32,6 +34,7 @@ impl std::fmt::Display for WorkspaceControlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::WorkspaceNotFound(id) => write!(f, "workspace not found: {id}"),
+            Self::NotFound(msg) => write!(f, "not found: {msg}"),
             Self::Io(e) => write!(f, "io error: {e}"),
             Self::Parse(e) => write!(f, "parse error: {e}"),
         }
@@ -240,6 +243,34 @@ pub trait WorkspaceControlStore: Send + Sync {
         &self,
         workspace_id: &str,
     ) -> Result<Vec<RoleRecordDto>, WorkspaceControlError>;
+
+    fn put_skill(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        req: UpsertSkillRequest,
+    ) -> Result<ManagedSkillDto, WorkspaceControlError>;
+
+    fn delete_skill(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        dir_path: Option<&str>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
+
+    fn put_role(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        req: UpsertRoleRequest,
+    ) -> Result<RoleRecordDto, WorkspaceControlError>;
+
+    fn delete_role(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        file_path: Option<&str>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError>;
 
     fn get_runtime_status(
         &self,
@@ -640,6 +671,52 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
     ) -> Result<Vec<RoleRecordDto>, WorkspaceControlError> {
         Ok(self.get_roles_skills_state(workspace_id)?.roles)
     }
+
+    fn put_skill(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        req: UpsertSkillRequest,
+    ) -> Result<ManagedSkillDto, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        upsert_skill(&wpath, slug, &req)
+    }
+
+    fn delete_skill(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        dir_path: Option<&str>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        delete_skill(&wpath, slug, dir_path)?;
+        Ok(ApplyOutcome::ReloadRequired)
+    }
+
+    fn put_role(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        req: UpsertRoleRequest,
+    ) -> Result<RoleRecordDto, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        upsert_role(&wpath, slug, &req)
+    }
+
+    fn delete_role(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        file_path: Option<&str>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let wpath = self.workspace_path(workspace_id)?;
+        let _lock = self.write_lock.lock().unwrap();
+        delete_role(&wpath, slug, file_path)?;
+        Ok(ApplyOutcome::ReloadRequired)
+    }
 }
 
 // ── NullWorkspaceControlStore ─────────────────────────────────────────────────
@@ -708,6 +785,38 @@ impl WorkspaceControlStore for NullWorkspaceControlStore {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
     fn get_roles(&self, id: &str) -> Result<Vec<RoleRecordDto>, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn put_skill(
+        &self,
+        id: &str,
+        _: &str,
+        _: UpsertSkillRequest,
+    ) -> Result<ManagedSkillDto, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn delete_skill(
+        &self,
+        id: &str,
+        _: &str,
+        _: Option<&str>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn put_role(
+        &self,
+        id: &str,
+        _: &str,
+        _: UpsertRoleRequest,
+    ) -> Result<RoleRecordDto, WorkspaceControlError> {
+        Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
+    }
+    fn delete_role(
+        &self,
+        id: &str,
+        _: &str,
+        _: Option<&str>,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
     fn get_runtime_status(&self, id: &str) -> Result<RuntimeStatus, WorkspaceControlError> {

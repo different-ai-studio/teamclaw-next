@@ -5,20 +5,19 @@ import { invoke } from '@tauri-apps/api/core'
 import { workspaceScopedKey } from '@/lib/storage'
 import { sessionFlowLog } from '@/lib/session-flow-log'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { getOpenCodeClient } from '@/lib/opencode/sdk-client'
-// Legacy config.ts helpers kept for initAll (Phase D removes them).
+import {
+  encodeWorkspaceId,
+  putDaemonProviderAuth,
+  deleteDaemonProviderAuth,
+  getDaemonProviders,
+  type DaemonProviderInfo,
+} from '@/lib/daemon-local-client'
 import {
   type CustomProviderConfig,
   getCustomProviderConfig,
   getCustomProviderIds,
   providerApiKeyName,
 } from '@/lib/opencode/config'
-import {
-  encodeWorkspaceId,
-  putDaemonProviderAuth,
-  deleteDaemonProviderAuth,
-  getDaemonProviders,
-} from '@/lib/daemon-local-client'
 
 const SELECTED_MODEL_BASE = `${appShortName}-selected-model`
 
@@ -34,12 +33,41 @@ function readSavedSelectedModel(): string | null {
   return localStorage.getItem(SELECTED_MODEL_BASE)
 }
 
-function tryGetClient(): any {
-  try {
-    return getOpenCodeClient()
-  } catch {
-    return null
-  }
+function daemonProvidersToConfigured(
+  daemonProviders: DaemonProviderInfo[],
+  disconnectedIds: Set<string>,
+): { configuredProviders: ConfiguredProvider[]; providers: ProviderEntry[] } {
+  const configuredProviders: ConfiguredProvider[] = daemonProviders
+    .filter((p) => p.authenticated && !disconnectedIds.has(p.id))
+    .map((p) => ({
+      id: p.id,
+      name: p.display_name,
+      models: p.models.map((modelId) => ({ id: modelId, name: modelId })),
+    }))
+
+  const providers: ProviderEntry[] = daemonProviders.map((p) => ({
+    id: p.id,
+    name: p.display_name,
+    configured: p.authenticated && !disconnectedIds.has(p.id),
+  }))
+
+  providers.sort((a, b) => {
+    if (a.configured !== b.configured) return a.configured ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+
+  return { configuredProviders, providers }
+}
+
+async function loadDaemonProviderSnapshot(disconnectedIds: Set<string>): Promise<{
+  configuredProviders: ConfiguredProvider[]
+  providers: ProviderEntry[]
+} | null> {
+  const workspacePath = useWorkspaceStore.getState().workspacePath
+  if (!workspacePath) return null
+  const daemonProviders = await getDaemonProviders(encodeWorkspaceId(workspacePath))
+  if (daemonProviders === null) return null
+  return daemonProvidersToConfigured(daemonProviders, disconnectedIds)
 }
 
 export interface ProviderAuthMethod {
@@ -187,232 +215,83 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   _disconnectedIds: new Set<string>(),
 
   refreshAuthMethods: async () => {
-    const client = tryGetClient()
-    if (!client) return
-    try {
-      const methods = await client.getAuthMethods()
-      set({ authMethods: methods as Record<string, ProviderAuthMethod[]> })
-    } catch (err) {
-      console.error('Failed to load auth methods:', err)
-    }
+    set({ authMethods: {} })
   },
 
-  // Initiate OAuth for a provider. Returns pending state with url+instructions for the UI to show.
-  connectProviderOAuth: async (providerId, methodIndex) => {
-    const client = tryGetClient()
-    if (!client) return { status: 'error' as const, message: 'Agent runtime not connected' }
-    try {
-      const result = await client.oauthAuthorize(providerId, methodIndex)
-      if (!result) return { status: 'error' as const, message: 'Provider does not support OAuth' }
-      return {
-        status: 'pending' as const,
-        url: result.url,
-        instructions: result.instructions ?? '',
-        methodType: (result.method ?? 'code') as 'auto' | 'code',
-      }
-    } catch (err) {
-      return { status: 'error' as const, message: err instanceof Error ? err.message : 'Unknown error' }
-    }
+  connectProviderOAuth: async () => ({
+    status: 'error' as const,
+    message: 'OAuth provider login is not available without the legacy OpenCode sidecar',
+  }),
+
+  completeOAuthCallback: async () => {
+    toast.error('OAuth login failed', { description: 'OAuth is not available via the daemon control plane yet' })
+    return false
   },
 
-  // Poll/wait for OAuth callback to complete (call after opening browser).
-  // For Device Flow (methodType:"auto") the sidecar polls GitHub internally; this call blocks until done.
-  completeOAuthCallback: async (providerId, methodIndex, code) => {
-    const client = tryGetClient()
-    if (!client) return false
-    try {
-      await client.oauthCallback(providerId, methodIndex, code)
-      set((state) => {
-        const newDisconnected = new Set(state._disconnectedIds)
-        newDisconnected.delete(providerId)
-        return { _disconnectedIds: newDisconnected }
-      })
-      toast.success('Provider connected', { description: `Successfully connected ${providerId}` })
-      await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
-      return true
-    } catch (err) {
-      toast.error('OAuth login failed', { description: err instanceof Error ? err.message : 'Unknown error' })
-      return false
-    }
-  },
-
-  // Refresh all available providers (GET /provider)
-  // Response: { all: ProviderObj[], connected: string[], default: Record<string,string> }
   refreshProviders: async () => {
-    const client = tryGetClient()
-    if (!client) return // Client not ready yet, skip silently
     set({ providersLoading: true })
     try {
-      const data = await client.getProviders()
-      const connectedSet = new Set(data.connected || [])
-      const { _disconnectedIds } = get()
-      _disconnectedIds.forEach((id) => connectedSet.delete(id))
-      const providers: ProviderEntry[] = (data.all || []).map((p: any) => ({
-        id: p.id,
-        name: p.name || p.id,
-        configured: connectedSet.has(p.id),
-      }))
-      // Sort: connected first, then alphabetical
-      providers.sort((a, b) => {
-        if (a.configured !== b.configured) return a.configured ? -1 : 1
-        return a.name.localeCompare(b.name)
-      })
-      set({ providers, providersLoading: false })
+      const snapshot = await loadDaemonProviderSnapshot(get()._disconnectedIds)
+      if (!snapshot) {
+        set({ providersLoading: false })
+        return
+      }
+      set({ providers: snapshot.providers, providersLoading: false })
     } catch (err) {
       console.error('Failed to load providers:', err)
-      // Only show toast if it's not a connection error (agent runtime not ready)
-      const isConnectionError = err instanceof Error && (err.message.includes('Cannot connect to agent runtime') || err.message.includes('Load failed'))
-      if (!isConnectionError) {
-        toast.error('Failed to load providers', {
-          id: 'provider-list-error',
-          description: err instanceof Error ? err.message : 'Unknown error',
-        })
-      }
       set({ providersLoading: false })
     }
   },
 
-  // Refresh configured providers with model details (GET /config/providers)
   refreshConfiguredProviders: async () => {
-    const client = tryGetClient()
-    if (!client) return // Client not ready yet, skip silently
     set({ configuredProvidersLoading: true })
     try {
-      const data = await client.getConfigProviders()
-      const { _disconnectedIds } = get()
-
-      // Transform providers into our format, excluding disconnected ones
-      const configuredProviders: ConfiguredProvider[] = (data.providers || [])
-        .filter((p: any) => !_disconnectedIds.has(p.id || p.name))
-        .map((p: any) => ({
-          id: p.id || p.name,
-          name: p.name,
-          models: Object.entries(p.models || {}).map(([key, model]: [string, any]) => ({
-            id: model.id || key,
-            name: model.name || key,
-          })),
-        }))
-
-      // Build flattened models list
-      const models: ModelOption[] = []
-      configuredProviders.forEach((p) => {
-        p.models.forEach((m) => {
-          models.push({
-            id: m.id,
-            name: m.name,
-            provider: p.id,
-          })
-        })
-      })
-
+      const snapshot = await loadDaemonProviderSnapshot(get()._disconnectedIds)
+      if (!snapshot) {
+        set({ configuredProvidersLoading: false })
+        return
+      }
       set({
-        configuredProviders,
-        models,
+        configuredProviders: snapshot.configuredProviders,
+        models: flattenConfiguredProviders(snapshot.configuredProviders),
         configuredProvidersLoading: false,
       })
     } catch (err) {
       console.error('Failed to load configured providers:', err)
-      // Only show toast if it's not a connection error (agent runtime not ready)
-      const isConnectionError = err instanceof Error && (err.message.includes('Cannot connect to agent runtime') || err.message.includes('Load failed'))
-      if (!isConnectionError) {
-        toast.error('Failed to load model list', {
-          id: 'model-list-error',
-          description: err instanceof Error ? err.message : 'Unknown error',
-        })
-      }
       set({ configuredProvidersLoading: false })
     }
   },
 
-  // Refresh current model from agent runtime config (GET /config)
   refreshCurrentModel: async () => {
-    const client = tryGetClient()
-    if (!client) return // Client not ready yet, skip silently
-    try {
-      const config = await client.getConfig() as Record<string, unknown>
-      if (config.model) {
-        set({ currentModelKey: config.model as string })
-      }
-    } catch (err) {
-      console.error('Failed to load current model config:', err)
-      // Non-critical, don't toast
-    }
+    const saved = readSavedSelectedModel()
+    if (saved) set({ currentModelKey: saved })
   },
 
-  // Connect a provider by setting its API key and validate by fetching provider models.
-  // Some providers (e.g. Alibaba Coding) may return models slowly or in a different shape;
-  // we retry once and allow "provider found but 0 models" as success with a note.
   connectProvider: async (providerId: string, apiKey: string) => {
-    const client = tryGetClient()
-    if (!client) {
-      toast.error('Agent runtime not connected')
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    if (!workspacePath) {
+      toast.error('No workspace selected')
       return false
     }
     try {
-      await client.setAuth(providerId, { type: 'api', key: apiKey })
-      const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
-      await delay(600)
-      let data: { providers?: Array<{ id?: string; name?: string; models?: unknown }> } = {}
-      for (let attempt = 0; attempt < 2; attempt++) {
-        data = await client.getConfigProviders()
-        const providers = data.providers || []
-        const provider = providers.find(
-          (p: { id?: string; name?: string }) =>
-            (p.id && p.id === providerId) ||
-            (p.name && p.name === providerId) ||
-            (p.id && p.id.toLowerCase() === providerId.toLowerCase()) ||
-            (p.name && p.name.toLowerCase() === providerId.toLowerCase())
-        )
-        if (provider) {
-          const models = provider.models
-          const modelCount =
-            Array.isArray(models) ? models.length : typeof models === 'object' && models ? Object.keys(models).length : 0
-          if (import.meta.env.DEV) {
-            console.log('[LLM connect] providerId=', providerId, 'found=', true, 'modelCount=', modelCount)
-          }
-          // Skip toast for team provider — sidebar icon already indicates connection
-          if (providerId !== 'team') {
-            if (modelCount > 0) {
-              toast.success('Provider connected', {
-                description: `Successfully connected ${providerId}`,
-              })
-            } else {
-              toast.success('Provider connected', {
-                description: 'If no models appear below, the provider may list them later or use a custom model ID.',
-              })
-            }
-          }
-          set((state) => {
-            const newDisconnected = new Set(state._disconnectedIds)
-            newDisconnected.delete(providerId)
-            return { _disconnectedIds: newDisconnected }
-          })
-          await Promise.all([
-            get().refreshProviders(),
-            get().refreshConfiguredProviders(),
-          ])
-          return true
-        }
-        if (attempt === 0) {
-          await delay(800)
-        }
-      }
-      const providers = data.providers || []
-      console.warn('[LLM connect] Provider not in config list after setAuth (may be valid for some providers).', { providerId, providerIds: providers.map((p: { id?: string; name?: string }) => p.id || p.name) })
-      if (providerId !== 'team') {
-        toast.success('Provider connected', {
-          description: "If no models appear, select the model in chat or check the provider's custom model ID.",
+      const isRef = /^\$\{?.+\}?$/.test(apiKey)
+      if (apiKey && !isRef) {
+        await invoke('env_var_set', {
+          key: providerApiKeyName(providerId),
+          value: apiKey,
+          description: `API key for provider ${providerId}`,
         })
+      }
+      await putDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId, { api_key: apiKey })
+      if (providerId !== 'team') {
+        toast.success('Provider connected', { description: `Successfully connected ${providerId}` })
       }
       set((state) => {
         const newDisconnected = new Set(state._disconnectedIds)
         newDisconnected.delete(providerId)
         return { _disconnectedIds: newDisconnected }
       })
-      await Promise.all([
-        get().refreshProviders(),
-        get().refreshConfiguredProviders(),
-      ])
+      await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       return true
     } catch (err) {
       console.error('[LLM connect] Failed to connect provider:', err)
@@ -423,33 +302,26 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Disconnect a provider by removing its authentication
   disconnectProvider: async (providerId: string) => {
-    const client = tryGetClient()
-    if (!client) {
-      toast.error('Agent runtime not connected')
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    if (!workspacePath) {
+      toast.error('No workspace selected')
       return false
     }
     try {
-      await client.deleteAuth(providerId)
-      toast.success('Provider disconnected', {
-        description: `Successfully disconnected ${providerId}`,
-      })
-      // Track as disconnected so subsequent refreshes from the server
-      // don't re-add it as "connected" (the agent runtime reports custom providers
-      // as connected even after auth removal).
+      await deleteDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId)
+      toast.success('Provider disconnected', { description: `Successfully disconnected ${providerId}` })
       set((state) => {
         const newDisconnected = new Set(state._disconnectedIds)
         newDisconnected.add(providerId)
-        const updatedProviders = state.providers
-          .map((p) => (p.id === providerId ? { ...p, configured: false } : p))
-          .sort((a, b) => {
-            if (a.configured !== b.configured) return a.configured ? -1 : 1
-            return a.name.localeCompare(b.name)
-          })
         return {
           _disconnectedIds: newDisconnected,
-          providers: updatedProviders,
+          providers: state.providers
+            .map((p) => (p.id === providerId ? { ...p, configured: false } : p))
+            .sort((a, b) => {
+              if (a.configured !== b.configured) return a.configured ? -1 : 1
+              return a.name.localeCompare(b.name)
+            }),
           configuredProviders: state.configuredProviders.filter((p) => p.id !== providerId),
           models: state.models.filter((m) => m.provider !== providerId),
         }
@@ -595,55 +467,17 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Initialize all data at once
   initAll: async () => {
-    await get().refreshConfiguredProviders().catch(() => undefined)
+    await Promise.all([
+      get().refreshProviders().catch(() => undefined),
+      get().refreshConfiguredProviders().catch(() => undefined),
+      get().refreshCurrentModel().catch(() => undefined),
+    ])
 
     const workspacePath = useWorkspaceStore.getState().workspacePath
-    const { _disconnectedIds } = get()
-    const customProviderIds = workspacePath ? await getCustomProviderIds(workspacePath) : []
-    const customConfiguredProviders = workspacePath
-      ? (await Promise.all(
-          customProviderIds.map(async (providerId) => {
-            if (_disconnectedIds.has(providerId)) return null
+    if (workspacePath) {
+      await get().refreshCustomProviderIds(workspacePath).catch(() => undefined)
+    }
 
-            const config = await getCustomProviderConfig(workspacePath, providerId)
-            if (!config || config.models.length === 0) return null
-
-            return {
-              id: providerId,
-              name: config.name || providerId,
-              models: config.models.map((model) => ({
-                id: model.modelId,
-                name: model.modelName || model.modelId,
-              })),
-            } satisfies ConfiguredProvider
-          }),
-        )).filter((provider): provider is ConfiguredProvider => provider !== null)
-      : []
-
-    const configuredProviders = mergeConfiguredProviders(
-      get().configuredProviders,
-      customConfiguredProviders,
-    )
-    const models = flattenConfiguredProviders(configuredProviders)
-    const providers = mergeProviders(
-      get().providers,
-      customConfiguredProviders.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        configured: true,
-      })),
-    )
-
-    set({
-      providers,
-      configuredProviders,
-      models,
-      providersLoading: false,
-      configuredProvidersLoading: false,
-      customProviderIds,
-    })
-
-    // After loading, resolve the selected model from OpenCode settings only.
     const { currentModelKey } = get()
     const availableModels = get().models
 
@@ -651,13 +485,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     let resolvedSource = resolvedKey ? 'currentModelKey' : 'none'
 
     if (!resolvedKey || !availableModels.find((m) => `${m.provider}/${m.id}` === resolvedKey)) {
-      // Try localStorage fallback (workspace-scoped, with legacy fallback)
       const saved = readSavedSelectedModel()
       if (saved && availableModels.find((m) => `${m.provider}/${m.id}` === saved)) {
         resolvedKey = saved
         resolvedSource = 'localStorage'
       } else if (availableModels.length > 0) {
-        // Last resort: first available OpenCode-configured model.
         resolvedKey = `${availableModels[0].provider}/${availableModels[0].id}`
         resolvedSource = 'firstAvailable'
       } else {

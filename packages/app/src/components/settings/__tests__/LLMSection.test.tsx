@@ -22,7 +22,13 @@ const mocks = vi.hoisted(() => {
     disconnectProvider: vi.fn(),
     initAll: vi.fn(),
   }
-  const workspaceState = { workspacePath: '/test', openCodeReady: true, setOpenCodeBootstrapped: vi.fn(), setWorkspace: vi.fn() }
+  const workspaceState = {
+    workspacePath: '/test',
+    openCodeReady: true,
+    daemonHttpReady: true,
+    setOpenCodeBootstrapped: vi.fn(),
+    setWorkspace: vi.fn(),
+  }
   const teamModeState = { teamMode: false, teamModelConfig: null as null | { model: string; modelName: string; baseUrl: string }, devUnlocked: false, teamModelOptions: [] as Array<{ id: string; name: string }>, switchTeamModel: vi.fn() }
   return {
     providerState,
@@ -60,7 +66,6 @@ vi.mock('@/stores/team-mode', () => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: mocks.shellOpen }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.dialogOpen }))
-vi.mock('@/lib/opencode/sdk-client', () => ({ initOpenCodeClient: mocks.initOpenCodeClient }))
 vi.mock('@/lib/opencode/restart', () => ({ restartOpencode: mocks.restartOpencode }))
 vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' ') }))
 vi.mock('../shared', () => ({
@@ -80,6 +85,7 @@ describe('LLMSection', () => {
     mocks.providerState.authMethods = {}
     mocks.workspaceState.workspacePath = '/test'
     mocks.workspaceState.openCodeReady = true
+    mocks.workspaceState.daemonHttpReady = true
     mocks.workspaceState.setWorkspace.mockReset()
     mocks.teamModeState.teamMode = false
     mocks.teamModeState.teamModelConfig = null
@@ -109,20 +115,14 @@ describe('LLMSection', () => {
     })
   })
 
-  it('connects directly to the current OpenCode server on port 13141 without waiting for desktop runtime readiness', async () => {
-    mocks.workspaceState.openCodeReady = false
-
+  it('refreshes provider data from the daemon workspace-control plane on mount', async () => {
     render(<LLMSection />)
 
     await waitFor(() => {
-      expect(mocks.initOpenCodeClient).toHaveBeenCalledWith({
-        baseUrl: 'http://127.0.0.1:13141',
-        workspacePath: '/test',
-      })
+      expect(mocks.providerState.refreshProviders).toHaveBeenCalled()
+      expect(mocks.providerState.refreshConfiguredProviders).toHaveBeenCalled()
+      expect(mocks.providerState.refreshAuthMethods).toHaveBeenCalled()
     })
-    expect(mocks.providerState.refreshProviders).toHaveBeenCalled()
-    expect(mocks.providerState.refreshConfiguredProviders).toHaveBeenCalled()
-    expect(mocks.providerState.refreshAuthMethods).toHaveBeenCalled()
   })
 
   it('shows no providers message when empty', () => {

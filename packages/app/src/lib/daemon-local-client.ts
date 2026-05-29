@@ -337,6 +337,69 @@ export async function getDaemonRoles(
   return result.ok ? result.data : null
 }
 
+export interface DaemonUpsertSkillRequest {
+  content: string
+  skillName?: string
+  installLocation?: 'workspace' | 'global'
+  dirPath?: string
+  filename?: string
+}
+
+export async function putDaemonSkill(
+  workspaceId: string,
+  slug: string,
+  req: DaemonUpsertSkillRequest,
+): Promise<DaemonRolesSkillsState['skills'][number] | null> {
+  const result = await daemonFetch<DaemonRolesSkillsState['skills'][number]>(
+    `/v1/workspaces/${workspaceId}/skills/${encodeURIComponent(slug)}`,
+    { method: 'PUT', body: JSON.stringify(req) },
+  )
+  return result.ok ? result.data : null
+}
+
+export async function deleteDaemonSkill(
+  workspaceId: string,
+  slug: string,
+  dirPath?: string,
+): Promise<DaemonApplyOutcome | null> {
+  const query = dirPath ? `?dirPath=${encodeURIComponent(dirPath)}` : ''
+  const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
+    `/v1/workspaces/${workspaceId}/skills/${encodeURIComponent(slug)}${query}`,
+    { method: 'DELETE' },
+  )
+  return result.ok ? result.data.outcome : null
+}
+
+export interface DaemonUpsertRoleRequest {
+  rawMarkdown: string
+  targetFilePath?: string
+}
+
+export async function putDaemonRole(
+  workspaceId: string,
+  slug: string,
+  req: DaemonUpsertRoleRequest,
+): Promise<DaemonRolesSkillsState['roles'][number] | null> {
+  const result = await daemonFetch<DaemonRolesSkillsState['roles'][number]>(
+    `/v1/workspaces/${workspaceId}/roles/${encodeURIComponent(slug)}`,
+    { method: 'PUT', body: JSON.stringify(req) },
+  )
+  return result.ok ? result.data : null
+}
+
+export async function deleteDaemonRole(
+  workspaceId: string,
+  slug: string,
+  filePath?: string,
+): Promise<DaemonApplyOutcome | null> {
+  const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : ''
+  const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
+    `/v1/workspaces/${workspaceId}/roles/${encodeURIComponent(slug)}${query}`,
+    { method: 'DELETE' },
+  )
+  return result.ok ? result.data.outcome : null
+}
+
 // ─── Allowlist ────────────────────────────────────────────────────────────────
 
 export async function getDaemonAllowlist(
