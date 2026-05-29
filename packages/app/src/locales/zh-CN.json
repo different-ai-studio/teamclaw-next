@@ -436,6 +436,8 @@
     }
   },
   "workspace": {
+    "connectingDaemon": "正在连接 amuxd daemon…",
+    "daemonUnavailableHint": "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
     "title": "工作区",
     "openFolder": "打开文件夹",
     "recentFolders": "最近文件夹",
@@ -1722,6 +1724,9 @@
       }
     },
     "team": {
+      "prereqTitle": "暂无法配置团队共享",
+      "prereqNoTeam": "尚未创建或选择团队，请先创建/选择一个团队后再配置团队共享。",
+      "prereqNoWorkspace": "workspacePath 为空，请先打开一个工作区。",
       "currentTeam": "共享空间",
       "loadingShareMode": "正在加载团队共享状态…",
       "oss": {
