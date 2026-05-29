@@ -17,6 +17,11 @@ const backendMocks = vi.hoisted(() => ({
   listAgentDefaults: vi.fn(),
   listActorDirectoryByIds: vi.fn(),
   listDaemonWorkspaces: vi.fn(),
+  createDaemonWorkspace: vi.fn(),
+}))
+
+const workspaceStoreMocks = vi.hoisted(() => ({
+  workspacePath: '',
 }))
 
 vi.mock('@/lib/teamclaw-rpc', () => ({
@@ -42,8 +47,19 @@ vi.mock('@/lib/backend', () => ({
     },
     workspaces: {
       listDaemonWorkspaces: backendMocks.listDaemonWorkspaces,
+      createDaemonWorkspace: backendMocks.createDaemonWorkspace,
     },
   }),
+}))
+
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: {
+    getState: () => ({ workspacePath: workspaceStoreMocks.workspacePath }),
+  },
+}))
+
+vi.mock('@/lib/current-actor', () => ({
+  resolveCurrentMemberActorId: vi.fn().mockResolvedValue('member-1'),
 }))
 
 describe('startAgentRuntimesAsync', () => {
@@ -57,6 +73,8 @@ describe('startAgentRuntimesAsync', () => {
     backendMocks.listAgentDefaults.mockReset()
     backendMocks.listActorDirectoryByIds.mockReset()
     backendMocks.listDaemonWorkspaces.mockReset()
+    backendMocks.createDaemonWorkspace.mockReset()
+    workspaceStoreMocks.workspacePath = ''
     backendMocks.createSessionShell.mockResolvedValue({ sessionId: 'sess-1' })
     backendMocks.insertOutgoingMessage.mockResolvedValue({})
     backendMocks.listActorDirectoryByIds.mockResolvedValue([])
@@ -306,11 +324,22 @@ describe('startAgentRuntimesAsync', () => {
     )
   })
 
-  it('starts agents with fallback values when runtime hint lookup fails', async () => {
+  it('creates a cloud workspace when runtime lookup fails but local path is known', async () => {
     backendMocks.listLatestAgentRuntimeHints.mockRejectedValue(new Error('runtime hints unavailable'))
     backendMocks.listAgentDefaults.mockResolvedValue([
       { id: 'agent-7', agent_types: [], default_agent_type: null },
     ])
+    workspaceStoreMocks.workspacePath = '/Users/me/TeamClaw'
+    backendMocks.createDaemonWorkspace.mockResolvedValue({
+      id: 'ws-created',
+      team_id: 'team-1',
+      agent_id: 'agent-7',
+      name: 'TeamClaw',
+      path: '/Users/me/TeamClaw',
+      archived: false,
+      created_at: '',
+      updated_at: '',
+    })
 
     const { startAgentRuntimesAsync } = await import('../session-create')
     await startAgentRuntimesAsync({
@@ -319,10 +348,17 @@ describe('startAgentRuntimesAsync', () => {
       agentActorIds: ['agent-7'],
     })
 
+    expect(backendMocks.createDaemonWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: 'team-1',
+        agentId: 'agent-7',
+        path: '/Users/me/TeamClaw',
+      }),
+    )
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
         targetDeviceId: 'agent-7',
-        workspaceId: '',
+        workspaceId: 'ws-created',
         agentType: AgentType.CLAUDE_CODE,
       }),
     )

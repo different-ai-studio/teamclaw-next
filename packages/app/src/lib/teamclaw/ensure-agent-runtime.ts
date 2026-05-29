@@ -5,7 +5,9 @@ import { waitForTeamclawRpcReady } from "@/lib/teamclaw-rpc";
 import { useDevicePresenceStore } from "@/stores/device-presence-store";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { resolveRuntimeStateEntryForAgent } from "@/lib/runtime-state-resolve";
+import { resolveSessionWorkspaceHintForRuntimeStart } from "@/lib/teamclaw/resolve-runtime-start-workspace";
 import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 const inFlight = new Map<string, Promise<void>>();
 
@@ -117,11 +119,34 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
       }),
     );
 
+    const localWorkspacePath = useWorkspaceStore.getState().workspacePath?.trim() || null
+    const workspaceIdHint =
+      args.workspaceIdHint?.trim() ||
+      (await resolveSessionWorkspaceHintForRuntimeStart({
+        teamId: args.teamId,
+        localWorkspacePath,
+        sessionId: args.sessionId,
+        agentActorIds,
+      })) ||
+      undefined
+
     logDebug(
       "client:runtime_start_batch",
-      { agentActorIds, modelId: args.modelId ?? null },
+      {
+        agentActorIds,
+        modelId: args.modelId ?? null,
+        workspaceIdHint: workspaceIdHint ?? null,
+        localWorkspacePath,
+      },
       { sessionId: args.sessionId, topic: `rpc/runtimeStart/${args.sessionId}` },
     );
+    sessionFlowLog("ensure_agent_runtime.workspace_resolved", {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      reason: args.reason ?? "unknown",
+      workspaceIdHint: workspaceIdHint ?? null,
+      localWorkspacePath,
+    });
 
     await startAgentRuntimesAsync({
       sessionId: args.sessionId,
@@ -129,7 +154,7 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
       agentActorIds,
       modelId: args.modelId,
       modelIdByAgent: args.modelIdByAgent,
-      workspaceIdHint: args.workspaceIdHint,
+      workspaceIdHint,
     });
 
     const retainDeadline = Date.now() + 12_000;

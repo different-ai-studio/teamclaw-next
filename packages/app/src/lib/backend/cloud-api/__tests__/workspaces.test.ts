@@ -31,12 +31,21 @@ const cloudWorkspace = { id: "w1", teamId: "t1", name: "Alpha", archived: false,
 describe("workspaces module", () => {
   it("listDaemonWorkspaces calls /v1/workspaces and maps fields", async () => {
     const client = mockClient({
-      "GET /v1/workspaces?teamId=t1&limit=200": { items: [cloudWorkspace], nextCursor: null },
+      "GET /v1/workspaces?teamId=t1&limit=200": {
+        items: [{
+          ...cloudWorkspace,
+          slug: "/Users/me/TeamClaw",
+          agentId: "agent-1",
+        }],
+        nextCursor: null,
+      },
     });
     const mod = createWorkspacesModule(client);
     const out = await mod.listDaemonWorkspaces("t1");
     expect(out[0].id).toBe("w1");
     expect(out[0].team_id).toBe("t1");
+    expect(out[0].path).toBe("/Users/me/TeamClaw");
+    expect(out[0].agent_id).toBe("agent-1");
     expect(out[0].archived).toBe(false);
   });
 

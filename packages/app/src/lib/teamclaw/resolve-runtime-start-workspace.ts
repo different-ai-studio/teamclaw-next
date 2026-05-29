@@ -127,6 +127,66 @@ export async function resolveCloudWorkspaceIdForLocalPath(
   return null
 }
 
+/** Prefer the sole cloud workspace row bound to an agent when path matching fails. */
+export async function resolveCloudWorkspaceIdForAgents(
+  teamId: string,
+  agentActorIds: string[],
+): Promise<string | null> {
+  const trimmedTeam = teamId.trim()
+  const ids = [...new Set(agentActorIds.map((id) => id.trim()).filter(Boolean))]
+  if (!trimmedTeam || ids.length === 0) return null
+
+  const rows = await getBackend().workspaces.listDaemonWorkspaces(trimmedTeam).catch(() => [])
+  for (const agentId of ids) {
+    const bound = rows.filter((row) => !row.archived && row.agent_id?.trim() === agentId)
+    if (bound.length >= 1) {
+      const cloudId = bound[0].id?.trim()
+      if (cloudId) return cloudId
+    }
+  }
+  return null
+}
+
+/**
+ * Resolve or create the cloud workspace UUID for runtimeStart.workspaceId.
+ * Never returns a filesystem path.
+ */
+export async function ensureCloudWorkspaceIdForAgentRuntime(args: {
+  teamId: string
+  agentActorId: string
+  localWorkspacePath?: string | null
+  sessionId?: string
+  createdByMemberId?: string | null
+}): Promise<string> {
+  const agentActorId = args.agentActorId.trim()
+  if (!agentActorId || !args.teamId.trim()) return ''
+
+  const fromHint = await resolveSessionWorkspaceHintForRuntimeStart({
+    teamId: args.teamId,
+    localWorkspacePath: args.localWorkspacePath,
+    sessionId: args.sessionId,
+    agentActorIds: [agentActorId],
+  })
+  if (fromHint) return fromHint
+
+  const path = args.localWorkspacePath?.trim()
+  if (!path) return ''
+
+  const name = path.split('/').filter(Boolean).pop() || 'workspace'
+  try {
+    const created = await getBackend().workspaces.createDaemonWorkspace({
+      teamId: args.teamId,
+      agentId: agentActorId,
+      createdByMemberId: args.createdByMemberId ?? null,
+      name,
+      path,
+    })
+    return created.id?.trim() || ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * Best-effort workspace hint for runtimeStart on the outbox/send path.
  * Prefer the current local workspace binding; fall back to per-session /
@@ -138,13 +198,19 @@ export async function resolveSessionWorkspaceHintForRuntimeStart(args: {
   sessionId?: string
   agentActorIds?: string[]
 }): Promise<string> {
+  const agentActorIds = [...new Set((args.agentActorIds ?? []).map((id) => id.trim()).filter(Boolean))]
+
   const localPath = args.localWorkspacePath?.trim()
   if (localPath) {
     const fromPath = await resolveCloudWorkspaceIdForLocalPath(args.teamId, localPath)
     if (fromPath) return fromPath
   }
 
-  const agentActorIds = [...new Set((args.agentActorIds ?? []).map((id) => id.trim()).filter(Boolean))]
+  if (agentActorIds.length > 0) {
+    const fromAgentBinding = await resolveCloudWorkspaceIdForAgents(args.teamId, agentActorIds)
+    if (fromAgentBinding) return fromAgentBinding
+  }
+
   const sessionId = args.sessionId?.trim() ?? ''
   if (!sessionId || agentActorIds.length === 0) return ''
 

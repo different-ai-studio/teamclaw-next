@@ -9,6 +9,8 @@ import {
 } from '@/lib/runtime-state-resolve'
 import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { resolveCurrentMemberActorId } from '@/lib/current-actor'
 import { mqttPublish } from '@/lib/mqtt-bridge'
 import {
   LiveEventEnvelopeSchema,
@@ -29,6 +31,7 @@ import {
   summarizeText,
 } from '@/lib/session-flow-log'
 import {
+  ensureCloudWorkspaceIdForAgentRuntime,
   loadAgentWorkspaceLookups,
   resolveAgentRuntimeWorkspaceId,
   runtimeStartWorkspaceArgs,
@@ -343,6 +346,13 @@ function pickAgentBackend(
  */
 export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<void> {
   if (args.agentActorIds.length === 0) return
+  const localWorkspacePath = useWorkspaceStore.getState().workspacePath?.trim() || ''
+  let createdByMemberId: string | null = null
+  try {
+    createdByMemberId = await resolveCurrentMemberActorId(args.teamId)
+  } catch {
+    createdByMemberId = null
+  }
   sessionFlowLog('runtime_start.batch.begin', {
     sessionId: args.sessionId,
     teamId: args.teamId,
@@ -446,7 +456,16 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
       ...(workspaceLookups.get(agentActorId) ?? {}),
       ...(args.workspaceIdHint?.trim() ? { callerWorkspaceId: args.workspaceIdHint } : {}),
     }
-    const workspaceId = resolveAgentRuntimeWorkspaceId(workspaceLookup)
+    let workspaceId = resolveAgentRuntimeWorkspaceId(workspaceLookup)
+    if (!workspaceId) {
+      workspaceId = await ensureCloudWorkspaceIdForAgentRuntime({
+        teamId: args.teamId,
+        agentActorId,
+        localWorkspacePath: localWorkspacePath || null,
+        sessionId: args.sessionId,
+        createdByMemberId,
+      })
+    }
     try {
       sessionFlowLog('runtime_start.request.begin', {
         sessionId: args.sessionId,
