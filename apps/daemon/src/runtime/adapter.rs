@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use acp::Agent as _; // bring trait methods into scope
 use agent_client_protocol as acp;
@@ -1051,6 +1052,7 @@ async fn run_acp_session(
     });
 
     // Initialize the connection
+    let t_init = Instant::now();
     conn.initialize(
         acp::InitializeRequest::new(acp::ProtocolVersion::V1)
             .client_info(acp::Implementation::new("amuxd", "0.1.0").title("AMUX Daemon")),
@@ -1058,7 +1060,11 @@ async fn run_acp_session(
     .await
     .map_err(|e| anyhow::anyhow!("ACP initialize failed: {}", e))?;
 
-    info!("ACP connection initialized");
+    info!(
+        agent_type = ?agent_type,
+        initialize_ms = t_init.elapsed().as_millis() as u64,
+        "ACP connection initialized"
+    );
 
     // Create or resume session
     let worktree_path = std::path::PathBuf::from(&worktree);
@@ -1093,6 +1099,7 @@ async fn run_acp_session(
     // this via the `unstable_session_model` capability; claude-agent-acp
     // currently does not, so it stays None and the hardcoded fallback table
     // takes over below.
+    let t_session = Instant::now();
     let (session_id, acp_model_state): (acp::SessionId, Option<acp::SessionModelState>) =
         if let Some(ref resume_id) = resume_acp_session_id {
             let resume_req = acp::ResumeSessionRequest::new(
@@ -1102,7 +1109,11 @@ async fn run_acp_session(
             match conn.resume_session(resume_req).await {
                 Ok(resp) => {
                     let sid = acp::SessionId::new(resume_id.clone());
-                    info!(session_id = %sid, "ACP session resumed");
+                    info!(
+                        session_id = %sid,
+                        resume_ms = t_session.elapsed().as_millis() as u64,
+                        "ACP session resumed"
+                    );
                     (sid, resp.models)
                 }
                 Err(e) => {
@@ -1115,7 +1126,11 @@ async fn run_acp_session(
                         .await
                         .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
                     let sid = resp.session_id.clone();
-                    info!(session_id = %sid, "ACP session created (fallback)");
+                    info!(
+                        session_id = %sid,
+                        new_session_ms = t_session.elapsed().as_millis() as u64,
+                        "ACP session created (fallback)"
+                    );
                     (sid, resp.models)
                 }
             }
@@ -1125,7 +1140,11 @@ async fn run_acp_session(
                 .await
                 .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
             let sid = resp.session_id.clone();
-            info!(session_id = %sid, "ACP session created");
+            info!(
+                session_id = %sid,
+                new_session_ms = t_session.elapsed().as_millis() as u64,
+                "ACP session created"
+            );
             (sid, resp.models)
         };
 
