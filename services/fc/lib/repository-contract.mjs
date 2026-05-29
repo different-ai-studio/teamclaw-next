@@ -643,6 +643,25 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.equal(out, null);
   });
 
+  test("repository contract: attachments bucket is isolated from avatars bucket", async () => {
+    const repo = createRepository();
+    const attachmentBytes = Buffer.from("attachment payload");
+    const avatarBytes = Buffer.from("avatar payload");
+    await repo.uploadAttachment({ path: "iso/x.bin", mime: "application/octet-stream", bytes: attachmentBytes });
+    await repo.uploadAttachment({ path: "iso/x.bin", mime: "image/png", bytes: avatarBytes, bucket: "avatars" });
+
+    const attachmentOut = await repo.downloadAttachment("iso/x.bin");
+    assert.ok(attachmentOut);
+    assert.deepEqual(attachmentOut.bytes, attachmentBytes);
+
+    const avatarOut = await repo.downloadAttachment("iso/x.bin", { bucket: "avatars" });
+    assert.ok(avatarOut);
+    assert.deepEqual(avatarOut.bytes, avatarBytes);
+
+    const avatarUpload = await repo.uploadAttachment({ path: "iso/url.png", mime: "image/png", bytes: avatarBytes, bucket: "avatars" });
+    assert.ok(avatarUpload.url.includes("/avatars/"), "avatars bucket url must reference avatars/");
+  });
+
   test("repository contract: submitFeedback returns feedback object", async () => {
     const repo = createRepository();
     const out = await repo.submitFeedback({

@@ -461,12 +461,14 @@ function contractRepo() {
     async listTeamPermissions(teamId) {
       return permissionStore;
     },
-    async uploadAttachment({ path, mime, bytes }) {
-      attachmentStore[path] = { mime, bytes };
-      return { path, url: `https://supabase.example.com/storage/v1/object/public/attachments/${path}` };
+    async uploadAttachment({ path, mime, bytes, bucket }) {
+      const targetBucket = bucket || "attachments";
+      attachmentStore[`${targetBucket}/${path}`] = { mime, bytes };
+      return { path, url: `https://supabase.example.com/storage/v1/object/public/${targetBucket}/${path}` };
     },
-    async downloadAttachment(path) {
-      const entry = attachmentStore[path];
+    async downloadAttachment(path, { bucket } = {}) {
+      const targetBucket = bucket || "attachments";
+      const entry = attachmentStore[`${targetBucket}/${path}`];
       if (!entry) return null;
       return { mime: entry.mime, bytes: entry.bytes };
     },

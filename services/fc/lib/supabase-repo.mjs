@@ -10,7 +10,7 @@ import { ApiError } from "./http-utils.mjs";
 // subscribed, which we never do.
 const REALTIME_TRANSPORT_OPTS = { transport: WebSocket };
 
-const ATTACHMENTS_BUCKET = "attachments";
+const DEFAULT_ATTACHMENT_BUCKET = "attachments";
 const TEAM_COLUMNS = "id, name, slug, created_at";
 const MESSAGE_COLUMNS =
   "id, team_id, session_id, turn_id, sender_actor_id, reply_to_message_id, kind, content, metadata, model, created_at, updated_at";
@@ -889,20 +889,22 @@ async heartbeat() {
       if (error) throw error;
     },
 
-    async uploadAttachment({ path, mime, bytes }) {
+    async uploadAttachment({ path, mime, bytes, bucket }) {
+      const targetBucket = bucket || DEFAULT_ATTACHMENT_BUCKET;
       const { error } = await supabase.storage
-        .from(ATTACHMENTS_BUCKET)
+        .from(targetBucket)
         .upload(path, bytes, { contentType: mime, upsert: true });
       if (error) throw error;
       return {
         path,
-        url: `${supabaseUrl}/storage/v1/object/public/${ATTACHMENTS_BUCKET}/${path}`,
+        url: `${supabaseUrl}/storage/v1/object/public/${targetBucket}/${path}`,
       };
     },
 
-    async downloadAttachment(path) {
+    async downloadAttachment(path, { bucket } = {}) {
+      const targetBucket = bucket || DEFAULT_ATTACHMENT_BUCKET;
       const { data, error } = await supabase.storage
-        .from(ATTACHMENTS_BUCKET)
+        .from(targetBucket)
         .download(path);
       if (error) {
         const status = Number(error?.status || error?.statusCode || 0);
