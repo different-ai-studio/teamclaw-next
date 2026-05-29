@@ -152,7 +152,7 @@ async function sendRequest(
 export interface RuntimeStartArgs {
   targetDeviceId: string    // daemon device_id to route the RPC to
   workspaceId: string       // supabase workspace id (or empty for bare spawn)
-  worktree: string          // local path (or empty)
+  worktree: string          // leave empty — target daemon resolves local path from workspaceId
   sessionId: string         // supabase session id
   agentType: number         // amux.AgentType enum (e.g., AgentType.CLAUDE_CODE)
   initialPrompt?: string

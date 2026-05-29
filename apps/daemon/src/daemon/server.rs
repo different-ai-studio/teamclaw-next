@@ -138,35 +138,35 @@ pub(crate) struct OfflineRestartPlan {
 /// Pure decision half of [`DaemonServer::resume_historical_runtimes_for_session`].
 ///
 /// Given every resumable `StoredSession` for one conversation, keep only the
-/// most-recent (`created_at`) row per `(agent_type, workspace_id)` tuple and
-/// report the rest as superseded `runtime_id`s. Each desktop session-start /
-/// model-switch spawns a fresh `runtime_id`, so a session accumulates several
-/// non-stopped historical rows across restarts; resuming all of them would
-/// bring up multiple live agents that each answer the same @mention. Exposed
-/// as a free fn so the dedup invariant is unit-testable without spawning ACP
-/// processes.
+/// single most-recent (`created_at`) row and report the rest as superseded
+/// `runtime_id`s. The daemon is a single actor/participant in a session, so it
+/// must hold at most one live runtime per conversation regardless of
+/// agent_type / workspace. Each desktop session-start / model-switch /
+/// workspace-change spawns a fresh `runtime_id`, so a session accumulates
+/// several non-stopped historical rows across restarts; resuming more than one
+/// brings up multiple live agents that each answer the same @mention (the
+/// duplicate-reply bug — including the case where the duplicates live in
+/// different workspaces). Exposed as a free fn so the invariant is
+/// unit-testable without spawning ACP processes.
 pub(crate) fn dedup_resumable_runtimes(
     stored_sessions: Vec<StoredSession>,
 ) -> (Vec<StoredSession>, Vec<String>) {
-    let mut latest_by_tuple: std::collections::HashMap<(i32, String), StoredSession> =
-        std::collections::HashMap::new();
+    let mut keep: Option<StoredSession> = None;
     let mut superseded: Vec<String> = Vec::new();
     for stored in stored_sessions {
-        let key = (stored.agent_type, stored.workspace_id.clone());
-        match latest_by_tuple.get(&key) {
+        match keep.take() {
             Some(existing) if existing.created_at >= stored.created_at => {
                 superseded.push(stored.runtime_id.clone());
+                keep = Some(existing);
             }
             Some(existing) => {
                 superseded.push(existing.runtime_id.clone());
-                latest_by_tuple.insert(key, stored);
+                keep = Some(stored);
             }
-            None => {
-                latest_by_tuple.insert(key, stored);
-            }
+            None => keep = Some(stored),
         }
     }
-    (latest_by_tuple.into_values().collect(), superseded)
+    (keep.into_iter().collect(), superseded)
 }
 
 pub struct DaemonServer {
@@ -2220,6 +2220,45 @@ impl DaemonServer {
         self.publish_envelope_to_sessions(agent_id, &envelope).await;
     }
 
+    /// Enforce the one-live-runtime-per-session invariant at message-routing
+    /// time. If multiple handles leaked into memory (race, stale resume, etc.),
+    /// keep the newest and stop the rest before fanning out a prompt.
+    async fn coalesce_session_runtimes(&mut self, session_id: &str) -> Vec<String> {
+        let ids = self
+            .agents
+            .lock()
+            .await
+            .runtime_ids_for_session(session_id);
+        if ids.len() <= 1 {
+            return ids;
+        }
+        let keep = self
+            .agents
+            .lock()
+            .await
+            .newest_runtime_id_for_session(session_id);
+        let Some(keep) = keep else {
+            return ids;
+        };
+        let superseded: Vec<String> = ids.into_iter().filter(|id| id != &keep).collect();
+        warn!(
+            session_id = %session_id,
+            keep = %keep,
+            superseded = ?superseded,
+            "coalesce_session_runtimes: stopping duplicate live runtimes before fanout"
+        );
+        for rid in &superseded {
+            self.agents.lock().await.stop_agent(rid).await;
+            if let Some(s) = self.sessions.find_by_id_mut(rid) {
+                s.status = amux::AgentStatus::Stopped as i32;
+            }
+        }
+        if !superseded.is_empty() {
+            let _ = self.sessions.save(&self.sessions_path);
+        }
+        vec![keep]
+    }
+
     /// Route an inbound `message.created` from `session/{sid}/live` to the
     /// appropriate runtimes: mentioned runtimes receive a real prompt (which
     /// flushes any queued silent context first); un-mentioned runtimes have
@@ -2239,7 +2278,7 @@ impl DaemonServer {
             return;
         }
 
-        let runtime_ids = self.agents.lock().await.runtime_ids_for_session(session_id);
+        let runtime_ids = self.coalesce_session_runtimes(session_id).await;
         if runtime_ids.is_empty() {
             if self
                 .resume_historical_runtimes_for_session(session_id)
@@ -2248,7 +2287,7 @@ impl DaemonServer {
                 return;
             }
 
-            let runtime_ids = self.agents.lock().await.runtime_ids_for_session(session_id);
+            let runtime_ids = self.coalesce_session_runtimes(session_id).await;
             if !runtime_ids.is_empty() {
                 self.route_session_message_to_runtimes(
                     session_id,
@@ -2432,16 +2471,16 @@ impl DaemonServer {
             return false;
         }
 
-        // Collapse to at most one runtime per (agent_type, workspace_id).
-        // `StoredSession`s are keyed by runtime_id and every desktop
-        // session-start / model-switch spawns a fresh runtime_id, so a single
-        // conversation accumulates several non-stopped historical rows across
-        // restarts. Resuming all of them brings up multiple live agents for
-        // one session — each then answers the same @mention, which is the
-        // "two different models reply to one prompt" duplication the user
-        // sees after restart. Keep only the most recent row per tuple; the
-        // rest are superseded and marked Stopped so they neither resume now
-        // nor linger as resumable on disk.
+        // Collapse to a single runtime per session. `StoredSession`s are keyed
+        // by runtime_id and every desktop session-start / model-switch /
+        // workspace-change spawns a fresh runtime_id, so a single conversation
+        // accumulates several non-stopped historical rows across restarts.
+        // Resuming more than one brings up multiple live agents for one session
+        // — each then answers the same @mention, which is the duplicate-reply
+        // the user sees after restart (including duplicates that live in
+        // different workspaces). Keep only the most recent row; the rest are
+        // superseded and marked Stopped so they neither resume now nor linger
+        // as resumable on disk.
         let (keep, superseded) = dedup_resumable_runtimes(stored_sessions);
 
         if !superseded.is_empty() {
@@ -2454,7 +2493,7 @@ impl DaemonServer {
             info!(
                 session_id = %session_id,
                 superseded = ?superseded,
-                "resume_historical: marked superseded duplicate runtimes Stopped (one live runtime per agent_type+workspace)"
+                "resume_historical: marked superseded duplicate runtimes Stopped (one live runtime per session)"
             );
         }
 
@@ -3965,16 +4004,58 @@ impl DaemonServer {
 
         let remote_workspace_id = remote_workspace_id_owned.as_deref();
 
-        // Idempotency: if a live runtime already exists for the same
-        // (session_id, agent_type, workspace_id) tuple, return its id
-        // instead of spawning a duplicate. Protects against misbehaving
-        // clients that fire RuntimeStart twice (e.g. picker + inline
+        // Invariant: a conversation has at most one live runtime *on this
+        // daemon*. The daemon is a single actor/participant in the session, so
+        // it must answer an @mention exactly once. Historically each desktop
+        // session-start / model-switch / workspace-change spawned a fresh
+        // runtime_id keyed by (session_id, agent_type, workspace_id); several
+        // could end up live at the same time (e.g. one resumed-on-restart in
+        // workspace A plus one freshly started in workspace B) and *each* then
+        // replied to the same prompt — the duplicate-reply bug.
+        //
+        // Collapse to one: among this session's live runtimes, reuse the one
+        // that exactly matches the requested (agent_type, workspace_id) and
+        // supersede (stop) every other one so the latest client intent wins
+        // and only a single runtime remains to answer. Also protects against
+        // misbehaving clients that fire RuntimeStart twice (picker + inline
         // mention race on the desktop client pre-4210aad8).
-        let existing_runtime = self
-            .agents
-            .lock()
-            .await
-            .find_active_runtime_for(session_id, agent_type, &ws_id);
+        let (existing_runtime, superseded): (Option<String>, Vec<String>) =
+            if session_id.is_empty() {
+                (None, Vec::new())
+            } else {
+                let agents = self.agents.lock().await;
+                let mut reuse: Option<String> = None;
+                let mut stale: Vec<String> = Vec::new();
+                for rid in agents.runtime_ids_for_session(session_id) {
+                    match agents.get_handle(&rid) {
+                        Some(h)
+                            if reuse.is_none()
+                                && h.agent_type == agent_type
+                                && h.workspace_id == ws_id =>
+                        {
+                            reuse = Some(rid);
+                        }
+                        _ => stale.push(rid),
+                    }
+                }
+                (reuse, stale)
+            };
+
+        if !superseded.is_empty() {
+            for rid in &superseded {
+                self.agents.lock().await.stop_agent(rid).await;
+                if let Some(s) = self.sessions.find_by_id_mut(rid) {
+                    s.status = amux::AgentStatus::Stopped as i32;
+                }
+            }
+            let _ = self.sessions.save(&self.sessions_path);
+            info!(
+                session_id,
+                superseded = ?superseded,
+                "apply_start_runtime: superseded stale runtimes for session (one live runtime per session)"
+            );
+        }
+
         if let Some(existing) = existing_runtime {
             info!(
                 session_id,
@@ -5617,12 +5698,11 @@ mod tests {
     }
 
     #[test]
-    fn dedup_resumable_runtimes_keeps_latest_per_agent_workspace_tuple() {
-        // Same conversation accumulated three historical runtimes for one
-        // (agent_type, workspace) tuple across restarts/model-switches, plus
-        // one runtime for a different agent_type. Only the newest of the
-        // duplicate tuple and the lone other-agent runtime should be kept;
-        // the two older duplicates are superseded.
+    fn dedup_resumable_runtimes_keeps_only_newest_for_session() {
+        // Same conversation accumulated several historical runtimes across
+        // restarts / model-switches / workspace-changes. The daemon is one
+        // participant, so only the single newest may resume; everything else
+        // is superseded — including runtimes for other agent_types/workspaces.
         let stored = vec![
             make_stored_session("rt-old", "s1", amux::AgentType::ClaudeCode, "ws-1", 100),
             make_stored_session("rt-mid", "s1", amux::AgentType::ClaudeCode, "ws-1", 200),
@@ -5630,34 +5710,46 @@ mod tests {
             make_stored_session("rt-other", "s1", amux::AgentType::Codex, "ws-1", 150),
         ];
 
-        let (mut keep, mut superseded) = dedup_resumable_runtimes(stored);
-        keep.sort_by(|a, b| a.runtime_id.cmp(&b.runtime_id));
+        let (keep, mut superseded) = dedup_resumable_runtimes(stored);
         superseded.sort();
 
         assert_eq!(
             keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
-            vec!["rt-new", "rt-other"],
-            "keep the newest runtime per (agent_type, workspace) tuple"
+            vec!["rt-new"],
+            "keep only the single newest runtime for the session"
         );
         assert_eq!(
             superseded,
-            vec!["rt-mid".to_string(), "rt-old".to_string()],
-            "older duplicates of the same tuple are superseded"
+            vec![
+                "rt-mid".to_string(),
+                "rt-old".to_string(),
+                "rt-other".to_string()
+            ],
+            "every other runtime is superseded regardless of agent_type/workspace"
         );
     }
 
     #[test]
-    fn dedup_resumable_runtimes_distinguishes_workspace() {
-        // Same agent_type but different workspaces are independent agents —
-        // neither supersedes the other even though one is older.
+    fn dedup_resumable_runtimes_collapses_across_workspaces() {
+        // Two live runtimes in different workspaces for the same conversation
+        // each answered the same @mention (the duplicate-reply bug). Only the
+        // newest survives; the cross-workspace duplicate is superseded.
         let stored = vec![
             make_stored_session("rt-a", "s1", amux::AgentType::ClaudeCode, "ws-1", 100),
             make_stored_session("rt-b", "s1", amux::AgentType::ClaudeCode, "ws-2", 50),
         ];
 
         let (keep, superseded) = dedup_resumable_runtimes(stored);
-        assert_eq!(keep.len(), 2, "different workspaces are kept independently");
-        assert!(superseded.is_empty(), "no cross-workspace supersession");
+        assert_eq!(
+            keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
+            vec!["rt-a"],
+            "newest runtime wins across workspaces"
+        );
+        assert_eq!(
+            superseded,
+            vec!["rt-b".to_string()],
+            "older cross-workspace duplicate is superseded"
+        );
     }
 
     #[tokio::test]

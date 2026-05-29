@@ -20,7 +20,10 @@ const backendListCandidateActors = vi.fn()
 const backendAddParticipant = vi.fn()
 const backendRemoveParticipant = vi.fn()
 const backendListLatestRuntimeHints = vi.fn()
+const backendFetchLatestRuntimeForSession = vi.fn()
 const backendListAgentDefaults = vi.fn()
+const backendListActorDirectoryByIds = vi.fn()
+const backendListDaemonWorkspaces = vi.fn()
 const backendGetSession = vi.fn()
 const backendResolveCurrentMemberActor = vi.fn()
 const loadSessionParticipantsMock = vi.fn()
@@ -39,7 +42,14 @@ vi.mock('@/lib/backend', () => ({
     },
     runtime: {
       listLatestAgentRuntimeHints: backendListLatestRuntimeHints,
+      fetchLatestRuntimeForSession: backendFetchLatestRuntimeForSession,
       listAgentDefaults: backendListAgentDefaults,
+    },
+    actors: {
+      listActorDirectoryByIds: backendListActorDirectoryByIds,
+    },
+    workspaces: {
+      listDaemonWorkspaces: backendListDaemonWorkspaces,
     },
     auth: {
       getSession: backendGetSession,
@@ -89,13 +99,19 @@ beforeEach(() => {
   backendAddParticipant.mockReset()
   backendRemoveParticipant.mockReset()
   backendListLatestRuntimeHints.mockReset()
+  backendFetchLatestRuntimeForSession.mockReset()
   backendListAgentDefaults.mockReset()
+  backendListActorDirectoryByIds.mockReset()
+  backendListDaemonWorkspaces.mockReset()
   backendGetSession.mockReset()
   backendResolveCurrentMemberActor.mockReset()
   backendAddParticipant.mockResolvedValue(undefined)
   backendRemoveParticipant.mockResolvedValue(undefined)
   backendListLatestRuntimeHints.mockResolvedValue([])
+  backendFetchLatestRuntimeForSession.mockResolvedValue(null)
   backendListAgentDefaults.mockResolvedValue([])
+  backendListActorDirectoryByIds.mockResolvedValue([])
+  backendListDaemonWorkspaces.mockResolvedValue([])
   backendGetSession.mockResolvedValue({ user: { id: 'user-1' } })
   backendResolveCurrentMemberActor.mockResolvedValue({ id: 'm-1', team_id: 'team-1' })
   mockRuntimeStart.mockReset()
@@ -169,6 +185,26 @@ function mockSheetData(
     const historyMatches = (agentHistoryRows as Array<any>).filter((row) => agentIds.includes(row.agent_id))
     if (historyMatches.length > 0) return Promise.resolve(historyMatches)
     return Promise.resolve((runtimeRows as Array<any>).map((row) => ({ session_id: 'sess-1', ...row })))
+  })
+  backendFetchLatestRuntimeForSession.mockImplementation(async (agentId: string) => {
+    const sessionScopedRows = [...(runtimeRows as Array<any>), ...(agentHistoryRows as Array<any>)]
+    const row = sessionScopedRows.find((r) => r.agent_id === agentId)
+    if (!row?.workspace_id) return null
+    return {
+      id: `session-runtime-${agentId}`,
+      runtime_id: row.runtime_id ?? 'rt-1',
+      team_id: 'team-1',
+      agent_id: agentId,
+      session_id: 'sess-1',
+      workspace_id: row.workspace_id,
+      backend_type: row.backend_type ?? 'claude',
+      backend_session_id: null,
+      status: row.status ?? 'running',
+      current_model: row.current_model ?? null,
+      last_seen_at: null,
+      created_at: '2026-05-18T00:00:00.000Z',
+      updated_at: row.updated_at ?? '2026-05-18T00:00:00.000Z',
+    }
   })
   backendListAgentDefaults.mockResolvedValue(
     ([...(actorRows as Array<any>), ...(teamAgentRows as Array<any>)]).map((row) => ({
@@ -404,7 +440,7 @@ describe('SessionActorSheet', () => {
           expect.objectContaining({
             targetDeviceId: 'a-2',
             workspaceId: 'ws-open',
-            worktree: '/Users/weigan.huang/copilot-ws-v2',
+            worktree: '',
             agentType: AgentType.OPENCODE,
           }),
         )
@@ -514,7 +550,7 @@ describe('SessionActorSheet', () => {
     await waitFor(() => expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'sess-1',
-        worktree: '/Users/weigan.huang/copilot-ws-v2',
+        worktree: '',
       }),
     ))
   })

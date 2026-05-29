@@ -22,7 +22,11 @@ import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amu
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import { useSessionParticipantStore } from '@/stores/session-participant-store'
 import { actorAvatarColor } from '@/lib/actor-color'
-import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  loadAgentWorkspaceLookups,
+  resolveAgentRuntimeWorkspaceId,
+  runtimeStartWorkspaceArgs,
+} from '@/lib/teamclaw/resolve-runtime-start-workspace'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -379,7 +383,6 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
   const [candidateActors, setCandidateActors] = React.useState<CandidateActor[]>([])
   const [addingActorId, setAddingActorId] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const runtimeStates = useRuntimeStateStore(s => s.byRuntimeId)
 
@@ -680,10 +683,12 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
         return
       }
 
-      // 2. Derive workspace from the agent's prior runtime history
+      // 2. Resolve cloud workspace id for this agent (path resolved on target daemon).
       const priorRows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, [candidate.id])
-
-      const workspaceId = priorRows?.[0]?.workspace_id ?? ''
+      const workspaceLookups = await loadAgentWorkspaceLookups(teamId, sessionId, [candidate.id]).catch(() => new Map())
+      const workspaceId = resolveAgentRuntimeWorkspaceId(
+        workspaceLookups.get(candidate.id) ?? {},
+      )
       // Prefer the agent's explicit default_agent_type (set via UI) over the
       // backend_type recorded from the agent's prior runtime — the prior value
       // can lag if the operator changed the default after the last spawn.
@@ -701,8 +706,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       try {
         const result = await runtimeStart({
           targetDeviceId: candidate.id,
-          workspaceId,
-          worktree: workspacePath ?? '',
+          ...runtimeStartWorkspaceArgs(workspaceId),
           sessionId,
           agentType,
           initialPrompt: '',
