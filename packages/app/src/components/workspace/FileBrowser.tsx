@@ -1,12 +1,13 @@
 import * as React from 'react'
 import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area"
-import { Search, GitBranch, ChevronsDownUp, Undo2, LocateFixed, X } from 'lucide-react'
+import { Search, GitBranch, ChevronsDownUp, Undo2, LocateFixed, X, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { cn } from '@/lib/utils'
 import { useFileChangeListener } from '@/hooks/useFileChangeListener'
 import { useWorkspaceStore, type FileNode } from '@/stores/workspace'
+import { useOssSyncStore } from '@/stores/oss-sync'
 import { ScrollBar } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import {
@@ -79,6 +80,18 @@ export function FileBrowser({ className, variant = 'default', rootPath, rootPath
   const setSearchExpanded = onSearchExpandedChange ?? setInternalSearchExpanded
 
   const isCustomRoot = !!rootPath || !!rootPaths
+
+  // OSS team-share "sync now" — only surfaced when this workspace actually has
+  // OSS sync state (oss_sync_status reports a teamId). Non-team / git-mode
+  // workspaces report no teamId, so the button stays hidden there.
+  const ossTeamId = useOssSyncStore((s) => s.teamId)
+  const ossSyncing = useOssSyncStore((s) => s.syncing)
+  const refreshOssSync = useOssSyncStore((s) => s.refresh)
+  const ossSyncNow = useOssSyncStore((s) => s.syncNow)
+  React.useEffect(() => {
+    if (workspacePath) void refreshOssSync(workspacePath)
+  }, [workspacePath, refreshOssSync])
+  const showOssSync = !isCustomRoot && !!ossTeamId
 
   // When rootPaths is provided, create virtual root folder nodes for each path.
   // When rootPath is provided, extract its subtree from the global fileTree.
@@ -187,6 +200,22 @@ export function FileBrowser({ className, variant = 'default', rootPath, rootPath
 
   const iconButtonClass = 'flex items-center justify-center h-7 w-7 rounded-md transition-colors shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground'
 
+  const ossSyncButton = showOssSync ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => workspacePath && void ossSyncNow(workspacePath)}
+          disabled={ossSyncing}
+          className={iconButtonClass}
+          data-testid="filebrowser-oss-sync"
+        >
+          <RefreshCw className={cn('h-3.5 w-3.5', ossSyncing && 'animate-spin')} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{t('settings.team.oss.syncNow', 'Sync now')}</TooltipContent>
+    </Tooltip>
+  ) : null
+
   return (
     <div className={cn('flex flex-col h-full', className)} data-file-browser data-testid="file-browser">
 
@@ -227,6 +256,9 @@ export function FileBrowser({ className, variant = 'default', rootPath, rootPath
 
               {/* Caller-provided action icons (e.g. New Note, New Folder, Sync) */}
               {actionIcons}
+
+              {/* OSS team-share sync now — only when this workspace is OSS-synced */}
+              {ossSyncButton}
 
               {/* Git filter — only for git-tracked directories */}
               {!hideGitStatus && (
@@ -310,6 +342,7 @@ export function FileBrowser({ className, variant = 'default', rootPath, rootPath
                 className="pl-7 h-7 text-xs"
               />
             </div>
+            {ossSyncButton}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

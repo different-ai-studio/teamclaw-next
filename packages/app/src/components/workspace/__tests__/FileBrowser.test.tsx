@@ -73,6 +73,7 @@ vi.mock("sonner", () => ({
 vi.mock("@/lib/utils", () => ({
   cn: (...args: Array<string | false | null | undefined>) =>
     args.filter(Boolean).join(" "),
+  isTauri: () => false,
 }));
 
 vi.mock("@/hooks/useFileChangeListener", () => ({
