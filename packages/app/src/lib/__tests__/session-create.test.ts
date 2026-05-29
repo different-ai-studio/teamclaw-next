@@ -13,11 +13,10 @@ const backendMocks = vi.hoisted(() => ({
   createSessionShell: vi.fn(),
   insertOutgoingMessage: vi.fn(),
   listLatestAgentRuntimeHints: vi.fn(),
+  fetchLatestRuntimeForSession: vi.fn(),
   listAgentDefaults: vi.fn(),
-}))
-
-const workspaceStoreState = vi.hoisted(() => ({
-  workspacePath: '/Users/weigan.huang/copilot-ws-v2',
+  listActorDirectoryByIds: vi.fn(),
+  listDaemonWorkspaces: vi.fn(),
 }))
 
 vi.mock('@/lib/teamclaw-rpc', () => ({
@@ -35,15 +34,16 @@ vi.mock('@/lib/backend', () => ({
     },
     runtime: {
       listLatestAgentRuntimeHints: backendMocks.listLatestAgentRuntimeHints,
+      fetchLatestRuntimeForSession: backendMocks.fetchLatestRuntimeForSession,
       listAgentDefaults: backendMocks.listAgentDefaults,
     },
+    actors: {
+      listActorDirectoryByIds: backendMocks.listActorDirectoryByIds,
+    },
+    workspaces: {
+      listDaemonWorkspaces: backendMocks.listDaemonWorkspaces,
+    },
   }),
-}))
-
-vi.mock('@/stores/workspace', () => ({
-  useWorkspaceStore: {
-    getState: () => workspaceStoreState,
-  },
 }))
 
 describe('startAgentRuntimesAsync', () => {
@@ -53,15 +53,22 @@ describe('startAgentRuntimesAsync', () => {
     backendMocks.createSessionShell.mockReset()
     backendMocks.insertOutgoingMessage.mockReset()
     backendMocks.listLatestAgentRuntimeHints.mockReset()
+    backendMocks.fetchLatestRuntimeForSession.mockReset()
     backendMocks.listAgentDefaults.mockReset()
+    backendMocks.listActorDirectoryByIds.mockReset()
+    backendMocks.listDaemonWorkspaces.mockReset()
     backendMocks.createSessionShell.mockResolvedValue({ sessionId: 'sess-1' })
     backendMocks.insertOutgoingMessage.mockResolvedValue({})
-    workspaceStoreState.workspacePath = '/Users/weigan.huang/copilot-ws-v2'
+    backendMocks.listActorDirectoryByIds.mockResolvedValue([])
+    backendMocks.listDaemonWorkspaces.mockResolvedValue([])
+    backendMocks.fetchLatestRuntimeForSession.mockResolvedValue(null)
   })
 
   function mockTables(opts: {
     runtimes?: Array<{ agent_id: string; workspace_id: string | null; backend_type: string | null }>
-    actors?: Array<{ id: string; agent_types: string[]; default_agent_type: string | null }>
+    sessionRuntimes?: Array<{ agent_id: string; workspace_id: string | null }>
+    actors?: Array<{ id: string; agent_types: string[]; default_agent_type: string | null; default_workspace_id?: string | null }>
+    workspaces?: Array<{ id: string; agent_id: string | null; archived?: boolean }>
   }) {
     backendMocks.listLatestAgentRuntimeHints.mockResolvedValue(
       (opts.runtimes ?? []).map((r) => ({
@@ -74,7 +81,50 @@ describe('startAgentRuntimesAsync', () => {
         ...r,
       })),
     )
+    backendMocks.fetchLatestRuntimeForSession.mockImplementation(async (agentId: string) => {
+      const row = (opts.sessionRuntimes ?? []).find((r) => r.agent_id === agentId)
+      if (!row?.workspace_id) return null
+      return {
+        id: `session-runtime-${agentId}`,
+        runtime_id: `runtime-id-${agentId}`,
+        team_id: 'team-1',
+        agent_id: agentId,
+        session_id: 'sess-1',
+        workspace_id: row.workspace_id,
+        backend_type: 'claude',
+        backend_session_id: null,
+        status: 'running',
+        current_model: null,
+        last_seen_at: null,
+        created_at: '2026-05-18T00:00:00.000Z',
+        updated_at: '2026-05-18T00:00:00.000Z',
+      }
+    })
     backendMocks.listAgentDefaults.mockResolvedValue(opts.actors ?? [])
+    backendMocks.listActorDirectoryByIds.mockResolvedValue(
+      (opts.actors ?? []).map((a) => ({
+        id: a.id,
+        team_id: 'team-1',
+        actor_type: 'agent',
+        display_name: a.id,
+        default_workspace_id: a.default_workspace_id ?? null,
+        agent_types: a.agent_types,
+        default_agent_type: a.default_agent_type,
+      })),
+    )
+    backendMocks.listDaemonWorkspaces.mockResolvedValue(
+      (opts.workspaces ?? []).map((w) => ({
+        id: w.id,
+        team_id: 'team-1',
+        agent_id: w.agent_id,
+        created_by_member_id: null,
+        name: w.id,
+        path: null,
+        archived: w.archived ?? false,
+        created_at: '2026-05-18T00:00:00.000Z',
+        updated_at: '2026-05-18T00:00:00.000Z',
+      })),
+    )
   }
 
   it('returns the backend session id after creating a shell', async () => {
@@ -96,9 +146,10 @@ describe('startAgentRuntimesAsync', () => {
     }))
   })
 
-  it('sends opencode runtimeStart requests for prior opencode agent runtimes', async () => {
+  it('sends opencode runtimeStart requests for this-session runtime workspace', async () => {
     mockTables({
-      runtimes: [{ agent_id: 'agent-1', workspace_id: 'ws-opencode', backend_type: 'opencode' }],
+      runtimes: [{ agent_id: 'agent-1', workspace_id: 'ws-other-session', backend_type: 'opencode' }],
+      sessionRuntimes: [{ agent_id: 'agent-1', workspace_id: 'ws-opencode' }],
       actors: [{ id: 'agent-1', agent_types: [], default_agent_type: null }],
     })
 
@@ -113,7 +164,7 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-1',
         workspaceId: 'ws-opencode',
-        worktree: '/Users/weigan.huang/copilot-ws-v2',
+        worktree: '',
         agentType: AgentType.OPENCODE,
       }),
     )
@@ -136,7 +187,7 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-2',
         workspaceId: '',
-        worktree: '/Users/weigan.huang/copilot-ws-v2',
+        worktree: '',
         agentType: AgentType.CLAUDE_CODE,
       }),
     )
@@ -159,7 +210,7 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-daemon',
         workspaceId: '',
-        worktree: '/Users/weigan.huang/copilot-ws-v2',
+        worktree: '',
         agentType: AgentType.OPENCODE,
       }),
     )
@@ -277,12 +328,12 @@ describe('startAgentRuntimesAsync', () => {
     )
   })
 
-  it('starts agents from prior runtime history when agent defaults lookup fails', async () => {
+  it('uses session runtime workspace and ignores team-wide prior workspace hint', async () => {
     backendMocks.listLatestAgentRuntimeHints.mockResolvedValue([
       {
         id: 'runtime-agent-8',
         agent_id: 'agent-8',
-        workspace_id: 'ws-prior',
+        workspace_id: 'ws-other-session',
         backend_type: 'opencode',
         runtime_id: 'runtime-id-agent-8',
         session_id: 'previous-session',
@@ -291,7 +342,24 @@ describe('startAgentRuntimesAsync', () => {
         updated_at: '2026-05-18T00:00:00.000Z',
       },
     ])
+    backendMocks.fetchLatestRuntimeForSession.mockResolvedValue({
+      id: 'session-runtime-agent-8',
+      runtime_id: 'runtime-id-agent-8',
+      team_id: 'team-1',
+      agent_id: 'agent-8',
+      session_id: 'sess-1',
+      workspace_id: 'ws-this-session',
+      backend_type: 'opencode',
+      backend_session_id: null,
+      status: 'running',
+      current_model: null,
+      last_seen_at: null,
+      created_at: '2026-05-18T00:00:00.000Z',
+      updated_at: '2026-05-18T00:00:00.000Z',
+    })
     backendMocks.listAgentDefaults.mockRejectedValue(new Error('agent defaults unavailable'))
+    backendMocks.listActorDirectoryByIds.mockResolvedValue([])
+    backendMocks.listDaemonWorkspaces.mockResolvedValue([])
 
     const { startAgentRuntimesAsync } = await import('../session-create')
     await startAgentRuntimesAsync({
@@ -303,8 +371,31 @@ describe('startAgentRuntimesAsync', () => {
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
         targetDeviceId: 'agent-8',
-        workspaceId: 'ws-prior',
+        workspaceId: 'ws-this-session',
+        worktree: '',
         agentType: AgentType.OPENCODE,
+      }),
+    )
+  })
+
+  it('uses agent default_workspace_id when runtime history is empty', async () => {
+    mockTables({
+      runtimes: [],
+      actors: [{ id: 'agent-9', agent_types: [], default_agent_type: null, default_workspace_id: 'ws-default' }],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-9'],
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-9',
+        workspaceId: 'ws-default',
+        worktree: '',
       }),
     )
   })

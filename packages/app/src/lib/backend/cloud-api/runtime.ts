@@ -6,7 +6,7 @@ import type {
   RuntimeTargetRow,
   SessionRuntimeModelRow,
 } from "../types";
-import type { CloudApiClient } from "./http";
+import { CloudApiError, type CloudApiClient } from "./http";
 
 type CloudAgentRuntime = {
   id: string;
@@ -56,6 +56,19 @@ export function createRuntimeModule(client: CloudApiClient): RuntimeBackend {
       for (const id of agentActorIds) params.append("agentId", id);
       const out = await client.get<{ items: AgentRuntimeHintRow[] }>(`/v1/runtime/hints?${params}`);
       return out.items;
+    },
+    async fetchLatestRuntimeForSession(agentActorId, sessionId) {
+      const params = new URLSearchParams({
+        agentId: agentActorId,
+        sessionId,
+      });
+      try {
+        const row = await client.get<CloudAgentRuntime>(`/v1/agents/runtimes/latest?${params}`);
+        return mapRuntime(row);
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
     },
     async listAgentDefaults(agentActorIds) {
       if (agentActorIds.length === 0) return [];

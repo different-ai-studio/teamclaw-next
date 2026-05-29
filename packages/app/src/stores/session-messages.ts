@@ -9,7 +9,6 @@ import {
 } from "@/lib/proto/teamclaw_pb";
 import { getBackend } from "@/lib/backend";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
-import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import { getOpenCodeClient, isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
@@ -140,7 +139,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
         ? agentRows[0]
         : null;
 
-    const { createSessionShell, startAgentRuntimesAsync } = await import("@/lib/session-create");
+    const { createSessionShell } = await import("@/lib/session-create");
     const { sessionId } = await createSessionShell({
       teamId: currentTeam.id,
       creatorActorId,
@@ -156,18 +155,10 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     } as Partial<SessionState>);
 
     if (soleAgent) {
-      const { selectedModel } = get();
       useEngagedAgentStore.getState().setAgents(sessionId, [{
         id: soleAgent.id,
         displayName: soleAgent.display_name || "AI",
       }]);
-      void startAgentRuntimesAsync({
-        sessionId,
-        teamId: currentTeam.id,
-        agentActorIds: [soleAgent.id],
-        agentType: selectedModel ? resolveAmuxAgentType(selectedModel.providerID) : undefined,
-        modelId: selectedModel?.modelID,
-      });
     }
 
     return sessionId;

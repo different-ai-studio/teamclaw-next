@@ -23,13 +23,16 @@ import {
   type SessionParticipantRow,
 } from '@/lib/local-cache'
 import { isTauri } from '@/lib/utils'
-import { useWorkspaceStore } from '@/stores/workspace'
 import {
   sessionFlowError,
   sessionFlowLog,
   summarizeText,
 } from '@/lib/session-flow-log'
-
+import {
+  loadAgentWorkspaceLookups,
+  resolveAgentRuntimeWorkspaceId,
+  runtimeStartWorkspaceArgs,
+} from '@/lib/teamclaw/resolve-runtime-start-workspace'
 export interface CreateSessionShellArgs {
   teamId: string
   creatorActorId: string
@@ -284,38 +287,9 @@ export async function createSessionWithFirstMessage(
     messageId,
   })
 
-  // Fire-and-forget runtime spawn. The caller (new-session dialog / chat
-  // panel) navigates into the session immediately; runtime readiness arrives
-  // asynchronously via RuntimeInfo retain (Starting -> Active). Awaiting here
-  // would block the UI on ACP startup, which is the latency we are removing.
-  if (args.agentActorIds.length > 0) {
-    sessionFlowLog('session_with_first_message.runtime_start.begin', {
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-      agentType: args.agentType,
-      modelId: args.modelId,
-    })
-    void startAgentRuntimesAsync({
-      sessionId,
-      teamId: args.teamId,
-      agentActorIds: args.agentActorIds,
-      agentType: args.agentType,
-      modelId: args.modelId,
-    }).then(() => {
-      sessionFlowLog('session_with_first_message.runtime_start.done', {
-        sessionId,
-        teamId: args.teamId,
-        agentActorIds: args.agentActorIds,
-      })
-    }).catch((runtimeErr) => {
-      sessionFlowError('session_with_first_message.runtime_start.failed', runtimeErr, {
-        sessionId,
-        teamId: args.teamId,
-        agentActorIds: args.agentActorIds,
-      })
-    })
-  }
+  // Fire-and-forget runtime spawn is handled by ChatPanel's engaged_agents_effect
+  // (and outbox ensure on send). Seeding engaged agents before navigation avoids
+  // duplicate runtimeStart from both createSessionWithFirstMessage and the effect.
 
   sessionFlowLog('session_with_first_message.ok', {
     sessionId,
@@ -356,9 +330,10 @@ function pickAgentBackend(
 }
 
 /**
- * Fire-and-forget RPC fanout. Looks up each agent's prior workspace from
- * agent_runtimes history, then calls runtimeStart per agent. Failures are
- * logged but don't propagate — UI has already moved on.
+ * Fire-and-forget RPC fanout. Resolves each agent's cloud workspace id
+ * (prior runtime → default_workspace_id → agent-bound workspace), then calls
+ * runtimeStart with worktree left empty so the target daemon resolves the
+ * local path. Failures are logged but don't propagate — UI has already moved on.
  *
  * The caller is expected to NOT await this — kick it off with `void`.
  * Daemon-published RuntimeInfo retains will update the runtime-state-store
@@ -366,7 +341,6 @@ function pickAgentBackend(
  */
 export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<void> {
   if (args.agentActorIds.length === 0) return
-  const currentWorkspacePath = useWorkspaceStore.getState().workspacePath ?? ''
   sessionFlowLog('runtime_start.batch.begin', {
     sessionId: args.sessionId,
     teamId: args.teamId,
@@ -375,11 +349,13 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     modelId: args.modelId,
   })
 
+  const agentActorIds = args.agentActorIds
+
   const backend = getBackend()
   const priorByAgent = new Map<string, { workspace_id: string | null; backend_type: string | null }>()
   let priorRows: Awaited<ReturnType<typeof backend.runtime.listLatestAgentRuntimeHints>> = []
   try {
-    priorRows = await backend.runtime.listLatestAgentRuntimeHints(args.teamId, args.agentActorIds)
+    priorRows = await backend.runtime.listLatestAgentRuntimeHints(args.teamId, agentActorIds)
   } catch (error) {
     sessionFlowError('runtime_start.lookup_prior.failed', error, {
       sessionId: args.sessionId,
@@ -407,7 +383,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
   const defaultByAgent = new Map<string, { agent_types: string[]; default_agent_type: string | null }>()
   let agentRows: Awaited<ReturnType<typeof backend.runtime.listAgentDefaults>> = []
   try {
-    agentRows = await backend.runtime.listAgentDefaults(args.agentActorIds)
+    agentRows = await backend.runtime.listAgentDefaults(agentActorIds)
   } catch (error) {
     sessionFlowError('runtime_start.lookup_agent_defaults.failed', error, {
       sessionId: args.sessionId,
@@ -428,7 +404,24 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     })
   }
 
-  await Promise.all(args.agentActorIds.map(async (agentActorId) => {
+  let workspaceLookups: Awaited<ReturnType<typeof loadAgentWorkspaceLookups>> = new Map()
+  try {
+    workspaceLookups = await loadAgentWorkspaceLookups(args.teamId, args.sessionId, agentActorIds)
+  } catch (error) {
+    sessionFlowError('runtime_start.lookup_workspace.failed', error, {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      agentActorIds,
+    })
+    console.warn('[session-create] workspace lookup failed; continuing with agent defaults only', {
+      sessionId: args.sessionId,
+      teamId: args.teamId,
+      agentActorIds,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  await Promise.all(agentActorIds.map(async (agentActorId) => {
     const prior = priorByAgent.get(agentActorId)
     const agentDefaults = defaultByAgent.get(agentActorId)
     const backendType = pickAgentBackend(
@@ -446,6 +439,9 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
       byRuntimeId,
       providerFallback: args.modelIdByAgent?.[agentActorId] ?? args.modelId,
     }).modelId || undefined
+    const workspaceId = resolveAgentRuntimeWorkspaceId(
+      workspaceLookups.get(agentActorId) ?? {},
+    )
     try {
       sessionFlowLog('runtime_start.request.begin', {
         sessionId: args.sessionId,
@@ -454,15 +450,14 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         agentType,
         modelId: resolvedModelId ?? null,
         userPick: userPick ?? null,
-        workspaceId: prior?.workspace_id ?? '',
+        workspaceId,
       })
       // Current amuxd convention: daemon device_id == its actor_id, so the
       // RPC topic is amux/{team}/device/{agentActorId}/rpc/req. Multi-daemon
       // teams would need a separate (actor -> deviceId) lookup.
       const result = await runtimeStart({
         targetDeviceId: agentActorId,
-        workspaceId: prior?.workspace_id ?? '',
-        worktree: currentWorkspacePath,
+        ...runtimeStartWorkspaceArgs(workspaceId),
         sessionId: args.sessionId,
         agentType,
         initialPrompt: '',

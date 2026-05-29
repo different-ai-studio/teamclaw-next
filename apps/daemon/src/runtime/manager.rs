@@ -498,6 +498,9 @@ impl RuntimeManager {
             self.set_current_model(agent_id, &model_id);
         }
 
+        self.seed_cursor_from_prior_runtime(agent_id, remote_session_id)
+            .await;
+
         // Upsert agent_runtimes with status="starting" on resume
         if let Some(sb) = &self.backend {
             let row = AgentRuntimeUpsert {
@@ -842,6 +845,13 @@ impl RuntimeManager {
     /// so anything present here is by definition still tracked; the caller
     /// reads `AgentStatus` off the retained state topic if it cares about
     /// liveness.
+    /// Tuple-exact lookup `(session_id, agent_type, workspace_id)`.
+    ///
+    /// Retained for reference/tests: `apply_start_runtime` now enforces the
+    /// stronger "one live runtime per session" invariant directly (reuse the
+    /// tuple-exact match, supersede the rest), so this is no longer on the
+    /// runtime-start hot path.
+    #[allow(dead_code)]
     pub fn find_active_runtime_for(
         &self,
         session_id: &str,
@@ -994,6 +1004,17 @@ impl RuntimeManager {
             .filter(|(_, h)| h.session_id == session_id)
             .map(|(rid, _)| rid.clone())
             .collect()
+    }
+
+    /// Among in-memory runtimes bound to `session_id`, return the one with
+    /// the greatest `started_at`. Defense-in-depth when multiple runtimes
+    /// leaked despite the one-runtime-per-session invariant.
+    pub fn newest_runtime_id_for_session(&self, session_id: &str) -> Option<String> {
+        self.agents
+            .iter()
+            .filter(|(_, h)| h.session_id == session_id)
+            .max_by_key(|(_, h)| h.started_at)
+            .map(|(id, _)| id.clone())
     }
 
     /// Return the `agent_id` stored on the handle for the given runtime key.
@@ -1714,6 +1735,21 @@ mod tests {
         assert_eq!(ids, vec!["rt1", "rt2"]);
         assert_eq!(mgr.runtime_ids_for_session("session_OTHER"), vec!["rt3"]);
         assert!(mgr.runtime_ids_for_session("unknown").is_empty());
+    }
+
+    #[test]
+    fn newest_runtime_id_for_session_picks_latest_started_at() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        mgr.add_test_runtime("rt-old", "agent_A", "session_S");
+        mgr.add_test_runtime("rt-new", "agent_B", "session_S");
+        mgr.get_handle_mut("rt-old").unwrap().started_at = 100;
+        mgr.get_handle_mut("rt-new").unwrap().started_at = 200;
+
+        assert_eq!(
+            mgr.newest_runtime_id_for_session("session_S"),
+            Some("rt-new".to_string())
+        );
+        assert_eq!(mgr.newest_runtime_id_for_session("missing"), None);
     }
 
     #[test]
