@@ -78,6 +78,9 @@ function contractRepo() {
   const attachmentStore = {};
   const runtimeStore = {};
   const shareModeStore = {};
+  const feedbackStore = [];
+  const reportStore = [];
+  const skillStore = [];
   return {
     async enableShareMode(teamId, mode, gitConfig) {
       if (shareModeStore[teamId]?.shareMode) {
@@ -487,22 +490,80 @@ function contractRepo() {
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {},
     async setAgentDeviceId(agentActorId, { deviceId }) {},
     async submitFeedback(body) {
-      return {
+      const row = {
         messageId: body.messageId,
         actorId: body.actorId,
+        teamId: body.teamId ?? null,
+        sessionId: body.sessionId ?? null,
         kind: body.kind,
         starRating: body.starRating ?? null,
-        note: body.note ?? null,
-        createdAt: "2026-05-28T00:00:00Z",
-        updatedAt: null,
+        skill: body.skill ?? null,
+        createdAt: "2026-05-29T00:00:00Z",
       };
+      feedbackStore.push(row);
+      return row;
     },
     async listFeedback({ sessionId }) {
-      return { items: [] };
+      return { items: feedbackStore.filter(f => f.sessionId === sessionId) };
     },
-    async deleteFeedback(messageId, actorId) {},
-    async getTeamLeaderboard(teamId, { period } = {}) {
-      return { items: [] };
+    async deleteFeedback(messageId, actorId) {
+      const idx = feedbackStore.findIndex(f => f.messageId === messageId && f.actorId === actorId);
+      if (idx >= 0) feedbackStore.splice(idx, 1);
+    },
+    async submitSessionReport(body) {
+      reportStore.push({ ...body });
+      for (const [skill, count] of Object.entries(body.skillUsage ?? {})) {
+        skillStore.push({ actorId: body.actorId, teamId: body.teamId, sessionId: body.sessionId, skill, count });
+      }
+    },
+    async submitSkillUsage(body) {
+      skillStore.push({ ...body, count: body.count ?? 1 });
+    },
+    async listFeedbackSummary(teamId) {
+      const items = feedbackStore
+        .filter((f) => f.teamId === teamId)
+        .reduce((acc, f) => {
+          const e = acc.get(f.actorId) ?? { actorId: f.actorId, displayName: null, positive: 0, negative: 0, total: 0 };
+          if (f.kind === "positive") e.positive += 1;
+          if (f.kind === "negative") e.negative += 1;
+          e.total += 1;
+          acc.set(f.actorId, e);
+          return acc;
+        }, new Map());
+      return { items: [...items.values()] };
+    },
+    async getTeamLeaderboard(teamId, { period = "week" } = {}) {
+      const byActor = new Map();
+      const ensure = (actorId) => {
+        if (!byActor.has(actorId)) {
+          byActor.set(actorId, {
+            actorId, teamId, displayName: null, period,
+            tokensUsed: 0, costUsd: 0, positiveFeedback: 0, negativeFeedback: 0,
+            sessionCount: 0, skillUsage: {}, score: 0,
+          });
+        }
+        return byActor.get(actorId);
+      };
+      for (const r of reportStore) {
+        if (r.teamId !== teamId) continue;
+        const e = ensure(r.actorId);
+        e.tokensUsed += r.tokensUsed ?? 0;
+        e.costUsd += r.costUsd ?? 0;
+        e.sessionCount += 1;
+        e.score = e.tokensUsed;
+      }
+      for (const f of feedbackStore) {
+        if (f.teamId !== teamId) continue;
+        const e = ensure(f.actorId);
+        if (f.kind === "positive") e.positiveFeedback += 1;
+        if (f.kind === "negative") e.negativeFeedback += 1;
+      }
+      for (const s of skillStore) {
+        if (s.teamId !== teamId) continue;
+        const e = ensure(s.actorId);
+        e.skillUsage[s.skill] = (e.skillUsage[s.skill] ?? 0) + (s.count ?? 1);
+      }
+      return { items: [...byActor.values()] };
     },
   };
 }

@@ -648,14 +648,16 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     const out = await repo.submitFeedback({
       messageId: "00000000-0000-0000-0000-000000000001",
       actorId: "00000000-0000-0000-0000-000000000002",
-      kind: "up",
+      teamId: "00000000-0000-0000-0000-000000000004",
+      sessionId: "00000000-0000-0000-0000-000000000003",
+      kind: "positive",
       starRating: null,
-      note: null,
+      skill: null,
     });
     assert.ok(out, "result must be returned");
     assert.equal(out.messageId, "00000000-0000-0000-0000-000000000001");
     assert.equal(out.actorId, "00000000-0000-0000-0000-000000000002");
-    assert.equal(out.kind, "up");
+    assert.equal(out.kind, "positive");
   });
 
   test("repository contract: listFeedback returns items array", async () => {
@@ -670,9 +672,51 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     await repo.deleteFeedback("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002");
   });
 
-  test("repository contract: getTeamLeaderboard returns items array", async () => {
+  test("repository contract: getTeamLeaderboard returns enriched items", async () => {
     const repo = createRepository();
     const out = await repo.getTeamLeaderboard("00000000-0000-0000-0000-000000000004", { period: "week" });
+    assert.ok(out, "result must be returned");
+    assert.ok(Array.isArray(out.items), "items must be an array");
+    if (out.items.length > 0) {
+      const row = out.items[0];
+      assert.deepEqual(Object.keys(row).sort(), [
+        "actorId", "costUsd", "displayName", "negativeFeedback", "period",
+        "positiveFeedback", "score", "sessionCount", "skillUsage", "teamId", "tokensUsed",
+      ].sort());
+      assert.equal(row.period, "week");
+      assert.equal(typeof row.skillUsage, "object");
+    }
+  });
+
+  test("repository contract: submitSessionReport stores report and skill usage", async () => {
+    const repo = createRepository();
+    await repo.submitSessionReport({
+      actorId: "00000000-0000-0000-0000-000000000002",
+      teamId: "00000000-0000-0000-0000-000000000004",
+      sessionId: "00000000-0000-0000-0000-000000000003",
+      tokensUsed: 1234,
+      costUsd: 0.5,
+      model: "claude-opus-4-8",
+      agentKind: "code",
+      endedAt: "2026-05-29T00:00:00Z",
+      skillUsage: { "sentry-fix": 2 },
+    });
+  });
+
+  test("repository contract: submitSkillUsage succeeds", async () => {
+    const repo = createRepository();
+    await repo.submitSkillUsage({
+      actorId: "00000000-0000-0000-0000-000000000002",
+      teamId: "00000000-0000-0000-0000-000000000004",
+      sessionId: null,
+      skill: "superpowers:brainstorming",
+      count: 1,
+    });
+  });
+
+  test("repository contract: listFeedbackSummary returns items array", async () => {
+    const repo = createRepository();
+    const out = await repo.listFeedbackSummary("00000000-0000-0000-0000-000000000004");
     assert.ok(out, "result must be returned");
     assert.ok(Array.isArray(out.items), "items must be an array");
   });
