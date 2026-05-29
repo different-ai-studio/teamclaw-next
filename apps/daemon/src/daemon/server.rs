@@ -892,11 +892,18 @@ impl DaemonServer {
             }
             // 2. Ensure every member workspace links to the global dir.
             for ws_path in &workspace_paths {
-                let status = crate::config::workspace_link::ensure_workspace_link(
-                    Path::new(ws_path),
-                    &team_id,
+                let ws_root = Path::new(ws_path);
+                let status =
+                    crate::config::workspace_link::ensure_workspace_link(ws_root, &team_id);
+                // The effective dir agents read from — the in-workspace link
+                // normally, or the global dir under the no-link fallback.
+                let effective = crate::config::global_team_store::resolve_team_dir(ws_root, &team_id);
+                info!(
+                    team_id,
+                    workspace = %ws_path,
+                    effective = %effective.display(),
+                    "team link: {status:?}"
                 );
-                info!(team_id, workspace = %ws_path, "team link: {status:?}");
             }
         }
     }

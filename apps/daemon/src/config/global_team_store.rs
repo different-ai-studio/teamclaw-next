@@ -4,7 +4,7 @@
 //! (`~/.amuxd`). Every workspace of that team exposes this directory via a
 //! `teamclaw-team` symlink (see `workspace_link`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::DaemonConfig;
 
@@ -40,6 +40,19 @@ pub fn global_sync_state_path(team_id: &str) -> PathBuf {
         .join("state.json")
 }
 
+/// Where to read this workspace's shared team content. If the in-workspace
+/// `teamclaw-team` entry exists (symlink/junction/real dir), use it so existing
+/// relative read paths resolve transparently; otherwise (e.g. the Windows
+/// no-link fallback) read the global dir directly.
+pub fn resolve_team_dir(workspace_root: &Path, team_id: &str) -> PathBuf {
+    let link = workspace_root.join(TEAM_LINK_NAME);
+    if std::fs::symlink_metadata(&link).is_ok() {
+        link
+    } else {
+        global_team_dir(team_id)
+    }
+}
+
 /// Create the team dir and the fixed shared-prefix subdirectories if missing.
 /// Returns the team dir path.
 pub fn ensure_initialized(team_id: &str) -> std::io::Result<PathBuf> {
@@ -68,6 +81,28 @@ mod tests {
         assert_ne!(a, b);
         assert!(a.ends_with("teams/team-a/teamclaw-team"));
         assert!(global_sync_state_path("team-a").ends_with("teams/team-a/sync/state.json"));
+    }
+
+    #[test]
+    fn resolve_team_dir_prefers_link_else_global() {
+        let _guard = TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+        let ws = tempfile::tempdir().unwrap();
+
+        // No in-workspace entry → resolves to the global dir.
+        assert_eq!(
+            resolve_team_dir(ws.path(), "team-r"),
+            global_team_dir("team-r")
+        );
+
+        // In-workspace entry present → resolves to it (transparent reads).
+        #[cfg(unix)]
+        {
+            let link = ws.path().join(TEAM_LINK_NAME);
+            std::os::unix::fs::symlink(tmp.path(), &link).unwrap();
+            assert_eq!(resolve_team_dir(ws.path(), "team-r"), link);
+        }
     }
 
     #[test]
