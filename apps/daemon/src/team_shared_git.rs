@@ -123,21 +123,24 @@ fn ensure_scaffold(team_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn setup_or_sync_shared_dir(
-    workspace_root: &Path,
+/// Sync a git-backed team dir at an explicit path (used for the global,
+/// per-team copy). The dir is created/cloned if missing.
+pub fn sync_git_dir(
+    team_dir: &Path,
     config: &TeamSharedGitConfig,
 ) -> anyhow::Result<TeamSharedGitStatus> {
-    let team_dir = shared_dir_path(workspace_root, &config.shared_dir_name)?;
     let Some(git_url) = config.git_url.as_deref().filter(|u| !u.trim().is_empty()) else {
         return Ok(TeamSharedGitStatus {
-            shared_dir_path: team_dir,
+            shared_dir_path: team_dir.to_path_buf(),
             configured: false,
             synced: false,
         });
     };
 
     let remote_url = embed_token_in_url(git_url, config.git_token.as_deref());
+    let clone_parent = team_dir.parent().unwrap_or(Path::new("."));
     if !team_dir.exists() {
+        std::fs::create_dir_all(clone_parent)?;
         let mut args = vec!["clone".to_string()];
         if let Some(branch) = config
             .git_branch
@@ -149,12 +152,12 @@ pub fn setup_or_sync_shared_dir(
         }
         args.push(remote_url);
         args.push(team_dir.to_string_lossy().to_string());
-        let (ok, _, stderr) = git_owned(&args, workspace_root)?;
+        let (ok, _, stderr) = git_owned(&args, clone_parent)?;
         if !ok {
             anyhow::bail!("git clone failed: {}", stderr.trim());
         }
     } else if team_dir.join(".git").exists() {
-        let _ = git(&["remote", "set-url", "origin", &remote_url], &team_dir);
+        let _ = git(&["remote", "set-url", "origin", &remote_url], team_dir);
     } else {
         anyhow::bail!(
             "shared directory {} exists but is not a git repository",
@@ -162,42 +165,66 @@ pub fn setup_or_sync_shared_dir(
         );
     }
 
-    ensure_scaffold(&team_dir)?;
+    ensure_scaffold(team_dir)?;
 
-    let (_, status, _) = git(&["status", "--porcelain"], &team_dir)?;
+    let (_, status, _) = git(&["status", "--porcelain"], team_dir)?;
     let had_local_changes = !status.trim().is_empty();
     if had_local_changes {
-        let _ = git(&["add", "-A"], &team_dir);
-        let _ = git(&["commit", "-m", "chore: daemon sync"], &team_dir);
+        let _ = git(&["add", "-A"], team_dir);
+        let _ = git(&["commit", "-m", "chore: daemon sync"], team_dir);
     }
 
-    let branch = current_branch(&team_dir, config.git_branch.as_deref());
-    let (ok, _, stderr) = git(&["fetch", "origin"], &team_dir)?;
+    let branch = current_branch(team_dir, config.git_branch.as_deref());
+    let (ok, _, stderr) = git(&["fetch", "origin"], team_dir)?;
     if !ok {
         anyhow::bail!("git fetch failed: {}", stderr.trim());
     }
-    let (ok, _, stderr) = git(&["pull", "--rebase", "origin", &branch], &team_dir)?;
+    let (ok, _, stderr) = git(&["pull", "--rebase", "origin", &branch], team_dir)?;
     if !ok {
-        let _ = git(&["rebase", "--abort"], &team_dir);
+        let _ = git(&["rebase", "--abort"], team_dir);
         anyhow::bail!("git pull --rebase failed: {}", stderr.trim());
     }
     if had_local_changes {
-        let (ok, _, stderr) = git(&["push", "origin", &branch], &team_dir)?;
+        let (ok, _, stderr) = git(&["push", "origin", &branch], team_dir)?;
         if !ok {
             anyhow::bail!("git push failed: {}", stderr.trim());
         }
     }
 
     Ok(TeamSharedGitStatus {
-        shared_dir_path: team_dir,
+        shared_dir_path: team_dir.to_path_buf(),
         configured: true,
         synced: true,
     })
 }
 
+/// Backwards-compatible wrapper: sync the team dir located inside a workspace.
+pub fn setup_or_sync_shared_dir(
+    workspace_root: &Path,
+    config: &TeamSharedGitConfig,
+) -> anyhow::Result<TeamSharedGitStatus> {
+    let team_dir = shared_dir_path(workspace_root, &config.shared_dir_name)?;
+    sync_git_dir(&team_dir, config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_git_dir_returns_not_configured_without_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let team_dir = tmp.path().join("teamclaw-team");
+        std::fs::create_dir_all(&team_dir).unwrap();
+        let config: TeamSharedGitConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true
+        }))
+        .unwrap();
+        let status = sync_git_dir(&team_dir, &config).unwrap();
+        assert_eq!(status.shared_dir_path, team_dir);
+        assert!(!status.configured);
+        assert!(!status.synced);
+    }
 
     #[test]
     fn rejects_unsafe_shared_dir_names() {
