@@ -774,9 +774,31 @@ async heartbeat() {
     },
 
     async upsertAgentRuntime(body) {
+      // team_id is NOT NULL on public.agent_runtimes, but the daemon does not
+      // send teamId in its request body. Derive it server-side from the agent
+      // actor (actors.team_id) when the caller omits it. This Supabase client
+      // is bound to the caller's bearer token, so the read runs under the
+      // agent's RLS context (an agent can read its own actor row).
+      let teamId = body.teamId;
+      if (!teamId) {
+        const { data: actorRow, error: actorErr } = await supabase
+          .from("actors")
+          .select("team_id")
+          .eq("id", body.agentActorId)
+          .maybeSingle();
+        if (actorErr) throw actorErr;
+        teamId = actorRow?.team_id ?? null;
+      }
+      if (!teamId) {
+        throw new ApiError(
+          400,
+          "missing_team",
+          "Unable to resolve team_id for agent runtime: agent actor not found or not visible",
+        );
+      }
       const row = {
         id: body.id ?? randomUUID(),
-        team_id: body.teamId,
+        team_id: teamId,
         agent_id: body.agentActorId,
         session_id: body.sessionId,
         runtime_id: body.runtimeId,
@@ -787,9 +809,12 @@ async heartbeat() {
         current_model: body.currentModel ?? null,
         updated_at: new Date().toISOString(),
       };
+      // The only matching unique index is agent_runtimes_agent_backend_uniq on
+      // (agent_id, backend_session_id) (migration 202604220027). onConflict must
+      // name a real unique constraint or Postgres raises 42P10.
       const { data, error } = await supabase
         .from("agent_runtimes")
-        .upsert(row, { onConflict: "session_id,runtime_id,backend_session_id" })
+        .upsert(row, { onConflict: "agent_id,backend_session_id" })
         .select("id")
         .single();
       if (error) throw error;
