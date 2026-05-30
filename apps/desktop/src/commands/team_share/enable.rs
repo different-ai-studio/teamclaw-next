@@ -373,6 +373,162 @@ pub async fn team_share_get_status(
     get_share_status_impl(team_id, workspace_path).await
 }
 
+// ─── team_sync_paths ───────────────────────────────────────────────────────
+//
+// Surfaces, for the settings UI, *where team content physically lives* and
+// *every `teamclaw-team` symlink that points at it*. All three share modes
+// (oss / managed_git / custom_git) converge on the same topology: one real
+// directory per team at `~/.amuxd/teams/<team_id>/teamclaw-team` (the daemon's
+// global copy; git modes clone into it), with a `teamclaw-team` symlink in each
+// workspace that joined the team. The list of workspaces comes from the daemon
+// registry (`~/.amuxd/workspaces.toml`), filtered by `team_id`.
+
+/// One workspace's `teamclaw-team` entry, for the settings UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceLinkInfo {
+    pub workspace_path: String,
+    pub display_name: String,
+    /// `<workspace_path>/teamclaw-team` — the symlink (or legacy local dir).
+    pub link_path: String,
+    /// `"symlink"` | `"real_dir"` | `"missing"` (see `detect_link_status`).
+    pub status: String,
+    /// Whether this is the workspace currently open in the app.
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSyncPaths {
+    /// `~/.amuxd/teams/<team_id>/teamclaw-team` — the single real copy.
+    pub real_dir: Option<String>,
+    /// Whether that real directory currently exists on disk.
+    pub real_dir_exists: bool,
+    /// The current workspace plus every workspace bound to this team in the
+    /// daemon registry, each with its `teamclaw-team` link status.
+    pub links: Vec<WorkspaceLinkInfo>,
+}
+
+/// Minimal mirror of the fields we need from `~/.amuxd/workspaces.toml`.
+#[derive(Debug, Clone, Deserialize)]
+struct RegistryWorkspace {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    team_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WorkspaceRegistry {
+    #[serde(default)]
+    workspaces: Vec<RegistryWorkspace>,
+}
+
+/// Parse a `workspaces.toml` body and keep only workspaces joined to `team_id`.
+/// Pure (no FS) so it can be unit-tested. Malformed TOML yields an empty list.
+fn filter_team_workspaces(toml_body: &str, team_id: &str) -> Vec<RegistryWorkspace> {
+    let registry: WorkspaceRegistry = toml::from_str(toml_body).unwrap_or_default();
+    registry
+        .workspaces
+        .into_iter()
+        .filter(|w| !w.path.is_empty() && w.team_id.as_deref() == Some(team_id))
+        .collect()
+}
+
+fn load_team_workspaces(team_id: &str) -> Vec<RegistryWorkspace> {
+    let Some(path) = dirs::home_dir().map(|h| h.join(".amuxd").join("workspaces.toml")) else {
+        return vec![];
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(body) => filter_team_workspaces(&body, team_id),
+        Err(_) => vec![],
+    }
+}
+
+/// Best-effort canonicalization for stable path comparison; falls back to the
+/// raw string when the path can't be canonicalized (e.g. it doesn't exist).
+fn canon_path(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string())
+}
+
+fn basename_or(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn push_workspace_link(
+    links: &mut Vec<WorkspaceLinkInfo>,
+    seen: &mut std::collections::HashSet<String>,
+    ws_path: &str,
+    display_name: String,
+    is_current: bool,
+) {
+    if ws_path.is_empty() || !seen.insert(canon_path(ws_path)) {
+        return;
+    }
+    let link_path = std::path::Path::new(ws_path)
+        .join(TEAM_REPO_DIR)
+        .to_string_lossy()
+        .into_owned();
+    links.push(WorkspaceLinkInfo {
+        workspace_path: ws_path.to_string(),
+        display_name,
+        link_path,
+        status: detect_link_status(ws_path).to_string(),
+        is_current,
+    });
+}
+
+pub fn team_sync_paths_impl(team_id: String, workspace_path: String) -> TeamSyncPaths {
+    let real_dir = global_team_dir_display(&team_id);
+    let real_dir_exists = real_dir
+        .as_deref()
+        .map(|p| std::path::Path::new(p).exists())
+        .unwrap_or(false);
+
+    let current_canon = canon_path(&workspace_path);
+    let mut links: Vec<WorkspaceLinkInfo> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Current workspace first, even if it isn't team-bound in the registry yet
+    // (e.g. just enabled, daemon hasn't recorded team_id). Dedup handles the
+    // overlap when it *is* already in the registry.
+    if !workspace_path.is_empty() {
+        let name = basename_or(&workspace_path);
+        push_workspace_link(&mut links, &mut seen, &workspace_path, name, true);
+    }
+
+    for w in load_team_workspaces(&team_id) {
+        let is_current = canon_path(&w.path) == current_canon;
+        let name = if w.display_name.is_empty() {
+            basename_or(&w.path)
+        } else {
+            w.display_name.clone()
+        };
+        push_workspace_link(&mut links, &mut seen, &w.path, name, is_current);
+    }
+
+    TeamSyncPaths {
+        real_dir,
+        real_dir_exists,
+        links,
+    }
+}
+
+#[tauri::command]
+pub async fn team_sync_paths(
+    team_id: String,
+    workspace_path: String,
+) -> Result<TeamSyncPaths, String> {
+    Ok(team_sync_paths_impl(team_id, workspace_path))
+}
+
 #[cfg(test)]
 mod link_status_tests {
     use super::*;
@@ -406,5 +562,48 @@ mod link_status_tests {
             assert!(p.contains(".amuxd"));
             assert!(p.ends_with(TEAM_REPO_DIR));
         }
+    }
+
+    #[test]
+    fn filter_team_workspaces_keeps_only_matching_team() {
+        let body = r#"
+[[workspaces]]
+workspace_id = "a"
+path = "/ws/alpha"
+display_name = "alpha"
+team_id = "team-1"
+
+[[workspaces]]
+workspace_id = "b"
+path = "/ws/beta"
+display_name = "beta"
+team_id = "team-2"
+
+[[workspaces]]
+workspace_id = "c"
+path = "/ws/gamma"
+display_name = "gamma"
+"#;
+        let got = filter_team_workspaces(body, "team-1");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, "/ws/alpha");
+
+        // Unknown team / malformed body → empty, never panics.
+        assert!(filter_team_workspaces(body, "team-9").is_empty());
+        assert!(filter_team_workspaces("not = valid = toml", "team-1").is_empty());
+    }
+
+    #[test]
+    fn sync_paths_includes_current_workspace_with_link_status() {
+        let ws = tempfile::tempdir().unwrap();
+        let ws_path = ws.path().to_str().unwrap().to_string();
+        let out = team_sync_paths_impl("team-xyz".into(), ws_path.clone());
+
+        // Current workspace is always present and flagged, even when it isn't
+        // in the registry yet. With no teamclaw-team entry on disk → "missing".
+        let current: Vec<_> = out.links.iter().filter(|l| l.is_current).collect();
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].status, "missing");
+        assert!(current[0].link_path.ends_with(TEAM_REPO_DIR));
     }
 }
