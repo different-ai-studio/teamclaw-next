@@ -18,6 +18,8 @@ public struct SettingsView: View {
     let activeTeam: TeamSummary?
     let onSignOut: (() -> Void)?
     let preferencesAPI: (any PushPreferencesAPI)?
+    let teamRepository: (any TeamRepository)?
+    let actorRepository: (any ActorRepository)?
 
     @State private var teamDetails: TeamDetails?
     @State private var teamLoadError: String?
@@ -33,11 +35,15 @@ public struct SettingsView: View {
     public init(connectedAgentsStore: ConnectedAgentsStore?,
                 activeTeam: TeamSummary? = nil,
                 onSignOut: (() -> Void)? = nil,
-                preferencesAPI: (any PushPreferencesAPI)? = nil) {
+                preferencesAPI: (any PushPreferencesAPI)? = nil,
+                teamRepository: (any TeamRepository)? = nil,
+                actorRepository: (any ActorRepository)? = nil) {
         self.connectedAgentsStore = connectedAgentsStore
         self.activeTeam = activeTeam
         self.onSignOut = onSignOut
         self.preferencesAPI = preferencesAPI
+        self.teamRepository = teamRepository
+        self.actorRepository = actorRepository
     }
 
     private var appVersion: String {
@@ -117,6 +123,7 @@ public struct SettingsView: View {
                         initialDisplayName: displayName == "—" ? "" : displayName,
                         initialAvatarURL: currentActor?.avatarURL,
                         teamName: activeTeam?.name,
+                        actorRepository: actorRepository,
                         onSaved: { record in
                             ActorCacheSynchronizer.upsert(record, modelContext: modelContext)
                             try? modelContext.save()
@@ -463,8 +470,8 @@ public struct SettingsView: View {
 
     private func loadTeam() async {
         guard let team = activeTeam else { return }
+        guard let repo = teamRepository else { return }
         do {
-            let repo = try SupabaseTeamRepository()
             teamDetails = try await repo.loadDetails(teamID: team.id)
             teamLoadError = nil
         } catch {
@@ -480,6 +487,7 @@ private struct EditProfileSheet: View {
     let initialDisplayName: String
     let initialAvatarURL: String?
     let teamName: String?
+    let actorRepository: (any ActorRepository)?
     let onSaved: (ActorRecord) -> Void
 
     @State private var displayName: String
@@ -495,12 +503,14 @@ private struct EditProfileSheet: View {
         initialDisplayName: String,
         initialAvatarURL: String?,
         teamName: String?,
+        actorRepository: (any ActorRepository)? = nil,
         onSaved: @escaping (ActorRecord) -> Void
     ) {
         self.actorID = actorID
         self.initialDisplayName = initialDisplayName
         self.initialAvatarURL = initialAvatarURL
         self.teamName = teamName
+        self.actorRepository = actorRepository
         self.onSaved = onSaved
         _displayName = State(initialValue: initialDisplayName)
         _avatarURL = State(initialValue: initialAvatarURL)
@@ -633,7 +643,10 @@ private struct EditProfileSheet: View {
         defer { isSaving = false }
 
         do {
-            let repo = try SupabaseActorRepository()
+            guard let repo = actorRepository else {
+                errorMessage = "Cloud API is not configured."
+                return
+            }
             var nextAvatarURL = avatarURL
             if let selectedAvatarData {
                 nextAvatarURL = try await repo.uploadAvatar(

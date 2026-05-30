@@ -6,6 +6,7 @@ import AMUXCore
 public struct InviteSheet: View {
     let session: Session
     let teamclawService: TeamclawService
+    let sessionRepository: (any SessionRepository)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -13,9 +14,11 @@ public struct InviteSheet: View {
     @State private var selectedIds: Set<String> = []
     @State private var isSending = false
 
-    public init(session: Session, teamclawService: TeamclawService) {
+    public init(session: Session, teamclawService: TeamclawService,
+                sessionRepository: (any SessionRepository)? = nil) {
         self.session = session
         self.teamclawService = teamclawService
+        self.sessionRepository = sessionRepository
     }
 
     public var body: some View {
@@ -77,7 +80,10 @@ public struct InviteSheet: View {
 
         Task {
             do {
-                let repository = try SupabaseSessionRepository()
+                guard let repository = sessionRepository else {
+                    await MainActor.run { isSending = false }
+                    return
+                }
                 try await repository.addParticipants(
                     sessionID: session.sessionId,
                     actorIDs: Array(selectedIds)

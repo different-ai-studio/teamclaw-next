@@ -2,6 +2,20 @@ import { ApiError } from "../http-utils.mjs";
 import { requireString } from "../router.mjs";
 
 export function registerNotifications(router) {
+  router.post("/v1/devices/push-token", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.deviceId, "deviceId");
+    requireString(body.token, "token");
+    await ctx.repository.registerDevicePushToken({
+      deviceId: body.deviceId,
+      platform: body.platform ?? "ios",
+      provider: body.provider ?? "apns",
+      token: body.token,
+      appVersion: body.appVersion ?? null,
+    });
+    return { statusCode: 204, body: null };
+  });
+
   router.get("/v1/notifications/prefs", async (ctx) => {
     const out = await ctx.repository.getNotificationPrefs();
     return { body: out };

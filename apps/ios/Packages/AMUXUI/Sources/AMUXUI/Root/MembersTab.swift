@@ -18,6 +18,8 @@ public struct MembersTab: View {
     let currentActorID: String?
     let store: ActorStore
     let connectedAgentsStore: ConnectedAgentsStore?
+    let workspacesRepository: (any WorkspaceRepository)?
+    let agentAccessRepository: (any AgentAccessRepository)?
     /// One-shot trigger from the parent (e.g. the zero-agent reminder) to
     /// open the invite sheet without a toolbar tap. Toggled back to false
     /// after firing so subsequent triggers re-fire cleanly.
@@ -37,6 +39,8 @@ public struct MembersTab: View {
                 currentActorID: String? = nil,
                 store: ActorStore,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
+                agentAccessRepository: (any AgentAccessRepository)? = nil,
                 showInvite: Binding<Bool> = .constant(false)) {
         self.pairing = pairing
         self.mqtt = mqtt
@@ -46,6 +50,8 @@ public struct MembersTab: View {
         self.currentActorID = currentActorID
         self.store = store
         self.connectedAgentsStore = connectedAgentsStore
+        self.workspacesRepository = workspacesRepository
+        self.agentAccessRepository = agentAccessRepository
         self._externalInviteTrigger = showInvite
     }
 
@@ -108,7 +114,9 @@ public struct MembersTab: View {
                             sessionViewModel: sessionViewModel,
                             store: store,
                             teamclawService: teamclawService,
-                            connectedAgentsStore: connectedAgentsStore
+                            connectedAgentsStore: connectedAgentsStore,
+                            workspacesRepository: workspacesRepository,
+                            agentAccessRepository: agentAccessRepository
                         )
                     } else {
                         ContentUnavailableView(

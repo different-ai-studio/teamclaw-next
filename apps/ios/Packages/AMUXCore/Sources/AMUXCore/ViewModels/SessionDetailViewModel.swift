@@ -129,6 +129,7 @@ public final class SessionDetailViewModel {
     private let sessionsRepository: SessionRepository?
     private let agentRuntimesRepository: AgentRuntimesRepository?
     private let messagesRepository: MessagesRepository?
+    private let workspacesRepository: (any WorkspaceRepository)?
     /// `nonisolated(unsafe)` so the deinit (which runs in a nonisolated
     /// context) can cancel the MQTT subscription task on VM teardown.
     /// Writes happen only from main-actor methods (`start`, `stop`); the
@@ -230,6 +231,7 @@ public final class SessionDetailViewModel {
                 sessionsRepository: SessionRepository? = nil,
                 agentRuntimesRepository: AgentRuntimesRepository? = nil,
                 messagesRepository: MessagesRepository? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
                 outboxSender: OutboxSender? = nil) {
         self.runtime = runtime; self.mqtt = mqtt; self.hub = hub; self.teamID = teamID; self.peerId = peerId
         self.session = session; self.teamclawService = teamclawService
@@ -237,6 +239,7 @@ public final class SessionDetailViewModel {
         self.sessionsRepository = sessionsRepository
         self.agentRuntimesRepository = agentRuntimesRepository
         self.messagesRepository = messagesRepository
+        self.workspacesRepository = workspacesRepository
         self.outboxSender = outboxSender
     }
 
@@ -560,8 +563,8 @@ public final class SessionDetailViewModel {
     public func refreshMemberSheet() async {
         guard let session, !session.sessionId.isEmpty else { return }
         let loader = SessionMemberSheetLoader(
-            sessionsRepository: sessionsRepository ?? (try? SupabaseSessionRepository()),
-            agentRuntimesRepository: agentRuntimesRepository ?? (try? SupabaseAgentRuntimesRepository())
+            sessionsRepository: sessionsRepository,
+            agentRuntimesRepository: agentRuntimesRepository
         )
         guard let snapshot = await loader.load(
             sessionID: session.sessionId,
@@ -775,7 +778,7 @@ public final class SessionDetailViewModel {
         let sessionID = session.sessionId
         guard !sessionID.isEmpty else { return }
 
-        let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+        let sessionsRepo = self.sessionsRepository
         guard let sessionsRepo else {
             print("[RuntimeDetailVM] addMembers: no sessions repo available")
             return
@@ -800,7 +803,7 @@ public final class SessionDetailViewModel {
         let sessionID = session.sessionId
         guard !sessionID.isEmpty else { return }
 
-        let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+        let sessionsRepo = self.sessionsRepository
         if let sessionsRepo {
             do {
                 try await sessionsRepo.addParticipants(sessionID: sessionID, actorIDs: [actorID])
@@ -871,7 +874,7 @@ public final class SessionDetailViewModel {
                   let sessionID = self.session?.sessionId,
                   !sessionID.isEmpty else { return }
 
-            let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+            let sessionsRepo = self.sessionsRepository
             if let sessionsRepo {
                 do {
                     try await sessionsRepo.removeParticipant(sessionID: sessionID, actorID: actorID)
@@ -979,14 +982,14 @@ public final class SessionDetailViewModel {
     }
 
     /// Best-effort lookup of the worktree filesystem path for a workspace UUID.
-    /// Uses Supabase via `SupabaseWorkspaceRepository`, narrowed to the agent's
+    /// Uses the injected Cloud API `WorkspaceRepository`, narrowed to the agent's
     /// own workspaces first (matching `AddAgentSheet`'s default), then widened
     /// to all team workspaces if the agent-scoped query yielded nothing.
     /// Returns "" when the path can't be resolved — the daemon will reject
     /// with a clean error rather than us pre-validating here.
     private func resolveWorkspacePath(workspaceID: String, agentActorID: String) async -> String {
         guard !workspaceID.isEmpty, !teamID.isEmpty else { return "" }
-        guard let repo = try? SupabaseWorkspaceRepository() else { return "" }
+        guard let repo = workspacesRepository else { return "" }
 
         if let agentScoped = try? await repo.listWorkspaces(teamID: teamID, agentID: agentActorID),
            let hit = agentScoped.first(where: { $0.id == workspaceID }) {
@@ -1132,7 +1135,7 @@ public final class SessionDetailViewModel {
             }
 
             // 3. Supabase delete (source of truth).
-            let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+            let sessionsRepo = self.sessionsRepository
             if let sessionsRepo {
                 do {
                     try await sessionsRepo.removeParticipant(sessionID: sessionID, actorID: actorID)
@@ -1347,7 +1350,14 @@ public final class SessionDetailViewModel {
         }
         if let sessionId = session?.sessionId {
             Task.detached {
-                guard let repo = try? SupabaseSessionsRepository() else { return }
+                guard let config = CloudAPIConfigurationStore.configuration() else { return }
+                let storage = KeychainSessionStorage()
+                let repo = CloudAPIRepositoryFactory.sessionsRepository(configuration: config) {
+                    guard let s = try storage.load(), s.expiresAt.timeIntervalSinceNow > 0 else {
+                        throw CloudAPIError.missingAccessToken
+                    }
+                    return s.accessToken
+                }
                 try? await repo.markSessionViewed(sessionId: sessionId, lastReadMessageId: nil)
             }
         }
@@ -1931,7 +1941,7 @@ public final class SessionDetailViewModel {
     /// represented; only `user_*` and `agent_reply` kinds become AgentEvents.
     public func seedFromSupabaseMessages(modelContext: ModelContext) async {
         guard let session else { return }
-        guard let repo = messagesRepository ?? (try? SupabaseMessagesRepository()) else { return }
+        guard let repo = messagesRepository else { return }
         let messages: [MessageRecord]
         do {
             messages = try await repo.listForSession(sessionID: session.sessionId)

@@ -108,6 +108,17 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
+    async updateCurrentActorProfile(actorId, { displayName, avatarUrl }) {
+      const { data, error } = await supabase.rpc("update_current_actor_profile", {
+        p_actor_id: actorId,
+        p_display_name: displayName,
+        p_avatar_url: avatarUrl ?? null,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      return mapDirectoryActor(row);
+    },
+
     // --- Team share mode (Task 3 of share-onboarding refactor) ---
 
     async enableShareMode(teamId, mode, gitConfig) {
@@ -210,7 +221,7 @@ export function createSupabaseBusinessRepository(options) {
       let query = supabase
         .from("actor_directory")
         .select(
-          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at",
+          "id, team_id, actor_type, user_id, invited_by_actor_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, agent_kind, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at",
         )
         .eq("team_id", teamId);
       if (kind) query = query.eq("actor_type", kind);
@@ -568,10 +579,38 @@ async heartbeat() {
       return row ?? null;
     },
 
+    async registerDevicePushToken(input) {
+      // Identity comes from the bearer token, not the client, mirroring
+      // writeForegroundPresence. Clients send device/platform/provider/token.
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) throw new ApiError(401, "unauthorized", "no authenticated user");
+      const row = {
+        user_id: userId,
+        device_id: input.deviceId,
+        platform: input.platform ?? "ios",
+        provider: input.provider ?? "apns",
+        token: input.token,
+        app_version: input.appVersion ?? null,
+        last_seen_at: new Date().toISOString(),
+      };
+      const { error } = await supabase
+        .from("device_push_tokens")
+        .upsert(row, { onConflict: "user_id,device_id,provider" });
+      if (error) throw error;
+    },
+
     async putNotificationPrefs(input) {
+      // Identity comes from the bearer token (auth.getUser), not the body —
+      // CloudAPI clients no longer hold a Supabase user id.
+      const { data: prefUser, error: prefUserErr } = await supabase.auth.getUser();
+      if (prefUserErr) throw prefUserErr;
+      const prefUserId = input.user_id ?? prefUser?.user?.id;
+      if (!prefUserId) throw new ApiError(401, "unauthorized", "no authenticated user");
       // Accept snake_case from the frontend (matches the on-disk row shape).
       const row = {
-        user_id: input.user_id,
+        user_id: prefUserId,
         enabled: input.enabled ?? true,
         dnd_start_min: input.dnd_start_min ?? null,
         dnd_end_min: input.dnd_end_min ?? null,
@@ -793,6 +832,24 @@ async heartbeat() {
       });
       if (error) throw error;
       return mapIdeaActivityRow(requiredRow(data, "ideas.createIdeaActivity"));
+    },
+
+    async listIdeaActivities(ideaId) {
+      const { data, error } = await supabase
+        .from("idea_activities")
+        .select("id, team_id, idea_id, actor_id, activity_type, content, metadata, attachment_urls, created_at, updated_at")
+        .eq("idea_id", ideaId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return { items: (data ?? []).map(mapIdeaActivityRow) };
+    },
+
+    async reorderIdeas({ teamId, ideaIds }) {
+      const { error } = await supabase.rpc("reorder_ideas", {
+        p_team_id: teamId,
+        p_idea_ids: ideaIds,
+      });
+      if (error) throw error;
     },
 
     async upsertAgentRuntime(body) {
@@ -1709,9 +1766,34 @@ async heartbeat() {
           updatedAt: row.updated_at ?? null,
           agentId: row.agent_id ?? id,
           deviceId: row.device_id ?? null,
+          // Fields the list_connected_agents RPC computes that clients need
+          // (iOS ConnectedAgent: permission level, visibility, ownership).
+          permissionLevel: row.permission_level ?? null,
+          visibility: row.visibility ?? null,
+          isOwner: row.is_owner === true,
         };
       }).filter((row) => typeof row.id === "string" && row.id.length > 0);
       return { items };
+    },
+
+    async shareAgentToTeam(agentActorId) {
+      const { error } = await supabase.rpc("share_agent_to_team", { p_agent_id: agentActorId });
+      if (error) throw error;
+    },
+
+    async makeAgentPersonal(agentActorId) {
+      const { error } = await supabase.rpc("make_agent_personal", { p_agent_id: agentActorId });
+      if (error) throw error;
+    },
+
+    async getAgentDeviceId(agentActorId) {
+      const { data, error } = await supabase
+        .from("agents")
+        .select("id, device_id")
+        .eq("id", agentActorId)
+        .maybeSingle();
+      if (error) throw error;
+      return { deviceId: data?.device_id ?? null };
     },
 
     async updateOwnedAgentProfile(agentActorId, patch) {
@@ -1742,30 +1824,35 @@ async heartbeat() {
       if (error) throw error;
       const rows = data ?? [];
       const memberIds = [...new Set(rows.map((row) => row.member_id))];
-      const memberNames = new Map();
+      const memberInfo = new Map();
       if (memberIds.length > 0) {
         const { data: members, error: memberError } = await supabase
           .from("actor_directory")
-          .select("id, display_name")
+          .select("id, display_name, actor_type, last_active_at")
           .in("id", memberIds);
         if (memberError) throw memberError;
         for (const member of members ?? []) {
-          memberNames.set(member.id, member.display_name || member.id);
+          memberInfo.set(member.id, member);
         }
       }
-      const items = rows.map((row) => ({
-        id: row.id,
-        agentId: row.agent_id,
-        agentActorId: row.agent_id,
-        actorId: row.member_id,
-        memberId: row.member_id,
-        memberName: memberNames.get(row.member_id) ?? row.member_id,
-        role: row.permission_level,
-        permissionLevel: row.permission_level,
-        grantedByMemberId: row.granted_by_member_id,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+      const items = rows.map((row) => {
+        const member = memberInfo.get(row.member_id);
+        return {
+          id: row.id,
+          agentId: row.agent_id,
+          agentActorId: row.agent_id,
+          actorId: row.member_id,
+          memberId: row.member_id,
+          memberName: member?.display_name || row.member_id,
+          actorType: member?.actor_type ?? null,
+          lastActiveAt: member?.last_active_at ?? null,
+          role: row.permission_level,
+          permissionLevel: row.permission_level,
+          grantedByMemberId: row.granted_by_member_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+      });
       return { items };
     },
 
@@ -1904,10 +1991,12 @@ function mapDirectoryActor(row) {
     displayName: row?.display_name ?? null,
     avatarUrl: row?.avatar_url ?? null,
     userId: row?.user_id ?? null,
+    invitedByActorId: row?.invited_by_actor_id ?? null,
     teamRole: row?.team_role ?? null,
     memberStatus: row?.member_status ?? null,
     agentStatus: row?.agent_status ?? null,
     agentTypes: row?.agent_types ?? null,
+    agentKind: row?.agent_kind ?? null,
     defaultAgentType: row?.default_agent_type ?? null,
     defaultWorkspaceId: row?.default_workspace_id ?? null,
     visibility: row?.agent_visibility ?? null,
@@ -2299,6 +2388,11 @@ function mapIdeaRow(row) {
     archived: row?.archived === true,
     authorActorId: row?.author_actor_id ?? null,
     actorIds: row?.actor_ids ?? [],
+    // Fields the ideas table carries that clients (iOS IdeaStore) depend on.
+    workspaceId: row?.workspace_id ?? null,
+    status: row?.status ?? null,
+    sortOrder: row?.sort_order ?? 0,
+    createdByActorId: row?.created_by_actor_id ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };
@@ -2342,14 +2436,20 @@ function mapAgentRuntimeRow(row) {
 }
 
 function mapIdeaActivityRow(row) {
+  const kind = row?.kind ?? row?.activity_type;
   return {
     id: requiredString(row?.id, "ideas.mapIdeaActivityRow", "id"),
     ideaId: requiredString(row?.idea_id, "ideas.mapIdeaActivityRow", "idea_id"),
-    kind: requiredString(row?.kind, "ideas.mapIdeaActivityRow", "kind"),
+    kind: requiredString(kind, "ideas.mapIdeaActivityRow", "kind"),
+    // Expose `activityType` alongside `kind` for clients that key on it.
+    activityType: kind,
     content: row?.content ?? null,
     actorId: requiredString(row?.actor_id, "ideas.mapIdeaActivityRow", "actor_id"),
     metadata: row?.metadata ?? null,
+    teamId: row?.team_id ?? null,
+    attachmentUrls: row?.attachment_urls ?? [],
     createdAt: requiredString(row?.created_at, "ideas.mapIdeaActivityRow", "created_at"),
+    updatedAt: row?.updated_at ?? null,
   };
 }
 

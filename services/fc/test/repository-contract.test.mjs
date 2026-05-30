@@ -318,6 +318,15 @@ function contractRepo() {
     async updateOwnedAgentProfile(agentActorId, patch) {
       assert.equal(agentActorId, "agent-1");
     },
+    async shareAgentToTeam(agentActorId) {
+      assert.ok(typeof agentActorId === "string");
+    },
+    async makeAgentPersonal(agentActorId) {
+      assert.ok(typeof agentActorId === "string");
+    },
+    async getAgentDeviceId(agentActorId) {
+      return { deviceId: "device-1" };
+    },
     async updateAgentDefaults(agentActorId, patch) {
       assert.equal(agentActorId, "agent-1");
     },
@@ -356,6 +365,10 @@ function contractRepo() {
         digestFrequency: input.digestFrequency ?? "off",
       };
     },
+    async registerDevicePushToken(input) {
+      assert.ok(typeof input.deviceId === "string");
+      assert.ok(typeof input.token === "string");
+    },
     async muteSession(sessionId, input) {},
     async unmuteSession(sessionId) {},
     async listMutedSessions() {
@@ -370,7 +383,17 @@ function contractRepo() {
       return { token: "invite-token", inviteId: "invite-1", expiresAt: input.expiresAt ?? null };
     },
     async removeTeamActor(teamId, actorId) {
-      assert.equal(teamId, "team-1");
+      assert.ok(typeof actorId === "string");
+    },
+    async updateCurrentActorProfile(actorId, { displayName, avatarUrl }) {
+      return {
+        id: actorId, teamId: "team-1", kind: "member",
+        displayName, avatarUrl: avatarUrl ?? null, userId: "user-1",
+        invitedByActorId: null, teamRole: "member", memberStatus: "active",
+        agentStatus: null, agentTypes: null, agentKind: null,
+        defaultAgentType: null, defaultWorkspaceId: null,
+        lastActiveAt: null, createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z",
+      };
     },
     async listIdeas({ teamId, archived, limit, cursor }) {
       assert.equal(teamId, "team-1");
@@ -415,6 +438,25 @@ function contractRepo() {
         metadata: body.metadata ?? null,
         createdAt: "2026-05-27T01:00:00Z",
       };
+    },
+    async listIdeaActivities(ideaId) {
+      return { items: [{
+        id: "activity-1",
+        ideaId,
+        kind: "comment",
+        activityType: "comment",
+        content: "hi",
+        actorId: "actor-1",
+        metadata: null,
+        teamId: "team-1",
+        attachmentUrls: [],
+        createdAt: "2026-05-27T01:00:00Z",
+        updatedAt: "2026-05-27T01:00:00Z",
+      }] };
+    },
+    async reorderIdeas({ teamId, ideaIds }) {
+      assert.equal(teamId, "team-1");
+      assert.ok(Array.isArray(ideaIds));
     },
     async listShortcuts(teamId, { parentId } = {}) {
       let items = shortcutStore.filter(s => s.teamId === teamId);

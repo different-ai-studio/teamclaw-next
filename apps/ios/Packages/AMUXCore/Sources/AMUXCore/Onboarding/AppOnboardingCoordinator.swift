@@ -175,11 +175,17 @@ public final class AppOnboardingCoordinator {
             return
         }
 
-        guard let actorRepo = try? SupabaseActorRepository(),
-              let agentAccessRepo = try? SupabaseAgentAccessRepository() else {
+        guard let agentAccessConfig = CloudAPIConfigurationStore.configuration() else {
             teamRuntimeContext = nil
             return
         }
+        let actorRepo = CloudAPIRepositoryFactory.actorRepository(
+            configuration: agentAccessConfig
+        ) { [store] in try await store.accessToken() }
+        let agentAccessRepo = CloudAPIRepositoryFactory.agentAccessRepository(
+            configuration: agentAccessConfig,
+            memberActorID: ctx.memberActorID
+        ) { [store] in try await store.accessToken() }
 
         let actorStore = ActorStore(teamID: ctx.team.id,
                                     repository: actorRepo,
@@ -193,14 +199,17 @@ public final class AppOnboardingCoordinator {
         await connectedAgentsStore.reload()
 
         let shortcutsStore: ShortcutsStore? = {
-            guard let repo = try? SupabaseShortcutsRepository() else { return nil }
-            let store = ShortcutsStore(
+            guard let config = CloudAPIConfigurationStore.configuration() else { return nil }
+            let repo = CloudAPIRepositoryFactory.shortcutsRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+            let scStore = ShortcutsStore(
                 teamID: ctx.team.id,
                 repository: repo,
                 modelContext: modelContext
             )
-            store.hydrateFromCache()
-            return store
+            scStore.hydrateFromCache()
+            return scStore
         }()
         if let shortcutsStore { Task { await shortcutsStore.reload() } }
 
@@ -225,6 +234,26 @@ public final class AppOnboardingCoordinator {
                 try await store.accessToken()
             }
         }
+        let cloudAPIWorkspacesRepo: (any WorkspaceRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.workspacesRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+        }
+        let cloudAPITeamRepo: (any TeamRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.teamRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+        }
+        let cloudAPISessionRepo: (any SessionRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.sessionRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+        }
+        let cloudAPIIdeasRepo: (any IdeaRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.ideasRepository(configuration: config, memberActorID: ctx.memberActorID) { [store] in
+                try await store.accessToken()
+            }
+        }
 
         teamRuntimeContext = TeamRuntimeContext(
             team: ctx.team,
@@ -232,12 +261,16 @@ public final class AppOnboardingCoordinator {
             actorStore: actorStore,
             connectedAgentsStore: connectedAgentsStore,
             shortcutsStore: shortcutsStore,
-            sessionIDsRepo: cloudAPISessionIDsRepo ?? (try? SupabaseSessionIDsRepository()),
-            sessionsRepo: cloudAPISessionsRepo ?? (try? SupabaseSessionsRepository()),
-            messagesRepo: cloudAPIMessagesRepo ?? (try? SupabaseMessagesRepository()),
-            agentRuntimesRepo: cloudAPIAgentRuntimesRepo ?? (try? SupabaseAgentRuntimesRepository()),
-            workspacesRepo: try? SupabaseWorkspaceRepository(),
-            agentAccessRepo: agentAccessRepo
+            sessionIDsRepo: cloudAPISessionIDsRepo,
+            sessionsRepo: cloudAPISessionsRepo,
+            messagesRepo: cloudAPIMessagesRepo,
+            agentRuntimesRepo: cloudAPIAgentRuntimesRepo,
+            workspacesRepo: cloudAPIWorkspacesRepo,
+            agentAccessRepo: agentAccessRepo,
+            teamRepo: cloudAPITeamRepo,
+            sessionRepo: cloudAPISessionRepo,
+            ideasRepo: cloudAPIIdeasRepo,
+            actorRepo: actorRepo
         )
     }
 

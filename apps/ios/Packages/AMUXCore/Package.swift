@@ -23,7 +23,6 @@ let package = Package(
         .package(url: "https://github.com/emqx/CocoaMQTT.git", from: "2.2.3"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.36.1"),
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.7.3"),
-        .package(url: "https://github.com/supabase/supabase-swift.git", exact: "2.43.1"),
     ],
     targets: [
         .target(
@@ -32,7 +31,6 @@ let package = Package(
                 .product(name: "CocoaMQTT", package: "CocoaMQTT"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
                 .product(name: "Markdown", package: "swift-markdown"),
-                .product(name: "Supabase", package: "supabase-swift"),
             ],
             resources: [.process("Resources")],
             // Pinned to Swift 5 mode: MQTTService is not yet Sendable-clean for Swift 6 strict concurrency. Migrate after audit.

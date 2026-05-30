@@ -12,6 +12,7 @@ public struct IdeaDetailView: View {
     let mqtt: MQTTService
     let hub: MQTTMessageHub
     let peerId: String
+    let sessionsRepository: (any SessionRepository)?
     @Binding var navigationPath: [String]
 
     @Environment(\.dismiss) private var dismiss
@@ -47,6 +48,7 @@ public struct IdeaDetailView: View {
         mqtt: MQTTService,
         hub: MQTTMessageHub,
         peerId: String,
+        sessionsRepository: (any SessionRepository)? = nil,
         navigationPath: Binding<[String]>
     ) {
         self.ideaID = ideaID
@@ -56,6 +58,7 @@ public struct IdeaDetailView: View {
         self.mqtt = mqtt
         self.hub = hub
         self.peerId = peerId
+        self.sessionsRepository = sessionsRepository
         self._navigationPath = navigationPath
     }
 
@@ -144,6 +147,7 @@ public struct IdeaDetailView: View {
                 mqtt: mqtt,
                 peerId: peerId,
                 teamclawService: teamclawService,
+                sessionsRepository: sessionsRepository,
                 viewModel: sessionViewModel,
                 preselectedIdeaId: item.id,
                 onSessionCreated: { sessionKey in

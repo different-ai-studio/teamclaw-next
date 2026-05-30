@@ -18,6 +18,10 @@ public struct SessionsTab: View {
     let actorStore: ActorStore?
     let shortcutsStore: ShortcutsStore?
     let messagesRepository: (any MessagesRepository)?
+    let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
+    let teamRepository: (any TeamRepository)?
+    let actorRepository: (any ActorRepository)?
     var onReconnect: (() -> Void)?
     var onSignOut: (() -> Void)?
     let preferencesAPI: (any PushPreferencesAPI)?
@@ -48,6 +52,10 @@ public struct SessionsTab: View {
                 actorStore: ActorStore? = nil,
                 shortcutsStore: ShortcutsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
+                teamRepository: (any TeamRepository)? = nil,
+                actorRepository: (any ActorRepository)? = nil,
                 onReconnect: (() -> Void)? = nil,
                 onSignOut: (() -> Void)? = nil,
                 preferencesAPI: (any PushPreferencesAPI)? = nil) {
@@ -64,6 +72,10 @@ public struct SessionsTab: View {
         self.actorStore = actorStore
         self.shortcutsStore = shortcutsStore
         self.messagesRepository = messagesRepository
+        self.workspacesRepository = workspacesRepository
+        self.sessionsRepository = sessionsRepository
+        self.teamRepository = teamRepository
+        self.actorRepository = actorRepository
         self.onReconnect = onReconnect
         self.onSignOut = onSignOut
         self.preferencesAPI = preferencesAPI
@@ -125,6 +137,8 @@ public struct SessionsTab: View {
                         navigationPath: $navigationPath,
                         connectedAgentsStore: connectedAgentsStore,
                         messagesRepository: messagesRepository,
+                        workspacesRepository: workspacesRepository,
+                        sessionsRepository: sessionsRepository,
                         preferencesAPI: preferencesAPI
                     )
                 }
@@ -132,7 +146,9 @@ public struct SessionsTab: View {
                     SettingsView(connectedAgentsStore: connectedAgentsStore,
                                  activeTeam: activeTeam,
                                  onSignOut: onSignOut,
-                                 preferencesAPI: preferencesAPI)
+                                 preferencesAPI: preferencesAPI,
+                                 teamRepository: teamRepository,
+                                 actorRepository: actorRepository)
                 }
                 .sheet(isPresented: $showNewSession) {
                     NewSessionSheet(mqtt: mqtt,
@@ -142,6 +158,8 @@ public struct SessionsTab: View {
                                    currentActorID: currentActorID,
                                    isAgentAvailable: pairing.isPaired,
                                    connectedAgentsStore: connectedAgentsStore,
+                                   workspacesRepository: workspacesRepository,
+                                   sessionsRepository: sessionsRepository,
                                    viewModel: viewModel) { agentId in
                         navigationPath = [agentId]
                         // Pull the freshly-created Supabase rows (sessions +
@@ -224,6 +242,8 @@ private struct SessionDestinationView: View {
     @Binding var navigationPath: [String]
     let connectedAgentsStore: ConnectedAgentsStore?
     let messagesRepository: (any MessagesRepository)?
+    let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
     let preferencesAPI: (any PushPreferencesAPI)?
 
     @Environment(\.modelContext) private var modelContext
@@ -249,6 +269,8 @@ private struct SessionDestinationView: View {
                     teamclawService: teamclawService,
                     connectedAgentsStore: connectedAgentsStore,
                     messagesRepository: messagesRepository,
+                    workspacesRepository: workspacesRepository,
+                    sessionsRepository: sessionsRepository,
                     pushPrefs: preferencesAPI
                 )
                 .id("session:\(session.sessionId)")

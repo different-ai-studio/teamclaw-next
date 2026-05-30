@@ -37,36 +37,47 @@ public struct SessionDetailView: View {
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
     private let pushPrefs: (any PushPreferencesAPI)?
+    private let workspacesRepository: (any WorkspaceRepository)?
 
     let connectedAgentsStore: ConnectedAgentsStore?
 
     public init(runtime: Runtime, mqtt: MQTTService, hub: MQTTMessageHub, peerId: String,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: runtime, mqtt: mqtt, hub: hub, peerId: peerId,
             connectedAgentsStore: connectedAgentsStore,
-            messagesRepository: messagesRepository))
+            sessionsRepository: sessionsRepository,
+            messagesRepository: messagesRepository,
+            workspacesRepository: workspacesRepository))
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = nil
         self.pushPrefs = pushPrefs
+        self.workspacesRepository = workspacesRepository
     }
 
     public init(session: Session, mqtt: MQTTService, hub: MQTTMessageHub, peerId: String,
                 teamclawService: TeamclawService?,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: nil, mqtt: mqtt, hub: hub, teamID: session.teamId,
             peerId: peerId, session: session,
             teamclawService: teamclawService,
             connectedAgentsStore: connectedAgentsStore,
-            messagesRepository: messagesRepository))
+            sessionsRepository: sessionsRepository,
+            messagesRepository: messagesRepository,
+            workspacesRepository: workspacesRepository))
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = teamclawService
         self.pushPrefs = pushPrefs
+        self.workspacesRepository = workspacesRepository
     }
 
     public var body: some View {
@@ -335,7 +346,8 @@ public struct SessionDetailView: View {
             .sheet(isPresented: $isAddAgentSheetPresented) {
                 AddAgentSheet(
                     candidates: viewModel.candidatesForAddAgent(),
-                    teamID: viewModel.teamIDRef
+                    teamID: viewModel.teamIDRef,
+                    workspacesRepository: workspacesRepository
                 ) { actorID, workspaceID, workspacePath, agentType in
                     Task {
                         await viewModel.addAgent(

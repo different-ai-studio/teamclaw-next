@@ -101,6 +101,107 @@ public actor CloudAPIAgentRuntimesRepository: AgentRuntimesRepository {
     }
 }
 
+public actor CloudAPISessionRepository: SessionRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func createSession(_ input: SessionCreateInput) async throws {
+        let title = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw SessionRepositoryError.missingTitle }
+        guard !input.participants.isEmpty else { throw SessionRepositoryError.missingParticipants }
+
+        let body = CloudSessionCreateRequest(
+            id: input.id,
+            teamId: input.teamID,
+            title: title,
+            mode: input.mode,
+            ideaId: Self.normalized(input.ideaID),
+            primaryAgentActorId: Self.normalized(input.primaryAgentID),
+            participantActorIds: input.participants.map(\.actorID)
+        )
+        // FC derives created_by from the bearer actor; per-participant roles
+        // are not expressed by SessionCreate (participantActorIds is a flat
+        // uuid[]) and are intentionally dropped.
+        try await client.postVoid("/v1/sessions", body: body, idempotencyKey: input.id)
+    }
+
+    public func addParticipants(sessionID: String, actorIDs: [String]) async throws {
+        let encodedSession = Self.encodePath(sessionID)
+        for actorID in actorIDs {
+            let trimmed = actorID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            // FC's participants POST is single-actor + idempotent (upsert on
+            // session_id,actor_id), so we loop one call per actor.
+            try await client.postVoid(
+                "/v1/sessions/\(encodedSession)/participants",
+                body: CloudUpsertParticipantRequest(actorId: trimmed)
+            )
+        }
+    }
+
+    public func listSessionParticipants(sessionID: String) async throws -> [SessionParticipantRecord] {
+        let encodedSession = Self.encodePath(sessionID)
+        let page: CloudPage<CloudSessionParticipant> = try await client.get("/v1/sessions/\(encodedSession)/participants")
+        return page.items.map { row in
+            SessionParticipantRecord(
+                id: "\(row.sessionId):\(row.actorId)",
+                sessionID: row.sessionId,
+                actorID: row.actorId,
+                role: row.role,
+                displayName: row.displayName ?? "",
+                actorType: row.actorType ?? ""
+            )
+        }
+    }
+
+    public func removeParticipant(sessionID: String, actorID: String) async throws {
+        let encodedSession = Self.encodePath(sessionID)
+        let encodedActor = Self.encodePath(actorID)
+        try await client.deleteVoid("/v1/sessions/\(encodedSession)/participants/\(encodedActor)")
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func encodePath(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
+public actor CloudAPIWorkspaceRepository: WorkspaceRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listWorkspaces(teamID: String, agentID: String?) async throws -> [WorkspaceRecord] {
+        var query = "teamId=\(Self.encode(teamID))&limit=200"
+        if let agentID, !agentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            query += "&agentId=\(Self.encode(agentID))"
+        }
+        let page: CloudPage<CloudWorkspace> = try await client.get("/v1/workspaces?\(query)")
+        return page.items.map { row in
+            WorkspaceRecord(
+                id: row.id,
+                teamID: row.teamId,
+                agentID: row.agentId,
+                path: row.path ?? "",
+                displayName: row.name
+            )
+        }
+    }
+
+    private static func encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+}
+
 public actor CloudAPIMessagesRepository: MessagesRepository {
     private let client: CloudAPIClient
 
@@ -146,6 +247,281 @@ public actor CloudAPIMessagesRepository: MessagesRepository {
             body: body,
             idempotencyKey: input.id
         )
+    }
+}
+
+public actor CloudAPIShortcutsRepository: ShortcutsRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listPersonal() async throws -> [ShortcutRecord] {
+        let page: CloudPage<CloudShortcut> = try await client.get("/v1/shortcuts?scope=personal")
+        return page.items.map(\.record)
+    }
+
+    public func listTeam(teamID: String) async throws -> [ShortcutRecord] {
+        let encoded = teamID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? teamID
+        let page: CloudPage<CloudShortcut> = try await client.get("/v1/teams/\(encoded)/shortcuts")
+        return page.items.map(\.record)
+    }
+}
+
+public actor CloudAPIActorRepository: ActorRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listActors(teamID: String) async throws -> [ActorRecord] {
+        let page: CloudPage<CloudActor> = try await client.get("/v1/teams/\(Self.enc(teamID))/actors?limit=500")
+        return page.items.map { $0.record }
+    }
+
+    public func createInvite(teamID: String, input: InviteCreateInput) async throws -> InviteCreated {
+        let displayName = input.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !displayName.isEmpty else { throw ActorRepositoryError.missingDisplayName }
+        if input.kind == .member, input.teamRole == nil { throw ActorRepositoryError.missingTeamRole }
+        if input.kind == .agent, (input.agentKind ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ActorRepositoryError.missingAgentKind
+        }
+        let body = CloudCreateInviteRequest(
+            kind: input.kind.rawValue,
+            displayName: displayName,
+            teamRole: input.teamRole?.rawValue,
+            agentKind: input.agentKind,
+            ttlSeconds: input.ttlSeconds,
+            targetActorId: input.targetActorID
+        )
+        let row: CloudInviteCreated = try await client.post("/v1/teams/\(Self.enc(teamID))/invites", body: body)
+        guard let expiresAt = parseCloudDate(row.expiresAt) else {
+            throw ActorRepositoryError.emptyResponse("create_team_invite")
+        }
+        return InviteCreated(token: row.token, expiresAt: expiresAt, deeplink: row.deeplink ?? "")
+    }
+
+    public func claimInvite(token: String) async throws -> ClaimResult {
+        let row: CloudClaimInviteResult = try await client.post("/v1/invites/claim", body: CloudClaimInviteRequest(token: token))
+        return ClaimResult(
+            actorID: row.actorId, teamID: row.teamId, actorType: row.actorType,
+            displayName: row.displayName, refreshToken: row.refreshToken
+        )
+    }
+
+    public func heartbeat() async throws {
+        try await client.postVoid("/v1/heartbeat", body: CloudEmptyBody())
+    }
+
+    public func removeActor(actorID: String) async throws {
+        try await client.deleteVoid("/v1/actors/\(Self.enc(actorID))")
+    }
+
+    public func uploadAvatar(actorID: String, imageData: Data, contentType: String) async throws -> String {
+        let ext: String
+        switch contentType.lowercased() {
+        case "image/jpeg", "image/jpg": ext = "jpg"
+        case "image/png": ext = "png"
+        case "image/webp": ext = "webp"
+        default: throw ActorRepositoryError.unsupportedAvatarContentType(contentType)
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        let path = "\(actorID)/avatar-\(stamp).\(ext)"
+        let result: CloudAttachmentUpload = try await client.postRaw(
+            "/v1/attachments?path=\(Self.encQuery(path))&bucket=avatars",
+            bytes: imageData,
+            contentType: contentType
+        )
+        return result.url
+    }
+
+    public func updateCurrentActorProfile(actorID: String, displayName: String, avatarURL: String?) async throws -> ActorRecord {
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw ActorRepositoryError.missingDisplayName }
+        let body = CloudUpdateProfileRequest(displayName: name, avatarUrl: avatarURL)
+        let row: CloudActor = try await client.patch("/v1/actors/\(Self.enc(actorID))/profile", body: body)
+        return row.record
+    }
+
+    public func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?,
+                                    defaultAgentType: String?) async throws -> AgentDefaults {
+        let body = CloudUpdateAgentDefaultsRequest(
+            defaultWorkspaceId: defaultWorkspaceID,
+            agentKind: agentKind?.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultAgentType: defaultAgentType?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        // FC returns 204; rebuild the record from the inputs we just persisted.
+        try await client.patchVoid("/v1/agents/\(Self.enc(actorID))/defaults", body: body)
+        return AgentDefaults(
+            agentID: actorID,
+            defaultWorkspaceID: defaultWorkspaceID,
+            agentKind: agentKind,
+            defaultAgentType: defaultAgentType
+        )
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+
+    private static func encQuery(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
+    }
+}
+
+public actor CloudAPIAgentAccessRepository: AgentAccessRepository {
+    private let client: CloudAPIClient
+    private let memberActorID: String
+
+    public init(client: CloudAPIClient, memberActorID: String) {
+        self.client = client
+        self.memberActorID = memberActorID
+    }
+
+    public func listConnectedAgents(teamID: String) async throws -> [ConnectedAgent] {
+        let page: CloudPage<CloudConnectedAgent> = try await client.get("/v1/teams/\(Self.enc(teamID))/agents/connected")
+        return page.items.map { $0.connectedAgent }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    public func listAuthorizedHumans(agentID: String) async throws -> [AgentAuthorizedHuman] {
+        let page: CloudPage<CloudAgentAccess> = try await client.get("/v1/agents/\(Self.enc(agentID))/access")
+        return page.items
+            .filter { ($0.actorType ?? "member") == "member" }
+            .map { $0.authorizedHuman }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    public func canManageAuthorizedHumans(agentID: String) async throws -> Bool {
+        // Owner-only, matching the prior owner_member_id == me semantics. The
+        // permission endpoint reports the caller-scoped permission_level.
+        let result: CloudAgentPermission = try await client.get(
+            "/v1/agents/\(Self.enc(agentID))/permission?actorId=\(Self.enc(memberActorID))"
+        )
+        return result.role == "owner"
+    }
+
+    public func grantAuthorizedHuman(agentID: String, memberID: String, permissionLevel: String) async throws {
+        try await client.postVoid(
+            "/v1/agents/\(Self.enc(agentID))/access",
+            body: CloudGrantAccessRequest(actorId: memberID, role: permissionLevel)
+        )
+    }
+
+    public func shareAgentToTeam(agentID: String) async throws {
+        try await client.postVoid("/v1/agents/\(Self.enc(agentID))/share-to-team", body: CloudEmptyBody())
+    }
+
+    public func makeAgentPersonal(agentID: String) async throws {
+        try await client.postVoid("/v1/agents/\(Self.enc(agentID))/make-personal", body: CloudEmptyBody())
+    }
+
+    public func deviceID(for agentID: String) async throws -> String? {
+        let result: CloudDeviceId = try await client.get("/v1/agents/\(Self.enc(agentID))/device-id")
+        return result.deviceId
+    }
+
+    public func teamAgentCount(teamID: String) async throws -> Int {
+        let page: CloudPage<CloudActorRef> = try await client.get("/v1/teams/\(Self.enc(teamID))/actors?kind=agent&limit=500")
+        return page.items.count
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
+public actor CloudAPIIdeaRepository: IdeaRepository {
+    private let client: CloudAPIClient
+    private let memberActorID: String
+
+    public init(client: CloudAPIClient, memberActorID: String) {
+        self.client = client
+        self.memberActorID = memberActorID
+    }
+
+    public func listIdeas(teamID: String) async throws -> [IdeaRecord] {
+        var all: [CloudIdea] = []
+        // FC paginates and returns one archived bucket per call; iOS wants the
+        // full team list (IdeaStore splits archived locally), so follow the
+        // cursor to exhaustion for both archived states.
+        for archived in [false, true] {
+            var cursor: String? = nil
+            repeat {
+                var query = "teamId=\(Self.enc(teamID))&archived=\(archived)&limit=200"
+                if let cursor, !cursor.isEmpty { query += "&cursor=\(Self.enc(cursor))" }
+                let page: CloudPage<CloudIdea> = try await client.get("/v1/ideas?\(query)")
+                all.append(contentsOf: page.items)
+                cursor = page.nextCursor
+            } while cursor != nil
+        }
+        return all.map { $0.record }
+    }
+
+    public func createIdea(teamID: String, input: IdeaCreateInput) async throws -> IdeaRecord {
+        let title = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw IdeaRepositoryError.missingTitle }
+        let body = CloudIdeaCreateRequest(
+            teamId: teamID,
+            title: title,
+            description: input.description,
+            workspaceId: Self.normalized(input.workspaceID),
+            authorActorId: memberActorID
+        )
+        let row: CloudIdea = try await client.post("/v1/ideas", body: body)
+        return row.record
+    }
+
+    public func updateIdea(ideaID: String, input: IdeaUpdateInput) async throws -> IdeaRecord {
+        let title = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw IdeaRepositoryError.missingTitle }
+        let body = CloudIdeaUpdateRequest(
+            title: title,
+            description: input.description,
+            status: input.status,
+            workspaceId: Self.normalized(input.workspaceID)
+        )
+        let row: CloudIdea = try await client.patch("/v1/ideas/\(Self.enc(ideaID))", body: body)
+        return row.record
+    }
+
+    public func setArchived(ideaID: String, archived: Bool) async throws -> IdeaRecord {
+        try await client.postVoid("/v1/ideas/\(Self.enc(ideaID))/archive", body: CloudArchiveRequest(archived: archived))
+        // Archive returns 204; re-fetch the updated idea for the protocol's record.
+        let row: CloudIdea = try await client.get("/v1/ideas/\(Self.enc(ideaID))")
+        return row.record
+    }
+
+    public func reorderIdeas(teamID: String, ideaIDs: [String]) async throws {
+        try await client.postVoid("/v1/ideas/reorder", body: CloudReorderIdeasRequest(teamId: teamID, ideaIds: ideaIDs))
+    }
+
+    public func listIdeaActivities(ideaID: String) async throws -> [IdeaActivityRecord] {
+        let page: CloudPage<CloudIdeaActivity> = try await client.get("/v1/ideas/\(Self.enc(ideaID))/activities")
+        return page.items.map { $0.record }
+    }
+
+    public func createIdeaActivity(ideaID: String, input: IdeaActivityCreateInput) async throws -> IdeaActivityRecord {
+        let body = CloudIdeaActivityCreateRequest(
+            kind: input.activityType,
+            content: input.content,
+            metadata: input.metadata,
+            attachmentUrls: input.attachmentURLs.map(\.absoluteString),
+            actorId: memberActorID
+        )
+        let row: CloudIdeaActivity = try await client.post("/v1/ideas/\(Self.enc(ideaID))/activities", body: body)
+        return row.record
+    }
+
+    private static func normalized(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
 }
 
@@ -212,6 +588,56 @@ public enum CloudAPIRepositoryFactory {
         accessToken: @escaping @Sendable () async throws -> String
     ) -> any AgentRuntimesRepository {
         CloudAPIAgentRuntimesRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func workspacesRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any WorkspaceRepository {
+        CloudAPIWorkspaceRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func shortcutsRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any ShortcutsRepository {
+        CloudAPIShortcutsRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func sessionRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any SessionRepository {
+        CloudAPISessionRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func ideasRepository(
+        configuration: CloudAPIConfiguration,
+        memberActorID: String,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any IdeaRepository {
+        CloudAPIIdeaRepository(
+            client: client(configuration: configuration, accessToken: accessToken),
+            memberActorID: memberActorID
+        )
+    }
+
+    public static func agentAccessRepository(
+        configuration: CloudAPIConfiguration,
+        memberActorID: String,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any AgentAccessRepository {
+        CloudAPIAgentAccessRepository(
+            client: client(configuration: configuration, accessToken: accessToken),
+            memberActorID: memberActorID
+        )
+    }
+
+    public static func actorRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any ActorRepository {
+        CloudAPIActorRepository(client: client(configuration: configuration, accessToken: accessToken))
     }
 }
 
@@ -283,6 +709,310 @@ private struct CloudAgentRuntime: Decodable, Sendable {
     let lastSeenAt: String?
     let createdAt: String
     let updatedAt: String
+}
+
+private struct CloudSessionCreateRequest: Encodable, Sendable {
+    let id: String
+    let teamId: String
+    let title: String
+    let mode: String
+    let ideaId: String?
+    let primaryAgentActorId: String?
+    let participantActorIds: [String]
+}
+
+private struct CloudUpsertParticipantRequest: Encodable, Sendable {
+    let actorId: String
+}
+
+private struct CloudSessionParticipant: Decodable, Sendable {
+    let sessionId: String
+    let actorId: String
+    let role: String?
+    let displayName: String?
+    let actorType: String?
+}
+
+private struct CloudActor: Decodable, Sendable {
+    let id: String
+    let teamId: String?
+    let kind: String?
+    let displayName: String?
+    let avatarUrl: String?
+    let userId: String?
+    let invitedByActorId: String?
+    let teamRole: String?
+    let memberStatus: String?
+    let agentStatus: String?
+    let agentTypes: [String]?
+    let agentKind: String?
+    let defaultAgentType: String?
+    let defaultWorkspaceId: String?
+    let lastActiveAt: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var record: ActorRecord {
+        ActorRecord(
+            id: id,
+            teamID: teamId ?? "",
+            actorType: kind ?? "",
+            userID: userId,
+            invitedByActorID: invitedByActorId,
+            displayName: displayName ?? "",
+            avatarURL: avatarUrl,
+            lastActiveAt: parseCloudDate(lastActiveAt),
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast,
+            memberStatus: memberStatus,
+            teamRole: teamRole,
+            agentTypes: agentTypes ?? [],
+            agentKind: agentKind,
+            defaultAgentType: defaultAgentType,
+            agentStatus: agentStatus,
+            defaultWorkspaceID: defaultWorkspaceId
+        )
+    }
+}
+
+private struct CloudInviteCreated: Decodable, Sendable {
+    let token: String
+    let expiresAt: String?
+    let deeplink: String?
+}
+
+private struct CloudAttachmentUpload: Decodable, Sendable {
+    let path: String
+    let url: String
+}
+
+private struct CloudCreateInviteRequest: Encodable, Sendable {
+    let kind: String
+    let displayName: String
+    let teamRole: String?
+    let agentKind: String?
+    let ttlSeconds: Int
+    let targetActorId: String?
+}
+
+private struct CloudUpdateProfileRequest: Encodable, Sendable {
+    let displayName: String
+    let avatarUrl: String?
+}
+
+private struct CloudUpdateAgentDefaultsRequest: Encodable, Sendable {
+    let defaultWorkspaceId: String?
+    let agentKind: String?
+    let defaultAgentType: String?
+}
+
+private struct CloudConnectedAgent: Decodable, Sendable {
+    let id: String
+    let displayName: String?
+    let agentTypes: [String]?
+    let agentKind: String?
+    let defaultAgentType: String?
+    let permissionLevel: String?
+    let visibility: String?
+    let isOwner: Bool?
+    let lastActiveAt: String?
+    let deviceId: String?
+
+    var connectedAgent: ConnectedAgent {
+        ConnectedAgent(
+            id: id,
+            displayName: displayName ?? "",
+            agentTypes: agentTypes ?? [],
+            agentKind: agentKind ?? "",
+            defaultAgentType: defaultAgentType,
+            permissionLevel: permissionLevel ?? "",
+            lastActiveAt: parseCloudDate(lastActiveAt),
+            deviceID: deviceId,
+            visibility: visibility ?? "team",
+            isOwner: isOwner ?? false
+        )
+    }
+}
+
+private struct CloudAgentAccess: Decodable, Sendable {
+    let actorId: String
+    let memberName: String?
+    let role: String?
+    let permissionLevel: String?
+    let grantedByMemberId: String?
+    let lastActiveAt: String?
+    let actorType: String?
+
+    var authorizedHuman: AgentAuthorizedHuman {
+        AgentAuthorizedHuman(
+            id: actorId,
+            displayName: memberName ?? actorId,
+            permissionLevel: role ?? permissionLevel ?? "",
+            grantedByActorID: grantedByMemberId,
+            lastActiveAt: parseCloudDate(lastActiveAt)
+        )
+    }
+}
+
+private struct CloudAgentPermission: Decodable, Sendable {
+    let allowed: Bool
+    let role: String?
+}
+
+private struct CloudDeviceId: Decodable, Sendable {
+    let deviceId: String?
+}
+
+private struct CloudActorRef: Decodable, Sendable {
+    let id: String
+}
+
+private struct CloudGrantAccessRequest: Encodable, Sendable {
+    let actorId: String
+    let role: String
+}
+
+private struct CloudEmptyBody: Encodable, Sendable {}
+
+private struct CloudIdea: Decodable, Sendable {
+    let id: String
+    let teamId: String
+    let workspaceId: String?
+    let createdByActorId: String?
+    let title: String
+    let description: String?
+    let status: String?
+    let archived: Bool
+    let sortOrder: Int?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var record: IdeaRecord {
+        IdeaRecord(
+            id: id,
+            teamID: teamId,
+            workspaceID: workspaceId ?? "",
+            createdByActorID: createdByActorId ?? "",
+            title: title,
+            description: description ?? "",
+            status: status ?? "open",
+            archived: archived,
+            sortOrder: sortOrder ?? 0,
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast
+        )
+    }
+}
+
+private struct CloudIdeaActivity: Decodable, Sendable {
+    let id: String
+    let teamId: String?
+    let ideaId: String
+    let actorId: String
+    let activityType: String?
+    let kind: String?
+    let content: String?
+    let metadata: [String: String]?
+    let attachmentUrls: [String]?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var record: IdeaActivityRecord {
+        IdeaActivityRecord(
+            id: id,
+            teamID: teamId ?? "",
+            ideaID: ideaId,
+            actorID: actorId,
+            activityType: activityType ?? kind ?? "",
+            content: content ?? "",
+            metadata: metadata ?? [:],
+            attachmentURLs: (attachmentUrls ?? []).compactMap(URL.init(string:)),
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast
+        )
+    }
+}
+
+private struct CloudIdeaCreateRequest: Encodable, Sendable {
+    let teamId: String
+    let title: String
+    let description: String
+    let workspaceId: String?
+    let authorActorId: String
+}
+
+private struct CloudIdeaUpdateRequest: Encodable, Sendable {
+    let title: String
+    let description: String
+    let status: String
+    let workspaceId: String?
+}
+
+private struct CloudArchiveRequest: Encodable, Sendable {
+    let archived: Bool
+}
+
+private struct CloudReorderIdeasRequest: Encodable, Sendable {
+    let teamId: String
+    let ideaIds: [String]
+}
+
+private struct CloudIdeaActivityCreateRequest: Encodable, Sendable {
+    let kind: String
+    let content: String
+    let metadata: [String: String]
+    let attachmentUrls: [String]
+    let actorId: String
+}
+
+private struct CloudShortcut: Decodable, Sendable {
+    let id: String
+    let scope: String
+    let ownerMemberId: String?
+    let teamId: String?
+    let parentId: String?
+    let label: String
+    let icon: String?
+    let order: Int
+    let nodeType: String
+    let target: String
+    let createdAt: String?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, scope, label, icon, order, target
+        case ownerMemberId = "owner_member_id"
+        case teamId = "team_id"
+        case parentId = "parent_id"
+        case nodeType = "node_type"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    var record: ShortcutRecord {
+        ShortcutRecord(
+            id: id,
+            scope: ShortcutScope(rawValue: scope) ?? .personal,
+            ownerMemberID: ownerMemberId,
+            teamID: teamId,
+            parentID: parentId,
+            label: label,
+            icon: icon,
+            order: order,
+            type: ShortcutNodeType(rawValue: nodeType) ?? .native,
+            target: target,
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast
+        )
+    }
+}
+
+private struct CloudWorkspace: Decodable, Sendable {
+    let id: String
+    let teamId: String
+    let name: String
+    let path: String?
+    let agentId: String?
 }
 
 private struct CloudMarkViewedRequest: Encodable, Sendable {

@@ -76,6 +76,25 @@ public struct AgentDefaults: Equatable, Sendable {
     }
 }
 
+public enum ActorRepositoryError: LocalizedError {
+    case missingDisplayName
+    case missingAgentKind
+    case missingTeamRole
+    case unsupportedAvatarContentType(String)
+    case emptyResponse(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingDisplayName: return "Display name is required."
+        case .missingAgentKind:   return "Agent kind is required."
+        case .missingTeamRole:    return "Team role is required."
+        case .unsupportedAvatarContentType(let contentType):
+            return "Unsupported avatar content type: \(contentType)."
+        case .emptyResponse(let fn): return "\(fn) returned no rows."
+        }
+    }
+}
+
 public protocol ActorRepository: Sendable {
     func listActors(teamID: String) async throws -> [ActorRecord]
     func createInvite(teamID: String, input: InviteCreateInput) async throws -> InviteCreated

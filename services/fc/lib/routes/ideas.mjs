@@ -58,10 +58,25 @@ export function registerIdeas(router) {
     return { statusCode: 201, body: idea };
   });
 
+  router.post("/v1/ideas/reorder", async (ctx) => {
+    const body = ctx.json ?? {};
+    requireString(body.teamId, "teamId");
+    if (!Array.isArray(body.ideaIds)) {
+      throw new ApiError(400, "validation_failed", "ideaIds is required and must be an array");
+    }
+    await ctx.repository.reorderIdeas({ teamId: body.teamId, ideaIds: body.ideaIds });
+    return { statusCode: 204, body: null };
+  });
+
   router.get("/v1/ideas/:ideaId", async (ctx) => {
     const idea = await ctx.repository.getIdea(ctx.params.ideaId);
     if (!idea) throw new ApiError(404, "not_found", "idea not found");
     return { body: idea };
+  });
+
+  router.get("/v1/ideas/:ideaId/activities", async (ctx) => {
+    const out = await ctx.repository.listIdeaActivities(ctx.params.ideaId);
+    return { body: out };
   });
 
   router.patch("/v1/ideas/:ideaId", async (ctx) => {
@@ -71,7 +86,9 @@ export function registerIdeas(router) {
   });
 
   router.post("/v1/ideas/:ideaId/archive", async (ctx) => {
-    await ctx.repository.archiveIdea(ctx.params.ideaId);
+    const body = ctx.json ?? {};
+    const archived = body.archived === undefined ? true : body.archived === true;
+    await ctx.repository.archiveIdea(ctx.params.ideaId, { archived });
     return { statusCode: 204, body: null };
   });
 

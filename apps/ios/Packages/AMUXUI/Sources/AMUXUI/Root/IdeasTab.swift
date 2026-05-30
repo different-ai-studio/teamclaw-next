@@ -11,6 +11,9 @@ public struct IdeasTab: View {
     let sessionViewModel: SessionListViewModel
     let connectedAgentsStore: ConnectedAgentsStore?
     let messagesRepository: (any MessagesRepository)?
+    let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
+    let ideasRepository: (any IdeaRepository)?
     /// Drives the "Mine" filter on the ideas list — compared against
     /// `IdeaRecord.createdByActorID`. `nil` hides the chip.
     let currentActorID: String?
@@ -36,6 +39,9 @@ public struct IdeasTab: View {
         sessionViewModel: SessionListViewModel,
         connectedAgentsStore: ConnectedAgentsStore? = nil,
         messagesRepository: (any MessagesRepository)? = nil,
+        workspacesRepository: (any WorkspaceRepository)? = nil,
+        sessionsRepository: (any SessionRepository)? = nil,
+        ideasRepository: (any IdeaRepository)? = nil,
         currentActorID: String? = nil
     ) {
         self.mqtt = mqtt
@@ -46,6 +52,9 @@ public struct IdeasTab: View {
         self.sessionViewModel = sessionViewModel
         self.connectedAgentsStore = connectedAgentsStore
         self.messagesRepository = messagesRepository
+        self.workspacesRepository = workspacesRepository
+        self.sessionsRepository = sessionsRepository
+        self.ideasRepository = ideasRepository
         self.currentActorID = currentActorID
     }
 
@@ -96,6 +105,7 @@ public struct IdeasTab: View {
                                 mqtt: mqtt,
                                 hub: hub,
                                 peerId: "ios-\(pairing.authToken.prefix(6))",
+                                sessionsRepository: sessionsRepository,
                                 navigationPath: $navigationPath
                             )
                         } else {
@@ -114,7 +124,9 @@ public struct IdeasTab: View {
                                 peerId: "ios-\(pairing.authToken.prefix(6))",
                                 teamclawService: teamclawService,
                                 connectedAgentsStore: connectedAgentsStore,
-                                messagesRepository: messagesRepository
+                                messagesRepository: messagesRepository,
+                                workspacesRepository: workspacesRepository,
+                                sessionsRepository: sessionsRepository
                             )
                         } else {
                             Text("Session not found")
@@ -170,7 +182,12 @@ public struct IdeasTab: View {
 
         if ideaStore == nil || ideaStoreTeamID != activeTeam.id {
             do {
-                let repository = try SupabaseIdeaRepository()
+                guard let repository = ideasRepository else {
+                    ideaStore = nil
+                    ideaStoreTeamID = nil
+                    ideaSetupError = "Cloud API is not configured."
+                    return
+                }
                 ideaStore = IdeaStore(
                     teamID: activeTeam.id,
                     repository: repository,

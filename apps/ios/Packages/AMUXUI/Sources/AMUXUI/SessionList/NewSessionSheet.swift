@@ -19,6 +19,8 @@ public struct NewSessionSheet: View {
     let currentActorID: String?
     let isAgentAvailable: Bool
     let connectedAgentsStore: ConnectedAgentsStore?
+    let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
 
     let viewModel: SessionListViewModel
     let preselectedIdeaId: String?
@@ -53,6 +55,8 @@ public struct NewSessionSheet: View {
     public init(mqtt: MQTTService, peerId: String, teamclawService: TeamclawService? = nil,
                 teamID: String = "", currentActorID: String? = nil, isAgentAvailable: Bool = true,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 viewModel: SessionListViewModel,
                 preselectedIdeaId: String? = nil,
                 preselectedCollaborators: [CachedActor] = [],
@@ -64,6 +68,8 @@ public struct NewSessionSheet: View {
         self.currentActorID = currentActorID
         self.isAgentAvailable = isAgentAvailable
         self.connectedAgentsStore = connectedAgentsStore
+        self.workspacesRepository = workspacesRepository
+        self.sessionsRepository = sessionsRepository
         self.viewModel = viewModel
         self.preselectedIdeaId = preselectedIdeaId
         self.preselectedCollaborators = preselectedCollaborators
@@ -185,7 +191,7 @@ public struct NewSessionSheet: View {
         }
         .task {
             guard workspaceStore == nil, !teamID.isEmpty else { return }
-            if let repository = try? SupabaseWorkspaceRepository() {
+            if let repository = workspacesRepository {
                 workspaceStore = WorkspaceStore(teamID: teamID, repository: repository)
                 // Load all workspaces (no agent filter) so AgentConfigSheet
                 // can show options before the user taps each agent.
@@ -461,12 +467,9 @@ public struct NewSessionSheet: View {
         )
 
         Task {
-            let repository: SessionRepository
-            do {
-                repository = try SupabaseSessionRepository()
-            } catch {
+            guard let repository = sessionsRepository else {
                 isSending = false
-                errorMessage = error.localizedDescription
+                errorMessage = "Cloud API is not configured."
                 return
             }
             let useCase = SessionCreationUseCase(
