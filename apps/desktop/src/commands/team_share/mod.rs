@@ -22,8 +22,8 @@ pub mod join;
 pub use enable::{
     enable_custom_git_impl, enable_managed_git_impl, enable_oss_impl, get_share_status_impl,
     set_team_secret_impl, team_share_enable_custom_git, team_share_enable_managed_git,
-    team_share_enable_oss, team_share_get_status, team_share_set_team_secret, EnableShareResult,
-    GitEnableInput,
+    team_share_enable_oss, team_share_get_status, team_share_set_team_secret, team_sync_paths,
+    EnableShareResult, GitEnableInput,
 };
 #[allow(unused_imports)]
 pub use join::{team_share_join_existing, team_share_join_existing_impl, JoinExistingResult};

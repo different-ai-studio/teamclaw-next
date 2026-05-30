@@ -26,7 +26,9 @@ import { cn, isTauri, copyToClipboard } from '@/lib/utils'
 import { ToggleSwitch } from '@/components/settings/shared'
 import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
+import { TeamSyncPaths } from './TeamSyncPaths'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { buildConfig, TEAM_SYNCED_EVENT } from '@/lib/build-config'
 import {
   buildTeamProviderConfig,
@@ -128,6 +130,7 @@ export function TeamGitConfig() {
   const { t } = useTranslation()
   const canManageServiceConfig = true
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const workspaceReady = !!workspacePath
   const workspaceArgs = React.useMemo<{ workspacePath?: string }>(
     () => (workspacePath ? { workspacePath } : {}),
@@ -986,6 +989,9 @@ export function TeamGitConfig() {
               )}
             </div>
           </SettingCard>
+
+          {/* Real sync directory + every workspace symlink (all 3 share modes) */}
+          <TeamSyncPaths teamId={teamId} workspacePath={workspacePath} />
 
           {/* Shared Layer Info */}
           <SettingCard className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">

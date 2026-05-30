@@ -1,0 +1,197 @@
+import * as React from 'react'
+import { Copy, Check, FolderGit2, Link2 } from 'lucide-react'
+
+import { cn, isTauri, copyToClipboard } from '@/lib/utils'
+
+/**
+ * TeamSyncPaths — shows *where team content physically lives* and *every
+ * `teamclaw-team` symlink that points at it*, for all three share modes
+ * (OSS / 自建 Git / 托管 Git).
+ *
+ * All modes converge on one real directory per team
+ * (`~/.amuxd/teams/<team_id>/teamclaw-team`, the daemon's global copy — git
+ * modes clone into it) with a `teamclaw-team` symlink in each joined workspace.
+ * The data comes from the local `team_sync_paths` Tauri command (no network),
+ * so this renders the same in every panel.
+ */
+
+type LinkStatus = 'symlink' | 'real_dir' | 'missing'
+
+interface WorkspaceLink {
+  workspacePath: string
+  displayName: string
+  linkPath: string
+  status: LinkStatus
+  isCurrent: boolean
+}
+
+interface TeamSyncPathsData {
+  realDir: string | null
+  realDirExists: boolean
+  links: WorkspaceLink[]
+}
+
+const STATUS_META: Record<
+  LinkStatus,
+  { label: string; className: string }
+> = {
+  symlink: {
+    label: '已软链',
+    className:
+      'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  },
+  real_dir: {
+    label: '本地目录（待迁移）',
+    className: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  },
+  missing: {
+    label: '未链接',
+    className: 'bg-muted text-muted-foreground',
+  },
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = React.useState(false)
+  return (
+    <button
+      type="button"
+      aria-label="复制路径"
+      title="复制路径"
+      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      onClick={() => {
+        void copyToClipboard(value)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+      }}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-500" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+    </button>
+  )
+}
+
+export function TeamSyncPaths({
+  teamId,
+  workspacePath,
+  className,
+}: {
+  teamId: string | null
+  workspacePath: string | null
+  className?: string
+}) {
+  const [data, setData] = React.useState<TeamSyncPathsData | null>(null)
+
+  React.useEffect(() => {
+    if (!teamId || !workspacePath || !isTauri()) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const res = await invoke<TeamSyncPathsData>('team_sync_paths', {
+          teamId,
+          workspacePath,
+        })
+        if (!cancelled) setData(res)
+      } catch {
+        // Best-effort: if the command fails we simply omit the paths block
+        // rather than breaking the surrounding panel.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [teamId, workspacePath])
+
+  if (!data || (!data.realDir && data.links.length === 0)) return null
+
+  return (
+    <div
+      className={cn(
+        'rounded-lg border border-border/50 bg-card/50 p-4',
+        className,
+      )}
+    >
+      <h4 className="mb-3 text-[13px] font-medium text-foreground/80">同步路径</h4>
+
+      {/* Real sync directory */}
+      {data.realDir && (
+        <div className="mb-3">
+          <div className="mb-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <FolderGit2 className="h-3.5 w-3.5" />
+            真实同步目录
+            <span
+              className={cn(
+                'ml-1 rounded px-1.5 py-0.5 text-[10px]',
+                data.realDirExists
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-muted text-muted-foreground',
+              )}
+            >
+              {data.realDirExists ? '存在' : '尚未创建'}
+            </span>
+          </div>
+          <div className="flex items-start gap-2 rounded-md border border-border/40 bg-background/50 px-2.5 py-1.5">
+            <code className="min-w-0 flex-1 break-all font-mono text-[12px] text-foreground/90">
+              {data.realDir}
+            </code>
+            <CopyButton value={data.realDir} />
+          </div>
+        </div>
+      )}
+
+      {/* Workspace symlinks */}
+      {data.links.length > 0 && (
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <Link2 className="h-3.5 w-3.5" />
+            工作区软链（{data.links.length}）
+          </div>
+          <ul className="divide-y divide-border/40 rounded-md border border-border/40">
+            {data.links.map((link) => {
+              const meta = STATUS_META[link.status]
+              return (
+                <li
+                  key={link.linkPath}
+                  className="flex items-start justify-between gap-2 px-2.5 py-1.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[12px] font-medium text-foreground/90">
+                        {link.displayName}
+                      </span>
+                      {link.isCurrent && (
+                        <span className="shrink-0 rounded bg-coral/15 px-1.5 py-0.5 text-[10px] text-coral">
+                          当前
+                        </span>
+                      )}
+                    </div>
+                    <code
+                      className="block break-all font-mono text-[11px] text-muted-foreground"
+                      title={link.linkPath}
+                    >
+                      {link.linkPath}
+                    </code>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span
+                      className={cn(
+                        'rounded px-1.5 py-0.5 text-[10px]',
+                        meta.className,
+                      )}
+                    >
+                      {meta.label}
+                    </span>
+                    <CopyButton value={link.linkPath} />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
