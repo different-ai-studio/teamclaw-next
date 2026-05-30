@@ -2252,17 +2252,36 @@ mod tests {
             .session_upsert_batch(&[session("s1", "teamA")])
             .await
             .unwrap();
-        store.idea_upsert_batch(&[idea("i1", "teamB")]).await.unwrap();
+        store
+            .idea_upsert_batch(&[idea("i1", "teamB")])
+            .await
+            .unwrap();
         store
             .outbox_upsert(&outbox("m1", "teamA", "s1"))
             .await
             .unwrap();
 
-        assert_eq!(store.team_for_actor("a1").await.unwrap().as_deref(), Some("teamA"));
-        assert_eq!(store.team_for_session("s1").await.unwrap().as_deref(), Some("teamA"));
-        assert_eq!(store.team_for_idea("i1").await.unwrap().as_deref(), Some("teamB"));
-        assert_eq!(store.team_for_outbox("m1").await.unwrap().as_deref(), Some("teamA"));
-        assert!(store.team_for_session("does-not-exist").await.unwrap().is_none());
+        assert_eq!(
+            store.team_for_actor("a1").await.unwrap().as_deref(),
+            Some("teamA")
+        );
+        assert_eq!(
+            store.team_for_session("s1").await.unwrap().as_deref(),
+            Some("teamA")
+        );
+        assert_eq!(
+            store.team_for_idea("i1").await.unwrap().as_deref(),
+            Some("teamB")
+        );
+        assert_eq!(
+            store.team_for_outbox("m1").await.unwrap().as_deref(),
+            Some("teamA")
+        );
+        assert!(store
+            .team_for_session("does-not-exist")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -2272,8 +2291,14 @@ mod tests {
             .session_upsert_batch(&[session("s1", "teamA"), session("s2", "teamB")])
             .await
             .unwrap();
-        store.outbox_upsert(&outbox("m1", "teamA", "s1")).await.unwrap();
-        store.outbox_upsert(&outbox("m2", "teamB", "s2")).await.unwrap();
+        store
+            .outbox_upsert(&outbox("m1", "teamA", "s1"))
+            .await
+            .unwrap();
+        store
+            .outbox_upsert(&outbox("m2", "teamB", "s2"))
+            .await
+            .unwrap();
 
         let only_a = store.outbox_list_team("teamA").await.unwrap();
         assert_eq!(only_a.len(), 1);

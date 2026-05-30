@@ -64,7 +64,6 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
 
     // ── Store selectors ──────────────────────────────────────────────────
     const isLoading = useSessionStore((s) => s.isLoading);
-    const messageQueue = useSessionStore((s) => s.messageQueue);
     const v2StreamScrollTrigger = useV2StreamingStore((s) => {
       if (!activeSessionId) return 0;
       let total = 0;

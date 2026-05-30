@@ -10,10 +10,7 @@ use super::fc_client::{ManifestItem, ManifestPage};
 /// Returns (all_items, final_snapshot_seq).
 ///
 /// This is a testable version of the pagination loop in `engine::tick()`.
-pub async fn drain_manifest<F, Fut>(
-    after_seq: i64,
-    fetch_page: F,
-) -> (Vec<ManifestItem>, i64)
+pub async fn drain_manifest<F, Fut>(after_seq: i64, fetch_page: F) -> (Vec<ManifestItem>, i64)
 where
     F: Fn(i64, Option<String>, Option<i64>) -> Fut,
     Fut: std::future::Future<Output = Result<ManifestPage, super::error::SyncError>>,

@@ -50,7 +50,7 @@ export async function applySessionRuntimeModel(args: ApplySessionRuntimeModelArg
       modelId: args.modelId,
       agentActorIds: args.agentActorIds,
     })
-    throw new Error(`Failed to load agent runtimes: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`Failed to load agent runtimes: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
 
   const validRuntimeRows = runtimeRows.filter(

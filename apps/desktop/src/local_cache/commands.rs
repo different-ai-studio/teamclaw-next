@@ -161,7 +161,10 @@ pub async fn local_cache_actor_load_by_ids(
     let db = get_db(&state).await?;
     let result = db.actor_load_by_ids(&ids).await?;
     if let Some(current) = current_team(&state).await {
-        Ok(result.into_iter().filter(|r| r.team_id == current).collect())
+        Ok(result
+            .into_iter()
+            .filter(|r| r.team_id == current)
+            .collect())
     } else {
         Ok(result)
     }

@@ -64,7 +64,20 @@ globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k, i18n: { language: 'en', changeLanguage: vi.fn() } }),
 }))
-vi.mock('sonner', () => ({ Toaster: () => null }))
+vi.mock('sonner', () => ({
+  Toaster: () => null,
+  toast: Object.assign(vi.fn(), {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+    loading: vi.fn(),
+    dismiss: vi.fn(),
+    promise: vi.fn(),
+    custom: vi.fn(),
+  }),
+}))
 vi.mock('@/lib/utils', () => ({
   cn: (...a: string[]) => a.join(' '),
   isTauri: () => false,

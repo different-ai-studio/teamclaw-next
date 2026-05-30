@@ -70,10 +70,9 @@ impl LocalSyncState {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("state: create dir {}: {e}", parent.display()))?;
         }
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("state: serialize: {e}"))?;
-        std::fs::write(&path, json)
-            .map_err(|e| format!("state: write {}: {e}", path.display()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| format!("state: serialize: {e}"))?;
+        std::fs::write(&path, json).map_err(|e| format!("state: write {}: {e}", path.display()))?;
         Ok(())
     }
 

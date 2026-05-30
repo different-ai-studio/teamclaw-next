@@ -2,7 +2,9 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
-    #[error("conflict: remote_version={remote_version:?}, remote_cipher_hash={remote_cipher_hash:?}")]
+    #[error(
+        "conflict: remote_version={remote_version:?}, remote_cipher_hash={remote_cipher_hash:?}"
+    )]
     Conflict {
         remote_version: Option<i32>,
         remote_cipher_hash: Option<String>,

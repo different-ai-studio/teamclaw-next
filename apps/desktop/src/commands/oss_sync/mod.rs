@@ -63,7 +63,6 @@ pub(crate) fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, S
     Ok((base_url, jwt))
 }
 
-
 /// Write (or refresh) the Supabase JWT into teamclaw.json so that the OSS sync
 /// commands (`oss_sync_now`, `oss_sync_create_team`, etc.) can authenticate
 /// against FC. Call this from the frontend whenever the Supabase session
@@ -220,7 +219,7 @@ pub async fn oss_sync_status(
             mtime: f.mtime,
         })
         .collect();
-    recent_files.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    recent_files.sort_by_key(|b| std::cmp::Reverse(b.mtime));
     recent_files.truncate(20);
 
     Ok(SyncStatus {

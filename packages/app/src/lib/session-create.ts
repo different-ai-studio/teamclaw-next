@@ -10,6 +10,7 @@ import {
 import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useAuthStore } from '@/stores/auth-store'
 import { resolveCurrentMemberActorId } from '@/lib/current-actor'
 import { mqttPublish } from '@/lib/mqtt-bridge'
 import {
@@ -350,7 +351,8 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
   const localWorkspacePath = useWorkspaceStore.getState().workspacePath?.trim() || ''
   let createdByMemberId: string | null = null
   try {
-    createdByMemberId = await resolveCurrentMemberActorId(args.teamId)
+    const userId = useAuthStore.getState().session?.user?.id ?? ''
+    createdByMemberId = userId ? await resolveCurrentMemberActorId(args.teamId, userId) : null
   } catch {
     createdByMemberId = null
   }
