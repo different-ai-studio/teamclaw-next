@@ -2826,6 +2826,15 @@
       "agent": "Agent",
       "member": "Team"
     },
+    "role": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member"
+    },
+    "visibility": {
+      "team": "Team",
+      "personal": "Personal"
+    },
     "contextMenu": {
       "viewProfile": "View profile",
       "copyName": "Copy name",

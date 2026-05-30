@@ -29,6 +29,10 @@ export type ActorRow = {
   default_workspace_id?: string | null
   user_id?: string | null
   created_at?: string | null
+  // Member: 'owner' | 'admin' | 'member'. Agent: undefined.
+  team_role?: string | null
+  // Agent: 'team' | 'personal'. Member: undefined.
+  visibility?: string | null
 }
 
 export interface UseActorsForTeamResult {
@@ -114,6 +118,8 @@ export function useActorsForTeam(): UseActorsForTeamResult {
         default_workspace_id: row.default_workspace_id ?? null,
         user_id: row.user_id ?? null,
         created_at: row.created_at ?? null,
+        team_role: row.team_role ?? null,
+        visibility: row.visibility ?? null,
       }))
       setActors(rows)
       setLoading(false)
@@ -158,6 +164,7 @@ export function isActorOnline(lastActiveAt: string | null): boolean {
 type ActorTypeFilter = 'all' | 'agent' | 'member'
 
 function ActorRowView({ actor }: { actor: ActorRow }) {
+  const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
   // Members: heartbeat-based — last_active_at within 5min.
   // Agents: authoritative MQTT presence from device-presence-store
@@ -174,6 +181,18 @@ function ActorRowView({ actor }: { actor: ActorRow }) {
   const enterActorDraft = useUIStore((s) => s.enterActorDraft)
   const colors = actorAvatarColor(actor.id)
   const lastActive = actor.last_active_at ? formatRelativeTime(new Date(actor.last_active_at)) : ''
+  // Subtitle: an agent shows its Team/Personal visibility; a member shows their
+  // team role. Both fall back to the generic type label while the live fetch is
+  // still in flight (the offline cache doesn't carry role/visibility).
+  const subtitle = isAgent
+    ? actor.visibility === 'personal'
+      ? t('actors.visibility.personal', 'Personal')
+      : actor.visibility === 'team'
+        ? t('actors.visibility.team', 'Team')
+        : t('actors.type.agent', 'Agent')
+    : actor.team_role
+      ? t(`actors.role.${actor.team_role}`, actor.team_role)
+      : t('actors.type.member', 'Team')
   return (
     <button
       type="button"
@@ -200,7 +219,7 @@ function ActorRowView({ actor }: { actor: ActorRow }) {
           )}
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11.5px] leading-[18px] text-muted-foreground">
-          <span className="truncate">{isAgent ? 'Agent' : 'Team'}</span>
+          <span className="truncate">{subtitle}</span>
           {status && (
             <>
               <span className="text-faint">·</span>

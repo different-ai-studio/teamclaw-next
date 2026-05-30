@@ -10,7 +10,7 @@ begin
 end;
 $$;
 
-select plan(21);
+select plan(22);
 
 select has_column('public', 'agents', 'visibility');
 select col_has_default('public', 'agents', 'visibility');
@@ -80,6 +80,14 @@ select is(
 );
 
 select pg_temp.as_user('91000000-0000-0000-0000-000000000001');
+
+select ok(
+  exists (
+    select 1 from public.actor_directory
+    where id = '11000000-0000-0000-0000-0000000000a1'
+  ),
+  'owner sees their own personal agent in actor_directory'
+);
 
 select ok(
   app.can_prompt_agent('11000000-0000-0000-0000-0000000000a1'::uuid),

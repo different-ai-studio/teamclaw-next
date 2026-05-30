@@ -16,7 +16,7 @@ exception
 end;
 $$;
 
-select plan(67);
+select plan(68);
 
 select has_schema('app');
 select has_table('public', 'teams');
@@ -295,6 +295,7 @@ select has_table('public', 'team_invites');
 select hasnt_table('public', 'daemon_invites');
 select has_view('public',  'actor_directory');
 select has_column('public', 'actor_directory', 'avatar_url');
+select has_column('public', 'actor_directory', 'agent_visibility');
 select has_function('public', 'update_current_actor_profile', array['uuid', 'text', 'text']);
 select hasnt_column('public', 'members', 'user_id');
 select hasnt_column('public', 'agents',  'created_by_member_id');

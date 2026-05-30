@@ -210,7 +210,7 @@ export function createSupabaseBusinessRepository(options) {
       let query = supabase
         .from("actor_directory")
         .select(
-          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at",
         )
         .eq("team_id", teamId);
       if (kind) query = query.eq("actor_type", kind);
@@ -1169,7 +1169,7 @@ async heartbeat() {
       let q = supabase
         .from("actor_directory")
         .select(
-          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at",
+          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at",
         )
         .in("id", actorIds);
       if (teamId) q = q.eq("team_id", teamId);
@@ -1874,7 +1874,7 @@ const SESSION_FULL_COLUMNS =
   "id, team_id, title, mode, idea_id, primary_agent_id, created_by_actor_id, summary, last_message_preview, last_message_at, acp_session_id, binding, created_at, updated_at";
 
 const ACTOR_DIRECTORY_COLUMNS =
-  "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, last_active_at, created_at, updated_at";
+  "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at";
 
 function mapSessionFull(row) {
   return {
@@ -1910,6 +1910,7 @@ function mapDirectoryActor(row) {
     agentTypes: row?.agent_types ?? null,
     defaultAgentType: row?.default_agent_type ?? null,
     defaultWorkspaceId: row?.default_workspace_id ?? null,
+    visibility: row?.agent_visibility ?? null,
     lastActiveAt: row?.last_active_at ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,

@@ -2826,6 +2826,15 @@
       "agent": "Agent",
       "member": "团队"
     },
+    "role": {
+      "owner": "拥有者",
+      "admin": "管理员",
+      "member": "成员"
+    },
+    "visibility": {
+      "team": "团队",
+      "personal": "个人"
+    },
     "contextMenu": {
       "viewProfile": "查看资料",
       "copyName": "复制名字",
