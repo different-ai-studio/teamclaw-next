@@ -6,7 +6,30 @@
 //! channel/session machinery can be exercised against an in-memory backend
 //! without going through HTTP.
 use async_trait::async_trait;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Reconnect transport this long before the cached JWT expires so the broker
+/// never serves traffic on a connection whose ACL has silently gone stale.
+pub const PROACTIVE_CREDENTIAL_BUFFER: Duration = Duration::from_secs(5 * 60);
+
+/// How long to wait before tearing down the current transport connection and
+/// fetching a fresh JWT. Returns zero when a cached expiry is within
+/// [`PROACTIVE_CREDENTIAL_BUFFER`]; uses a conservative 50-minute fallback
+/// when expiry is unknown.
+pub fn proactive_reconnect_delay(cached_expiry: Option<Instant>) -> Duration {
+    match cached_expiry {
+        Some(t) => t
+            .checked_duration_since(Instant::now())
+            .and_then(|d| d.checked_sub(PROACTIVE_CREDENTIAL_BUFFER))
+            .unwrap_or(Duration::ZERO),
+        None => Duration::from_secs(50 * 60),
+    }
+}
+
+/// True when the cached JWT should be refreshed before opening transport.
+pub fn credential_in_proactive_refresh_window(cached_expiry: Option<Instant>) -> bool {
+    cached_expiry.is_some() && proactive_reconnect_delay(cached_expiry) == Duration::ZERO
+}
 
 pub mod error;
 pub use error::{BackendError, BackendResult};
@@ -53,6 +76,9 @@ pub trait Backend: Send + Sync {
     fn cached_credential_expiry(&self) -> Option<Instant> {
         None
     }
+
+    /// Drop any cached access token so the next [`auth_token`] call refreshes.
+    fn invalidate_cached_credential(&self) {}
 
     /// Fetch runtime MQTT broker overrides from the cloud backend. Default
     /// implementation is a no-op for backends that have no remote config
@@ -232,4 +258,36 @@ pub trait Backend: Send + Sync {
         turn_id: &str,
         sequence: u64,
     ) -> BackendResult<()>;
+}
+
+#[cfg(test)]
+mod proactive_refresh_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn proactive_delay_is_zero_inside_five_minute_buffer() {
+        let expiry = Instant::now() + Duration::from_secs(2 * 60);
+        assert!(credential_in_proactive_refresh_window(Some(expiry)));
+        assert_eq!(
+            proactive_reconnect_delay(Some(expiry)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn proactive_delay_is_positive_outside_buffer() {
+        let expiry = Instant::now() + Duration::from_secs(10 * 60);
+        assert!(!credential_in_proactive_refresh_window(Some(expiry)));
+        assert!(proactive_reconnect_delay(Some(expiry)) > Duration::from_secs(4 * 60));
+    }
+
+    #[test]
+    fn unknown_expiry_uses_conservative_fallback() {
+        assert!(!credential_in_proactive_refresh_window(None));
+        assert_eq!(
+            proactive_reconnect_delay(None),
+            Duration::from_secs(50 * 60)
+        );
+    }
 }

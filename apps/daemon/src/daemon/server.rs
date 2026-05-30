@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use teamclaw_transport::MessagePublisher;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -11,7 +11,10 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
-use crate::backend::{AgentRuntimeUpsert, Backend, WorkspaceUpsert};
+use crate::backend::{
+    credential_in_proactive_refresh_window, proactive_reconnect_delay, AgentRuntimeUpsert, Backend,
+    WorkspaceUpsert,
+};
 use crate::channels::{AmuxdAcpHandle, AmuxdChannelStore, ChannelManager};
 use crate::collab::{AuthManager, AuthResult, PeerState, PeerTracker, PermissionManager};
 use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
@@ -1072,6 +1075,13 @@ impl DaemonServer {
                     }
                 }
             };
+            if credential_in_proactive_refresh_window(self.backend.cached_credential_expiry()) {
+                info!(
+                    "cached JWT within proactive refresh window, forcing token refresh before MQTT connect"
+                );
+                self.backend.invalidate_cached_credential();
+                continue 'outer;
+            }
 
             // ── 2. Rebuild MqttClient ──
             let credential_mode =
@@ -1187,16 +1197,8 @@ impl DaemonServer {
             // the daemon thinks everything's fine but messages are dropped.
             // Fire 5 min before the cached expiry; conservative 50 min
             // fallback if expiry isn't cached yet.
-            let proactive_reconnect_in: Duration = {
-                let buffer = Duration::from_secs(5 * 60);
-                match self.backend.cached_credential_expiry() {
-                    Some(t) => t
-                        .checked_duration_since(Instant::now())
-                        .and_then(|d| d.checked_sub(buffer))
-                        .unwrap_or(Duration::ZERO),
-                    None => Duration::from_secs(50 * 60),
-                }
-            };
+            let proactive_reconnect_in =
+                proactive_reconnect_delay(self.backend.cached_credential_expiry());
             info!(
                 reconnect_in_secs = proactive_reconnect_in.as_secs(),
                 "scheduled proactive MQTT reconnect before token expiry"
@@ -1330,6 +1332,7 @@ impl DaemonServer {
                             expiry = ?self.backend.cached_credential_expiry(),
                             "JWT nearing expiry, proactively reconnecting MQTT before broker silently denies ACL"
                         );
+                        self.backend.invalidate_cached_credential();
                         // Queue a graceful DISCONNECT so the broker sees an
                         // intentional close (no LWT blip) before we drop the
                         // eventloop. The drain loop below gives rumqttc a
@@ -1416,6 +1419,13 @@ impl DaemonServer {
                     }
                 }
             };
+            if credential_in_proactive_refresh_window(self.backend.cached_credential_expiry()) {
+                info!(
+                    "cached JWT within proactive refresh window, forcing token refresh before NATS connect"
+                );
+                self.backend.invalidate_cached_credential();
+                continue 'outer;
+            }
 
             // 2. Connect.
             info!(
@@ -1489,16 +1499,8 @@ impl DaemonServer {
             //    the current client and reconnecting with the new token —
             //    async_nats keeps the auth token only at connect time, so an
             //    in-place refresh isn't possible without a fresh connection.
-            let proactive_reconnect_in: Duration = {
-                let buffer = Duration::from_secs(5 * 60);
-                match self.backend.cached_credential_expiry() {
-                    Some(t) => t
-                        .checked_duration_since(Instant::now())
-                        .and_then(|d| d.checked_sub(buffer))
-                        .unwrap_or(Duration::ZERO),
-                    None => Duration::from_secs(50 * 60),
-                }
-            };
+            let proactive_reconnect_in =
+                proactive_reconnect_delay(self.backend.cached_credential_expiry());
             info!(
                 reconnect_in_secs = proactive_reconnect_in.as_secs(),
                 "scheduled proactive NATS reconnect before token expiry"
@@ -1606,6 +1608,7 @@ impl DaemonServer {
                             expiry = ?self.backend.cached_credential_expiry(),
                             "JWT nearing expiry, proactively reconnecting NATS"
                         );
+                        self.backend.invalidate_cached_credential();
                         // Mark offline before tearing down so subscribers see
                         // the presence change immediately rather than waiting
                         // for the next online publish.

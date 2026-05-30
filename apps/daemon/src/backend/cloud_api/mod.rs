@@ -337,6 +337,12 @@ impl Backend for CloudApiBackend {
             .expires_at
     }
 
+    fn invalidate_cached_credential(&self) {
+        let mut state = self.token.lock().expect("token state poisoned");
+        state.access_token = None;
+        state.expires_at = None;
+    }
+
     async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult> {
         #[derive(serde::Serialize)]
         struct ClaimInviteRequest<'a> {
@@ -983,6 +989,35 @@ mod tests {
             .filter(|r| r.url.path() == "/v1/auth/refresh")
             .count();
         assert_eq!(refreshes, 1, "access token should be cached, not re-fetched");
+    }
+
+    #[tokio::test]
+    async fn invalidate_cached_credential_forces_next_refresh() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        let backend = CloudApiBackend::new(config(&server));
+
+        backend.access_token().await.unwrap();
+        let refreshes_before = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(refreshes_before, 1);
+
+        backend.invalidate_cached_credential();
+        backend.access_token().await.unwrap();
+
+        let refreshes_after = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(refreshes_after, 2);
     }
 
     #[tokio::test]
