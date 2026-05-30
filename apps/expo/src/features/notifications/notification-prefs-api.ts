@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 
 export type NotificationPrefs = {
   enabled: boolean;
@@ -19,27 +19,26 @@ export type NotificationPrefsApi = {
   save: (prefs: NotificationPrefs) => Promise<void>;
 };
 
-export function createNotificationPrefsApi(
-  client: SupabaseClient,
-  userId: () => string | null,
-): NotificationPrefsApi {
+type CloudPrefsRow = {
+  enabled: boolean;
+  dnd_start_min: number | null;
+  dnd_end_min: number | null;
+  dnd_tz: string | null;
+} | null;
+
+export function createNotificationPrefsApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): NotificationPrefsApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
   return {
     async load() {
-      const uid = userId();
-      if (!uid) return { ...DEFAULT_PREFS };
-      const result = await client
-        .from("notification_prefs")
-        .select("enabled, dnd_start_min, dnd_end_min, dnd_tz")
-        .eq("user_id", uid)
-        .maybeSingle();
-      const row = result.data as
-        | {
-            enabled: boolean;
-            dnd_start_min: number | null;
-            dnd_end_min: number | null;
-            dnd_tz: string | null;
-          }
-        | null;
+      const row = await client.get<CloudPrefsRow>("/v1/notifications/prefs");
       if (!row) return { ...DEFAULT_PREFS };
       return {
         enabled: row.enabled,
@@ -49,20 +48,13 @@ export function createNotificationPrefsApi(
       };
     },
     async save(prefs) {
-      const uid = userId();
-      if (!uid) return;
-      await client
-        .from("notification_prefs")
-        .upsert(
-          {
-            user_id: uid,
-            enabled: prefs.enabled,
-            dnd_start_min: prefs.dndStartMin,
-            dnd_end_min: prefs.dndEndMin,
-            dnd_tz: prefs.dndTz,
-          },
-          { onConflict: "user_id" },
-        );
+      // FC derives user_id from the bearer token.
+      await client.post("/v1/notifications/prefs", {
+        enabled: prefs.enabled,
+        dnd_start_min: prefs.dndStartMin,
+        dnd_end_min: prefs.dndEndMin,
+        dnd_tz: prefs.dndTz,
+      });
     },
   };
 }

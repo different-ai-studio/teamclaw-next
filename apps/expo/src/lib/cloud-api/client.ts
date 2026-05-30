@@ -10,6 +10,26 @@ export type CloudApiClient = {
   del: (path: string) => Promise<void>;
 };
 
+/** Resolve the Cloud API base URL (cloud_api is the only client backend). */
+export function cloudApiBaseUrl(): string {
+  const baseUrl = process.env.EXPO_PUBLIC_CLOUD_API_URL?.trim();
+  if (!baseUrl) {
+    throw new Error("EXPO_PUBLIC_CLOUD_API_URL is required (cloud_api is the only backend).");
+  }
+  return baseUrl;
+}
+
+/** Build a getAccessToken closure from a Supabase client's auth session.
+ * Transitional bridge until the auth layer itself moves off the SDK. */
+export function supabaseAccessToken(
+  client: { auth: { getSession: () => Promise<{ data: { session: { access_token: string } | null } }> } },
+): () => Promise<string | null> {
+  return async () => {
+    const { data } = await client.auth.getSession();
+    return data.session?.access_token ?? null;
+  };
+}
+
 function createRequestId(): string {
   return `req_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
