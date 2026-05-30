@@ -148,6 +148,49 @@ pub(crate) fn group_workspaces_by_team(
     by_team.into_iter().collect()
 }
 
+/// Idempotently materialize a team's global shared dir and a workspace's
+/// `teamclaw-team` symlink into it.
+///
+/// All three share modes converge on one global copy per team at
+/// `~/.amuxd/teams/<team_id>/teamclaw-team`; every member workspace exposes it
+/// via a `teamclaw-team` symlink. This used to run ONLY in the startup sweep,
+/// so any team binding that landed after boot (the normal case — the app
+/// selects/joins a team while the daemon is already running) was never linked
+/// until the next restart. Factored out as a free function so every binding
+/// path (startup sweep, startup registration, AddWorkspace RPC) can trigger it
+/// on demand. Safe to call repeatedly; an empty `team_id` is a no-op.
+pub(crate) fn ensure_team_link(team_id: &str, ws_path: &str) {
+    if team_id.trim().is_empty() || ws_path.trim().is_empty() {
+        return;
+    }
+    let global_dir = crate::config::global_team_store::global_team_dir(team_id);
+    // Git-backed teams clone/pull into the global dir first (`git clone` needs
+    // an absent/empty target, so we must not pre-create the scaffold before
+    // cloning). OSS / unconfigured teams have no git config and just get the
+    // scaffold from `ensure_initialized` below.
+    if let Some(config) = load_team_shared_config_for_workspace(Path::new(ws_path)) {
+        if let Err(e) = crate::team_shared_git::sync_git_dir(&global_dir, &config) {
+            warn!(team_id, "global git sync failed: {e}");
+        }
+    }
+    // Create the fixed shared layout if missing (idempotent).
+    if let Err(e) = crate::config::global_team_store::ensure_initialized(team_id) {
+        warn!(team_id, "global team dir init failed: {e}");
+        return;
+    }
+    let ws_root = Path::new(ws_path);
+    let status = crate::config::workspace_link::ensure_workspace_link(ws_root, team_id);
+    // The effective dir agents read from — the in-workspace link normally, or
+    // the global dir under the no-link fallback.
+    let effective = crate::config::global_team_store::resolve_team_dir(ws_root, team_id);
+    info!(
+        team_id,
+        workspace = %ws_path,
+        effective = %effective.display(),
+        "team link: {status:?}"
+    );
+}
+
 /// Pure policy for which team_id (if any) to stamp on a freshly-added
 /// workspace: an existing team_id always wins; otherwise inherit the daemon's
 /// team. An empty/whitespace daemon team yields none.
@@ -874,44 +917,8 @@ impl DaemonServer {
     async fn sync_team_shared_dirs_for_known_workspaces(&self) {
         let grouped = group_workspaces_by_team(&self.workspaces.workspaces);
         for (team_id, workspace_paths) in grouped {
-            // 1. Sync the single global copy for this team.
-            //    `load_team_shared_config_for_workspace` only returns Some for
-            //    git modes (it requires a non-empty git_url), so a git-backed
-            //    team is cloned/pulled into the global dir FIRST — `git clone`
-            //    needs an absent/empty target, so we must not pre-create the
-            //    fixed scaffold before cloning. OSS / unconfigured teams skip
-            //    this and just get the scaffold below.
-            let global_dir = crate::config::global_team_store::global_team_dir(&team_id);
-            let config = workspace_paths
-                .first()
-                .and_then(|first| load_team_shared_config_for_workspace(Path::new(first)));
-            if let Some(config) = &config {
-                if let Err(e) = crate::team_shared_git::sync_git_dir(&global_dir, config) {
-                    warn!(team_id, "global git sync failed: {e}");
-                }
-            }
-            // Ensure the fixed shared layout exists (idempotent). For OSS this
-            // creates the scaffold; for a freshly-cloned git repo it tops up any
-            // missing dirs (git ignores the empty ones).
-            if let Err(e) = crate::config::global_team_store::ensure_initialized(&team_id) {
-                warn!(team_id, "global team dir init failed: {e}");
-                continue;
-            }
-            // 2. Ensure every member workspace links to the global dir.
             for ws_path in &workspace_paths {
-                let ws_root = Path::new(ws_path);
-                let status =
-                    crate::config::workspace_link::ensure_workspace_link(ws_root, &team_id);
-                // The effective dir agents read from — the in-workspace link
-                // normally, or the global dir under the no-link fallback.
-                let effective =
-                    crate::config::global_team_store::resolve_team_dir(ws_root, &team_id);
-                info!(
-                    team_id,
-                    workspace = %ws_path,
-                    effective = %effective.display(),
-                    "team link: {status:?}"
-                );
+                ensure_team_link(&team_id, ws_path);
             }
         }
     }
@@ -1696,6 +1703,12 @@ impl DaemonServer {
                 if let Err(e) = self.workspaces.save(&self.workspaces_path) {
                     warn!(path = %startup_path, "workspace auto-registration save failed: {}", e);
                     return;
+                }
+
+                // The startup sweep runs *before* this fresh-machine
+                // registration, so link the just-stamped workspace here too.
+                if let Some(team_id) = workspace.team_id.clone() {
+                    ensure_team_link(&team_id, &workspace.path);
                 }
 
                 info!(
@@ -3919,6 +3932,12 @@ impl DaemonServer {
                 if should_save {
                     let _ = self.workspaces.save(&self.workspaces_path);
                 }
+                // On-demand link: a workspace bound to a team after the startup
+                // sweep (the normal app flow) must materialize the global dir +
+                // symlink now, not wait for the next daemon restart.
+                if let Some(team_id) = ws.team_id.clone() {
+                    ensure_team_link(&team_id, &ws.path);
+                }
                 info!(workspace_id = %ws.workspace_id, path = %ws.path, "workspace added");
                 let info = amux::WorkspaceInfo {
                     workspace_id: ws.workspace_id,
@@ -5136,6 +5155,44 @@ mod tests {
         assert_eq!(team_id_to_stamp(None, None), None);
         // Empty/whitespace daemon team → nothing to stamp.
         assert_eq!(team_id_to_stamp(None, Some("   ")), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_team_link_creates_global_dir_and_workspace_symlink() {
+        // Serializes with other HOME-mutating tests (config_dir reads $HOME).
+        let _guard = crate::config::global_team_store::TEST_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let ws = tempfile::tempdir().unwrap();
+        let ws_path = ws.path().to_str().unwrap();
+
+        ensure_team_link("team-ondemand", ws_path);
+
+        // Global dir + scaffold created under ~/.amuxd/teams/<id>/teamclaw-team.
+        let global = crate::config::global_team_store::global_team_dir("team-ondemand");
+        assert!(global.is_dir(), "global team dir should be created");
+        assert!(global.join("skills").is_dir());
+
+        // Workspace exposes it via a teamclaw-team symlink to that global dir.
+        let link = ws.path().join("teamclaw-team");
+        let meta = std::fs::symlink_metadata(&link).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "workspace entry should be a symlink"
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), global);
+
+        // Idempotent: a second call must not error or change the target.
+        ensure_team_link("team-ondemand", ws_path);
+        assert_eq!(std::fs::read_link(&link).unwrap(), global);
+
+        // Empty team_id is a no-op (no stray dir/link).
+        let ws2 = tempfile::tempdir().unwrap();
+        ensure_team_link("", ws2.path().to_str().unwrap());
+        assert!(std::fs::symlink_metadata(ws2.path().join("teamclaw-team")).is_err());
     }
 
     struct TestServer {
