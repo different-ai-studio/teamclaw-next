@@ -404,6 +404,7 @@ export interface ActorDirectoryEntry {
   agent_types?: string[] | null;
   default_agent_type?: string | null;
   default_workspace_id?: string | null;
+  visibility?: string | null;
 }
 
 export interface ConnectedAgentRow extends ActorDirectoryEntry {

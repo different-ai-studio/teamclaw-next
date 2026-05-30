@@ -40,7 +40,6 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
   const online = isAgent
     ? (agentPresence ? agentPresence.online : isActorOnline(displayActor.last_active_at))
     : isActorOnline(displayActor.last_active_at)
-  const status = isAgent ? displayActor.agent_status : displayActor.member_status
   const c = actorAvatarColor(displayActor.id)
   const lastActive = displayActor.last_active_at
     ? formatRelativeTime(new Date(displayActor.last_active_at))
@@ -53,6 +52,23 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
     : (lastActive
       ? t('actors.detail.lastActive', 'Last active {{when}}', { when: lastActive })
       : t('actors.detail.offline', 'Offline'))
+  // Members carry a team role; agents carry a Team/Personal visibility. They are
+  // mutually exclusive — never show a member's status string in the "role" slot.
+  const roleLabel = !isAgent && displayActor.team_role
+    ? t(`actors.role.${displayActor.team_role}`, displayActor.team_role)
+    : null
+  const visibilityLabel = isAgent && displayActor.visibility
+    ? (displayActor.visibility === 'personal'
+      ? t('actors.visibility.personal', 'Personal')
+      : t('actors.visibility.team', 'Team'))
+    : null
+  const subtitleText = isAgent
+    ? (visibilityLabel ? `${actorTypeLabel} · ${visibilityLabel}` : actorTypeLabel)
+    : (roleLabel ?? actorTypeLabel)
+  // An agent's supported-types row is noise when it just repeats the default type.
+  const extraAgentTypes = isAgent && displayActor.agent_types
+    ? displayActor.agent_types.filter((tp) => tp !== displayActor.default_agent_type)
+    : []
 
   const copyId = async () => {
     try {
@@ -99,17 +115,20 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
                 {displayActor.display_name?.slice(0, 1).toUpperCase()
                   || (isAgent ? <Sparkles className="h-9 w-9" /> : <UserIcon className="h-9 w-9" />)}
               </div>
-              <span className={cn(
-                'absolute bottom-2 right-0 h-4 w-4 rounded-full ring-[3px] ring-background',
-                isAgent ? 'bg-coral' : online ? 'bg-emerald-500' : 'bg-faint',
-              )} />
+              <span
+                className={cn(
+                  'absolute bottom-1 right-1 h-4 w-4 rounded-full ring-[3px] ring-background',
+                  online ? 'bg-emerald-500' : 'bg-faint',
+                )}
+                aria-label={online ? t('actors.detail.online', 'Online') : t('actors.detail.offline', 'Offline')}
+              />
             </div>
 
             <div className="mt-5 max-w-full truncate text-[24px] font-bold leading-tight text-foreground">
               {displayActor.display_name}
             </div>
             <div className="mt-2 text-[14px] leading-5 text-muted-foreground">
-              {status || actorTypeLabel}
+              {subtitleText}
             </div>
             <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-border-soft bg-paper px-3 py-1.5 text-[12.5px] text-ink-2">
               <span className={cn('h-2 w-2 rounded-full', online ? 'bg-emerald-500' : 'bg-faint')} />
@@ -128,22 +147,32 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
               {t('actors.detail.details', 'Details')}
             </div>
             <dl className="grid grid-cols-[140px_minmax(0,1fr)] gap-x-5 gap-y-4 text-[13px] leading-5">
-              <dt className="text-muted-foreground">{t('actors.detail.role', 'Role')}</dt>
-              <dd className="min-w-0 truncate text-foreground">{status || actorTypeLabel}</dd>
+              {!isAgent && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.role', 'Role')}</dt>
+                  <dd className="min-w-0 truncate text-foreground">{roleLabel ?? '—'}</dd>
+                </>
+              )}
               <dt className="text-muted-foreground">{t('actors.detail.type', 'Type')}</dt>
               <dd className="min-w-0 truncate text-foreground">{actorTypeLabel}</dd>
+              {isAgent && visibilityLabel && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.visibility', 'Visibility')}</dt>
+                  <dd className="min-w-0 truncate text-foreground">{visibilityLabel}</dd>
+                </>
+              )}
               {isAgent && displayActor.default_agent_type && (
                 <>
                   <dt className="text-muted-foreground">{t('actors.detail.agentType', 'Agent type')}</dt>
                   <dd className="min-w-0 truncate text-foreground">{displayActor.default_agent_type}</dd>
                 </>
               )}
-              {isAgent && displayActor.agent_types && displayActor.agent_types.length > 0 && (
+              {isAgent && extraAgentTypes.length > 0 && (
                 <>
                   <dt className="text-muted-foreground">{t('actors.detail.supportedAgentTypes', 'Supported types')}</dt>
                   <dd className="min-w-0 text-foreground">
                     <div className="flex flex-wrap gap-1.5">
-                      {displayActor.agent_types.map((tp) => (
+                      {extraAgentTypes.map((tp) => (
                         <span
                           key={tp}
                           className="rounded-md border border-border-soft bg-paper px-2 py-0.5 font-mono text-[11.5px] text-ink-2"
@@ -153,12 +182,6 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
                       ))}
                     </div>
                   </dd>
-                </>
-              )}
-              {isAgent && displayActor.user_id && (
-                <>
-                  <dt className="text-muted-foreground">{t('actors.detail.authorizedMember', 'Authorized member')}</dt>
-                  <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{displayActor.user_id}</dd>
                 </>
               )}
               {isAgent && displayActor.default_workspace_id && (

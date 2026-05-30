@@ -17,6 +17,10 @@ export type ActorRow = {
   updatedAt: string;
   deletedAt?: string | null;
   syncedAt: string;
+  // Display hints (member role / agent Team|Personal visibility) cached so the
+  // list's first offline paint matches the network paint — no subtitle pop-in.
+  teamRole?: string | null;
+  agentVisibility?: string | null;
 };
 
 export type SessionRow = {

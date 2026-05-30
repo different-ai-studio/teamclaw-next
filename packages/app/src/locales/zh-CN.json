@@ -2826,6 +2826,15 @@
       "agent": "Agent",
       "member": "团队"
     },
+    "role": {
+      "owner": "拥有者",
+      "admin": "管理员",
+      "member": "成员"
+    },
+    "visibility": {
+      "team": "团队",
+      "personal": "个人"
+    },
     "contextMenu": {
       "viewProfile": "查看资料",
       "copyName": "复制名字",
@@ -2845,6 +2854,7 @@
       "details": "详情",
       "role": "角色",
       "type": "类型",
+      "visibility": "可见性",
       "agentType": "Agent 类型",
       "supportedAgentTypes": "支持的类型",
       "authorizedMember": "授权成员",

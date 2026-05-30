@@ -3678,6 +3678,18 @@ components:
           type:
             - string
             - "null"
+        teamRole:
+          description: Member's role in the team. Null for agents/external.
+          type:
+            - string
+            - "null"
+          enum: [owner, admin, member, null]
+        visibility:
+          description: Agent visibility scope. Null for members/external.
+          type:
+            - string
+            - "null"
+          enum: [team, personal, null]
         metadata:
           type:
             - object
