@@ -1022,8 +1022,31 @@ impl RuntimeManager {
     /// own events for the duration of the turn and will hand the receiver
     /// back afterwards.
     pub fn poll_events(&mut self) -> Vec<(String, amux::AcpEvent)> {
+        self.poll_events_inner(|_| true)
+    }
+
+    /// Drain queued ACP events only for agents accepted by `allow`. Lets a
+    /// secondary consumer (e.g. the HTTP/SSE adapter) drain *only* the
+    /// runtimes it owns, instead of competing with the MQTT main loop's
+    /// `poll_events()` over the single-consumer per-agent channel. Events for
+    /// runtimes the secondary consumer does not own stay queued for the main
+    /// loop, which is what publishes them to `session/live`.
+    pub fn poll_events_for(
+        &mut self,
+        allow: &std::collections::HashSet<String>,
+    ) -> Vec<(String, amux::AcpEvent)> {
+        self.poll_events_inner(|agent_id| allow.contains(agent_id))
+    }
+
+    fn poll_events_inner(
+        &mut self,
+        allow: impl Fn(&str) -> bool,
+    ) -> Vec<(String, amux::AcpEvent)> {
         let mut events = vec![];
         for (agent_id, handle) in &mut self.agents {
+            if !allow(agent_id) {
+                continue;
+            }
             let mut got_any = false;
             if let Some(rx) = handle.event_rx.as_mut() {
                 while let Ok(event) = rx.try_recv() {
@@ -1990,6 +2013,50 @@ mod tests {
         assert!(
             after > 0,
             "poll_events should bump last_active_at for agents that emitted"
+        );
+    }
+
+    #[test]
+    fn poll_events_for_only_drains_allowlisted_runtimes() {
+        // Regression: the HTTP/SSE adapter's event pump shares the single
+        // RuntimeManager with the MQTT main loop. It used to call the global
+        // `poll_events()`, draining (and then silently discarding) events for
+        // runtimes it did not own — starving the desktop's `session/live`
+        // path. `poll_events_for` must touch ONLY the allowlisted runtimes and
+        // leave everyone else's events queued for the main loop.
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt-http");
+        mgr.add_test_runtime("rt-mqtt", "rt-mqtt", "sess-mqtt");
+
+        let mk = || amux::AcpEvent {
+            model: String::new(),
+            event: None,
+        };
+        let http_tx = mgr.get_handle_mut("rt-http").unwrap().event_tx.clone();
+        let mqtt_tx = mgr.get_handle_mut("rt-mqtt").unwrap().event_tx.clone();
+        http_tx.try_send(mk()).expect("http channel ready");
+        mqtt_tx.try_send(mk()).expect("mqtt channel ready");
+
+        // HTTP pump drains only the runtime it owns.
+        let owned: std::collections::HashSet<String> =
+            std::iter::once("rt-http".to_string()).collect();
+        let http_drained = mgr.poll_events_for(&owned);
+        assert_eq!(http_drained.len(), 1, "HTTP pump drains only its own runtime");
+        assert!(
+            http_drained.iter().all(|(id, _)| id == "rt-http"),
+            "HTTP pump must not steal events from rt-mqtt"
+        );
+
+        // The MQTT main loop's global drain still sees rt-mqtt's untouched
+        // event (and nothing left for rt-http).
+        let main_drained = mgr.poll_events();
+        assert_eq!(
+            main_drained.len(),
+            1,
+            "main loop still receives the un-stolen rt-mqtt event"
+        );
+        assert_eq!(
+            main_drained[0].0, "rt-mqtt",
+            "main loop drains exactly rt-mqtt's event, not rt-http's (already taken)"
         );
     }
 
