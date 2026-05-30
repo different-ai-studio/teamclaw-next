@@ -102,6 +102,8 @@ export function useActorsForTeam(): UseActorsForTeamResult {
             member_status: r.memberStatus ?? null,
             agent_status: r.agentStatus ?? null,
             last_active_at: r.lastActiveAt ?? null,
+            team_role: r.teamRole ?? null,
+            visibility: r.agentVisibility ?? null,
           })))
           hadLocal = true
           setLoading(false)
@@ -147,6 +149,8 @@ export function useActorsForTeam(): UseActorsForTeamResult {
           memberStatus: r.member_status,
           agentStatus: r.agent_status,
           lastActiveAt: r.last_active_at,
+          teamRole: r.team_role,
+          agentVisibility: r.visibility,
           createdAt: now,
           updatedAt: now,
           syncedAt: now,
