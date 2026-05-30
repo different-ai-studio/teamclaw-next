@@ -1333,8 +1333,12 @@ public final class TeamclawService {
 
     private func rpcTargetDeviceID(for primaryAgentId: String?) async -> String? {
         guard let primaryAgentId, !primaryAgentId.isEmpty else { return nil }
-        guard let repository = try? SupabaseAgentAccessRepository() else { return nil }
-        return try? await repository.deviceID(for: primaryAgentId)
+        // Resolve from the already-loaded connected-agents list (each agent
+        // carries its daemon device id) instead of a direct backend query.
+        guard let deviceID = connectedAgentsStore?.agents
+            .first(where: { $0.id == primaryAgentId })?.deviceID,
+              !deviceID.isEmpty else { return nil }
+        return deviceID
     }
 
     private func rehydrateForegroundSessionSubscriptions(on mqtt: MQTTService) async {

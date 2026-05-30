@@ -269,6 +269,68 @@ public actor CloudAPIShortcutsRepository: ShortcutsRepository {
     }
 }
 
+public actor CloudAPIAgentAccessRepository: AgentAccessRepository {
+    private let client: CloudAPIClient
+    private let memberActorID: String
+
+    public init(client: CloudAPIClient, memberActorID: String) {
+        self.client = client
+        self.memberActorID = memberActorID
+    }
+
+    public func listConnectedAgents(teamID: String) async throws -> [ConnectedAgent] {
+        let page: CloudPage<CloudConnectedAgent> = try await client.get("/v1/teams/\(Self.enc(teamID))/agents/connected")
+        return page.items.map { $0.connectedAgent }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    public func listAuthorizedHumans(agentID: String) async throws -> [AgentAuthorizedHuman] {
+        let page: CloudPage<CloudAgentAccess> = try await client.get("/v1/agents/\(Self.enc(agentID))/access")
+        return page.items
+            .filter { ($0.actorType ?? "member") == "member" }
+            .map { $0.authorizedHuman }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    public func canManageAuthorizedHumans(agentID: String) async throws -> Bool {
+        // Owner-only, matching the prior owner_member_id == me semantics. The
+        // permission endpoint reports the caller-scoped permission_level.
+        let result: CloudAgentPermission = try await client.get(
+            "/v1/agents/\(Self.enc(agentID))/permission?actorId=\(Self.enc(memberActorID))"
+        )
+        return result.role == "owner"
+    }
+
+    public func grantAuthorizedHuman(agentID: String, memberID: String, permissionLevel: String) async throws {
+        try await client.postVoid(
+            "/v1/agents/\(Self.enc(agentID))/access",
+            body: CloudGrantAccessRequest(actorId: memberID, role: permissionLevel)
+        )
+    }
+
+    public func shareAgentToTeam(agentID: String) async throws {
+        try await client.postVoid("/v1/agents/\(Self.enc(agentID))/share-to-team", body: CloudEmptyBody())
+    }
+
+    public func makeAgentPersonal(agentID: String) async throws {
+        try await client.postVoid("/v1/agents/\(Self.enc(agentID))/make-personal", body: CloudEmptyBody())
+    }
+
+    public func deviceID(for agentID: String) async throws -> String? {
+        let result: CloudDeviceId = try await client.get("/v1/agents/\(Self.enc(agentID))/device-id")
+        return result.deviceId
+    }
+
+    public func teamAgentCount(teamID: String) async throws -> Int {
+        let page: CloudPage<CloudActorRef> = try await client.get("/v1/teams/\(Self.enc(teamID))/actors?kind=agent&limit=500")
+        return page.items.count
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
 public actor CloudAPIIdeaRepository: IdeaRepository {
     private let client: CloudAPIClient
     private let memberActorID: String
@@ -457,6 +519,17 @@ public enum CloudAPIRepositoryFactory {
             memberActorID: memberActorID
         )
     }
+
+    public static func agentAccessRepository(
+        configuration: CloudAPIConfiguration,
+        memberActorID: String,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any AgentAccessRepository {
+        CloudAPIAgentAccessRepository(
+            client: client(configuration: configuration, accessToken: accessToken),
+            memberActorID: memberActorID
+        )
+    }
 }
 
 private struct CloudPage<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -550,6 +623,74 @@ private struct CloudSessionParticipant: Decodable, Sendable {
     let displayName: String?
     let actorType: String?
 }
+
+private struct CloudConnectedAgent: Decodable, Sendable {
+    let id: String
+    let displayName: String?
+    let agentTypes: [String]?
+    let agentKind: String?
+    let defaultAgentType: String?
+    let permissionLevel: String?
+    let visibility: String?
+    let isOwner: Bool?
+    let lastActiveAt: String?
+    let deviceId: String?
+
+    var connectedAgent: ConnectedAgent {
+        ConnectedAgent(
+            id: id,
+            displayName: displayName ?? "",
+            agentTypes: agentTypes ?? [],
+            agentKind: agentKind ?? "",
+            defaultAgentType: defaultAgentType,
+            permissionLevel: permissionLevel ?? "",
+            lastActiveAt: parseCloudDate(lastActiveAt),
+            deviceID: deviceId,
+            visibility: visibility ?? "team",
+            isOwner: isOwner ?? false
+        )
+    }
+}
+
+private struct CloudAgentAccess: Decodable, Sendable {
+    let actorId: String
+    let memberName: String?
+    let role: String?
+    let permissionLevel: String?
+    let grantedByMemberId: String?
+    let lastActiveAt: String?
+    let actorType: String?
+
+    var authorizedHuman: AgentAuthorizedHuman {
+        AgentAuthorizedHuman(
+            id: actorId,
+            displayName: memberName ?? actorId,
+            permissionLevel: role ?? permissionLevel ?? "",
+            grantedByActorID: grantedByMemberId,
+            lastActiveAt: parseCloudDate(lastActiveAt)
+        )
+    }
+}
+
+private struct CloudAgentPermission: Decodable, Sendable {
+    let allowed: Bool
+    let role: String?
+}
+
+private struct CloudDeviceId: Decodable, Sendable {
+    let deviceId: String?
+}
+
+private struct CloudActorRef: Decodable, Sendable {
+    let id: String
+}
+
+private struct CloudGrantAccessRequest: Encodable, Sendable {
+    let actorId: String
+    let role: String
+}
+
+private struct CloudEmptyBody: Encodable, Sendable {}
 
 private struct CloudIdea: Decodable, Sendable {
     let id: String

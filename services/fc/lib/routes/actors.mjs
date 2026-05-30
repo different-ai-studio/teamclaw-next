@@ -101,6 +101,24 @@ export function registerActors(router) {
     return { body: result };
   });
 
+  router.post("/v1/agents/:agentActorId/share-to-team", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    await ctx.repository.shareAgentToTeam(agentActorId);
+    return { statusCode: 204, body: null };
+  });
+
+  router.post("/v1/agents/:agentActorId/make-personal", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    await ctx.repository.makeAgentPersonal(agentActorId);
+    return { statusCode: 204, body: null };
+  });
+
+  router.get("/v1/agents/:agentActorId/device-id", async (ctx) => {
+    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
+    const out = await ctx.repository.getAgentDeviceId(agentActorId);
+    return { body: out };
+  });
+
   router.delete("/v1/agents/:agentActorId/access/:actorId", async (ctx) => {
     const agentActorId = decodeURIComponent(ctx.params.agentActorId);
     const actorId = decodeURIComponent(ctx.params.actorId);

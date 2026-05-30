@@ -1727,9 +1727,34 @@ async heartbeat() {
           updatedAt: row.updated_at ?? null,
           agentId: row.agent_id ?? id,
           deviceId: row.device_id ?? null,
+          // Fields the list_connected_agents RPC computes that clients need
+          // (iOS ConnectedAgent: permission level, visibility, ownership).
+          permissionLevel: row.permission_level ?? null,
+          visibility: row.visibility ?? null,
+          isOwner: row.is_owner === true,
         };
       }).filter((row) => typeof row.id === "string" && row.id.length > 0);
       return { items };
+    },
+
+    async shareAgentToTeam(agentActorId) {
+      const { error } = await supabase.rpc("share_agent_to_team", { p_agent_id: agentActorId });
+      if (error) throw error;
+    },
+
+    async makeAgentPersonal(agentActorId) {
+      const { error } = await supabase.rpc("make_agent_personal", { p_agent_id: agentActorId });
+      if (error) throw error;
+    },
+
+    async getAgentDeviceId(agentActorId) {
+      const { data, error } = await supabase
+        .from("agents")
+        .select("id, device_id")
+        .eq("id", agentActorId)
+        .maybeSingle();
+      if (error) throw error;
+      return { deviceId: data?.device_id ?? null };
     },
 
     async updateOwnedAgentProfile(agentActorId, patch) {
@@ -1760,30 +1785,35 @@ async heartbeat() {
       if (error) throw error;
       const rows = data ?? [];
       const memberIds = [...new Set(rows.map((row) => row.member_id))];
-      const memberNames = new Map();
+      const memberInfo = new Map();
       if (memberIds.length > 0) {
         const { data: members, error: memberError } = await supabase
           .from("actor_directory")
-          .select("id, display_name")
+          .select("id, display_name, actor_type, last_active_at")
           .in("id", memberIds);
         if (memberError) throw memberError;
         for (const member of members ?? []) {
-          memberNames.set(member.id, member.display_name || member.id);
+          memberInfo.set(member.id, member);
         }
       }
-      const items = rows.map((row) => ({
-        id: row.id,
-        agentId: row.agent_id,
-        agentActorId: row.agent_id,
-        actorId: row.member_id,
-        memberId: row.member_id,
-        memberName: memberNames.get(row.member_id) ?? row.member_id,
-        role: row.permission_level,
-        permissionLevel: row.permission_level,
-        grantedByMemberId: row.granted_by_member_id,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+      const items = rows.map((row) => {
+        const member = memberInfo.get(row.member_id);
+        return {
+          id: row.id,
+          agentId: row.agent_id,
+          agentActorId: row.agent_id,
+          actorId: row.member_id,
+          memberId: row.member_id,
+          memberName: member?.display_name || row.member_id,
+          actorType: member?.actor_type ?? null,
+          lastActiveAt: member?.last_active_at ?? null,
+          role: row.permission_level,
+          permissionLevel: row.permission_level,
+          grantedByMemberId: row.granted_by_member_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+      });
       return { items };
     },
 

@@ -318,6 +318,15 @@ function contractRepo() {
     async updateOwnedAgentProfile(agentActorId, patch) {
       assert.equal(agentActorId, "agent-1");
     },
+    async shareAgentToTeam(agentActorId) {
+      assert.ok(typeof agentActorId === "string");
+    },
+    async makeAgentPersonal(agentActorId) {
+      assert.ok(typeof agentActorId === "string");
+    },
+    async getAgentDeviceId(agentActorId) {
+      return { deviceId: "device-1" };
+    },
     async updateAgentDefaults(agentActorId, patch) {
       assert.equal(agentActorId, "agent-1");
     },

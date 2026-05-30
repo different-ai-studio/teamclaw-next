@@ -440,6 +440,7 @@ struct ActorDetailView: View {
     let teamclawService: TeamclawService?
     let connectedAgentsStore: ConnectedAgentsStore?
     var workspacesRepository: (any WorkspaceRepository)?
+    var agentAccessRepository: (any AgentAccessRepository)?
     @Environment(\.dismiss) private var dismiss
     @State private var authorizedHumansStore: AgentAuthorizedHumansStore?
     @State private var workspaceStore: WorkspaceStore?
@@ -731,7 +732,7 @@ struct ActorDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
             guard !actor.isMember, authorizedHumansStore == nil else { return }
-            if let repo = try? SupabaseAgentAccessRepository() {
+            if let repo = agentAccessRepository {
                 let store = AgentAuthorizedHumansStore(agentID: actor.actorId, teamID: actor.teamId, repository: repo)
                 authorizedHumansStore = store
                 await store.reload()
