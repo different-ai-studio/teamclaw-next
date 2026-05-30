@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 import AMUXSharedUI
 import AMUXCore
 
@@ -157,7 +158,7 @@ struct LoginView: View {
             }
 
             socialButton(title: "Sign in with Google", icon: "globe") {
-                Task { await coordinator.signInWithGoogle() }
+                Task { await signInWithGoogleOAuth() }
             }
         }
     }
@@ -176,6 +177,63 @@ struct LoginView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(Color.amux.hairline, lineWidth: 1)
             )
+    }
+
+    // MARK: - Google OAuth via ASWebAuthenticationSession
+
+    @MainActor
+    private func signInWithGoogleOAuth() async {
+        guard !coordinator.isBusy else { return }
+        guard let authorizeURL = await coordinator.oauthAuthorizeURL() else {
+            // Store does not support PKCE OAuth (e.g. Supabase fallback); no-op.
+            return
+        }
+
+        // Mark busy while the browser session is open.
+        coordinator.isBusy = true
+        coordinator.errorMessage = nil
+
+        let callbackURL: URL
+        do {
+            callbackURL = try await withCheckedThrowingContinuation { continuation in
+                let session = ASWebAuthenticationSession(
+                    url: authorizeURL,
+                    callbackURLScheme: "teamclaw"
+                ) { url, error in
+                    if let error = error as? ASWebAuthenticationSessionError,
+                       error.code == .canceledLogin {
+                        // User cancelled — treat as silent no-op.
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    if let url {
+                        continuation.resume(returning: url)
+                    } else {
+                        continuation.resume(throwing: ASWebAuthenticationSessionError(
+                            .presentationContextNotProvided))
+                    }
+                }
+                session.presentationContextProvider = WebAuthContextProvider.shared
+                session.prefersEphemeralWebBrowserSession = true
+                session.start()
+            }
+        } catch is CancellationError {
+            coordinator.isBusy = false
+            return
+        } catch {
+            coordinator.isBusy = false
+            coordinator.errorMessage = error.localizedDescription
+            return
+        }
+
+        // Release our isBusy lock before delegating to handleAuthCallback,
+        // which guards against re-entry itself and manages isBusy internally.
+        coordinator.isBusy = false
+        await coordinator.handleAuthCallback(url: callbackURL)
     }
 
     private func socialButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
@@ -201,5 +259,27 @@ struct LoginView: View {
         }
         .buttonStyle(.plain)
         .disabled(coordinator.isBusy)
+    }
+}
+
+// MARK: - ASWebAuthentication presentation context
+
+/// Provides the key window as the presentation anchor for
+/// `ASWebAuthenticationSession`. A single shared instance is sufficient
+/// because the session is always presented from the app's active window.
+private final class WebAuthContextProvider: NSObject,
+    ASWebAuthenticationPresentationContextProviding, @unchecked Sendable {
+
+    static let shared = WebAuthContextProvider()
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        // Walk the connected scenes to find the first key window.
+        let windowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first
+        return windowScene?.keyWindow ?? ASPresentationAnchor()
     }
 }

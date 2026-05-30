@@ -444,6 +444,14 @@ public final class AppOnboardingCoordinator {
         await performAuth { try await self.store.signInWithGoogle() }
     }
 
+    /// Returns the FC OAuth authorize URL (with a fresh PKCE challenge already
+    /// embedded) that the UI layer should open in ASWebAuthenticationSession.
+    /// Returns nil if the underlying store does not support PKCE OAuth (e.g.
+    /// the Supabase store — callers should guard accordingly).
+    public func oauthAuthorizeURL() async -> URL? {
+        await (store as? CloudAPIAppOnboardingStore)?.oauthAuthorizeURL()
+    }
+
     public func signInAnonymously() async {
         await performAuth { try await self.store.signInAnonymously() }
     }
