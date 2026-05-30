@@ -1,12 +1,10 @@
 import XCTest
 import SwiftData
-import Supabase
 @testable import AMUXCore
 
 final class AttachmentUploadManagerTests: XCTestCase {
     var modelContainer: ModelContainer!
     var modelContext: ModelContext!
-    var supabaseClient: SupabaseClient!
     var uploadManager: AttachmentUploadManager!
 
     override func setUp() async throws {
@@ -17,11 +15,25 @@ final class AttachmentUploadManagerTests: XCTestCase {
         modelContainer = try ModelContainer(for: AttachmentUpload.self, configurations: config)
         modelContext = ModelContext(modelContainer)
 
-        // Create a real SupabaseClient with test URL and key
-        supabaseClient = SupabaseClient(supabaseURL: URL(string: "https://test.supabase.co")!, supabaseKey: "test-key")
+        // Cloud API client with a stub transport that fails the upload — these
+        // tests exercise record creation / state transitions / size + file
+        // guards, not a real upload round-trip.
+        let configuration = CloudAPIConfiguration(
+            baseURL: URL(string: "https://test.cloud.example")!,
+            supabaseURL: URL(string: "https://test.supabase.co")!,
+            supabaseAnonKey: "test-key"
+        )
+        let client = CloudAPIClient(
+            configuration: configuration,
+            accessToken: { "test-token" },
+            send: { _ in
+                (Data("{\"error\":{\"code\":\"x\",\"message\":\"stub\"}}".utf8),
+                 HTTPURLResponse(url: URL(string: "https://test.cloud.example")!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+            }
+        )
         uploadManager = AttachmentUploadManager(
             modelContext: modelContext,
-            supabaseClient: supabaseClient
+            client: client
         )
     }
 

@@ -1,8 +1,7 @@
 import Foundation
 import SwiftData
-import Supabase
 
-/// Manages file uploads to Supabase Storage.
+/// Manages file uploads to the Cloud API attachments store.
 /// Handles progress tracking, state transitions, and error recovery.
 ///
 /// Thread safety: This class is marked `@unchecked Sendable` because:
@@ -11,20 +10,29 @@ import Supabase
 /// - `modelContext` is thread-confined to the main thread
 public class AttachmentUploadManager: NSObject, @unchecked Sendable {
     private let modelContext: ModelContext
-    private let supabaseClient: SupabaseClient
+    private let client: CloudAPIClient
 
-    public init(modelContext: ModelContext, supabaseClient: SupabaseClient) {
+    public init(modelContext: ModelContext, client: CloudAPIClient) {
         self.modelContext = modelContext
-        self.supabaseClient = supabaseClient
+        self.client = client
     }
 
-    /// Convenience factory used by AMUXUI (which doesn't depend on the
-    /// `Supabase` package directly) to build a manager wired to the project's
-    /// configured Supabase instance via `SupabaseProjectConfiguration`.
+    /// Convenience factory used by AMUXUI to build a manager wired to the
+    /// Cloud API. The access-token closure reads the current token from the
+    /// Keychain-backed session each call (refresh is owned by the onboarding
+    /// SessionStore), so uploads carry the user's bearer for storage RLS.
     public static func fromMainBundle(modelContext: ModelContext) throws -> AttachmentUploadManager {
-        let config = try SupabaseProjectConfiguration.fromMainBundle()
-        let client = SupabaseClient(supabaseURL: config.url, supabaseKey: config.publishableKey)
-        return AttachmentUploadManager(modelContext: modelContext, supabaseClient: client)
+        guard let config = CloudAPIConfigurationStore.configuration() else {
+            throw UploadError.uploadFailed("Cloud API is not configured")
+        }
+        let storage = KeychainSessionStorage()
+        let client = CloudAPIClient(configuration: config, accessToken: {
+            guard let session = try storage.load(), session.expiresAt.timeIntervalSinceNow > 0 else {
+                throw CloudAPIError.missingAccessToken
+            }
+            return session.accessToken
+        })
+        return AttachmentUploadManager(modelContext: modelContext, client: client)
     }
 
     /// Begin uploading a file to Storage.
@@ -98,29 +106,22 @@ public class AttachmentUploadManager: NSObject, @unchecked Sendable {
 
             let uploadPath = "\(teamID)/\(upload.sessionID)/\(upload.attachmentID)/\(upload.fileName)"
 
-            // Upload to Supabase Storage (off main thread)
-            try await supabaseClient.storage
-                .from("attachments")
-                .upload(
-                    uploadPath,
-                    data: fileData,
-                    options: FileOptions(
-                        cacheControl: "3600",
-                        contentType: mimeType(for: upload.fileName)
-                    )
-                )
-
-            // Generate a signed URL (bucket is private; AsyncImage needs a token-signed URL)
-            let signedURL = try await supabaseClient.storage
-                .from("attachments")
-                .createSignedURL(path: uploadPath, expiresIn: 31_536_000) // 1 year
+            // Upload raw bytes to the Cloud API attachments store (off main
+            // thread). The bucket is public, so the returned URL renders
+            // tokenlessly cross-client (no signed URL needed).
+            let encodedPath = uploadPath.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? uploadPath
+            let result: AttachmentUploadResult = try await client.postRaw(
+                "/v1/attachments?path=\(encodedPath)&bucket=attachments",
+                bytes: fileData,
+                contentType: mimeType(for: upload.fileName)
+            )
 
             // Mark complete on main thread
             await MainActor.run {
                 if let upload = self.fetchUpload(byID: uploadID) {
                     upload.uploadState = .completed
                     upload.uploadedBytes = upload.fileSize
-                    upload.storageURL = signedURL.absoluteString
+                    upload.storageURL = result.url
                     do {
                         try self.modelContext.save()
                     } catch {
@@ -173,6 +174,11 @@ public class AttachmentUploadManager: NSObject, @unchecked Sendable {
         let fileData = try Data(contentsOf: filePath)
         await performUpload(fileData: fileData, teamID: teamID, uploadID: attachmentID)
     }
+}
+
+private struct AttachmentUploadResult: Decodable, Sendable {
+    let path: String
+    let url: String
 }
 
 public enum UploadError: LocalizedError {
