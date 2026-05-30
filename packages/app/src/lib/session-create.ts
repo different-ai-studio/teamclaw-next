@@ -36,6 +36,7 @@ import {
   resolveAgentRuntimeWorkspaceId,
   runtimeStartWorkspaceArgs,
 } from '@/lib/teamclaw/resolve-runtime-start-workspace'
+import { ensureDaemonWorkspaceRegistered } from '@/lib/teamclaw/ensure-daemon-workspace'
 export interface CreateSessionShellArgs {
   teamId: string
   creatorActorId: string
@@ -466,6 +467,33 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         createdByMemberId,
       })
     }
+
+    let runtimeWorkspaceId = workspaceId
+    if (workspaceId) {
+      try {
+        const ensured = await ensureDaemonWorkspaceRegistered({
+          targetDeviceId: agentActorId,
+          teamId: args.teamId,
+          cloudWorkspaceId: workspaceId,
+          agentLabel: agentActorId.slice(0, 8),
+        })
+        runtimeWorkspaceId = ensured.runtimeWorkspaceId
+      } catch (error) {
+        sessionFlowError('runtime_start.daemon_workspace.failed', error, {
+          sessionId: args.sessionId,
+          teamId: args.teamId,
+          agentActorId,
+          workspaceId,
+        })
+        console.error('[session-create] daemon workspace ensure failed', {
+          agentActorId,
+          workspaceId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+        return
+      }
+    }
+
     try {
       sessionFlowLog('runtime_start.request.begin', {
         sessionId: args.sessionId,
@@ -475,13 +503,14 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         modelId: resolvedModelId ?? null,
         userPick: userPick ?? null,
         workspaceId,
+        runtimeWorkspaceId,
       })
       // Current amuxd convention: daemon device_id == its actor_id, so the
       // RPC topic is amux/{team}/device/{agentActorId}/rpc/req. Multi-daemon
       // teams would need a separate (actor -> deviceId) lookup.
       const result = await runtimeStart({
         targetDeviceId: agentActorId,
-        ...runtimeStartWorkspaceArgs(workspaceId),
+        ...runtimeStartWorkspaceArgs(runtimeWorkspaceId),
         sessionId: args.sessionId,
         agentType,
         initialPrompt: '',

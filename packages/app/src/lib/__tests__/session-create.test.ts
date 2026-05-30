@@ -8,6 +8,11 @@ const mockRuntimeStart = vi.fn().mockResolvedValue({
   rejectedReason: '',
 })
 const mockSetModel = vi.fn().mockResolvedValue({})
+const mockEnsureDaemonWorkspace = vi.fn().mockImplementation(
+  async ({ cloudWorkspaceId }: { cloudWorkspaceId: string }) => ({
+    runtimeWorkspaceId: cloudWorkspaceId,
+  }),
+)
 
 const backendMocks = vi.hoisted(() => ({
   createSessionShell: vi.fn(),
@@ -27,6 +32,10 @@ const workspaceStoreMocks = vi.hoisted(() => ({
 vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
+}))
+
+vi.mock('@/lib/teamclaw/ensure-daemon-workspace', () => ({
+  ensureDaemonWorkspaceRegistered: (...args: unknown[]) => mockEnsureDaemonWorkspace(...args),
 }))
 
 vi.mock('@/lib/backend', () => ({
@@ -66,6 +75,12 @@ describe('startAgentRuntimesAsync', () => {
   beforeEach(() => {
     mockRuntimeStart.mockClear()
     mockSetModel.mockClear()
+    mockEnsureDaemonWorkspace.mockClear()
+    mockEnsureDaemonWorkspace.mockImplementation(
+      async ({ cloudWorkspaceId }: { cloudWorkspaceId: string }) => ({
+        runtimeWorkspaceId: cloudWorkspaceId,
+      }),
+    )
     backendMocks.createSessionShell.mockReset()
     backendMocks.insertOutgoingMessage.mockReset()
     backendMocks.listLatestAgentRuntimeHints.mockReset()
@@ -455,6 +470,52 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetDeviceId: 'agent-10',
         workspaceId: 'ws-from-send',
+        worktree: '',
+      }),
+    )
+  })
+
+  it('skips runtimeStart when daemon workspace ensure fails', async () => {
+    mockTables({
+      runtimes: [],
+      sessionRuntimes: [{ agent_id: 'agent-11', workspace_id: 'ws-missing' }],
+    })
+    mockEnsureDaemonWorkspace.mockRejectedValueOnce(new Error('addWorkspace failed'))
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-11'],
+    })
+
+    expect(mockEnsureDaemonWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-11',
+        cloudWorkspaceId: 'ws-missing',
+      }),
+    )
+    expect(mockRuntimeStart).not.toHaveBeenCalled()
+  })
+
+  it('uses daemon-local workspace id returned by ensure before runtimeStart', async () => {
+    mockTables({
+      runtimes: [],
+      sessionRuntimes: [{ agent_id: 'agent-12', workspace_id: 'cloud-ws-1' }],
+    })
+    mockEnsureDaemonWorkspace.mockResolvedValueOnce({ runtimeWorkspaceId: 'local-ws-1' })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['agent-12'],
+    })
+
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDeviceId: 'agent-12',
+        workspaceId: 'local-ws-1',
         worktree: '',
       }),
     )
