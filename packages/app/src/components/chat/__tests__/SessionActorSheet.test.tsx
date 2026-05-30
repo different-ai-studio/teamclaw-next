@@ -512,9 +512,16 @@ describe('SessionActorSheet', () => {
     )
 
     render(<SessionActorPanel sessionId="sess-1" teamId="team-1" />)
-    await waitFor(() => expect(screen.getByText('参与者')).toBeInTheDocument())
+    // '参与者' is the static panel header — it renders immediately, before the
+    // async participant/candidate load resolves, so waiting on it races the
+    // data sections (flaky under CI load). Anchor on data-dependent markers
+    // from both the participant-derived list (AGENT) and the candidate list
+    // (ShipReview) so the wait only resolves once the loaded content is in.
+    await waitFor(() => {
+      expect(screen.getByText('AGENT')).toBeInTheDocument()
+      expect(screen.getByText('ShipReview')).toBeInTheDocument()
+    })
 
-    expect(screen.getByText('AGENT')).toBeInTheDocument()
     expect(screen.getByText('团队')).toBeInTheDocument()
     expect(screen.getByText('邀请加入')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('搜索成员或 Agent...')).toBeInTheDocument()
