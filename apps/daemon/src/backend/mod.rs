@@ -113,6 +113,9 @@ pub trait Backend: Send + Sync {
     /// Upsert a `workspaces` row, returning the canonical id.
     async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow>;
 
+    /// Set `agents.default_workspace_id` for the current daemon actor.
+    async fn set_agent_default_workspace(&self, workspace_id: &str) -> BackendResult<()>;
+
     /// Fetch a `sessions` row alongside its `session_participants`.
     async fn fetch_session_with_participants(
         &self,

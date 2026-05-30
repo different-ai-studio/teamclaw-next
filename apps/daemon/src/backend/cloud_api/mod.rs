@@ -518,6 +518,21 @@ impl Backend for CloudApiBackend {
         }
     }
 
+    async fn set_agent_default_workspace(&self, workspace_id: &str) -> BackendResult<()> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "defaultWorkspaceId")]
+            default_workspace_id: &'a str,
+        }
+        self.patch_no_content(
+            &format!("/v1/agents/{}/defaults", self.cfg.actor_id),
+            &Body {
+                default_workspace_id: workspace_id,
+            },
+        )
+        .await
+    }
+
     async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow> {
         #[derive(serde::Serialize)]
         struct Body<'a> {
@@ -1197,6 +1212,25 @@ mod tests {
             .await;
         let backend = CloudApiBackend::new(config(&server));
         backend.set_agent_device_id("device-abc").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_agent_default_workspace_patches_cloud_api() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("PATCH"))
+            .and(path("/v1/agents/agent-1/defaults"))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({ "defaultWorkspaceId": "workspace-remote-1" }),
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        backend
+            .set_agent_default_workspace("workspace-remote-1")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

@@ -930,6 +930,8 @@ impl DaemonServer {
         // channel doesn't delay collab connectivity.
         self.start_channels().await;
         self.sync_team_shared_dirs_for_known_workspaces().await;
+        self.register_startup_workspace_at(std::env::current_dir())
+            .await;
 
         {
             let mut mgr = self.agents.lock().await;
@@ -1165,7 +1167,6 @@ impl DaemonServer {
             info!(device_id = %self.config.device.id, "MQTT connected, listening for commands");
 
             if first_connect {
-                self.register_startup_workspace().await;
                 // Drain messages that landed in the cloud backend while the daemon
                 // process was down. MQTT lives are dropped by the broker
                 // when clean_session=true clients are offline, so anything
@@ -1479,7 +1480,6 @@ impl DaemonServer {
             info!(device_id = %self.config.device.id, "NATS connected, listening for runtime commands");
 
             if first_connect {
-                self.register_startup_workspace().await;
                 self.auto_restart_offline_sessions().await;
                 first_connect = false;
             }
@@ -1623,8 +1623,15 @@ impl DaemonServer {
         }
     }
 
-    async fn register_startup_workspace(&mut self) {
-        let current_dir = match std::env::current_dir() {
+    async fn register_startup_workspace_at(
+        &mut self,
+        current_dir: std::io::Result<std::path::PathBuf>,
+    ) {
+        if !self.workspaces.workspaces.is_empty() {
+            return;
+        }
+
+        let current_dir = match current_dir {
             Ok(path) => path,
             Err(e) => {
                 warn!(
@@ -1656,6 +1663,27 @@ impl DaemonServer {
                     .find(|w| w.workspace_id == workspace.workspace_id)
                 {
                     *existing = workspace.clone();
+                }
+
+                if !workspace.remote_workspace_id.is_empty() {
+                    if let Err(e) = self
+                        .backend
+                        .set_agent_default_workspace(&workspace.remote_workspace_id)
+                        .await
+                    {
+                        warn!(
+                            workspace_id = %workspace.remote_workspace_id,
+                            path = %workspace.path,
+                            "startup default workspace update failed: {}",
+                            e
+                        );
+                    } else {
+                        info!(
+                            workspace_id = %workspace.remote_workspace_id,
+                            path = %workspace.path,
+                            "startup default workspace set"
+                        );
+                    }
                 }
 
                 if !should_save {
@@ -6005,5 +6033,191 @@ mod tests {
 
         let agents = fixture.server.agents.lock().await;
         assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn register_startup_workspace_bootstraps_cwd_when_store_empty() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        let workspace_dir = ts._tmp.path().to_path_buf();
+        let display_name = workspace_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        seed_startup_workspace_sync(&mock, &display_name, "remote-ws-1");
+
+        ts.server
+            .register_startup_workspace_at(Ok(workspace_dir.clone()))
+            .await;
+
+        assert_eq!(ts.server.workspaces.workspaces.len(), 1);
+        assert_eq!(
+            ts.server.workspaces.workspaces[0].path,
+            workspace_dir.canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            ts.server.workspaces.workspaces[0].remote_workspace_id,
+            "remote-ws-1"
+        );
+        assert!(ts.server.workspaces_path.exists());
+        assert_eq!(
+            mock.state().default_workspace_ids,
+            vec!["remote-ws-1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn register_startup_workspace_skips_when_store_not_empty() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        ts.server.workspaces.workspaces.push(crate::config::StoredWorkspace {
+            workspace_id: "existing".to_string(),
+            remote_workspace_id: "remote-existing".to_string(),
+            path: "/tmp/existing".to_string(),
+            display_name: "existing".to_string(),
+            team_id: None,
+        });
+
+        ts.server
+            .register_startup_workspace_at(Ok(ts._tmp.path().to_path_buf()))
+            .await;
+
+        assert_eq!(ts.server.workspaces.workspaces.len(), 1);
+        assert!(mock.state().default_workspace_ids.is_empty());
+        assert!(!ts.server.workspaces_path.exists());
+    }
+
+    fn seed_startup_workspace_sync(
+        mock: &Arc<crate::backend::mock::MockBackend>,
+        display_name: &str,
+        remote_id: &str,
+    ) {
+        mock.state().workspace_results.insert(
+            (
+                "team-test".to_string(),
+                "agent-actor".to_string(),
+                display_name.to_string(),
+            ),
+            crate::backend::WorkspaceRow {
+                id: remote_id.to_string(),
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn register_startup_workspace_skips_default_when_cloud_sync_fails() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        let workspace_dir = ts._tmp.path().to_path_buf();
+
+        ts.server
+            .register_startup_workspace_at(Ok(workspace_dir.clone()))
+            .await;
+
+        assert_eq!(ts.server.workspaces.workspaces.len(), 1);
+        assert!(ts.server.workspaces.workspaces[0]
+            .remote_workspace_id
+            .is_empty());
+        assert!(mock.state().default_workspace_ids.is_empty());
+        assert!(ts.server.workspaces_path.exists());
+
+        let saved = WorkspaceStore::load(&ts.server.workspaces_path).unwrap();
+        assert_eq!(saved.workspaces.len(), 1);
+        assert_eq!(
+            saved.workspaces[0].path,
+            workspace_dir.canonicalize().unwrap().to_string_lossy()
+        );
+    }
+
+    #[tokio::test]
+    async fn register_startup_workspace_persists_local_when_default_update_fails() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        let workspace_dir = ts._tmp.path().to_path_buf();
+        let display_name = workspace_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        seed_startup_workspace_sync(&mock, &display_name, "remote-ws-1");
+        mock.state().set_default_workspace_error = Some("cloud rejected default".to_string());
+
+        ts.server
+            .register_startup_workspace_at(Ok(workspace_dir))
+            .await;
+
+        assert_eq!(
+            ts.server.workspaces.workspaces[0].remote_workspace_id,
+            "remote-ws-1"
+        );
+        assert!(mock.state().default_workspace_ids.is_empty());
+        assert!(ts.server.workspaces_path.exists());
+
+        let saved = WorkspaceStore::load(&ts.server.workspaces_path).unwrap();
+        assert_eq!(saved.workspaces[0].remote_workspace_id, "remote-ws-1");
+    }
+
+    #[tokio::test]
+    async fn register_startup_workspace_calls_cloud_upsert_before_default() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        let workspace_dir = ts._tmp.path().to_path_buf();
+        let display_name = workspace_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        seed_startup_workspace_sync(&mock, &display_name, "remote-ws-1");
+
+        ts.server
+            .register_startup_workspace_at(Ok(workspace_dir.clone()))
+            .await;
+
+        let snap = mock.state();
+        assert_eq!(snap.upserted_workspaces.len(), 1);
+        assert_eq!(snap.upserted_workspaces[0].team_id, "team-test");
+        assert_eq!(snap.upserted_workspaces[0].agent_id, "agent-actor");
+        assert_eq!(snap.upserted_workspaces[0].name, display_name);
+        assert_eq!(
+            snap.upserted_workspaces[0].path.as_deref(),
+            Some(workspace_dir.canonicalize().unwrap().to_str().unwrap())
+        );
+        assert_eq!(snap.default_workspace_ids, vec!["remote-ws-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn register_startup_workspace_skips_when_current_dir_unavailable() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+
+        ts.server
+            .register_startup_workspace_at(Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing cwd",
+            )))
+            .await;
+
+        assert!(ts.server.workspaces.workspaces.is_empty());
+        assert!(mock.state().default_workspace_ids.is_empty());
+        assert!(!ts.server.workspaces_path.exists());
     }
 }

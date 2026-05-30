@@ -155,6 +155,8 @@ pub struct MockState {
     pub runtime_rows_by_session_runtime: HashMap<(String, String, String), AgentRuntimeRow>,
     pub latest_runtime_rows: HashMap<(String, String), AgentRuntimeRow>,
     pub ensured_agent_types: Vec<(Vec<String>, String)>,
+    pub default_workspace_ids: Vec<String>,
+    pub set_default_workspace_error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -299,6 +301,19 @@ impl Backend for MockBackend {
 
     async fn heartbeat(&self) -> BackendResult<()> {
         self.state.lock().unwrap().heartbeats += 1;
+        Ok(())
+    }
+
+    async fn set_agent_default_workspace(&self, workspace_id: &str) -> BackendResult<()> {
+        let mut st = self.state.lock().unwrap();
+        if let Some(message) = &st.set_default_workspace_error {
+            return Err(BackendError::Provider {
+                provider: "mock",
+                code: None,
+                message: message.clone(),
+            });
+        }
+        st.default_workspace_ids.push(workspace_id.to_string());
         Ok(())
     }
 
@@ -624,6 +639,29 @@ mod tests {
         assert_eq!(be.actor_id(), "actor-x");
         assert_eq!(be.auth_token().await.unwrap(), "mock-token");
         assert_eq!(be.cached_credential_expiry(), None);
+    }
+
+    #[tokio::test]
+    async fn set_agent_default_workspace_records_workspace_id() {
+        let (be, state) = dyn_backend();
+        be.set_agent_default_workspace("ws-remote-42").await.unwrap();
+        assert_eq!(
+            state.lock().unwrap().default_workspace_ids,
+            vec!["ws-remote-42".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn set_agent_default_workspace_returns_configured_error() {
+        let mock = MockBackend::with_identity("team-x", "actor-x");
+        mock.state.lock().unwrap().set_default_workspace_error =
+            Some("permission denied".to_string());
+        let be: Arc<dyn Backend> = Arc::new(mock);
+        let err = be
+            .set_agent_default_workspace("ws-remote-42")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("permission denied"));
     }
 
     #[tokio::test]
