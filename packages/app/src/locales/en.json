@@ -2854,6 +2854,7 @@
       "details": "Details",
       "role": "Role",
       "type": "Type",
+      "visibility": "Visibility",
       "agentType": "Agent type",
       "supportedAgentTypes": "Supported types",
       "authorizedMember": "Authorized member",
