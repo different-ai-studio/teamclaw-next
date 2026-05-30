@@ -101,6 +101,35 @@ public actor CloudAPIAgentRuntimesRepository: AgentRuntimesRepository {
     }
 }
 
+public actor CloudAPIWorkspaceRepository: WorkspaceRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listWorkspaces(teamID: String, agentID: String?) async throws -> [WorkspaceRecord] {
+        var query = "teamId=\(Self.encode(teamID))&limit=200"
+        if let agentID, !agentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            query += "&agentId=\(Self.encode(agentID))"
+        }
+        let page: CloudPage<CloudWorkspace> = try await client.get("/v1/workspaces?\(query)")
+        return page.items.map { row in
+            WorkspaceRecord(
+                id: row.id,
+                teamID: row.teamId,
+                agentID: row.agentId,
+                path: row.path ?? "",
+                displayName: row.name
+            )
+        }
+    }
+
+    private static func encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+}
+
 public actor CloudAPIMessagesRepository: MessagesRepository {
     private let client: CloudAPIClient
 
@@ -213,6 +242,13 @@ public enum CloudAPIRepositoryFactory {
     ) -> any AgentRuntimesRepository {
         CloudAPIAgentRuntimesRepository(client: client(configuration: configuration, accessToken: accessToken))
     }
+
+    public static func workspacesRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any WorkspaceRepository {
+        CloudAPIWorkspaceRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
 }
 
 private struct CloudPage<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -283,6 +319,14 @@ private struct CloudAgentRuntime: Decodable, Sendable {
     let lastSeenAt: String?
     let createdAt: String
     let updatedAt: String
+}
+
+private struct CloudWorkspace: Decodable, Sendable {
+    let id: String
+    let teamId: String
+    let name: String
+    let path: String?
+    let agentId: String?
 }
 
 private struct CloudMarkViewedRequest: Encodable, Sendable {

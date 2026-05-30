@@ -20,6 +20,7 @@ public struct AddAgentSheet: View {
 
     let candidates: [ConnectedAgent]
     let teamID: String
+    let workspacesRepository: (any WorkspaceRepository)?
     let onConfirm: (_ actorID: String,
                     _ workspaceID: String,
                     _ workspacePath: String,
@@ -30,12 +31,14 @@ public struct AddAgentSheet: View {
 
     public init(candidates: [ConnectedAgent],
                 teamID: String,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
                 onConfirm: @escaping (_ actorID: String,
                                       _ workspaceID: String,
                                       _ workspacePath: String,
                                       _ agentType: AgentConfigSheet.AgentType) -> Void) {
         self.candidates = candidates
         self.teamID = teamID
+        self.workspacesRepository = workspacesRepository
         self.onConfirm = onConfirm
     }
 
@@ -101,7 +104,7 @@ public struct AddAgentSheet: View {
         }
         .task {
             guard workspaceStore == nil, !teamID.isEmpty else { return }
-            if let repository = try? SupabaseWorkspaceRepository() {
+            if let repository = workspacesRepository {
                 workspaceStore = WorkspaceStore(teamID: teamID, repository: repository)
                 await workspaceStore?.reload(agentID: nil)
             }

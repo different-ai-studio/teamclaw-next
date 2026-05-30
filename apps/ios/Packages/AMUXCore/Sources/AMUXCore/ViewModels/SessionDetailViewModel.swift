@@ -129,6 +129,7 @@ public final class SessionDetailViewModel {
     private let sessionsRepository: SessionRepository?
     private let agentRuntimesRepository: AgentRuntimesRepository?
     private let messagesRepository: MessagesRepository?
+    private let workspacesRepository: (any WorkspaceRepository)?
     /// `nonisolated(unsafe)` so the deinit (which runs in a nonisolated
     /// context) can cancel the MQTT subscription task on VM teardown.
     /// Writes happen only from main-actor methods (`start`, `stop`); the
@@ -230,6 +231,7 @@ public final class SessionDetailViewModel {
                 sessionsRepository: SessionRepository? = nil,
                 agentRuntimesRepository: AgentRuntimesRepository? = nil,
                 messagesRepository: MessagesRepository? = nil,
+                workspacesRepository: (any WorkspaceRepository)? = nil,
                 outboxSender: OutboxSender? = nil) {
         self.runtime = runtime; self.mqtt = mqtt; self.hub = hub; self.teamID = teamID; self.peerId = peerId
         self.session = session; self.teamclawService = teamclawService
@@ -237,6 +239,7 @@ public final class SessionDetailViewModel {
         self.sessionsRepository = sessionsRepository
         self.agentRuntimesRepository = agentRuntimesRepository
         self.messagesRepository = messagesRepository
+        self.workspacesRepository = workspacesRepository
         self.outboxSender = outboxSender
     }
 
@@ -979,14 +982,14 @@ public final class SessionDetailViewModel {
     }
 
     /// Best-effort lookup of the worktree filesystem path for a workspace UUID.
-    /// Uses Supabase via `SupabaseWorkspaceRepository`, narrowed to the agent's
+    /// Uses the injected Cloud API `WorkspaceRepository`, narrowed to the agent's
     /// own workspaces first (matching `AddAgentSheet`'s default), then widened
     /// to all team workspaces if the agent-scoped query yielded nothing.
     /// Returns "" when the path can't be resolved — the daemon will reject
     /// with a clean error rather than us pre-validating here.
     private func resolveWorkspacePath(workspaceID: String, agentActorID: String) async -> String {
         guard !workspaceID.isEmpty, !teamID.isEmpty else { return "" }
-        guard let repo = try? SupabaseWorkspaceRepository() else { return "" }
+        guard let repo = workspacesRepository else { return "" }
 
         if let agentScoped = try? await repo.listWorkspaces(teamID: teamID, agentID: agentActorID),
            let hit = agentScoped.first(where: { $0.id == workspaceID }) {

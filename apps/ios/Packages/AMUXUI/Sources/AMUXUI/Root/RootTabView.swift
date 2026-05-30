@@ -77,6 +77,7 @@ public struct RootTabView: View {
                             actorStore: teamRuntime?.actorStore,
                             shortcutsStore: teamRuntime?.shortcutsStore,
                             messagesRepository: teamRuntime?.messagesRepo,
+                            workspacesRepository: teamRuntime?.workspacesRepo,
                             onReconnect: onReconnect,
                             onSignOut: onSignOut,
                             preferencesAPI: preferencesAPI)
@@ -90,6 +91,7 @@ public struct RootTabView: View {
                          sessionViewModel: viewModel,
                          connectedAgentsStore: teamRuntime?.connectedAgentsStore,
                          messagesRepository: teamRuntime?.messagesRepo,
+                         workspacesRepository: teamRuntime?.workspacesRepo,
                          currentActorID: currentActorID)
             }
             Tab("Actors", systemImage: "person.2", value: AppTab.members) {
@@ -102,6 +104,7 @@ public struct RootTabView: View {
                                currentActorID: currentActorID,
                                store: actorStore,
                                connectedAgentsStore: teamRuntime?.connectedAgentsStore,
+                               workspacesRepository: teamRuntime?.workspacesRepo,
                                showInvite: $showInviteAfterReminder)
                 } else {
                     ContentUnavailableView("No Team Selected",

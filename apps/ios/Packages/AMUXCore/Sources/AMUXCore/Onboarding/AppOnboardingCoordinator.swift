@@ -225,6 +225,11 @@ public final class AppOnboardingCoordinator {
                 try await store.accessToken()
             }
         }
+        let cloudAPIWorkspacesRepo: (any WorkspaceRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.workspacesRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+        }
 
         teamRuntimeContext = TeamRuntimeContext(
             team: ctx.team,
@@ -236,7 +241,7 @@ public final class AppOnboardingCoordinator {
             sessionsRepo: cloudAPISessionsRepo ?? (try? SupabaseSessionsRepository()),
             messagesRepo: cloudAPIMessagesRepo ?? (try? SupabaseMessagesRepository()),
             agentRuntimesRepo: cloudAPIAgentRuntimesRepo ?? (try? SupabaseAgentRuntimesRepository()),
-            workspacesRepo: try? SupabaseWorkspaceRepository(),
+            workspacesRepo: cloudAPIWorkspacesRepo,
             agentAccessRepo: agentAccessRepo
         )
     }

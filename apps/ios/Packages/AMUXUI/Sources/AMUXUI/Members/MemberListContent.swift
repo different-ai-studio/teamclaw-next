@@ -439,6 +439,7 @@ struct ActorDetailView: View {
     let store: ActorStore
     let teamclawService: TeamclawService?
     let connectedAgentsStore: ConnectedAgentsStore?
+    var workspacesRepository: (any WorkspaceRepository)?
     @Environment(\.dismiss) private var dismiss
     @State private var authorizedHumansStore: AgentAuthorizedHumansStore?
     @State private var workspaceStore: WorkspaceStore?
@@ -738,7 +739,7 @@ struct ActorDetailView: View {
         }
         .task {
             guard actor.isAgent, workspaceStore == nil else { return }
-            if let repo = try? SupabaseWorkspaceRepository() {
+            if let repo = workspacesRepository {
                 let store = WorkspaceStore(teamID: actor.teamId, repository: repo)
                 workspaceStore = store
                 await store.reload(agentID: actor.actorId)

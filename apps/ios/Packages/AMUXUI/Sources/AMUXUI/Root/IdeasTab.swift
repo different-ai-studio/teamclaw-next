@@ -11,6 +11,7 @@ public struct IdeasTab: View {
     let sessionViewModel: SessionListViewModel
     let connectedAgentsStore: ConnectedAgentsStore?
     let messagesRepository: (any MessagesRepository)?
+    let workspacesRepository: (any WorkspaceRepository)?
     /// Drives the "Mine" filter on the ideas list — compared against
     /// `IdeaRecord.createdByActorID`. `nil` hides the chip.
     let currentActorID: String?
@@ -36,6 +37,7 @@ public struct IdeasTab: View {
         sessionViewModel: SessionListViewModel,
         connectedAgentsStore: ConnectedAgentsStore? = nil,
         messagesRepository: (any MessagesRepository)? = nil,
+        workspacesRepository: (any WorkspaceRepository)? = nil,
         currentActorID: String? = nil
     ) {
         self.mqtt = mqtt
@@ -46,6 +48,7 @@ public struct IdeasTab: View {
         self.sessionViewModel = sessionViewModel
         self.connectedAgentsStore = connectedAgentsStore
         self.messagesRepository = messagesRepository
+        self.workspacesRepository = workspacesRepository
         self.currentActorID = currentActorID
     }
 
@@ -114,7 +117,8 @@ public struct IdeasTab: View {
                                 peerId: "ios-\(pairing.authToken.prefix(6))",
                                 teamclawService: teamclawService,
                                 connectedAgentsStore: connectedAgentsStore,
-                                messagesRepository: messagesRepository
+                                messagesRepository: messagesRepository,
+                                workspacesRepository: workspacesRepository
                             )
                         } else {
                             Text("Session not found")
