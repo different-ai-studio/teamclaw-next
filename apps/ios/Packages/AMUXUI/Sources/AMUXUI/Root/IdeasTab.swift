@@ -13,6 +13,7 @@ public struct IdeasTab: View {
     let messagesRepository: (any MessagesRepository)?
     let workspacesRepository: (any WorkspaceRepository)?
     let sessionsRepository: (any SessionRepository)?
+    let ideasRepository: (any IdeaRepository)?
     /// Drives the "Mine" filter on the ideas list — compared against
     /// `IdeaRecord.createdByActorID`. `nil` hides the chip.
     let currentActorID: String?
@@ -40,6 +41,7 @@ public struct IdeasTab: View {
         messagesRepository: (any MessagesRepository)? = nil,
         workspacesRepository: (any WorkspaceRepository)? = nil,
         sessionsRepository: (any SessionRepository)? = nil,
+        ideasRepository: (any IdeaRepository)? = nil,
         currentActorID: String? = nil
     ) {
         self.mqtt = mqtt
@@ -52,6 +54,7 @@ public struct IdeasTab: View {
         self.messagesRepository = messagesRepository
         self.workspacesRepository = workspacesRepository
         self.sessionsRepository = sessionsRepository
+        self.ideasRepository = ideasRepository
         self.currentActorID = currentActorID
     }
 
@@ -179,7 +182,12 @@ public struct IdeasTab: View {
 
         if ideaStore == nil || ideaStoreTeamID != activeTeam.id {
             do {
-                let repository = try SupabaseIdeaRepository()
+                guard let repository = ideasRepository else {
+                    ideaStore = nil
+                    ideaStoreTeamID = nil
+                    ideaSetupError = "Cloud API is not configured."
+                    return
+                }
                 ideaStore = IdeaStore(
                     teamID: activeTeam.id,
                     repository: repository,

@@ -9,3 +9,17 @@ public protocol IdeaRepository: Sendable {
     func listIdeaActivities(ideaID: String) async throws -> [IdeaActivityRecord]
     func createIdeaActivity(ideaID: String, input: IdeaActivityCreateInput) async throws -> IdeaActivityRecord
 }
+
+public enum IdeaRepositoryError: LocalizedError {
+    case missingTitle
+    case emptyResponse(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingTitle:
+            return "Title is required."
+        case .emptyResponse(let functionName):
+            return "\(functionName) returned no rows."
+        }
+    }
+}

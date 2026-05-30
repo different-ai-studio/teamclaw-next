@@ -57,6 +57,16 @@ public struct CloudAPIClient: Sendable {
         try await requestVoid("POST", path: path, body: data, idempotencyKey: idempotencyKey)
     }
 
+    public func patch<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        idempotencyKey: String? = nil,
+        as type: T.Type = T.self
+    ) async throws -> T {
+        let data = try JSONEncoder().encode(body)
+        return try await request("PATCH", path: path, body: data, idempotencyKey: idempotencyKey, as: type)
+    }
+
     public func deleteVoid(_ path: String) async throws {
         try await requestVoid("DELETE", path: path, body: Optional<Data>.none, idempotencyKey: nil)
     }

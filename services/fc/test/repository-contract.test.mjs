@@ -416,6 +416,25 @@ function contractRepo() {
         createdAt: "2026-05-27T01:00:00Z",
       };
     },
+    async listIdeaActivities(ideaId) {
+      return { items: [{
+        id: "activity-1",
+        ideaId,
+        kind: "comment",
+        activityType: "comment",
+        content: "hi",
+        actorId: "actor-1",
+        metadata: null,
+        teamId: "team-1",
+        attachmentUrls: [],
+        createdAt: "2026-05-27T01:00:00Z",
+        updatedAt: "2026-05-27T01:00:00Z",
+      }] };
+    },
+    async reorderIdeas({ teamId, ideaIds }) {
+      assert.equal(teamId, "team-1");
+      assert.ok(Array.isArray(ideaIds));
+    },
     async listShortcuts(teamId, { parentId } = {}) {
       let items = shortcutStore.filter(s => s.teamId === teamId);
       if (parentId !== undefined) {

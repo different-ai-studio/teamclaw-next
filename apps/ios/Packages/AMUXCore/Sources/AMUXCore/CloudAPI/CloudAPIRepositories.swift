@@ -269,6 +269,98 @@ public actor CloudAPIShortcutsRepository: ShortcutsRepository {
     }
 }
 
+public actor CloudAPIIdeaRepository: IdeaRepository {
+    private let client: CloudAPIClient
+    private let memberActorID: String
+
+    public init(client: CloudAPIClient, memberActorID: String) {
+        self.client = client
+        self.memberActorID = memberActorID
+    }
+
+    public func listIdeas(teamID: String) async throws -> [IdeaRecord] {
+        var all: [CloudIdea] = []
+        // FC paginates and returns one archived bucket per call; iOS wants the
+        // full team list (IdeaStore splits archived locally), so follow the
+        // cursor to exhaustion for both archived states.
+        for archived in [false, true] {
+            var cursor: String? = nil
+            repeat {
+                var query = "teamId=\(Self.enc(teamID))&archived=\(archived)&limit=200"
+                if let cursor, !cursor.isEmpty { query += "&cursor=\(Self.enc(cursor))" }
+                let page: CloudPage<CloudIdea> = try await client.get("/v1/ideas?\(query)")
+                all.append(contentsOf: page.items)
+                cursor = page.nextCursor
+            } while cursor != nil
+        }
+        return all.map { $0.record }
+    }
+
+    public func createIdea(teamID: String, input: IdeaCreateInput) async throws -> IdeaRecord {
+        let title = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw IdeaRepositoryError.missingTitle }
+        let body = CloudIdeaCreateRequest(
+            teamId: teamID,
+            title: title,
+            description: input.description,
+            workspaceId: Self.normalized(input.workspaceID),
+            authorActorId: memberActorID
+        )
+        let row: CloudIdea = try await client.post("/v1/ideas", body: body)
+        return row.record
+    }
+
+    public func updateIdea(ideaID: String, input: IdeaUpdateInput) async throws -> IdeaRecord {
+        let title = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw IdeaRepositoryError.missingTitle }
+        let body = CloudIdeaUpdateRequest(
+            title: title,
+            description: input.description,
+            status: input.status,
+            workspaceId: Self.normalized(input.workspaceID)
+        )
+        let row: CloudIdea = try await client.patch("/v1/ideas/\(Self.enc(ideaID))", body: body)
+        return row.record
+    }
+
+    public func setArchived(ideaID: String, archived: Bool) async throws -> IdeaRecord {
+        try await client.postVoid("/v1/ideas/\(Self.enc(ideaID))/archive", body: CloudArchiveRequest(archived: archived))
+        // Archive returns 204; re-fetch the updated idea for the protocol's record.
+        let row: CloudIdea = try await client.get("/v1/ideas/\(Self.enc(ideaID))")
+        return row.record
+    }
+
+    public func reorderIdeas(teamID: String, ideaIDs: [String]) async throws {
+        try await client.postVoid("/v1/ideas/reorder", body: CloudReorderIdeasRequest(teamId: teamID, ideaIds: ideaIDs))
+    }
+
+    public func listIdeaActivities(ideaID: String) async throws -> [IdeaActivityRecord] {
+        let page: CloudPage<CloudIdeaActivity> = try await client.get("/v1/ideas/\(Self.enc(ideaID))/activities")
+        return page.items.map { $0.record }
+    }
+
+    public func createIdeaActivity(ideaID: String, input: IdeaActivityCreateInput) async throws -> IdeaActivityRecord {
+        let body = CloudIdeaActivityCreateRequest(
+            kind: input.activityType,
+            content: input.content,
+            metadata: input.metadata,
+            attachmentUrls: input.attachmentURLs.map(\.absoluteString),
+            actorId: memberActorID
+        )
+        let row: CloudIdeaActivity = try await client.post("/v1/ideas/\(Self.enc(ideaID))/activities", body: body)
+        return row.record
+    }
+
+    private static func normalized(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
 public actor CloudAPIInviteClaimer {
     private let client: CloudAPIClient
 
@@ -353,6 +445,17 @@ public enum CloudAPIRepositoryFactory {
         accessToken: @escaping @Sendable () async throws -> String
     ) -> any SessionRepository {
         CloudAPISessionRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func ideasRepository(
+        configuration: CloudAPIConfiguration,
+        memberActorID: String,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any IdeaRepository {
+        CloudAPIIdeaRepository(
+            client: client(configuration: configuration, accessToken: accessToken),
+            memberActorID: memberActorID
+        )
     }
 }
 
@@ -446,6 +549,97 @@ private struct CloudSessionParticipant: Decodable, Sendable {
     let role: String?
     let displayName: String?
     let actorType: String?
+}
+
+private struct CloudIdea: Decodable, Sendable {
+    let id: String
+    let teamId: String
+    let workspaceId: String?
+    let createdByActorId: String?
+    let title: String
+    let description: String?
+    let status: String?
+    let archived: Bool
+    let sortOrder: Int?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var record: IdeaRecord {
+        IdeaRecord(
+            id: id,
+            teamID: teamId,
+            workspaceID: workspaceId ?? "",
+            createdByActorID: createdByActorId ?? "",
+            title: title,
+            description: description ?? "",
+            status: status ?? "open",
+            archived: archived,
+            sortOrder: sortOrder ?? 0,
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast
+        )
+    }
+}
+
+private struct CloudIdeaActivity: Decodable, Sendable {
+    let id: String
+    let teamId: String?
+    let ideaId: String
+    let actorId: String
+    let activityType: String?
+    let kind: String?
+    let content: String?
+    let metadata: [String: String]?
+    let attachmentUrls: [String]?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var record: IdeaActivityRecord {
+        IdeaActivityRecord(
+            id: id,
+            teamID: teamId ?? "",
+            ideaID: ideaId,
+            actorID: actorId,
+            activityType: activityType ?? kind ?? "",
+            content: content ?? "",
+            metadata: metadata ?? [:],
+            attachmentURLs: (attachmentUrls ?? []).compactMap(URL.init(string:)),
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast
+        )
+    }
+}
+
+private struct CloudIdeaCreateRequest: Encodable, Sendable {
+    let teamId: String
+    let title: String
+    let description: String
+    let workspaceId: String?
+    let authorActorId: String
+}
+
+private struct CloudIdeaUpdateRequest: Encodable, Sendable {
+    let title: String
+    let description: String
+    let status: String
+    let workspaceId: String?
+}
+
+private struct CloudArchiveRequest: Encodable, Sendable {
+    let archived: Bool
+}
+
+private struct CloudReorderIdeasRequest: Encodable, Sendable {
+    let teamId: String
+    let ideaIds: [String]
+}
+
+private struct CloudIdeaActivityCreateRequest: Encodable, Sendable {
+    let kind: String
+    let content: String
+    let metadata: [String: String]
+    let attachmentUrls: [String]
+    let actorId: String
 }
 
 private struct CloudShortcut: Decodable, Sendable {

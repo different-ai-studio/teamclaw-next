@@ -95,6 +95,7 @@ public struct RootTabView: View {
                          messagesRepository: teamRuntime?.messagesRepo,
                          workspacesRepository: teamRuntime?.workspacesRepo,
                          sessionsRepository: teamRuntime?.sessionRepo,
+                         ideasRepository: teamRuntime?.ideasRepo,
                          currentActorID: currentActorID)
             }
             Tab("Actors", systemImage: "person.2", value: AppTab.members) {

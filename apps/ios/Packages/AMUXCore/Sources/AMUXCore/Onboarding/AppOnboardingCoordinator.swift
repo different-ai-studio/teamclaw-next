@@ -243,6 +243,11 @@ public final class AppOnboardingCoordinator {
                 try await store.accessToken()
             }
         }
+        let cloudAPIIdeasRepo: (any IdeaRepository)? = cloudAPIConfig.map { config in
+            CloudAPIRepositoryFactory.ideasRepository(configuration: config, memberActorID: ctx.memberActorID) { [store] in
+                try await store.accessToken()
+            }
+        }
 
         teamRuntimeContext = TeamRuntimeContext(
             team: ctx.team,
@@ -257,7 +262,8 @@ public final class AppOnboardingCoordinator {
             workspacesRepo: cloudAPIWorkspacesRepo,
             agentAccessRepo: agentAccessRepo,
             teamRepo: cloudAPITeamRepo,
-            sessionRepo: cloudAPISessionRepo
+            sessionRepo: cloudAPISessionRepo,
+            ideasRepo: cloudAPIIdeasRepo
         )
     }
 

@@ -795,6 +795,24 @@ async heartbeat() {
       return mapIdeaActivityRow(requiredRow(data, "ideas.createIdeaActivity"));
     },
 
+    async listIdeaActivities(ideaId) {
+      const { data, error } = await supabase
+        .from("idea_activities")
+        .select("id, team_id, idea_id, actor_id, activity_type, content, metadata, attachment_urls, created_at, updated_at")
+        .eq("idea_id", ideaId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return { items: (data ?? []).map(mapIdeaActivityRow) };
+    },
+
+    async reorderIdeas({ teamId, ideaIds }) {
+      const { error } = await supabase.rpc("reorder_ideas", {
+        p_team_id: teamId,
+        p_idea_ids: ideaIds,
+      });
+      if (error) throw error;
+    },
+
     async upsertAgentRuntime(body) {
       // team_id is NOT NULL on public.agent_runtimes, but the daemon does not
       // send teamId in its request body. Derive it server-side from the agent
@@ -2299,6 +2317,11 @@ function mapIdeaRow(row) {
     archived: row?.archived === true,
     authorActorId: row?.author_actor_id ?? null,
     actorIds: row?.actor_ids ?? [],
+    // Fields the ideas table carries that clients (iOS IdeaStore) depend on.
+    workspaceId: row?.workspace_id ?? null,
+    status: row?.status ?? null,
+    sortOrder: row?.sort_order ?? 0,
+    createdByActorId: row?.created_by_actor_id ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
   };
@@ -2342,14 +2365,20 @@ function mapAgentRuntimeRow(row) {
 }
 
 function mapIdeaActivityRow(row) {
+  const kind = row?.kind ?? row?.activity_type;
   return {
     id: requiredString(row?.id, "ideas.mapIdeaActivityRow", "id"),
     ideaId: requiredString(row?.idea_id, "ideas.mapIdeaActivityRow", "idea_id"),
-    kind: requiredString(row?.kind, "ideas.mapIdeaActivityRow", "kind"),
+    kind: requiredString(kind, "ideas.mapIdeaActivityRow", "kind"),
+    // Expose `activityType` alongside `kind` for clients that key on it.
+    activityType: kind,
     content: row?.content ?? null,
     actorId: requiredString(row?.actor_id, "ideas.mapIdeaActivityRow", "actor_id"),
     metadata: row?.metadata ?? null,
+    teamId: row?.team_id ?? null,
+    attachmentUrls: row?.attachment_urls ?? [],
     createdAt: requiredString(row?.created_at, "ideas.mapIdeaActivityRow", "created_at"),
+    updatedAt: row?.updated_at ?? null,
   };
 }
 
