@@ -18,7 +18,7 @@ export default function IdeasIndexRoute() {
   const teamIdRef = useRef<string | null>(null);
 
   if (controllerRef.current === null || teamIdRef.current !== teamId) {
-    controllerRef.current = createIdeasController(createIdeasApi(supabase), teamId);
+    controllerRef.current = createIdeasController(createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }), teamId);
     teamIdRef.current = teamId;
   }
 
@@ -76,7 +76,7 @@ export default function IdeasIndexRoute() {
       onCreate={() => router.push("/(app)/new-idea")}
       onOpenArchived={() => router.push("/(app)/archived-ideas")}
       onArchiveBatch={async (ideaIds) => {
-        const api = createIdeasApi(supabase);
+        const api = createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) });
         for (const id of ideaIds) {
           try {
             await api.archive(id);

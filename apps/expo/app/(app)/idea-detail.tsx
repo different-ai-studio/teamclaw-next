@@ -32,7 +32,7 @@ export default function IdeaDetailRoute() {
     if (!teamId || !ideaId) return;
     setIsRefreshing(true);
     try {
-      const fresh = await createIdeasApi(supabase).listIdeas(teamId);
+      const fresh = await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId);
       const found = fresh.find((row) => row.ideaId === ideaId) ?? null;
       setIdea(found);
     } finally {
@@ -49,7 +49,7 @@ export default function IdeaDetailRoute() {
     setIsLoading(true);
     void (async () => {
       try {
-        const ideasApi = createIdeasApi(supabase);
+        const ideasApi = createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) });
         const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
         const [ideas, actors] = await Promise.all([
           ideasApi.listIdeas(teamId),
@@ -103,7 +103,7 @@ export default function IdeaDetailRoute() {
         setBusyAction("toggleStatus");
         const next: IdeaStatus = idea.status === "done" ? "open" : "done";
         try {
-          await createIdeasApi(supabase).updateStatus(idea.ideaId, next);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).updateStatus(idea.ideaId, next);
           setIdea({ ...idea, status: next, updatedAt: new Date().toISOString() });
         } catch {
           // Surface via screen busy state release — keep idea as-is.
@@ -118,7 +118,7 @@ export default function IdeaDetailRoute() {
         if (next === idea.status) return;
         setBusyAction("toggleStatus");
         try {
-          await createIdeasApi(supabase).updateStatus(idea.ideaId, next);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).updateStatus(idea.ideaId, next);
           setIdea({ ...idea, status: next, updatedAt: new Date().toISOString() });
           showToast("success", `Marked ${next.replace("_", " ")}`);
         } catch (err) {
@@ -136,7 +136,7 @@ export default function IdeaDetailRoute() {
     ? async () => {
         setBusyAction("archive");
         try {
-          await createIdeasApi(supabase).archive(idea.ideaId);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).archive(idea.ideaId);
           showToast("success", "Idea archived");
           router.back();
         } catch (err) {
@@ -153,7 +153,7 @@ export default function IdeaDetailRoute() {
     ? async (patch: { title: string; description: string }) => {
         setBusyAction("save");
         try {
-          await createIdeasApi(supabase).updateContent(idea.ideaId, patch);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).updateContent(idea.ideaId, patch);
           setIdea({
             ...idea,
             title: patch.title,

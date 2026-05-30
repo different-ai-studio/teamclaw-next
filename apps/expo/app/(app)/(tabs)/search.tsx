@@ -29,7 +29,7 @@ export default function SearchIndexRoute() {
     setIsLoading(true);
     (async () => {
       const sessionsApi = createSessionsApi(supabase);
-      const ideasApi = createIdeasApi(supabase);
+      const ideasApi = createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) });
       const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
       try {
         const [nextSessions, nextIdeas, nextActors] = await Promise.all([

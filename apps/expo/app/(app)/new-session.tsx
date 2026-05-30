@@ -46,7 +46,7 @@ export default function NewSessionRoute() {
     let cancelled = false;
     void Promise.all([
       createActorsApi({ getAccessToken: supabaseAccessToken(supabase) }).listActors(teamId),
-      createIdeasApi(supabase).listIdeas(teamId),
+      createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId),
       supabase
         .from("workspaces")
         .select("id, path, agent_id")
