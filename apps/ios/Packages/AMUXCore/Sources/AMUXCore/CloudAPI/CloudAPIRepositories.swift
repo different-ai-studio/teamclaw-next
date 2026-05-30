@@ -178,6 +178,25 @@ public actor CloudAPIMessagesRepository: MessagesRepository {
     }
 }
 
+public actor CloudAPIShortcutsRepository: ShortcutsRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listPersonal() async throws -> [ShortcutRecord] {
+        let page: CloudPage<CloudShortcut> = try await client.get("/v1/shortcuts?scope=personal")
+        return page.items.map(\.record)
+    }
+
+    public func listTeam(teamID: String) async throws -> [ShortcutRecord] {
+        let encoded = teamID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? teamID
+        let page: CloudPage<CloudShortcut> = try await client.get("/v1/teams/\(encoded)/shortcuts")
+        return page.items.map(\.record)
+    }
+}
+
 public actor CloudAPIInviteClaimer {
     private let client: CloudAPIClient
 
@@ -249,6 +268,13 @@ public enum CloudAPIRepositoryFactory {
     ) -> any WorkspaceRepository {
         CloudAPIWorkspaceRepository(client: client(configuration: configuration, accessToken: accessToken))
     }
+
+    public static func shortcutsRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any ShortcutsRepository {
+        CloudAPIShortcutsRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
 }
 
 private struct CloudPage<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -319,6 +345,48 @@ private struct CloudAgentRuntime: Decodable, Sendable {
     let lastSeenAt: String?
     let createdAt: String
     let updatedAt: String
+}
+
+private struct CloudShortcut: Decodable, Sendable {
+    let id: String
+    let scope: String
+    let ownerMemberId: String?
+    let teamId: String?
+    let parentId: String?
+    let label: String
+    let icon: String?
+    let order: Int
+    let nodeType: String
+    let target: String
+    let createdAt: String?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, scope, label, icon, order, target
+        case ownerMemberId = "owner_member_id"
+        case teamId = "team_id"
+        case parentId = "parent_id"
+        case nodeType = "node_type"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    var record: ShortcutRecord {
+        ShortcutRecord(
+            id: id,
+            scope: ShortcutScope(rawValue: scope) ?? .personal,
+            ownerMemberID: ownerMemberId,
+            teamID: teamId,
+            parentID: parentId,
+            label: label,
+            icon: icon,
+            order: order,
+            type: ShortcutNodeType(rawValue: nodeType) ?? .native,
+            target: target,
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast
+        )
+    }
 }
 
 private struct CloudWorkspace: Decodable, Sendable {

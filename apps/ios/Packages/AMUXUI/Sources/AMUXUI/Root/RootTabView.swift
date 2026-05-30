@@ -78,6 +78,7 @@ public struct RootTabView: View {
                             shortcutsStore: teamRuntime?.shortcutsStore,
                             messagesRepository: teamRuntime?.messagesRepo,
                             workspacesRepository: teamRuntime?.workspacesRepo,
+                            teamRepository: teamRuntime?.teamRepo,
                             onReconnect: onReconnect,
                             onSignOut: onSignOut,
                             preferencesAPI: preferencesAPI)

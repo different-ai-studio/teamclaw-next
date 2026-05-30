@@ -18,6 +18,7 @@ public struct SettingsView: View {
     let activeTeam: TeamSummary?
     let onSignOut: (() -> Void)?
     let preferencesAPI: (any PushPreferencesAPI)?
+    let teamRepository: (any TeamRepository)?
 
     @State private var teamDetails: TeamDetails?
     @State private var teamLoadError: String?
@@ -33,11 +34,13 @@ public struct SettingsView: View {
     public init(connectedAgentsStore: ConnectedAgentsStore?,
                 activeTeam: TeamSummary? = nil,
                 onSignOut: (() -> Void)? = nil,
-                preferencesAPI: (any PushPreferencesAPI)? = nil) {
+                preferencesAPI: (any PushPreferencesAPI)? = nil,
+                teamRepository: (any TeamRepository)? = nil) {
         self.connectedAgentsStore = connectedAgentsStore
         self.activeTeam = activeTeam
         self.onSignOut = onSignOut
         self.preferencesAPI = preferencesAPI
+        self.teamRepository = teamRepository
     }
 
     private var appVersion: String {
@@ -463,8 +466,8 @@ public struct SettingsView: View {
 
     private func loadTeam() async {
         guard let team = activeTeam else { return }
+        guard let repo = teamRepository else { return }
         do {
-            let repo = try SupabaseTeamRepository()
             teamDetails = try await repo.loadDetails(teamID: team.id)
             teamLoadError = nil
         } catch {

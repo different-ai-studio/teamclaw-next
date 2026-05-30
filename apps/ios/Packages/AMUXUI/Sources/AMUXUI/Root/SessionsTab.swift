@@ -19,6 +19,7 @@ public struct SessionsTab: View {
     let shortcutsStore: ShortcutsStore?
     let messagesRepository: (any MessagesRepository)?
     let workspacesRepository: (any WorkspaceRepository)?
+    let teamRepository: (any TeamRepository)?
     var onReconnect: (() -> Void)?
     var onSignOut: (() -> Void)?
     let preferencesAPI: (any PushPreferencesAPI)?
@@ -50,6 +51,7 @@ public struct SessionsTab: View {
                 shortcutsStore: ShortcutsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
+                teamRepository: (any TeamRepository)? = nil,
                 onReconnect: (() -> Void)? = nil,
                 onSignOut: (() -> Void)? = nil,
                 preferencesAPI: (any PushPreferencesAPI)? = nil) {
@@ -67,6 +69,7 @@ public struct SessionsTab: View {
         self.shortcutsStore = shortcutsStore
         self.messagesRepository = messagesRepository
         self.workspacesRepository = workspacesRepository
+        self.teamRepository = teamRepository
         self.onReconnect = onReconnect
         self.onSignOut = onSignOut
         self.preferencesAPI = preferencesAPI
@@ -136,7 +139,8 @@ public struct SessionsTab: View {
                     SettingsView(connectedAgentsStore: connectedAgentsStore,
                                  activeTeam: activeTeam,
                                  onSignOut: onSignOut,
-                                 preferencesAPI: preferencesAPI)
+                                 preferencesAPI: preferencesAPI,
+                                 teamRepository: teamRepository)
                 }
                 .sheet(isPresented: $showNewSession) {
                     NewSessionSheet(mqtt: mqtt,
