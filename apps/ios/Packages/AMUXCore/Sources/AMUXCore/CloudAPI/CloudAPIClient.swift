@@ -71,6 +71,15 @@ public struct CloudAPIClient: Sendable {
         try await requestVoid("DELETE", path: path, body: Optional<Data>.none, idempotencyKey: nil)
     }
 
+    public func putVoid<Body: Encodable & Sendable>(
+        _ path: String,
+        body: Body,
+        idempotencyKey: String? = nil
+    ) async throws {
+        let data = try JSONEncoder().encode(body)
+        try await requestVoid("PUT", path: path, body: data, idempotencyKey: idempotencyKey)
+    }
+
     private func request<T: Decodable & Sendable>(
         _ method: String,
         path: String,

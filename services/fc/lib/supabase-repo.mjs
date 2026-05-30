@@ -568,10 +568,38 @@ async heartbeat() {
       return row ?? null;
     },
 
+    async registerDevicePushToken(input) {
+      // Identity comes from the bearer token, not the client, mirroring
+      // writeForegroundPresence. Clients send device/platform/provider/token.
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) throw new ApiError(401, "unauthorized", "no authenticated user");
+      const row = {
+        user_id: userId,
+        device_id: input.deviceId,
+        platform: input.platform ?? "ios",
+        provider: input.provider ?? "apns",
+        token: input.token,
+        app_version: input.appVersion ?? null,
+        last_seen_at: new Date().toISOString(),
+      };
+      const { error } = await supabase
+        .from("device_push_tokens")
+        .upsert(row, { onConflict: "user_id,device_id,provider" });
+      if (error) throw error;
+    },
+
     async putNotificationPrefs(input) {
+      // Identity comes from the bearer token (auth.getUser), not the body —
+      // CloudAPI clients no longer hold a Supabase user id.
+      const { data: prefUser, error: prefUserErr } = await supabase.auth.getUser();
+      if (prefUserErr) throw prefUserErr;
+      const prefUserId = input.user_id ?? prefUser?.user?.id;
+      if (!prefUserId) throw new ApiError(401, "unauthorized", "no authenticated user");
       // Accept snake_case from the frontend (matches the on-disk row shape).
       const row = {
-        user_id: input.user_id,
+        user_id: prefUserId,
         enabled: input.enabled ?? true,
         dnd_start_min: input.dnd_start_min ?? null,
         dnd_end_min: input.dnd_end_min ?? null,

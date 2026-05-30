@@ -3,7 +3,6 @@ import SwiftData
 import AMUXCore
 import AMUXSharedUI
 import Sentry
-import Supabase
 
 @main
 struct AMUXApp: App {
@@ -47,22 +46,23 @@ struct AMUXApp: App {
             Task { await PushBootstrap.shared.handleApnsToken(hex) }
         }
 
-        // Wire Supabase-backed push adapters. A dedicated client is built
-        // from the same bundle config used by SupabaseAppOnboardingStore so
-        // the token uploader, presence writer, and prefs API share the
-        // authenticated session. The userIDProvider closure reads the
-        // current session lazily — it resolves correctly both before and
-        // after sign-in without a strong capture of the @State onboarding.
-        if let config = try? SupabaseProjectConfiguration.fromMainBundle() {
-            let pushClient = SupabaseClient(
-                supabaseURL: config.url,
-                supabaseKey: config.publishableKey
-            )
-            PushBootstrap.shared.registerWithSupabase(
-                client: pushClient,
-                userIDProvider: { [pushClient] in
-                    pushClient.auth.currentSession?.user.id.uuidString.lowercased()
+        // Wire Cloud-API-backed push adapters. The access-token closure reads
+        // the current token straight from the Keychain-backed session each
+        // call (no refresh here — the onboarding SessionStore owns refresh, so
+        // we avoid double-refresh races). Identity is derived server-side from
+        // the bearer; registration no-ops gracefully until a session exists.
+        if let config = CloudAPIConfigurationStore.configuration() {
+            let sessionStorage = KeychainSessionStorage()
+            let pushClient = CloudAPIClient(configuration: config, accessToken: {
+                guard let session = try sessionStorage.load(),
+                      session.expiresAt.timeIntervalSinceNow > 0 else {
+                    throw CloudAPIError.missingAccessToken
                 }
+                return session.accessToken
+            })
+            PushBootstrap.shared.registerWithCloudAPI(
+                client: pushClient,
+                isAuthenticated: { (try? sessionStorage.load()) != nil }
             )
         }
     }

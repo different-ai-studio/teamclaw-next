@@ -365,6 +365,10 @@ function contractRepo() {
         digestFrequency: input.digestFrequency ?? "off",
       };
     },
+    async registerDevicePushToken(input) {
+      assert.ok(typeof input.deviceId === "string");
+      assert.ok(typeof input.token === "string");
+    },
     async muteSession(sessionId, input) {},
     async unmuteSession(sessionId) {},
     async listMutedSessions() {

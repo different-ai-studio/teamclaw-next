@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 import AMUXCore
-import Supabase
 
 @MainActor
 final class PushBootstrap {
@@ -32,13 +31,17 @@ final class PushBootstrap {
         try? await svc.uploadToken(hex)
     }
 
-    /// Convenience: build all three Supabase-backed adapters and register them.
-    func registerWithSupabase(client: SupabaseClient,
-                              userIDProvider: @escaping @Sendable () -> String?) {
-        let uploader = SupabaseTokenUploader(client: client)
-        let presence = SupabasePresenceWriter(client: client, userID: userIDProvider)
-        let prefs = SupabasePushPreferences(client: client, userID: userIDProvider)
+    /// Convenience: build all three Cloud-API-backed adapters and register
+    /// them. Identity is derived server-side from the bearer token, so the
+    /// only thing the uploader needs locally is whether a session exists
+    /// (to gate token upload before sign-in).
+    func registerWithCloudAPI(client: CloudAPIClient,
+                              isAuthenticated: @escaping @Sendable () -> Bool) {
+        let uploader = CloudAPIPushTokenUploader(client: client)
+        let presence = CloudAPIPresenceWriter(client: client)
+        let prefs = CloudAPIPushPreferences(client: client)
         register(uploader: uploader, presenceWriter: presence,
-                 preferencesAPI: prefs, userIDProvider: userIDProvider)
+                 preferencesAPI: prefs,
+                 userIDProvider: { isAuthenticated() ? "self" : nil })
     }
 }
