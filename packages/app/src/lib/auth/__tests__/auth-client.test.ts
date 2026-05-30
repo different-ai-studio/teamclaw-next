@@ -3,6 +3,7 @@ import { createAuthClient } from "../auth-client";
 import {
   __resetSessionStoreForTests,
   getSession,
+  refreshSession,
   setSession,
 } from "../session-store";
 import type { Session } from "../types";
@@ -63,6 +64,34 @@ describe("auth-client", () => {
     const client = createAuthClient({ baseUrl: BASE, fetchImpl: fetchImpl as unknown as typeof fetch });
     await client.verifyOtp("u@example.com", "123456");
     expect(getSession()?.access_token).toBe("verified");
+  });
+
+  it("timer refresh accepts normalized Cloud API session fields and preserves the user", async () => {
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, {
+        accessToken: "new-at",
+        refreshToken: "new-rt",
+        expiresAt,
+      }),
+    );
+    createAuthClient({ baseUrl: BASE, fetchImpl: fetchImpl as unknown as typeof fetch });
+    setSession(
+      makeSession({
+        access_token: "old-at",
+        refresh_token: "old-rt",
+        user: { id: "u1", email: "u@example.com" },
+      }),
+    );
+
+    await refreshSession();
+
+    expect(getSession()).toMatchObject({
+      access_token: "new-at",
+      refresh_token: "new-rt",
+      expires_at: expiresAt,
+      user: { id: "u1", email: "u@example.com" },
+    });
   });
 
   it("signOut clears local session even if the request fails", async () => {
