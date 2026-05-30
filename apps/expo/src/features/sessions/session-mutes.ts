@@ -1,48 +1,37 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 
 /**
- * Per-user, per-session mute toggle. Mirrors the iOS `session_mutes` table
- * (`user_id`, `session_id` composite key) so the FC notification fan-out
- * skips push delivery when a session is muted.
+ * Per-user, per-session mute toggle via the Cloud API. FC keys mutes on the
+ * bearer user; isMuted reads the muted-session list and tests membership.
  */
 export type SessionMutesApi = {
   isMuted: (sessionId: string) => Promise<boolean>;
   setMuted: (sessionId: string, muted: boolean) => Promise<void>;
 };
 
-export function createSessionMutesApi(
-  client: SupabaseClient,
-  userId: () => string | null,
-): SessionMutesApi {
+export function createSessionMutesApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): SessionMutesApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
   return {
     async isMuted(sessionId) {
-      const uid = userId();
-      if (!uid || !sessionId) return false;
-      const result = await client
-        .from("session_mutes")
-        .select("session_id")
-        .eq("user_id", uid)
-        .eq("session_id", sessionId)
-        .limit(1);
-      const rows = result.data;
-      return Array.isArray(rows) && rows.length > 0;
+      if (!sessionId) return false;
+      const result = await client.get<{ items: string[] }>("/v1/sessions/muted");
+      return (result.items ?? []).includes(sessionId);
     },
     async setMuted(sessionId, muted) {
-      const uid = userId();
-      if (!uid || !sessionId) return;
+      if (!sessionId) return;
+      const path = `/v1/sessions/${encodeURIComponent(sessionId)}/mute`;
       if (muted) {
-        await client
-          .from("session_mutes")
-          .upsert(
-            { user_id: uid, session_id: sessionId },
-            { onConflict: "user_id,session_id" },
-          );
+        await client.post(path, { until: null });
       } else {
-        await client
-          .from("session_mutes")
-          .delete()
-          .eq("user_id", uid)
-          .eq("session_id", sessionId);
+        await client.del(path);
       }
     },
   };
