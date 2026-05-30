@@ -1,0 +1,92 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockGetLocalDaemonDeviceId = vi.fn();
+const mockProbeDaemonHttp = vi.fn();
+
+vi.mock("@/lib/daemon-agent-admin", () => ({
+  getLocalDaemonDeviceId: () => mockGetLocalDaemonDeviceId(),
+}));
+
+vi.mock("@/lib/daemon-local-client", () => ({
+  probeDaemonHttp: () => mockProbeDaemonHttp(),
+}));
+
+vi.mock("@/lib/utils", () => ({
+  isTauri: () => true,
+}));
+
+describe("resolveAgentDevicePresence", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockGetLocalDaemonDeviceId.mockReset();
+    mockProbeDaemonHttp.mockReset();
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+    useDevicePresenceStore.setState({ byDeviceId: {} });
+  });
+
+  it("returns online when MQTT retain is already present", async () => {
+    const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
+    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+
+    useDevicePresenceStore.getState().upsert("agent-1", {
+      online: true,
+      deviceName: "b001-agent",
+      lastUpdated: Date.now(),
+    });
+
+    await expect(resolveAgentDevicePresence("agent-1", { timeoutMs: 0 })).resolves.toBe("online");
+  });
+
+  it("waits for MQTT retain before treating presence as unknown", async () => {
+    const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
+    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+
+    mockGetLocalDaemonDeviceId.mockResolvedValue(null);
+
+    const promise = resolveAgentDevicePresence("agent-1", { timeoutMs: 300 });
+    await vi.advanceTimersByTimeAsync(100);
+    useDevicePresenceStore.getState().upsert("agent-1", {
+      online: true,
+      deviceName: "b001-agent",
+      lastUpdated: Date.now(),
+    });
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBe("online");
+  });
+
+  it("returns offline only when MQTT explicitly reports offline", async () => {
+    const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
+    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+
+    useDevicePresenceStore.getState().upsert("agent-1", {
+      online: false,
+      deviceName: "b001-agent",
+      lastUpdated: Date.now(),
+    });
+
+    await expect(resolveAgentDevicePresence("agent-1", { timeoutMs: 0 })).resolves.toBe("offline");
+  });
+
+  it("returns unknown when retain is missing and agent is not the local daemon", async () => {
+    const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
+
+    mockGetLocalDaemonDeviceId.mockResolvedValue("local-device");
+    mockProbeDaemonHttp.mockResolvedValue({ ok: true, reason: null });
+
+    await expect(resolveAgentDevicePresence("remote-agent", { timeoutMs: 0 })).resolves.toBe("unknown");
+    expect(mockProbeDaemonHttp).not.toHaveBeenCalled();
+  });
+
+  it("uses local HTTP probe for the desktop daemon when MQTT retain is still missing", async () => {
+    const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
+
+    mockGetLocalDaemonDeviceId.mockResolvedValue("local-agent");
+    mockProbeDaemonHttp.mockResolvedValue({ ok: true, reason: null });
+
+    await expect(resolveAgentDevicePresence("local-agent", { timeoutMs: 0 })).resolves.toBe("online");
+  });
+});
