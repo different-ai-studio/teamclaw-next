@@ -81,7 +81,20 @@ export function useActorsForTeam(): UseActorsForTeamResult {
         const local = await loadActorsForTeam(teamId)
         if (cancelled) return
         if (local.length > 0) {
-          const sorted = [...local].sort((a, b) => a.displayName.localeCompare(b.displayName))
+          // Order the cached rows the SAME way the server (FC listTeamActors) does
+          // — last_active_at desc (nulls last), then display_name asc. Otherwise the
+          // first paint (cache) and the network result would be sorted differently,
+          // making the whole list visibly reshuffle when the fetch lands.
+          const sorted = [...local].sort((a, b) => {
+            const at = a.lastActiveAt
+            const bt = b.lastActiveAt
+            if (at !== bt) {
+              if (!at) return 1
+              if (!bt) return -1
+              return at < bt ? 1 : -1
+            }
+            return a.displayName.localeCompare(b.displayName)
+          })
           setActors(sorted.map((r): ActorRow => ({
             id: r.id,
             actor_type: r.actorType === 'agent' ? 'agent' : 'member',
