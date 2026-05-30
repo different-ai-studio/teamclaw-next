@@ -29,6 +29,7 @@ public struct TeamRuntimeContext {
     public let workspacesRepo: (any WorkspaceRepository)?
     public let agentAccessRepo: (any AgentAccessRepository)?
     public let teamRepo: (any TeamRepository)?
+    public let sessionRepo: (any SessionRepository)?
 
     public init(
         team: TeamSummary,
@@ -42,7 +43,8 @@ public struct TeamRuntimeContext {
         agentRuntimesRepo: (any AgentRuntimesRepository)?,
         workspacesRepo: (any WorkspaceRepository)?,
         agentAccessRepo: (any AgentAccessRepository)?,
-        teamRepo: (any TeamRepository)? = nil
+        teamRepo: (any TeamRepository)? = nil,
+        sessionRepo: (any SessionRepository)? = nil
     ) {
         self.team = team
         self.memberActorID = memberActorID
@@ -56,5 +58,6 @@ public struct TeamRuntimeContext {
         self.workspacesRepo = workspacesRepo
         self.agentAccessRepo = agentAccessRepo
         self.teamRepo = teamRepo
+        self.sessionRepo = sessionRepo
     }
 }

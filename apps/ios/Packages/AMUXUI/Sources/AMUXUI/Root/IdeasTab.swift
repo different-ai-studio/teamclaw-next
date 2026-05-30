@@ -12,6 +12,7 @@ public struct IdeasTab: View {
     let connectedAgentsStore: ConnectedAgentsStore?
     let messagesRepository: (any MessagesRepository)?
     let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
     /// Drives the "Mine" filter on the ideas list — compared against
     /// `IdeaRecord.createdByActorID`. `nil` hides the chip.
     let currentActorID: String?
@@ -38,6 +39,7 @@ public struct IdeasTab: View {
         connectedAgentsStore: ConnectedAgentsStore? = nil,
         messagesRepository: (any MessagesRepository)? = nil,
         workspacesRepository: (any WorkspaceRepository)? = nil,
+        sessionsRepository: (any SessionRepository)? = nil,
         currentActorID: String? = nil
     ) {
         self.mqtt = mqtt
@@ -49,6 +51,7 @@ public struct IdeasTab: View {
         self.connectedAgentsStore = connectedAgentsStore
         self.messagesRepository = messagesRepository
         self.workspacesRepository = workspacesRepository
+        self.sessionsRepository = sessionsRepository
         self.currentActorID = currentActorID
     }
 
@@ -99,6 +102,7 @@ public struct IdeasTab: View {
                                 mqtt: mqtt,
                                 hub: hub,
                                 peerId: "ios-\(pairing.authToken.prefix(6))",
+                                sessionsRepository: sessionsRepository,
                                 navigationPath: $navigationPath
                             )
                         } else {
@@ -118,7 +122,8 @@ public struct IdeasTab: View {
                                 teamclawService: teamclawService,
                                 connectedAgentsStore: connectedAgentsStore,
                                 messagesRepository: messagesRepository,
-                                workspacesRepository: workspacesRepository
+                                workspacesRepository: workspacesRepository,
+                                sessionsRepository: sessionsRepository
                             )
                         } else {
                             Text("Session not found")

@@ -57,6 +57,10 @@ public struct CloudAPIClient: Sendable {
         try await requestVoid("POST", path: path, body: data, idempotencyKey: idempotencyKey)
     }
 
+    public func deleteVoid(_ path: String) async throws {
+        try await requestVoid("DELETE", path: path, body: Optional<Data>.none, idempotencyKey: nil)
+    }
+
     private func request<T: Decodable & Sendable>(
         _ method: String,
         path: String,

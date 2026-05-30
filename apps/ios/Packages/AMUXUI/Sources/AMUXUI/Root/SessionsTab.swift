@@ -19,6 +19,7 @@ public struct SessionsTab: View {
     let shortcutsStore: ShortcutsStore?
     let messagesRepository: (any MessagesRepository)?
     let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
     let teamRepository: (any TeamRepository)?
     var onReconnect: (() -> Void)?
     var onSignOut: (() -> Void)?
@@ -51,6 +52,7 @@ public struct SessionsTab: View {
                 shortcutsStore: ShortcutsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 teamRepository: (any TeamRepository)? = nil,
                 onReconnect: (() -> Void)? = nil,
                 onSignOut: (() -> Void)? = nil,
@@ -69,6 +71,7 @@ public struct SessionsTab: View {
         self.shortcutsStore = shortcutsStore
         self.messagesRepository = messagesRepository
         self.workspacesRepository = workspacesRepository
+        self.sessionsRepository = sessionsRepository
         self.teamRepository = teamRepository
         self.onReconnect = onReconnect
         self.onSignOut = onSignOut
@@ -132,6 +135,7 @@ public struct SessionsTab: View {
                         connectedAgentsStore: connectedAgentsStore,
                         messagesRepository: messagesRepository,
                         workspacesRepository: workspacesRepository,
+                        sessionsRepository: sessionsRepository,
                         preferencesAPI: preferencesAPI
                     )
                 }
@@ -151,6 +155,7 @@ public struct SessionsTab: View {
                                    isAgentAvailable: pairing.isPaired,
                                    connectedAgentsStore: connectedAgentsStore,
                                    workspacesRepository: workspacesRepository,
+                                   sessionsRepository: sessionsRepository,
                                    viewModel: viewModel) { agentId in
                         navigationPath = [agentId]
                         // Pull the freshly-created Supabase rows (sessions +
@@ -234,6 +239,7 @@ private struct SessionDestinationView: View {
     let connectedAgentsStore: ConnectedAgentsStore?
     let messagesRepository: (any MessagesRepository)?
     let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
     let preferencesAPI: (any PushPreferencesAPI)?
 
     @Environment(\.modelContext) private var modelContext
@@ -260,6 +266,7 @@ private struct SessionDestinationView: View {
                     connectedAgentsStore: connectedAgentsStore,
                     messagesRepository: messagesRepository,
                     workspacesRepository: workspacesRepository,
+                    sessionsRepository: sessionsRepository,
                     pushPrefs: preferencesAPI
                 )
                 .id("session:\(session.sessionId)")

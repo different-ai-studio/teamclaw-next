@@ -101,6 +101,78 @@ public actor CloudAPIAgentRuntimesRepository: AgentRuntimesRepository {
     }
 }
 
+public actor CloudAPISessionRepository: SessionRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func createSession(_ input: SessionCreateInput) async throws {
+        let title = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw SessionRepositoryError.missingTitle }
+        guard !input.participants.isEmpty else { throw SessionRepositoryError.missingParticipants }
+
+        let body = CloudSessionCreateRequest(
+            id: input.id,
+            teamId: input.teamID,
+            title: title,
+            mode: input.mode,
+            ideaId: Self.normalized(input.ideaID),
+            primaryAgentActorId: Self.normalized(input.primaryAgentID),
+            participantActorIds: input.participants.map(\.actorID)
+        )
+        // FC derives created_by from the bearer actor; per-participant roles
+        // are not expressed by SessionCreate (participantActorIds is a flat
+        // uuid[]) and are intentionally dropped.
+        try await client.postVoid("/v1/sessions", body: body, idempotencyKey: input.id)
+    }
+
+    public func addParticipants(sessionID: String, actorIDs: [String]) async throws {
+        let encodedSession = Self.encodePath(sessionID)
+        for actorID in actorIDs {
+            let trimmed = actorID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            // FC's participants POST is single-actor + idempotent (upsert on
+            // session_id,actor_id), so we loop one call per actor.
+            try await client.postVoid(
+                "/v1/sessions/\(encodedSession)/participants",
+                body: CloudUpsertParticipantRequest(actorId: trimmed)
+            )
+        }
+    }
+
+    public func listSessionParticipants(sessionID: String) async throws -> [SessionParticipantRecord] {
+        let encodedSession = Self.encodePath(sessionID)
+        let page: CloudPage<CloudSessionParticipant> = try await client.get("/v1/sessions/\(encodedSession)/participants")
+        return page.items.map { row in
+            SessionParticipantRecord(
+                id: "\(row.sessionId):\(row.actorId)",
+                sessionID: row.sessionId,
+                actorID: row.actorId,
+                role: row.role,
+                displayName: row.displayName ?? "",
+                actorType: row.actorType ?? ""
+            )
+        }
+    }
+
+    public func removeParticipant(sessionID: String, actorID: String) async throws {
+        let encodedSession = Self.encodePath(sessionID)
+        let encodedActor = Self.encodePath(actorID)
+        try await client.deleteVoid("/v1/sessions/\(encodedSession)/participants/\(encodedActor)")
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func encodePath(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
 public actor CloudAPIWorkspaceRepository: WorkspaceRepository {
     private let client: CloudAPIClient
 
@@ -275,6 +347,13 @@ public enum CloudAPIRepositoryFactory {
     ) -> any ShortcutsRepository {
         CloudAPIShortcutsRepository(client: client(configuration: configuration, accessToken: accessToken))
     }
+
+    public static func sessionRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any SessionRepository {
+        CloudAPISessionRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
 }
 
 private struct CloudPage<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -345,6 +424,28 @@ private struct CloudAgentRuntime: Decodable, Sendable {
     let lastSeenAt: String?
     let createdAt: String
     let updatedAt: String
+}
+
+private struct CloudSessionCreateRequest: Encodable, Sendable {
+    let id: String
+    let teamId: String
+    let title: String
+    let mode: String
+    let ideaId: String?
+    let primaryAgentActorId: String?
+    let participantActorIds: [String]
+}
+
+private struct CloudUpsertParticipantRequest: Encodable, Sendable {
+    let actorId: String
+}
+
+private struct CloudSessionParticipant: Decodable, Sendable {
+    let sessionId: String
+    let actorId: String
+    let role: String?
+    let displayName: String?
+    let actorType: String?
 }
 
 private struct CloudShortcut: Decodable, Sendable {

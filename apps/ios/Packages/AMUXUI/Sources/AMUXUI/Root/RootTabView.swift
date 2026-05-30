@@ -78,6 +78,7 @@ public struct RootTabView: View {
                             shortcutsStore: teamRuntime?.shortcutsStore,
                             messagesRepository: teamRuntime?.messagesRepo,
                             workspacesRepository: teamRuntime?.workspacesRepo,
+                            sessionsRepository: teamRuntime?.sessionRepo,
                             teamRepository: teamRuntime?.teamRepo,
                             onReconnect: onReconnect,
                             onSignOut: onSignOut,
@@ -93,6 +94,7 @@ public struct RootTabView: View {
                          connectedAgentsStore: teamRuntime?.connectedAgentsStore,
                          messagesRepository: teamRuntime?.messagesRepo,
                          workspacesRepository: teamRuntime?.workspacesRepo,
+                         sessionsRepository: teamRuntime?.sessionRepo,
                          currentActorID: currentActorID)
             }
             Tab("Actors", systemImage: "person.2", value: AppTab.members) {

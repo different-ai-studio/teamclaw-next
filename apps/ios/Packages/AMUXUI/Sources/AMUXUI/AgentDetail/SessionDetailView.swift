@@ -45,10 +45,12 @@ public struct SessionDetailView: View {
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: runtime, mqtt: mqtt, hub: hub, peerId: peerId,
             connectedAgentsStore: connectedAgentsStore,
+            sessionsRepository: sessionsRepository,
             messagesRepository: messagesRepository,
             workspacesRepository: workspacesRepository))
         self.connectedAgentsStore = connectedAgentsStore
@@ -62,12 +64,14 @@ public struct SessionDetailView: View {
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 pushPrefs: (any PushPreferencesAPI)? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: nil, mqtt: mqtt, hub: hub, teamID: session.teamId,
             peerId: peerId, session: session,
             teamclawService: teamclawService,
             connectedAgentsStore: connectedAgentsStore,
+            sessionsRepository: sessionsRepository,
             messagesRepository: messagesRepository,
             workspacesRepository: workspacesRepository))
         self.connectedAgentsStore = connectedAgentsStore

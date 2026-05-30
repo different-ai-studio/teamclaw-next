@@ -20,6 +20,7 @@ public struct NewSessionSheet: View {
     let isAgentAvailable: Bool
     let connectedAgentsStore: ConnectedAgentsStore?
     let workspacesRepository: (any WorkspaceRepository)?
+    let sessionsRepository: (any SessionRepository)?
 
     let viewModel: SessionListViewModel
     let preselectedIdeaId: String?
@@ -55,6 +56,7 @@ public struct NewSessionSheet: View {
                 teamID: String = "", currentActorID: String? = nil, isAgentAvailable: Bool = true,
                 connectedAgentsStore: ConnectedAgentsStore? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
+                sessionsRepository: (any SessionRepository)? = nil,
                 viewModel: SessionListViewModel,
                 preselectedIdeaId: String? = nil,
                 preselectedCollaborators: [CachedActor] = [],
@@ -67,6 +69,7 @@ public struct NewSessionSheet: View {
         self.isAgentAvailable = isAgentAvailable
         self.connectedAgentsStore = connectedAgentsStore
         self.workspacesRepository = workspacesRepository
+        self.sessionsRepository = sessionsRepository
         self.viewModel = viewModel
         self.preselectedIdeaId = preselectedIdeaId
         self.preselectedCollaborators = preselectedCollaborators
@@ -464,12 +467,9 @@ public struct NewSessionSheet: View {
         )
 
         Task {
-            let repository: SessionRepository
-            do {
-                repository = try SupabaseSessionRepository()
-            } catch {
+            guard let repository = sessionsRepository else {
                 isSending = false
-                errorMessage = error.localizedDescription
+                errorMessage = "Cloud API is not configured."
                 return
             }
             let useCase = SessionCreationUseCase(

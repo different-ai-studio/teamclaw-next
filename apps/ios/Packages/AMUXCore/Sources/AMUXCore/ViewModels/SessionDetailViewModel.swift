@@ -563,7 +563,7 @@ public final class SessionDetailViewModel {
     public func refreshMemberSheet() async {
         guard let session, !session.sessionId.isEmpty else { return }
         let loader = SessionMemberSheetLoader(
-            sessionsRepository: sessionsRepository ?? (try? SupabaseSessionRepository()),
+            sessionsRepository: sessionsRepository,
             agentRuntimesRepository: agentRuntimesRepository ?? (try? SupabaseAgentRuntimesRepository())
         )
         guard let snapshot = await loader.load(
@@ -778,7 +778,7 @@ public final class SessionDetailViewModel {
         let sessionID = session.sessionId
         guard !sessionID.isEmpty else { return }
 
-        let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+        let sessionsRepo = self.sessionsRepository
         guard let sessionsRepo else {
             print("[RuntimeDetailVM] addMembers: no sessions repo available")
             return
@@ -803,7 +803,7 @@ public final class SessionDetailViewModel {
         let sessionID = session.sessionId
         guard !sessionID.isEmpty else { return }
 
-        let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+        let sessionsRepo = self.sessionsRepository
         if let sessionsRepo {
             do {
                 try await sessionsRepo.addParticipants(sessionID: sessionID, actorIDs: [actorID])
@@ -874,7 +874,7 @@ public final class SessionDetailViewModel {
                   let sessionID = self.session?.sessionId,
                   !sessionID.isEmpty else { return }
 
-            let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+            let sessionsRepo = self.sessionsRepository
             if let sessionsRepo {
                 do {
                     try await sessionsRepo.removeParticipant(sessionID: sessionID, actorID: actorID)
@@ -1135,7 +1135,7 @@ public final class SessionDetailViewModel {
             }
 
             // 3. Supabase delete (source of truth).
-            let sessionsRepo = self.sessionsRepository ?? (try? SupabaseSessionRepository())
+            let sessionsRepo = self.sessionsRepository
             if let sessionsRepo {
                 do {
                     try await sessionsRepo.removeParticipant(sessionID: sessionID, actorID: actorID)
