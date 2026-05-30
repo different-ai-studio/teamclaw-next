@@ -49,3 +49,36 @@ pub async fn get_daemon_http_info() -> Result<Option<DaemonHttpInfo>, String> {
         root_token,
     }))
 }
+
+/// Minimal view of `~/.amuxd/daemon.toml` — just the field we surface.
+#[derive(Debug, serde::Deserialize)]
+struct DaemonConfigTeam {
+    #[serde(default)]
+    team_id: Option<String>,
+}
+
+/// The team this machine's daemon is onboarded to, read from
+/// `~/.amuxd/daemon.toml`. `None` when the daemon hasn't been onboarded (no
+/// config / no team_id) or the file can't be read.
+///
+/// The daemon is single-team: its `team_id` is set once at `amuxd init` and is
+/// independent of whichever team the app currently has selected. The settings
+/// UI compares the two and warns the user when they diverge, since team-share
+/// content is synced/linked under the daemon's team, not the app's.
+#[tauri::command]
+pub async fn get_daemon_team_id() -> Result<Option<String>, String> {
+    let config_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join(".amuxd")
+        .join("daemon.toml");
+
+    let body = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+    let parsed: DaemonConfigTeam = toml::from_str(&body).map_err(|e| e.to_string())?;
+    Ok(parsed
+        .team_id
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty()))
+}

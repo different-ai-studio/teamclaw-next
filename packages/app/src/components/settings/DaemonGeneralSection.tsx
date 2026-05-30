@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, Bot, Check, Loader2, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Bot, Check, Loader2, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCurrentTeamStore } from '@/stores/current-team'
@@ -18,7 +18,7 @@ import {
   type CurrentDaemonAgent,
   type TeamMemberOption,
 } from '@/lib/daemon-agent-admin'
-import { cn } from '@/lib/utils'
+import { cn, isTauri } from '@/lib/utils'
 import { SectionHeader, SettingCard } from './shared'
 
 const permissionLevels: AgentPermissionLevel[] = ['view', 'prompt', 'admin']
@@ -52,6 +52,29 @@ export function DaemonGeneralSection() {
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [daemonTeamId, setDaemonTeamId] = React.useState<string | null>(null)
+
+  // The local daemon is single-team (its team_id is fixed at `amuxd init`).
+  // Read it so we can warn when it diverges from the app's selected team —
+  // team-share content syncs/links under the daemon's team, not the app's.
+  React.useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const id = await invoke<string | null>('get_daemon_team_id')
+        if (!cancelled) setDaemonTeamId(id ?? null)
+      } catch {
+        // Best-effort: no daemon config / not onboarded → no warning.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const teamMismatch = !!daemonTeamId && !!team?.id && daemonTeamId !== team.id
 
   const load = React.useCallback(async () => {
     if (!team?.id) return
@@ -192,6 +215,35 @@ export function DaemonGeneralSection() {
             <div>
               <p className="text-[13px] font-medium text-destructive">{t('common.error', 'Error')}</p>
               <p className="mt-1 break-words text-[13px] text-destructive/80">{error}</p>
+            </div>
+          </div>
+        </SettingCard>
+      )}
+
+      {teamMismatch && (
+        <SettingCard className="border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[13px] font-medium text-amber-700 dark:text-amber-400">
+                {t('settings.daemonGeneral.teamMismatchTitle', '本机 Daemon 与当前团队不一致')}
+              </p>
+              <p className="text-[12px] leading-5 text-amber-700/80 dark:text-amber-400/80">
+                {t(
+                  'settings.daemonGeneral.teamMismatchDesc',
+                  'Daemon 绑定的团队与 App 当前选中的团队不同。团队共享内容会同步并软链到 Daemon 的团队，而非当前团队。如需让本机参与当前团队的共享，请用当前团队的邀请重新初始化 Daemon。',
+                )}
+              </p>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-0.5 pt-0.5 text-[11px]">
+                <dt className="text-amber-700/70 dark:text-amber-400/70">
+                  {t('settings.daemonGeneral.daemonTeam', 'Daemon 团队')}
+                </dt>
+                <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{daemonTeamId}</dd>
+                <dt className="text-amber-700/70 dark:text-amber-400/70">
+                  {t('settings.daemonGeneral.currentTeam', '当前团队')}
+                </dt>
+                <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{team.id}</dd>
+              </dl>
             </div>
           </div>
         </SettingCard>
