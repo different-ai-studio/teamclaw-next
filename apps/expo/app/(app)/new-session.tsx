@@ -16,6 +16,7 @@ import {
 } from "../../src/features/sessions/screens/NewSessionScreen";
 import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { uuidV4 } from "../../src/lib/uuid";
 import { showToast } from "../../src/ui/Toast";
 
@@ -44,7 +45,7 @@ export default function NewSessionRoute() {
     if (!teamId) return;
     let cancelled = false;
     void Promise.all([
-      createActorsApi(supabase).listActors(teamId),
+      createActorsApi({ getAccessToken: supabaseAccessToken(supabase) }).listActors(teamId),
       createIdeasApi(supabase).listIdeas(teamId),
       supabase
         .from("workspaces")

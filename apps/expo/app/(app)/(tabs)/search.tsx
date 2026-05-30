@@ -10,6 +10,7 @@ import { SearchScreen } from "../../../src/features/search/screens/SearchScreen"
 import { createSessionsApi } from "../../../src/features/sessions/session-api";
 import type { SessionSummary } from "../../../src/features/sessions/session-types";
 import { supabase } from "../../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../../src/lib/cloud-api/client";
 
 export default function SearchIndexRoute() {
   const router = useRouter();
@@ -29,7 +30,7 @@ export default function SearchIndexRoute() {
     (async () => {
       const sessionsApi = createSessionsApi(supabase);
       const ideasApi = createIdeasApi(supabase);
-      const actorsApi = createActorsApi(supabase);
+      const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
       try {
         const [nextSessions, nextIdeas, nextActors] = await Promise.all([
           sessionsApi.listSessions(teamId),

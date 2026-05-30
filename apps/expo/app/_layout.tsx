@@ -329,7 +329,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
       });
       const store = createConnectedAgentsStore({
         teamId: state.currentTeam!.id,
-        api: createAgentAccessApi(supabase),
+        api: createAgentAccessApi({ getAccessToken: supabaseAccessToken(supabase) }),
         subscriber,
         cache,
       });

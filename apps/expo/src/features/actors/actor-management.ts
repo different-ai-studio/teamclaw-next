@@ -14,12 +14,12 @@ export function canRemoveActor({
 
 export function canManageAuthorizedHumans({
   actorType,
-  ownerMemberId,
-  currentMemberActorId,
+  isOwner,
 }: {
   actorType: string | null | undefined;
-  ownerMemberId: string | null | undefined;
-  currentMemberActorId: string | null | undefined;
+  isOwner: boolean | null | undefined;
 }): boolean {
-  return actorType === "agent" && Boolean(ownerMemberId) && ownerMemberId === currentMemberActorId;
+  // Owner-gating is resolved server-side (GET /v1/agents/:id/permission) and
+  // surfaced as `isOwner`; the directory no longer carries owner_member_id.
+  return actorType === "agent" && Boolean(isOwner);
 }

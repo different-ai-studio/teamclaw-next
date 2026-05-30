@@ -6,6 +6,7 @@ import { createActorsApi } from "../../../src/features/actors/actor-api";
 import { createActorsController } from "../../../src/features/actors/actor-controller";
 import { ActorsListScreen } from "../../../src/features/actors/screens/ActorsListScreen";
 import { supabase } from "../../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../../src/lib/cloud-api/client";
 
 export default function ActorsIndexRoute() {
   const router = useRouter();
@@ -16,7 +17,10 @@ export default function ActorsIndexRoute() {
   const teamIdRef = useRef<string | null>(null);
 
   if (controllerRef.current === null || teamIdRef.current !== teamId) {
-    controllerRef.current = createActorsController(createActorsApi(supabase), teamId);
+    controllerRef.current = createActorsController(
+      createActorsApi({ getAccessToken: supabaseAccessToken(supabase) }),
+      teamId,
+    );
     teamIdRef.current = teamId;
   }
 

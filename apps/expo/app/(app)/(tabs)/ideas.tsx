@@ -7,6 +7,7 @@ import { createIdeasApi } from "../../../src/features/ideas/idea-api";
 import { createIdeasController } from "../../../src/features/ideas/idea-controller";
 import { IdeasListScreen } from "../../../src/features/ideas/screens/IdeasListScreen";
 import { supabase } from "../../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../../src/lib/cloud-api/client";
 
 export default function IdeasIndexRoute() {
   const router = useRouter();
@@ -44,7 +45,7 @@ export default function IdeasIndexRoute() {
   useEffect(() => {
     if (!teamId) return;
     let cancelled = false;
-    void createActorsApi(supabase)
+    void createActorsApi({ getAccessToken: supabaseAccessToken(supabase) })
       .listActors(teamId)
       .then((rows) => {
         if (cancelled) return;

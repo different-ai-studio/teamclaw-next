@@ -7,6 +7,7 @@ import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import type { Idea, IdeaStatus } from "../../src/features/ideas/idea-types";
 import { IdeaDetailScreen } from "../../src/features/ideas/screens/IdeaDetailScreen";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { showToast } from "../../src/ui/Toast";
 
 type BusyAction = "toggleStatus" | "archive" | "save" | null;
@@ -49,7 +50,7 @@ export default function IdeaDetailRoute() {
     void (async () => {
       try {
         const ideasApi = createIdeasApi(supabase);
-        const actorsApi = createActorsApi(supabase);
+        const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
         const [ideas, actors] = await Promise.all([
           ideasApi.listIdeas(teamId),
           actorsApi.listActors(teamId),

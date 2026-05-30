@@ -321,7 +321,7 @@ export default function SessionDetailRoute() {
   useEffect(() => {
     if (!currentTeam?.id) return;
     let cancelled = false;
-    void createActorsApi(supabase)
+    void createActorsApi({ getAccessToken: supabaseAccessToken(supabase) })
       .listActors(currentTeam.id)
       .then((rows) => {
         if (!cancelled) setTeamActors(rows);

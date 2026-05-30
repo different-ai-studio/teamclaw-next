@@ -13,6 +13,7 @@ import { createSessionsApi } from "../../src/features/sessions/session-api";
 import { MemberPickerSheet } from "../../src/features/sessions/screens/MemberPickerSheet";
 import { SessionMemberSheet } from "../../src/features/sessions/screens/SessionMemberSheet";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { showToast } from "../../src/ui/Toast";
 import { TextPromptModal } from "../../src/ui/TextPromptModal";
@@ -72,7 +73,7 @@ export default function SessionMembersRoute() {
     let cancelled = false;
     setIsLoading(true);
     const sessionsApi = createSessionsApi(supabase);
-    const actorsApi = createActorsApi(supabase);
+    const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
     void Promise.all([
       sessionsApi.getSession(teamId, sessionId),
       actorsApi.listActors(teamId),

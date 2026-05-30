@@ -105,7 +105,7 @@ export default function WorkspacesRoute() {
   useEffect(() => {
     if (!teamId) return;
     let cancelled = false;
-    void createActorsApi(supabase)
+    void createActorsApi({ getAccessToken: supabaseAccessToken(supabase) })
       .listActors(teamId)
       .then((rows) => {
         if (cancelled) return;

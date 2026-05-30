@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Share } from "react-native";
 
 import { useOnboarding, useTeamMqtt } from "../_layout";
@@ -16,7 +16,9 @@ import {
   ActorDetailScreen,
   type AgentWorkspaceChoice,
 } from "../../src/features/actors/screens/ActorDetailScreen";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { showToast } from "../../src/ui/Toast";
 
@@ -35,7 +37,21 @@ export default function ActorDetailRoute() {
   const teamId = state.currentTeam?.id ?? "";
   const isMe = actorId !== null && actorId === state.currentMemberActorId;
 
+  const actorsApi = useMemo(
+    () => createActorsApi({ getAccessToken: supabaseAccessToken(supabase) }),
+    [],
+  );
+  const agentAccessApi = useMemo(
+    () => createAgentAccessApi({ getAccessToken: supabaseAccessToken(supabase) }),
+    [],
+  );
+  const workspacesApi = useMemo(
+    () => createWorkspacesApi({ getAccessToken: supabaseAccessToken(supabase) }),
+    [],
+  );
+
   const [actor, setActor] = useState<Actor | null>(null);
+  const [agentIsOwner, setAgentIsOwner] = useState(false);
   const [allActors, setAllActors] = useState<Actor[]>([]);
   const [agentWorkspaces, setAgentWorkspaces] = useState<AgentWorkspaceChoice[]>([]);
   const [authorizedHumans, setAuthorizedHumans] = useState<AgentAuthorizedHuman[]>([]);
@@ -59,8 +75,7 @@ export default function ActorDetailRoute() {
   });
   const canManageAccess = canManageAuthorizedHumans({
     actorType: actor?.actorType,
-    ownerMemberId: actor?.ownerMemberId,
-    currentMemberActorId: state.currentMemberActorId,
+    isOwner: agentIsOwner,
   });
   const authorizedHumanIds = new Set(authorizedHumans.map((human) => human.id));
   const authorizedMemberCandidates = allActors.filter(
@@ -72,42 +87,47 @@ export default function ActorDetailRoute() {
 
   const reloadAgentWorkspaces = useCallback(async () => {
     if (!teamId) return;
-    const result = await supabase
-      .from("workspaces")
-      .select("id, name, path, agent_id, archived")
-      .eq("team_id", teamId)
-      .eq("archived", false)
-      .order("name", { ascending: true });
-    if (result.error) {
+    try {
+      const rows = await workspacesApi.list(teamId);
+      setAgentWorkspaces(
+        rows
+          .filter((w) => !w.archived)
+          .map((w) => ({ id: w.id, name: w.name, path: w.path, agentId: w.agentId }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    } catch {
       setAgentWorkspaces([]);
-      return;
     }
-    setAgentWorkspaces(
-      ((result.data ?? []) as Array<{
-        id: string;
-        name: string | null;
-        path: string | null;
-        agent_id: string | null;
-      }>).map((row) => ({
-        id: row.id,
-        name: row.name ?? "",
-        path: row.path ?? null,
-        agentId: row.agent_id ?? null,
-      })),
-    );
-  }, [teamId]);
+  }, [teamId, workspacesApi]);
 
   const refresh = useCallback(async () => {
     if (!teamId || !actorId) return;
     setIsRefreshing(true);
     try {
-      const rows = await createActorsApi(supabase).listActors(teamId);
+      const rows = await actorsApi.listActors(teamId);
       setAllActors(rows);
-      setActor(rows.find((row) => row.actorId === actorId) ?? null);
+      const found = rows.find((row) => row.actorId === actorId) ?? null;
+      if (found?.actorType === "agent") {
+        // Directory drops deviceId/owner; re-hydrate from agent-access so
+        // RPC routing and owner-gating survive a refresh.
+        const [deviceId, owner] = await Promise.all([
+          agentAccessApi.getAgentDeviceId(actorId).catch(() => null),
+          state.currentMemberActorId
+            ? agentAccessApi
+                .canManageAgent(actorId, state.currentMemberActorId)
+                .catch(() => false)
+            : Promise.resolve(false),
+        ]);
+        setAgentIsOwner(owner);
+        setActor({ ...found, deviceId });
+      } else {
+        setAgentIsOwner(false);
+        setActor(found);
+      }
     } finally {
       setIsRefreshing(false);
     }
-  }, [actorId, teamId]);
+  }, [actorId, teamId, actorsApi, agentAccessApi, state.currentMemberActorId]);
 
   useEffect(() => {
     if (!teamId || !actorId) {
@@ -118,42 +138,39 @@ export default function ActorDetailRoute() {
     setIsLoading(true);
     void (async () => {
       try {
-        const rows = await createActorsApi(supabase).listActors(teamId);
+        const rows = await actorsApi.listActors(teamId);
         if (cancelled) return;
         const nextActor = rows.find((row) => row.actorId === actorId) ?? null;
         setAllActors(rows);
         setActor(nextActor);
+        setAgentIsOwner(false);
 
         if (nextActor?.actorType === "agent") {
           setIsLoadingAuthorizedHumans(true);
-          const [authorizedRows, workspaceResult] = await Promise.all([
-            createAgentAccessApi(supabase).listAuthorizedHumans(actorId),
-            supabase
-              .from("workspaces")
-              .select("id, name, path, agent_id, archived")
-              .eq("team_id", teamId)
-              .eq("archived", false)
-              .order("name", { ascending: true }),
+          const [authorizedRows, deviceId, owner, workspaceRows] = await Promise.all([
+            agentAccessApi.listAuthorizedHumans(actorId),
+            agentAccessApi.getAgentDeviceId(actorId).catch(() => null),
+            state.currentMemberActorId
+              ? agentAccessApi
+                  .canManageAgent(actorId, state.currentMemberActorId)
+                  .catch(() => false)
+              : Promise.resolve(false),
+            workspacesApi.list(teamId).catch(() => []),
           ]);
           if (cancelled) return;
           setAuthorizedHumans(authorizedRows);
-          if (workspaceResult.error) {
-            setAgentWorkspaces([]);
-          } else {
-            setAgentWorkspaces(
-              ((workspaceResult.data ?? []) as Array<{
-                id: string;
-                name: string | null;
-                path: string | null;
-                agent_id: string | null;
-              }>).map((row) => ({
-                id: row.id,
-                name: row.name ?? "",
-                path: row.path ?? null,
-                agentId: row.agent_id ?? null,
-              })),
-            );
-          }
+          setAgentIsOwner(owner);
+          // Merge the on-demand deviceId back onto the directory actor so the
+          // agent-management RPC paths and ActorDetailScreen keep working.
+          setActor((prev) =>
+            prev?.actorId === actorId ? { ...prev, deviceId } : prev,
+          );
+          setAgentWorkspaces(
+            workspaceRows
+              .filter((w) => !w.archived)
+              .map((w) => ({ id: w.id, name: w.name, path: w.path, agentId: w.agentId }))
+              .sort((a, b) => a.name.localeCompare(b.name)),
+          );
           setIsLoadingAuthorizedHumans(false);
         } else {
           setAuthorizedHumans([]);
@@ -228,13 +245,13 @@ export default function ActorDetailRoute() {
     return () => {
       cancelled = true;
     };
-  }, [actorId, teamId]);
+  }, [actorId, teamId, actorsApi, agentAccessApi, workspacesApi, state.currentMemberActorId]);
 
   const reloadAuthorizedHumans = useCallback(async () => {
     if (!actorId || actor?.actorType !== "agent") return;
     setIsLoadingAuthorizedHumans(true);
     try {
-      const rows = await createAgentAccessApi(supabase).listAuthorizedHumans(actorId);
+      const rows = await agentAccessApi.listAuthorizedHumans(actorId);
       setAuthorizedHumans(rows);
     } catch (err) {
       showToast(
@@ -244,7 +261,7 @@ export default function ActorDetailRoute() {
     } finally {
       setIsLoadingAuthorizedHumans(false);
     }
-  }, [actor?.actorType, actorId]);
+  }, [actor?.actorType, actorId, agentAccessApi]);
 
   const removeActor = useCallback(() => {
     if (!actorId || !actor || isRemoving) return;
@@ -258,7 +275,7 @@ export default function ActorDetailRoute() {
           style: "destructive",
           onPress: () => {
             setIsRemoving(true);
-            void createActorsApi(supabase)
+            void actorsApi
               .removeActor(actorId)
               .then(() => {
                 showToast("success", "Actor removed from team.");
@@ -277,13 +294,13 @@ export default function ActorDetailRoute() {
         },
       ],
     );
-  }, [actor, actorId, isRemoving, router]);
+  }, [actor, actorId, actorsApi, isRemoving, router]);
 
   const createReinvite = useCallback(async () => {
     if (!teamId || !actor || isCreatingReinvite) return;
     setIsCreatingReinvite(true);
     try {
-      const invite = await createActorsApi(supabase).createReinvite({ teamId, actor });
+      const invite = await actorsApi.createReinvite({ teamId, actor });
       await Clipboard.setStringAsync(invite.deeplink);
       showToast("success", "Invite link copied.");
       await Share.share({ message: invite.deeplink });
@@ -295,14 +312,14 @@ export default function ActorDetailRoute() {
     } finally {
       setIsCreatingReinvite(false);
     }
-  }, [actor, isCreatingReinvite, teamId]);
+  }, [actor, actorsApi, isCreatingReinvite, teamId]);
 
   const grantAuthorizedHuman = useCallback(
     async (memberActorId: string) => {
       if (!actorId || !state.currentMemberActorId || isGrantingAuthorizedHuman) return;
       setIsGrantingAuthorizedHuman(true);
       try {
-        await createAgentAccessApi(supabase).grantAuthorizedHuman(
+        await agentAccessApi.grantAuthorizedHuman(
           actorId,
           memberActorId,
           "prompt",
@@ -321,6 +338,7 @@ export default function ActorDetailRoute() {
     },
     [
       actorId,
+      agentAccessApi,
       isGrantingAuthorizedHuman,
       reloadAuthorizedHumans,
       state.currentMemberActorId,
@@ -332,7 +350,7 @@ export default function ActorDetailRoute() {
       if (!actorId || isRevokingAuthorizedHuman) return;
       setIsRevokingAuthorizedHuman(true);
       try {
-        await createAgentAccessApi(supabase).revokeAuthorizedHuman(actorId, memberActorId);
+        await agentAccessApi.revokeAuthorizedHuman(actorId, memberActorId);
         showToast("success", "Member access revoked.");
         await reloadAuthorizedHumans();
       } catch (err) {
@@ -344,7 +362,7 @@ export default function ActorDetailRoute() {
         setIsRevokingAuthorizedHuman(false);
       }
     },
-    [actorId, isRevokingAuthorizedHuman, reloadAuthorizedHumans],
+    [actorId, agentAccessApi, isRevokingAuthorizedHuman, reloadAuthorizedHumans],
   );
 
   const updateAgentDefaults = useCallback(
@@ -352,7 +370,7 @@ export default function ActorDetailRoute() {
       if (!actorId || !actor || isSavingAgentDefaults) return;
       setIsSavingAgentDefaults(true);
       try {
-        await createActorsApi(supabase).updateAgentDefaults(actorId, patch);
+        await actorsApi.updateAgentDefaults(actorId, patch);
         setActor((prev) =>
           prev?.actorId === actorId
             ? {
@@ -382,7 +400,7 @@ export default function ActorDetailRoute() {
         setIsSavingAgentDefaults(false);
       }
     },
-    [actor, actorId, isSavingAgentDefaults],
+    [actor, actorId, actorsApi, isSavingAgentDefaults],
   );
 
   const addAgentWorkspace = useCallback(
@@ -472,11 +490,10 @@ export default function ActorDetailRoute() {
       if (!actorId || !actor || isUpdatingAgentVisibility) return;
       setIsUpdatingAgentVisibility(true);
       try {
-        const api = createAgentAccessApi(supabase);
         if (visibility === "team") {
-          await api.shareAgentToTeam(actorId);
+          await agentAccessApi.shareAgentToTeam(actorId);
         } else {
-          await api.makeAgentPersonal(actorId);
+          await agentAccessApi.makeAgentPersonal(actorId);
         }
         setActor((prev) => (prev?.actorId === actorId ? { ...prev, visibility } : prev));
         showToast(
@@ -493,7 +510,7 @@ export default function ActorDetailRoute() {
         setIsUpdatingAgentVisibility(false);
       }
     },
-    [actor, actorId, isUpdatingAgentVisibility, refresh],
+    [actor, actorId, agentAccessApi, isUpdatingAgentVisibility, refresh],
   );
 
   return (
