@@ -29,6 +29,23 @@ export function registerActors(router) {
     return { body: actor };
   });
 
+  router.patch("/v1/actors/:actorId/profile", async (ctx) => {
+    const actorId = decodeURIComponent(ctx.params.actorId);
+    const body = ctx.json ?? {};
+    requireString(body.displayName, "displayName");
+    const actor = await ctx.repository.updateCurrentActorProfile(actorId, {
+      displayName: body.displayName,
+      avatarUrl: body.avatarUrl ?? null,
+    });
+    return { body: actor };
+  });
+
+  router.delete("/v1/actors/:actorId", async (ctx) => {
+    const actorId = decodeURIComponent(ctx.params.actorId);
+    await ctx.repository.removeTeamActor(null, actorId);
+    return { statusCode: 204, body: null };
+  });
+
   router.post("/v1/actors/external", async (ctx) => {
     const body = ctx.json;
     if (!body) throw new ApiError(400, "validation_failed", "body is required");

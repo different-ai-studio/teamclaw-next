@@ -175,11 +175,13 @@ public final class AppOnboardingCoordinator {
             return
         }
 
-        guard let actorRepo = try? SupabaseActorRepository(),
-              let agentAccessConfig = CloudAPIConfigurationStore.configuration() else {
+        guard let agentAccessConfig = CloudAPIConfigurationStore.configuration() else {
             teamRuntimeContext = nil
             return
         }
+        let actorRepo = CloudAPIRepositoryFactory.actorRepository(
+            configuration: agentAccessConfig
+        ) { [store] in try await store.accessToken() }
         let agentAccessRepo = CloudAPIRepositoryFactory.agentAccessRepository(
             configuration: agentAccessConfig,
             memberActorID: ctx.memberActorID
@@ -267,7 +269,8 @@ public final class AppOnboardingCoordinator {
             agentAccessRepo: agentAccessRepo,
             teamRepo: cloudAPITeamRepo,
             sessionRepo: cloudAPISessionRepo,
-            ideasRepo: cloudAPIIdeasRepo
+            ideasRepo: cloudAPIIdeasRepo,
+            actorRepo: actorRepo
         )
     }
 

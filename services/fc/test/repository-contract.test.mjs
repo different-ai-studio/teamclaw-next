@@ -383,7 +383,17 @@ function contractRepo() {
       return { token: "invite-token", inviteId: "invite-1", expiresAt: input.expiresAt ?? null };
     },
     async removeTeamActor(teamId, actorId) {
-      assert.equal(teamId, "team-1");
+      assert.ok(typeof actorId === "string");
+    },
+    async updateCurrentActorProfile(actorId, { displayName, avatarUrl }) {
+      return {
+        id: actorId, teamId: "team-1", kind: "member",
+        displayName, avatarUrl: avatarUrl ?? null, userId: "user-1",
+        invitedByActorId: null, teamRole: "member", memberStatus: "active",
+        agentStatus: null, agentTypes: null, agentKind: null,
+        defaultAgentType: null, defaultWorkspaceId: null,
+        lastActiveAt: null, createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z",
+      };
     },
     async listIdeas({ teamId, archived, limit, cursor }) {
       assert.equal(teamId, "team-1");

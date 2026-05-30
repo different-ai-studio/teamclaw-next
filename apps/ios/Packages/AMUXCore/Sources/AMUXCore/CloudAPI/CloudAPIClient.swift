@@ -80,12 +80,32 @@ public struct CloudAPIClient: Sendable {
         try await requestVoid("PUT", path: path, body: data, idempotencyKey: idempotencyKey)
     }
 
+    /// POST raw bytes (e.g. an octet-stream upload) and decode the JSON result.
+    public func postRaw<T: Decodable & Sendable>(
+        _ path: String,
+        bytes: Data,
+        contentType: String,
+        as type: T.Type = T.self
+    ) async throws -> T {
+        try await request("POST", path: path, body: bytes, idempotencyKey: nil, as: type, contentType: contentType)
+    }
+
+    public func patchVoid<Body: Encodable & Sendable>(
+        _ path: String,
+        body: Body,
+        idempotencyKey: String? = nil
+    ) async throws {
+        let data = try JSONEncoder().encode(body)
+        try await requestVoid("PATCH", path: path, body: data, idempotencyKey: idempotencyKey)
+    }
+
     private func request<T: Decodable & Sendable>(
         _ method: String,
         path: String,
         body: Data?,
         idempotencyKey: String?,
-        as type: T.Type
+        as type: T.Type,
+        contentType: String = "application/json"
     ) async throws -> T {
         let token = try await accessToken().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { throw CloudAPIError.missingAccessToken }
@@ -104,7 +124,7 @@ public struct CloudAPIClient: Sendable {
         }
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
         let (data, response) = try await send(request)

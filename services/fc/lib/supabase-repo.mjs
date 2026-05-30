@@ -108,6 +108,17 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
+    async updateCurrentActorProfile(actorId, { displayName, avatarUrl }) {
+      const { data, error } = await supabase.rpc("update_current_actor_profile", {
+        p_actor_id: actorId,
+        p_display_name: displayName,
+        p_avatar_url: avatarUrl ?? null,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      return mapDirectoryActor(row);
+    },
+
     // --- Team share mode (Task 3 of share-onboarding refactor) ---
 
     async enableShareMode(teamId, mode, gitConfig) {
@@ -210,7 +221,7 @@ export function createSupabaseBusinessRepository(options) {
       let query = supabase
         .from("actor_directory")
         .select(
-          "id, team_id, actor_type, user_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at",
+          "id, team_id, actor_type, user_id, invited_by_actor_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, agent_kind, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at",
         )
         .eq("team_id", teamId);
       if (kind) query = query.eq("actor_type", kind);
@@ -1980,10 +1991,12 @@ function mapDirectoryActor(row) {
     displayName: row?.display_name ?? null,
     avatarUrl: row?.avatar_url ?? null,
     userId: row?.user_id ?? null,
+    invitedByActorId: row?.invited_by_actor_id ?? null,
     teamRole: row?.team_role ?? null,
     memberStatus: row?.member_status ?? null,
     agentStatus: row?.agent_status ?? null,
     agentTypes: row?.agent_types ?? null,
+    agentKind: row?.agent_kind ?? null,
     defaultAgentType: row?.default_agent_type ?? null,
     defaultWorkspaceId: row?.default_workspace_id ?? null,
     visibility: row?.agent_visibility ?? null,

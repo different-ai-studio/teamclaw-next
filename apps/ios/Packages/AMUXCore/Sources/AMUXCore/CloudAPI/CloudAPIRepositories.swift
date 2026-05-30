@@ -269,6 +269,108 @@ public actor CloudAPIShortcutsRepository: ShortcutsRepository {
     }
 }
 
+public actor CloudAPIActorRepository: ActorRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func listActors(teamID: String) async throws -> [ActorRecord] {
+        let page: CloudPage<CloudActor> = try await client.get("/v1/teams/\(Self.enc(teamID))/actors?limit=500")
+        return page.items.map { $0.record }
+    }
+
+    public func createInvite(teamID: String, input: InviteCreateInput) async throws -> InviteCreated {
+        let displayName = input.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !displayName.isEmpty else { throw ActorRepositoryError.missingDisplayName }
+        if input.kind == .member, input.teamRole == nil { throw ActorRepositoryError.missingTeamRole }
+        if input.kind == .agent, (input.agentKind ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ActorRepositoryError.missingAgentKind
+        }
+        let body = CloudCreateInviteRequest(
+            kind: input.kind.rawValue,
+            displayName: displayName,
+            teamRole: input.teamRole?.rawValue,
+            agentKind: input.agentKind,
+            ttlSeconds: input.ttlSeconds,
+            targetActorId: input.targetActorID
+        )
+        let row: CloudInviteCreated = try await client.post("/v1/teams/\(Self.enc(teamID))/invites", body: body)
+        guard let expiresAt = parseCloudDate(row.expiresAt) else {
+            throw ActorRepositoryError.emptyResponse("create_team_invite")
+        }
+        return InviteCreated(token: row.token, expiresAt: expiresAt, deeplink: row.deeplink ?? "")
+    }
+
+    public func claimInvite(token: String) async throws -> ClaimResult {
+        let row: CloudClaimInviteResult = try await client.post("/v1/invites/claim", body: CloudClaimInviteRequest(token: token))
+        return ClaimResult(
+            actorID: row.actorId, teamID: row.teamId, actorType: row.actorType,
+            displayName: row.displayName, refreshToken: row.refreshToken
+        )
+    }
+
+    public func heartbeat() async throws {
+        try await client.postVoid("/v1/heartbeat", body: CloudEmptyBody())
+    }
+
+    public func removeActor(actorID: String) async throws {
+        try await client.deleteVoid("/v1/actors/\(Self.enc(actorID))")
+    }
+
+    public func uploadAvatar(actorID: String, imageData: Data, contentType: String) async throws -> String {
+        let ext: String
+        switch contentType.lowercased() {
+        case "image/jpeg", "image/jpg": ext = "jpg"
+        case "image/png": ext = "png"
+        case "image/webp": ext = "webp"
+        default: throw ActorRepositoryError.unsupportedAvatarContentType(contentType)
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        let path = "\(actorID)/avatar-\(stamp).\(ext)"
+        let result: CloudAttachmentUpload = try await client.postRaw(
+            "/v1/attachments?path=\(Self.encQuery(path))&bucket=avatars",
+            bytes: imageData,
+            contentType: contentType
+        )
+        return result.url
+    }
+
+    public func updateCurrentActorProfile(actorID: String, displayName: String, avatarURL: String?) async throws -> ActorRecord {
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw ActorRepositoryError.missingDisplayName }
+        let body = CloudUpdateProfileRequest(displayName: name, avatarUrl: avatarURL)
+        let row: CloudActor = try await client.patch("/v1/actors/\(Self.enc(actorID))/profile", body: body)
+        return row.record
+    }
+
+    public func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?,
+                                    defaultAgentType: String?) async throws -> AgentDefaults {
+        let body = CloudUpdateAgentDefaultsRequest(
+            defaultWorkspaceId: defaultWorkspaceID,
+            agentKind: agentKind?.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultAgentType: defaultAgentType?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        // FC returns 204; rebuild the record from the inputs we just persisted.
+        try await client.patchVoid("/v1/agents/\(Self.enc(actorID))/defaults", body: body)
+        return AgentDefaults(
+            agentID: actorID,
+            defaultWorkspaceID: defaultWorkspaceID,
+            agentKind: agentKind,
+            defaultAgentType: defaultAgentType
+        )
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+
+    private static func encQuery(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
+    }
+}
+
 public actor CloudAPIAgentAccessRepository: AgentAccessRepository {
     private let client: CloudAPIClient
     private let memberActorID: String
@@ -530,6 +632,13 @@ public enum CloudAPIRepositoryFactory {
             memberActorID: memberActorID
         )
     }
+
+    public static func actorRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any ActorRepository {
+        CloudAPIActorRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
 }
 
 private struct CloudPage<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -622,6 +731,79 @@ private struct CloudSessionParticipant: Decodable, Sendable {
     let role: String?
     let displayName: String?
     let actorType: String?
+}
+
+private struct CloudActor: Decodable, Sendable {
+    let id: String
+    let teamId: String?
+    let kind: String?
+    let displayName: String?
+    let avatarUrl: String?
+    let userId: String?
+    let invitedByActorId: String?
+    let teamRole: String?
+    let memberStatus: String?
+    let agentStatus: String?
+    let agentTypes: [String]?
+    let agentKind: String?
+    let defaultAgentType: String?
+    let defaultWorkspaceId: String?
+    let lastActiveAt: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var record: ActorRecord {
+        ActorRecord(
+            id: id,
+            teamID: teamId ?? "",
+            actorType: kind ?? "",
+            userID: userId,
+            invitedByActorID: invitedByActorId,
+            displayName: displayName ?? "",
+            avatarURL: avatarUrl,
+            lastActiveAt: parseCloudDate(lastActiveAt),
+            createdAt: parseCloudDate(createdAt) ?? .distantPast,
+            updatedAt: parseCloudDate(updatedAt) ?? .distantPast,
+            memberStatus: memberStatus,
+            teamRole: teamRole,
+            agentTypes: agentTypes ?? [],
+            agentKind: agentKind,
+            defaultAgentType: defaultAgentType,
+            agentStatus: agentStatus,
+            defaultWorkspaceID: defaultWorkspaceId
+        )
+    }
+}
+
+private struct CloudInviteCreated: Decodable, Sendable {
+    let token: String
+    let expiresAt: String?
+    let deeplink: String?
+}
+
+private struct CloudAttachmentUpload: Decodable, Sendable {
+    let path: String
+    let url: String
+}
+
+private struct CloudCreateInviteRequest: Encodable, Sendable {
+    let kind: String
+    let displayName: String
+    let teamRole: String?
+    let agentKind: String?
+    let ttlSeconds: Int
+    let targetActorId: String?
+}
+
+private struct CloudUpdateProfileRequest: Encodable, Sendable {
+    let displayName: String
+    let avatarUrl: String?
+}
+
+private struct CloudUpdateAgentDefaultsRequest: Encodable, Sendable {
+    let defaultWorkspaceId: String?
+    let agentKind: String?
+    let defaultAgentType: String?
 }
 
 private struct CloudConnectedAgent: Decodable, Sendable {
