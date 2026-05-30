@@ -1190,6 +1190,10 @@
     "daemonGeneral": {
       "title": "通用",
       "description": "维护本机 Daemon 对应的 Agent 和访问权限",
+      "teamMismatchTitle": "本机 Daemon 与当前团队不一致",
+      "teamMismatchDesc": "Daemon 绑定的团队与 App 当前选中的团队不同。团队共享内容会同步并软链到 Daemon 的团队，而非当前团队。如需让本机参与当前团队的共享，请用当前团队的邀请重新初始化 Daemon。",
+      "daemonTeam": "Daemon 团队",
+      "currentTeam": "当前团队",
       "noTeam": "加入或创建团队后再配置 Daemon Agent。",
       "noAgent": "本机暂未关联 Daemon Agent。",
       "basicInfo": "Agent 基本信息",

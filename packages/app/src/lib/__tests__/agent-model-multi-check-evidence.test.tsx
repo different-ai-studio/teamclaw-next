@@ -202,21 +202,6 @@ describe("agent model multi-check evidence", () => {
       { id: "opencode/big-pickle", displayName: "OpenCode Zen/Big Pickle" },
     ];
     const effectiveModelId = "big-pickle";
-    const rows = available.map((m) => {
-      const left = m.id;
-      const right = effectiveModelId;
-      const exact = left === right;
-      const shortEq = shortAgentModelId(left) === shortAgentModelId(right);
-      let loop = false;
-      for (const model of available) {
-        const ids = new Set([model.id, shortAgentModelId(model.id)]);
-        if (ids.has(left) && ids.has(right)) {
-          loop = true;
-          break;
-        }
-      }
-      return { id: left, exact, shortEq, loop, checked: exact || shortEq || loop };
-    });
     expect(
       available.map((m) => isAgentModelRowSelected(m.id, effectiveModelId)),
     ).toEqual([true, false]);

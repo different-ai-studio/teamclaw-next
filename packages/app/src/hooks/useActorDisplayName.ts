@@ -66,9 +66,15 @@ export function useActorDisplayName(actorId: string | undefined | null): string 
   React.useEffect(() => {
     if (!actorId || name) return;
     let cancelled = false;
-    void lookupActorDisplayName(actorId).then((resolved) => {
-      if (!cancelled && resolved) setName(resolved);
-    });
+    void lookupActorDisplayName(actorId)
+      .then((resolved) => {
+        if (!cancelled && resolved) setName(resolved);
+      })
+      .catch((e) => {
+        // Backend unavailable (e.g. cloud API not configured) — keep the
+        // fallback display name instead of leaking an unhandled rejection.
+        console.warn("[actor-display-name] lookup failed:", e);
+      });
     return () => {
       cancelled = true;
     };

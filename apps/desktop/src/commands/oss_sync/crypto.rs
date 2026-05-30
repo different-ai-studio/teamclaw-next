@@ -26,8 +26,8 @@ pub fn encrypt_blob(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String>
     getrandom::getrandom(&mut nonce_bytes)
         .map_err(|e| format!("crypto: nonce generation failed: {e}"))?;
 
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| format!("crypto: cipher init failed: {e}"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("crypto: cipher init failed: {e}"))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
@@ -66,8 +66,8 @@ pub fn decrypt_blob(blob: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
     let nonce_bytes = &blob[5..17];
     let ciphertext = &blob[HEADER_LEN..];
 
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| format!("crypto: cipher init failed: {e}"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("crypto: cipher init failed: {e}"))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
     cipher
@@ -106,8 +106,7 @@ mod tests {
     fn test_wrong_key_fails() {
         let key = test_key();
         let wrong_key =
-            derive_key("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
-                .unwrap();
+            derive_key("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").unwrap();
         let blob = encrypt_blob(b"secret", &key).unwrap();
         assert!(decrypt_blob(&blob, &wrong_key).is_err());
     }

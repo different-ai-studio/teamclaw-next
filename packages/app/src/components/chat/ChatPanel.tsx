@@ -33,7 +33,6 @@ import { resolveSessionActivityOwner } from "@/lib/session-list-activity";
 import { resolveCurrentMemberActorId } from "@/lib/current-actor";
 import { isAgentActorType } from "@/lib/actor-type";
 import { resolveSessionWorkspaceHintForRuntimeStart } from "@/lib/teamclaw/resolve-runtime-start-workspace";
-import { resolveAmuxAgentType } from "@/lib/amux-agent-type";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
 import { Suggestions, Suggestion } from "@/packages/ai/suggestion";
@@ -61,7 +60,6 @@ import { loadSessionActiveModel } from "@/lib/session-active-model";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
 import { selectAgentModel } from "@/lib/runtime-state-resolve";
-import { useAgentModelPickStore } from "@/stores/agent-model-pick-store";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -102,7 +100,7 @@ async function resolveMentionActorIdsForSession(
   const fromText = await resolveActorIdsFromAtText(sessionId, messageText);
   if (fromText.agentIds.length > 0) {
     const engaged = useEngagedAgentStore.getState();
-    let participants: Array<{ id: string; display_name?: string | null }> = [];
+    let participants: Array<{ id: string; display_name?: string | null }>;
     try {
       participants = await getBackend().sessionMembers.listParticipants(sessionId);
     } catch {
@@ -1437,7 +1435,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       : (firstMessage.text ?? '').trim() || 'New chat';
 
     try {
-      const { createSessionShell, startAgentRuntimesAsync } = await import('@/lib/session-create');
+      const { createSessionShell } = await import('@/lib/session-create');
       const memberIds = picks.members.map((m) => m.id);
       const agentIds = picks.agents.map((a) => a.id);
       const allAdditional = Array.from(new Set([...memberIds, ...agentIds]));

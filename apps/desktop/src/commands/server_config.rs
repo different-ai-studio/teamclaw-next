@@ -285,10 +285,7 @@ mod tests {
 
         let d = services_defaults();
         assert_eq!(loaded.backend_kind.as_deref(), Some("cloud_api"));
-        assert_eq!(
-            loaded.cloud_api_url.as_deref(),
-            Some(DEFAULT_CLOUD_API_URL)
-        );
+        assert_eq!(loaded.cloud_api_url.as_deref(), Some(DEFAULT_CLOUD_API_URL));
         assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
         assert_eq!(loaded.mqtt_port, Some(d.mqtt_port));
         assert_eq!(loaded.mqtt_use_tls, Some(d.mqtt_use_tls));

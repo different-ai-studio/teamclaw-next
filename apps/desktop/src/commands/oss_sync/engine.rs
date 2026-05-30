@@ -56,8 +56,8 @@ pub async fn tick(
     // root (.teamclaw/...).
     let content_root = team_content_root(workspace_path);
 
-    let mut state = LocalSyncState::load(workspace_path, team_id)
-        .map_err(|e| SyncError::State(e))?;
+    let mut state =
+        LocalSyncState::load(workspace_path, team_id).map_err(|e| SyncError::State(e))?;
 
     // ── PULL ─────────────────────────────────────────────────────────────────
     // Paginate /sync/manifest fully before advancing last_server_seq.
@@ -127,12 +127,8 @@ pub async fn tick(
             if ls.dirty && item.version > ls.synced_version {
                 // Write local content as a conflict sidecar before overwriting.
                 if let Ok(local_bytes) = std::fs::read(&abs_path) {
-                    let _ = write_conflict_sidecar(
-                        &abs_path,
-                        &local_bytes,
-                        &ls.synced_cipher_hash,
-                    )
-                    .await;
+                    let _ = write_conflict_sidecar(&abs_path, &local_bytes, &ls.synced_cipher_hash)
+                        .await;
                     pull_conflicts += 1;
                 }
             }
@@ -220,8 +216,8 @@ pub async fn tick(
                         .get(&path)
                         .map(|f| f.synced_cipher_hash.as_str())
                         .unwrap_or("unknown");
-                    let _ = write_conflict_sidecar(&abs_path, &local_bytes, local_cipher_hash)
-                        .await;
+                    let _ =
+                        write_conflict_sidecar(&abs_path, &local_bytes, local_cipher_hash).await;
                 }
                 // Download the remote version that beat us.
                 if let Some(hash) = remote_cipher_hash {

@@ -67,7 +67,7 @@ export async function ensureDaemonWorkspaceRegistered(
     })
     const message = error instanceof Error ? error.message : String(error)
     await notifyDaemonWorkspaceError('无法加载 workspace 信息', `${agentLabel}：${message}`)
-    throw new Error(`Failed to load cloud workspace ${cloudId}: ${message}`)
+    throw new Error(`Failed to load cloud workspace ${cloudId}: ${message}`, { cause: error })
   }
 
   if (!cloudPath) {
@@ -88,7 +88,7 @@ export async function ensureDaemonWorkspaceRegistered(
     targetDeviceId,
   })
 
-  let daemonWorkspaces: WorkspaceInfo[] = []
+  let daemonWorkspaces: WorkspaceInfo[]
   try {
     const fetched = await fetchWorkspaces({ targetDeviceId })
     daemonWorkspaces = fetched.workspaces ?? []
@@ -100,7 +100,7 @@ export async function ensureDaemonWorkspaceRegistered(
     })
     const message = error instanceof Error ? error.message : String(error)
     await notifyDaemonWorkspaceError('无法读取 Agent workspace 列表', `${agentLabel}：${message}`)
-    throw new Error(`fetchWorkspaces failed for ${targetDeviceId}: ${message}`)
+    throw new Error(`fetchWorkspaces failed for ${targetDeviceId}: ${message}`, { cause: error })
   }
 
   const existing = daemonWorkspaces.find((ws) => daemonWorkspaceMatchesCloud(ws, cloudId, cloudPath))
@@ -150,6 +150,6 @@ export async function ensureDaemonWorkspaceRegistered(
       'Agent workspace 注册失败',
       `${agentLabel}：无法在 daemon 上注册目录 ${cloudPath}。${message}`,
     )
-    throw new Error(`addWorkspace failed for ${targetDeviceId} path ${cloudPath}: ${message}`)
+    throw new Error(`addWorkspace failed for ${targetDeviceId} path ${cloudPath}: ${message}`, { cause: error })
   }
 }

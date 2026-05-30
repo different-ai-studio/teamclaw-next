@@ -284,7 +284,7 @@ export function ActorsView() {
   const { t } = useTranslation()
   const { state: sidebarState } = useSidebar()
   const sidebarCollapsed = sidebarState === 'collapsed'
-  const { actors, loading, error, teamId } = useActorsForTeam()
+  const { actors, loading, error } = useActorsForTeam()
   const [query, setQuery] = React.useState('')
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [filter, setFilter] = React.useState<ActorTypeFilter>('all')

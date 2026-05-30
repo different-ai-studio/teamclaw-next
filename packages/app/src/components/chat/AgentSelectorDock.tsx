@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Command,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
@@ -191,7 +190,7 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
       if (cancelled) return
 
       const sessionRows = rtRows.filter((row) => row.session_id === activeSessionId)
-      let mappedAgentIds: string[] = []
+      const mappedAgentIds: string[] = []
       setAgentToRuntimeId((prev) => {
         const next = new Map(prev)
         for (const r of sessionRows) {
