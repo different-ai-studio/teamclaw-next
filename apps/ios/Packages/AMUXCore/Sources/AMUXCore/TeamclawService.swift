@@ -725,7 +725,7 @@ public final class TeamclawService {
     }
 
     private func resolveMessagesRepository() -> (any MessagesRepository)? {
-        messagesRepository ?? (try? SupabaseMessagesRepository())
+        messagesRepository
     }
 
     public func makeCreateSessionRequest(

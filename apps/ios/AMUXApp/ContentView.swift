@@ -27,45 +27,31 @@ struct ContentView: View {
         _mqtt = State(initialValue: mqtt)
         _hub = State(initialValue: MQTTMessageHub(mqtt: mqtt))
 
-        // Cloud API is the production default (see CloudAPIConfigurationStore):
-        // build the Cloud-API-backed onboarding store whenever a cloud endpoint
-        // is resolvable, and schedule a one-shot bridge that seeds the new
-        // SessionStore from any existing Supabase session so already-signed-in
-        // users are NOT logged out by the cutover. Fall back to the legacy
-        // Supabase store only when no cloud config exists (removed in Task 10).
+        // Cloud API is the only client backend. Build the Cloud-API-backed
+        // onboarding store from the resolved cloud endpoint; if none is
+        // configured, surface a failing store rather than a Supabase fallback
+        // (the Supabase SDK was removed in the cutover endgame). Existing
+        // sessions persisted only in the old Supabase keychain are not migrated
+        // — affected users re-authenticate once.
         if let cloudConfig = CloudAPIConfigurationStore.configuration() {
             let store = CloudAPIAppOnboardingStore(
                 configuration: cloudConfig,
                 storage: KeychainSessionStorage()
             )
             _onboarding = State(initialValue: AppOnboardingCoordinator(store: store))
-
-            let sessionStore = store.sessionStoreForBridge
-            let baseURL = cloudConfig.baseURL
-            _pendingSessionMigration = State(initialValue: { @Sendable in
-                let bridge = SupabaseSessionBridge(
-                    sessionStore: sessionStore,
-                    baseURL: baseURL,
-                    legacyRefreshTokenProvider: {
-                        guard let legacy = try? SupabaseAppOnboardingStore() else { return nil }
-                        return try? await legacy.legacyRefreshToken()
-                    }
-                )
-                try? await bridge.migrateIfNeeded()
-            })
         } else {
-            do {
-                let store = try SupabaseAppOnboardingStore()
-                _onboarding = State(initialValue: AppOnboardingCoordinator(store: store))
-            } catch {
-                _onboarding = State(
-                    initialValue: AppOnboardingCoordinator(
-                        store: FailingOnboardingStore(error: error)
+            _onboarding = State(
+                initialValue: AppOnboardingCoordinator(
+                    store: FailingOnboardingStore(
+                        error: NSError(
+                            domain: "CloudAPI", code: 0,
+                            userInfo: [NSLocalizedDescriptionKey: "Cloud API is not configured."]
+                        )
                     )
                 )
-            }
-            _pendingSessionMigration = State(initialValue: nil)
+            )
         }
+        _pendingSessionMigration = State(initialValue: nil)
     }
 
     var body: some View {

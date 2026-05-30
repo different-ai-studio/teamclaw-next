@@ -564,7 +564,7 @@ public final class SessionDetailViewModel {
         guard let session, !session.sessionId.isEmpty else { return }
         let loader = SessionMemberSheetLoader(
             sessionsRepository: sessionsRepository,
-            agentRuntimesRepository: agentRuntimesRepository ?? (try? SupabaseAgentRuntimesRepository())
+            agentRuntimesRepository: agentRuntimesRepository
         )
         guard let snapshot = await loader.load(
             sessionID: session.sessionId,
@@ -1350,7 +1350,14 @@ public final class SessionDetailViewModel {
         }
         if let sessionId = session?.sessionId {
             Task.detached {
-                guard let repo = try? SupabaseSessionsRepository() else { return }
+                guard let config = CloudAPIConfigurationStore.configuration() else { return }
+                let storage = KeychainSessionStorage()
+                let repo = CloudAPIRepositoryFactory.sessionsRepository(configuration: config) {
+                    guard let s = try storage.load(), s.expiresAt.timeIntervalSinceNow > 0 else {
+                        throw CloudAPIError.missingAccessToken
+                    }
+                    return s.accessToken
+                }
                 try? await repo.markSessionViewed(sessionId: sessionId, lastReadMessageId: nil)
             }
         }
@@ -1934,7 +1941,7 @@ public final class SessionDetailViewModel {
     /// represented; only `user_*` and `agent_reply` kinds become AgentEvents.
     public func seedFromSupabaseMessages(modelContext: ModelContext) async {
         guard let session else { return }
-        guard let repo = messagesRepository ?? (try? SupabaseMessagesRepository()) else { return }
+        guard let repo = messagesRepository else { return }
         let messages: [MessageRecord]
         do {
             messages = try await repo.listForSession(sessionID: session.sessionId)
