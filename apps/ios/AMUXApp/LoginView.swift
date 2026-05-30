@@ -45,8 +45,8 @@ struct LoginView: View {
                 .font(.amuxSerif(38, weight: .regular))
                 .foregroundStyle(Color.amux.onyx)
             Text(coordinator.pendingEmailOTPEmail != nil
-                 ? "Check your inbox for an 8-digit code."
-                 : "We'll email you an 8-digit code.")
+                 ? "Check your inbox for a 6-digit code."
+                 : "We'll email you a 6-digit code.")
                 .font(.body)
                 .foregroundStyle(Color.amux.basalt)
                 .fixedSize(horizontal: false, vertical: true)
@@ -85,17 +85,17 @@ struct LoginView: View {
             }
 
             authField {
-                TextField("8-digit code", text: $code)
+                TextField("6-digit code", text: $code)
                     .textContentType(.oneTimeCode)
                     .keyboardType(.numberPad)
                     .accessibilityIdentifier("login.codeField")
                     .onChange(of: code) { _, newValue in
                         let digits = newValue.filter { $0.isNumber }
-                        code = String(digits.prefix(8))
+                        code = String(digits.prefix(6))
                     }
             }
 
-            primaryButton(title: "Verify", enabled: code.count == 8) {
+            primaryButton(title: "Verify", enabled: code.count == 6) {
                 guard let pendingEmail = coordinator.pendingEmailOTPEmail else { return }
                 Task { await coordinator.verifyOTP(email: pendingEmail, token: code) }
             }

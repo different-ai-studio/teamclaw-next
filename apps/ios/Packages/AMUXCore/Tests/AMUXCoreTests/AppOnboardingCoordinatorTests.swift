@@ -174,6 +174,14 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
         // no-op
     }
 
+    func sendUpgradeEmailOTP(email: String) async throws {
+        // no-op
+    }
+
+    func verifyUpgradeEmailOTP(email: String, token: String) async throws {
+        // no-op
+    }
+
     func upgradeWithAppleCredential(idToken: String, nonce: String) async throws {
         // no-op
     }
