@@ -1,10 +1,14 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import {
+  AddWorkspaceRequestSchema,
+  FetchWorkspacesRequestSchema,
   RpcRequestSchema,
   RpcResponseSchema,
   RuntimeStartRequestSchema,
   RuntimeStopRequestSchema,
   SetModelRequestSchema,
+  type AddWorkspaceResult,
+  type FetchWorkspacesResult,
   type RpcRequest,
   type RpcResponse,
   type RuntimeStartResult,
@@ -143,6 +147,79 @@ async function sendRequest(
       reject(err instanceof Error ? err : new Error(String(err)))
     })
   })
+}
+
+function addWorkspaceResponseError(response: RpcResponse): Error | null {
+  if (!response.success) {
+    return new Error(response.error || 'addWorkspace rejected')
+  }
+  if (response.result.case !== 'addWorkspaceResult') {
+    return new Error(`unexpected result variant: ${response.result.case}`)
+  }
+  if (!response.result.value.accepted) {
+    return new Error(response.result.value.error || response.error || 'addWorkspace rejected')
+  }
+  return null
+}
+
+function fetchWorkspacesResponseError(response: RpcResponse): Error | null {
+  if (!response.success) {
+    return new Error(response.error || 'fetchWorkspaces rejected')
+  }
+  if (response.result.case !== 'fetchWorkspacesResult') {
+    return new Error(`unexpected result variant: ${response.result.case}`)
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Public helper: fetchWorkspaces
+// ---------------------------------------------------------------------------
+
+export interface FetchWorkspacesArgs {
+  targetDeviceId: string
+  timeoutMs?: number
+}
+
+export async function fetchWorkspaces(args: FetchWorkspacesArgs): Promise<FetchWorkspacesResult> {
+  const response = await sendRequest((req) => {
+    req.method = {
+      case: 'fetchWorkspaces',
+      value: create(FetchWorkspacesRequestSchema, {}),
+    }
+  }, args.targetDeviceId, args.timeoutMs)
+
+  const error = fetchWorkspacesResponseError(response)
+  if (error) throw error
+  return response.result.value as FetchWorkspacesResult
+}
+
+// ---------------------------------------------------------------------------
+// Public helper: addWorkspace
+// ---------------------------------------------------------------------------
+
+export interface AddWorkspaceArgs {
+  targetDeviceId: string
+  path: string
+  timeoutMs?: number
+}
+
+export async function addWorkspace(args: AddWorkspaceArgs): Promise<AddWorkspaceResult> {
+  const path = args.path.trim()
+  if (!path) {
+    throw new Error('addWorkspace: path is required')
+  }
+
+  const response = await sendRequest((req) => {
+    req.method = {
+      case: 'addWorkspace',
+      value: create(AddWorkspaceRequestSchema, { path }),
+    }
+  }, args.targetDeviceId, args.timeoutMs)
+
+  const error = addWorkspaceResponseError(response)
+  if (error) throw error
+  return response.result.value as AddWorkspaceResult
 }
 
 // ---------------------------------------------------------------------------
