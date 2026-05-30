@@ -62,6 +62,48 @@ export function registerAuth(router) {
     return { body: out };
   });
 
+  router.post("/v1/auth/signin-password", { auth: "none" }, async (ctx) => {
+    const body = ctx.json ?? {};
+    if (!body.email || typeof body.email !== "string") {
+      throw new ApiError(400, "validation_failed", "email is required");
+    }
+    if (!body.password || typeof body.password !== "string") {
+      throw new ApiError(400, "validation_failed", "password is required");
+    }
+    const out = await ctx.repository.signInWithPassword({ email: body.email, password: body.password });
+    return { body: out };
+  });
+
+  router.post("/v1/auth/signup", { auth: "none" }, async (ctx) => {
+    const body = ctx.json ?? {};
+    if (!body.email || typeof body.email !== "string") {
+      throw new ApiError(400, "validation_failed", "email is required");
+    }
+    if (!body.password || typeof body.password !== "string") {
+      throw new ApiError(400, "validation_failed", "password is required");
+    }
+    const out = await ctx.repository.signUp({ email: body.email, password: body.password });
+    return { body: out };
+  });
+
+  router.get("/v1/auth/oauth/:provider/authorize", { auth: "none" }, async (ctx) => {
+    const provider = decodeURIComponent(ctx.params.provider);
+    const redirect = ctx.query.get("redirect");
+    const codeChallenge = ctx.query.get("code_challenge");
+    if (!redirect) throw new ApiError(400, "validation_failed", "redirect is required");
+    if (!codeChallenge) throw new ApiError(400, "validation_failed", "code_challenge is required");
+    const location = ctx.repository.oauthAuthorizeUrl({ provider, redirect, codeChallenge });
+    return { redirect: location };
+  });
+
+  router.post("/v1/auth/oauth/exchange", { auth: "none" }, async (ctx) => {
+    const body = ctx.json ?? {};
+    if (!body.code || typeof body.code !== "string") throw new ApiError(400, "validation_failed", "code is required");
+    if (!body.codeVerifier || typeof body.codeVerifier !== "string") throw new ApiError(400, "validation_failed", "codeVerifier is required");
+    const out = await ctx.repository.exchangePkceCode({ code: body.code, codeVerifier: body.codeVerifier });
+    return { body: out };
+  });
+
   // Native OIDC sign-in (Apple / Google id_token grant). When a bearer token
   // is supplied, GoTrue links the identity to the current user instead of
   // creating a new one — this powers the anonymous → Apple upgrade path.

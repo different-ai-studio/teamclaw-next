@@ -40,6 +40,16 @@ export async function handleBusinessApiRequest(event, deps) {
         isBase64Encoded: true,
       };
     }
+    if (result.redirect) {
+      return {
+        statusCode: 302,
+        headers: {
+          "Location": result.redirect,
+          "X-Request-Id": requestId,
+        },
+        body: "",
+      };
+    }
     return jsonResponse(result.statusCode ?? 200, result.body, requestId);
   } catch (error) {
     return errorResponse(error, requestId);

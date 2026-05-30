@@ -3107,6 +3107,119 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/auth/signin-password:
+    post:
+      operationId: signInWithPassword
+      summary: Proxy to Supabase GoTrue password grant
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: GoTrue session payload
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/auth/signup:
+    post:
+      operationId: signUp
+      summary: Proxy to Supabase GoTrue /signup with email + password
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: GoTrue session payload (or confirmation pending)
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+  "/v1/auth/oauth/{provider}/authorize":
+    get:
+      operationId: oauthAuthorize
+      summary: Stateless PKCE OAuth authorize redirect
+      description: |
+        Builds a GoTrue authorize URL for the given provider and returns a 302
+        redirect. The client supplies its own PKCE `code_challenge`; FC holds no
+        state. GoTrue redirects to `redirect` (app scheme URL) with a single-use
+        authorization code.
+      tags: [Auth]
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, example: google }
+        - name: redirect
+          in: query
+          required: true
+          schema: { type: string, example: "teamclaw://auth-callback" }
+        - name: code_challenge
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to GoTrue authorize URL
+          headers:
+            Location:
+              schema: { type: string }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/auth/oauth/exchange:
+    post:
+      operationId: oauthExchangePkce
+      summary: Exchange PKCE authorization code for session tokens
+      description: |
+        Forwards `{ auth_code, code_verifier }` to GoTrue's
+        `POST /auth/v1/token?grant_type=pkce` and returns the session payload.
+        FC holds no state — the client supplies the `codeVerifier` it generated
+        before the authorize redirect.
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, codeVerifier]
+              properties:
+                code: { type: string }
+                codeVerifier: { type: string }
+      responses:
+        "200":
+          description: GoTrue session payload
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/me/bootstrap:
     get:
       operationId: getMeBootstrap
