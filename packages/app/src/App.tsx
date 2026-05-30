@@ -7,11 +7,10 @@ import {
 } from "react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
 import {
-  AlertCircle,
   BookOpen,
   FolderGit,
   ChevronLeft,
@@ -633,6 +632,30 @@ function AppContent() {
   // Extracted hooks — initialization, panel state, keyboard shortcuts
   const { initialWorkspaceResolved, openCodeError } = useWorkspaceInit();
   const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
+
+  // Surface a local amuxd daemon connection failure as a persistent toast
+  // instead of taking over the whole window. The rest of the UI stays usable;
+  // the toast auto-dismisses once the daemon becomes reachable.
+  useEffect(() => {
+    const DAEMON_TOAST_ID = "amuxd-daemon-unavailable";
+    if (isTauri() && workspacePath && !daemonHttpReady && openCodeError) {
+      toast.error(openCodeError, {
+        id: DAEMON_TOAST_ID,
+        duration: Infinity,
+        description: t(
+          "workspace.daemonUnavailableHint",
+          "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
+        ),
+        action: {
+          label: t("common.retry", "重试"),
+          onClick: () => window.location.reload(),
+        },
+      });
+    } else {
+      toast.dismiss(DAEMON_TOAST_ID);
+    }
+  }, [workspacePath, daemonHttpReady, openCodeError, t]);
+
   useDesktopNotifications(myActorId);
   useChannelGatewayInit();
   useGitReposInit();
@@ -1467,56 +1490,6 @@ function AppContent() {
           </header>
           <div className="flex-1 overflow-hidden">
             <WorkspacePrompt />
-          </div>
-        </SidebarInset>
-        {settingsModal}
-      </>
-    );
-  }
-
-  if (isTauri() && workspacePath && !daemonHttpReady) {
-    return (
-      <>
-        <AppSidebar />
-        <SidebarInset className="flex h-svh flex-col overflow-hidden">
-          <header
-            className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background px-4"
-            data-tauri-drag-region
-          >
-            {collapsedInsetLeading}
-            <span className="font-medium">{buildConfig.app.name}</span>
-          </header>
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-            {openCodeError ? (
-              <>
-                <AlertCircle className="h-10 w-10 text-destructive" />
-                <p className="max-w-md text-[15px] font-medium text-foreground">
-                  {openCodeError}
-                </p>
-                <p className="max-w-md text-[13px] text-muted-foreground">
-                  {t(
-                    "workspace.daemonUnavailableHint",
-                    "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
-                  )}
-                </p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="mt-2"
-                  onClick={() => window.location.reload()}
-                >
-                  <RotateCw className="mr-2 h-3.5 w-3.5" />
-                  {t("common.retry", "重试")}
-                </Button>
-              </>
-            ) : (
-              <>
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <p className="text-[13px] text-muted-foreground">
-                  {t("workspace.connectingDaemon", "正在连接 amuxd daemon…")}
-                </p>
-              </>
-            )}
           </div>
         </SidebarInset>
         {settingsModal}
