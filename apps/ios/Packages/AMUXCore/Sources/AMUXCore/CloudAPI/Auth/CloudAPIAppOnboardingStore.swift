@@ -33,6 +33,13 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         self.pkce = PKCEStore()
     }
 
+    /// Bridge-only handle to the underlying `SessionStore`. Used exclusively by
+    /// `SupabaseSessionBridge` at app composition to seed the Cloud API session
+    /// from an existing legacy Supabase session before first use. Not part of
+    /// the `AppOnboardingStore` protocol; do not use for normal token access
+    /// (go through `accessToken()` instead).
+    public nonisolated var sessionStoreForBridge: SessionStore { sessionStore }
+
     /// Hydrate the session from storage exactly once, before any operation.
     /// Done lazily (rather than a fire-and-forget `Task` in `init`) so the
     /// first call deterministically observes any persisted session.

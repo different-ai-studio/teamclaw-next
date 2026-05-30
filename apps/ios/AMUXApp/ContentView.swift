@@ -14,6 +14,10 @@ struct ContentView: View {
     @State private var onboarding: AppOnboardingCoordinator
     @State private var isConnecting = false
     @State private var connectTask: Task<Void, Never>?
+    /// One-shot legacy→CloudAPI session migration, run before the first
+    /// `bootstrap()`. Nil when no cloud config is resolvable (Supabase
+    /// fallback) — nothing to migrate. Cleared after it runs once.
+    @State private var pendingSessionMigration: (@Sendable () async -> Void)?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
 
@@ -23,15 +27,44 @@ struct ContentView: View {
         _mqtt = State(initialValue: mqtt)
         _hub = State(initialValue: MQTTMessageHub(mqtt: mqtt))
 
-        do {
-            let store = try SupabaseAppOnboardingStore()
-            _onboarding = State(initialValue: AppOnboardingCoordinator(store: store))
-        } catch {
-            _onboarding = State(
-                initialValue: AppOnboardingCoordinator(
-                    store: FailingOnboardingStore(error: error)
-                )
+        // Cloud API is the production default (see CloudAPIConfigurationStore):
+        // build the Cloud-API-backed onboarding store whenever a cloud endpoint
+        // is resolvable, and schedule a one-shot bridge that seeds the new
+        // SessionStore from any existing Supabase session so already-signed-in
+        // users are NOT logged out by the cutover. Fall back to the legacy
+        // Supabase store only when no cloud config exists (removed in Task 10).
+        if let cloudConfig = CloudAPIConfigurationStore.configuration() {
+            let store = CloudAPIAppOnboardingStore(
+                configuration: cloudConfig,
+                storage: KeychainSessionStorage()
             )
+            _onboarding = State(initialValue: AppOnboardingCoordinator(store: store))
+
+            let sessionStore = store.sessionStoreForBridge
+            let baseURL = cloudConfig.baseURL
+            _pendingSessionMigration = State(initialValue: { @Sendable in
+                let bridge = SupabaseSessionBridge(
+                    sessionStore: sessionStore,
+                    baseURL: baseURL,
+                    legacyRefreshTokenProvider: {
+                        guard let legacy = try? SupabaseAppOnboardingStore() else { return nil }
+                        return try? await legacy.legacyRefreshToken()
+                    }
+                )
+                try? await bridge.migrateIfNeeded()
+            })
+        } else {
+            do {
+                let store = try SupabaseAppOnboardingStore()
+                _onboarding = State(initialValue: AppOnboardingCoordinator(store: store))
+            } catch {
+                _onboarding = State(
+                    initialValue: AppOnboardingCoordinator(
+                        store: FailingOnboardingStore(error: error)
+                    )
+                )
+            }
+            _pendingSessionMigration = State(initialValue: nil)
         }
     }
 
@@ -76,6 +109,14 @@ struct ContentView: View {
             }
         }
         .task {
+            // Seed the Cloud API SessionStore from any pre-existing Supabase
+            // session exactly once, BEFORE the first bootstrap, so existing
+            // users stay signed in across the cutover. No-op (nil) on the
+            // Supabase fallback path.
+            if let migrate = pendingSessionMigration {
+                pendingSessionMigration = nil
+                await migrate()
+            }
             await onboarding.bootstrap()
         }
         .task {

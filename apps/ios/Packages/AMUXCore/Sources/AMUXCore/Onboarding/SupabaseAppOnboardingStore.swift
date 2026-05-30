@@ -320,6 +320,15 @@ public actor SupabaseAppOnboardingStore: AppOnboardingStore {
         try await client.auth.session.accessToken
     }
 
+    /// Read-only accessor used ONLY by `SupabaseSessionBridge` to seed the
+    /// Cloud API session from an existing legacy Supabase session during the
+    /// one-shot auth migration. Reads the cached session (no network refresh,
+    /// returns nil when no legacy session exists) so it can never log the user
+    /// out as a side effect of the migration probe.
+    public func legacyRefreshToken() async throws -> String? {
+        client.auth.currentSession?.refreshToken
+    }
+
     public nonisolated func tokenRefreshes() -> AsyncStream<Void> {
         AsyncStream { continuation in
             let task = Task { [client] in
