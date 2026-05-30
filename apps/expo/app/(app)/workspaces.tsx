@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -14,10 +14,12 @@ import {
 
 import { useOnboarding } from "../_layout";
 import { createActorsApi } from "../../src/features/actors/actor-api";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
 import { showToast } from "../../src/ui/Toast";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
 type WorkspaceRow = {
@@ -42,6 +44,11 @@ export default function WorkspacesRoute() {
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const workspacesApi = useMemo(
+    () => createWorkspacesApi({ getAccessToken: supabaseAccessToken(supabase) }),
+    [],
+  );
+
   const load = useCallback(async () => {
     if (!teamId) {
       setIsLoading(false);
@@ -50,23 +57,25 @@ export default function WorkspacesRoute() {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await supabase
-        .from("workspaces")
-        .select("id, name, path, agent_id, archived")
-        .eq("team_id", teamId)
-        .order("name", { ascending: true });
-      if (result.error) {
-        setError(result.error.message);
-        setRows([]);
-      } else {
-        setRows((result.data ?? []) as WorkspaceRow[]);
-      }
+      const items = await workspacesApi.list(teamId);
+      setRows(
+        items
+          .map((w) => ({
+            id: w.id,
+            name: w.name,
+            path: w.path,
+            agent_id: w.agentId,
+            archived: w.archived,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load workspaces.");
+      setRows([]);
     } finally {
       setIsLoading(false);
     }
-  }, [teamId]);
+  }, [teamId, workspacesApi]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,15 +90,8 @@ export default function WorkspacesRoute() {
 
   const handleArchive = async (id: string, archived: boolean) => {
     try {
-      const result = await supabase
-        .from("workspaces")
-        .update({ archived, updated_at: new Date().toISOString() })
-        .eq("id", id);
-      if (result.error) {
-        setError(result.error.message);
-      } else {
-        await load();
-      }
+      await workspacesApi.setArchived(id, archived);
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't update workspace.");
     }
@@ -123,14 +125,7 @@ export default function WorkspacesRoute() {
 
   const handleAgentBind = async (workspaceId: string, agentId: string | null) => {
     try {
-      const result = await supabase
-        .from("workspaces")
-        .update({ agent_id: agentId, updated_at: new Date().toISOString() })
-        .eq("id", workspaceId);
-      if (result.error) {
-        setError(result.error.message);
-        return;
-      }
+      await workspacesApi.bindAgent(workspaceId, agentId);
       setRows((prev) =>
         prev.map((row) =>
           row.id === workspaceId ? { ...row, agent_id: agentId } : row,
@@ -145,14 +140,7 @@ export default function WorkspacesRoute() {
   const commitPath = async (id: string) => {
     try {
       const next = editPathDraft.trim();
-      const result = await supabase
-        .from("workspaces")
-        .update({ path: next || null, updated_at: new Date().toISOString() })
-        .eq("id", id);
-      if (result.error) {
-        setError(result.error.message);
-        return;
-      }
+      await workspacesApi.setPath(id, next || null);
       setRows((prev) => prev.map((row) => (row.id === id ? { ...row, path: next || null } : row)));
       setEditingPathId(null);
       setEditPathDraft("");
@@ -168,19 +156,14 @@ export default function WorkspacesRoute() {
     setIsCreating(true);
     setCreateError(null);
     try {
-      const result = await supabase.from("workspaces").insert({
-        team_id: teamId,
-        created_by_member_id: memberActorId,
+      await workspacesApi.create({
+        teamId,
         name,
-        archived: false,
+        createdByMemberId: memberActorId,
       });
-      if (result.error) {
-        setCreateError(result.error.message);
-      } else {
-        setCreateDraft("");
-        showToast("success", "Workspace created");
-        await load();
-      }
+      setCreateDraft("");
+      showToast("success", "Workspace created");
+      await load();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Couldn't create workspace.");
     } finally {

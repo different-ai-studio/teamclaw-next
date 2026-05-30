@@ -1024,6 +1024,16 @@ paths:
                   type: string
                 archived:
                   type: boolean
+                path:
+                  type:
+                    - string
+                    - "null"
+                agentId:
+                  description: Bind (or, when null, unbind) the workspace's agent.
+                  type:
+                    - string
+                    - "null"
+                  format: uuid
                 metadata:
                   type: object
                   additionalProperties: true

@@ -368,6 +368,7 @@ export function createSupabaseBusinessRepository(options) {
       if (patch.archived !== undefined) row.archived = patch.archived;
       if (patch.slug !== undefined) row.path = patch.slug;
       if (patch.path !== undefined) row.path = patch.path;
+      if (patch.agentId !== undefined) row.agent_id = patch.agentId;
       const { data, error } = await supabase
         .from("workspaces")
         .update(row)

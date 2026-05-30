@@ -125,6 +125,14 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     assert.equal(w.archived, true);
   });
 
+  test("repository contract: patchWorkspace binds agentId", async () => {
+    const repo = createRepository();
+    const bound = await repo.patchWorkspace("workspace-1", { agentId: "agent-9" });
+    assert.equal(bound.agentId, "agent-9");
+    const cleared = await repo.patchWorkspace("workspace-1", { agentId: null });
+    assert.equal(cleared.agentId, null);
+  });
+
   test("repository contract: getTeamWorkspaceConfig returns null when absent", async () => {
     const repo = createRepository();
     const cfg = await repo.getTeamWorkspaceConfig("team-no-config");

@@ -239,6 +239,7 @@ function contractRepo() {
       if (patch.name !== undefined) w.name = patch.name;
       if (patch.archived !== undefined) w.archived = patch.archived;
       if (patch.metadata !== undefined) w.metadata = patch.metadata;
+      if (patch.agentId !== undefined) w.agentId = patch.agentId;
       return w;
     },
     async getTeamWorkspaceConfig(teamId) {
