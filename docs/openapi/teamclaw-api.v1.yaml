@@ -414,6 +414,22 @@ paths:
           description: OK
         "401":
           $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/mark-unread:
+    post:
+      operationId: markSessionUnread
+      summary: Mark session unread
+      description: |
+        Deletes the current actor's read marker for the session so it
+        re-surfaces as unread. The actor is derived from the bearer token,
+        mirroring mark-viewed.
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/teams/{teamId}/sessions:
     get:
       operationId: listTeamSessions

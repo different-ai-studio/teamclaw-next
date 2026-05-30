@@ -32,7 +32,7 @@ import {
   type TimelineEvent,
 } from "./session-types";
 import { reduceTimeline, emptyTimelineState, type TimelineState } from "./timeline-reducer";
-import { createSessionsApi } from "./session-api";
+import type { createCloudSessionsApi } from "./cloud-api";
 
 export type SessionDetailConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -50,7 +50,7 @@ export type SessionDetailControllerState = {
   streamingByAgent: ReadonlyMap<string, StreamingBuffer>;
 };
 
-type SessionsApi = ReturnType<typeof createSessionsApi>;
+type SessionsApi = ReturnType<typeof createCloudSessionsApi>;
 
 type SessionDetailControllerDeps = {
   api: Pick<

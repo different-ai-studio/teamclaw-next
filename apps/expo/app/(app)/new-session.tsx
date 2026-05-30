@@ -9,7 +9,7 @@ import { isOpenIdea, type Idea } from "../../src/features/ideas/idea-types";
 import { buildFirstMessageWithIdea } from "../../src/features/sessions/idea-preface";
 import { resolveInitialMessageMentionActorIds } from "../../src/features/sessions/session-mention-resolver";
 import { resolveAgentRuntimeStartPlans } from "../../src/features/sessions/runtime-start";
-import { createSessionsApi } from "../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
 import {
   NewSessionScreen,
   type AgentWorkspaceChoice,
@@ -124,7 +124,7 @@ export default function NewSessionRoute() {
         setIsBusy(true);
         setErrorMessage(null);
         try {
-          const sessionsApi = createSessionsApi(supabase);
+          const sessionsApi = createConfiguredSessionsApi(supabase);
           const actorById = new Map(actors.map((actor) => [actor.actorId, actor]));
           const selectedAgents = collaboratorActorIds
             .map((id) => actorById.get(id))
@@ -168,6 +168,7 @@ export default function NewSessionRoute() {
             : undefined;
           const expandedMessage = buildFirstMessageWithIdea(firstMessage, idea);
           const sessionId = await sessionsApi.createSession({
+            teamId: state.currentTeam.id,
             title: deriveTitle(firstMessage),
             mode: "collab",
             primaryAgentId: primaryAgentActorId,

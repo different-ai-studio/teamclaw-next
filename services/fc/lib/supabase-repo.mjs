@@ -1522,6 +1522,17 @@ async heartbeat() {
       if (error) throw error;
     },
 
+    async markSessionUnread(sessionId) {
+      // RLS ("write own markers", FOR ALL) scopes the delete to the caller's
+      // own actor markers, so a delete-by-session_id only clears the current
+      // user's read marker — the symmetric counterpart to markSessionViewed.
+      const { error } = await supabase
+        .from("session_read_markers")
+        .delete()
+        .eq("session_id", sessionId);
+      if (error) throw error;
+    },
+
     async getSessionByAcp(acpSessionId) {
       const { data, error } = await supabase
         .from("sessions")

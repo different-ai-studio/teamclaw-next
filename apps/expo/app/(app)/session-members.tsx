@@ -9,7 +9,7 @@ import {
   resolveAgentRuntimeRestartPlan,
   resolveAgentRuntimeStartPlans,
 } from "../../src/features/sessions/runtime-start";
-import { createSessionsApi } from "../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
 import { MemberPickerSheet } from "../../src/features/sessions/screens/MemberPickerSheet";
 import { SessionMemberSheet } from "../../src/features/sessions/screens/SessionMemberSheet";
 import { supabase } from "../../src/lib/supabase/client";
@@ -72,7 +72,7 @@ export default function SessionMembersRoute() {
     }
     let cancelled = false;
     setIsLoading(true);
-    const sessionsApi = createSessionsApi(supabase);
+    const sessionsApi = createConfiguredSessionsApi(supabase);
     const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
     void Promise.all([
       sessionsApi.getSession(teamId, sessionId),
@@ -163,7 +163,7 @@ export default function SessionMembersRoute() {
   const handleRemove = async (actorId: string) => {
     if (!sessionId) return;
     try {
-      await createSessionsApi(supabase).removeParticipant(sessionId, actorId);
+      await createConfiguredSessionsApi(supabase).removeParticipant(sessionId, actorId);
       setParticipantIds((prev) => prev.filter((id) => id !== actorId));
       showToast("success", "Removed from session");
     } catch (err) {
@@ -223,7 +223,7 @@ export default function SessionMembersRoute() {
               })),
             })
           : [];
-      await createSessionsApi(supabase).addParticipants(sessionId, fresh);
+      await createConfiguredSessionsApi(supabase).addParticipants(sessionId, fresh);
       setParticipantIds((prev) => Array.from(new Set([...prev, ...fresh])));
       if (runtimePlans.length > 0 && teamMqtt && state.currentMemberActorId) {
         const runtimeRpc = createRuntimeRpcClient({
@@ -412,7 +412,7 @@ export default function SessionMembersRoute() {
           setModelPromptAgent(null);
           if (!target || !trimmed) return;
           try {
-            await createSessionsApi(supabase).updateRuntimeModel(
+            await createConfiguredSessionsApi(supabase).updateRuntimeModel(
               target.dbRuntimeId,
               trimmed,
             );

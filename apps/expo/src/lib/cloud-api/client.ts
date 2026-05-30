@@ -10,6 +10,17 @@ export type CloudApiClient = {
   del: (path: string) => Promise<void>;
 };
 
+/** Thrown for non-2xx Cloud API responses; carries the HTTP status so callers
+ * can branch (e.g. treat 404 as "absent" rather than an error). */
+export class CloudApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "CloudApiError";
+    this.status = status;
+  }
+}
+
 /** Resolve the Cloud API base URL (cloud_api is the only client backend). */
 export function cloudApiBaseUrl(): string {
   const baseUrl = process.env.EXPO_PUBLIC_CLOUD_API_URL?.trim();
@@ -65,7 +76,10 @@ export function createCloudApiClient(args: {
     const text = await response.text();
     const payload = text ? JSON.parse(text) : null;
     if (!response.ok) {
-      throw new Error(payload?.error?.message ?? "Cloud API request failed.");
+      throw new CloudApiError(
+        response.status,
+        payload?.error?.message ?? "Cloud API request failed.",
+      );
     }
     return payload as T;
   }

@@ -141,6 +141,7 @@ function contractRepo() {
       return newS;
     },
     async markSessionViewed(sessionId) {},
+    async markSessionUnread(sessionId) {},
     async listSessionParticipants(sessionId) {
       const s = sessionStore.find(s => s.id === sessionId);
       return { items: s?.participants ?? [] };

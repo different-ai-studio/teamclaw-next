@@ -190,6 +190,12 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     await repo.markSessionViewed("session-1");
   });
 
+  test("repository contract: markSessionUnread succeeds", async () => {
+    const repo = createRepository();
+    await repo.markSessionViewed("session-1", "message-1");
+    await repo.markSessionUnread("session-1");
+  });
+
   test("repository contract: listSessionParticipants returns items", async () => {
     const repo = createRepository();
     const out = await repo.listSessionParticipants("session-1");
