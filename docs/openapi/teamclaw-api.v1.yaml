@@ -2993,7 +2993,11 @@ paths:
   /v1/auth/signin-otp:
     post:
       operationId: signInOtp
-      summary: Proxy to Supabase GoTrue /auth/v1/otp (magic link)
+      summary: Proxy to Supabase GoTrue /auth/v1/otp (email or SMS OTP)
+      description: >
+        Provide either `email` or `phone` (E.164, e.g. +8613800138000). For
+        phone, an SMS code is sent; pass `options.channel` to override the
+        default "sms" delivery channel.
       tags: [Auth]
       security: []
       requestBody:
@@ -3002,9 +3006,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email]
+              description: Exactly one of email or phone must be provided.
               properties:
                 email: { type: string, format: email }
+                phone: { type: string, description: "E.164 phone, e.g. +8613800138000" }
                 options: { type: object }
       responses:
         "200":
@@ -3020,6 +3025,9 @@ paths:
     post:
       operationId: verifyOtp
       summary: Proxy to Supabase GoTrue /auth/v1/verify
+      description: >
+        Provide either `email` or `phone` (matching the signin-otp request)
+        plus `token`. `type` defaults to "email"; phone verification uses "sms".
       tags: [Auth]
       security: []
       requestBody:
@@ -3028,11 +3036,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, token]
+              required: [token]
+              description: Exactly one of email or phone must be provided.
               properties:
                 email: { type: string, format: email }
+                phone: { type: string, description: "E.164 phone, e.g. +8613800138000" }
                 token: { type: string }
-                type: { type: string, default: email }
+                type: { type: string, default: email, enum: [email, sms, signup, email_change, phone_change, recovery] }
       responses:
         "200":
           description: GoTrue session payload

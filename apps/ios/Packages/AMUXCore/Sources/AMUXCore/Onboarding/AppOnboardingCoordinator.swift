@@ -86,6 +86,8 @@ public protocol AppOnboardingStore: Sendable {
     func signUp(email: String, password: String) async throws
     func sendEmailOTP(email: String) async throws
     func verifyOTP(email: String, token: String) async throws
+    func sendPhoneOTP(phone: String) async throws
+    func verifyPhoneOTP(phone: String, token: String) async throws
     func signInWithAppleCredential(idToken: String, nonce: String) async throws
     func signInWithGoogle() async throws
     func signInAnonymously() async throws
@@ -136,6 +138,9 @@ public final class AppOnboardingCoordinator {
     public var pendingCreatedTeam: CreatedTeam?
     public var errorMessage: String?
     public var pendingEmailOTPEmail: String?
+    /// E.164 phone awaiting an SMS code. Mirrors `pendingEmailOTPEmail`; the
+    /// login UI shows the code step when either is non-nil.
+    public var pendingPhoneOTPPhone: String?
     public var isBusy = false
     /// True iff the current session is an anonymous Supabase user. UI uses
     /// this to surface the "upgrade your account" affordance.
@@ -467,6 +472,28 @@ public final class AppOnboardingCoordinator {
 
     public func resetPendingEmailOTP() {
         pendingEmailOTPEmail = nil
+        errorMessage = nil
+    }
+
+    public func sendPhoneOTP(phone: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await store.sendPhoneOTP(phone: phone)
+            pendingPhoneOTPPhone = phone
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    public func verifyPhoneOTP(phone: String, token: String) async {
+        await performAuth { try await self.store.verifyPhoneOTP(phone: phone, token: token) }
+    }
+
+    public func resetPendingPhoneOTP() {
+        pendingPhoneOTPPhone = nil
         errorMessage = nil
     }
 

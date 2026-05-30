@@ -2089,8 +2089,17 @@ export function createSupabaseAuthRepository(options) {
       });
     },
 
-    async signInOtp({ email, options }) {
-      const body = { email };
+    async signInOtp({ email, phone, options }) {
+      // GoTrue /otp accepts either `email` or `phone` (E.164). For phone the
+      // `channel` option ("sms" | "whatsapp") selects delivery; default sms.
+      const body = {};
+      if (typeof email === "string" && email.length > 0) body.email = email;
+      if (typeof phone === "string" && phone.length > 0) {
+        body.phone = phone;
+        if (!options || typeof options !== "object" || !("channel" in options)) {
+          body.channel = "sms";
+        }
+      }
       if (options && typeof options === "object") {
         Object.assign(body, options);
       }
@@ -2105,14 +2114,18 @@ export function createSupabaseAuthRepository(options) {
       });
     },
 
-    async verifyOtp({ email, token, type = "email" }) {
+    async verifyOtp({ email, phone, token, type = "email" }) {
+      // For phone OTP, GoTrue expects { phone, token, type: "sms" }.
+      const body = { token, type };
+      if (typeof email === "string" && email.length > 0) body.email = email;
+      if (typeof phone === "string" && phone.length > 0) body.phone = phone;
       return goTrueRequest({
         fetchImpl,
         supabaseUrl,
         apiKey: publishableKey,
         method: "POST",
         path: "/auth/v1/verify",
-        body: { email, token, type },
+        body,
         operation: "auth.verifyOtp",
       });
     },
