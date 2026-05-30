@@ -174,6 +174,48 @@ describe('AgentSelectorDock', () => {
     expect(screen.queryByText('old-model')).not.toBeInTheDocument()
   })
 
+  it('does not refetch runtime hints in a loop when retain payload changes but runtime ids stay the same', async () => {
+    mocks.agentRuntimeRows = []
+    const retainEntry = {
+      daemonDeviceId: 'a-1',
+      lastUpdated: Date.now(),
+      info: {
+        availableModels: [{ id: 'm-1', displayName: 'Model One' }],
+        currentModel: 'm-1',
+      },
+    }
+    mocks.runtimeStates = { 'a-1': retainEntry }
+
+    const props = {
+      activeSessionId: 'session-1' as const,
+      engagedAgents: [{ id: 'a-1', displayName: 'OpenCode Bot' }],
+      onRemoveAgent: vi.fn(),
+    }
+
+    const { rerender } = render(<AgentSelectorDock {...props} />)
+
+    await screen.findByText('OpenCode Bot')
+    await new Promise((r) => setTimeout(r, 50))
+    const callsAfterMount = mocks.queriedTeamIds.length
+
+    for (let i = 0; i < 5; i += 1) {
+      mocks.runtimeStates = {
+        'a-1': {
+          ...retainEntry,
+          lastUpdated: Date.now() + i + 1,
+          info: {
+            ...retainEntry.info,
+            currentModel: `m-${i}`,
+          },
+        },
+      }
+      rerender(<AgentSelectorDock {...props} />)
+    }
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(mocks.queriedTeamIds.length).toBe(callsAfterMount)
+  })
+
   it('shows loading when runtime has not advertised ACP models yet', async () => {
     mocks.agentRuntimeRows = [
       { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'session-1' },

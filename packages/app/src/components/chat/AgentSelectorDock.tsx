@@ -142,7 +142,17 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
   }, [activeSessionId, teamId, engagedAgentIdSignature])
 
   // Retain-driven refetch: if any engaged agent has a retain but we haven't
-  // mapped its runtime_id yet, re-pull agent_runtimes.
+  // mapped its runtime_id yet, re-pull agent_runtimes. Guarded so we only try
+  // once per (missing agents, retain snapshot) — agentToRuntimeId must not be
+  // in the effect deps or setState retriggers an infinite refetch loop.
+  const missingAgentIdSignature = React.useMemo(() => {
+    return engagedAgents
+      .filter((a) => !agentToRuntimeId.has(a.id))
+      .map((a) => a.id)
+      .sort()
+      .join(',')
+  }, [engagedAgents, agentToRuntimeId])
+
   const retainSignature = React.useMemo(() => {
     const ids = engagedAgents.map((a) => a.id)
     return Object.entries(runtimeStates)
@@ -152,11 +162,20 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
       .join(',')
   }, [runtimeStates, engagedAgents])
 
+  const runtimeMapRefetchKeyRef = React.useRef<string | null>(null)
+
   React.useEffect(() => {
-    if (!activeSessionId || !teamId || engagedAgents.length === 0) return
-    const missing = engagedAgents.some((a) => !agentToRuntimeId.has(a.id))
-    if (!missing) return
+    runtimeMapRefetchKeyRef.current = null
+  }, [activeSessionId, engagedAgentIdSignature])
+
+  React.useEffect(() => {
+    if (!activeSessionId || !teamId || !missingAgentIdSignature) return
     if (!retainSignature) return
+
+    const refetchKey = `${missingAgentIdSignature}|${retainSignature}`
+    if (runtimeMapRefetchKeyRef.current === refetchKey) return
+    runtimeMapRefetchKeyRef.current = refetchKey
+
     let cancelled = false
     void (async () => {
       let rtRows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
@@ -170,27 +189,48 @@ export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgen
         rtRows = []
       }
       if (cancelled) return
-      const map = new Map<string, string>()
-      const btMap = new Map<string, string>()
-      for (const r of rtRows.filter((row) => row.session_id === activeSessionId)) {
-        if (r.agent_id && r.runtime_id && !map.has(r.agent_id)) map.set(r.agent_id, r.runtime_id)
-        if (r.agent_id && r.backend_type && !btMap.has(r.agent_id)) btMap.set(r.agent_id, r.backend_type)
-      }
-      sessionFlowLog('agent_selector.runtime_map.refetched', {
-        sessionId: activeSessionId,
-        rowCount: rtRows.length,
-        missingAgentIds: engagedAgents.filter((a) => !agentToRuntimeId.has(a.id)).map((a) => a.id),
-        retainSignature,
+
+      const sessionRows = rtRows.filter((row) => row.session_id === activeSessionId)
+      let mappedAgentIds: string[] = []
+      setAgentToRuntimeId((prev) => {
+        const next = new Map(prev)
+        for (const r of sessionRows) {
+          if (r.agent_id && r.runtime_id && !next.has(r.agent_id)) {
+            next.set(r.agent_id, r.runtime_id)
+            mappedAgentIds.push(r.agent_id)
+          }
+        }
+        return mappedAgentIds.length > 0 ? next : prev
       })
-      setAgentToRuntimeId(map)
       setAgentToBackendType((prev) => {
         const next = new Map(prev)
-        btMap.forEach((bt, id) => next.set(id, bt))
-        return next
+        let changed = false
+        for (const r of sessionRows) {
+          if (r.agent_id && r.backend_type && !next.has(r.agent_id)) {
+            next.set(r.agent_id, r.backend_type)
+            changed = true
+          }
+        }
+        return changed ? next : prev
       })
+      if (mappedAgentIds.length > 0) {
+        sessionFlowLog('agent_selector.runtime_map.refetched', {
+          sessionId: activeSessionId,
+          rowCount: rtRows.length,
+          mappedAgentIds,
+          missingAgentIds: missingAgentIdSignature.split(','),
+          retainSignature,
+        })
+      }
     })()
     return () => { cancelled = true }
-  }, [engagedAgents, activeSessionId, agentToRuntimeId, retainSignature, teamId, engagedAgentIdSignature])
+  }, [
+    activeSessionId,
+    teamId,
+    missingAgentIdSignature,
+    retainSignature,
+    engagedAgentIds,
+  ])
 
   // Backfill backend_type from the agent's most recent historical runtime
   // when we have no live entry yet — mirrors iOS CachedAgentRuntime fallback.
