@@ -142,6 +142,14 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
         // no-op
     }
 
+    func sendPhoneOTP(phone: String) async throws {
+        // no-op
+    }
+
+    func verifyPhoneOTP(phone: String, token: String) async throws {
+        // no-op
+    }
+
     func signInWithAppleCredential(idToken: String, nonce: String) async throws {
         // no-op
     }

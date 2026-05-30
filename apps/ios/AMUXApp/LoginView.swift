@@ -6,17 +6,31 @@ import AMUXCore
 struct LoginView: View {
     @Bindable var coordinator: AppOnboardingCoordinator
     @State private var email = ""
+    @State private var phone = "+86"
     @State private var code = ""
+    @State private var loginMethod: LoginMethod = .email
+
+    private enum LoginMethod: Hashable { case email, phone }
+
+    /// True once either an email or phone code has been requested.
+    private var isCodeStep: Bool {
+        coordinator.pendingEmailOTPEmail != nil || coordinator.pendingPhoneOTPPhone != nil
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
-                if coordinator.pendingEmailOTPEmail != nil {
+                if isCodeStep {
                     codeEntrySection
                 } else {
-                    emailEntrySection
+                    methodPicker
+                    if loginMethod == .email {
+                        emailEntrySection
+                    } else {
+                        phoneEntrySection
+                    }
                 }
 
                 if let err = coordinator.errorMessage {
@@ -41,17 +55,55 @@ struct LoginView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(coordinator.pendingEmailOTPEmail != nil ? "Enter the code" : "Sign in")
+            Text(isCodeStep ? "Enter the code" : "Sign in")
                 .font(.amuxSerif(38, weight: .regular))
                 .foregroundStyle(Color.amux.onyx)
-            Text(coordinator.pendingEmailOTPEmail != nil
-                 ? "Check your inbox for a 6-digit code."
-                 : "We'll email you a 6-digit code.")
+            Text(headerSubtitle)
                 .font(.body)
                 .foregroundStyle(Color.amux.basalt)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var headerSubtitle: String {
+        if coordinator.pendingPhoneOTPPhone != nil {
+            return "Check your messages for a 6-digit code."
+        }
+        if coordinator.pendingEmailOTPEmail != nil {
+            return "Check your inbox for a 6-digit code."
+        }
+        return loginMethod == .phone
+            ? "We'll text you a 6-digit code."
+            : "We'll email you a 6-digit code."
+    }
+
+    // MARK: - Method picker
+
+    private var methodPicker: some View {
+        Picker("Sign-in method", selection: $loginMethod) {
+            Text("Email").tag(LoginMethod.email)
+            Text("Phone").tag(LoginMethod.phone)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("login.methodPicker")
+    }
+
+    // MARK: - Phone entry (step 1)
+
+    private var phoneEntrySection: some View {
+        VStack(spacing: 12) {
+            authField {
+                TextField("Phone number", text: $phone)
+                    .textContentType(.telephoneNumber)
+                    .keyboardType(.phonePad)
+                    .accessibilityIdentifier("login.phoneField")
+            }
+
+            primaryButton(title: "Send code", enabled: phone.count > 4) {
+                Task { await coordinator.sendPhoneOTP(phone: phone) }
+            }
+        }
     }
 
     // MARK: - Email entry (step 1)
@@ -77,8 +129,8 @@ struct LoginView: View {
 
     private var codeEntrySection: some View {
         VStack(spacing: 12) {
-            if let pendingEmail = coordinator.pendingEmailOTPEmail {
-                Text("Code sent to **\(pendingEmail)**")
+            if let destination = coordinator.pendingPhoneOTPPhone ?? coordinator.pendingEmailOTPEmail {
+                Text("Code sent to **\(destination)**")
                     .font(.footnote)
                     .foregroundStyle(Color.amux.basalt)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -96,15 +148,22 @@ struct LoginView: View {
             }
 
             primaryButton(title: "Verify", enabled: code.count == 6) {
-                guard let pendingEmail = coordinator.pendingEmailOTPEmail else { return }
-                Task { await coordinator.verifyOTP(email: pendingEmail, token: code) }
+                if let pendingPhone = coordinator.pendingPhoneOTPPhone {
+                    Task { await coordinator.verifyPhoneOTP(phone: pendingPhone, token: code) }
+                } else if let pendingEmail = coordinator.pendingEmailOTPEmail {
+                    Task { await coordinator.verifyOTP(email: pendingEmail, token: code) }
+                }
             }
 
             Button {
                 code = ""
-                coordinator.resetPendingEmailOTP()
+                if coordinator.pendingPhoneOTPPhone != nil {
+                    coordinator.resetPendingPhoneOTP()
+                } else {
+                    coordinator.resetPendingEmailOTP()
+                }
             } label: {
-                Text("Use a different email")
+                Text(coordinator.pendingPhoneOTPPhone != nil ? "Use a different number" : "Use a different email")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(Color.amux.cinnabarDeep)
                     .frame(maxWidth: .infinity)
