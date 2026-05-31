@@ -1,6 +1,11 @@
+import { eq } from "drizzle-orm";
+import type { PgDatabase } from "drizzle-orm/pg-core";
 import { getAuth, type Auth } from "../../auth/better-auth.js";
 import { mintSession } from "../../auth/mint-session.js";
 import { toGoTrueSession, toRefreshShape, toEpochSeconds } from "../../auth/reshape.js";
+import { teamInvites, actors, members, teamMembers, agents, agentMemberAccess } from "../../db/schema/index.js";
+import { ApiError } from "../http-utils.js";
+import { randomUUID } from "node:crypto";
 
 // createPgAuthRepository — the BACKEND_KIND=postgres AuthRepository, backed by
 // Better-Auth. Every method calls the VERIFIED getAuth().api.* and reshapes the
@@ -15,7 +20,7 @@ import { toGoTrueSession, toRefreshShape, toEpochSeconds } from "../../auth/resh
 //     -> `{ token: <JWT> }`. The JWT has sub=userId, iss=aud=baseURL (matches
 //     verify.ts), exp ~15m.
 //   - Session (refresh) expiry comes from auth.api.getSession(...).session.expiresAt.
-export function createPgAuthRepository(opts: { auth?: Auth } = {}) {
+export function createPgAuthRepository(opts: { auth?: Auth; db?: PgDatabase<any, any> } = {}) {
   // Keep getAuth() lazy — resolve inside each method so importing the module
   // needs no env. `opts.auth` lets tests inject a pglite-backed instance.
   const resolveAuth = () => opts.auth ?? getAuth();
@@ -178,9 +183,126 @@ export function createPgAuthRepository(opts: { auth?: Auth } = {}) {
     },
 
     // --- Plan 5 ---
-    async claimInvite(_token: string) {
-      void _token;
-      throw new Error("not_implemented:claimInvite");
+    // claimInvite(token, { userId? }):
+    //   member branch: requires a userId (existing Better-Auth user); inserts
+    //     actor(member) + member(active) + team_member; refreshToken = null.
+    //   agent branch: creates a daemon Better-Auth user (daemon.{uuid}@amuxd.run),
+    //     inserts actor(agent) + agents + agent_member_access(admin); mints a
+    //     session and returns the refreshToken.
+    //   Both branches mark the invite consumed atomically in a transaction.
+    async claimInvite(token: string, ctx: { userId?: string } = {}) {
+      const db = opts.db;
+      if (!db) throw new Error("claimInvite requires db to be passed in opts");
+      const auth = resolveAuth();
+
+      // Load + validate invite
+      const [invite] = await db
+        .select()
+        .from(teamInvites)
+        .where(eq(teamInvites.token, token))
+        .limit(1);
+      if (!invite) throw new ApiError(404, "not_found", "invite not found");
+      if (invite.consumedAt) throw new ApiError(409, "conflict", "invite_already_claimed");
+      if (new Date(invite.expiresAt) < new Date()) throw new ApiError(404, "not_found", "invite_expired");
+
+      const kind = invite.kind; // "member" | "agent"
+
+      if (kind === "member") {
+        const userId = ctx.userId;
+        if (!userId) throw new ApiError(400, "bad_request", "userId required for member invite claim");
+
+        return await (db as any).transaction(async (tx: any) => {
+          // Insert actor
+          const [actor] = await tx.insert(actors).values({
+            teamId: invite.teamId,
+            actorType: "member",
+            displayName: invite.displayName,
+            userId,
+            invitedByActorId: invite.invitedByActorId,
+          }).returning();
+
+          // Insert member (active)
+          await tx.insert(members).values({ id: actor.id, status: "active" });
+
+          // Insert team_member
+          await tx.insert(teamMembers).values({
+            teamId: invite.teamId,
+            memberId: actor.id,
+            role: invite.teamRole ?? "member",
+          });
+
+          // Mark invite consumed
+          await (tx.update(teamInvites) as any)
+            .set({ consumedAt: new Date(), consumedByActorId: actor.id })
+            .where(eq(teamInvites.token, token));
+
+          return {
+            actorId: actor.id,
+            teamId: invite.teamId,
+            actorType: "member" as const,
+            displayName: invite.displayName,
+            refreshToken: null,
+          };
+        });
+      }
+
+      if (kind === "agent") {
+        // Create a daemon Better-Auth user via internalAdapter.createUser
+        // (same surface used by mintSession for createSession)
+        const ctx2 = await (auth as any).$context;
+        const daemonEmail = `daemon.${randomUUID()}@amuxd.run`;
+        const daemonUser = await ctx2.internalAdapter.createUser({
+          email: daemonEmail,
+          name: invite.displayName,
+          emailVerified: false,
+        });
+        if (!daemonUser?.id) throw new Error("failed to create daemon Better-Auth user");
+
+        const minted = await mintSession(daemonUser.id, auth);
+
+        return await (db as any).transaction(async (tx: any) => {
+          // Insert actor (agent type, userId = daemon BA user)
+          const [actor] = await tx.insert(actors).values({
+            teamId: invite.teamId,
+            actorType: "agent",
+            displayName: invite.displayName,
+            userId: daemonUser.id,
+            invitedByActorId: invite.invitedByActorId,
+          }).returning();
+
+          // Insert agents row
+          await tx.insert(agents).values({
+            id: actor.id,
+            agentKind: invite.agentKind ?? "daemon",
+            status: "active",
+            visibility: "team",
+          });
+
+          // Insert agent_member_access: grant admin to invitedByActorId
+          // (invitedByActorId is a member actor; use it as the memberId)
+          await tx.insert(agentMemberAccess).values({
+            agentId: actor.id,
+            memberId: invite.invitedByActorId,
+            permissionLevel: "admin",
+            grantedByMemberId: invite.invitedByActorId,
+          });
+
+          // Mark invite consumed
+          await (tx.update(teamInvites) as any)
+            .set({ consumedAt: new Date(), consumedByActorId: actor.id })
+            .where(eq(teamInvites.token, token));
+
+          return {
+            actorId: actor.id,
+            teamId: invite.teamId,
+            actorType: "agent" as const,
+            displayName: invite.displayName,
+            refreshToken: minted.refreshToken,
+          };
+        });
+      }
+
+      throw new ApiError(400, "bad_request", `unsupported invite kind: ${kind}`);
     },
 
     // Re-exported primitive for Plan 5 wiring.
