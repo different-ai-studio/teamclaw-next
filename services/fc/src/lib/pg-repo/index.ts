@@ -11,8 +11,6 @@ import { makeRuntimeRepo } from "./runtime.js";
 import { makeNotificationsRepo } from "./notifications.js";
 import { makeTelemetryRepo } from "./telemetry.js";
 
-const NI = (name: string) => async () => { throw new Error(`not_implemented:${name}`); };
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createPgBusinessRepository({ db, accessToken, userId, callerActorId, provisionLiteLlm }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string; provisionLiteLlm?: TeamsRepoDeps["provisionLiteLlm"] }) {
   void accessToken; // retained for Plan 4/5 (JWT -> actor identity / authz)
@@ -46,6 +44,5 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
     createTeam: (input: any) => teamsRepo.createTeam(input, teamsCtx),
     createTeamInvite: (teamId: string, input: any) => teamsRepo.createTeamInvite(teamId, input, teamsCtx),
     removeTeamActor: (teamId: string, actorId: string) => teamsRepo.removeTeamActor(teamId, actorId),
-    updateCurrentActorProfile: NI("updateCurrentActorProfile"),
   } as any;
 }

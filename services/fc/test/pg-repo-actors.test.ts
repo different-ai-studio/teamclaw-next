@@ -186,6 +186,46 @@ test("getTeamDirectory returns actors and members with canonical keys", async ()
   assert.deepEqual(Object.keys(result.members[0]).sort(), memberKeys);
 });
 
+// ── updateCurrentActorProfile ─────────────────────────────────────────────────
+
+test("updateCurrentActorProfile updates displayName and returns directory shape", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedMemberActor(db, team.id, { displayName: "Old Name" });
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.updateCurrentActorProfile(actor.id, { displayName: "New Name" });
+  assert.equal(result.displayName, "New Name", "displayName must be updated");
+  assert.equal(result.id, actor.id, "id must match");
+  assert.equal(result.teamId, team.id, "teamId must match");
+  assert.equal(result.kind, "member", "kind must be member");
+
+  // Persisted: verify via getActor
+  const fetched = await repo.getActor(actor.id);
+  assert.ok(fetched, "actor must exist");
+  assert.equal(fetched.displayName, "New Name", "persisted displayName must match");
+});
+
+test("updateCurrentActorProfile updates avatarUrl", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedMemberActor(db, team.id);
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.updateCurrentActorProfile(actor.id, { avatarUrl: "https://example.com/avatar.png" });
+  assert.equal(result.avatarUrl, "https://example.com/avatar.png");
+});
+
+test("updateCurrentActorProfile throws 404 for unknown actorId", async () => {
+  const { db } = await makeTestDb();
+  const repo = createPgBusinessRepository({ db });
+
+  await assert.rejects(
+    () => repo.updateCurrentActorProfile("00000000-0000-0000-0000-000000000000", { displayName: "X" }),
+    (err: any) => { assert.equal(err.statusCode, 404); return true; },
+  );
+});
+
 test("getTeamDirectory only returns actors in the specified team", async () => {
   const { db } = await makeTestDb();
   const teamA = await seedTeam(db);

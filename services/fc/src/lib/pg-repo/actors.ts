@@ -19,6 +19,7 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { actors, members, teamMembers, actorDirectory } from "../../db/schema/index.js";
+import { ApiError } from "../http-utils.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
   d ? new Date(d).toISOString() : null;
@@ -162,6 +163,22 @@ export function makeActorsRepo(db: DbLike, ctx: ActorsCtx = {}) {
         .map(mapMemberRow);
 
       return { actors: actorsList, members: membersList };
+    },
+
+    /**
+     * Updates display_name / avatar_url for the given actor and returns the
+     * directory-actor shape (consistent with getActor/listTeamActors).
+     */
+    async updateCurrentActorProfile(actorId: string, { displayName, avatarUrl }: { displayName?: string; avatarUrl?: string }) {
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (displayName !== undefined) set.displayName = displayName;
+      if (avatarUrl !== undefined) set.avatarUrl = avatarUrl;
+      const [r] = await (db.update(actors) as any)
+        .set(set)
+        .where(eq(actors.id, actorId))
+        .returning();
+      if (!r) throw new ApiError(404, "not_found", "actor not found");
+      return mapActorRow(r);
     },
 
     /**
