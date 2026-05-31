@@ -84,6 +84,16 @@ type RuntimeInfo = {
   backendType: string | null;
 };
 
+type SessionRuntime = {
+  dbRuntimeId: string;
+  runtimeId: string;
+  agentId: string | null;
+  workspaceId: string | null;
+  backendType: string | null;
+  currentModel: string | null;
+  status: string;
+};
+
 function mapSession(row: CloudSessionFull): SessionSummary {
   return {
     sessionId: row.id,
@@ -138,6 +148,23 @@ export function createCloudSessionsApi(options: CreateCloudSessionsApiOptions) {
         `/v1/teams/${encodeURIComponent(teamId)}/sessions`,
       );
       return (response.items ?? []).map(mapSession);
+    },
+
+    async listSessionsForIdea(
+      teamId: string,
+      ideaId: string,
+      limit = 5,
+    ): Promise<SessionSummary[]> {
+      // The team-sessions endpoint returns rows ordered by last_message_at
+      // desc and carries ideaId, so we filter client-side to mirror the prior
+      // `sessions.eq(idea_id).order(last_message_at).limit(5)` query.
+      const response = await client.get<{ items?: CloudSessionFull[] }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/sessions`,
+      );
+      return (response.items ?? [])
+        .filter((row) => row.ideaId === ideaId)
+        .slice(0, limit)
+        .map(mapSession);
     },
 
     async getSession(teamId: string, sessionId: string): Promise<SessionSummary | null> {
@@ -203,6 +230,14 @@ export function createCloudSessionsApi(options: CreateCloudSessionsApiOptions) {
       await client.patch(`/v1/messages/${encodeURIComponent(messageId)}`, { content });
     },
 
+    async deleteMessage(messageId: string): Promise<void> {
+      await client.del(`/v1/messages/${encodeURIComponent(messageId)}`);
+    },
+
+    async setSessionArchived(sessionId: string, archivedAt: string | null): Promise<void> {
+      await client.patch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { archivedAt });
+    },
+
     async createSession(input: {
       teamId: string;
       title: string;
@@ -263,6 +298,32 @@ export function createCloudSessionsApi(options: CreateCloudSessionsApiOptions) {
 
     async updateRuntimeModel(runtimeId: string, model: string): Promise<void> {
       await client.patch(`/v1/runtime/${encodeURIComponent(runtimeId)}/model`, { model });
+    },
+
+    async listSessionRuntimes(sessionId: string): Promise<SessionRuntime[]> {
+      type Row = {
+        id: string | null;
+        runtime_id: string | null;
+        agent_id: string | null;
+        workspace_id: string | null;
+        backend_type: string | null;
+        current_model: string | null;
+        status: string | null;
+      };
+      const response = await client.get<{ items?: Row[] }>(
+        `/v1/sessions/${encodeURIComponent(sessionId)}/runtime-models`,
+      );
+      return (response.items ?? [])
+        .filter((row): row is Row & { id: string } => Boolean(row.id))
+        .map((row) => ({
+          dbRuntimeId: row.id,
+          runtimeId: row.runtime_id ?? "",
+          agentId: row.agent_id ?? null,
+          workspaceId: row.workspace_id ?? null,
+          backendType: row.backend_type ?? null,
+          currentModel: row.current_model ?? null,
+          status: row.status ?? "unknown",
+        }));
     },
 
     async loadRuntime(sessionId: string): Promise<RuntimeInfo | null> {

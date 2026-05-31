@@ -17,6 +17,8 @@ import {
   type AgentWorkspaceChoice,
 } from "../../src/features/actors/screens/ActorDetailScreen";
 import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
+import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import { supabase } from "../../src/lib/supabase/client";
 import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
@@ -177,32 +179,19 @@ export default function ActorDetailRoute() {
           setAgentWorkspaces([]);
         }
 
-        const participants = (await supabase
-          .from("session_participants")
-          .select("session_id, sessions:session_id(id, title, last_message_at)")
-          .eq("actor_id", actorId)
-          .limit(8)) as {
-          data:
-            | Array<{
-                session_id: string;
-                sessions:
-                  | { id: string; title: string | null; last_message_at: string | null }
-                  | null;
-              }>
-            | null;
-          error: { message?: string } | null;
-        };
+        const sessionIds = await actorsApi.listActorSessionIds(actorId);
         if (cancelled) return;
-        const sessions = (participants.data ?? [])
-          .map((row) => row.sessions)
-          .filter(
-            (s): s is { id: string; title: string | null; last_message_at: string | null } =>
-              Boolean(s),
-          )
+        const sessionIdSet = new Set(sessionIds);
+        const teamSessions = teamId
+          ? await createConfiguredSessionsApi(supabase).listSessions(teamId)
+          : [];
+        if (cancelled) return;
+        const sessions = teamSessions
+          .filter((s) => sessionIdSet.has(s.sessionId))
           .map((s) => ({
-            sessionId: s.id,
+            sessionId: s.sessionId,
             title: s.title ?? "",
-            lastMessageAt: s.last_message_at ?? "",
+            lastMessageAt: s.lastMessageAt ?? "",
           }))
           .sort((a, b) => {
             const ams = Date.parse(a.lastMessageAt) || 0;
@@ -212,21 +201,13 @@ export default function ActorDetailRoute() {
           .slice(0, 5);
         setRecentSessions(sessions);
 
-        const [sessionsCount, ideasCount] = await Promise.all([
-          supabase
-            .from("session_participants")
-            .select("session_id", { count: "exact", head: true })
-            .eq("actor_id", actorId),
-          supabase
-            .from("ideas")
-            .select("id", { count: "exact", head: true })
-            .eq("created_by_actor_id", actorId)
-            .eq("archived", false),
-        ]);
+        const ideas = teamId
+          ? await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId)
+          : [];
         if (cancelled) return;
         setStats({
-          sessions: sessionsCount.count ?? 0,
-          ideas: ideasCount.count ?? 0,
+          sessions: sessionIds.length,
+          ideas: ideas.filter((idea) => idea.createdByActorId === actorId).length,
         });
       } catch {
         if (!cancelled) {

@@ -173,12 +173,10 @@ export default function SessionsIndexRoute() {
       onInviteAgent={() => router.push("/(app)/invite")}
       onArchiveBatch={async (sessionIds) => {
         const now = new Date().toISOString();
+        const api = createConfiguredSessionsApi(supabase);
         for (const id of sessionIds) {
           try {
-            await supabase
-              .from("sessions")
-              .update({ archived_at: now })
-              .eq("id", id);
+            await api.setSessionArchived(id, now);
           } catch {
             // continue
           }

@@ -591,7 +591,7 @@ export default function SessionDetailRoute() {
           onClearReply={() => controller?.setReplyTarget(null)}
           onDeleteMessage={async (messageId) => {
             try {
-              await supabase.from("messages").delete().eq("id", messageId);
+              await createConfiguredSessionsApi(supabase).deleteMessage(messageId);
               successTone();
               showToast("success", "Message deleted");
               void controller?.load();

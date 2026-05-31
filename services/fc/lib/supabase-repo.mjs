@@ -1919,13 +1919,17 @@ async heartbeat() {
     async listSessionRuntimeModels(sessionId) {
       const { data, error } = await supabase
         .from("agent_runtimes")
-        .select("runtime_id, backend_type, current_model")
+        .select("id, runtime_id, agent_id, workspace_id, backend_type, current_model, status")
         .eq("session_id", sessionId);
       if (error) throw error;
       return (data ?? []).map((row) => ({
+        id: row.id ?? null,
         runtime_id: row.runtime_id ?? null,
+        agent_id: row.agent_id ?? null,
+        workspace_id: row.workspace_id ?? null,
         backend_type: row.backend_type ?? null,
         current_model: row.current_model ?? null,
+        status: row.status ?? null,
       }));
     },
 

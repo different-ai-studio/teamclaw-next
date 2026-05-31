@@ -10,6 +10,7 @@ import {
   resolveAgentRuntimeStartPlans,
 } from "../../src/features/sessions/runtime-start";
 import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
 import { MemberPickerSheet } from "../../src/features/sessions/screens/MemberPickerSheet";
 import { SessionMemberSheet } from "../../src/features/sessions/screens/SessionMemberSheet";
 import { supabase } from "../../src/lib/supabase/client";
@@ -28,16 +29,6 @@ type AgentRuntime = {
   backendType: string | null;
   currentModel: string | null;
   status: string;
-};
-
-type RuntimeRow = {
-  id: string | null;
-  runtime_id: string | null;
-  agent_id: string | null;
-  workspace_id: string | null;
-  backend_type: string | null;
-  current_model: string | null;
-  status: string | null;
 };
 
 type WorkspaceRow = {
@@ -74,47 +65,35 @@ export default function SessionMembersRoute() {
     setIsLoading(true);
     const sessionsApi = createConfiguredSessionsApi(supabase);
     const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
+    const workspacesApi = createWorkspacesApi({ getAccessToken: supabaseAccessToken(supabase) });
     void Promise.all([
       sessionsApi.getSession(teamId, sessionId),
       actorsApi.listActors(teamId),
-      supabase
-        .from("agent_runtimes")
-        .select("id, runtime_id, agent_id, workspace_id, backend_type, current_model, status")
-        .eq("session_id", sessionId),
-      supabase
-        .from("workspaces")
-        .select("id, path, agent_id")
-        .eq("team_id", teamId)
-        .eq("archived", false)
-        .order("name", { ascending: true }),
+      sessionsApi.listSessionRuntimes(sessionId),
+      workspacesApi.list(teamId),
     ])
-      .then(([session, allActors, runtimeResult, workspaceResult]) => {
+      .then(([session, allActors, runtimeRows, workspaceRows]) => {
         if (cancelled) return;
         setParticipantIds(session?.participantActorIds ?? []);
         setActors(allActors);
-        const result = runtimeResult as {
-          data: RuntimeRow[] | null;
-          error: unknown;
-        };
-        const rows: AgentRuntime[] = (result.data ?? [])
-          .filter((row): row is RuntimeRow & { id: string; agent_id: string } =>
-            Boolean(row.id && row.agent_id),
-          )
+        const rows: AgentRuntime[] = runtimeRows
+          .filter((row): row is typeof row & { agentId: string } => Boolean(row.agentId))
           .map((row) => ({
-            dbRuntimeId: row.id,
-            runtimeId: row.runtime_id ?? "",
-            agentId: row.agent_id,
-            workspaceId: row.workspace_id,
-            backendType: row.backend_type,
-            currentModel: row.current_model,
-            status: row.status ?? "unknown",
+            dbRuntimeId: row.dbRuntimeId,
+            runtimeId: row.runtimeId,
+            agentId: row.agentId,
+            workspaceId: row.workspaceId,
+            backendType: row.backendType,
+            currentModel: row.currentModel,
+            status: row.status,
           }));
         setRuntimes(rows);
-        const workspaceRows = workspaceResult as {
-          data: WorkspaceRow[] | null;
-          error: unknown;
-        };
-        setWorkspaces(workspaceRows.error ? [] : workspaceRows.data ?? []);
+        setWorkspaces(
+          workspaceRows
+            .filter((row) => !row.archived)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((row) => ({ id: row.id, path: row.path, agent_id: row.agentId })),
+        );
       })
       .catch(() => {
         if (cancelled) return;

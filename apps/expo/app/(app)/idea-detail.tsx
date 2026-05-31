@@ -6,6 +6,7 @@ import { createActorsApi } from "../../src/features/actors/actor-api";
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import type { Idea, IdeaStatus } from "../../src/features/ideas/idea-types";
 import { IdeaDetailScreen } from "../../src/features/ideas/screens/IdeaDetailScreen";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
 import { supabase } from "../../src/lib/supabase/client";
 import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { showToast } from "../../src/ui/Toast";
@@ -65,23 +66,17 @@ export default function IdeaDetailRoute() {
           setCreatorName(null);
         }
 
-        const related = (await supabase
-          .from("sessions")
-          .select("id, title, last_message_at")
-          .eq("idea_id", ideaId)
-          .order("last_message_at", { ascending: false })
-          .limit(5)) as {
-          data:
-            | Array<{ id: string; title: string | null; last_message_at: string | null }>
-            | null;
-          error: { message?: string } | null;
-        };
+        const related = await createConfiguredSessionsApi(supabase).listSessionsForIdea(
+          teamId,
+          ideaId,
+          5,
+        );
         if (cancelled) return;
         setRelatedSessions(
-          (related.data ?? []).map((row) => ({
-            sessionId: row.id,
+          related.map((row) => ({
+            sessionId: row.sessionId,
             title: row.title ?? "",
-            lastMessageAt: row.last_message_at ?? "",
+            lastMessageAt: row.lastMessageAt ?? "",
           })),
         );
       } catch {

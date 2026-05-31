@@ -6,6 +6,7 @@ import { createActorsApi } from "../../src/features/actors/actor-api";
 import { isAgentActor, type Actor } from "../../src/features/actors/actor-types";
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import { isOpenIdea, type Idea } from "../../src/features/ideas/idea-types";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
 import { buildFirstMessageWithIdea } from "../../src/features/sessions/idea-preface";
 import { resolveInitialMessageMentionActorIds } from "../../src/features/sessions/session-mention-resolver";
 import { resolveAgentRuntimeStartPlans } from "../../src/features/sessions/runtime-start";
@@ -47,28 +48,22 @@ export default function NewSessionRoute() {
     void Promise.all([
       createActorsApi({ getAccessToken: supabaseAccessToken(supabase) }).listActors(teamId),
       createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId),
-      supabase
-        .from("workspaces")
-        .select("id, path, agent_id")
-        .eq("team_id", teamId)
-        .eq("archived", false)
-        .order("name", { ascending: true }),
+      createWorkspacesApi({ getAccessToken: supabaseAccessToken(supabase) }).list(teamId),
     ])
-      .then(([actorRows, ideaRows, workspaceResult]) => {
+      .then(([actorRows, ideaRows, workspaceRows]) => {
         if (cancelled) return;
         setActors(actorRows);
         setIdeas(ideaRows.filter(isOpenIdea));
-        if (workspaceResult.error) {
-          setWorkspaces([]);
-        } else {
-          setWorkspaces(
-            (workspaceResult.data ?? []).map((row) => ({
-              id: String(row.id),
-              path: row.path ? String(row.path) : "",
-              agentId: row.agent_id ? String(row.agent_id) : null,
+        setWorkspaces(
+          workspaceRows
+            .filter((row) => !row.archived)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((row) => ({
+              id: row.id,
+              path: row.path ?? "",
+              agentId: row.agentId,
             })),
-          );
-        }
+        );
       })
       .catch(() => {
         if (cancelled) return;

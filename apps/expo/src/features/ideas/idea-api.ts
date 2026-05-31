@@ -51,6 +51,12 @@ function toIdea(row: CloudIdea, workspaceName: string | null): Idea {
 }
 
 export type IdeasApi = {
+  createIdea: (input: {
+    teamId: string;
+    title: string;
+    description?: string;
+    workspaceId?: string | null;
+  }) => Promise<Idea>;
   updateStatus: (ideaId: string, status: IdeaStatus) => Promise<void>;
   updateContent: (
     ideaId: string,
@@ -86,6 +92,17 @@ export function createIdeasApi(args: {
   }
 
   return {
+    async createIdea(input) {
+      const body: Record<string, unknown> = {
+        teamId: input.teamId,
+        title: input.title,
+        description: input.description ?? "",
+      };
+      if (input.workspaceId != null) body.workspaceId = input.workspaceId;
+      const row = await client.post<CloudIdea>("/v1/ideas", body);
+      return toIdea(row, null);
+    },
+
     async updateStatus(ideaId, status) {
       await client.patch(`/v1/ideas/${encodeURIComponent(ideaId)}`, { status });
     },

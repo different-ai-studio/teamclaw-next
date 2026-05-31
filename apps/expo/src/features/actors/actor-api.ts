@@ -75,6 +75,7 @@ function buildInviteDeeplink(token: string): string {
 
 export type ActorsApi = {
   listActors: (teamId: string) => Promise<Actor[]>;
+  listActorSessionIds: (actorId: string) => Promise<string[]>;
   removeActor: (actorId: string) => Promise<void>;
   updateAgentDefaults: (
     agentId: string,
@@ -105,6 +106,14 @@ export function createActorsApi(args: {
         `/v1/teams/${encodeURIComponent(teamId)}/actors?limit=500`,
       );
       return (result.items ?? []).map(toActor);
+    },
+
+    async listActorSessionIds(actorId) {
+      if (!actorId) return [];
+      const result = await client.get<{ items: string[] }>(
+        `/v1/actors/${encodeURIComponent(actorId)}/sessions`,
+      );
+      return result.items ?? [];
     },
 
     async removeActor(actorId) {
