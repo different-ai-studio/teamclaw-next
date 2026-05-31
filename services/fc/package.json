@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --test 'test/**/*.test.mjs'",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "openapi:lint": "redocly lint ../../docs/openapi/teamclaw-api.v1.yaml",
     "openapi:types": "openapi-typescript ../../docs/openapi/teamclaw-api.v1.yaml --output /tmp/teamclaw-api.v1.d.ts"
   },
@@ -20,6 +22,9 @@
   },
   "devDependencies": {
     "@redocly/cli": "^1.34.15",
-    "openapi-typescript": "^7.13.0"
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.16.0"
   }
 }
