@@ -23,16 +23,14 @@ import {
   type CronScope,
 } from '@/stores/cron'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useCurrentTeamStore } from '@/stores/current-team'
 import { ToggleSwitch } from './shared'
 import { getDeliveryTargetDisplay } from '@/lib/cron-utils'
 import { CronJobDialog } from './cron/CronJobDialog'
 import { CronHistoryDialog } from './cron/CronHistoryDialog'
 import {
-  getCurrentDaemonWorkspaceAgent,
-  listDaemonWorkspaces,
-  type DaemonWorkspace,
-} from '@/lib/daemon-workspaces'
+  listLocalDaemonWorkspaces,
+  type LocalDaemonWorkspace,
+} from '@/lib/cron-workspace-models'
 
 // ==================== Job Card ====================
 
@@ -193,13 +191,12 @@ export function CronSection() {
     clearError,
   } = useCronStore()
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
-  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
 
   const [formOpen, setFormOpen] = React.useState(false)
   const [editJob, setEditJob] = React.useState<CronJob | undefined>(undefined)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [historyJob, setHistoryJob] = React.useState<CronJob | null>(null)
-  const [workspaceOptions, setWorkspaceOptions] = React.useState<DaemonWorkspace[]>([])
+  const [workspaceOptions, setWorkspaceOptions] = React.useState<LocalDaemonWorkspace[]>([])
   const [workspaceOptionsLoading, setWorkspaceOptionsLoading] = React.useState(false)
 
   React.useEffect(() => {
@@ -212,17 +209,11 @@ export function CronSection() {
 
   React.useEffect(() => {
     let cancelled = false
-    if (!teamId) {
-      setWorkspaceOptions([])
-      return
-    }
-
     setWorkspaceOptionsLoading(true)
     ;(async () => {
-      const agent = await getCurrentDaemonWorkspaceAgent(teamId)
-      const rows = agent ? await listDaemonWorkspaces(teamId, agent.id) : []
+      const rows = await listLocalDaemonWorkspaces()
       if (cancelled) return
-      setWorkspaceOptions(rows.filter((row) => !row.archived && !!row.path))
+      setWorkspaceOptions(rows.filter((row) => !!row.path))
     })()
       .catch(() => {
         if (!cancelled) setWorkspaceOptions([])
@@ -234,7 +225,7 @@ export function CronSection() {
     return () => {
       cancelled = true
     }
-  }, [teamId])
+  }, [])
 
   React.useEffect(() => {
     if (activeScope !== 'workspace') return
@@ -354,8 +345,8 @@ export function CronSection() {
                 </option>
               )}
               {workspaceOptions.map((workspace) => (
-                <option key={workspace.id} value={workspace.path ?? ''}>
-                  {workspace.name || workspace.path} · {workspace.path}
+                <option key={workspace.workspaceId} value={workspace.path}>
+                  {workspace.displayName || workspace.path} · {workspace.path}
                 </option>
               ))}
             </select>

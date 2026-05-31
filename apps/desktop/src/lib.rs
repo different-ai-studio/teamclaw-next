@@ -305,6 +305,7 @@ pub fn run() {
             commands::greet,
             commands::daemon_http::get_daemon_http_info,
             commands::daemon_http::get_daemon_team_id,
+            commands::daemon_http::list_local_daemon_workspaces,
             commands::show_in_folder,
             commands::open_with_default_app,
             commands::open_in_terminal,

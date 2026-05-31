@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   listDaemonWorkspaces: vi.fn(),
+  getCurrentDaemonWorkspaceAgent: vi.fn(),
   getDaemonProviders: vi.fn(),
   loadTeamProviderFormState: vi.fn(),
+  getCustomProviderIds: vi.fn(),
+  getCustomProviderConfig: vi.fn(),
 }))
 
 vi.mock('@/lib/daemon-workspaces', () => ({
-  getCurrentDaemonWorkspaceAgent: vi.fn(),
+  getCurrentDaemonWorkspaceAgent: mocks.getCurrentDaemonWorkspaceAgent,
   listDaemonWorkspaces: mocks.listDaemonWorkspaces,
 }))
 
@@ -28,7 +31,16 @@ vi.mock('@/lib/team-provider', async (importOriginal) => {
   }
 })
 
-import { resolveDaemonWorkspacePath, loadCronDialogProviders } from '@/lib/cron-workspace-models'
+vi.mock('@/lib/teamclaw-config', () => ({
+  getCustomProviderIds: mocks.getCustomProviderIds,
+  getCustomProviderConfig: mocks.getCustomProviderConfig,
+}))
+
+import {
+  resolveDaemonWorkspacePath,
+  loadCronDialogProviders,
+  loadCronDialogModels,
+} from '@/lib/cron-workspace-models'
 
 describe('resolveDaemonWorkspacePath', () => {
   beforeEach(() => {
@@ -63,7 +75,10 @@ describe('loadCronDialogProviders', () => {
   beforeEach(() => {
     mocks.getDaemonProviders.mockReset()
     mocks.loadTeamProviderFormState.mockReset()
+    mocks.getCustomProviderIds.mockReset()
+    mocks.getCustomProviderConfig.mockReset()
     mocks.loadTeamProviderFormState.mockResolvedValue(null)
+    mocks.getCustomProviderIds.mockResolvedValue([])
   })
 
   it('prefers workspace daemon providers over team-only opencode entry', async () => {
@@ -104,5 +119,86 @@ describe('loadCronDialogProviders', () => {
 
     const providers = await loadCronDialogProviders('/ws')
     expect(providers.map((p) => p.id)).toEqual(['team', 'custom'])
+  })
+
+  it('merges providers from teamclaw.json config when daemon providers only include team', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'team',
+        display_name: 'Team',
+        authenticated: true,
+        models: ['gpt-5.2'],
+      },
+    ])
+    mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
+    mocks.getCustomProviderConfig.mockResolvedValue({
+      name: 'scnet',
+      baseURL: 'https://api.scnet.cn/api/llm/v1',
+      models: [{ modelId: 'MiniMax-M2.5', modelName: 'MiniMax-M2.5' }],
+    })
+
+    const providers = await loadCronDialogProviders('/ws')
+    expect(providers.map((p) => p.id)).toEqual(['scnet'])
+    expect(providers[0].models[0].id).toBe('MiniMax-M2.5')
+  })
+})
+
+describe('loadCronDialogModels', () => {
+  beforeEach(() => {
+    mocks.getCurrentDaemonWorkspaceAgent.mockReset()
+    mocks.listDaemonWorkspaces.mockReset()
+    mocks.getDaemonProviders.mockReset()
+    mocks.loadTeamProviderFormState.mockReset()
+    mocks.getCustomProviderIds.mockReset()
+    mocks.getCustomProviderConfig.mockReset()
+    mocks.loadTeamProviderFormState.mockResolvedValue(null)
+    mocks.getCustomProviderIds.mockResolvedValue([])
+  })
+
+  it('falls back to cloud daemon default when local registry has no default flag', async () => {
+    mocks.getCurrentDaemonWorkspaceAgent.mockResolvedValue({
+      id: 'agent-1',
+      defaultWorkspaceId: 'cloud-ws-2',
+    })
+    mocks.listDaemonWorkspaces.mockResolvedValue([
+      {
+        id: 'cloud-ws-2',
+        path: '/Users/me/copilot-ws-v2',
+        archived: false,
+      },
+    ])
+    mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
+    mocks.getCustomProviderConfig.mockResolvedValue({
+      name: 'scnet',
+      baseURL: 'https://api.scnet.cn/api/llm/v1',
+      models: [{ modelId: 'MiniMax-M2.5', modelName: 'MiniMax-M2.5' }],
+    })
+    mocks.getDaemonProviders.mockResolvedValue([])
+
+    const result = await loadCronDialogModels({
+      activeScope: 'global',
+      teamId: 'team-1',
+      workspacePath: null,
+      localWorkspaces: [
+        {
+          workspaceId: 'local-1',
+          remoteWorkspaceId: 'cloud-ws-2',
+          path: '/Users/me/copilot-ws-v2',
+          displayName: 'copilot-ws-v2',
+          teamId: 'team-1',
+          isDefault: false,
+        },
+      ],
+      messages: {
+        workspaceNoPath: 'no path',
+        globalNoTeam: 'no team',
+        globalNoDefault: 'no default',
+        globalNoDefaultPath: 'no default path',
+        loadFailed: 'load failed',
+      },
+    })
+
+    expect(result.hint).toBeNull()
+    expect(result.providers[0].id).toBe('scnet')
   })
 })
