@@ -2180,7 +2180,10 @@ function outgoingMessageRow(sessionId, input) {
     sender_actor_id: input.senderActorId,
     kind: input.kind ?? "text",
     content: input.content,
-    metadata: input.metadata ?? null,
+    // Column is `jsonb not null default '{}'`. An explicit NULL bypasses the
+    // default and trips the not-null constraint, so default to {} here (mirrors
+    // the pg-repo backend). iOS sends no metadata when a message has no mentions.
+    metadata: input.metadata ?? {},
     model: input.model ?? null,
     turn_id: input.turnId ?? null,
     reply_to_message_id: input.replyToMessageId ?? null,

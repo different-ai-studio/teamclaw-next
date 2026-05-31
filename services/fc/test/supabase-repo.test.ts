@@ -121,7 +121,7 @@ test("insertMessage writes a messages row and maps response", async () => {
     sender_actor_id: "actor-1",
     kind: "text",
     content: "hello",
-    metadata: null,
+    metadata: {},
     model: null,
     turn_id: null,
     reply_to_message_id: null,
