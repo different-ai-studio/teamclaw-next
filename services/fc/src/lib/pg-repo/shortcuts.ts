@@ -163,8 +163,16 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
 
     // ── createShortcut ────────────────────────────────────────────────────────
     /**
-     * BUG FIX: ownerActorId must be the caller's actor in THIS team.
-     * Never resolved globally — see module-level doc.
+     * AUTHZ FIX (#4): never trust a client-supplied ownerActorId. The owner is
+     * ALWAYS resolved server-side from the authenticated user's actor in THIS
+     * team via requireActorForTeam (team-scoped — fixes the multi-team
+     * current_member_id() bug AND prevents a caller forging another actor's id).
+     *
+     * A client MAY still send ownerActorId, but it is only honored when it
+     * EXACTLY equals the resolved actor; any mismatch is rejected 403. When no
+     * identity is available (ctx.userId absent — e.g. a trusted server caller
+     * with no JWT), the explicit ownerActorId is used as-is so internal/gateway
+     * callers keep working.
      */
     async createShortcut(body: {
       teamId: string;
@@ -175,24 +183,29 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
       icon?: string | null;
       payload?: string | null;
       scope?: string;
-      /** Explicit team-scoped actor (preferred, fixes multi-team bug) */
+      /** Client hint only — validated against the resolved actor, never trusted blindly */
       ownerActorId?: string;
-      /** Fallback: resolved via requireActorForTeam(userId, teamId) — team-scoped */
+      /** Overrides ctx.userId for the resolution (used by trusted callers) */
       userId?: string;
     }) {
       let ownerMemberId: string | null = null;
 
-      if (body.ownerActorId) {
-        // Explicit team-scoped actor from caller — trusted, correct path
-        ownerMemberId = body.ownerActorId;
-      } else {
-        // Resolve from userId — requireActorForTeam is team-scoped (never global)
-        const uid = body.userId ?? ctx.userId;
-        if (uid) {
-          ownerMemberId = await requireActorForTeam(db, uid, body.teamId);
+      const uid = body.userId ?? ctx.userId;
+      if (uid) {
+        // Authenticated path: resolve the caller's team-scoped actor (403 if not
+        // a member). This is authoritative — a forged ownerActorId is rejected.
+        const resolved = await requireActorForTeam(db, uid, body.teamId);
+        if (body.ownerActorId && body.ownerActorId !== resolved) {
+          throw new ApiError(403, "forbidden", "ownerActorId does not match the caller's actor in this team");
         }
-        // If neither is supplied, shortcut is team-owned (no personal owner)
+        ownerMemberId = resolved;
+      } else if (body.ownerActorId) {
+        // No authenticated user (trusted server/gateway caller) — accept the
+        // explicit team-scoped actor as provided.
+        ownerMemberId = body.ownerActorId;
       }
+      // If neither identity nor ownerActorId is available the shortcut is
+      // team-owned (no personal owner).
 
       const [r] = await (db.insert(shortcuts) as any)
         .values({

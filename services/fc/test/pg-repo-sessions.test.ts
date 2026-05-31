@@ -43,12 +43,13 @@ test("listSessions returns canonical contract keys for actor-visible sessions", 
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
+  // Identity flows through ctx.userId — the route supplies neither teamId nor actorId.
   const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
   await repo.createSession({ teamId: team.id, title: "Alpha", mode: "solo", participantActorIds: [actor.id] });
   await repo.createSession({ teamId: team.id, title: "Beta", mode: "solo", participantActorIds: [actor.id] });
 
-  const rows = await repo.listSessions({ teamId: team.id, actorId: actor.id, limit: 50, cursor: null });
+  const rows = await repo.listSessions({ limit: 50, cursor: null });
   assert.ok(Array.isArray(rows), "listSessions should return an array");
   assert.ok(rows.length >= 2, "should see 2 sessions");
 
@@ -64,14 +65,14 @@ test("listSessions ordering: lastMessageAt desc nulls last, then createdAt desc,
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
-  const repo = createPgBusinessRepository({ db });
+  const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
   // Create two sessions; neither has lastMessageAt set (null)
   await repo.createSession({ teamId: team.id, title: "First", mode: "solo", participantActorIds: [actor.id] });
   await new Promise((r) => setTimeout(r, 5)); // tiny delay to ensure createdAt ordering
   await repo.createSession({ teamId: team.id, title: "Second", mode: "solo", participantActorIds: [actor.id] });
 
-  const rows = await repo.listSessions({ teamId: team.id, actorId: actor.id, limit: 50, cursor: null });
+  const rows = await repo.listSessions({ limit: 50, cursor: null });
   assert.ok(rows.length >= 2);
 
   // Verify ordering: null lastMessageAt rows sorted by createdAt desc
@@ -95,22 +96,27 @@ test("listSessions ordering: lastMessageAt desc nulls last, then createdAt desc,
   }
 });
 
-test("listSessions team-scopes: actor only sees sessions in their team", async () => {
+test("listSessions team-scopes: a user only sees sessions where their actor participates", async () => {
   const { db } = await makeTestDb();
   const teamA = await seedTeam(db);
   const teamB = await seedTeam(db);
+  // Two DIFFERENT users, one actor each in separate teams.
   const actorA = await seedActor(db, teamA.id);
   const actorB = await seedActor(db, teamB.id);
-  const repo = createPgBusinessRepository({ db });
+  // Write path is a trusted caller — no identity needed.
+  const writer = createPgBusinessRepository({ db });
+  await writer.createSession({ teamId: teamA.id, title: "A-Session", mode: "solo", participantActorIds: [actorA.id] });
+  await writer.createSession({ teamId: teamB.id, title: "B-Session", mode: "solo", participantActorIds: [actorB.id] });
 
-  await repo.createSession({ teamId: teamA.id, title: "A-Session", mode: "solo", participantActorIds: [actorA.id] });
-  await repo.createSession({ teamId: teamB.id, title: "B-Session", mode: "solo", participantActorIds: [actorB.id] });
+  // Each user's list is resolved purely from their own ctx.userId.
+  const repoA = createPgBusinessRepository({ db, userId: actorA.userId });
+  const repoB = createPgBusinessRepository({ db, userId: actorB.userId });
+  const rowsA = await repoA.listSessions({ limit: 50, cursor: null });
+  const rowsB = await repoB.listSessions({ limit: 50, cursor: null });
 
-  const rowsA = await repo.listSessions({ teamId: teamA.id, actorId: actorA.id, limit: 50, cursor: null });
-  const rowsB = await repo.listSessions({ teamId: teamB.id, actorId: actorB.id, limit: 50, cursor: null });
-
-  assert.ok(rowsA.every((r: any) => r.teamId === teamA.id), "actorA should only see teamA sessions");
-  assert.ok(rowsB.every((r: any) => r.teamId === teamB.id), "actorB should only see teamB sessions");
+  assert.ok(rowsA.every((r: any) => r.teamId === teamA.id), "userA should only see teamA sessions");
+  assert.ok(rowsB.every((r: any) => r.teamId === teamB.id), "userB should only see teamB sessions");
+  assert.ok(!rowsA.find((r: any) => r.title === "B-Session"), "userA must not see teamB session");
 });
 
 // ── getSession ────────────────────────────────────────────────────────────────
@@ -193,17 +199,41 @@ test("patchSession mutates title", async () => {
 
 // ── markSessionViewed ─────────────────────────────────────────────────────────
 
-test("markSessionViewed upserts a read marker (no throw)", async () => {
+test("markSessionViewed upserts a read marker (resolved from ctx.userId)", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
-  const repo = createPgBusinessRepository({ db });
+  // Actor is resolved server-side from the authenticated user.
+  const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
   const s = await repo.createSession({ teamId: team.id, title: "ViewMe", mode: "solo", participantActorIds: [actor.id] });
-  // markSessionViewed with actorId
-  await repo.markSessionViewed(s.id, actor.id);
+  await repo.markSessionViewed(s.id);
   // Calling again should be idempotent
-  await repo.markSessionViewed(s.id, actor.id);
+  await repo.markSessionViewed(s.id);
+});
+
+test("markSessionViewed fails closed with no identity and no trusted actor", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db }); // no userId
+
+  const s = await repo.createSession({ teamId: team.id, title: "NoId", mode: "solo", participantActorIds: [actor.id] });
+  await assert.rejects(() => repo.markSessionViewed(s.id), /missing_auth|cannot resolve actor/i);
+});
+
+test("markSessionViewed throws 403 when authenticated user is not a member of the session's team", async () => {
+  const { db } = await makeTestDb();
+  const teamA = await seedTeam(db);
+  const teamB = await seedTeam(db);
+  const actorA = await seedActor(db, teamA.id);
+  const outsider = await seedActor(db, teamB.id); // user with no actor in teamA
+
+  const writer = createPgBusinessRepository({ db });
+  const s = await writer.createSession({ teamId: teamA.id, title: "TeamA", mode: "solo", participantActorIds: [actorA.id] });
+
+  const repo = createPgBusinessRepository({ db, userId: outsider.userId });
+  await assert.rejects(() => repo.markSessionViewed(s.id), /forbidden|not a member/i);
 });
 
 // ── hasUnread ────────────────────────────────────────────────────────────────
@@ -212,12 +242,12 @@ test("hasUnread is false after markSessionViewed", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
-  const repo = createPgBusinessRepository({ db });
+  const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
   const s = await repo.createSession({ teamId: team.id, title: "UnreadTest", mode: "solo", participantActorIds: [actor.id] });
-  await repo.markSessionViewed(s.id, actor.id);
+  await repo.markSessionViewed(s.id);
 
-  const rows = await repo.listSessions({ teamId: team.id, actorId: actor.id, limit: 50, cursor: null });
+  const rows = await repo.listSessions({ limit: 50, cursor: null });
   const found = rows.find((r: any) => r.id === s.id);
   assert.ok(found);
   assert.equal(found.hasUnread, false);

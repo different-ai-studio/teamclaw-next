@@ -14,7 +14,11 @@ import { makeAttachmentsRepo } from "./attachments.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createPgBusinessRepository({ db, accessToken, userId, callerActorId, provisionLiteLlm, dispatchPush }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string; provisionLiteLlm?: TeamsRepoDeps["provisionLiteLlm"]; dispatchPush?: MessagesRepoDeps["dispatchPush"] }) {
-  void accessToken; // retained for Plan 4/5 (JWT -> actor identity / authz)
+  // accessToken is verified upstream (makeBusinessRepoFactory) and its `sub`
+  // claim is passed here as `userId`. It is kept in the signature only for the
+  // few methods that need to forward the raw bearer (none currently); identity
+  // for authz flows exclusively through ctx.userId.
+  void accessToken;
   const ctx = { userId, callerActorId };
   const teamsRepo = makeTeamsRepo(db, { provisionLiteLlm });
   const teamsCtx = { userId };

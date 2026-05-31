@@ -20,7 +20,9 @@ import {
   sessions,
   sessionParticipants,
   sessionReadMarkers,
+  actors,
 } from "../../db/schema/index.js";
+import { ApiError } from "../http-utils.js";
 import { resolveActorForTeam } from "./authz.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
@@ -79,37 +81,55 @@ function mapParticipant(r: any) {
 }
 
 export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
+  // Resolve every actor id that belongs to the authenticated user (one per team).
+  // Mirrors `app.current_actor_id()` semantics but across ALL the user's actors
+  // rather than just the globally-oldest one — fixing the multi-team blind spot.
+  async function resolveActorIdsForUser(userId: string): Promise<string[]> {
+    const rows = await db
+      .select({ id: actors.id })
+      .from(actors)
+      .where(eq(actors.userId, userId));
+    return rows.map((r: any) => r.id).filter(Boolean);
+  }
+
   return {
     // ── List sessions (participant-filtered) ──────────────────────────────────
+    /**
+     * AUTHZ (#10): lists the CURRENT ACTOR's sessions, resolved from ctx.userId.
+     * The GET /v1/sessions route supplies neither teamId nor actorId, matching
+     * the Supabase RPC `list_current_actor_sessions` (no team filter, scoped to
+     * the authenticated user's participating sessions across all their teams).
+     *
+     * A client-supplied actorId is NEVER trusted. teamId is optional: when given
+     * it narrows the result to that team (still scoped to the user's actors).
+     * When no identity is available the result is empty (fail closed) — an
+     * unauthenticated caller sees nothing rather than every team's sessions.
+     */
     async listSessions({
       teamId,
-      actorId: explicitActorId,
       limit = 50,
       cursor = null,
     }: {
-      teamId: string;
-      actorId?: string | null;
+      teamId?: string;
       limit?: number;
       cursor?: { lastMessageAt?: string | null; createdAt?: string; id?: string } | null;
-    }) {
-      // Resolve the actor we'll use for participant filtering
-      let actorId = explicitActorId ?? null;
-      if (!actorId && ctx.userId) {
-        actorId = await resolveActorForTeam(db, ctx.userId, teamId);
+    } = {}) {
+      // Resolve the caller's actor ids from the authenticated user.
+      const actorIds = ctx.userId ? await resolveActorIdsForUser(ctx.userId) : [];
+      if (actorIds.length === 0) {
+        // No identity / no actors → no visible sessions (fail closed).
+        return [];
       }
 
-      // Join sessions → session_participants to filter to only the actor's sessions.
-      // Also left-join session_read_markers to compute hasUnread.
-      // Ordering: lastMessageAt desc NULLS LAST, createdAt desc, id desc.
-
-      // Build base query using SQL template for complex join + ordering
-      const participantFilter = actorId
-        ? sql`EXISTS (
+      // Participant filter: any of the user's actors participates in the session.
+      const participantFilter = sql`EXISTS (
             SELECT 1 FROM session_participants sp
             WHERE sp.session_id = sessions.id
-              AND sp.actor_id = ${actorId}
-          )`
-        : sql`TRUE`;
+              AND sp.actor_id IN (${sql.join(actorIds, sql`, `)})
+          )`;
+
+      // Optional team narrowing (scoped to the user's actors regardless).
+      const teamFilter = teamId ? sql`sessions.team_id = ${teamId}` : sql`TRUE`;
 
       const cursorFilter = cursor?.lastMessageAt !== undefined
         ? sql`(
@@ -120,14 +140,12 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
           )`
         : sql`TRUE`;
 
-      // Read markers for the actor (to compute hasUnread)
-      const readMarkerSubq = actorId
-        ? sql`(
-            SELECT srm.last_read_at FROM session_read_markers srm
-            WHERE srm.session_id = sessions.id AND srm.actor_id = ${actorId}
-            LIMIT 1
-          )`
-        : sql`NULL`;
+      // Read markers for any of the user's actors (to compute hasUnread).
+      const readMarkerSubq = sql`(
+            SELECT MIN(srm.last_read_at) FROM session_read_markers srm
+            WHERE srm.session_id = sessions.id
+              AND srm.actor_id IN (${sql.join(actorIds, sql`, `)})
+          )`;
 
       const rows = await (db as any).execute(sql`
         SELECT
@@ -147,7 +165,7 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
             ELSE FALSE
           END AS "hasUnread"
         FROM sessions
-        WHERE sessions.team_id = ${teamId}
+        WHERE (${teamFilter})
           AND (${participantFilter})
           AND (${cursorFilter})
         ORDER BY
@@ -266,17 +284,42 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
     },
 
     // ── markSessionViewed ─────────────────────────────────────────────────────
-    async markSessionViewed(sessionId: string, actorId?: string | null, lastReadMessageId?: string | null) {
-      // Resolve actorId if not supplied
-      let resolvedActorId = actorId ?? null;
-      if (!resolvedActorId && ctx.userId) {
-        // We need teamId for actor resolution — fetch from session
+    /**
+     * AUTHZ (#10): the read marker's actor is ALWAYS resolved server-side from
+     * ctx.userId + the session's team — never from a client-supplied actor — so a
+     * caller cannot mark a session read on behalf of someone else.
+     *
+     * Signature matches the Supabase backend: (sessionId, lastReadMessageId).
+     * The optional 2nd-positional explicit actorId is reserved for trusted
+     * server/gateway callers that operate WITHOUT an authenticated user
+     * (ctx.userId absent); pass it as `{ actorId }`. The route never does.
+     *
+     * Fails CLOSED: with an authenticated user but no actor in the session's team
+     * (or a missing session) it throws 403/404 rather than silently no-opping. A
+     * call with neither ctx.userId nor a trusted actorId throws 401.
+     */
+    async markSessionViewed(
+      sessionId: string,
+      lastReadMessageId?: string | null,
+      trusted?: { actorId?: string | null },
+    ) {
+      let resolvedActorId: string | null = null;
+
+      if (ctx.userId) {
+        // Authenticated path — resolve from the session's team. Authoritative.
         const [s] = await db.select({ teamId: sessions.teamId }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
-        if (s) {
-          resolvedActorId = await resolveActorForTeam(db, ctx.userId, s.teamId);
+        if (!s) throw new ApiError(404, "not_found", "session not found");
+        resolvedActorId = await resolveActorForTeam(db, ctx.userId, s.teamId);
+        if (!resolvedActorId) {
+          throw new ApiError(403, "forbidden", "not a member of this session's team");
         }
+      } else if (trusted?.actorId) {
+        // Trusted server/gateway caller (no JWT) — accept the explicit actor.
+        resolvedActorId = trusted.actorId;
+      } else {
+        // No identity at all — fail closed.
+        throw new ApiError(401, "missing_auth", "cannot resolve actor for mark-viewed");
       }
-      if (!resolvedActorId) return; // no actor to mark
 
       await (db.insert(sessionReadMarkers) as any)
         .values({

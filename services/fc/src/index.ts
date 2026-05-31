@@ -14,6 +14,9 @@ import { createPgAuthRepository } from "./lib/pg-repo/auth.js";
 import { queryParams } from "./lib/routing-utils.js";
 import { dispatchPush } from "./lib/push-dispatch.js";
 import { pushDeps, pgPushDeps } from "./lib/admin-handlers.js";
+import { verifyAccessToken } from "./auth/verify.js";
+import { ApiError } from "./lib/http-utils.js";
+import type { JWTVerifyGetKey } from "jose";
 
 // ---------------------------------------------------------------------------
 // Environment (used only for /v1 business API). Read lazily inside the deps
@@ -49,17 +52,37 @@ export function makeAuthRepoFactory(kind: "supabase" | "postgres") {
     });
 }
 
-export function makeBusinessRepoFactory(kind: "supabase" | "postgres") {
+export function makeBusinessRepoFactory(
+  kind: "supabase" | "postgres",
+  // Tests may inject a local JWKS + issuer/audience baseURL so verifyAccessToken
+  // can validate tokens signed by an in-memory key. Production omits this and
+  // uses the remote JWKS at AUTH_BASE_URL.
+  verifyOpts?: { keyset?: JWTVerifyGetKey; baseURL?: string },
+) {
   if (kind === "postgres") {
-    return ({ accessToken }: { accessToken: string }) =>
-      createPgBusinessRepository({
+    // ROOT-CAUSE FIX: verify the bearer JWT and resolve the authenticated
+    // user id (claims.sub) BEFORE constructing the repo, so every authz check
+    // gated on ctx.userId actually has an identity. A bad/expired token makes
+    // verifyAccessToken reject; the hono adapter's try/catch maps it to 401.
+    return async ({ accessToken }: { accessToken: string }) => {
+      let claims;
+      try {
+        claims = await verifyAccessToken(accessToken, verifyOpts ?? {});
+      } catch (cause) {
+        // Bad / expired / unverifiable token → fail closed as 401 (not an opaque
+        // 500). errorResponse passes ApiError through verbatim.
+        throw new ApiError(401, "invalid_token", "Invalid or expired access token", { cause });
+      }
+      return createPgBusinessRepository({
         db: getDb(),
+        userId: claims.sub,
         accessToken,
         // Lazy push hook: pgPushDeps() is constructed on first call and reused.
         // push_idempotency_claim and list_session_push_targets are now served
         // by Drizzle queries via buildPgPushDeps() — no Supabase service-role.
         dispatchPush: async (record) => { await dispatchPush(record, pgPushDeps()); },
       });
+    };
   }
   return ({ accessToken }: { accessToken: string }) =>
     createSupabaseBusinessRepository({

@@ -8,7 +8,7 @@ import {
 } from "./http-utils.js";
 
 type Deps = {
-  createRepository: (args: { accessToken: string }) => unknown;
+  createRepository: (args: { accessToken: string }) => unknown | Promise<unknown>;
   createAuthRepository: () => unknown;
 };
 type RouteOptions = { auth?: "bearer" | "none"; rawBody?: boolean };
@@ -117,7 +117,11 @@ export function createHonoRouterAdapter(app: Hono, deps: Deps) {
         let repository: unknown;
         if (auth !== "none") {
           const token = extractBearerToken(Object.fromEntries(c.req.raw.headers));
-          repository = deps.createRepository({ accessToken: token });
+          // createRepository may be async (postgres factory verifies the JWT and
+          // resolves userId before constructing the repo). Awaiting a sync return
+          // (supabase factory) is harmless. A thrown verifyAccessToken (bad/expired
+          // token) propagates to the catch below and is mapped to 401 by errorResponse.
+          repository = await deps.createRepository({ accessToken: token });
         } else {
           repository = deps.createAuthRepository();
         }

@@ -65,6 +65,8 @@ export function registerSessions(router) {
     const lastReadMessageId = typeof body.lastReadMessageId === "string" && body.lastReadMessageId.length > 0
       ? body.lastReadMessageId
       : null;
+    // The actor is resolved server-side from the authenticated user inside the
+    // repo — the route never supplies a client actorId.
     await ctx.repository.markSessionViewed(sessionId, lastReadMessageId);
     return { statusCode: 204, body: null };
   });
