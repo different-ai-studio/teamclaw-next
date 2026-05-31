@@ -366,6 +366,7 @@ export function createSupabaseBusinessRepository(options) {
       if (patch.archived !== undefined) row.archived = patch.archived;
       if (patch.slug !== undefined) row.path = patch.slug;
       if (patch.path !== undefined) row.path = patch.path;
+      if (patch.agentId !== undefined) row.agent_id = patch.agentId;
       const { data, error } = await supabase
         .from("workspaces")
         .update(row)
@@ -1397,6 +1398,17 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
+    async markSessionUnread(sessionId) {
+      // Delete the caller's read marker so the session re-derives as unread.
+      // RLS scopes the delete to the current actor via the "write own markers"
+      // FOR ALL policy, so no explicit actor filter is needed here.
+      const { error } = await supabase
+        .from("session_read_markers")
+        .delete()
+        .eq("session_id", sessionId);
+      if (error) throw error;
+    },
+
     async getSessionByAcp(acpSessionId) {
       const { data, error } = await supabase
         .from("sessions")
@@ -1783,13 +1795,17 @@ export function createSupabaseBusinessRepository(options) {
     async listSessionRuntimeModels(sessionId) {
       const { data, error } = await supabase
         .from("agent_runtimes")
-        .select("runtime_id, backend_type, current_model")
+        .select("id, runtime_id, agent_id, workspace_id, backend_type, current_model, status")
         .eq("session_id", sessionId);
       if (error) throw error;
       return (data ?? []).map((row) => ({
+        id: row.id ?? null,
         runtime_id: row.runtime_id ?? null,
+        agent_id: row.agent_id ?? null,
+        workspace_id: row.workspace_id ?? null,
         backend_type: row.backend_type ?? null,
         current_model: row.current_model ?? null,
+        status: row.status ?? null,
       }));
     },
 

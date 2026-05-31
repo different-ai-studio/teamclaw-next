@@ -137,6 +137,22 @@ test("pg-repo [workspaces]: patchWorkspace updates slug (path)", async () => {
   assert.equal(w.slug, "my-slug");
 });
 
+test("pg-repo [workspaces]: patchWorkspace binds and unbinds agentId", async () => {
+  const { pg, repo } = await makeRepo();
+  await seedTeam(pg, T1, "t1-patch-agent-slug");
+  await seedWorkspace(pg, W1, T1, "Alpha");
+
+  // mapWorkspace doesn't surface agentId, so assert the column directly.
+  const AGENT = "11111111-1111-4111-8111-111111111111";
+  await repo.patchWorkspace(W1, { agentId: AGENT });
+  const bound = await pg.query("SELECT agent_id FROM workspaces WHERE id = $1", [W1]);
+  assert.equal(bound.rows[0].agent_id, AGENT);
+
+  await repo.patchWorkspace(W1, { agentId: null });
+  const unbound = await pg.query("SELECT agent_id FROM workspaces WHERE id = $1", [W1]);
+  assert.equal(unbound.rows[0].agent_id, null);
+});
+
 // ── getTeamWorkspaceConfig null ───────────────────────────────────────────────
 
 test("pg-repo [workspaces]: getTeamWorkspaceConfig returns null when absent", async () => {

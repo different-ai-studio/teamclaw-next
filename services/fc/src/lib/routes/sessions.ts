@@ -71,6 +71,14 @@ export function registerSessions(router) {
     return { statusCode: 204, body: null };
   });
 
+  router.post("/v1/sessions/:sessionId/mark-unread", async (ctx) => {
+    const sessionId = decodeURIComponent(ctx.params.sessionId);
+    // The actor is resolved server-side from the authenticated user inside the
+    // repo — the route never supplies a client actorId.
+    await ctx.repository.markSessionUnread(sessionId);
+    return { statusCode: 204, body: null };
+  });
+
   router.get("/v1/me/bootstrap", async (ctx) => {
     const out = await ctx.repository.getMeBootstrap();
     return { body: out };

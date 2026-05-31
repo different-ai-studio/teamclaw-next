@@ -102,12 +102,13 @@ export function makeWorkspacesRepo(db: DbLike) {
     },
 
     // ── Patch ─────────────────────────────────────────────────────────────
-    async patchWorkspace(workspaceId: string, patch: { name?: string; archived?: boolean; slug?: string | null; path?: string | null }) {
+    async patchWorkspace(workspaceId: string, patch: { name?: string; archived?: boolean; slug?: string | null; path?: string | null; agentId?: string | null }) {
       const updates: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.name !== undefined) updates.name = patch.name;
       if (patch.archived !== undefined) updates.archived = patch.archived;
       if (patch.slug !== undefined) updates.path = patch.slug;
       if (patch.path !== undefined) updates.path = patch.path;
+      if (patch.agentId !== undefined) updates.agentId = patch.agentId;
 
       const [r] = await (db.update(workspaces) as any)
         .set(updates)

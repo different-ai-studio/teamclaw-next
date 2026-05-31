@@ -338,6 +338,41 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
         });
     },
 
+    /**
+     * Mark a session unread for the calling actor by deleting their read
+     * marker, so the session re-derives as unread. Actor resolution + fail-closed
+     * semantics mirror markSessionViewed.
+     */
+    async markSessionUnread(sessionId: string, trusted?: { actorId?: string | null }) {
+      let resolvedActorId: string | null = null;
+
+      if (ctx.userId) {
+        const [s] = await db
+          .select({ teamId: sessions.teamId })
+          .from(sessions)
+          .where(eq(sessions.id, sessionId))
+          .limit(1);
+        if (!s) throw new ApiError(404, "not_found", "session not found");
+        resolvedActorId = await resolveActorForTeam(db, ctx.userId, s.teamId);
+        if (!resolvedActorId) {
+          throw new ApiError(403, "forbidden", "not a member of this session's team");
+        }
+      } else if (trusted?.actorId) {
+        resolvedActorId = trusted.actorId;
+      } else {
+        throw new ApiError(401, "missing_auth", "cannot resolve actor for mark-unread");
+      }
+
+      await db
+        .delete(sessionReadMarkers)
+        .where(
+          and(
+            eq(sessionReadMarkers.sessionId, sessionId),
+            eq(sessionReadMarkers.actorId, resolvedActorId),
+          ),
+        );
+    },
+
     // ── ensureGatewaySession ──────────────────────────────────────────────────
     /**
      * Idempotent get-or-create on the (teamId, binding) unique key.
