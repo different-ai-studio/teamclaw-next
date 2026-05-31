@@ -571,11 +571,10 @@ export function useGitReposInit() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function useCronInit() {
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const workspaceReady = useWorkspaceStore((s) => s.daemonHttpReady);
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
 
   useEffect(() => {
-    if (!isTauri() || !workspacePath || !workspaceReady) return;
+    if (!isTauri() || !daemonHttpReady) return;
 
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -600,7 +599,7 @@ export function useCronInit() {
       cancelled = true;
       unlisten?.();
     };
-  }, [workspacePath, workspaceReady]);
+  }, [daemonHttpReady]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

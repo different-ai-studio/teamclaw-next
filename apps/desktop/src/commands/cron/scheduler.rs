@@ -28,6 +28,8 @@ pub struct CronScheduler {
     generation: Arc<RwLock<u64>>,
     /// Set from `cron_init` so run-record updates can refresh the UI session filter.
     app_handle: Arc<std::sync::Mutex<Option<AppHandle>>>,
+    /// Project cwd for workspace-scoped jobs. `None` for global scope — amuxd uses daemon default.
+    execution_workspace: Arc<RwLock<Option<String>>>,
 }
 
 impl Clone for CronScheduler {
@@ -38,6 +40,7 @@ impl Clone for CronScheduler {
             session_mapping: Arc::clone(&self.session_mapping),
             generation: Arc::clone(&self.generation),
             app_handle: Arc::clone(&self.app_handle),
+            execution_workspace: Arc::clone(&self.execution_workspace),
         }
     }
 }
@@ -78,7 +81,12 @@ impl CronScheduler {
             session_mapping: Arc::new(RwLock::new(None)),
             generation: Arc::new(RwLock::new(0)),
             app_handle: Arc::new(std::sync::Mutex::new(None)),
+            execution_workspace: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_execution_workspace(&self, path: Option<String>) {
+        *self.execution_workspace.write().await = path;
     }
 
     pub fn set_app_handle(&self, app: AppHandle) {
@@ -338,6 +346,16 @@ impl CronScheduler {
         }
     }
 
+    fn working_directory_for_run(
+        execution_workspace: Option<&str>,
+        worktree_path: Option<&str>,
+    ) -> Option<String> {
+        worktree_path
+            .filter(|path| !path.is_empty())
+            .map(str::to_string)
+            .or_else(|| execution_workspace.filter(|path| !path.is_empty()).map(str::to_string))
+    }
+
     /// Execute a single cron job
     pub async fn execute_job(&self, job: CronJob) {
         let run_id = uuid::Uuid::new_v4().to_string();
@@ -347,10 +365,15 @@ impl CronScheduler {
         // restarted during execution (e.g., workspace switched). If so, abort.
         let my_generation = *self.generation.read().await;
         let my_workspace = self.storage.get_workspace_path().await.unwrap_or_default();
+        let execution_workspace = self.execution_workspace.read().await.clone();
 
         // Worktree setup (if enabled)
         let use_worktree = job.payload.use_worktree.unwrap_or(false);
-        let mut wt_guard = WorktreeGuard::new(&my_workspace);
+        let mut wt_guard = WorktreeGuard::new(
+            execution_workspace
+                .as_deref()
+                .unwrap_or(my_workspace.as_str()),
+        );
 
         // Create initial run record
         let mut record = CronRunRecord {
@@ -368,8 +391,22 @@ impl CronScheduler {
         };
         self.storage.append_run(&record).await;
 
+        if use_worktree && execution_workspace.is_none() {
+            record.status = RunStatus::Failed;
+            record.finished_at = Some(Utc::now());
+            record.error = Some(
+                "Git worktree requires a workspace-scoped cron job; switch to Workspace tasks"
+                    .into(),
+            );
+            self.persist_run_and_notify_ui(&record).await;
+            self.update_job_after_run(&job, started_at, &my_workspace)
+                .await;
+            return;
+        }
+
         if use_worktree {
-            let wt_dir = std::path::Path::new(&my_workspace)
+            let wt_base = execution_workspace.as_deref().unwrap_or(my_workspace.as_str());
+            let wt_dir = std::path::Path::new(wt_base)
                 .join(".worktrees")
                 .join(format!("cron-{}-{}", job.id, run_id));
             let wt_path = wt_dir.to_string_lossy().to_string();
@@ -385,7 +422,7 @@ impl CronScheduler {
                 return;
             }
 
-            match Self::create_worktree(&my_workspace, &wt_path, branch) {
+            match Self::create_worktree(wt_base, &wt_path, branch) {
                 Ok(()) => {
                     record.worktree_path = Some(wt_path.clone());
                     self.persist_run_and_notify_ui(&record).await;
@@ -443,7 +480,10 @@ impl CronScheduler {
         //  docs/superpowers/specs/2026-05-17-cron-to-amuxd-design.md §3.)
 
         let session_key = format!("cron/{}/{}", job.id, run_id);
-        let working_directory = wt_guard.path.clone(); // Option<String>
+        let working_directory = Self::working_directory_for_run(
+            execution_workspace.as_deref(),
+            wt_guard.path.as_deref(),
+        );
 
         // Preserved from the OpenCode path: parse `job.payload.model` (a short
         // name like "sonnet") into `(provider, model)`. Kept identical so any
@@ -460,7 +500,7 @@ impl CronScheduler {
                 session_key: &session_key,
                 message: &job.payload.message,
                 job_name: Some(&job.name),
-                working_directory: working_directory.as_deref(),
+                working_directory: working_directory.as_deref().map(str::as_ref),
                 model_override: model_param.as_ref().map(|(p, m)| {
                     crate::commands::cron::amuxd_client::ModelOverride {
                         provider: p,
@@ -813,6 +853,38 @@ mod tests {
             worktree_path: None,
             last_heartbeat_at: None,
         }
+    }
+
+    #[test]
+    fn cron_run_uses_workspace_directory_when_worktree_disabled() {
+        let workspace = "/tmp/teamclaw-workspace";
+
+        assert_eq!(
+            CronScheduler::working_directory_for_run(Some(workspace), None).as_deref(),
+            Some(workspace)
+        );
+    }
+
+    #[test]
+    fn cron_run_uses_worktree_directory_when_present() {
+        let worktree = "/tmp/teamclaw-workspace/.worktrees/cron-1";
+
+        assert_eq!(
+            CronScheduler::working_directory_for_run(
+                Some("/tmp/teamclaw-workspace"),
+                Some(worktree),
+            )
+            .as_deref(),
+            Some(worktree)
+        );
+    }
+
+    #[test]
+    fn global_cron_run_without_worktree_leaves_directory_to_daemon_default() {
+        assert_eq!(
+            CronScheduler::working_directory_for_run(None, None),
+            None
+        );
     }
 
     // ── run reconciliation ──────────────────────────────────────────────────

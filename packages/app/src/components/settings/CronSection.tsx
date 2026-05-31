@@ -20,7 +20,9 @@ import {
   formatRelativeTime,
   getChannelDisplayName,
   type CronJob,
+  type CronScope,
 } from '@/stores/cron'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { ToggleSwitch } from './shared'
 import { getDeliveryTargetDisplay } from '@/lib/cron-utils'
 import { CronJobDialog } from './cron/CronJobDialog'
@@ -170,24 +172,38 @@ function JobCard({
 
 export function CronSection() {
   const { t } = useTranslation()
-  const { jobs, isLoading, error, loadJobs, removeJob, toggleEnabled, runJob, clearError } =
-    useCronStore()
+  const {
+    jobs,
+    isLoading,
+    error,
+    activeScope,
+    setScope,
+    loadJobs,
+    removeJob,
+    toggleEnabled,
+    runJob,
+    clearError,
+  } = useCronStore()
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const [formOpen, setFormOpen] = React.useState(false)
   const [editJob, setEditJob] = React.useState<CronJob | undefined>(undefined)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [historyJob, setHistoryJob] = React.useState<CronJob | null>(null)
 
-  // Cron backend init runs from `useCronInit` when the workspace + OpenCode are ready.
-  // Periodically refresh job list while this section is mounted.
-  // Refresh jobs periodically (every 30 seconds)
   React.useEffect(() => {
     loadJobs()
     const interval = setInterval(() => {
       loadJobs()
     }, 30000)
     return () => clearInterval(interval)
-  }, [loadJobs])
+  }, [loadJobs, activeScope])
+
+  const handleScopeChange = (scope: CronScope) => {
+    if (scope === activeScope) return
+    if (scope === 'workspace' && !workspacePath) return
+    void setScope(scope)
+  }
 
   const handleOpenCreate = () => {
     setEditJob(undefined)
@@ -221,6 +237,48 @@ export function CronSection() {
           <Plus className="h-4 w-4 mr-1" />
           {t('settings.cron.newJob', 'New Job')}
         </Button>
+      </div>
+
+      <div className="rounded-[14px] border border-border-soft bg-paper p-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleScopeChange('global')}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors',
+              activeScope === 'global'
+                ? 'bg-panel text-foreground'
+                : 'text-muted-foreground hover:bg-panel/60',
+            )}
+          >
+            {t('settings.cron.scopeGlobal', 'Global tasks')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScopeChange('workspace')}
+            disabled={!workspacePath}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors',
+              activeScope === 'workspace'
+                ? 'bg-panel text-foreground'
+                : 'text-muted-foreground hover:bg-panel/60',
+              !workspacePath && 'cursor-not-allowed opacity-40',
+            )}
+          >
+            {t('settings.cron.scopeWorkspace', 'Workspace tasks')}
+          </button>
+        </div>
+        <p className="text-[12px] text-muted-foreground leading-relaxed">
+          {activeScope === 'global'
+            ? t(
+                'settings.cron.scopeGlobalHint',
+                'Runs use the daemon default workspace. Changing the default updates future runs.',
+              )
+            : t(
+                'settings.cron.scopeWorkspaceHint',
+                'Runs in the current workspace — suitable for project files, git worktrees, and MCP/skills.',
+              )}
+        </p>
       </div>
 
       {/* Error */}

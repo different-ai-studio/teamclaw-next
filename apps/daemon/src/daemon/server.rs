@@ -758,6 +758,19 @@ impl DaemonServer {
     ) -> anyhow::Result<serde_json::Value> {
         let parsed = parse_prompt_await_payload(payload)?;
 
+        let working_directory = match parsed.working_directory.filter(|s| !s.is_empty()) {
+            Some(dir) => dir.to_string(),
+            None => self
+                .workspaces
+                .default_workspace_path()
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no working directory: configure a default workspace in Daemon > Workspace settings"
+                    )
+                })?,
+        };
+
         // The daemon must have been onboarded (team_id present) before any
         // cron prompt can be honored — the gateway-session model expects a
         // team. Surface a clean error rather than panicking inside the
@@ -809,7 +822,7 @@ impl DaemonServer {
                         "cron",                                    // title (display only)
                         parsed.model_override.clone(),
                         Some(&sb_sid), // bind AgentReply to the cloud session
-                        parsed.working_directory, // spawn in caller-supplied worktree if Some(_)
+                        Some(working_directory.as_str()),
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;

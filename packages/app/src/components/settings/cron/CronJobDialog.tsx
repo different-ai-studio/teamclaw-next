@@ -48,7 +48,16 @@ import {
   type DeliveryChannel,
 } from '@/stores/cron'
 import { useChannelsStore } from '@/stores/channels'
-import { useProviderStore } from '@/stores/provider'
+import {
+  loadConfiguredProvidersForWorkspace,
+  type ConfiguredProvider,
+} from '@/stores/provider'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { useCurrentTeamStore } from '@/stores/current-team'
+import {
+  getCurrentDaemonWorkspaceAgent,
+  listDaemonWorkspaces,
+} from '@/lib/daemon-workspaces'
 import { ToggleSwitch } from '../shared'
 import {
   type JobFormState,
@@ -73,22 +82,76 @@ export function CronJobDialog({
   editJob?: CronJob
 }) {
   const { t } = useTranslation()
-  const { addJob, updateJob, runJob } = useCronStore()
+  const { addJob, updateJob, runJob, activeScope } = useCronStore()
   const channelsStore = useChannelsStore()
-  const { models, configuredProviders, refreshConfiguredProviders } = useProviderStore()
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
 
   const [form, setForm] = React.useState<JobFormState>(defaultFormState)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [advancedOptionsOpen, setAdvancedOptionsOpen] = React.useState(false)
+  const [scopeProviders, setScopeProviders] = React.useState<ConfiguredProvider[]>([])
+  const [modelHint, setModelHint] = React.useState<string | null>(null)
   const advancedScrollAnchorRef = React.useRef<HTMLDivElement>(null)
 
-  // Load models when dialog opens
   React.useEffect(() => {
-    if (open && models.length === 0) {
-      refreshConfiguredProviders()
+    if (!open) return
+    let cancelled = false
+
+    ;(async () => {
+      let targetPath: string | null = null
+      let hint: string | null = null
+
+      if (activeScope === 'workspace') {
+        if (!workspacePath) {
+          hint = t('settings.cron.workspaceModelsNoPath', 'Select a workspace first.')
+        } else {
+          targetPath = workspacePath
+        }
+      } else if (!teamId) {
+        hint = t('settings.cron.globalModelsNoTeam', 'Join a team to load daemon models.')
+      } else {
+        const agent = await getCurrentDaemonWorkspaceAgent(teamId)
+        if (!agent?.defaultWorkspaceId) {
+          hint = t(
+            'settings.cron.globalModelsNoDefault',
+            'Set a default workspace in Daemon settings.',
+          )
+        } else {
+          const workspaces = await listDaemonWorkspaces(teamId, agent.id)
+          const defaultWs = workspaces.find((w) => w.id === agent.defaultWorkspaceId)
+          if (!defaultWs?.path) {
+            hint = t(
+              'settings.cron.globalModelsNoDefaultPath',
+              'Default workspace has no local path on this daemon.',
+            )
+          } else {
+            targetPath = defaultWs.path
+          }
+        }
+      }
+
+      if (cancelled) return
+      setModelHint(hint)
+      if (!targetPath) {
+        setScopeProviders([])
+        return
+      }
+      const loaded = await loadConfiguredProvidersForWorkspace(targetPath)
+      if (cancelled) return
+      setScopeProviders(loaded?.configuredProviders ?? [])
+    })().catch(() => {
+      if (!cancelled) {
+        setScopeProviders([])
+        setModelHint(t('settings.cron.modelsLoadFailed', 'Failed to load models.'))
+      }
+    })
+
+    return () => {
+      cancelled = true
     }
-  }, [open])
+  }, [open, activeScope, workspacePath, teamId, t])
 
   React.useEffect(() => {
     if (open) {
@@ -168,6 +231,9 @@ export function CronJobDialog({
     setSaving(true)
     setError(null)
 
+    const payloadForm =
+      activeScope === 'global' ? { ...form, useWorktree: false } : form
+
     try {
       if (editJob) {
         const request: UpdateCronJobRequest = {
@@ -176,7 +242,7 @@ export function CronJobDialog({
           description: undefined,
           enabled: form.enabled,
           schedule: formStateToSchedule(form),
-          payload: formStateToPayload(form),
+          payload: formStateToPayload(payloadForm),
           delivery: form.deliveryEnabled ? formStateToDelivery(form) : null,
           deleteAfterRun: form.deleteAfterRun,
         }
@@ -187,7 +253,7 @@ export function CronJobDialog({
           description: undefined,
           enabled: form.enabled,
           schedule: formStateToSchedule(form),
-          payload: formStateToPayload(form),
+          payload: formStateToPayload(payloadForm),
           delivery: formStateToDelivery(form),
           deleteAfterRun: form.deleteAfterRun,
         }
@@ -228,6 +294,15 @@ export function CronJobDialog({
 
         <ScrollArea className="max-h-[60vh] pr-4">
           <div className="space-y-6 py-2">
+            {activeScope === 'global' && (
+              <p className="rounded-lg border border-border-soft bg-panel/50 px-3 py-2 text-[12px] text-muted-foreground leading-relaxed">
+                {t(
+                  'settings.cron.globalJobNote',
+                  'Global tasks run in the daemon default workspace. Changing the default updates future runs.',
+                )}
+              </p>
+            )}
+
             {/* Section 1: Basic Info */}
             <div className="space-y-3">
               <div className="space-y-2">
@@ -277,12 +352,17 @@ export function CronJobDialog({
                             {t('settings.cron.useDefaultModel', 'Use default model')}
                           </span>
                         </SelectItem>
-                        {configuredProviders.length === 0 && (
+                        {modelHint && (
+                          <div className="px-2 py-4 text-center text-[12.5px] text-muted-foreground">
+                            {modelHint}
+                          </div>
+                        )}
+                        {!modelHint && scopeProviders.length === 0 && (
                           <div className="px-2 py-6 text-center text-[13px] text-muted-foreground">
                             {t('settings.cron.noModels', 'No models configured. Please configure providers in LLM Settings first.')}
                           </div>
                         )}
-                        {configuredProviders.map((provider) => (
+                        {scopeProviders.map((provider) => (
                           <React.Fragment key={provider.id}>
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t first:border-t-0">
                               {provider.name}
@@ -500,21 +580,34 @@ export function CronJobDialog({
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 {t('settings.cron.execution', 'Execution')}
               </h4>
-              {/* Worktree isolation */}
-              <div className="flex items-center justify-between">
+              {/* Worktree isolation — workspace-scoped only */}
+              <div
+                className={cn(
+                  'flex items-center justify-between',
+                  activeScope === 'global' && 'opacity-50',
+                )}
+              >
                 <div>
                   <label className="text-[13px] font-medium">{t('settings.cron.useWorktree', 'Run in isolated worktree')}</label>
                   <p className="text-xs text-muted-foreground">
-                    {t('settings.cron.useWorktreeDesc', 'Execute in a temporary git worktree copy')}
+                    {activeScope === 'global'
+                      ? t(
+                          'settings.cron.useWorktreeGlobalDisabled',
+                          'Not available for global tasks — use Workspace tasks.',
+                        )
+                      : t('settings.cron.useWorktreeDesc', 'Execute in a temporary git worktree copy')}
                   </p>
                 </div>
                 <ToggleSwitch
-                  enabled={form.useWorktree}
-                  onChange={(v) => update({ useWorktree: v })}
+                  enabled={activeScope !== 'global' && form.useWorktree}
+                  onChange={(v) => {
+                    if (activeScope === 'global') return
+                    update({ useWorktree: v })
+                  }}
                 />
               </div>
 
-              {form.useWorktree && (
+              {activeScope !== 'global' && form.useWorktree && (
                 <div className="space-y-2 pl-4 border-l-2 border-muted">
                   <label className="text-[13px] font-medium flex items-center gap-1.5">
                     <GitBranch className="h-3.5 w-3.5" />
