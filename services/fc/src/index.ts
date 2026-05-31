@@ -48,6 +48,27 @@ const app = createApp({
 
 const honoHandler = handle(app);
 
+// FC 3.0 HTTP trigger may populate queryStringParameters but leave rawQueryString
+// empty/absent. hono/aws-lambda's v2 processor (used when event.rawPath exists)
+// reads ONLY rawQueryString for the query string — it does NOT fall back to
+// queryStringParameters. Backfill rawQueryString from queryStringParameters when
+// rawQueryString is missing so GET query params are not silently dropped.
+export function normalizeFcEvent(event: any): any {
+  if (
+    (!event.rawQueryString || event.rawQueryString === "") &&
+    event.queryStringParameters &&
+    typeof event.queryStringParameters === "object"
+  ) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(event.queryStringParameters)) {
+      if (v !== undefined && v !== null) qs.set(k, String(v));
+    }
+    const s = qs.toString();
+    if (s) event.rawQueryString = s;
+  }
+  return event;
+}
+
 export async function handler(event: any, context: any) {
   // FC 3.0 HTTP trigger passes a Buffer; FC 2.0 may pass a JSON string.
   if (Buffer.isBuffer(event)) {
@@ -55,5 +76,6 @@ export async function handler(event: any, context: any) {
   } else if (typeof event === "string") {
     event = JSON.parse(event);
   }
+  normalizeFcEvent(event);
   return honoHandler(event, context);
 }
