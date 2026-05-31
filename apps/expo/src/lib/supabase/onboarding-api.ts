@@ -65,7 +65,8 @@ export function createOnboardingApi(client: CloudAuthClient) {
     },
 
     async verifyOTP(email: string, token: string) {
-      return client.auth.verifyOtp({ email, token, type: "email" });
+      const { error } = await client.auth.verifyOtp({ email, token, type: "email" });
+      if (error) throw new Error(error.message);
     },
 
     async createOAuthSignInUrl(provider: OAuthProvider, redirectTo: string) {

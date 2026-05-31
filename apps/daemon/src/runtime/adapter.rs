@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use acp::Agent as _; // bring trait methods into scope
 use agent_client_protocol as acp;
@@ -182,62 +182,116 @@ struct SessionRoute {
     /// this counter to go (and stay) quiescent before emitting Active->Idle,
     /// guaranteeing the turn's final text lands ahead of the turn-end marker.
     notif_inflight: Rc<Cell<usize>>,
+    /// Monotonic count of `session_notification` handlers that have *finished*
+    /// pushing their events onto `event_tx`. Unlike `notif_inflight` (which
+    /// reads 0 both *before* a handler is dispatched and *after* it completes),
+    /// this only ever moves forward, so the drain barrier can tell "a handler
+    /// just completed" apart from "no handler has started yet" and extend its
+    /// quiet window accordingly.
+    notif_finished: Rc<Cell<u64>>,
 }
 
 /// RAII guard that marks one in-flight `session_notification` on a session
-/// route: increments on construction, decrements on drop (panic-safe).
+/// route: increments `inflight` on construction; on drop (panic-safe)
+/// decrements `inflight` and bumps the monotonic `finished` counter.
 struct NotifInflightGuard {
-    counter: Rc<Cell<usize>>,
+    inflight: Rc<Cell<usize>>,
+    finished: Rc<Cell<u64>>,
 }
 
 impl NotifInflightGuard {
-    fn new(counter: Rc<Cell<usize>>) -> Self {
-        counter.set(counter.get() + 1);
-        Self { counter }
+    fn new(inflight: Rc<Cell<usize>>, finished: Rc<Cell<u64>>) -> Self {
+        inflight.set(inflight.get() + 1);
+        Self { inflight, finished }
     }
 }
 
 impl Drop for NotifInflightGuard {
     fn drop(&mut self) {
-        self.counter.set(self.counter.get().saturating_sub(1));
+        self.inflight.set(self.inflight.get().saturating_sub(1));
+        self.finished.set(self.finished.get().wrapping_add(1));
     }
 }
 
 /// Block until the per-session notification dispatch pipeline is quiescent.
 ///
-/// See `SessionRoute::notif_inflight` for why this barrier exists. We can't
-/// hook the crate's reader/dispatcher, but we can observe quiescence: the
-/// reader enqueues every trailing notification onto the crate's internal
-/// `incoming_rx` *before* it resolves the prompt response, so by the time
-/// `prompt()` returns those notifications are already queued. One scheduler
-/// turn lets the dispatcher spawn all of their handlers; subsequent turns let
-/// those handlers run (each bumps `notif_inflight` on entry, before its first
-/// `await`, and clears it once its `event_tx` sends complete). Requiring the
-/// counter to read zero across two consecutive yields closes the
-/// "dispatched-but-not-yet-polled" window: any handler that was merely queued
-/// at the first observation has run to completion (pushing its `Output`) by
-/// the second.
+/// See `SessionRoute::notif_inflight` for why this barrier exists. The ACP
+/// crate's reader (`rpc.rs::handle_io`) enqueues every trailing notification
+/// onto its internal `incoming_rx` *before* it resolves the prompt response,
+/// so by the time `conn.prompt()` returns the whole turn's notifications are
+/// already queued. But the handlers run on a *separate* task chain:
+/// `handle_incoming` pulls each notification off `incoming_rx` and `spawn`s an
+/// independent handler task, and only those handler tasks push `Thinking` /
+/// `Output` onto `event_tx`.
+///
+/// The previous implementation declared the pipeline drained after observing
+/// `notif_inflight == 0` across two `yield_now()` turns. That was racy:
+/// `notif_inflight` reads 0 *both* before any handler is dispatched *and*
+/// after they all complete. When the crate's `BufReader` happened to read the
+/// whole turn (every notification line + the prompt response) in one
+/// uninterrupted burst, the prompt worker could be scheduled first and burn
+/// both zero observations before `handle_incoming` ran even once — emitting
+/// `Active->Idle` ahead of the turn's content. The aggregator then flushed
+/// empty buffers, closed the turn, and the real chunks (arriving afterward)
+/// were stranded in a never-closed follow-up turn and lost.
+///
+/// We can't hook the crate's dispatcher, so we settle on a *time-bounded quiet
+/// window* instead. Giving the local executor real wall-clock time guarantees
+/// the ready `handle_incoming` task drains `incoming_rx` (it pulls every
+/// already-buffered item in a single poll) and the spawned handlers run. We
+/// only return once `notif_inflight == 0` *and* no handler has finished for at
+/// least `QUIET_WINDOW` — the monotonic `notif_finished` counter
+/// distinguishes "a handler just completed" from "nothing started yet", so a
+/// turn that is still flushing keeps extending the window while a genuinely
+/// empty turn falls through after one quiet window.
 async fn await_notifications_drained(registry: &Rc<RefCell<SessionRegistry>>, acp_session_id: &str) {
-    // Bounded so a wedged/removed session can never pin the prompt worker.
-    const MAX_SPINS: usize = 4096;
-    let mut zero_streak = 0usize;
-    for _ in 0..MAX_SPINS {
-        tokio::task::yield_now().await;
-        let inflight = {
-            let guard = registry.borrow();
-            match guard.sessions.get(acp_session_id) {
-                Some(route) => route.notif_inflight.get(),
-                // Session detached mid-turn: nothing left to order against.
-                None => return,
-            }
+    // Minimum span of no-completions + zero-inflight we require before
+    // declaring the pipeline drained. Comfortably longer than the few
+    // scheduler ticks it takes the executor to drain `incoming_rx` and run
+    // the (trivial) handler tasks, yet negligible against multi-second turns.
+    const QUIET_WINDOW: Duration = Duration::from_millis(12);
+    // Hard ceiling so a wedged/removed session can never pin the prompt worker.
+    const MAX_WAIT: Duration = Duration::from_millis(3000);
+    // Poll cadence: real sleeps (not bare yields) so the crate's reader,
+    // `handle_incoming`, and the handler tasks all get wall-clock time to run.
+    const TICK: Duration = Duration::from_millis(1);
+
+    let start = Instant::now();
+    let read_state = || -> Option<(usize, u64)> {
+        let guard = registry.borrow();
+        guard
+            .sessions
+            .get(acp_session_id)
+            .map(|route| (route.notif_inflight.get(), route.notif_finished.get()))
+    };
+
+    // Seed with the current completion count; any forward movement marks
+    // fresh activity and restarts the quiet window.
+    let mut last_finished = match read_state() {
+        Some((_, finished)) => finished,
+        // Session detached mid-turn: nothing left to order against.
+        None => return,
+    };
+    let mut last_activity = Instant::now();
+    let finished0 = last_finished;
+
+    loop {
+        tokio::time::sleep(TICK).await;
+        let (inflight, finished) = match read_state() {
+            Some(state) => state,
+            None => return,
         };
-        if inflight == 0 {
-            zero_streak += 1;
-            if zero_streak >= 2 {
-                return;
-            }
-        } else {
-            zero_streak = 0;
+        if finished != last_finished {
+            last_finished = finished;
+            last_activity = Instant::now();
+        }
+        if inflight == 0 && last_activity.elapsed() >= QUIET_WINDOW {
+            debug!(session = %acp_session_id, processed = finished.wrapping_sub(finished0), waited_ms = start.elapsed().as_millis() as u64, "ACP notification drain settled");
+            return;
+        }
+        if start.elapsed() >= MAX_WAIT {
+            warn!(session = %acp_session_id, processed = finished.wrapping_sub(finished0), inflight, "ACP notification drain hit MAX_WAIT");
+            return;
         }
     }
 }
@@ -445,17 +499,22 @@ impl acp::Client for AmuxClient {
         let events = translate_session_update(args.update);
         let route = {
             let guard = self.registry.borrow();
-            guard
-                .sessions
-                .get(&session_id)
-                .map(|r| (r.event_tx.clone(), r.notif_inflight.clone()))
+            guard.sessions.get(&session_id).map(|r| {
+                (
+                    r.event_tx.clone(),
+                    r.notif_inflight.clone(),
+                    r.notif_finished.clone(),
+                )
+            })
         };
-        if let Some((event_tx, inflight)) = route {
+        if let Some((event_tx, inflight, finished)) = route {
             // Mark this handler in-flight *before* the first await so the
             // prompt worker's drain barrier can observe it (see
             // `await_notifications_drained`). The guard clears it once all
-            // sends below complete, even on early return / panic.
-            let _inflight_guard = NotifInflightGuard::new(inflight);
+            // sends below complete, even on early return / panic, and bumps
+            // the monotonic `finished` counter so the barrier can tell a
+            // just-completed handler apart from one that never started.
+            let _inflight_guard = NotifInflightGuard::new(inflight, finished);
             for event in events {
                 let _ = event_tx.send(event).await;
             }
@@ -1219,6 +1278,7 @@ async fn attach_acp_session_on_conn(
             is_gateway,
             pending_permissions: HashMap::new(),
             notif_inflight: Rc::new(Cell::new(0)),
+            notif_finished: Rc::new(Cell::new(0)),
         },
     );
 

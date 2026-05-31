@@ -115,7 +115,7 @@ async function loadSessionRuntimeCommands(
     return []
   }
 
-  let runtimeRows: RuntimeCommandRow[] = []
+  let runtimeRows: RuntimeCommandRow[]
   try {
     runtimeRows = await getBackend().runtime.listSessionRuntimeModels(activeSessionId) as RuntimeCommandRow[]
   } catch (error) {

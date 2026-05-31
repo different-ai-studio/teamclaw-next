@@ -285,6 +285,8 @@ private actor FailingOnboardingStore: AppOnboardingStore {
     func signUp(email: String, password: String) async throws { throw error }
     func sendEmailOTP(email: String) async throws { throw error }
     func verifyOTP(email: String, token: String) async throws { throw error }
+    func sendPhoneOTP(phone: String) async throws { throw error }
+    func verifyPhoneOTP(phone: String, token: String) async throws { throw error }
     func signInWithAppleCredential(idToken: String, nonce: String) async throws { throw error }
     func signInWithGoogle() async throws { throw error }
     func handleAuthCallback(url: URL) async throws { throw error }
@@ -294,6 +296,8 @@ private actor FailingOnboardingStore: AppOnboardingStore {
     func isAnonymous() async -> Bool { false }
     func currentUserEmail() async -> String? { nil }
     func upgradeWithPassword(email: String, password: String) async throws { throw error }
+    func sendUpgradeEmailOTP(email: String) async throws { throw error }
+    func verifyUpgradeEmailOTP(email: String, token: String) async throws { throw error }
     func upgradeWithAppleCredential(idToken: String, nonce: String) async throws { throw error }
     func claimInvite(token: String) async throws -> ClaimResult { throw error }
     func setSession(refreshToken: String) async throws { throw error }

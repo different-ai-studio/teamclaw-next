@@ -140,6 +140,24 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         }
     }
 
+    public func sendPhoneOTP(phone: String) async throws {
+        await ensureStarted()
+        // GoTrue sends an SMS code for the E.164 phone; FC defaults channel sms.
+        try await auth.postVoid(
+            "/v1/auth/signin-otp",
+            body: PhoneOTPRequest(phone: phone, options: .init(shouldCreateUser: true))
+        )
+    }
+
+    public func verifyPhoneOTP(phone: String, token: String) async throws {
+        await ensureStarted()
+        let g: GoTrueSession = try await auth.post(
+            "/v1/auth/verify-otp",
+            body: VerifyPhoneOTPRequest(phone: phone, token: token, type: "sms")
+        )
+        try await store(g)
+    }
+
     public func signInWithAppleCredential(idToken: String, nonce: String) async throws {
         await ensureStarted()
         let g: GoTrueSession = try await auth.post(
@@ -197,6 +215,36 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         // PATCH /auth/v1/user returns the updated user, not necessarily a new
         // session. Only adopt it when it actually carries fresh tokens;
         // otherwise the existing session (same user_id) remains valid.
+        if g.accessToken != nil {
+            try await store(g)
+        }
+    }
+
+    public func sendUpgradeEmailOTP(email: String) async throws {
+        await ensureStarted()
+        // GoTrue email_change: PATCH the user's email with the current bearer.
+        // This emails a verification code (the {{ .Token }} → 6-digit template)
+        // without minting a new user, so the upgrade keeps the same user_id.
+        let token = try await sessionStore.accessToken()
+        // PATCH returns the (still-anonymous) user; we don't adopt it here —
+        // the session only changes after the code is verified.
+        let _: GoTrueSession = try await auth.patch(
+            "/v1/auth/user",
+            body: EmailUpdate(email: email),
+            bearer: token
+        )
+    }
+
+    public func verifyUpgradeEmailOTP(email: String, token: String) async throws {
+        await ensureStarted()
+        let bearer = try await sessionStore.accessToken()
+        let g: GoTrueSession = try await auth.post(
+            "/v1/auth/verify-otp",
+            body: VerifyOTPRequest(email: email, token: token, type: "email_change"),
+            bearer: bearer
+        )
+        // verify-otp for email_change returns the updated session; adopt it
+        // when present so the (now non-anonymous) tokens replace the old ones.
         if g.accessToken != nil {
             try await store(g)
         }
@@ -376,6 +424,10 @@ private struct PasswordCredentials: Encodable, Sendable {
     let password: String
 }
 
+private struct EmailUpdate: Encodable, Sendable {
+    let email: String
+}
+
 private struct OTPRequest: Encodable, Sendable {
     let email: String
     let options: Options
@@ -386,6 +438,20 @@ private struct OTPRequest: Encodable, Sendable {
 
 private struct VerifyOTPRequest: Encodable, Sendable {
     let email: String
+    let token: String
+    let type: String
+}
+
+private struct PhoneOTPRequest: Encodable, Sendable {
+    let phone: String
+    let options: Options
+    struct Options: Encodable, Sendable {
+        let shouldCreateUser: Bool
+    }
+}
+
+private struct VerifyPhoneOTPRequest: Encodable, Sendable {
+    let phone: String
     let token: String
     let type: String
 }

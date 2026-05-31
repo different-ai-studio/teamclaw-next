@@ -414,22 +414,6 @@ paths:
           description: OK
         "401":
           $ref: "#/components/responses/Error"
-  /v1/sessions/{sessionId}/mark-unread:
-    post:
-      operationId: markSessionUnread
-      summary: Mark session unread
-      description: |
-        Deletes the current actor's read marker for the session so it
-        re-surfaces as unread. The actor is derived from the bearer token,
-        mirroring mark-viewed.
-      tags: [Sessions]
-      parameters:
-        - $ref: "#/components/parameters/SessionId"
-      responses:
-        "204":
-          description: OK
-        "401":
-          $ref: "#/components/responses/Error"
   /v1/teams/{teamId}/sessions:
     get:
       operationId: listTeamSessions
@@ -1040,16 +1024,6 @@ paths:
                   type: string
                 archived:
                   type: boolean
-                path:
-                  type:
-                    - string
-                    - "null"
-                agentId:
-                  description: Bind (or, when null, unbind) the workspace's agent.
-                  type:
-                    - string
-                    - "null"
-                  format: uuid
                 metadata:
                   type: object
                   additionalProperties: true
@@ -3019,7 +2993,11 @@ paths:
   /v1/auth/signin-otp:
     post:
       operationId: signInOtp
-      summary: Proxy to Supabase GoTrue /auth/v1/otp (magic link)
+      summary: Proxy to Supabase GoTrue /auth/v1/otp (email or SMS OTP)
+      description: >
+        Provide either `email` or `phone` (E.164, e.g. +8613800138000). For
+        phone, an SMS code is sent; pass `options.channel` to override the
+        default "sms" delivery channel.
       tags: [Auth]
       security: []
       requestBody:
@@ -3028,9 +3006,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email]
+              description: Exactly one of email or phone must be provided.
               properties:
                 email: { type: string, format: email }
+                phone: { type: string, description: "E.164 phone, e.g. +8613800138000" }
                 options: { type: object }
       responses:
         "200":
@@ -3046,6 +3025,9 @@ paths:
     post:
       operationId: verifyOtp
       summary: Proxy to Supabase GoTrue /auth/v1/verify
+      description: >
+        Provide either `email` or `phone` (matching the signin-otp request)
+        plus `token`. `type` defaults to "email"; phone verification uses "sms".
       tags: [Auth]
       security: []
       requestBody:
@@ -3054,11 +3036,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, token]
+              required: [token]
+              description: Exactly one of email or phone must be provided.
               properties:
                 email: { type: string, format: email }
+                phone: { type: string, description: "E.164 phone, e.g. +8613800138000" }
                 token: { type: string }
-                type: { type: string, default: email }
+                type: { type: string, default: email, enum: [email, sms, signup, email_change, phone_change, recovery] }
       responses:
         "200":
           description: GoTrue session payload

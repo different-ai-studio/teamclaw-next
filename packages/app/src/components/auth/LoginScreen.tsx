@@ -88,7 +88,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               {t("auth.enterCode", "Enter the code")}
             </h2>
             <p className="text-[13px] text-muted-foreground">
-              {t("auth.codeSent", "We sent an 8-digit code to {{email}}.", { email: otpEmail })}
+              {t("auth.codeSent", "We sent a 6-digit code to {{email}}.", { email: otpEmail })}
             </p>
           </div>
           <label className="block space-y-2">
@@ -100,10 +100,10 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               inputMode="numeric"
               pattern="[0-9]*"
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               required
               autoFocus
-              maxLength={8}
+              maxLength={6}
               className="h-11 text-center text-lg tracking-[0.35em] font-mono"
             />
           </label>
@@ -114,7 +114,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
           )}
           <Button
             type="submit"
-            disabled={serverConfigRequired || loading || code.length !== 8}
+            disabled={serverConfigRequired || loading || code.length !== 6}
             className="h-10 w-full bg-coral text-paper hover:bg-coral/90 disabled:bg-coral/40 disabled:text-paper"
           >
             {loading ? t("auth.verifying", "Verifying…") : t("auth.verify", "Verify")}
@@ -137,7 +137,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               {t("auth.signIn", "Sign in")}
             </h2>
             <p className="text-[13px] text-muted-foreground">
-              {t("auth.willEmailCode", "We'll email you an 8-digit code.")}
+              {t("auth.willEmailCode", "We'll email you a 6-digit code.")}
             </p>
           </div>
           <label className="block space-y-2">

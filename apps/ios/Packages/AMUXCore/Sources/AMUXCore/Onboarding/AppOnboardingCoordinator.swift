@@ -86,6 +86,8 @@ public protocol AppOnboardingStore: Sendable {
     func signUp(email: String, password: String) async throws
     func sendEmailOTP(email: String) async throws
     func verifyOTP(email: String, token: String) async throws
+    func sendPhoneOTP(phone: String) async throws
+    func verifyPhoneOTP(phone: String, token: String) async throws
     func signInWithAppleCredential(idToken: String, nonce: String) async throws
     func signInWithGoogle() async throws
     func signInAnonymously() async throws
@@ -111,6 +113,12 @@ public protocol AppOnboardingStore: Sendable {
     // attaching credentials. Same auth.users.id, so all team / actor / access
     // rows the user accumulated as anonymous are preserved.
     func upgradeWithPassword(email: String, password: String) async throws
+    /// Send an email verification code to attach `email` to the current
+    /// anonymous user (GoTrue email_change flow). Bearer = current session.
+    func sendUpgradeEmailOTP(email: String) async throws
+    /// Confirm the code from `sendUpgradeEmailOTP`, finalizing the upgrade
+    /// while keeping the same user_id.
+    func verifyUpgradeEmailOTP(email: String, token: String) async throws
     func upgradeWithAppleCredential(idToken: String, nonce: String) async throws
 
     /// Emits each time the underlying auth provider rotates the access
@@ -130,6 +138,9 @@ public final class AppOnboardingCoordinator {
     public var pendingCreatedTeam: CreatedTeam?
     public var errorMessage: String?
     public var pendingEmailOTPEmail: String?
+    /// E.164 phone awaiting an SMS code. Mirrors `pendingEmailOTPEmail`; the
+    /// login UI shows the code step when either is non-nil.
+    public var pendingPhoneOTPPhone: String?
     public var isBusy = false
     /// True iff the current session is an anonymous Supabase user. UI uses
     /// this to surface the "upgrade your account" affordance.
@@ -464,6 +475,28 @@ public final class AppOnboardingCoordinator {
         errorMessage = nil
     }
 
+    public func sendPhoneOTP(phone: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await store.sendPhoneOTP(phone: phone)
+            pendingPhoneOTPPhone = phone
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    public func verifyPhoneOTP(phone: String, token: String) async {
+        await performAuth { try await self.store.verifyPhoneOTP(phone: phone, token: token) }
+    }
+
+    public func resetPendingPhoneOTP() {
+        pendingPhoneOTPPhone = nil
+        errorMessage = nil
+    }
+
     public func signInWithApple() async {
 #if os(iOS)
         await performAuth {
@@ -584,6 +617,28 @@ public final class AppOnboardingCoordinator {
     /// retained. Triggers a re-bootstrap to refresh `isAnonymous`.
     public func upgradeWithPassword(email: String, password: String) async {
         await performAuth { try await self.store.upgradeWithPassword(email: email, password: password) }
+    }
+
+    /// Step 1 of the code-based upgrade: email a verification code. Mirrors
+    /// `sendEmailOTP` — stashes `pendingEmailOTPEmail` so the sheet can switch
+    /// to the code-entry step, and does NOT route away on success.
+    public func sendUpgradeEmailOTP(email: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await store.sendUpgradeEmailOTP(email: email)
+            pendingEmailOTPEmail = email
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Step 2: confirm the code and finalize the upgrade. On success the
+    /// user_id is unchanged, so existing team / actor rows are retained.
+    public func verifyUpgradeEmailOTP(email: String, token: String) async {
+        await performAuth { try await self.store.verifyUpgradeEmailOTP(email: email, token: token) }
     }
 
     /// Same as `upgradeWithPassword` but linking an Apple identity instead.

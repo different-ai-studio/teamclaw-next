@@ -52,6 +52,33 @@ function safeJson(raw: string): unknown {
   }
 }
 
+function normalizeRefreshSession(data: unknown, current: Session | null): Session {
+  if (!data || typeof data !== "object") return data as Session;
+  const row = data as Partial<Session> & {
+    accessToken?: unknown;
+    refreshToken?: unknown;
+    expiresAt?: unknown;
+  };
+  if (typeof row.access_token === "string" && typeof row.refresh_token === "string") {
+    return row as Session;
+  }
+  if (
+    typeof row.accessToken === "string" &&
+    typeof row.refreshToken === "string" &&
+    typeof row.expiresAt === "number" &&
+    current?.user
+  ) {
+    return {
+      ...current,
+      access_token: row.accessToken,
+      refresh_token: row.refreshToken,
+      expires_at: row.expiresAt,
+      token_type: current.token_type ?? "bearer",
+    };
+  }
+  return row as Session;
+}
+
 export function createAuthClient(opts: AuthClientOptions): AuthClient {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const url = (path: string) => joinUrl(opts.baseUrl, path);
@@ -87,15 +114,15 @@ export function createAuthClient(opts: AuthClientOptions): AuthClient {
     if (!session?.refresh_token) {
       throw new AuthError("No refresh token available.", 401, "no_refresh_token");
     }
-    const data = (await post("/v1/auth/refresh", { refreshToken: session.refresh_token })) as Session;
-    return data;
+    const data = await post("/v1/auth/refresh", { refreshToken: session.refresh_token });
+    return normalizeRefreshSession(data, session);
   }
 
   // Wire the refresher into the SessionStore so timer-driven refreshes work.
   configureSessionStore({
     refresher: async (refreshToken: string) => {
-      const data = (await post("/v1/auth/refresh", { refreshToken })) as Session;
-      return data;
+      const data = await post("/v1/auth/refresh", { refreshToken });
+      return normalizeRefreshSession(data, getSession());
     },
   });
 

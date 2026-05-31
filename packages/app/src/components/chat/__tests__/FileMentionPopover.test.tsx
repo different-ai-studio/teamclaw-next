@@ -62,9 +62,16 @@ describe('FileMentionPopover', () => {
       expect(screen.getByText('README.md')).toBeTruthy()
     })
 
-    fireEvent.keyDown(document, { key: 'Tab' })
+    // The keydown handler reads filteredEntriesRef.current, which is synced
+    // from filteredEntries in a separate effect that may commit one tick after
+    // the list first renders. Re-fire Tab until that ref is populated so the
+    // test does not race the ref sync (flaky under CI load, never hit by a
+    // real user).
+    await waitFor(() => {
+      fireEvent.keyDown(document, { key: 'Tab' })
+      expect(onSelect).toHaveBeenCalledWith('README.md')
+    })
 
-    expect(onSelect).toHaveBeenCalledWith('README.md')
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

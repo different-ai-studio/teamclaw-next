@@ -17,6 +17,10 @@ import {
 
 import { useOnboarding } from "../_layout";
 import { supabase } from "../../src/lib/supabase/client";
+import {
+  OTP_CODE_LENGTH,
+  sanitizeOtpInput,
+} from "../../src/features/onboarding/auth-otp";
 import type { OAuthProvider } from "../../src/features/onboarding/onboarding-oauth";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { showToast } from "../../src/ui/Toast";
@@ -28,40 +32,69 @@ export default function UpgradeAccountRoute() {
   const router = useRouter();
   const { controller, state } = useOnboarding();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  // Set once a code has been emailed — switches the screen to code entry.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = isBusy || state.isBusy;
 
-  const canSubmit =
+  const isCodeStep = pendingEmail !== null;
+  const canSendCode =
     !busy &&
     email.trim().length > 0 &&
-    /^\S+@\S+\.\S+$/.test(email.trim()) &&
-    password.length >= 6;
+    /^\S+@\S+\.\S+$/.test(email.trim());
+  const canVerify = !busy && code.length === OTP_CODE_LENGTH;
 
-  const handleUpgrade = async () => {
-    if (!canSubmit) return;
+  // Step 1: email a verification code to attach `email` to the current
+  // (anonymous) user. GoTrue's email_change flow keeps the same user_id, so
+  // existing teams / agents / sessions stay attached.
+  const handleSendCode = async () => {
+    if (!canSendCode) return;
     setIsBusy(true);
     setError(null);
     try {
-      const result = await supabase.auth.updateUser({
-        email: email.trim(),
-        password,
+      const result = await supabase.auth.updateUser({ email: email.trim() });
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      setPendingEmail(email.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send the code.");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  // Step 2: confirm the code and finalize the upgrade.
+  const handleVerifyCode = async () => {
+    if (!canVerify || !pendingEmail) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      const result = await supabase.auth.verifyOtp({
+        email: pendingEmail,
+        token: code,
+        type: "email_change",
       });
       if (result.error) {
         setError(result.error.message);
         return;
       }
-      showToast(
-        "success",
-        "Account upgraded — check your inbox to verify the email.",
-      );
+      showToast("success", "Account upgraded.");
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't upgrade account.");
     } finally {
       setIsBusy(false);
     }
+  };
+
+  const handleUseDifferentEmail = () => {
+    setPendingEmail(null);
+    setCode("");
+    setError(null);
   };
 
   const handleOAuthUpgrade = async (provider: OAuthProvider) => {
@@ -100,117 +133,165 @@ export default function UpgradeAccountRoute() {
           keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.lede}>
-            {state.isAnonymous
-              ? "Attach an email, Apple, or Google identity so you don't lose this workspace next time you launch Teamclaw."
-              : "Change this account's email/password or connect another sign-in identity."}
+            {isCodeStep
+              ? `Enter the ${OTP_CODE_LENGTH}-digit code we emailed to ${pendingEmail}.`
+              : state.isAnonymous
+                ? "Attach an email, Apple, or Google identity so you don't lose this workspace next time you launch Teamclaw."
+                : "Change this account's email or connect another sign-in identity."}
           </Text>
 
-          <View style={styles.card}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Email</Text>
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!busy}
-                keyboardType="email-address"
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                placeholderTextColor={colors.slate}
-                selectionColor={colors.cinnabar}
-                style={styles.input}
-                textContentType="emailAddress"
-                value={email}
-              />
+          {isCodeStep ? (
+            <View style={styles.card}>
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Code</Text>
+                <TextInput
+                  accessibilityLabel={`${OTP_CODE_LENGTH}-digit code`}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!busy}
+                  keyboardType="number-pad"
+                  maxLength={OTP_CODE_LENGTH}
+                  onChangeText={(value) => setCode(sanitizeOtpInput(value))}
+                  placeholder={`${OTP_CODE_LENGTH}-digit code`}
+                  placeholderTextColor={colors.slate}
+                  selectionColor={colors.cinnabar}
+                  style={styles.input}
+                  textContentType="oneTimeCode"
+                  value={code}
+                />
+              </View>
             </View>
-            <Hairline />
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Password</Text>
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!busy}
-                onChangeText={setPassword}
-                placeholder="At least 6 characters"
-                placeholderTextColor={colors.slate}
-                secureTextEntry
-                selectionColor={colors.cinnabar}
-                style={styles.input}
-                textContentType="newPassword"
-                value={password}
-              />
+          ) : (
+            <View style={styles.card}>
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Email</Text>
+                <TextInput
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!busy}
+                  keyboardType="email-address"
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={colors.slate}
+                  selectionColor={colors.cinnabar}
+                  style={styles.input}
+                  textContentType="emailAddress"
+                  value={email}
+                />
+              </View>
             </View>
-          </View>
+          )}
 
           {error || state.errorMessage ? (
             <Text style={styles.errorText}>{error ?? state.errorMessage}</Text>
           ) : null}
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={!canSubmit}
-            onPress={handleUpgrade}
-            style={({ pressed }) => [
-              styles.cta,
-              canSubmit ? styles.ctaActive : styles.ctaInactive,
-              pressed && canSubmit ? styles.ctaPressed : null,
-            ]}
-          >
-            {busy ? (
-              <ActivityIndicator color={hai.paper} />
-            ) : (
-              <Text
-                style={[
-                  styles.ctaText,
-                  canSubmit ? styles.ctaTextActive : styles.ctaTextInactive,
+          {isCodeStep ? (
+            <>
+              <Pressable
+                accessibilityRole="button"
+                disabled={!canVerify}
+                onPress={handleVerifyCode}
+                style={({ pressed }) => [
+                  styles.cta,
+                  canVerify ? styles.ctaActive : styles.ctaInactive,
+                  pressed && canVerify ? styles.ctaPressed : null,
                 ]}
               >
-                Upgrade with Email
-              </Text>
-            )}
-          </Pressable>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.socialColumn}>
+                {busy ? (
+                  <ActivityIndicator color={hai.paper} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.ctaText,
+                      canVerify ? styles.ctaTextActive : styles.ctaTextInactive,
+                    ]}
+                  >
+                    Verify
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={handleUseDifferentEmail}
+                style={styles.linkButton}
+              >
+                <Text style={styles.linkText}>Use a different email</Text>
+              </Pressable>
+            </>
+          ) : (
             <Pressable
               accessibilityRole="button"
-              disabled={busy}
-              onPress={() => {
-                void handleOAuthUpgrade("apple");
-              }}
+              disabled={!canSendCode}
+              onPress={handleSendCode}
               style={({ pressed }) => [
-                styles.socialButton,
-                pressed && !busy ? styles.pressed : null,
-                busy ? styles.disabled : null,
+                styles.cta,
+                canSendCode ? styles.ctaActive : styles.ctaInactive,
+                pressed && canSendCode ? styles.ctaPressed : null,
               ]}
             >
-              <View style={styles.socialIconWrap}>
-                <Ionicons color={colors.onyx} name="logo-apple" size={19} />
-              </View>
-              <Text style={styles.socialLabel}>Upgrade with Apple</Text>
+              {busy ? (
+                <ActivityIndicator color={hai.paper} />
+              ) : (
+                <Text
+                  style={[
+                    styles.ctaText,
+                    canSendCode ? styles.ctaTextActive : styles.ctaTextInactive,
+                  ]}
+                >
+                  Send code
+                </Text>
+              )}
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy}
-              onPress={() => {
-                void handleOAuthUpgrade("google");
-              }}
-              style={({ pressed }) => [
-                styles.socialButton,
-                pressed && !busy ? styles.pressed : null,
-                busy ? styles.disabled : null,
-              ]}
-            >
-              <View style={styles.socialIconWrap}>
-                <Ionicons color={colors.onyx} name="globe-outline" size={19} />
+          )}
+
+          {!isCodeStep ? (
+            <>
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
               </View>
-              <Text style={styles.socialLabel}>Upgrade with Google</Text>
-            </Pressable>
-          </View>
+
+              <View style={styles.socialColumn}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => {
+                    void handleOAuthUpgrade("apple");
+                  }}
+                  style={({ pressed }) => [
+                    styles.socialButton,
+                    pressed && !busy ? styles.pressed : null,
+                    busy ? styles.disabled : null,
+                  ]}
+                >
+                  <View style={styles.socialIconWrap}>
+                    <Ionicons color={colors.onyx} name="logo-apple" size={19} />
+                  </View>
+                  <Text style={styles.socialLabel}>Upgrade with Apple</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => {
+                    void handleOAuthUpgrade("google");
+                  }}
+                  style={({ pressed }) => [
+                    styles.socialButton,
+                    pressed && !busy ? styles.pressed : null,
+                    busy ? styles.disabled : null,
+                  ]}
+                >
+                  <View style={styles.socialIconWrap}>
+                    <Ionicons color={colors.onyx} name="globe-outline" size={19} />
+                  </View>
+                  <Text style={styles.socialLabel}>Upgrade with Google</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
 
           <Text style={styles.footnote}>
             After upgrading, sign in with the same identity next time you
@@ -323,6 +404,14 @@ const styles = StyleSheet.create({
   lede: {
     color: colors.basalt,
     ...typography.secondaryBody,
+  },
+  linkButton: {
+    alignItems: "center",
+    paddingVertical: spacing.xs,
+  },
+  linkText: {
+    color: colors.slate,
+    ...typography.caption,
   },
   pressed: {
     opacity: 0.8,

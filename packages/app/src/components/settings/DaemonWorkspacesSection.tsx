@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, Archive, CheckCircle2, FolderOpen, Loader2, Plus, RefreshCw, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -14,13 +15,69 @@ import {
   type DaemonAgent,
   type DaemonWorkspace,
 } from '@/lib/daemon-workspaces'
+import { addWorkspace } from '@/lib/teamclaw-rpc'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import { SectionHeader, SettingCard } from './shared'
 
 function workspaceNameFromPath(path: string | null): string {
   if (!path) return ''
   const trimmed = path.replace(/\/+$/, '')
   return trimmed.split('/').pop() || trimmed
+}
+
+function WorkspaceCard({
+  workspace,
+  agentDisplayName,
+  isDefault,
+  showSetDefault,
+  settingDefault,
+  saving,
+  onSetDefault,
+  onArchive,
+  t,
+}: {
+  workspace: DaemonWorkspace
+  agentDisplayName: string
+  isDefault: boolean
+  showSetDefault: boolean
+  settingDefault: boolean
+  saving: boolean
+  onSetDefault?: () => void
+  onArchive: () => void
+  t: (key: string, fallback: string) => string
+}) {
+  return (
+    <div className="rounded-lg border border-border-soft bg-background/50 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[13px] font-medium">{workspace.name}</p>
+            {isDefault && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                <CheckCircle2 className="h-3 w-3" />
+                {t('settings.daemonWorkspaces.default', 'Default')}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 break-all font-mono text-xs text-foreground">{workspace.path || '-'}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{agentDisplayName}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {showSetDefault && onSetDefault && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => void onSetDefault()} disabled={saving || settingDefault}>
+              {settingDefault ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1 h-3.5 w-3.5" />}
+              {t('settings.daemonWorkspaces.setDefault', 'Set default')}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={onArchive} disabled={saving}>
+            <Archive className="mr-1 h-3.5 w-3.5" />
+            {t('settings.daemonWorkspaces.archive', 'Archive')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function DaemonWorkspacesSection() {
@@ -30,11 +87,14 @@ export function DaemonWorkspacesSection() {
   const currentWorkspacePath = useWorkspaceStore((s) => s.workspacePath)
   const [agent, setAgent] = React.useState<DaemonAgent | null>(null)
   const [workspaces, setWorkspaces] = React.useState<DaemonWorkspace[]>([])
-  const [name, setName] = React.useState('')
   const [path, setPath] = React.useState(currentWorkspacePath ?? '')
+  const [setAsDefaultOnAdd, setSetAsDefaultOnAdd] = React.useState(true)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [settingDefaultWorkspaceId, setSettingDefaultWorkspaceId] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+
+  const derivedName = workspaceNameFromPath(path)
 
   const load = React.useCallback(async () => {
     if (!team?.id) return
@@ -65,26 +125,78 @@ export function DaemonWorkspacesSection() {
   const handleUseCurrentWorkspace = () => {
     if (!currentWorkspacePath) return
     setPath(currentWorkspacePath)
-    if (!name.trim()) {
-      setName(workspaceNameFromPath(currentWorkspacePath))
+  }
+
+  const registerDefaultOnDaemon = async (
+    teamId: string,
+    agentId: string,
+    workspaceId: string,
+    workspacePath: string,
+    deviceId: string | null | undefined,
+  ): Promise<{ daemonRegistered: boolean; daemonError?: string }> => {
+    const trimmedPath = workspacePath.trim()
+    let daemonRegistered = false
+    let daemonError: string | undefined
+
+    // Register path on daemon first. addWorkspace used to PATCH cloud default with a
+    // stale remote_workspace_id when the path already existed locally — apply after
+    // cloud default is set so the user's choice wins.
+    if (deviceId && trimmedPath) {
+      try {
+        await addWorkspace({ targetDeviceId: deviceId, path: trimmedPath, timeoutMs: 10_000 })
+        daemonRegistered = true
+      } catch (err) {
+        daemonError = err instanceof Error ? err.message : String(err)
+      }
+    } else if (trimmedPath) {
+      daemonError = t('settings.daemonWorkspaces.noDaemonDevice', 'No local daemon device is connected.')
     }
+
+    await setAgentDefaultWorkspace(agentId, workspaceId)
+
+    const refreshed = await getCurrentDaemonWorkspaceAgent(teamId)
+    if (refreshed?.defaultWorkspaceId !== workspaceId) {
+      throw new Error(t('settings.daemonWorkspaces.defaultPersistFailed', 'Failed to save default workspace to cloud.'))
+    }
+
+    setAgent((current) => (current ? { ...current, defaultWorkspaceId: workspaceId } : refreshed))
+
+    return { daemonRegistered, daemonError }
+  }
+
+  const notifyDaemonRegistrationWarning = (daemonError: string) => {
+    toast.warning(t('settings.daemonWorkspaces.defaultSavedDaemonPending', 'Default workspace saved'), {
+      description: t('settings.daemonWorkspaces.daemonRegisterFailed', 'Daemon registration failed: {{message}}', { message: daemonError }),
+      duration: 10_000,
+    })
   }
 
   const handleCreate = async () => {
-    if (!team?.id || !agent?.id || !name.trim() || !path.trim()) return
+    const trimmedPath = path.trim()
+    if (!team?.id || !agent?.id || !trimmedPath || !derivedName) return
     setSaving(true)
     setError(null)
     try {
-      await createDaemonWorkspace({
+      const created = await createDaemonWorkspace({
         teamId: team.id,
         agentId: agent.id,
         createdByMemberId: currentMember?.id ?? null,
-        name: name.trim(),
-        path: path.trim(),
+        name: derivedName,
+        path: trimmedPath,
       })
-      setName('')
+      if (setAsDefaultOnAdd) {
+        const registration = await registerDefaultOnDaemon(team.id, agent.id, created.id, trimmedPath, agent.deviceId)
+        await load()
+        if (!registration.daemonRegistered && registration.daemonError) {
+          notifyDaemonRegistrationWarning(registration.daemonError)
+        } else {
+          toast.success(t('settings.daemonWorkspaces.addedAsDefault', 'Workspace added and set as default'))
+        }
+      } else {
+        await load()
+        toast.success(t('settings.daemonWorkspaces.added', 'Workspace added'))
+      }
       setPath(currentWorkspacePath ?? '')
-      await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -92,16 +204,23 @@ export function DaemonWorkspacesSection() {
     }
   }
 
-  const handleSetDefault = async (agentId: string, workspaceId: string) => {
+  const handleSetDefault = async (agentId: string, workspaceId: string, workspacePath: string) => {
     setSaving(true)
+    setSettingDefaultWorkspaceId(workspaceId)
     setError(null)
     try {
-      await setAgentDefaultWorkspace(agentId, workspaceId)
+      const registration = await registerDefaultOnDaemon(team.id, agentId, workspaceId, workspacePath, agent?.deviceId)
       await load()
+      if (!registration.daemonRegistered && registration.daemonError) {
+        notifyDaemonRegistrationWarning(registration.daemonError)
+      } else {
+        toast.success(t('settings.daemonWorkspaces.defaultUpdated', 'Default workspace updated'))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
+      setSettingDefaultWorkspaceId(null)
     }
   }
 
@@ -125,6 +244,12 @@ export function DaemonWorkspacesSection() {
 
   const activeWorkspaces = workspaces.filter((workspace) => !workspace.archived)
   const archivedWorkspaces = workspaces.filter((workspace) => workspace.archived)
+  const defaultWorkspace = agent?.defaultWorkspaceId
+    ? activeWorkspaces.find((workspace) => workspace.id === agent.defaultWorkspaceId) ?? null
+    : null
+  const otherWorkspaces = activeWorkspaces.filter((workspace) => workspace.id !== agent?.defaultWorkspaceId)
+  const agentDisplayName = agent?.displayName || t('settings.daemonWorkspaces.unknownAgent', 'Unknown agent')
+  const resolveAgentId = (workspace: DaemonWorkspace) => workspace.agentId ?? agent?.id ?? null
 
   if (!team) {
     return (
@@ -182,54 +307,6 @@ export function DaemonWorkspacesSection() {
       <SettingCard>
         <div className="space-y-4">
           <div>
-            <p className="text-[13px] font-medium">{t('settings.daemonWorkspaces.addTitle', 'Add daemon workspace')}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t('settings.daemonWorkspaces.addDesc', 'Writes to Supabase workspaces and binds the row to this machine daemon agent.')}
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.agent', 'Daemon Agent')}</span>
-              <div className="rounded-md border border-border-soft bg-background/50 px-3 py-2">
-                <p className="truncate text-[13px] font-medium">{agent?.displayName || '-'}</p>
-                <code className="block truncate font-mono text-xs text-muted-foreground">{agent?.id || '-'}</code>
-              </div>
-            </div>
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.name', 'Name')}</span>
-              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="TeamClaw" disabled={saving} />
-            </label>
-          </div>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.path', 'Path')}</span>
-            <div className="flex gap-2">
-              <Input
-                value={path}
-                onChange={(event) => setPath(event.target.value)}
-                placeholder="/Users/me/TeamClaw"
-                className="font-mono text-xs"
-                disabled={saving}
-              />
-              <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={handleUseCurrentWorkspace} disabled={!currentWorkspacePath || saving}>
-                {t('settings.daemonWorkspaces.useCurrent', 'Use current')}
-              </Button>
-            </div>
-          </label>
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={handleCreate}
-            disabled={saving || !agent?.id || !name.trim() || !path.trim()}
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-            {t('settings.daemonWorkspaces.add', 'Add Workspace')}
-          </Button>
-        </div>
-      </SettingCard>
-
-      <SettingCard>
-        <div className="space-y-4">
-          <div>
             <p className="text-[13px] font-medium">{t('settings.daemonWorkspaces.availableTitle', 'Daemon workspaces')}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {t('settings.daemonWorkspaces.availableDesc', 'Rows are read from public.workspaces. Default workspace updates public.agents.default_workspace_id.')}
@@ -243,43 +320,53 @@ export function DaemonWorkspacesSection() {
           ) : activeWorkspaces.length === 0 ? (
             <p className="text-[13px] text-muted-foreground">{t('settings.daemonWorkspaces.empty', 'No daemon workspaces configured yet.')}</p>
           ) : (
-            <div className="space-y-2">
-              {activeWorkspaces.map((workspace) => {
-                const isDefault = Boolean(agent?.defaultWorkspaceId && agent.defaultWorkspaceId === workspace.id)
-                return (
-                  <div key={workspace.id} className="rounded-lg border border-border-soft bg-background/50 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-[13px] font-medium">{workspace.name}</p>
-                          {isDefault && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
-                              <CheckCircle2 className="h-3 w-3" />
-                              {t('settings.daemonWorkspaces.default', 'Default')}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1 break-all font-mono text-xs text-foreground">{workspace.path || '-'}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {agent?.displayName || t('settings.daemonWorkspaces.unknownAgent', 'Unknown agent')}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        {!isDefault && workspace.agentId && (
-                          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => handleSetDefault(workspace.agentId!, workspace.id)} disabled={saving}>
-                            <Save className="mr-1 h-3.5 w-3.5" />
-                            {t('settings.daemonWorkspaces.setDefault', 'Set default')}
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => handleArchive(workspace, true)} disabled={saving}>
-                          <Archive className="mr-1 h-3.5 w-3.5" />
-                          {t('settings.daemonWorkspaces.archive', 'Archive')}
-                        </Button>
-                      </div>
-                    </div>
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.defaultTitle', 'Default workspace')}</p>
+                {defaultWorkspace ? (
+                  <WorkspaceCard
+                    workspace={defaultWorkspace}
+                    agentDisplayName={agentDisplayName}
+                    isDefault
+                    showSetDefault={false}
+                    settingDefault={false}
+                    saving={saving}
+                    onArchive={() => handleArchive(defaultWorkspace, true)}
+                    t={t}
+                  />
+                ) : (
+                  <p className="text-[13px] text-muted-foreground">{t('settings.daemonWorkspaces.noDefault', 'No default workspace set yet.')}</p>
+                )}
+              </div>
+
+              {otherWorkspaces.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.othersTitle', 'Other workspaces')}</p>
+                  <div className="space-y-2">
+                    {otherWorkspaces.map((workspace) => {
+                      const workspaceAgentId = resolveAgentId(workspace)
+                      return (
+                      <WorkspaceCard
+                        key={workspace.id}
+                        workspace={workspace}
+                        agentDisplayName={agentDisplayName}
+                        isDefault={false}
+                        showSetDefault={Boolean(workspaceAgentId)}
+                        settingDefault={settingDefaultWorkspaceId === workspace.id}
+                        saving={saving}
+                        onSetDefault={
+                          workspaceAgentId
+                            ? () => handleSetDefault(workspaceAgentId, workspace.id, workspace.path ?? '')
+                            : undefined
+                        }
+                        onArchive={() => handleArchive(workspace, true)}
+                        t={t}
+                      />
+                      )
+                    })}
                   </div>
-                )
-              })}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -303,6 +390,68 @@ export function DaemonWorkspacesSection() {
           </div>
         </SettingCard>
       )}
+
+      <SettingCard>
+        <div className="space-y-4">
+          <div>
+            <p className="text-[13px] font-medium">{t('settings.daemonWorkspaces.addTitle', 'Add daemon workspace')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('settings.daemonWorkspaces.addDesc', 'Register a local directory for this machine\'s daemon agent.')}
+            </p>
+            {agent && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('settings.daemonWorkspaces.bindToAgent', 'Will bind to local agent {{name}}', { name: agent.displayName })}
+              </p>
+            )}
+          </div>
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonWorkspaces.path', 'Path')}</span>
+            <div className="flex gap-2">
+              <Input
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+                placeholder="/Users/me/TeamClaw"
+                className="font-mono text-xs"
+                disabled={saving}
+              />
+              <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={handleUseCurrentWorkspace} disabled={!currentWorkspacePath || saving}>
+                {t('settings.daemonWorkspaces.useCurrent', 'Use current')}
+              </Button>
+            </div>
+            {derivedName && (
+              <p className="text-[11px] text-faint">
+                {t('settings.daemonWorkspaces.namePreview', 'Registered as {{name}}', { name: derivedName })}
+              </p>
+            )}
+          </label>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <Checkbox
+              id="daemon-workspace-set-default"
+              checked={setAsDefaultOnAdd}
+              onCheckedChange={(checked) => setSetAsDefaultOnAdd(checked === true)}
+              disabled={saving}
+              className="mt-0.5"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-[13px] leading-snug">
+                {t('settings.daemonWorkspaces.setDefaultOnAdd', 'Set as default and register on daemon')}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {t('settings.daemonWorkspaces.setDefaultOnAddHint', 'Updates the agent default workspace and adds the directory to the local daemon in one step.')}
+              </span>
+            </span>
+          </label>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={handleCreate}
+            disabled={saving || !agent?.id || !path.trim() || !derivedName}
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            {t('settings.daemonWorkspaces.add', 'Add Workspace')}
+          </Button>
+        </div>
+      </SettingCard>
     </div>
   )
 }

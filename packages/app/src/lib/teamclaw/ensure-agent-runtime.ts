@@ -1,6 +1,6 @@
 import { getBackend } from "@/lib/backend";
 import { ensureSessionLiveSubscribed, ensureTeamSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
-import { startAgentRuntimesAsync } from "@/lib/session-create";
+import { startAgentRuntimesAsync, type RuntimeStartFailure } from "@/lib/session-create";
 import { waitForTeamclawRpcReady } from "@/lib/teamclaw-rpc";
 import { useDevicePresenceStore } from "@/stores/device-presence-store";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
@@ -10,6 +10,49 @@ import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 const inFlight = new Map<string, Promise<void>>();
+
+export type AgentDevicePresence = "online" | "offline" | "unknown";
+
+/**
+ * Resolve whether an agent's daemon is reachable.
+ *
+ * MQTT retained DeviceState can arrive slightly after subscribe — `undefined`
+ * in device-presence-store means "not yet known", not offline (see
+ * SessionActorSheet computeDotStateAndAnimation). Only explicit `online:
+ * false` (LWT) counts as offline. For the local desktop agent, HTTP probe
+ * is used as a bootstrap when MQTT retain hasn't landed yet.
+ */
+export async function resolveAgentDevicePresence(
+  agentActorId: string,
+  opts?: { timeoutMs?: number },
+): Promise<AgentDevicePresence> {
+  const timeoutMs = opts?.timeoutMs ?? 2_000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const entry = useDevicePresenceStore.getState().byDeviceId[agentActorId];
+    if (entry?.online === true) return "online";
+    if (entry?.online === false) return "offline";
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  const entry = useDevicePresenceStore.getState().byDeviceId[agentActorId];
+  if (entry?.online === true) return "online";
+  if (entry?.online === false) return "offline";
+
+  const { isTauri } = await import("@/lib/utils");
+  if (isTauri()) {
+    const { getLocalDaemonDeviceId } = await import("@/lib/daemon-agent-admin");
+    const { probeDaemonHttp } = await import("@/lib/daemon-local-client");
+    const localId = await getLocalDaemonDeviceId();
+    if (localId === agentActorId) {
+      const probe = await probeDaemonHttp();
+      return probe.ok ? "online" : "offline";
+    }
+  }
+
+  return "unknown";
+}
 
 function logDebug(
   eventCase: string,
@@ -35,21 +78,25 @@ async function ensureAgentIsSessionParticipant(sessionId: string, agentActorId: 
   logDebug("client:participant_added", { sessionId, agentActorId }, { sessionId, actorId: agentActorId });
 }
 
-function warnIfAgentDaemonOffline(agentActorId: string): void {
-  const presence = useDevicePresenceStore.getState().byDeviceId[agentActorId];
-  if (presence?.online === true) return;
+function notifyRuntimeStartFailures(failures: RuntimeStartFailure[]): void {
+  if (failures.length === 0) return;
   void import("sonner").then(({ toast }) => {
-    toast.warning("Agent daemon 未在线", {
-      description:
-        "未检测到该 Agent 的 MQTT 在线状态，runtimeStart 可能超时。请确认对应设备上的 amuxd 已启动并已加入团队。",
-      duration: 8000,
-    });
+    for (const failure of failures) {
+      const shortId = failure.agentActorId.slice(0, 8);
+      toast.error("Agent runtime 未启动", {
+        id: `runtime-start-failed-${failure.agentActorId}`,
+        description:
+          failure.reason.trim() ||
+          `Agent ${shortId} 的 daemon 未响应 runtimeStart（可能未在线或未加入团队）。`,
+        duration: 8000,
+      });
+      logDebug(
+        "client:runtime_start_failed",
+        failure,
+        { actorId: failure.agentActorId },
+      );
+    }
   });
-  logDebug(
-    "client:daemon_offline",
-    { agentActorId, presence: presence ?? null },
-    { actorId: agentActorId },
-  );
 }
 
 export type EnsureAgentRuntimeArgs = {
@@ -115,7 +162,6 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
             actorId: agentActorId,
           });
         }
-        warnIfAgentDaemonOffline(agentActorId);
       }),
     );
 
@@ -148,7 +194,7 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
       localWorkspacePath,
     });
 
-    await startAgentRuntimesAsync({
+    const runtimeFailures = await startAgentRuntimesAsync({
       sessionId: args.sessionId,
       teamId: args.teamId,
       agentActorIds,
@@ -156,6 +202,7 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
       modelIdByAgent: args.modelIdByAgent,
       workspaceIdHint,
     });
+    notifyRuntimeStartFailures(runtimeFailures);
 
     const retainDeadline = Date.now() + 12_000;
     while (Date.now() < retainDeadline) {

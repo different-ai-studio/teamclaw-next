@@ -10,6 +10,7 @@ import {
 import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useAuthStore } from '@/stores/auth-store'
 import { resolveCurrentMemberActorId } from '@/lib/current-actor'
 import { mqttPublish } from '@/lib/mqtt-bridge'
 import {
@@ -315,6 +316,11 @@ export interface StartAgentRuntimesArgs {
   workspaceIdHint?: string | null
 }
 
+export type RuntimeStartFailure = {
+  agentActorId: string
+  reason: string
+}
+
 function normalizeAgentTypes(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((t): t is string => typeof t === 'string' && t.length > 0)
@@ -339,18 +345,21 @@ function pickAgentBackend(
  * Fire-and-forget RPC fanout. Resolves each agent's cloud workspace id
  * (prior runtime → default_workspace_id → agent-bound workspace), then calls
  * runtimeStart with worktree left empty so the target daemon resolves the
- * local path. Failures are logged but don't propagate — UI has already moved on.
+ * local path. Per-agent failures are returned for the caller to surface;
+ * unexpected batch-level errors may still throw.
  *
  * The caller is expected to NOT await this — kick it off with `void`.
  * Daemon-published RuntimeInfo retains will update the runtime-state-store
  * asynchronously as the runtimes come up.
  */
-export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<void> {
-  if (args.agentActorIds.length === 0) return
+export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Promise<RuntimeStartFailure[]> {
+  if (args.agentActorIds.length === 0) return []
+  const failures: RuntimeStartFailure[] = []
   const localWorkspacePath = useWorkspaceStore.getState().workspacePath?.trim() || ''
   let createdByMemberId: string | null = null
   try {
-    createdByMemberId = await resolveCurrentMemberActorId(args.teamId)
+    const userId = useAuthStore.getState().session?.user?.id ?? ''
+    createdByMemberId = userId ? await resolveCurrentMemberActorId(args.teamId, userId) : null
   } catch {
     createdByMemberId = null
   }
@@ -490,6 +499,10 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
           workspaceId,
           reason: error instanceof Error ? error.message : String(error),
         })
+        failures.push({
+          agentActorId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
         return
       }
     }
@@ -527,6 +540,10 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         console.error('[session-create] runtimeStart rejected', {
           agentActorId,
           reason: result.rejectedReason,
+        })
+        failures.push({
+          agentActorId,
+          reason: result.rejectedReason?.trim() || 'runtimeStart rejected',
         })
       } else {
         sessionFlowLog('runtime_start.request.accepted', {
@@ -600,6 +617,10 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         agentActorId,
         reason: e instanceof Error ? e.message : String(e),
       })
+      failures.push({
+        agentActorId,
+        reason: e instanceof Error ? e.message : String(e),
+      })
     }
   }))
   sessionFlowLog('runtime_start.batch.done', {
@@ -607,5 +628,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     teamId: args.teamId,
     agentActorIds: args.agentActorIds,
     modelId: args.modelId,
+    failureCount: failures.length,
   })
+  return failures
 }

@@ -565,9 +565,25 @@ impl RuntimeManagerAdapter {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
+                // Only drain runtimes this HTTP adapter actually owns (have an
+                // active SSE session). Events for runtimes driven by the MQTT
+                // collaboration path (desktop chat) MUST stay queued for the
+                // daemon main loop's `poll_events()` → `forward_agent_event`
+                // → `session/live` publish. Draining them here would silently
+                // discard them in `process_runtime_event` (no HTTP session →
+                // early return), starving the desktop of agent replies.
+                let owned: std::collections::HashSet<String> = adapter
+                    .sessions
+                    .read()
+                    .values()
+                    .map(|s| s.runtime_id.clone())
+                    .collect();
+                if owned.is_empty() {
+                    continue;
+                }
                 let drained = {
                     let mut manager = adapter.manager.lock().await;
-                    manager.poll_events()
+                    manager.poll_events_for(&owned)
                 };
                 for (runtime_id, event) in drained {
                     adapter.process_runtime_event(&runtime_id, event);

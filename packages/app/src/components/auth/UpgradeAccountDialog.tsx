@@ -106,9 +106,10 @@ export function UpgradeAccountDialog({ open, onOpenChange }: Props) {
               </span>
               <Input
                 value={code}
-                onChange={(e) => setCode(e.target.value)}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 inputMode="numeric"
                 autoFocus
+                maxLength={6}
                 className="font-mono"
               />
             </label>
@@ -117,7 +118,7 @@ export function UpgradeAccountDialog({ open, onOpenChange }: Props) {
             )}
             <Button
               type="submit"
-              disabled={loading || !code.trim()}
+              disabled={loading || code.length !== 6}
               className="h-10 w-full bg-coral text-paper hover:bg-coral/90"
             >
               {loading

@@ -48,7 +48,7 @@ export function CommitList({
           >
             <div className="text-xs text-muted-foreground truncate">
               {formatRelative(e.timestamp, i18n.language)}
-              {e.author ? ` · ${e.author}` : ''}
+              {e.author ? ' · ' + e.author : ''}
             </div>
             <div className="text-sm truncate">{e.message || e.label}</div>
           </button>

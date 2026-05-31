@@ -142,6 +142,14 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
         // no-op
     }
 
+    func sendPhoneOTP(phone: String) async throws {
+        // no-op
+    }
+
+    func verifyPhoneOTP(phone: String, token: String) async throws {
+        // no-op
+    }
+
     func signInWithAppleCredential(idToken: String, nonce: String) async throws {
         // no-op
     }
@@ -171,6 +179,14 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
     func currentUserEmail() async -> String? { nil }
 
     func upgradeWithPassword(email: String, password: String) async throws {
+        // no-op
+    }
+
+    func sendUpgradeEmailOTP(email: String) async throws {
+        // no-op
+    }
+
+    func verifyUpgradeEmailOTP(email: String, token: String) async throws {
         // no-op
     }
 

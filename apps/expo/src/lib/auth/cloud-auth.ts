@@ -99,6 +99,13 @@ async function authRequest<T>(
   return payload as T;
 }
 
+function errorResult(error: unknown): { data: null; error: { message: string } } {
+  return {
+    data: null,
+    error: { message: error instanceof Error ? error.message : "Authentication request failed." },
+  };
+}
+
 function expiryFrom(body: GoTrueSessionBody): number {
   if (typeof body.expires_at === "number") return body.expires_at;
   if (typeof body.expires_in === "number") return nowSeconds() + body.expires_in;
@@ -151,7 +158,11 @@ export type CloudAuthClient = {
       email: string;
       options?: { shouldCreateUser?: boolean };
     }) => Promise<void>;
-    verifyOtp: (input: { email: string; token: string; type: "email" }) => Promise<unknown>;
+    verifyOtp: (input: {
+      email: string;
+      token: string;
+      type: "email" | "email_change";
+    }) => Promise<{ data: unknown; error: { message: string } | null }>;
     oauthAuthorize: (provider: string, redirectTo: string) => Promise<string>;
     exchangeOAuthCode: (code: string) => Promise<unknown>;
   };
@@ -252,23 +263,34 @@ export const cloudAuth: CloudAuthClient = {
       });
     },
 
-    async verifyOtp({ email, token }) {
+    async verifyOtp({ email, token, type }) {
       await store().start();
-      // Mirror the legacy store: try type "email", fall back to "signup".
+      // Store a session only when the response carries one (sign-in OTP does;
+      // an `email_change` confirmation keeps the existing user/session).
+      const consume = async (body: GoTrueSessionBody) => {
+        if (body.access_token && body.refresh_token) await storeGoTrue(body);
+        return { data: body, error: null as { message: string } | null };
+      };
       try {
         const body = await authRequest<GoTrueSessionBody>("/v1/auth/verify-otp", {
           method: "POST",
-          body: { email, token, type: "email" },
+          body: { email, token, type },
         });
-        await storeGoTrue(body);
-        return body;
-      } catch {
-        const body = await authRequest<GoTrueSessionBody>("/v1/auth/verify-otp", {
-          method: "POST",
-          body: { email, token, type: "signup" },
-        });
-        await storeGoTrue(body);
-        return body;
+        return await consume(body);
+      } catch (error) {
+        // Mirror the legacy store: for sign-in OTP, fall back to type "signup".
+        if (type === "email") {
+          try {
+            const body = await authRequest<GoTrueSessionBody>("/v1/auth/verify-otp", {
+              method: "POST",
+              body: { email, token, type: "signup" },
+            });
+            return await consume(body);
+          } catch (retryError) {
+            return errorResult(retryError);
+          }
+        }
+        return errorResult(error);
       }
     },
 

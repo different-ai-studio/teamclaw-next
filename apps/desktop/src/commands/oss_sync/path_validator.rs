@@ -58,9 +58,7 @@ pub fn validate(path: &str) -> Result<(), PathValidationError> {
             ));
         }
         if seg == "." {
-            return Err(PathValidationError(
-                r#"path contains "." segment"#.into(),
-            ));
+            return Err(PathValidationError(r#"path contains "." segment"#.into()));
         }
         if seg == ".." {
             return Err(PathValidationError(
@@ -68,9 +66,10 @@ pub fn validate(path: &str) -> Result<(), PathValidationError> {
             ));
         }
         if seg.len() > 255 {
-            return Err(PathValidationError(
-                format!("path segment exceeds 255 bytes: {}…", &seg[..20]),
-            ));
+            return Err(PathValidationError(format!(
+                "path segment exceeds 255 bytes: {}…",
+                &seg[..20]
+            )));
         }
     }
 

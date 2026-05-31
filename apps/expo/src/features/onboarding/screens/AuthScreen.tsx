@@ -124,8 +124,8 @@ export function AuthScreen({
           </Text>
           <Text style={styles.subtitle}>
             {isCodeStep
-              ? "Check your inbox for an 8-digit code."
-              : "We'll email you an 8-digit code."}
+              ? "Check your inbox for a 6-digit code."
+              : "We'll email you a 6-digit code."}
           </Text>
         </View>
 
@@ -138,12 +138,12 @@ export function AuthScreen({
 
             <View style={styles.authField}>
               <TextInput
-                accessibilityLabel="8-digit code"
+                accessibilityLabel="6-digit code"
                 editable={!isBusy}
                 keyboardType="number-pad"
                 maxLength={OTP_CODE_LENGTH}
                 onChangeText={(value) => setCode(sanitizeOtpInput(value))}
-                placeholder="8-digit code"
+                placeholder="6-digit code"
                 placeholderTextColor={colors.slate}
                 selectionColor={colors.cinnabar}
                 style={styles.fieldText}
