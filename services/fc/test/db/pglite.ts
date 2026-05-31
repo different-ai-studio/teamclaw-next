@@ -20,5 +20,7 @@ export async function makeTestDb() {
       if (s) await pg.exec(s);
     }
   }
-  return { db, pg };
+  // Cast to any so callers can use the db handle without fighting
+  // PgliteDatabase vs PostgresJsDatabase type variance
+  return { db: db as any, pg };
 }
