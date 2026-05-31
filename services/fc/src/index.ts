@@ -7,6 +7,7 @@ import {
 } from "./lib/supabase-repo.js";
 import { getDb } from "./db/client.js";
 import { createPgBusinessRepository } from "./lib/pg-repo/index.js";
+import { createPgAuthRepository } from "./lib/pg-repo/auth.js";
 import { queryParams } from "./lib/routing-utils.js";
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,17 @@ export function resolveBackendKind(env: NodeJS.ProcessEnv = process.env): "supab
   return env.BACKEND_KIND === "postgres" ? "postgres" : "supabase";
 }
 
+export function makeAuthRepoFactory(kind: "supabase" | "postgres") {
+  if (kind === "postgres") {
+    return () => createPgAuthRepository();
+  }
+  return () =>
+    createSupabaseAuthRepository({
+      supabaseUrl: SUPABASE_URL_FN(),
+      publishableKey: SUPABASE_PUBLISHABLE_KEY(),
+    });
+}
+
 export function makeBusinessRepoFactory(kind: "supabase" | "postgres") {
   if (kind === "postgres") {
     return ({ accessToken }: { accessToken: string }) =>
@@ -57,11 +69,7 @@ export function makeBusinessRepoFactory(kind: "supabase" | "postgres") {
 // rate-limiting). The repository deps build lazily per-request.
 const app = createApp({
   createRepository: makeBusinessRepoFactory(resolveBackendKind()),
-  createAuthRepository: () =>
-    createSupabaseAuthRepository({
-      supabaseUrl: SUPABASE_URL_FN(),
-      publishableKey: SUPABASE_PUBLISHABLE_KEY(),
-    }),
+  createAuthRepository: makeAuthRepoFactory(resolveBackendKind()),
 });
 
 const honoHandler = handle(app);
