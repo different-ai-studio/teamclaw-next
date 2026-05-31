@@ -16,6 +16,8 @@ import {
 import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
+import { createActorsApi } from "../../src/features/actors/actor-api";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { supabase } from "../../src/lib/supabase/client";
 import { showToast } from "../../src/ui/Toast";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
@@ -53,29 +55,19 @@ export default function InviteRoute() {
     setIsCreating(true);
     setError(null);
     try {
-      const result = (await supabase.rpc("create_team_invite", {
-        p_team_id: teamId,
-        p_kind: kind,
-        p_display_name: name.trim(),
-        p_team_role: kind === "member" ? role : null,
-        p_agent_kind: kind === "agent" ? agentKind : null,
-        p_ttl_seconds: 60 * 60 * 24 * 7,
-        p_target_actor_id: null,
-      })) as { data: unknown; error: { message?: string } | null };
-      if (result.error) {
-        setError(result.error.message ?? "Couldn't create invite.");
-        return;
-      }
-      const row = Array.isArray(result.data) ? result.data[0] : result.data;
-      const record = row as { token?: string; expires_at?: string } | null;
-      if (!record?.token) {
-        setError("Invite created but token was missing.");
-        return;
-      }
+      const result = await createActorsApi({
+        getAccessToken: supabaseAccessToken(supabase),
+      }).createInvite({
+        teamId,
+        kind,
+        displayName: name.trim(),
+        teamRole: kind === "member" ? role : null,
+        agentKind: kind === "agent" ? agentKind : null,
+      });
       setInvite({
-        token: record.token,
-        deeplink: buildDeeplink(record.token),
-        expiresAt: record.expires_at ?? "",
+        token: result.token,
+        deeplink: result.deeplink || buildDeeplink(result.token),
+        expiresAt: result.expiresAt,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create invite.");

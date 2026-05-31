@@ -86,6 +86,14 @@ export type ActorsApi = {
     actor: Actor;
     ttlSeconds?: number;
   }) => Promise<ActorInviteResult>;
+  createInvite: (input: {
+    teamId: string;
+    kind: "member" | "agent";
+    displayName: string;
+    teamRole?: string | null;
+    agentKind?: string | null;
+    ttlSeconds?: number;
+  }) => Promise<ActorInviteResult>;
 };
 
 export function createActorsApi(args: {
@@ -139,6 +147,33 @@ export function createActorsApi(args: {
           agentKind: kind === "agent" ? "daemon" : null,
           ttlSeconds,
           targetActorId: actor.actorId,
+        },
+      );
+      if (!row?.token) throw new Error("Invite created but token was missing.");
+      return {
+        token: row.token,
+        deeplink: row.deeplink || buildInviteDeeplink(row.token),
+        expiresAt: row.expiresAt ?? "",
+      };
+    },
+
+    async createInvite({
+      teamId,
+      kind,
+      displayName,
+      teamRole = null,
+      agentKind = null,
+      ttlSeconds = 60 * 60 * 24 * 7,
+    }) {
+      const row = await client.post<{ token?: string; deeplink?: string; expiresAt?: string }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/invites`,
+        {
+          kind,
+          displayName,
+          teamRole: kind === "member" ? teamRole : null,
+          agentKind: kind === "agent" ? agentKind : null,
+          ttlSeconds,
+          targetActorId: null,
         },
       );
       if (!row?.token) throw new Error("Invite created but token was missing.");
