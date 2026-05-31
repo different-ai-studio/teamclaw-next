@@ -4,6 +4,7 @@ import { makeIdeasRepo } from "./ideas.js";
 import { makeSessionsRepo } from "./sessions.js";
 import { makeMessagesRepo } from "./messages.js";
 import { makeWorkspacesRepo } from "./workspaces.js";
+import { makeShortcutsRepo } from "./shortcuts.js";
 
 const NI = (name: string) => async () => { throw new Error(`not_implemented:${name}`); };
 
@@ -16,6 +17,7 @@ export function createPgBusinessRepository({ db, accessToken, userId }: { db: Pg
   const sessionsRepo = makeSessionsRepo(db, ctx);
   const messagesRepo = makeMessagesRepo(db);
   const workspacesRepo = makeWorkspacesRepo(db);
+  const shortcutsRepo = makeShortcutsRepo(db, ctx);
   return {
     ...teamsRepo,
     ...ideasRepo,
@@ -24,6 +26,7 @@ export function createPgBusinessRepository({ db, accessToken, userId }: { db: Pg
     // workspacesRepo methods shadow teamsRepo.getTeamWorkspaceConfig / putTeamWorkspaceConfig
     // with the contract-shape-returning implementations
     ...workspacesRepo,
+    ...shortcutsRepo,
     createTeam: NI("createTeam"),
     createTeamInvite: NI("createTeamInvite"),
     removeTeamActor: NI("removeTeamActor"),
