@@ -607,6 +607,43 @@ function createSelectableQuery(table, calls, data, error) {
   return query;
 }
 
+// --- Actor directory ---
+
+test("listTeamActors selects actor_directory columns without removed agent_kind", async () => {
+  const tableCalls = [];
+  const repo = createRepo(fakeSupabase({
+    tableCalls,
+    tableData: {
+      actor_directory: [{
+        id: "actor-1",
+        team_id: "team-1",
+        actor_type: "agent",
+        user_id: null,
+        invited_by_actor_id: null,
+        display_name: "Bot",
+        avatar_url: null,
+        team_role: null,
+        member_status: null,
+        agent_status: "idle",
+        agent_types: ["claude"],
+        default_agent_type: "claude",
+        default_workspace_id: null,
+        agent_visibility: "team",
+        last_active_at: null,
+        created_at: "2026-05-27T01:00:00Z",
+        updated_at: "2026-05-27T01:00:00Z",
+      }],
+    },
+  }));
+
+  const page = await repo.listTeamActors("team-1", { limit: 10 });
+  const selectCall = tableCalls.find((c) => c.table === "actor_directory" && c.op === "select");
+  assert.ok(selectCall, "expected actor_directory select");
+  assert.ok(!selectCall.columns.includes("agent_kind"), "must not select removed agent_kind column");
+  assert.equal(page.items[0].defaultAgentType, "claude");
+  assert.equal(page.items[0].agentKind, null);
+});
+
 // --- Telemetry TDD tests ---
 
 test("submitFeedback writes team_id, session_id, skill and no note column", async () => {
