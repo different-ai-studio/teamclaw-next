@@ -9,7 +9,7 @@ resources:
       region: cn-shenzhen
       functionName: teamclaw-sync
       runtime: nodejs20
-      handler: index.handler
+      handler: dist/index.handler
       timeout: 30
       memorySize: 256
       logConfig: auto
@@ -46,6 +46,20 @@ resources:
         MQTT_USERNAME: ${env('MQTT_USERNAME')}
         MQTT_PASSWORD: ${env('MQTT_PASSWORD')}
         MQTT_USE_TLS: ${env('MQTT_USE_TLS', '')}
+        DATABASE_URL: ${env('DATABASE_URL', '')}
+        BACKEND_KIND: ${env('BACKEND_KIND', '')}
+        AUTH_SECRET: ${env('AUTH_SECRET', '')}
+        AUTH_BASE_URL: ${env('AUTH_BASE_URL', 'https://cloud.ucar.cc')}
+        PG_POOL_MAX: ${env('PG_POOL_MAX', '1')}
+        OTP_EMAIL_SMTP_HOST: ${env('OTP_EMAIL_SMTP_HOST', '')}
+        OTP_EMAIL_SMTP_PORT: ${env('OTP_EMAIL_SMTP_PORT', '')}
+        OTP_EMAIL_SMTP_USER: ${env('OTP_EMAIL_SMTP_USER', '')}
+        OTP_EMAIL_SMTP_PASS: ${env('OTP_EMAIL_SMTP_PASS', '')}
+        OTP_EMAIL_SMTP_FROM: ${env('OTP_EMAIL_SMTP_FROM', '')}
+        APPLE_CLIENT_ID: ${env('APPLE_CLIENT_ID', '')}
+        APPLE_CLIENT_SECRET: ${env('APPLE_CLIENT_SECRET', '')}
+        GOOGLE_CLIENT_ID: ${env('GOOGLE_CLIENT_ID', '')}
+        GOOGLE_CLIENT_SECRET: ${env('GOOGLE_CLIENT_SECRET', '')}
       triggers:
         - triggerName: http-trigger
           triggerType: http
@@ -55,3 +69,15 @@ resources:
               - GET
               - POST
               - OPTIONS
+        - triggerName: oss-abandon-sessions
+          triggerType: timer
+          triggerConfig:
+            cronExpression: '0 */15 * * * *'
+            enable: true
+            payload: '{"task":"oss-abandon-sessions"}'
+        - triggerName: oss-gc-blobs
+          triggerType: timer
+          triggerConfig:
+            cronExpression: '0 17 4 * * *'
+            enable: true
+            payload: '{"task":"oss-gc-blobs"}'

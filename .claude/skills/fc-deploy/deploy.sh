@@ -71,13 +71,37 @@ export CODEUP_PAT="${CODEUP_PAT:-}"
 export CODEUP_BOT_USERNAME="${CODEUP_BOT_USERNAME:-teamclaw}"
 
 # Required env vars. Grouped so the failure message is informative.
+# Always-required vars (independent of backend kind):
 REQUIRED=(
   ACCESS_KEY_ID ACCESS_KEY_SECRET ROLE_ARN
   PUSH_WEBHOOK_SECRET
-  SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY
   APNS_PRIVATE_KEY_P8 APNS_KEY_ID APNS_TEAM_ID APNS_TOPIC APNS_ENV
   MQTT_BROKER_URL MQTT_USERNAME MQTT_PASSWORD
 )
+
+BACKEND_KIND="${BACKEND_KIND:-}"
+
+if [ "$BACKEND_KIND" = "postgres" ]; then
+  # Postgres mode: require RDS creds + Better-Auth vars; Supabase vars are optional.
+  POSTGRES_REQUIRED=(DATABASE_URL AUTH_SECRET AUTH_BASE_URL)
+  for var in "${POSTGRES_REQUIRED[@]}"; do
+    if [ -z "${!var:-}" ]; then
+      REQUIRED+=("$var")
+    fi
+  done
+  if [ -z "${OTP_EMAIL_SMTP_HOST:-}" ]; then
+    echo "Warning: OTP_EMAIL_SMTP_HOST is not set — OTP email sign-in will not work." >&2
+  fi
+else
+  # Supabase mode (default): require Supabase vars.
+  SUPABASE_REQUIRED=(SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY)
+  for var in "${SUPABASE_REQUIRED[@]}"; do
+    if [ -z "${!var:-}" ]; then
+      REQUIRED+=("$var")
+    fi
+  done
+fi
+
 missing=()
 for var in "${REQUIRED[@]}"; do
   if [ -z "${!var:-}" ]; then
@@ -99,10 +123,14 @@ if ! command -v s &>/dev/null; then
   npm install -g @serverless-devs/s
 fi
 
-# Install dependencies (avoid broken third-party npm mirrors)
+# Install all deps (incl dev: typescript/tsx needed to build), then compile,
+# then prune dev deps so the deployed package only ships runtime deps + dist.
 export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}"
-npm install --omit=dev
+npm install
+npm run build
+npm prune --omit=dev
 
+# Deploy. s.yaml handler points at dist/index.handler (TS build output).
 # `s deploy` echoes the fully-resolved s.yaml — including every
 # `environmentVariables` value (Supabase service-role key, MQTT password,
 # CODEUP PAT, APNS key, …) — in plaintext to stdout. Pipe the deploy output
