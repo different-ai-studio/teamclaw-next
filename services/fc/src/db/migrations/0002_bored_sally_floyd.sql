@@ -508,31 +508,19 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
-CREATE SCHEMA IF NOT EXISTS app;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION app.current_actor_id_for_team(p_team_id uuid)
-RETURNS uuid
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT null::uuid
-$$;
---> statement-breakpoint
 CREATE OR REPLACE VIEW "public"."actor_directory" AS
 SELECT
   a.id, a.team_id, a.actor_type, a.user_id, a.invited_by_actor_id,
   a.display_name, a.avatar_url, a.last_active_at, a.created_at, a.updated_at,
-  m.status      AS member_status,
-  tm.role       AS team_role,
+  m.status        AS member_status,
+  tm.role         AS team_role,
   ag.agent_types,
   ag.default_agent_type,
   ag.default_workspace_id,
-  ag.visibility AS agent_visibility,
-  ag.status     AS agent_status
+  ag.visibility   AS agent_visibility,
+  ag.status       AS agent_status,
+  ag.owner_member_id
 FROM actors a
 LEFT JOIN members      m  ON m.id         = a.id
 LEFT JOIN team_members tm ON tm.member_id = a.id
-LEFT JOIN agents       ag ON ag.id        = a.id
-WHERE a.actor_type <> 'agent'
-   OR ag.visibility = 'team'
-   OR ag.owner_member_id = app.current_actor_id_for_team(a.team_id);
+LEFT JOIN agents       ag ON ag.id        = a.id;

@@ -1,0 +1,201 @@
+/**
+ * pg-repo-actors — UUID-seed pglite tests for the ACTORS/DIRECTORY domain.
+ *
+ * Follows the same pattern as pg-repo-sessions.test.ts:
+ * - makeTestDb() → fresh in-process pglite with migrations applied.
+ * - Seed helpers insert teams + actors.
+ * - Each test constructs its own repo instance.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { makeTestDb } from "./db/pglite.js";
+import { createPgBusinessRepository } from "../src/lib/pg-repo/index.js";
+import { teams, actors, members, teamMembers, agents } from "../src/db/schema/index.js";
+
+// ── Seed helpers ──────────────────────────────────────────────────────────────
+
+async function seedTeam(db: any, over: Record<string, any> = {}) {
+  const [t] = await db
+    .insert(teams)
+    .values({ name: "TestTeam", slug: `test-${Date.now()}-${Math.random()}`, ...over })
+    .returning();
+  return t;
+}
+
+async function seedMemberActor(db: any, teamId: string, opts: { displayName?: string; userId?: string } = {}) {
+  const [actor] = await db
+    .insert(actors)
+    .values({
+      teamId,
+      actorType: "member",
+      displayName: opts.displayName ?? "Test Actor",
+      userId: opts.userId ?? `user-${Math.random()}`,
+    })
+    .returning();
+  await db.insert(members).values({ id: actor.id, status: "active" });
+  await db.insert(teamMembers).values({ teamId, memberId: actor.id, role: "member" });
+  return actor;
+}
+
+async function seedAgentActor(db: any, teamId: string, ownerMemberId: string, visibility = "team") {
+  const [agentActor] = await db
+    .insert(actors)
+    .values({ teamId, actorType: "agent", displayName: "Bot" })
+    .returning();
+  await db.insert(agents).values({
+    id: agentActor.id,
+    agentKind: "claude",
+    status: "active",
+    visibility,
+    ownerMemberId,
+  });
+  return agentActor;
+}
+
+// ── getActor ──────────────────────────────────────────────────────────────────
+
+test("getActor returns displayName for existing actor", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedMemberActor(db, team.id, { displayName: "Alice" });
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.getActor(actor.id);
+  assert.ok(result, "actor should be found");
+  assert.equal(result.displayName, "Alice");
+});
+
+test("getActor returns null for missing actor", async () => {
+  const { db } = await makeTestDb();
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.getActor("00000000-0000-0000-0000-000000000000");
+  assert.equal(result, null);
+});
+
+// ── upsertExternalActor ───────────────────────────────────────────────────────
+
+test("upsertExternalActor creates a new external actor and returns actorId", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.upsertExternalActor({
+    teamId: team.id,
+    source: "wecom",
+    sourceId: "wc-001",
+    displayName: "External User",
+  });
+  assert.ok(result.actorId, "actorId must be present");
+  assert.equal(typeof result.actorId, "string");
+});
+
+test("upsertExternalActor is idempotent (returns same actorId on second call)", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const repo = createPgBusinessRepository({ db });
+
+  const first = await repo.upsertExternalActor({
+    teamId: team.id,
+    source: "wecom",
+    sourceId: "wc-002",
+    displayName: "Ext User",
+  });
+  const second = await repo.upsertExternalActor({
+    teamId: team.id,
+    source: "wecom",
+    sourceId: "wc-002",
+    displayName: "Ext User Updated",
+  });
+  assert.equal(first.actorId, second.actorId, "actorId must be stable across upserts");
+});
+
+// ── listTeamActors ────────────────────────────────────────────────────────────
+
+test("listTeamActors returns items with canonical contract keys", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  await seedMemberActor(db, team.id);
+  const repo = createPgBusinessRepository({ db });
+
+  const page = await repo.listTeamActors(team.id, { kind: null, limit: 200 });
+  assert.ok(Array.isArray(page.items), "items must be an array");
+  assert.ok(page.items.length >= 1, "must have at least one actor");
+
+  const expected = ["id", "teamId", "kind", "displayName", "avatarUrl", "metadata"].sort();
+  assert.deepEqual(Object.keys(page.items[0]).sort(), expected);
+});
+
+test("listTeamActors kind filter returns only matching actors", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  await seedAgentActor(db, team.id, member.id, "team");
+  const repo = createPgBusinessRepository({ db });
+
+  const memberPage = await repo.listTeamActors(team.id, { kind: "member", limit: 200 });
+  assert.ok(memberPage.items.every((a: any) => a.kind === "member"), "only member actors expected");
+
+  const agentPage = await repo.listTeamActors(team.id, { kind: "agent", limit: 200 });
+  assert.ok(agentPage.items.length >= 1, "should have at least one agent");
+  assert.ok(agentPage.items.every((a: any) => a.kind === "agent"), "only agent actors expected");
+});
+
+test("listTeamActors agent-visibility: personal agent excluded without callerActorId", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  await seedAgentActor(db, team.id, member.id, "personal");
+  // No callerActorId → personal agents excluded
+  const repo = createPgBusinessRepository({ db });
+
+  const page = await repo.listTeamActors(team.id, { kind: "agent", limit: 200 });
+  assert.equal(page.items.length, 0, "personal agent should not appear without caller context");
+});
+
+test("listTeamActors agent-visibility: personal agent visible to its owner", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  await seedAgentActor(db, team.id, member.id, "personal");
+  // Pass callerActorId = owner's actor id
+  const repo = createPgBusinessRepository({ db, callerActorId: member.id });
+
+  const page = await repo.listTeamActors(team.id, { kind: "agent", limit: 200 });
+  assert.equal(page.items.length, 1, "owner should see their personal agent");
+});
+
+// ── getTeamDirectory ──────────────────────────────────────────────────────────
+
+test("getTeamDirectory returns actors and members with canonical keys", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  await seedMemberActor(db, team.id, { displayName: "Dir Member" });
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.getTeamDirectory(team.id);
+  assert.ok(Array.isArray(result.actors), "actors must be an array");
+  assert.ok(Array.isArray(result.members), "members must be an array");
+  assert.ok(result.actors.length >= 1, "must have at least one actor");
+  assert.ok(result.members.length >= 1, "must have at least one member");
+
+  const actorKeys = ["id", "teamId", "kind", "displayName", "avatarUrl", "metadata"].sort();
+  assert.deepEqual(Object.keys(result.actors[0]).sort(), actorKeys);
+
+  const memberKeys = ["actorId", "teamId", "role", "joinedAt"].sort();
+  assert.deepEqual(Object.keys(result.members[0]).sort(), memberKeys);
+});
+
+test("getTeamDirectory only returns actors in the specified team", async () => {
+  const { db } = await makeTestDb();
+  const teamA = await seedTeam(db);
+  const teamB = await seedTeam(db);
+  await seedMemberActor(db, teamA.id);
+  await seedMemberActor(db, teamB.id);
+  const repo = createPgBusinessRepository({ db });
+
+  const resultA = await repo.getTeamDirectory(teamA.id);
+  const resultB = await repo.getTeamDirectory(teamB.id);
+  assert.ok(resultA.actors.every((a: any) => a.teamId === teamA.id), "all actors must belong to teamA");
+  assert.ok(resultB.actors.every((a: any) => a.teamId === teamB.id), "all actors must belong to teamB");
+});

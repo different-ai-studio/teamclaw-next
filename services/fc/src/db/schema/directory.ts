@@ -1,8 +1,9 @@
 import { pgView, uuid, text, timestamp } from "drizzle-orm/pg-core";
 
 // actor_directory is a Postgres VIEW joining actors + members + team_members + agents.
-// The DDL is hand-written into the generated migration (drizzle-kit does not emit VIEW DDL).
-// Column set mirrors the latest Supabase migration: 20260530010707_actor_directory_agent_visibility.sql
+// The DDL is hand-written into the migration (drizzle-kit does not emit VIEW DDL).
+// The view is CALLER-INDEPENDENT: it exposes all actors (members + agents of all
+// visibilities). Per-caller agent-visibility filtering happens in the repo query layer.
 export const actorDirectory = pgView("actor_directory", {
   id: uuid("id"),
   teamId: uuid("team_id"),
@@ -21,4 +22,5 @@ export const actorDirectory = pgView("actor_directory", {
   defaultWorkspaceId: uuid("default_workspace_id"),
   agentVisibility: text("agent_visibility"),
   agentStatus: text("agent_status"),
+  ownerMemberId: uuid("owner_member_id"),
 }).existing();
