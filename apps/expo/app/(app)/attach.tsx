@@ -10,6 +10,7 @@ import {
   AttachmentDrawerSheet,
   type AttachmentSource,
 } from "../../src/features/sessions/screens/AttachmentDrawerSheet";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { supabase } from "../../src/lib/supabase/client";
 import { PermissionPrimerSheet } from "../../src/ui/PermissionPrimerSheet";
 
@@ -36,7 +37,8 @@ export default function AttachRoute() {
     setIsUploading(true);
     try {
       for (const asset of assets) {
-        const uploaded = await uploadAttachment(supabase, {
+        const uploaded = await uploadAttachment({
+          getAccessToken: supabaseAccessToken(supabase),
           teamId,
           sessionId,
           localUri: asset.uri,

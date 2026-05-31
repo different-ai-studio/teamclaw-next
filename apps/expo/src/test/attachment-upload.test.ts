@@ -7,6 +7,16 @@ const fileSystemMock = vi.hoisted(() => ({
 
 vi.mock("expo-file-system", () => fileSystemMock);
 
+const BASE_URL = "https://fc.example.com";
+
+function uploadResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => JSON.stringify(body),
+  } as Response;
+}
+
 describe("uploadAttachment", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -14,87 +24,103 @@ describe("uploadAttachment", () => {
     fileSystemMock.readAsStringAsync.mockReset();
   });
 
-  it("returns a signed read URL for the private attachments bucket", async () => {
+  it("POSTs raw bytes to /v1/attachments and returns the public URL", async () => {
     const { uploadAttachment } = await import("../features/sessions/attachment-upload");
     const blob = new Blob(["image-bytes"], { type: "image/png" });
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: vi.fn().mockResolvedValue(blob),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const upload = vi.fn().mockResolvedValue({ error: null });
-    const createSignedUrl = vi.fn().mockResolvedValue({
-      data: { signedUrl: "https://storage.example.test/signed.png?token=abc" },
-      error: null,
-    });
-    const getPublicUrl = vi.fn().mockReturnValue({
-      data: { publicUrl: "https://storage.example.test/public.png" },
-    });
-    const from = vi.fn().mockReturnValue({ upload, createSignedUrl, getPublicUrl });
-
-    const result = await uploadAttachment(
-      { storage: { from } } as any,
-      {
-        teamId: "team-1",
-        sessionId: "session-1",
-        localUri: "file:///tmp/photo.png",
-        fallbackMime: "image/png",
-      },
+    // Global fetch is used only to read the local file URI.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(blob) }),
     );
 
-    expect(from).toHaveBeenCalledWith("attachments");
-    const uploadedBody = upload.mock.calls[0]?.[1] as ArrayBuffer;
+    const uploadFetch = vi
+      .fn()
+      .mockResolvedValue(
+        uploadResponse({ path: "team-1/session-1/x.png", url: "https://cdn.example.test/x.png" }),
+      );
+
+    const result = await uploadAttachment({
+      getAccessToken: async () => "access-token",
+      teamId: "team-1",
+      sessionId: "session-1",
+      localUri: "file:///tmp/photo.png",
+      fallbackMime: "image/png",
+      baseUrl: BASE_URL,
+      fetchImpl: uploadFetch as never,
+    });
+
+    expect(uploadFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = uploadFetch.mock.calls[0];
+    expect(String(url)).toBe(
+      `https://fc.example.com/v1/attachments?path=${encodeURIComponent(result.path)}&bucket=attachments`,
+    );
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toMatchObject({
+      Authorization: "Bearer access-token",
+      "Content-Type": "image/png",
+    });
+    const uploadedBody = init?.body as ArrayBuffer;
     expect(uploadedBody).toBeInstanceOf(ArrayBuffer);
     expect(Array.from(new Uint8Array(uploadedBody))).toEqual(
       Array.from(new Uint8Array(await blob.arrayBuffer())),
     );
-    expect(upload).toHaveBeenCalledWith(
-      result.path,
-      uploadedBody,
-      expect.objectContaining({ contentType: "image/png" }),
-    );
-    expect(createSignedUrl).toHaveBeenCalledWith(result.path, 31_536_000);
-    expect(getPublicUrl).not.toHaveBeenCalled();
-    expect(result.publicUrl).toBe("https://storage.example.test/signed.png?token=abc");
+    expect(result.mime).toBe("image/png");
+    expect(result.publicUrl).toBe("https://cdn.example.test/x.png");
   });
 
-  it("falls back to Expo FileSystem when React Native fetch cannot read the local URI", async () => {
+  it("routes to the requested bucket and throws on a non-2xx response", async () => {
     const { uploadAttachment } = await import("../features/sessions/attachment-upload");
-    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Network request failed"));
-    vi.stubGlobal("fetch", fetchMock);
-    fileSystemMock.readAsStringAsync.mockResolvedValue("aW1n");
+    const blob = new Blob(["avatar"], { type: "image/jpeg" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(blob) }),
+    );
 
-    let uploadedBody: ArrayBuffer | null = null;
-    const upload = vi.fn().mockImplementation((_path: string, body: ArrayBuffer) => {
-      uploadedBody = body;
-      return Promise.resolve({ error: null });
-    });
-    const createSignedUrl = vi.fn().mockResolvedValue({
-      data: { signedUrl: "https://storage.example.test/signed.jpg?token=abc" },
-      error: null,
-    });
-    const from = vi.fn().mockReturnValue({ upload, createSignedUrl });
+    const uploadFetch = vi
+      .fn()
+      .mockResolvedValue(uploadResponse({ error: { message: "too big" } }, 413));
 
-    const result = await uploadAttachment(
-      { storage: { from } } as any,
-      {
+    await expect(
+      uploadAttachment({
+        getAccessToken: async () => "access-token",
         teamId: "team-1",
         sessionId: "session-1",
-        localUri: "file:///tmp/photo.jpg",
+        localUri: "file:///tmp/avatar.jpg",
         fallbackMime: "image/jpeg",
-      },
-    );
+        bucket: "avatars",
+        baseUrl: BASE_URL,
+        fetchImpl: uploadFetch as never,
+      }),
+    ).rejects.toThrow(/too big/);
 
-    expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledWith(
-      "file:///tmp/photo.jpg",
-      { encoding: "base64" },
-    );
+    expect(String(uploadFetch.mock.calls[0][0])).toContain("&bucket=avatars");
+  });
+
+  it("falls back to Expo FileSystem when fetch cannot read the local URI", async () => {
+    const { uploadAttachment } = await import("../features/sessions/attachment-upload");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Network request failed")));
+    fileSystemMock.readAsStringAsync.mockResolvedValue("aW1n");
+
+    const uploadFetch = vi
+      .fn()
+      .mockResolvedValue(uploadResponse({ path: "p", url: "https://cdn.example.test/p.jpg" }));
+
+    const result = await uploadAttachment({
+      getAccessToken: async () => "access-token",
+      teamId: "team-1",
+      sessionId: "session-1",
+      localUri: "file:///tmp/photo.jpg",
+      fallbackMime: "image/jpeg",
+      baseUrl: BASE_URL,
+      fetchImpl: uploadFetch as never,
+    });
+
+    expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledWith("file:///tmp/photo.jpg", {
+      encoding: "base64",
+    });
     expect(result.mime).toBe("image/jpeg");
     expect(result.size).toBe(3);
-    if (!uploadedBody) {
-      throw new Error("Expected upload body to be captured.");
-    }
+    const uploadedBody = uploadFetch.mock.calls[0][1]?.body as ArrayBuffer;
     expect(uploadedBody).toBeInstanceOf(ArrayBuffer);
     expect(Array.from(new Uint8Array(uploadedBody))).toEqual([105, 109, 103]);
   });
