@@ -163,5 +163,43 @@ export function makeActorsRepo(db: DbLike, ctx: ActorsCtx = {}) {
 
       return { actors: actorsList, members: membersList };
     },
+
+    /**
+     * Returns actor_directory rows for a team updated after the given cursor.
+     * Used by the sync-v1 incremental sync endpoint.
+     * No visibility filter applied — matches the permissive Supabase behavior
+     * used by the sync service which already runs with elevated privileges.
+     */
+    async listActorDirectoryForSync(teamId: string, updatedAfter: string | null) {
+      const conditions = [eq(actorDirectory.teamId, teamId)];
+      if (updatedAfter) {
+        conditions.push(sql`${actorDirectory.updatedAt} > ${updatedAfter}::timestamptz`);
+      }
+      const rows = await db
+        .select({
+          id: actorDirectory.id,
+          teamId: actorDirectory.teamId,
+          actorType: actorDirectory.actorType,
+          displayName: actorDirectory.displayName,
+          memberStatus: actorDirectory.memberStatus,
+          agentStatus: actorDirectory.agentStatus,
+          lastActiveAt: actorDirectory.lastActiveAt,
+          createdAt: actorDirectory.createdAt,
+          updatedAt: actorDirectory.updatedAt,
+        })
+        .from(actorDirectory)
+        .where(and(...conditions));
+      return rows.map((r: any) => ({
+        id: r.id,
+        team_id: r.teamId,
+        actor_type: r.actorType,
+        display_name: r.displayName,
+        member_status: r.memberStatus ?? null,
+        agent_status: r.agentStatus ?? null,
+        last_active_at: r.lastActiveAt ? new Date(r.lastActiveAt).toISOString() : null,
+        created_at: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+        updated_at: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+      }));
+    },
   };
 }

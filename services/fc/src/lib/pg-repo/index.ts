@@ -1,5 +1,5 @@
 import type { PgDatabase } from "drizzle-orm/pg-core";
-import { makeTeamsRepo } from "./teams.js";
+import { makeTeamsRepo, type TeamsRepoDeps } from "./teams.js";
 import { makeIdeasRepo } from "./ideas.js";
 import { makeSessionsRepo } from "./sessions.js";
 import { makeMessagesRepo } from "./messages.js";
@@ -14,10 +14,10 @@ import { makeTelemetryRepo } from "./telemetry.js";
 const NI = (name: string) => async () => { throw new Error(`not_implemented:${name}`); };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createPgBusinessRepository({ db, accessToken, userId, callerActorId }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string }) {
+export function createPgBusinessRepository({ db, accessToken, userId, callerActorId, provisionLiteLlm }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string; provisionLiteLlm?: TeamsRepoDeps["provisionLiteLlm"] }) {
   void accessToken; // retained for Plan 4/5 (JWT -> actor identity / authz)
   const ctx = { userId, callerActorId };
-  const teamsRepo = makeTeamsRepo(db);
+  const teamsRepo = makeTeamsRepo(db, { provisionLiteLlm });
   const ideasRepo = makeIdeasRepo(db, ctx);
   const sessionsRepo = makeSessionsRepo(db, ctx);
   const messagesRepo = makeMessagesRepo(db);
@@ -46,6 +46,5 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
     createTeamInvite: NI("createTeamInvite"),
     removeTeamActor: NI("removeTeamActor"),
     updateCurrentActorProfile: NI("updateCurrentActorProfile"),
-    setupLiteLlm: NI("setupLiteLlm"),
   } as any;
 }
