@@ -78,6 +78,41 @@ async function readLocalFileForUpload(uri: string, fallbackMime: string): Promis
   }
 }
 
+type CloudUploadOptions = {
+  getAccessToken: () => Promise<string | null>;
+  path: string;
+  bucket: string;
+  body: ArrayBuffer;
+  mime: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
+
+/** POST raw bytes to `/v1/attachments?path=&bucket=`. The attachments/avatars
+ * buckets are public, so FC returns the public object URL directly. */
+async function postBytesToCloud(opts: CloudUploadOptions): Promise<{ path: string; url: string }> {
+  const token = await opts.getAccessToken();
+  if (!token) throw new Error("Missing auth session access token.");
+  const baseUrl = (opts.baseUrl ?? cloudApiBaseUrl()).replace(/\/+$/, "");
+  const uploadFetch = opts.fetchImpl ?? fetch;
+  const query = new URLSearchParams({ path: opts.path, bucket: opts.bucket });
+
+  const response = await uploadFetch(`${baseUrl}/v1/attachments?${query.toString()}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": opts.mime,
+    },
+    body: opts.body,
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(payload?.error?.message ?? "Couldn't upload the file.");
+  }
+  return { path: opts.path, url: payload?.url ?? "" };
+}
+
 /**
  * Reads the file behind `localUri` and uploads it to the Cloud API
  * (`POST /v1/attachments?path=<path>&bucket=<bucket>`, raw bytes) under
@@ -85,9 +120,8 @@ async function readLocalFileForUpload(uri: string, fallbackMime: string): Promis
  * app's `AttachmentUploadManager.makeRemotePath` so the same row in
  * `message_attachments` can be read interchangeably.
  *
- * The attachments/avatars buckets are public, so FC returns the public object
- * URL directly. Returns the storage path, that public URL, the resolved MIME,
- * and the size when available.
+ * Returns the storage path, the public object URL, the resolved MIME, and the
+ * size when available.
  */
 export async function uploadAttachment(args: {
   getAccessToken: () => Promise<string | null>;
@@ -104,31 +138,45 @@ export async function uploadAttachment(args: {
   const ext = inferExtension(args.localUri, mime);
   const path = `${args.teamId}/${args.sessionId}/${uuidV4()}.${ext}`;
 
-  const token = await args.getAccessToken();
-  if (!token) throw new Error("Missing auth session access token.");
-  const baseUrl = (args.baseUrl ?? cloudApiBaseUrl()).replace(/\/+$/, "");
-  const bucket = args.bucket ?? "attachments";
-  const uploadFetch = args.fetchImpl ?? fetch;
-  const query = new URLSearchParams({ path, bucket });
-
-  const response = await uploadFetch(`${baseUrl}/v1/attachments?${query.toString()}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": mime,
-    },
-    body,
-  });
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error(payload?.error?.message ?? "Couldn't upload the file.");
-  }
-
-  return {
+  const { url } = await postBytesToCloud({
+    getAccessToken: args.getAccessToken,
     path,
-    publicUrl: payload?.url ?? "",
+    bucket: args.bucket ?? "attachments",
+    body,
     mime,
-    size,
-  };
+    baseUrl: args.baseUrl,
+    fetchImpl: args.fetchImpl,
+  });
+
+  return { path, publicUrl: url, mime, size };
+}
+
+/**
+ * Reads the image behind `localUri` and uploads it to the public `avatars`
+ * bucket under `<actorId>/<uuid>.<ext>` (mirrors iOS `uploadAvatar`). Returns
+ * the public URL to persist on the actor row.
+ */
+export async function uploadAvatar(args: {
+  getAccessToken: () => Promise<string | null>;
+  actorId: string;
+  localUri: string;
+  fallbackMime?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const fallbackMime = inferMime(args.localUri, args.fallbackMime ?? "image/jpeg");
+  const { body, mime } = await readLocalFileForUpload(args.localUri, fallbackMime);
+  const ext = inferExtension(args.localUri, mime);
+  const path = `${args.actorId}/${uuidV4()}.${ext}`;
+
+  const { url } = await postBytesToCloud({
+    getAccessToken: args.getAccessToken,
+    path,
+    bucket: "avatars",
+    body,
+    mime,
+    baseUrl: args.baseUrl,
+    fetchImpl: args.fetchImpl,
+  });
+  return url;
 }

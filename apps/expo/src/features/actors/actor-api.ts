@@ -81,6 +81,10 @@ export type ActorsApi = {
     agentId: string,
     patch: { defaultWorkspaceId?: string | null; defaultAgentType?: string | null },
   ) => Promise<void>;
+  updateCurrentActorProfile: (
+    actorId: string,
+    patch: { displayName: string; avatarUrl: string | null },
+  ) => Promise<void>;
   createReinvite: (input: {
     teamId: string;
     actor: Actor;
@@ -133,6 +137,13 @@ export function createActorsApi(args: {
         defaultWorkspaceId: patch.defaultWorkspaceId ?? null,
         defaultAgentType: patch.defaultAgentType ?? null,
         agentKind: null,
+      });
+    },
+
+    async updateCurrentActorProfile(actorId, patch) {
+      await client.patch(`/v1/actors/${encodeURIComponent(actorId)}/profile`, {
+        displayName: patch.displayName,
+        avatarUrl: patch.avatarUrl,
       });
     },
 
