@@ -48,16 +48,10 @@ import {
   type DeliveryChannel,
 } from '@/stores/cron'
 import { useChannelsStore } from '@/stores/channels'
-import {
-  loadConfiguredProvidersForWorkspace,
-  type ConfiguredProvider,
-} from '@/stores/provider'
+import type { ConfiguredProvider } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCurrentTeamStore } from '@/stores/current-team'
-import {
-  getCurrentDaemonWorkspaceAgent,
-  listDaemonWorkspaces,
-} from '@/lib/daemon-workspaces'
+import { loadCronDialogModels } from '@/lib/cron-workspace-models'
 import { ToggleSwitch } from '../shared'
 import {
   type JobFormState,
@@ -100,47 +94,33 @@ export function CronJobDialog({
     let cancelled = false
 
     ;(async () => {
-      let targetPath: string | null = null
-      let hint: string | null = null
-
-      if (activeScope === 'workspace') {
-        if (!workspacePath) {
-          hint = t('settings.cron.workspaceModelsNoPath', 'Select a workspace first.')
-        } else {
-          targetPath = workspacePath
-        }
-      } else if (!teamId) {
-        hint = t('settings.cron.globalModelsNoTeam', 'Join a team to load daemon models.')
-      } else {
-        const agent = await getCurrentDaemonWorkspaceAgent(teamId)
-        if (!agent?.defaultWorkspaceId) {
-          hint = t(
+      const { providers, hint } = await loadCronDialogModels({
+        activeScope,
+        teamId,
+        workspacePath,
+        messages: {
+          workspaceNoPath: t(
+            'settings.cron.workspaceModelsNoPath',
+            'Select a workspace first.',
+          ),
+          globalNoTeam: t(
+            'settings.cron.globalModelsNoTeam',
+            'Join a team to load daemon models.',
+          ),
+          globalNoDefault: t(
             'settings.cron.globalModelsNoDefault',
             'Set a default workspace in Daemon settings.',
-          )
-        } else {
-          const workspaces = await listDaemonWorkspaces(teamId, agent.id)
-          const defaultWs = workspaces.find((w) => w.id === agent.defaultWorkspaceId)
-          if (!defaultWs?.path) {
-            hint = t(
-              'settings.cron.globalModelsNoDefaultPath',
-              'Default workspace has no local path on this daemon.',
-            )
-          } else {
-            targetPath = defaultWs.path
-          }
-        }
-      }
-
+          ),
+          globalNoDefaultPath: t(
+            'settings.cron.globalModelsNoDefaultPath',
+            'Default workspace has no local path on this daemon.',
+          ),
+          loadFailed: t('settings.cron.modelsLoadFailed', 'Failed to load models.'),
+        },
+      })
       if (cancelled) return
+      setScopeProviders(providers)
       setModelHint(hint)
-      if (!targetPath) {
-        setScopeProviders([])
-        return
-      }
-      const loaded = await loadConfiguredProvidersForWorkspace(targetPath)
-      if (cancelled) return
-      setScopeProviders(loaded?.configuredProviders ?? [])
     })().catch(() => {
       if (!cancelled) {
         setScopeProviders([])
