@@ -5,6 +5,8 @@ import {
   createSupabaseBusinessRepository,
   publishableKeyFromEnv,
 } from "./lib/supabase-repo.js";
+import { getDb } from "./db/client.js";
+import { createPgBusinessRepository } from "./lib/pg-repo/index.js";
 import { queryParams } from "./lib/routing-utils.js";
 
 // ---------------------------------------------------------------------------
@@ -30,15 +32,31 @@ export function syncGetQueryToBody(event: any) {
   return body;
 }
 
-// The single Hono app owns ALL routing (OPTIONS, /v1, /sync, admin, 404, 500,
-// rate-limiting). The repository deps build lazily per-request.
-const app = createApp({
-  createRepository: ({ accessToken }: { accessToken: string }) =>
+// ---------------------------------------------------------------------------
+// Backend kind selection — defaults to "supabase"; set BACKEND_KIND=postgres
+// to use the direct-postgres repo (Plan 5+).
+// ---------------------------------------------------------------------------
+export function resolveBackendKind(env: NodeJS.ProcessEnv = process.env): "supabase" | "postgres" {
+  return env.BACKEND_KIND === "postgres" ? "postgres" : "supabase";
+}
+
+export function makeBusinessRepoFactory(kind: "supabase" | "postgres") {
+  if (kind === "postgres") {
+    return ({ accessToken }: { accessToken: string }) =>
+      createPgBusinessRepository({ db: getDb(), accessToken });
+  }
+  return ({ accessToken }: { accessToken: string }) =>
     createSupabaseBusinessRepository({
       supabaseUrl: SUPABASE_URL_FN(),
       publishableKey: SUPABASE_PUBLISHABLE_KEY(),
       accessToken,
-    }),
+    });
+}
+
+// The single Hono app owns ALL routing (OPTIONS, /v1, /sync, admin, 404, 500,
+// rate-limiting). The repository deps build lazily per-request.
+const app = createApp({
+  createRepository: makeBusinessRepoFactory(resolveBackendKind()),
   createAuthRepository: () =>
     createSupabaseAuthRepository({
       supabaseUrl: SUPABASE_URL_FN(),
