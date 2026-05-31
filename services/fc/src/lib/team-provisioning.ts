@@ -21,7 +21,7 @@ export function slugify(name) {
 
 async function litellmFetch(path, method, body) {
   const url = `${LITELLM_URL()}${path}`;
-  const opts = {
+  const opts: any = {
     method,
     headers: {
       'Content-Type': 'application/json',

@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 export const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 export class ApiError extends Error {
-  constructor(statusCode, code, message, options = {}) {
+  statusCode: any;
+  code: any;
+  details: any;
+  declare cause: any;
+  constructor(statusCode, code, message, options: any = {}) {
     super(message);
     this.name = "ApiError";
     this.statusCode = statusCode;
@@ -56,13 +60,13 @@ export function optionalBearerToken(headers = {}) {
   return match && match[1]?.trim() ? match[1].trim() : null;
 }
 
-export function decodeBody(event = {}) {
+export function decodeBody(event: any = {}) {
   if (event.body === undefined || event.body === null || event.body === "") return "";
   if (event.isBase64Encoded) return Buffer.from(event.body, "base64").toString("utf8");
   return String(event.body);
 }
 
-export function parseJsonBody(event = {}) {
+export function parseJsonBody(event: any = {}) {
   const raw = decodeBody(event);
   if (!raw) return {};
   try {
@@ -86,7 +90,7 @@ export function jsonResponse(statusCode, body, requestId, headers = {}) {
 
 export function errorResponse(error, requestId) {
   const normalized = normalizeError(error);
-  const body = {
+  const body: any = {
     code: normalized.code,
     message: normalized.message,
     requestId,

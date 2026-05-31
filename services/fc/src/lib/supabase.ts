@@ -14,7 +14,7 @@ import WebSocket from 'ws';
 // workaround supabase-repo.mjs already applies for the /v1 client; without it
 // the /sync/* handlers (which use this service-role client) failed with
 // "Node.js 20 detected without native WebSocket support".
-const REALTIME_TRANSPORT_OPTS = { transport: WebSocket };
+const REALTIME_TRANSPORT_OPTS: any = { transport: WebSocket };
 
 /**
  * Return a Supabase client authenticated as service_role.

@@ -13,7 +13,7 @@ function parseBool(raw) {
 function buildMqttConfig() {
   const url = process.env.MQTT_BROKER_URL?.trim();
   if (!url) return null;
-  const mqtt = { url };
+  const mqtt: any = { url };
   const username = process.env.MQTT_USERNAME?.trim();
   const password = process.env.MQTT_PASSWORD?.trim();
   const useTls = parseBool(process.env.MQTT_USE_TLS);
@@ -24,7 +24,7 @@ function buildMqttConfig() {
 }
 
 export function buildBootstrapConfig() {
-  const config = {};
+  const config: any = {};
   const mqtt = buildMqttConfig();
   if (mqtt) config.mqtt = mqtt;
   return config;

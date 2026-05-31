@@ -529,7 +529,7 @@ async function handleApply(body) {
 // ---------------------------------------------------------------------------
 // LiteLLM helpers
 // ---------------------------------------------------------------------------
-async function litellmFetch(path, method, body) {
+async function litellmFetch(path, method, body = undefined) {
   const url = `${LITELLM_URL()}${path}`;
   const res = await fetch(url, {
     method,
@@ -551,7 +551,7 @@ async function litellmFetch(path, method, body) {
  * Verify teamSecret and optionally check owner identity.
  * Returns { auth, isOwner } or a json error response.
  */
-async function verifyTeam(teamId, teamSecret, requireOwnerNodeId) {
+async function verifyTeam(teamId, teamSecret, requireOwnerNodeId = undefined) {
   if (!teamId || !teamSecret) {
     return { error: json(400, { error: "Missing teamId or teamSecret" }) };
   }

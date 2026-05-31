@@ -9,7 +9,7 @@ export function registerShortcuts(router) {
     if (scope !== "personal" && scope !== "team") {
       throw new ApiError(400, "validation_failed", "scope must be 'personal' or 'team'");
     }
-    const args = { scope };
+    const args: any = { scope };
     if (scope === "team") {
       const teamId = ctx.query.get("teamId");
       if (!teamId) throw new ApiError(400, "validation_failed", "teamId is required for team scope");
@@ -25,7 +25,7 @@ export function registerShortcuts(router) {
 
   router.get("/v1/teams/:teamId/shortcuts", async (ctx) => {
     const { teamId } = ctx.params;
-    const args = {};
+    const args: any = {};
     const parentIdRaw = ctx.query.get("parentId");
     if (parentIdRaw !== null && parentIdRaw !== undefined) {
       args.parentId = parentIdRaw === "null" ? null : parentIdRaw;

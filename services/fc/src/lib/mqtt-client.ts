@@ -6,7 +6,7 @@
 // is back up.
 import mqtt from 'mqtt';
 
-export function createMqttPublisher({ url, username, password, clientId }) {
+export function createMqttPublisher({ url, username, password, clientId }: { url: any; username?: any; password?: any; clientId?: any }) {
   let client = null;
   let firstConnect = null;
 
@@ -38,7 +38,7 @@ export function createMqttPublisher({ url, username, password, clientId }) {
   return {
     async publish(topic, payload, options = {}) {
       await init();
-      return new Promise((resolve, reject) => {
+      return new Promise<void>((resolve, reject) => {
         client.publish(topic, payload, { qos: 1, ...options }, (err) => {
           if (err) reject(err); else resolve();
         });

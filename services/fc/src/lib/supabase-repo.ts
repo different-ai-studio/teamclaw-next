@@ -52,7 +52,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async createTeam(input) {
-      const args = { p_name: input.name };
+      const args: any = { p_name: input.name };
       if (input.slug !== undefined) args.p_slug = input.slug;
       if (input.litellmTeamId !== undefined) args.p_litellm_team_id = input.litellmTeamId;
       if (input.aiGatewayEndpoint !== undefined) args.p_ai_gateway_endpoint = input.aiGatewayEndpoint;
@@ -84,7 +84,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async createTeamInvite(teamId, input) {
-      const args = {
+      const args: any = {
         p_team_id: teamId,
         p_kind: input.kind,
         p_display_name: input.displayName,
@@ -286,7 +286,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async patchMessage(messageId, patch) {
-      const row = {};
+      const row: any = {};
       if (patch.content !== undefined) row.content = patch.content;
       if (patch.metadata !== undefined) row.metadata = patch.metadata;
       const { data, error } = await supabase
@@ -310,7 +310,7 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
-    async listWorkspaces({ teamId, limit = 50, cursor = null, agentId = null } = {}) {
+    async listWorkspaces({ teamId, limit = 50, cursor = null, agentId = null }: any = {}) {
       let query = supabase
         .from("workspaces")
         .select(WORKSPACE_COLUMNS)
@@ -363,7 +363,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async patchWorkspace(workspaceId, patch) {
-      const row = {};
+      const row: any = {};
       if (patch.name !== undefined) row.name = patch.name;
       if (patch.archived !== undefined) row.archived = patch.archived;
       if (patch.slug !== undefined) row.path = patch.slug;
@@ -418,11 +418,6 @@ export function createSupabaseBusinessRepository(options) {
       };
     },
 
-async heartbeat() {
-      const { error } = await supabase.rpc("update_actor_last_active");
-      if (error) throw error;
-    },
-
     async writeForegroundPresence({ deviceId, foregroundUntil }) {
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr) throw userErr;
@@ -439,26 +434,7 @@ async heartbeat() {
       if (error) throw error;
     },
 
-    async listShortcuts(teamId, { parentId } = {}) {
-      let query = supabase
-        .from("shortcuts")
-        .select("*")
-        .eq("scope", "team")
-        .eq("team_id", teamId)
-        .order("order", { ascending: true });
-      if (parentId !== undefined) {
-        if (parentId === null) {
-          query = query.is("parent_id", null);
-        } else {
-          query = query.eq("parent_id", parentId);
-        }
-      }
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data ?? []).map(mapShortcut);
-    },
-
-    async listShortcutsByScope({ scope, teamId, parentId } = {}) {
+    async listShortcutsByScope({ scope, teamId, parentId }: any = {}) {
       let query = supabase.from("shortcuts").select("*").eq("scope", scope);
       if (scope === "team" && teamId) query = query.eq("team_id", teamId);
       // Personal scope is gated by RLS on owner_member_id; no extra filter here.
@@ -469,102 +445,6 @@ async heartbeat() {
       const { data, error } = await query.order("order", { ascending: true });
       if (error) throw error;
       return (data ?? []).map(mapShortcut);
-    },
-
-    async createShortcut(input) {
-      const args = {
-        p_scope: input.scope,
-        p_label: input.label,
-        p_node_type: input.nodeType ?? input.kind,
-      };
-      if (input.teamId !== undefined) args.p_team_id = input.teamId;
-      if (input.parentId !== undefined) args.p_parent_id = input.parentId;
-      if (input.icon !== undefined) args.p_icon = input.icon;
-      if (input.order !== undefined) args.p_order = input.order;
-      if (input.target !== undefined) args.p_target = input.target;
-      const { data, error } = await supabase.rpc("shortcut_create", args);
-      if (error) throw error;
-      const id = requiredString(data, "shortcuts.createShortcut", "id");
-      return this.getShortcut(id);
-    },
-
-    async getShortcut(shortcutId) {
-      const { data, error } = await supabase
-        .from("shortcuts")
-        .select("*")
-        .eq("id", shortcutId)
-        .single();
-      if (error) {
-        if (error.code === "PGRST116") return null;
-        throw error;
-      }
-      return mapShortcut(data);
-    },
-
-    async updateShortcut(shortcutId, patch) {
-      const row = {};
-      if (patch.parentId !== undefined) row.parent_id = patch.parentId;
-      if (patch.label !== undefined) row.label = patch.label;
-      if (patch.payload !== undefined) row.payload = patch.payload;
-      if (patch.position !== undefined) row.position = patch.position;
-      if (patch.visibleRoleIds !== undefined) row.visible_role_ids = patch.visibleRoleIds;
-      const { data, error } = await supabase
-        .from("shortcuts")
-        .update(row)
-        .eq("id", shortcutId)
-        .select("*")
-        .single();
-      if (error) {
-        if (error.code === "PGRST116") return null;
-        throw error;
-      }
-      return mapShortcut(data);
-    },
-
-    async deleteShortcut(shortcutId) {
-      const { error } = await supabase
-        .from("shortcuts")
-        .delete()
-        .eq("id", shortcutId);
-      if (error) throw error;
-    },
-
-    async batchMoveShortcuts({ moves }) {
-      const formattedMoves = moves.map((m) => ({
-        shortcut_id: m.shortcutId,
-        parent_id: m.parentId,
-        position: m.position,
-      }));
-      const { error } = await supabase.rpc("shortcut_batch_move", {
-        p_moves: formattedMoves,
-      });
-      if (error) throw error;
-    },
-
-    async setShortcutVisibleRoles(shortcutId, { roleIds }) {
-      const { error } = await supabase.rpc("shortcut_set_visible_roles", {
-        p_shortcut_id: shortcutId,
-        p_role_ids: roleIds,
-      });
-      if (error) throw error;
-    },
-
-    async listTeamRoles(teamId) {
-      const { data, error } = await supabase
-        .from("team_roles")
-        .select("id, team_id, code, name")
-        .eq("team_id", teamId);
-      if (error) throw error;
-      return (data ?? []).map(mapTeamRole);
-    },
-
-    async listTeamPermissions(teamId) {
-      const { data, error } = await supabase
-        .from("permissions")
-        .select("resource_id, permission_roles(role_id)")
-        .eq("team_id", teamId);
-      if (error) throw error;
-      return (data ?? []).map(mapPermission);
     },
 
     async getNotificationPrefs() {
@@ -652,7 +532,7 @@ async heartbeat() {
       return { items: (data ?? []).map((r) => r.session_id) };
     },
 
-    async listIdeas({ teamId, archived = false, limit = 50, cursor = null } = {}) {
+    async listIdeas({ teamId, archived = false, limit = 50, cursor = null }: any = {}) {
       let query = supabase
         .from("ideas")
         .select("*")
@@ -684,7 +564,7 @@ async heartbeat() {
     },
 
     async createIdea(body) {
-      const args = {
+      const args: any = {
         p_team_id: body.teamId,
         p_title: body.title,
         p_description: body.description ?? body.body ?? "",
@@ -714,7 +594,7 @@ async heartbeat() {
       if (error) throw error;
     },
 
-    async listShortcuts(teamId, { parentId } = {}) {
+    async listShortcuts(teamId, { parentId }: any = {}) {
       let query = supabase
         .from("shortcuts")
         .select("*")
@@ -763,7 +643,7 @@ async heartbeat() {
     },
 
     async updateShortcut(shortcutId, patch) {
-      const body = {};
+      const body: any = {};
       if (patch.label !== undefined) body.label = patch.label;
       if (patch.payload !== undefined) body.payload = patch.payload;
       if (patch.parentId !== undefined) body.parent_id = patch.parentId;
@@ -980,7 +860,7 @@ async heartbeat() {
       };
     },
 
-    async downloadAttachment(path, { bucket } = {}) {
+    async downloadAttachment(path, { bucket }: any = {}) {
       const targetBucket = bucket || DEFAULT_ATTACHMENT_BUCKET;
       const { data, error } = await supabase.storage
         .from(targetBucket)
@@ -1457,7 +1337,7 @@ async heartbeat() {
       // it requires `idea_id` (NOT NULL via legacy schema gated behind
       // newer migrations) and assumes the caller as the only seat.
       const id = input.id ?? randomUUID();
-      const insertRow = {
+      const insertRow: any = {
         id,
         team_id: input.teamId,
         title: input.title,
@@ -1495,7 +1375,7 @@ async heartbeat() {
     },
 
     async patchSession(sessionId, patch) {
-      const update = {};
+      const update: any = {};
       if (patch.title !== undefined) update.title = patch.title;
       if (patch.summary !== undefined) update.summary = patch.summary;
       if (patch.archivedAt !== undefined) update.archived_at = patch.archivedAt;
@@ -1555,7 +1435,7 @@ async heartbeat() {
       // a marker in `summary` or metadata. The supabase create_session RPC
       // requires an idea_id, so we insert directly to bypass that constraint.
       const id = input.id ?? randomUUID();
-      const insertRow = {
+      const insertRow: any = {
         id,
         team_id: input.teamId,
         title: input.title,
@@ -1617,7 +1497,7 @@ async heartbeat() {
     },
 
     async upsertSessionParticipant(sessionId, input) {
-      const row = {
+      const row: any = {
         session_id: sessionId,
         actor_id: input.actorId,
       };
@@ -2147,7 +2027,7 @@ export function createSupabaseAuthRepository(options) {
     // GoTrue's `grant_type=id_token` endpoint verifies the token signature
     // against the provider, then mints / returns a Supabase session.
     async signInWithIdToken({ provider, idToken, nonce, accessToken }) {
-      const body = { provider, id_token: idToken };
+      const body: any = { provider, id_token: idToken };
       if (nonce) body.nonce = nonce;
       // When a bearer is forwarded, GoTrue links the OIDC identity to the
       // existing (e.g. anonymous) user instead of minting a new one — this
@@ -2207,17 +2087,17 @@ async function goTrueRequest({
   method,
   path,
   body,
-  bearerToken,
+  bearerToken = undefined,
   operation,
-}) {
-  const headers = {
+}: any) {
+  const headers: any = {
     "Content-Type": "application/json",
     apikey: apiKey,
   };
   if (bearerToken) {
     headers.Authorization = `Bearer ${bearerToken}`;
   }
-  const init = { method, headers };
+  const init: any = { method, headers };
   if (body !== undefined && body !== null) {
     init.body = JSON.stringify(body);
   } else if (method !== "GET" && method !== "HEAD") {
@@ -2246,7 +2126,7 @@ async function goTrueRequest({
 }
 
 function outgoingMessageRow(sessionId, input) {
-  const row = {
+  const row: any = {
     id: input.id,
     team_id: input.teamId,
     session_id: sessionId,

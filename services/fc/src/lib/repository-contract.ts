@@ -874,7 +874,7 @@ test("repository contract: getTeamDirectory returns actors and members", async (
   });
 }
 
-export function runAuthRepositoryContract({ test, assert, createAuthRepository }) {
+export function runAuthRepositoryContract({ test, assert, createAuthRepository, createRepository = createAuthRepository }) {
   test("repository contract: refreshAccessToken returns new token pair", async () => {
     const repo = createAuthRepository();
     const out = await repo.refreshAccessToken({ refreshToken: "test-refresh-token" });

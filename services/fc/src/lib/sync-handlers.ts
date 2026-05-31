@@ -220,7 +220,7 @@ export async function handleSyncUploadPrepare(caller, body) {
       Key: ossKey,
       ContentLength: size,
     });
-    presignedPut = await getSignedUrl(s3, putCmd, { expiresIn: 900 });
+    presignedPut = await getSignedUrl(s3 as any, putCmd, { expiresIn: 900 });
   }
 
   return json(200, {
@@ -364,7 +364,7 @@ export async function handleSyncDownload(caller, body) {
 
   const s3 = getS3Client();
   const getCmd = new GetObjectCommand({ Bucket: BUCKET(), Key: blob.oss_key });
-  const downloadUrl = await getSignedUrl(s3, getCmd, { expiresIn: 900 });
+  const downloadUrl = await getSignedUrl(s3 as any, getCmd, { expiresIn: 900 });
 
   return json(200, { downloadUrl, size: blob.size, ttlSec: 900 });
 }
