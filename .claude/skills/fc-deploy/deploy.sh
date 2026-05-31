@@ -99,9 +99,12 @@ if ! command -v s &>/dev/null; then
   npm install -g @serverless-devs/s
 fi
 
-# Install dependencies (avoid broken third-party npm mirrors)
+# Install all deps (incl dev: typescript/tsx needed to build), then compile,
+# then prune dev deps so the deployed package only ships runtime deps + dist.
 export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}"
-npm install --omit=dev
+npm install
+npm run build
+npm prune --omit=dev
 
-# Deploy
+# Deploy (s.yaml handler points at dist/index.handler)
 printf 'yes\n' | s deploy -y

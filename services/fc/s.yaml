@@ -9,7 +9,7 @@ resources:
       region: cn-shenzhen
       functionName: teamclaw-sync
       runtime: nodejs20
-      handler: index.handler
+      handler: dist/index.handler
       timeout: 30
       memorySize: 256
       logConfig: auto
