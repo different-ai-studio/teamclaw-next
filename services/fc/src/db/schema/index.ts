@@ -11,3 +11,4 @@ export * from "./notifications.js";
 export * from "./presence.js";
 export * from "./telemetry.js";
 export * from "./directory.js";
+export * from "./oss-sync.js";
