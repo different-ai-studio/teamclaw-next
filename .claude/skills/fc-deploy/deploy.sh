@@ -103,5 +103,40 @@ fi
 export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}"
 npm install --omit=dev
 
-# Deploy
-printf 'yes\n' | s deploy -y
+# `s deploy` echoes the fully-resolved s.yaml — including every
+# `environmentVariables` value (Supabase service-role key, MQTT password,
+# CODEUP PAT, APNS key, …) — in plaintext to stdout. Pipe the deploy output
+# through a redactor so those secrets never reach the terminal, CI logs, or a
+# shared session transcript. Useful info (function ARN, URL, errors) is kept.
+#
+# Keys whose VALUES must be masked wherever they appear in the output.
+FC_SECRET_KEYS="ACCESS_KEY_ID ACCESS_KEY_SECRET SUPABASE_SERVICE_ROLE_KEY SUPABASE_ANON_KEY PUSH_WEBHOOK_SECRET APNS_PRIVATE_KEY_P8 APNS_KEY_ID MQTT_PASSWORD LITELLM_MASTER_KEY CODEUP_PAT"
+export FC_SECRET_KEYS
+
+redact_secrets() {
+  # Streams stdin → stdout, replacing (a) each secret value (and each
+  # non-trivial line of a multi-line value, e.g. PEM chunks) and (b) any
+  # "KEY: …" line for a secret key, with ***REDACTED***.
+  perl -pe '
+    BEGIN {
+      @keys = split /\s+/, ($ENV{FC_SECRET_KEYS} // "");
+      @frags = ();
+      for my $k (@keys) {
+        my $v = $ENV{$k};
+        next unless defined $v && length $v;
+        push @frags, $v;
+        for my $ln (split /\n/, $v) {
+          $ln =~ s/^\s+|\s+$//g;
+          push @frags, $ln if length($ln) >= 8;
+        }
+      }
+      @frags = sort { length($b) <=> length($a) } @frags;
+    }
+    for my $f (@frags) { s/\Q$f\E/***REDACTED***/g }
+    for my $k (@keys)  { s/^(\s*\Q$k\E\s*:\s*).+$/$1***REDACTED***/ }
+  '
+}
+
+# Deploy. pipefail (set at top) makes the pipeline surface `s deploy`'s exit
+# code even though the redactor exits 0, so failures still abort the script.
+printf 'yes\n' | s deploy -y 2>&1 | redact_secrets
