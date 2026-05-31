@@ -689,11 +689,10 @@ function AppContent() {
   // session-event-bus.ts is bypassed: we write straight to the store the UI
   // reads from.
   const userId = useAuthStore((s) => s.session?.user.id ?? null);
-  // Wait for a team id for MQTT ACL. Prefer the active team from settings;
-  // fall back to the first row in the session list for older boot paths.
+  // Wait for a team id for MQTT ACL. The active team from settings is the
+  // authoritative source — populated by AuthGate / loadCurrentTeam after login.
   const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null);
-  const sessionListTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null);
-  const mqttTeamId = currentTeamId ?? sessionListTeamId;
+  const mqttTeamId = currentTeamId;
   const mqttAccessToken = useAuthStore((s) => s.session?.access_token ?? null);
   const mqttReconnectNonce = useMqttReconnectStore((s) => s.nonce);
   const mqttAuthKey = mqttConnectionKey({

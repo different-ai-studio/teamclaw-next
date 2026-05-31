@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCronStore } from '@/stores/cron'
 import { useSessionListStore, type SessionListEntry } from '@/stores/session-list-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { useSessionParticipantStore } from '@/stores/session-participant-store'
 import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { useSidebar } from '@/components/ui/sidebar'
@@ -144,7 +145,7 @@ export function SessionListColumn() {
 
   // Load actor-session set when filter switches to actor mode.
   // teamId is only used for cache namespacing; the supabase query is by actor_id.
-  const teamIdFromList = useSessionListStore((s) => s.rows[0]?.team_id ?? '')
+  const teamIdFromList = useCurrentTeamStore((s) => s.team?.id ?? '')
   React.useEffect(() => {
     initPinnedSessionIds(workspacePath)
   }, [initPinnedSessionIds, workspacePath])
