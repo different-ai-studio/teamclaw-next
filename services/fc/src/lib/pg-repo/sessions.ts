@@ -6,7 +6,8 @@
  *    from ctx.userId + teamId. This mirrors the Supabase RPC
  *    list_current_actor_sessions SECURITY DEFINER pattern.
  *  - markSessionViewed accepts explicit actorId or resolves from ctx.
- *  - Write paths (createSession, etc.) are trusted-caller paths — no JWT needed.
+ *  - createSession resolves createdByActorId from ctx.userId + teamId when the
+ *    client omits it (iOS Cloud API path). Matches sessions INSERT RLS.
  *
  * RPC replacements:
  *  - list_current_actor_sessions   → listSessions (Drizzle join on participants)
@@ -23,7 +24,7 @@ import {
   actors,
 } from "../../db/schema/index.js";
 import { ApiError } from "../http-utils.js";
-import { resolveActorForTeam } from "./authz.js";
+import { requireActorForTeam, resolveActorForTeam } from "./authz.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
   d ? new Date(d).toISOString() : null;
@@ -214,6 +215,10 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
       additionalActorIds?: string[];
     }) {
       const id = input.id ?? crypto.randomUUID();
+      let createdByActorId = input.createdByActorId;
+      if (!createdByActorId && ctx.userId) {
+        createdByActorId = await requireActorForTeam(db, ctx.userId, input.teamId);
+      }
       const insertRow: any = {
         id,
         teamId: input.teamId,
@@ -221,7 +226,7 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
         mode: input.mode ?? "collab",
         ideaId: input.ideaId ?? null,
       };
-      if (input.createdByActorId) insertRow.createdByActorId = input.createdByActorId;
+      if (createdByActorId) insertRow.createdByActorId = createdByActorId;
       if (input.primaryAgentId) insertRow.primaryAgentId = input.primaryAgentId;
 
       const [r] = await (db.insert(sessions) as any).values(insertRow).returning();
@@ -230,7 +235,7 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
       const participantIds = Array.from(
         new Set(
           [
-            input.createdByActorId,
+            createdByActorId,
             ...(input.participantActorIds ?? []),
             ...(input.additionalActorIds ?? []),
           ].filter((x): x is string => typeof x === "string" && x.length > 0),

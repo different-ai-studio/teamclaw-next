@@ -167,6 +167,24 @@ test("createSession returns session with participants", async () => {
   assert.ok(typeof s.createdAt === "string");
 });
 
+test("createSession resolves createdByActorId from ctx.userId when omitted", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const userId = "user-create-session-test";
+  const actor = await seedActor(db, team.id, { userId });
+  const repo = createPgBusinessRepository({ db, userId });
+
+  const s = await repo.createSession({
+    teamId: team.id,
+    title: "Resolved creator",
+    mode: "collab",
+    participantActorIds: [actor.id],
+  });
+
+  assert.equal(s.createdByActorId, actor.id);
+  assert.ok(s.participants.some((p: any) => p.actorId === actor.id));
+});
+
 test("createSession with explicit id respects the client-generated id", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
