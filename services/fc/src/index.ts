@@ -12,7 +12,7 @@ import { createPgBusinessRepository } from "./lib/pg-repo/index.js";
 import { createPgAuthRepository } from "./lib/pg-repo/auth.js";
 import { queryParams } from "./lib/routing-utils.js";
 import { dispatchPush } from "./lib/push-dispatch.js";
-import { pushDeps } from "./lib/admin-handlers.js";
+import { pushDeps, pgPushDeps } from "./lib/admin-handlers.js";
 
 // ---------------------------------------------------------------------------
 // Environment (used only for /v1 business API). Read lazily inside the deps
@@ -54,11 +54,10 @@ export function makeBusinessRepoFactory(kind: "supabase" | "postgres") {
       createPgBusinessRepository({
         db: getDb(),
         accessToken,
-        // Lazy push hook: pushDeps() is constructed on first call and reused.
-        // dispatchPush's helper RPCs (push_idempotency_claim,
-        // list_session_push_targets) still use the Supabase service-role client
-        // — documented follow-up to port those RPCs to pg-repo.
-        dispatchPush: async (record) => { await dispatchPush(record, pushDeps()); },
+        // Lazy push hook: pgPushDeps() is constructed on first call and reused.
+        // push_idempotency_claim and list_session_push_targets are now served
+        // by Drizzle queries via buildPgPushDeps() — no Supabase service-role.
+        dispatchPush: async (record) => { await dispatchPush(record, pgPushDeps()); },
       });
   }
   return ({ accessToken }: { accessToken: string }) =>

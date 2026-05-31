@@ -13,6 +13,12 @@ import { createApnsClient, createHttp2Transport } from './apns.js';
 import { dispatchPush } from './push-dispatch.js';
 import { createMqttPublisher } from './mqtt-client.js';
 import { publishableKeyFromEnv } from './supabase-repo.js';
+import { getDb } from '../db/client.js';
+import {
+  pushIdempotencyClaim,
+  listSessionPushTargets,
+  revokeDeviceToken,
+} from './pg-repo/push-targets.js';
 
 // ---------------------------------------------------------------------------
 // Environment (OSS vars imported from oss.ts; others below)
@@ -280,6 +286,58 @@ export function pushDeps() {
   if (_pushDeps) return _pushDeps;
   _pushDeps = buildPushDeps();
   return _pushDeps;
+}
+
+// ---------------------------------------------------------------------------
+// Pg-backed push deps (no Supabase service-role)
+// ---------------------------------------------------------------------------
+let _pgPushDeps: ReturnType<typeof buildPgPushDeps> | null = null;
+
+function buildPgPushDeps() {
+  const sb = {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      if (name === 'push_idempotency_claim') {
+        const messageId = args['p_message_id'] as string;
+        const claimed = await pushIdempotencyClaim(getDb(), messageId);
+        return { data: [{ claimed }] };
+      }
+      if (name === 'list_session_push_targets') {
+        const sessionId = args['p_session_id'] as string;
+        const excludeActorId = args['p_exclude_actor_id'] as string;
+        const targets = await listSessionPushTargets(getDb(), sessionId, excludeActorId);
+        return { data: targets };
+      }
+      throw new Error(`[pg-push] unknown rpc: ${name}`);
+    },
+    revokeToken: async (token: string) => {
+      await revokeDeviceToken(getDb(), token);
+    },
+  };
+
+  const apnsHost = APNS_ENV() === 'sandbox' ? 'api.sandbox.push.apple.com' : 'api.push.apple.com';
+  const jwt = createApnsJwtCache({
+    privateKeyP8: APNS_PRIVATE_KEY_P8(),
+    keyId: APNS_KEY_ID(),
+    teamId: APNS_TEAM_ID(),
+  });
+  const apns = createApnsClient({
+    jwt, topic: APNS_TOPIC(),
+    transport: createHttp2Transport(apnsHost),
+  });
+  const mqtt = MQTT_BROKER_URL()
+    ? createMqttPublisher({
+        url: MQTT_BROKER_URL(),
+        username: MQTT_USERNAME(),
+        password: MQTT_PASSWORD(),
+      })
+    : null;
+  return { sb, apns, mqtt };
+}
+
+export function pgPushDeps() {
+  if (_pgPushDeps) return _pgPushDeps;
+  _pgPushDeps = buildPgPushDeps();
+  return _pgPushDeps;
 }
 
 // ---------------------------------------------------------------------------
