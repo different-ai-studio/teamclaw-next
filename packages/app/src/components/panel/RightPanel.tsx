@@ -26,9 +26,8 @@ export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }:
   const sessionDiff = useSessionStore(s => s.sessionDiff)
   const activeSessionId = useSessionStore(s => s.activeSessionId)
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId))
-  const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null)
   const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null)
-  const teamIdForActors = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId
+  const teamIdForActors = sessionRow?.team_id ?? currentTeamId
 
   // Use defaultTab if provided, otherwise use store's activeTab
   const activeTab = defaultTab || storeActiveTab
