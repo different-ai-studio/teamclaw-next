@@ -197,12 +197,47 @@ test("createShortcut (multi-team bug fix): ownerMemberId is team-scoped actor, n
 test("updateShortcut mutates label and returns updated shape", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
-  const { actor } = await seedActor(db, team.id);
-  const repo = createPgBusinessRepository({ db });
+  const { actor, userId } = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db, userId });
 
   const shortcut = await repo.createShortcut({ teamId: team.id, kind: "link", label: "Old", position: 0, ownerActorId: actor.id });
   const updated = await repo.updateShortcut(shortcut.id, { label: "Updated Label" });
   assert.equal(updated.label, "Updated Label");
+});
+
+test("updateShortcut: caller NOT in shortcut's team → 403", async () => {
+  const { db } = await makeTestDb();
+  const ownerTeam = await seedTeam(db);
+  const otherTeam = await seedTeam(db);
+  const { actor: ownerActor, userId: ownerUserId } = await seedActor(db, ownerTeam.id);
+  const { userId: attackerUserId } = await seedActor(db, otherTeam.id);
+
+  // Create shortcut in ownerTeam
+  const ownerRepo = createPgBusinessRepository({ db, userId: ownerUserId });
+  const shortcut = await ownerRepo.createShortcut({ teamId: ownerTeam.id, kind: "link", label: "Private", position: 0, ownerActorId: ownerActor.id });
+
+  // Attacker (only in otherTeam) tries to mutate
+  const attackerRepo = createPgBusinessRepository({ db, userId: attackerUserId });
+  await assert.rejects(
+    () => attackerRepo.updateShortcut(shortcut.id, { label: "Hacked" }),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
+});
+
+test("updateShortcut: no ctx.userId → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const { actor, userId } = await seedActor(db, team.id);
+  const ownerRepo = createPgBusinessRepository({ db, userId });
+  const shortcut = await ownerRepo.createShortcut({ teamId: team.id, kind: "link", label: "SC", position: 0, ownerActorId: actor.id });
+
+  const anonRepo = createPgBusinessRepository({ db }); // no userId
+  await assert.rejects(
+    () => anonRepo.updateShortcut(shortcut.id, { label: "X" }),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
 });
 
 // ── deleteShortcut ────────────────────────────────────────────────────────────
@@ -210,8 +245,8 @@ test("updateShortcut mutates label and returns updated shape", async () => {
 test("deleteShortcut removes the row", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
-  const { actor } = await seedActor(db, team.id);
-  const repo = createPgBusinessRepository({ db });
+  const { actor, userId } = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db, userId });
 
   const shortcut = await repo.createShortcut({ teamId: team.id, kind: "link", label: "Temp", position: 0, ownerActorId: actor.id });
   await repo.deleteShortcut(shortcut.id);
@@ -220,13 +255,46 @@ test("deleteShortcut removes the row", async () => {
   assert.ok(!items.find((s: any) => s.id === shortcut.id), "deleted shortcut should not appear");
 });
 
+test("deleteShortcut: caller NOT in shortcut's team → 403", async () => {
+  const { db } = await makeTestDb();
+  const ownerTeam = await seedTeam(db);
+  const otherTeam = await seedTeam(db);
+  const { actor: ownerActor, userId: ownerUserId } = await seedActor(db, ownerTeam.id);
+  const { userId: attackerUserId } = await seedActor(db, otherTeam.id);
+
+  const ownerRepo = createPgBusinessRepository({ db, userId: ownerUserId });
+  const shortcut = await ownerRepo.createShortcut({ teamId: ownerTeam.id, kind: "link", label: "Mine", position: 0, ownerActorId: ownerActor.id });
+
+  const attackerRepo = createPgBusinessRepository({ db, userId: attackerUserId });
+  await assert.rejects(
+    () => attackerRepo.deleteShortcut(shortcut.id),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
+});
+
+test("deleteShortcut: no ctx.userId → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const { actor, userId } = await seedActor(db, team.id);
+  const ownerRepo = createPgBusinessRepository({ db, userId });
+  const shortcut = await ownerRepo.createShortcut({ teamId: team.id, kind: "link", label: "SC2", position: 0, ownerActorId: actor.id });
+
+  const anonRepo = createPgBusinessRepository({ db });
+  await assert.rejects(
+    () => anonRepo.deleteShortcut(shortcut.id),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
+});
+
 // ── batchMoveShortcuts ────────────────────────────────────────────────────────
 
 test("batchMoveShortcuts updates parentId and position", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
-  const { actor } = await seedActor(db, team.id);
-  const repo = createPgBusinessRepository({ db });
+  const { actor, userId } = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db, userId });
 
   const a = await repo.createShortcut({ teamId: team.id, kind: "link", label: "A", position: 0, ownerActorId: actor.id });
   const b = await repo.createShortcut({ teamId: team.id, kind: "folder", label: "B", position: 1, ownerActorId: actor.id });
@@ -240,6 +308,21 @@ test("batchMoveShortcuts updates parentId and position", async () => {
   const [row] = await db.select().from(shortcuts).where(eq(shortcuts.id, a.id));
   assert.equal(row.parentId, b.id, "parentId should be updated to b.id");
   assert.equal(row.order, 0, "position/order should be updated");
+});
+
+test("batchMoveShortcuts: no ctx.userId → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const { actor, userId } = await seedActor(db, team.id);
+  const ownerRepo = createPgBusinessRepository({ db, userId });
+  const a = await ownerRepo.createShortcut({ teamId: team.id, kind: "link", label: "A2", position: 0, ownerActorId: actor.id });
+
+  const anonRepo = createPgBusinessRepository({ db });
+  await assert.rejects(
+    () => anonRepo.batchMoveShortcuts({ moves: [{ shortcutId: a.id, parentId: null, position: 1 }] }),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
 });
 
 // ── setShortcutVisibleRoles ───────────────────────────────────────────────────
@@ -309,6 +392,52 @@ test("listShortcutsByScope filters by scope=team", async () => {
   // All results should come from the right team
   assert.ok(teamScoped.find((s: any) => s.label === "TeamScope"), "team-scope shortcut should appear");
   assert.ok(!teamScoped.find((s: any) => s.label === "PersonalScope"), "personal shortcut should not appear in team scope");
+});
+
+test("listShortcutsByScope personal: caller sees ONLY their own personal shortcuts in their team", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const { actor: actorA, userId: userIdA } = await seedActor(db, team.id);
+  const { actor: actorB, userId: userIdB } = await seedActor(db, team.id);
+
+  // actorA creates a personal shortcut
+  const repoA = createPgBusinessRepository({ db, userId: userIdA });
+  await repoA.createShortcut({ teamId: team.id, kind: "link", label: "A Personal", position: 0, ownerActorId: actorA.id, scope: "personal" });
+
+  // actorB creates a personal shortcut
+  const repoB = createPgBusinessRepository({ db, userId: userIdB });
+  await repoB.createShortcut({ teamId: team.id, kind: "link", label: "B Personal", position: 0, ownerActorId: actorB.id, scope: "personal" });
+
+  // actorA queries personal scope — should only see their own
+  const itemsA = await repoA.listShortcutsByScope({ scope: "personal", teamId: team.id });
+  assert.ok(itemsA.find((s: any) => s.label === "A Personal"), "A should see their own shortcut");
+  assert.ok(!itemsA.find((s: any) => s.label === "B Personal"), "A must NOT see B's personal shortcut");
+});
+
+test("listShortcutsByScope personal: no ctx.userId → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const anonRepo = createPgBusinessRepository({ db });
+  await assert.rejects(
+    () => anonRepo.listShortcutsByScope({ scope: "personal", teamId: team.id }),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
+});
+
+test("listShortcutsByScope personal: caller not in team → 403", async () => {
+  const { db } = await makeTestDb();
+  const teamA = await seedTeam(db);
+  const teamB = await seedTeam(db);
+  const { userId: userIdB } = await seedActor(db, teamB.id);
+
+  // userIdB is NOT in teamA
+  const repo = createPgBusinessRepository({ db, userId: userIdB });
+  await assert.rejects(
+    () => repo.listShortcutsByScope({ scope: "personal", teamId: teamA.id }),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
 });
 
 // ── listShortcutRoleBindings ──────────────────────────────────────────────────

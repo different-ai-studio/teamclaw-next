@@ -223,10 +223,10 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
      * Replaces share_agent_to_team RPC.
      */
     async shareAgentToTeam(agentId: string) {
-      if (ctx.userId) {
-        const isOwner = await checkAgentOwnership(db, ctx.userId, agentId);
-        if (!isOwner) throw new ApiError(403, "forbidden", "not the agent owner");
-      }
+      // AUTHZ FIX (#5): fail closed — 401 if no identity, 403 if not owner.
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "shareAgentToTeam: authenticated caller required");
+      const isOwner = await checkAgentOwnership(db, ctx.userId, agentId);
+      if (!isOwner) throw new ApiError(403, "forbidden", "not the agent owner");
       await (db.update(agents) as any)
         .set({ visibility: "team", updatedAt: new Date() })
         .where(eq(agents.id, agentId));
@@ -238,10 +238,10 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
      * Replaces make_agent_personal RPC.
      */
     async makeAgentPersonal(agentId: string) {
-      if (ctx.userId) {
-        const isOwner = await checkAgentOwnership(db, ctx.userId, agentId);
-        if (!isOwner) throw new ApiError(403, "forbidden", "not the agent owner");
-      }
+      // AUTHZ FIX (#5): fail closed — 401 if no identity, 403 if not owner.
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "makeAgentPersonal: authenticated caller required");
+      const isOwner = await checkAgentOwnership(db, ctx.userId, agentId);
+      if (!isOwner) throw new ApiError(403, "forbidden", "not the agent owner");
       await (db.update(agents) as any)
         .set({ visibility: "personal", updatedAt: new Date() })
         .where(eq(agents.id, agentId));
@@ -269,18 +269,17 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
       agentId: string,
       patch: { displayName?: string | null; visibility?: string | null },
     ) {
-      // Resolve owner if userId is available; skip authz if ctx is empty (internal calls)
-      if (ctx.userId) {
-        const callerActorId = await resolveActorForAgent(db, ctx.userId, agentId);
-        if (!callerActorId) throw new ApiError(403, "forbidden", "not a member of this team");
-        const [ag] = await db
-          .select({ ownerMemberId: agents.ownerMemberId })
-          .from(agents)
-          .where(eq(agents.id, agentId))
-          .limit(1);
-        if (!ag || ag.ownerMemberId !== callerActorId) {
-          throw new ApiError(403, "forbidden", "not the agent owner");
-        }
+      // AUTHZ FIX (#5): fail closed — 401 if no identity, 403 if not owner.
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "updateOwnedAgentProfile: authenticated caller required");
+      const callerActorId = await resolveActorForAgent(db, ctx.userId, agentId);
+      if (!callerActorId) throw new ApiError(403, "forbidden", "not a member of this team");
+      const [ag] = await db
+        .select({ ownerMemberId: agents.ownerMemberId })
+        .from(agents)
+        .where(eq(agents.id, agentId))
+        .limit(1);
+      if (!ag || ag.ownerMemberId !== callerActorId) {
+        throw new ApiError(403, "forbidden", "not the agent owner");
       }
 
       const updates: Record<string, any> = { updatedAt: new Date() };
@@ -312,10 +311,10 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
         defaultAgentType?: string | null;
       },
     ) {
-      if (ctx.userId) {
-        const isOwner = await checkAgentOwnership(db, ctx.userId, agentId);
-        if (!isOwner) throw new ApiError(403, "forbidden", "not the agent owner");
-      }
+      // AUTHZ FIX (#5): fail closed — 401 if no identity, 403 if not owner.
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "updateAgentDefaults: authenticated caller required");
+      const isOwner = await checkAgentOwnership(db, ctx.userId, agentId);
+      if (!isOwner) throw new ApiError(403, "forbidden", "not the agent owner");
 
       const updates: Record<string, any> = { updatedAt: new Date() };
       if (patch.defaultWorkspaceId !== undefined) {

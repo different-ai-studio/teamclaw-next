@@ -339,3 +339,135 @@ test("updateAgentDefaults does not throw", async () => {
     () => repo.updateAgentDefaults(agentActor.id, { defaultAgentType: "chat" }),
   );
 });
+
+// ── authz fail-closed: shareAgentToTeam / makeAgentPersonal / updateOwnedAgentProfile / updateAgentDefaults ──
+
+test("shareAgentToTeam: no ctx.userId → 401", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id, "personal");
+  const repo = createPgBusinessRepository({ db }); // no userId
+
+  await assert.rejects(
+    () => repo.shareAgentToTeam(agentActor.id),
+    (err: any) => err.statusCode === 401,
+    "should reject with 401",
+  );
+});
+
+test("shareAgentToTeam: non-owner → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const owner = await seedMemberActor(db, team.id, { userId: "owner-user" });
+  const nonOwner = await seedMemberActor(db, team.id, { userId: "nonowner-user" });
+  const agentActor = await seedAgentActor(db, team.id, owner.id, "personal");
+  const repo = createPgBusinessRepository({ db, userId: "nonowner-user" });
+
+  await assert.rejects(
+    () => repo.shareAgentToTeam(agentActor.id),
+    (err: any) => err.statusCode === 403,
+    "should reject with 403",
+  );
+});
+
+test("shareAgentToTeam: owner succeeds", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const owner = await seedMemberActor(db, team.id, { userId: "owner-share" });
+  const agentActor = await seedAgentActor(db, team.id, owner.id, "personal");
+  const repo = createPgBusinessRepository({ db, userId: "owner-share" });
+
+  await assert.doesNotReject(() => repo.shareAgentToTeam(agentActor.id));
+});
+
+test("makeAgentPersonal: no ctx.userId → 401", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id, "team");
+  const repo = createPgBusinessRepository({ db });
+
+  await assert.rejects(
+    () => repo.makeAgentPersonal(agentActor.id),
+    (err: any) => err.statusCode === 401,
+  );
+});
+
+test("makeAgentPersonal: non-owner → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const owner = await seedMemberActor(db, team.id, { userId: "mp-owner" });
+  const nonOwner = await seedMemberActor(db, team.id, { userId: "mp-nonowner" });
+  const agentActor = await seedAgentActor(db, team.id, owner.id, "team");
+  const repo = createPgBusinessRepository({ db, userId: "mp-nonowner" });
+
+  await assert.rejects(
+    () => repo.makeAgentPersonal(agentActor.id),
+    (err: any) => err.statusCode === 403,
+  );
+});
+
+test("makeAgentPersonal: owner succeeds", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const owner = await seedMemberActor(db, team.id, { userId: "mp-owner-ok" });
+  const agentActor = await seedAgentActor(db, team.id, owner.id, "team");
+  const repo = createPgBusinessRepository({ db, userId: "mp-owner-ok" });
+
+  await assert.doesNotReject(() => repo.makeAgentPersonal(agentActor.id));
+});
+
+test("updateOwnedAgentProfile: no ctx.userId → 401", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id);
+  const repo = createPgBusinessRepository({ db });
+
+  await assert.rejects(
+    () => repo.updateOwnedAgentProfile(agentActor.id, { displayName: "Hacked" }),
+    (err: any) => err.statusCode === 401,
+  );
+});
+
+test("updateOwnedAgentProfile: non-owner → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const owner = await seedMemberActor(db, team.id, { userId: "prof-owner" });
+  const nonOwner = await seedMemberActor(db, team.id, { userId: "prof-nonowner" });
+  const agentActor = await seedAgentActor(db, team.id, owner.id);
+  const repo = createPgBusinessRepository({ db, userId: "prof-nonowner" });
+
+  await assert.rejects(
+    () => repo.updateOwnedAgentProfile(agentActor.id, { displayName: "Hijack" }),
+    (err: any) => err.statusCode === 403,
+  );
+});
+
+test("updateAgentDefaults: no ctx.userId → 401", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id);
+  const repo = createPgBusinessRepository({ db });
+
+  await assert.rejects(
+    () => repo.updateAgentDefaults(agentActor.id, { defaultAgentType: "chat" }),
+    (err: any) => err.statusCode === 401,
+  );
+});
+
+test("updateAgentDefaults: non-owner → 403", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const owner = await seedMemberActor(db, team.id, { userId: "def-owner" });
+  const nonOwner = await seedMemberActor(db, team.id, { userId: "def-nonowner" });
+  const agentActor = await seedAgentActor(db, team.id, owner.id);
+  const repo = createPgBusinessRepository({ db, userId: "def-nonowner" });
+
+  await assert.rejects(
+    () => repo.updateAgentDefaults(agentActor.id, { defaultAgentType: "chat" }),
+    (err: any) => err.statusCode === 403,
+  );
+});

@@ -34,7 +34,7 @@ import {
   permissionRoles,
 } from "../../db/schema/index.js";
 import { ApiError } from "../http-utils.js";
-import { requireActorForTeam } from "./authz.js";
+import { requireActorForTeam, checkTeamMembership } from "./authz.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
   d ? new Date(d).toISOString() : null;
@@ -135,6 +135,14 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
     },
 
     // ── listShortcutsByScope ──────────────────────────────────────────────────
+    /**
+     * AUTHZ FIX (#2): personal shortcuts were unfiltered → cross-tenant leak.
+     *
+     * - scope='team'    → always filter by teamId (unchanged).
+     * - scope='personal' → filter by teamId AND ownerMemberId = caller's actor.
+     *   Requires ctx.userId; throws 403 if absent (fail closed).
+     * NEVER returns unfiltered rows.
+     */
     async listShortcutsByScope({
       scope,
       teamId,
@@ -145,7 +153,25 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
       parentId?: string | null;
     }) {
       const conditions: any[] = [eq(shortcuts.scope, scope)];
-      if (scope === "team" && teamId) conditions.push(eq(shortcuts.teamId, teamId));
+
+      if (scope === "team") {
+        if (!teamId) throw new ApiError(400, "bad_request", "teamId required for team scope");
+        conditions.push(eq(shortcuts.teamId, teamId));
+      } else if (scope === "personal") {
+        // Personal shortcuts must be scoped to the caller — fail closed if no identity.
+        if (!ctx.userId) {
+          throw new ApiError(403, "forbidden", "listShortcutsByScope: personal scope requires authenticated caller");
+        }
+        if (!teamId) throw new ApiError(400, "bad_request", "teamId required for personal scope");
+        const callerActorId = await requireActorForTeam(db, ctx.userId, teamId);
+        conditions.push(eq(shortcuts.teamId, teamId));
+        conditions.push(eq(shortcuts.ownerMemberId, callerActorId));
+      } else {
+        // Unknown scope — require teamId at minimum to avoid cross-tenant leaks.
+        if (!teamId) throw new ApiError(400, "bad_request", "teamId required");
+        conditions.push(eq(shortcuts.teamId, teamId));
+      }
+
       if (parentId !== undefined) {
         if (parentId === null) conditions.push(isNull(shortcuts.parentId));
         else conditions.push(eq(shortcuts.parentId, parentId));
@@ -225,10 +251,28 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
     },
 
     // ── updateShortcut ────────────────────────────────────────────────────────
+    /**
+     * AUTHZ FIX (#3): verify caller belongs to the shortcut's team before mutating.
+     * Fail closed — 403 if ctx.userId absent.
+     */
     async updateShortcut(
       shortcutId: string,
       patch: { label?: string; payload?: string | null; parentId?: string | null; position?: number },
     ) {
+      if (!ctx.userId) {
+        throw new ApiError(403, "forbidden", "updateShortcut: authenticated caller required");
+      }
+
+      // Load shortcut to obtain teamId for membership check.
+      const [existing] = await (db.select() as any)
+        .from(shortcuts)
+        .where(eq(shortcuts.id, shortcutId))
+        .limit(1);
+      if (!existing) throw new ApiError(404, "not_found", "shortcut not found");
+
+      const isMember = await checkTeamMembership(db, ctx.userId, existing.teamId);
+      if (!isMember) throw new ApiError(403, "forbidden", "not a member of this team");
+
       const updates: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.label !== undefined) updates.label = patch.label;
       if (patch.payload !== undefined) updates.target = patch.payload;
@@ -244,7 +288,24 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
     },
 
     // ── deleteShortcut ────────────────────────────────────────────────────────
+    /**
+     * AUTHZ FIX (#3): verify caller belongs to the shortcut's team before deleting.
+     * Fail closed — 403 if ctx.userId absent.
+     */
     async deleteShortcut(shortcutId: string) {
+      if (!ctx.userId) {
+        throw new ApiError(403, "forbidden", "deleteShortcut: authenticated caller required");
+      }
+
+      const [existing] = await (db.select() as any)
+        .from(shortcuts)
+        .where(eq(shortcuts.id, shortcutId))
+        .limit(1);
+      if (!existing) throw new ApiError(404, "not_found", "shortcut not found");
+
+      const isMember = await checkTeamMembership(db, ctx.userId, existing.teamId);
+      if (!isMember) throw new ApiError(403, "forbidden", "not a member of this team");
+
       await (db.delete(shortcuts) as any).where(eq(shortcuts.id, shortcutId));
     },
 
@@ -252,7 +313,9 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
     /**
      * BUG FIX: the legacy RPC resolved the owner via current_member_id() globally.
      * This implementation updates position/parentId only — no owner attribution.
-     * Caller must provide ownerActorId explicitly when owner attribution is needed.
+     *
+     * AUTHZ FIX (#3): verify caller is a member of every affected shortcut's team.
+     * Fail closed — 403 if ctx.userId absent.
      */
     async batchMoveShortcuts({
       moves,
@@ -260,6 +323,24 @@ export function makeShortcutsRepo(db: DbLike, ctx: ShortcutsCtx = {}) {
       moves: Array<{ shortcutId: string; parentId: string | null; position: number }>;
     }) {
       if (!moves.length) return;
+
+      if (!ctx.userId) {
+        throw new ApiError(403, "forbidden", "batchMoveShortcuts: authenticated caller required");
+      }
+
+      // Load all affected shortcuts to validate team membership.
+      const shortcutIds = moves.map((m) => m.shortcutId);
+      const rows: any[] = await (db.select() as any)
+        .from(shortcuts)
+        .where(inArray(shortcuts.id, shortcutIds));
+
+      // Collect unique teamIds and verify membership in all of them.
+      const teamIds = [...new Set(rows.map((r: any) => r.teamId as string))];
+      for (const tid of teamIds) {
+        const isMember = await checkTeamMembership(db, ctx.userId, tid);
+        if (!isMember) throw new ApiError(403, "forbidden", "not a member of this team");
+      }
+
       await (db as any).transaction(async (tx: any) => {
         for (const move of moves) {
           await (tx.update(shortcuts) as any)
