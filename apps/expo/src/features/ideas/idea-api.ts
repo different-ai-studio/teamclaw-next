@@ -1,35 +1,29 @@
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 import type { Idea, IdeaStatus } from "./idea-types";
 
-type SupabaseError = { message?: string } | null;
-type QueryResult<T> = { data: T; error: SupabaseError };
-type IdeasClient = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  from: (table: string) => any;
-};
+/**
+ * Cloud-only ideas provider. Mirrors the iOS CloudAPIIdeaRepository: the FC
+ * list endpoint paginates and returns one archived bucket per call, so
+ * listIdeas follows the cursor to exhaustion (both buckets when archived is
+ * requested). FC ideas carry no workspace name, so — like the prior Supabase
+ * join — names are enriched from GET /v1/workspaces.
+ */
 
-type IdeaRow = {
+// FC mapIdeaRow camelCase shape (subset we consume).
+type CloudIdea = {
   id: string;
-  team_id: string | null;
-  workspace_id: string | null;
-  created_by_actor_id: string | null;
-  title: string | null;
-  description: string | null;
-  status: string | null;
-  archived: boolean | null;
-  created_at: string | null;
-  updated_at: string | null;
+  teamId?: string | null;
+  workspaceId?: string | null;
+  createdByActorId?: string | null;
+  title?: string | null;
+  description?: string | null;
+  status?: string | null;
+  archived?: boolean | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
-type WorkspaceRow = {
-  id: string;
-  name: string | null;
-};
-
-function throwIfError(error: SupabaseError) {
-  if (error?.message) throw new Error(error.message);
-}
-
-function toStatus(value: string | null): IdeaStatus {
+function toStatus(value: string | null | undefined): IdeaStatus {
   switch (value) {
     case "in_progress":
       return "in_progress";
@@ -40,102 +34,116 @@ function toStatus(value: string | null): IdeaStatus {
   }
 }
 
-function toIdea(row: IdeaRow, workspaceName: string | null): Idea {
+function toIdea(row: CloudIdea, workspaceName: string | null): Idea {
   return {
     ideaId: row.id,
-    teamId: row.team_id ?? "",
-    workspaceId: row.workspace_id ?? null,
+    teamId: row.teamId ?? "",
+    workspaceId: row.workspaceId ?? null,
     workspaceName,
-    createdByActorId: row.created_by_actor_id ?? null,
+    createdByActorId: row.createdByActorId ?? null,
     title: row.title?.trim() || "Untitled idea",
     description: row.description ?? "",
     status: toStatus(row.status),
     archived: Boolean(row.archived),
-    createdAt: row.created_at ?? "",
-    updatedAt: row.updated_at ?? row.created_at ?? "",
+    createdAt: row.createdAt ?? "",
+    updatedAt: row.updatedAt ?? row.createdAt ?? "",
   };
 }
 
-export function createIdeasApi(client: IdeasClient) {
+export type IdeasApi = {
+  createIdea: (input: {
+    teamId: string;
+    title: string;
+    description?: string;
+    workspaceId?: string | null;
+  }) => Promise<Idea>;
+  updateStatus: (ideaId: string, status: IdeaStatus) => Promise<void>;
+  updateContent: (
+    ideaId: string,
+    patch: { title?: string; description?: string },
+  ) => Promise<void>;
+  archive: (ideaId: string) => Promise<void>;
+  unarchive: (ideaId: string) => Promise<void>;
+  listIdeas: (teamId: string, options?: { includeArchived?: boolean }) => Promise<Idea[]>;
+};
+
+export function createIdeasApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): IdeasApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
+
+  async function fetchBucket(teamId: string, archived: boolean): Promise<CloudIdea[]> {
+    const rows: CloudIdea[] = [];
+    let cursor: string | null = null;
+    do {
+      let path = `/v1/ideas?teamId=${encodeURIComponent(teamId)}&limit=200&archived=${archived}`;
+      if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+      const page = await client.get<{ items: CloudIdea[]; nextCursor: string | null }>(path);
+      rows.push(...(page.items ?? []));
+      cursor = page.nextCursor ?? null;
+    } while (cursor);
+    return rows;
+  }
+
   return {
-    async updateStatus(ideaId: string, status: IdeaStatus): Promise<void> {
-      const result = (await client
-        .from("ideas")
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq("id", ideaId)) as QueryResult<null>;
-      throwIfError(result.error);
-    },
-
-    async updateContent(
-      ideaId: string,
-      patch: { title?: string; description?: string },
-    ): Promise<void> {
-      const next: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
+    async createIdea(input) {
+      const body: Record<string, unknown> = {
+        teamId: input.teamId,
+        title: input.title,
+        description: input.description ?? "",
       };
-      if (patch.title !== undefined) next.title = patch.title;
-      if (patch.description !== undefined) next.description = patch.description;
-      const result = (await client
-        .from("ideas")
-        .update(next)
-        .eq("id", ideaId)) as QueryResult<null>;
-      throwIfError(result.error);
+      if (input.workspaceId != null) body.workspaceId = input.workspaceId;
+      const row = await client.post<CloudIdea>("/v1/ideas", body);
+      return toIdea(row, null);
     },
 
-    async archive(ideaId: string): Promise<void> {
-      const result = (await client
-        .from("ideas")
-        .update({ archived: true, updated_at: new Date().toISOString() })
-        .eq("id", ideaId)) as QueryResult<null>;
-      throwIfError(result.error);
+    async updateStatus(ideaId, status) {
+      await client.patch(`/v1/ideas/${encodeURIComponent(ideaId)}`, { status });
     },
 
-    async unarchive(ideaId: string): Promise<void> {
-      const result = (await client
-        .from("ideas")
-        .update({ archived: false, updated_at: new Date().toISOString() })
-        .eq("id", ideaId)) as QueryResult<null>;
-      throwIfError(result.error);
+    async updateContent(ideaId, patch) {
+      const body: Record<string, unknown> = {};
+      if (patch.title !== undefined) body.title = patch.title;
+      if (patch.description !== undefined) body.description = patch.description;
+      await client.patch(`/v1/ideas/${encodeURIComponent(ideaId)}`, body);
     },
 
-    async listIdeas(
-      teamId: string,
-      options: { includeArchived?: boolean } = {},
-    ): Promise<Idea[]> {
-      let query = client
-        .from("ideas")
-        .select(
-          "id, team_id, workspace_id, created_by_actor_id, title, description, status, archived, created_at, updated_at",
-        )
-        .eq("team_id", teamId);
-      if (!options.includeArchived) {
-        query = query.eq("archived", false);
+    async archive(ideaId) {
+      await client.post(`/v1/ideas/${encodeURIComponent(ideaId)}/archive`, { archived: true });
+    },
+
+    async unarchive(ideaId) {
+      await client.post(`/v1/ideas/${encodeURIComponent(ideaId)}/archive`, { archived: false });
+    },
+
+    async listIdeas(teamId, options = {}) {
+      if (!teamId) return [];
+      const buckets = options.includeArchived ? [false, true] : [false];
+      const rows: CloudIdea[] = [];
+      for (const archived of buckets) {
+        rows.push(...(await fetchBucket(teamId, archived)));
       }
-      const ideaResult = (await query
-        .order("updated_at", { ascending: false })) as QueryResult<IdeaRow[] | null>;
-      throwIfError(ideaResult.error);
-
-      const rows = ideaResult.data ?? [];
-      if (rows.length === 0) return [];
+      rows.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 
       const workspaceIds = Array.from(
-        new Set(rows.map((row) => row.workspace_id).filter((id): id is string => Boolean(id))),
+        new Set(rows.map((r) => r.workspaceId).filter((id): id is string => Boolean(id))),
       );
-
       let workspaceNames = new Map<string, string>();
       if (workspaceIds.length > 0) {
-        const wsResult = (await client
-          .from("workspaces")
-          .select("id, name")
-          .in("id", workspaceIds)) as QueryResult<WorkspaceRow[] | null>;
-        throwIfError(wsResult.error);
-        workspaceNames = new Map(
-          (wsResult.data ?? []).map((row) => [row.id, row.name?.trim() ?? ""]),
+        const ws = await client.get<{ items: { id: string; name: string }[] }>(
+          `/v1/workspaces?teamId=${encodeURIComponent(teamId)}&limit=200`,
         );
+        workspaceNames = new Map((ws.items ?? []).map((w) => [w.id, w.name?.trim() ?? ""]));
       }
 
       return rows.map((row) =>
-        toIdea(row, row.workspace_id ? workspaceNames.get(row.workspace_id) ?? null : null),
+        toIdea(row, row.workspaceId ? workspaceNames.get(row.workspaceId) ?? null : null),
       );
     },
   };

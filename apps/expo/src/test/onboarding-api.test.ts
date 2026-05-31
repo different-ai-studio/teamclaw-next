@@ -2,149 +2,78 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BootstrapResult, TeamSummary } from "../features/onboarding/onboarding-types";
 
-function createQueryMock<T>(result: Promise<T>) {
-  const builder = {
-    eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    single: vi.fn().mockReturnThis(),
-    then: result.then.bind(result),
-    catch: result.catch.bind(result),
-    finally: result.finally.bind(result),
-  };
-
-  return builder;
+function makeClient(overrides: {
+  session?: { user: { id: string; is_anonymous?: boolean; email?: string | null } } | null;
+  get?: ReturnType<typeof vi.fn>;
+  post?: ReturnType<typeof vi.fn>;
+  auth?: Record<string, unknown>;
+}) {
+  const session = overrides.session === undefined ? null : overrides.session;
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session } }),
+      ...overrides.auth,
+    },
+    api: {
+      get: overrides.get ?? vi.fn(),
+      post: overrides.post ?? vi.fn(),
+    },
+  } as never;
 }
 
-describe("createOnboardingApi", () => {
-  it("loadBootstrap returns null team when user has no member actors", async () => {
+describe("createOnboardingApi (cloud-only)", () => {
+  it("loadBootstrap returns null team when the session is anonymous with no teams", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const actorQuery = createQueryMock(Promise.resolve({ data: [], error: null }));
-    const from = vi.fn((table: string) => {
-      if (table === "actors") {
-        return actorQuery;
-      }
-
-      throw new Error(`unexpected table: ${table}`);
+    const get = vi.fn().mockResolvedValue({ memberActorId: null, teams: [], memberActorIdByTeam: {} });
+    const client = makeClient({
+      session: { user: { id: "user-1", is_anonymous: true } },
+      get,
     });
 
-    const client = {
-      auth: {
-        getSession: vi.fn().mockResolvedValue({
-          data: {
-            session: {
-              user: {
-                id: "user-1",
-                is_anonymous: true,
-              },
-            },
-          },
-          error: null,
-        }),
-      },
-      from,
-    } as any;
-
     const api = createOnboardingApi(client);
-
     await expect(api.loadBootstrap()).resolves.toEqual({
       isAnonymous: true,
       team: null,
       memberActorId: null,
     } satisfies BootstrapResult);
-    expect(actorQuery.select).toHaveBeenCalledWith("id");
-    expect(actorQuery.eq).toHaveBeenNthCalledWith(1, "user_id", "user-1");
-    expect(actorQuery.eq).toHaveBeenNthCalledWith(2, "actor_type", "member");
+    expect(get).toHaveBeenCalledWith("/v1/me/bootstrap");
   });
 
-  it("loadBootstrap returns first team membership as TeamSummary", async () => {
+  it("loadBootstrap maps the first bootstrap team + member actor id", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const memberships = [
-      {
-        role: "owner",
-        teams: {
-          id: "team-1",
-          name: "Team Claw",
-          slug: "team-claw",
-        },
-        member_id: "actor-1",
-      },
-      {
-        role: "member",
-        teams: {
-          id: "team-2",
-          name: "Ignored",
-          slug: "ignored",
-        },
-        member_id: "actor-2",
-      },
-    ];
-
-    const actorQuery = createQueryMock(Promise.resolve({
-      data: [{ id: "actor-1" }, { id: "actor-2" }],
-      error: null,
-    }));
-    const membershipQuery = createQueryMock(Promise.resolve({
-      data: memberships,
-      error: null,
-    }));
-    const from = vi.fn((table: string) => {
-      if (table === "actors") {
-        return actorQuery;
-      }
-      if (table === "team_members") {
-        return membershipQuery;
-      }
-      throw new Error(`unexpected table: ${table}`);
+    const get = vi.fn().mockResolvedValue({
+      memberActorId: "actor-1",
+      teams: [
+        { id: "team-1", name: "Team Claw", slug: "team-claw", role: "owner" },
+        { id: "team-2", name: "Ignored", slug: "ignored", role: "member" },
+      ],
+      memberActorIdByTeam: { "team-1": "actor-1", "team-2": "actor-2" },
     });
-
-    const client = {
-      auth: {
-        getSession: vi.fn().mockResolvedValue({
-          data: {
-            session: {
-              user: {
-                id: "user-1",
-                is_anonymous: false,
-              },
-            },
-          },
-          error: null,
-        }),
-      },
-      from,
-    } as any;
+    const client = makeClient({ session: { user: { id: "user-1", is_anonymous: false } }, get });
 
     const api = createOnboardingApi(client);
-
     await expect(api.loadBootstrap()).resolves.toEqual({
       isAnonymous: false,
       memberActorId: "actor-1",
-      team: {
-        id: "team-1",
-        name: "Team Claw",
-        slug: "team-claw",
-        role: "owner",
-      } satisfies TeamSummary,
+      team: { id: "team-1", name: "Team Claw", slug: "team-claw", role: "owner" } satisfies TeamSummary,
     } satisfies BootstrapResult);
-    expect(actorQuery.eq).toHaveBeenNthCalledWith(1, "user_id", "user-1");
-    expect(actorQuery.eq).toHaveBeenNthCalledWith(2, "actor_type", "member");
-    expect(membershipQuery.select).toHaveBeenCalledWith("member_id, role, teams!inner(id, name, slug)");
-    expect(membershipQuery.in).toHaveBeenCalledWith("member_id", ["actor-1", "actor-2"]);
   });
 
-  it("sendEmailOTP resolves with pendingEmail", async () => {
+  it("loadBootstrap returns empty when there is no session", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
+    const client = makeClient({ session: null });
+    const api = createOnboardingApi(client);
+    await expect(api.loadBootstrap()).resolves.toEqual({
+      isAnonymous: false,
+      team: null,
+      memberActorId: null,
+    } satisfies BootstrapResult);
+  });
 
-    const signInWithOtp = vi.fn().mockResolvedValue({ data: {}, error: null });
-    const client = {
-      auth: {
-        signInWithOtp,
-      },
-    } as any;
-
+  it("sendEmailOTP requests an OTP and returns the pending email", async () => {
+    const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
+    const signInWithOtp = vi.fn().mockResolvedValue(undefined);
+    const client = makeClient({ auth: { signInWithOtp } });
     const api = createOnboardingApi(client);
 
     await expect(api.sendEmailOTP("person@example.com")).resolves.toEqual({
@@ -152,25 +81,17 @@ describe("createOnboardingApi", () => {
     });
     expect(signInWithOtp).toHaveBeenCalledWith({
       email: "person@example.com",
-      options: {
-        shouldCreateUser: true,
-      },
+      options: { shouldCreateUser: true },
     });
   });
 
-  it("verifyOTP calls verifyOtp with email token and email type", async () => {
+  it("verifyOTP delegates to the auth client with email type", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const verifyOtp = vi.fn().mockResolvedValue({ data: {}, error: null });
-    const client = {
-      auth: {
-        verifyOtp,
-      },
-    } as any;
-
+    const verifyOtp = vi.fn().mockResolvedValue({});
+    const client = makeClient({ auth: { verifyOtp } });
     const api = createOnboardingApi(client);
 
-    await expect(api.verifyOTP("person@example.com", "123456")).resolves.toEqual({});
+    await api.verifyOTP("person@example.com", "123456");
     expect(verifyOtp).toHaveBeenCalledWith({
       email: "person@example.com",
       token: "123456",
@@ -178,86 +99,34 @@ describe("createOnboardingApi", () => {
     });
   });
 
-  it("createOAuthSignInUrl starts Supabase OAuth without browser redirect", async () => {
+  it("createOAuthSignInUrl builds the PKCE authorize URL", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const signInWithOAuth = vi.fn().mockResolvedValue({
-      data: { url: "https://auth.example.com/oauth" },
-      error: null,
-    });
-    const client = {
-      auth: {
-        signInWithOAuth,
-      },
-    } as any;
-
+    const oauthAuthorize = vi
+      .fn()
+      .mockResolvedValue("https://fc.example.com/v1/auth/oauth/google/authorize?...");
+    const client = makeClient({ auth: { oauthAuthorize } });
     const api = createOnboardingApi(client);
 
     await expect(
       api.createOAuthSignInUrl("google", "teamclaw://auth/callback"),
-    ).resolves.toBe("https://auth.example.com/oauth");
-    expect(signInWithOAuth).toHaveBeenCalledWith({
-      provider: "google",
-      options: {
-        redirectTo: "teamclaw://auth/callback",
-        skipBrowserRedirect: true,
-      },
-    });
+    ).resolves.toBe("https://fc.example.com/v1/auth/oauth/google/authorize?...");
+    expect(oauthAuthorize).toHaveBeenCalledWith("google", "teamclaw://auth/callback");
   });
 
-  it("createOAuthLinkUrl starts Supabase identity linking without browser redirect", async () => {
+  it("completeOAuthCallback exchanges a PKCE code", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const linkIdentity = vi.fn().mockResolvedValue({
-      data: { url: "https://auth.example.com/link" },
-      error: null,
-    });
-    const client = {
-      auth: {
-        linkIdentity,
-      },
-    } as any;
-
-    const api = createOnboardingApi(client);
-
-    await expect(
-      api.createOAuthLinkUrl("apple", "teamclaw://auth/callback"),
-    ).resolves.toBe("https://auth.example.com/link");
-    expect(linkIdentity).toHaveBeenCalledWith({
-      provider: "apple",
-      options: {
-        redirectTo: "teamclaw://auth/callback",
-        skipBrowserRedirect: true,
-      },
-    });
-  });
-
-  it("completeOAuthCallback exchanges PKCE code callbacks", async () => {
-    const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const exchangeCodeForSession = vi.fn().mockResolvedValue({ data: {}, error: null });
-    const client = {
-      auth: {
-        exchangeCodeForSession,
-      },
-    } as any;
-
+    const exchangeOAuthCode = vi.fn().mockResolvedValue({});
+    const client = makeClient({ auth: { exchangeOAuthCode } });
     const api = createOnboardingApi(client);
 
     await api.completeOAuthCallback("teamclaw://auth/callback?code=abc");
-    expect(exchangeCodeForSession).toHaveBeenCalledWith("abc");
+    expect(exchangeOAuthCode).toHaveBeenCalledWith("abc");
   });
 
   it("completeOAuthCallback stores implicit token callbacks", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
     const setSession = vi.fn().mockResolvedValue({ data: {}, error: null });
-    const client = {
-      auth: {
-        setSession,
-      },
-    } as any;
-
+    const client = makeClient({ auth: { setSession } });
     const api = createOnboardingApi(client);
 
     await api.completeOAuthCallback(
@@ -269,28 +138,15 @@ describe("createOnboardingApi", () => {
     });
   });
 
-  it("createTeam uses the create_team RPC and returns TeamSummary", async () => {
+  it("createTeam posts to /v1/teams then resolves role from bootstrap", async () => {
     const { createOnboardingApi } = await import("../lib/supabase/onboarding-api");
-
-    const rpc = vi.fn().mockResolvedValue({
-      data: [
-        {
-          team_id: "team-1",
-          team_name: "Team Claw",
-          team_slug: "team-claw",
-          member_id: "member-1",
-          role: "owner",
-          workspace_id: "workspace-1",
-          workspace_name: "Workspace",
-        },
-      ],
-      error: null,
+    const post = vi.fn().mockResolvedValue({ id: "team-1", name: "Team Claw", slug: "team-claw" });
+    const get = vi.fn().mockResolvedValue({
+      memberActorId: "actor-1",
+      teams: [{ id: "team-1", name: "Team Claw", slug: "team-claw", role: "owner" }],
+      memberActorIdByTeam: { "team-1": "actor-1" },
     });
-    const client = {
-      auth: {},
-      rpc,
-    } as any;
-
+    const client = makeClient({ post, get });
     const api = createOnboardingApi(client);
 
     await expect(api.createTeam("Team Claw")).resolves.toEqual({
@@ -299,6 +155,7 @@ describe("createOnboardingApi", () => {
       slug: "team-claw",
       role: "owner",
     } satisfies TeamSummary);
-    expect(rpc).toHaveBeenCalledWith("create_team", { p_name: "Team Claw" });
+    expect(post).toHaveBeenCalledWith("/v1/teams", { name: "Team Claw" });
+    expect(get).toHaveBeenCalledWith("/v1/me/bootstrap");
   });
 });

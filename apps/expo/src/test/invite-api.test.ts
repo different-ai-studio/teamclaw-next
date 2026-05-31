@@ -39,29 +39,35 @@ describe("parseInviteToken", () => {
 });
 
 describe("createInviteApi.claim", () => {
-  it("throws for an empty token without hitting the RPC", async () => {
-    const rpc = vi.fn();
-    const client = { rpc } as unknown as Parameters<typeof createInviteApi>[0];
-    const api = createInviteApi(client);
+  const baseUrl = "https://fc.example.com";
+  const getAccessToken = async () => "access-token";
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => JSON.stringify(body),
+    } as Response;
+  }
+
+  it("throws for an empty token without hitting the network", async () => {
+    const fetchImpl = vi.fn();
+    const api = createInviteApi({ getAccessToken, baseUrl, fetchImpl: fetchImpl as never });
     await expect(api.claim("  ")).rejects.toThrow(/empty/i);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("returns the mapped ClaimResult on success", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: [
-        {
-          actor_id: "actor-1",
-          team_id: "team-1",
-          actor_type: "member",
-          display_name: "Alice",
-          refresh_token: "rt-1",
-        },
-      ],
-      error: null,
-    });
-    const client = { rpc } as unknown as Parameters<typeof createInviteApi>[0];
-    const api = createInviteApi(client);
+  it("POSTs the token and returns the mapped ClaimResult on success", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        actorId: "actor-1",
+        teamId: "team-1",
+        actorType: "member",
+        displayName: "Alice",
+        refreshToken: "rt-1",
+      }),
+    );
+    const api = createInviteApi({ getAccessToken, baseUrl, fetchImpl: fetchImpl as never });
     await expect(api.claim("tok")).resolves.toEqual({
       actorId: "actor-1",
       teamId: "team-1",
@@ -69,41 +75,26 @@ describe("createInviteApi.claim", () => {
       displayName: "Alice",
       refreshToken: "rt-1",
     });
-    expect(rpc).toHaveBeenCalledWith("claim_team_invite", { token: "tok" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://fc.example.com/v1/invites/claim",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ token: "tok" }),
+      }),
+    );
   });
 
-  it("accepts a single-row response (not wrapped in an array)", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: {
-        actor_id: "actor-2",
-        team_id: "team-2",
-        actor_type: "agent",
-        display_name: "Bob",
-        refresh_token: null,
-      },
-      error: null,
-    });
-    const client = { rpc } as unknown as Parameters<typeof createInviteApi>[0];
-    const api = createInviteApi(client);
-    const result = await api.claim("tok-2");
-    expect(result.actorId).toBe("actor-2");
-    expect(result.refreshToken).toBeNull();
-  });
-
-  it("rejects when the RPC surfaces an error", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: null,
-      error: { message: "token expired" },
-    });
-    const client = { rpc } as unknown as Parameters<typeof createInviteApi>[0];
-    const api = createInviteApi(client);
+  it("rejects when the endpoint surfaces an error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({ error: { message: "token expired" } }, 404),
+    );
+    const api = createInviteApi({ getAccessToken, baseUrl, fetchImpl: fetchImpl as never });
     await expect(api.claim("tok")).rejects.toThrow(/token expired/);
   });
 
-  it("rejects when the RPC returns no row", async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: [], error: null });
-    const client = { rpc } as unknown as Parameters<typeof createInviteApi>[0];
-    const api = createInviteApi(client);
+  it("rejects when the claim returns no actor/team", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ actorId: null, teamId: null }));
+    const api = createInviteApi({ getAccessToken, baseUrl, fetchImpl: fetchImpl as never });
     await expect(api.claim("tok")).rejects.toThrow(/no actor/i);
   });
 });

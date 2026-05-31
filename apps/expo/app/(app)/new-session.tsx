@@ -6,16 +6,18 @@ import { createActorsApi } from "../../src/features/actors/actor-api";
 import { isAgentActor, type Actor } from "../../src/features/actors/actor-types";
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import { isOpenIdea, type Idea } from "../../src/features/ideas/idea-types";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
 import { buildFirstMessageWithIdea } from "../../src/features/sessions/idea-preface";
 import { resolveInitialMessageMentionActorIds } from "../../src/features/sessions/session-mention-resolver";
 import { resolveAgentRuntimeStartPlans } from "../../src/features/sessions/runtime-start";
-import { createSessionsApi } from "../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
 import {
   NewSessionScreen,
   type AgentWorkspaceChoice,
 } from "../../src/features/sessions/screens/NewSessionScreen";
 import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { uuidV4 } from "../../src/lib/uuid";
 import { showToast } from "../../src/ui/Toast";
 
@@ -44,30 +46,24 @@ export default function NewSessionRoute() {
     if (!teamId) return;
     let cancelled = false;
     void Promise.all([
-      createActorsApi(supabase).listActors(teamId),
-      createIdeasApi(supabase).listIdeas(teamId),
-      supabase
-        .from("workspaces")
-        .select("id, path, agent_id")
-        .eq("team_id", teamId)
-        .eq("archived", false)
-        .order("name", { ascending: true }),
+      createActorsApi({ getAccessToken: supabaseAccessToken(supabase) }).listActors(teamId),
+      createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId),
+      createWorkspacesApi({ getAccessToken: supabaseAccessToken(supabase) }).list(teamId),
     ])
-      .then(([actorRows, ideaRows, workspaceResult]) => {
+      .then(([actorRows, ideaRows, workspaceRows]) => {
         if (cancelled) return;
         setActors(actorRows);
         setIdeas(ideaRows.filter(isOpenIdea));
-        if (workspaceResult.error) {
-          setWorkspaces([]);
-        } else {
-          setWorkspaces(
-            (workspaceResult.data ?? []).map((row) => ({
-              id: String(row.id),
-              path: row.path ? String(row.path) : "",
-              agentId: row.agent_id ? String(row.agent_id) : null,
+        setWorkspaces(
+          workspaceRows
+            .filter((row) => !row.archived)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((row) => ({
+              id: row.id,
+              path: row.path ?? "",
+              agentId: row.agentId,
             })),
-          );
-        }
+        );
       })
       .catch(() => {
         if (cancelled) return;
@@ -123,7 +119,7 @@ export default function NewSessionRoute() {
         setIsBusy(true);
         setErrorMessage(null);
         try {
-          const sessionsApi = createSessionsApi(supabase);
+          const sessionsApi = createConfiguredSessionsApi(supabase);
           const actorById = new Map(actors.map((actor) => [actor.actorId, actor]));
           const selectedAgents = collaboratorActorIds
             .map((id) => actorById.get(id))
@@ -167,6 +163,7 @@ export default function NewSessionRoute() {
             : undefined;
           const expandedMessage = buildFirstMessageWithIdea(firstMessage, idea);
           const sessionId = await sessionsApi.createSession({
+            teamId: state.currentTeam.id,
             title: deriveTitle(firstMessage),
             mode: "collab",
             primaryAgentId: primaryAgentActorId,

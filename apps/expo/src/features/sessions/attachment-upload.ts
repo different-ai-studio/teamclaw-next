@@ -1,14 +1,8 @@
 import { Buffer } from "buffer";
 import * as FileSystem from "expo-file-system";
 
+import { cloudApiBaseUrl } from "../../lib/cloud-api/client";
 import { uuidV4 } from "../../lib/uuid";
-
-type StorageClient = {
-  storage: {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    from: (bucket: string) => any;
-  };
-};
 
 export type UploadedAttachment = {
   path: string;
@@ -16,8 +10,6 @@ export type UploadedAttachment = {
   mime: string;
   size: number | null;
 };
-
-const SIGNED_URL_EXPIRES_IN_SECONDS = 31_536_000;
 
 type LocalFileBody = {
   body: ArrayBuffer;
@@ -86,49 +78,105 @@ async function readLocalFileForUpload(uri: string, fallbackMime: string): Promis
   }
 }
 
+type CloudUploadOptions = {
+  getAccessToken: () => Promise<string | null>;
+  path: string;
+  bucket: string;
+  body: ArrayBuffer;
+  mime: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
+
+/** POST raw bytes to `/v1/attachments?path=&bucket=`. The attachments/avatars
+ * buckets are public, so FC returns the public object URL directly. */
+async function postBytesToCloud(opts: CloudUploadOptions): Promise<{ path: string; url: string }> {
+  const token = await opts.getAccessToken();
+  if (!token) throw new Error("Missing auth session access token.");
+  const baseUrl = (opts.baseUrl ?? cloudApiBaseUrl()).replace(/\/+$/, "");
+  const uploadFetch = opts.fetchImpl ?? fetch;
+  const query = new URLSearchParams({ path: opts.path, bucket: opts.bucket });
+
+  const response = await uploadFetch(`${baseUrl}/v1/attachments?${query.toString()}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": opts.mime,
+    },
+    body: opts.body,
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(payload?.error?.message ?? "Couldn't upload the file.");
+  }
+  return { path: opts.path, url: payload?.url ?? "" };
+}
+
 /**
- * Reads the file behind `localUri` and uploads it to
- * the `attachments` bucket under `<teamId>/<sessionId>/<uuid>.<ext>`.
- * The path convention matches the iOS app's
- * `AttachmentUploadManager.makeRemotePath` so the same row in
+ * Reads the file behind `localUri` and uploads it to the Cloud API
+ * (`POST /v1/attachments?path=<path>&bucket=<bucket>`, raw bytes) under
+ * `<teamId>/<sessionId>/<uuid>.<ext>`. The path convention matches the iOS
+ * app's `AttachmentUploadManager.makeRemotePath` so the same row in
  * `message_attachments` can be read interchangeably.
  *
- * Returns the storage path, a signed read URL for the private bucket,
- * the resolved MIME, and the size when available.
+ * Returns the storage path, the public object URL, the resolved MIME, and the
+ * size when available.
  */
-export async function uploadAttachment(
-  client: StorageClient,
-  args: {
-    teamId: string;
-    sessionId: string;
-    localUri: string;
-    fallbackMime?: string;
-  },
-): Promise<UploadedAttachment> {
+export async function uploadAttachment(args: {
+  getAccessToken: () => Promise<string | null>;
+  teamId: string;
+  sessionId: string;
+  localUri: string;
+  fallbackMime?: string;
+  bucket?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<UploadedAttachment> {
   const fallbackMime = inferMime(args.localUri, args.fallbackMime ?? "application/octet-stream");
   const { body, mime, size } = await readLocalFileForUpload(args.localUri, fallbackMime);
   const ext = inferExtension(args.localUri, mime);
   const path = `${args.teamId}/${args.sessionId}/${uuidV4()}.${ext}`;
 
-  const bucket = client.storage.from("attachments");
-  const result = await bucket.upload(path, body, {
-    cacheControl: "3600",
-    contentType: mime,
-    upsert: false,
-  });
-  if (result.error) {
-    throw new Error(result.error.message);
-  }
-
-  const signedUrlResult = await bucket.createSignedUrl(path, SIGNED_URL_EXPIRES_IN_SECONDS);
-  if (signedUrlResult.error) {
-    throw new Error(signedUrlResult.error.message);
-  }
-  const publicUrl = signedUrlResult.data?.signedUrl ?? "";
-  return {
+  const { url } = await postBytesToCloud({
+    getAccessToken: args.getAccessToken,
     path,
-    publicUrl,
+    bucket: args.bucket ?? "attachments",
+    body,
     mime,
-    size,
-  };
+    baseUrl: args.baseUrl,
+    fetchImpl: args.fetchImpl,
+  });
+
+  return { path, publicUrl: url, mime, size };
+}
+
+/**
+ * Reads the image behind `localUri` and uploads it to the public `avatars`
+ * bucket under `<actorId>/<uuid>.<ext>` (mirrors iOS `uploadAvatar`). Returns
+ * the public URL to persist on the actor row.
+ */
+export async function uploadAvatar(args: {
+  getAccessToken: () => Promise<string | null>;
+  actorId: string;
+  localUri: string;
+  fallbackMime?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const fallbackMime = inferMime(args.localUri, args.fallbackMime ?? "image/jpeg");
+  const { body, mime } = await readLocalFileForUpload(args.localUri, fallbackMime);
+  const ext = inferExtension(args.localUri, mime);
+  const path = `${args.actorId}/${uuidV4()}.${ext}`;
+
+  const { url } = await postBytesToCloud({
+    getAccessToken: args.getAccessToken,
+    path,
+    bucket: "avatars",
+    body,
+    mime,
+    baseUrl: args.baseUrl,
+    fetchImpl: args.fetchImpl,
+  });
+  return url;
 }

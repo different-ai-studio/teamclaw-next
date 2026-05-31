@@ -1,6 +1,7 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 
 export type PushTokenUpload = {
+  /** Kept for the call site; identity is derived server-side from the bearer. */
   userId: string;
   deviceId: string;
   /** "ios" | "android" — matches the iOS PushService convention. */
@@ -14,49 +15,29 @@ export type PushTokenUpload = {
 
 export type PushTokenApi = {
   upload: (input: PushTokenUpload) => Promise<void>;
-  remove: (userId: string, deviceId: string, provider: string) => Promise<void>;
 };
 
-/**
- * Mirrors `apps/ios/.../SupabasePushAdapters.swift`: writes into
- * `device_push_tokens` with the same column shape. The Supabase RLS
- * policy keys on `user_id`, so callers must pass the auth user ID, not
- * a member actor ID.
- */
-export function createPushTokenApi(client: SupabaseClient): PushTokenApi {
+/** Registers the device push token via the Cloud API (POST
+ * /v1/devices/push-token). FC derives user_id from the bearer token. */
+export function createPushTokenApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): PushTokenApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
   return {
     async upload(input) {
-      const result = await client.from("device_push_tokens").upsert(
-        {
-          user_id: input.userId,
-          device_id: input.deviceId,
-          platform: input.platform,
-          provider: input.provider,
-          token: input.token,
-          app_version: input.appVersion ?? null,
-          last_seen_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,device_id,provider" },
-      );
-      throwIfSupabaseError(result.error);
-    },
-    async remove(userId, deviceId, provider) {
-      const result = await client
-        .from("device_push_tokens")
-        .delete()
-        .eq("user_id", userId)
-        .eq("device_id", deviceId)
-        .eq("provider", provider);
-      throwIfSupabaseError(result.error);
+      await client.post("/v1/devices/push-token", {
+        deviceId: input.deviceId,
+        platform: input.platform,
+        provider: input.provider,
+        token: input.token,
+        appVersion: input.appVersion ?? null,
+      });
     },
   };
-}
-
-function throwIfSupabaseError(error: unknown) {
-  if (!error) return;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    throw new Error(typeof message === "string" ? message : "Supabase push token error");
-  }
-  throw new Error("Supabase push token error");
 }

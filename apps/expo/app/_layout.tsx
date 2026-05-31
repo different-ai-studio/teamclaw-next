@@ -31,6 +31,7 @@ import {
   savePendingInviteToken,
 } from "../src/features/onboarding/pending-invite";
 import { createOnboardingApi } from "../src/lib/supabase/onboarding-api";
+import { supabaseAccessToken } from "../src/lib/cloud-api/client";
 import { supabase } from "../src/lib/supabase/client";
 import { colors } from "../src/ui/theme";
 import { appStatusBarProps } from "../src/ui/status-bar";
@@ -230,7 +231,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
       const userId = data.session?.user.id ?? null;
       await registerNativePushToken({
         notifications: Notifications,
-        api: createPushTokenApi(supabase),
+        api: createPushTokenApi({ getAccessToken: supabaseAccessToken(supabase) }),
         userId,
         deviceId,
         platform: Platform.OS,
@@ -253,13 +254,9 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
     let subscription: { remove: () => void } | null = null;
 
     void (async () => {
-      const [{ data }, deviceId] = await Promise.all([
-        supabase.auth.getSession(),
-        getExpoDeviceId(),
-      ]);
+      const deviceId = await getExpoDeviceId();
       if (disposed) return;
-      const userId = data.session?.user.id ?? null;
-      const presence = createPresenceApi(supabase, () => userId);
+      const presence = createPresenceApi({ getAccessToken: supabaseAccessToken(supabase) });
       heartbeat = createForegroundPresenceHeartbeat({
         deviceId,
         writeForeground: presence.writeForeground,
@@ -332,7 +329,7 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
       });
       const store = createConnectedAgentsStore({
         teamId: state.currentTeam!.id,
-        api: createAgentAccessApi(supabase),
+        api: createAgentAccessApi({ getAccessToken: supabaseAccessToken(supabase) }),
         subscriber,
         cache,
       });

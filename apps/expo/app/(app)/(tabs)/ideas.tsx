@@ -7,6 +7,7 @@ import { createIdeasApi } from "../../../src/features/ideas/idea-api";
 import { createIdeasController } from "../../../src/features/ideas/idea-controller";
 import { IdeasListScreen } from "../../../src/features/ideas/screens/IdeasListScreen";
 import { supabase } from "../../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../../src/lib/cloud-api/client";
 
 export default function IdeasIndexRoute() {
   const router = useRouter();
@@ -17,7 +18,7 @@ export default function IdeasIndexRoute() {
   const teamIdRef = useRef<string | null>(null);
 
   if (controllerRef.current === null || teamIdRef.current !== teamId) {
-    controllerRef.current = createIdeasController(createIdeasApi(supabase), teamId);
+    controllerRef.current = createIdeasController(createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }), teamId);
     teamIdRef.current = teamId;
   }
 
@@ -44,7 +45,7 @@ export default function IdeasIndexRoute() {
   useEffect(() => {
     if (!teamId) return;
     let cancelled = false;
-    void createActorsApi(supabase)
+    void createActorsApi({ getAccessToken: supabaseAccessToken(supabase) })
       .listActors(teamId)
       .then((rows) => {
         if (cancelled) return;
@@ -75,7 +76,7 @@ export default function IdeasIndexRoute() {
       onCreate={() => router.push("/(app)/new-idea")}
       onOpenArchived={() => router.push("/(app)/archived-ideas")}
       onArchiveBatch={async (ideaIds) => {
-        const api = createIdeasApi(supabase);
+        const api = createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) });
         for (const id of ideaIds) {
           try {
             await api.archive(id);

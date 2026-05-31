@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { createShortcutsApi } from "./shortcut-api";
+import { createConfiguredShortcutsApi } from "./api-provider";
 import {
   isLeafShortcut,
   type Shortcut,
@@ -112,7 +112,7 @@ export function ShortcutsDrawer({
     setError(null);
     void (async () => {
       try {
-        const rows = await createShortcutsApi(supabase).listShortcuts(teamId);
+        const rows = await createConfiguredShortcutsApi(supabase).listShortcuts(teamId);
         if (!cancelled) setShortcuts(rows);
       } catch (err) {
         if (!cancelled) {

@@ -1,22 +1,54 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 import type {
   AgentAuthorizedHuman,
   ConnectedAgent,
 } from "./connected-agent-types";
 
-function mapAgent(row: Record<string, unknown>): ConnectedAgent {
-  const rawTypes = row.agent_types;
+/**
+ * Cloud-only agent-access provider. Mirrors the iOS CloudAPIAgentAccessRepository:
+ * connected agents (with deviceId + isOwner), authorized-human grants, agent
+ * visibility, plus the two on-demand lookups that replace fields the actor
+ * directory dropped — getAgentDeviceId (device routing) and canManageAgent
+ * (owner-gating via the permission endpoint).
+ */
+
+// FC connected-agent item shape (mapConnectedAgent).
+type CloudConnectedAgent = {
+  id: string;
+  displayName?: string | null;
+  agentTypes?: string[] | null;
+  defaultAgentType?: string | null;
+  permissionLevel?: string | null;
+  visibility?: string | null;
+  isOwner?: boolean | null;
+  deviceId?: string | null;
+  lastActiveAt?: string | null;
+};
+
+// FC agent-access item shape (mapAgentAccess).
+type CloudAgentAccess = {
+  actorId: string;
+  memberName?: string | null;
+  role?: string | null;
+  permissionLevel?: string | null;
+  grantedByMemberId?: string | null;
+  lastActiveAt?: string | null;
+  actorType?: string | null;
+};
+
+function toConnectedAgent(row: CloudConnectedAgent): ConnectedAgent {
   return {
-    agentId: String(row.agent_id ?? ""),
-    displayName: String(row.display_name ?? ""),
-    agentTypes: Array.isArray(rawTypes) ? rawTypes.filter((t): t is string => typeof t === "string") : [],
-    defaultAgentType: row.default_agent_type != null ? String(row.default_agent_type) : null,
-    permissionLevel: String(row.permission_level ?? "prompt"),
-    visibility: (String(row.visibility ?? "team") as "team" | "personal"),
-    isOwner: Boolean(row.is_owner),
-    deviceId: row.device_id != null ? String(row.device_id) : null,
-    lastActiveAt: row.last_active_at != null ? String(row.last_active_at) : null,
+    agentId: row.id,
+    displayName: row.displayName ?? "",
+    agentTypes: Array.isArray(row.agentTypes)
+      ? row.agentTypes.filter((t): t is string => typeof t === "string")
+      : [],
+    defaultAgentType: row.defaultAgentType ?? null,
+    permissionLevel: row.permissionLevel ?? "prompt",
+    visibility: row.visibility === "personal" ? "personal" : "team",
+    isOwner: Boolean(row.isOwner),
+    deviceId: row.deviceId ?? null,
+    lastActiveAt: row.lastActiveAt ?? null,
   };
 }
 
@@ -32,104 +64,82 @@ export type AgentAccessApi = {
     grantedByMemberId: string,
   ) => Promise<void>;
   revokeAuthorizedHuman: (agentId: string, memberId: string) => Promise<void>;
+  /** Daemon device id for an agent, fetched on demand (directory drops it). */
+  getAgentDeviceId: (agentId: string) => Promise<string | null>;
+  /** Owner-gating: true when the caller owns the agent (permission endpoint). */
+  canManageAgent: (agentId: string, memberActorId: string) => Promise<boolean>;
 };
 
-export function createAgentAccessApi(client: SupabaseClient): AgentAccessApi {
-  async function callRpc(name: string, args: object): Promise<unknown> {
-    const result = await client.rpc(name, args);
-    if (result.error) throw new Error(result.error.message ?? "RPC failed");
-    return result.data;
-  }
+export function createAgentAccessApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): AgentAccessApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
+
   return {
     async listConnectedAgents(teamId) {
-      const data = await callRpc("list_connected_agents", { p_team_id: teamId });
-      if (!Array.isArray(data)) return [];
-      return data.map((row) => mapAgent(row as Record<string, unknown>));
-    },
-    async shareAgentToTeam(agentId) {
-      await callRpc("share_agent_to_team", { p_agent_id: agentId });
-    },
-    async makeAgentPersonal(agentId) {
-      await callRpc("make_agent_personal", { p_agent_id: agentId });
-    },
-    async listAuthorizedHumans(agentId) {
-      const accessResult = (await client
-        .from("agent_member_access")
-        .select("member_id, permission_level, granted_by_member_id")
-        .eq("agent_id", agentId)) as {
-        data:
-          | Array<{
-              member_id: string;
-              permission_level: string | null;
-              granted_by_member_id: string | null;
-            }>
-          | null;
-        error: { message?: string } | null;
-      };
-      if (accessResult.error) {
-        throw new Error(accessResult.error.message ?? "Couldn't load authorized members.");
-      }
-
-      const accessRows = accessResult.data ?? [];
-      const memberIds = accessRows.map((row) => row.member_id);
-      if (memberIds.length === 0) return [];
-
-      const actorResult = (await client
-        .from("actors")
-        .select("id, actor_type, display_name, last_active_at")
-        .in("id", memberIds)) as {
-        data:
-          | Array<{
-              id: string;
-              actor_type: string | null;
-              display_name: string | null;
-              last_active_at: string | null;
-            }>
-          | null;
-        error: { message?: string } | null;
-      };
-      if (actorResult.error) {
-        throw new Error(actorResult.error.message ?? "Couldn't load authorized members.");
-      }
-
-      const actorsById = new Map(
-        (actorResult.data ?? []).map((row) => [row.id, row]),
+      if (!teamId) return [];
+      const result = await client.get<{ items: CloudConnectedAgent[] }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/agents/connected`,
       );
-      return accessRows.flatMap((row) => {
-        const actor = actorsById.get(row.member_id);
-        if (!actor || actor.actor_type !== "member") return [];
-        return {
-          id: row.member_id,
-          displayName: actor.display_name?.trim() || "Unnamed",
-          permissionLevel: row.permission_level ?? "prompt",
-          grantedByActorId: row.granted_by_member_id ?? null,
-          lastActiveAt: actor.last_active_at ?? null,
-        };
+      return (result.items ?? []).map(toConnectedAgent);
+    },
+
+    async shareAgentToTeam(agentId) {
+      await client.post(`/v1/agents/${encodeURIComponent(agentId)}/share-to-team`, {});
+    },
+
+    async makeAgentPersonal(agentId) {
+      await client.post(`/v1/agents/${encodeURIComponent(agentId)}/make-personal`, {});
+    },
+
+    async listAuthorizedHumans(agentId) {
+      const result = await client.get<{ items: CloudAgentAccess[] }>(
+        `/v1/agents/${encodeURIComponent(agentId)}/access`,
+      );
+      return (result.items ?? [])
+        .filter((row) => (row.actorType ?? "member") === "member")
+        .map((row) => ({
+          id: row.actorId,
+          displayName: row.memberName?.trim() || "Unnamed",
+          permissionLevel: row.role ?? row.permissionLevel ?? "prompt",
+          grantedByActorId: row.grantedByMemberId ?? null,
+          lastActiveAt: row.lastActiveAt ?? null,
+        }));
+    },
+
+    async grantAuthorizedHuman(agentId, memberId, permissionLevel) {
+      // grantedByMemberId is derived server-side from the bearer caller.
+      await client.post(`/v1/agents/${encodeURIComponent(agentId)}/access`, {
+        actorId: memberId,
+        role: permissionLevel,
       });
     },
-    async grantAuthorizedHuman(agentId, memberId, permissionLevel, grantedByMemberId) {
-      const result = await client.from("agent_member_access").upsert(
-        {
-          agent_id: agentId,
-          member_id: memberId,
-          permission_level: permissionLevel,
-          granted_by_member_id: grantedByMemberId,
-        },
-        { onConflict: "agent_id,member_id" },
-      );
-      if (result.error) {
-        throw new Error(result.error.message ?? "Couldn't authorize member.");
-      }
-    },
+
     async revokeAuthorizedHuman(agentId, memberId) {
-      const result = await client
-        .from("agent_member_access")
-        .delete()
-        .eq("agent_id", agentId)
-        .eq("member_id", memberId);
-      if (result.error) {
-        throw new Error(result.error.message ?? "Couldn't revoke member.");
-      }
+      await client.del(
+        `/v1/agents/${encodeURIComponent(agentId)}/access/${encodeURIComponent(memberId)}`,
+      );
+    },
+
+    async getAgentDeviceId(agentId) {
+      const result = await client.get<{ deviceId?: string | null }>(
+        `/v1/agents/${encodeURIComponent(agentId)}/device-id`,
+      );
+      return result?.deviceId ?? null;
+    },
+
+    async canManageAgent(agentId, memberActorId) {
+      if (!memberActorId) return false;
+      const result = await client.get<{ allowed: boolean; role: string | null }>(
+        `/v1/agents/${encodeURIComponent(agentId)}/permission?actorId=${encodeURIComponent(memberActorId)}`,
+      );
+      return result?.role === "owner";
     },
   };
 }

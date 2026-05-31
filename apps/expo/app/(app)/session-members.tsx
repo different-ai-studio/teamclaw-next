@@ -9,10 +9,12 @@ import {
   resolveAgentRuntimeRestartPlan,
   resolveAgentRuntimeStartPlans,
 } from "../../src/features/sessions/runtime-start";
-import { createSessionsApi } from "../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
 import { MemberPickerSheet } from "../../src/features/sessions/screens/MemberPickerSheet";
 import { SessionMemberSheet } from "../../src/features/sessions/screens/SessionMemberSheet";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { createRuntimeRpcClient } from "../../src/lib/teamclaw/runtime-rpc";
 import { showToast } from "../../src/ui/Toast";
 import { TextPromptModal } from "../../src/ui/TextPromptModal";
@@ -27,16 +29,6 @@ type AgentRuntime = {
   backendType: string | null;
   currentModel: string | null;
   status: string;
-};
-
-type RuntimeRow = {
-  id: string | null;
-  runtime_id: string | null;
-  agent_id: string | null;
-  workspace_id: string | null;
-  backend_type: string | null;
-  current_model: string | null;
-  status: string | null;
 };
 
 type WorkspaceRow = {
@@ -71,49 +63,37 @@ export default function SessionMembersRoute() {
     }
     let cancelled = false;
     setIsLoading(true);
-    const sessionsApi = createSessionsApi(supabase);
-    const actorsApi = createActorsApi(supabase);
+    const sessionsApi = createConfiguredSessionsApi(supabase);
+    const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
+    const workspacesApi = createWorkspacesApi({ getAccessToken: supabaseAccessToken(supabase) });
     void Promise.all([
       sessionsApi.getSession(teamId, sessionId),
       actorsApi.listActors(teamId),
-      supabase
-        .from("agent_runtimes")
-        .select("id, runtime_id, agent_id, workspace_id, backend_type, current_model, status")
-        .eq("session_id", sessionId),
-      supabase
-        .from("workspaces")
-        .select("id, path, agent_id")
-        .eq("team_id", teamId)
-        .eq("archived", false)
-        .order("name", { ascending: true }),
+      sessionsApi.listSessionRuntimes(sessionId),
+      workspacesApi.list(teamId),
     ])
-      .then(([session, allActors, runtimeResult, workspaceResult]) => {
+      .then(([session, allActors, runtimeRows, workspaceRows]) => {
         if (cancelled) return;
         setParticipantIds(session?.participantActorIds ?? []);
         setActors(allActors);
-        const result = runtimeResult as {
-          data: RuntimeRow[] | null;
-          error: unknown;
-        };
-        const rows: AgentRuntime[] = (result.data ?? [])
-          .filter((row): row is RuntimeRow & { id: string; agent_id: string } =>
-            Boolean(row.id && row.agent_id),
-          )
+        const rows: AgentRuntime[] = runtimeRows
+          .filter((row): row is typeof row & { agentId: string } => Boolean(row.agentId))
           .map((row) => ({
-            dbRuntimeId: row.id,
-            runtimeId: row.runtime_id ?? "",
-            agentId: row.agent_id,
-            workspaceId: row.workspace_id,
-            backendType: row.backend_type,
-            currentModel: row.current_model,
-            status: row.status ?? "unknown",
+            dbRuntimeId: row.dbRuntimeId,
+            runtimeId: row.runtimeId,
+            agentId: row.agentId,
+            workspaceId: row.workspaceId,
+            backendType: row.backendType,
+            currentModel: row.currentModel,
+            status: row.status,
           }));
         setRuntimes(rows);
-        const workspaceRows = workspaceResult as {
-          data: WorkspaceRow[] | null;
-          error: unknown;
-        };
-        setWorkspaces(workspaceRows.error ? [] : workspaceRows.data ?? []);
+        setWorkspaces(
+          workspaceRows
+            .filter((row) => !row.archived)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((row) => ({ id: row.id, path: row.path, agent_id: row.agentId })),
+        );
       })
       .catch(() => {
         if (cancelled) return;
@@ -162,7 +142,7 @@ export default function SessionMembersRoute() {
   const handleRemove = async (actorId: string) => {
     if (!sessionId) return;
     try {
-      await createSessionsApi(supabase).removeParticipant(sessionId, actorId);
+      await createConfiguredSessionsApi(supabase).removeParticipant(sessionId, actorId);
       setParticipantIds((prev) => prev.filter((id) => id !== actorId));
       showToast("success", "Removed from session");
     } catch (err) {
@@ -222,7 +202,7 @@ export default function SessionMembersRoute() {
               })),
             })
           : [];
-      await createSessionsApi(supabase).addParticipants(sessionId, fresh);
+      await createConfiguredSessionsApi(supabase).addParticipants(sessionId, fresh);
       setParticipantIds((prev) => Array.from(new Set([...prev, ...fresh])));
       if (runtimePlans.length > 0 && teamMqtt && state.currentMemberActorId) {
         const runtimeRpc = createRuntimeRpcClient({
@@ -411,7 +391,7 @@ export default function SessionMembersRoute() {
           setModelPromptAgent(null);
           if (!target || !trimmed) return;
           try {
-            await createSessionsApi(supabase).updateRuntimeModel(
+            await createConfiguredSessionsApi(supabase).updateRuntimeModel(
               target.dbRuntimeId,
               trimmed,
             );
