@@ -288,6 +288,44 @@ test("updateOwnedAgentProfile does not throw for owner", async () => {
   );
 });
 
+// ── getAgentDeviceId / setAgentDeviceId ───────────────────────────────────────
+
+test("getAgentDeviceId returns null when not set", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id);
+  const repo = createPgBusinessRepository({ db });
+
+  const result = await repo.getAgentDeviceId(agentActor.id);
+  assert.equal(result.deviceId, null);
+});
+
+test("setAgentDeviceId + getAgentDeviceId round-trips the deviceId", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id);
+  const repo = createPgBusinessRepository({ db });
+
+  await repo.setAgentDeviceId(agentActor.id, { deviceId: "device-xyz-123" });
+  const result = await repo.getAgentDeviceId(agentActor.id);
+  assert.equal(result.deviceId, "device-xyz-123");
+});
+
+test("setAgentDeviceId can overwrite an existing deviceId", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const agentActor = await seedAgentActor(db, team.id, member.id);
+  const repo = createPgBusinessRepository({ db });
+
+  await repo.setAgentDeviceId(agentActor.id, { deviceId: "first-device" });
+  await repo.setAgentDeviceId(agentActor.id, { deviceId: "second-device" });
+  const result = await repo.getAgentDeviceId(agentActor.id);
+  assert.equal(result.deviceId, "second-device");
+});
+
 // ── updateAgentDefaults ───────────────────────────────────────────────────────
 
 test("updateAgentDefaults does not throw", async () => {

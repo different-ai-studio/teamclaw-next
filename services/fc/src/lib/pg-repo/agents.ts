@@ -56,6 +56,7 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
           agentTypes: agents.agentTypes,
           defaultAgentType: agents.defaultAgentType,
           defaultWorkspaceId: agents.defaultWorkspaceId,
+          deviceId: agents.deviceId,
           createdAt: agents.createdAt,
           updatedAt: agents.updatedAt,
         })
@@ -85,7 +86,7 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
           defaultAgentType: r.defaultAgentType ?? null,
           defaultWorkspaceId: r.defaultWorkspaceId ?? null,
           agentId: r.id,
-          deviceId: null,
+          deviceId: r.deviceId ?? null,
           permissionLevel: null,
           createdAt: iso(r.createdAt),
           updatedAt: iso(r.updatedAt),
@@ -248,10 +249,14 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
 
     /**
      * Returns the device_id for an agent.
-     * NOTE: device_id is not in the current Drizzle agents schema — returns null.
      */
-    async getAgentDeviceId(_agentActorId: string) {
-      return { deviceId: null };
+    async getAgentDeviceId(agentActorId: string) {
+      const rows = await db
+        .select({ deviceId: agents.deviceId })
+        .from(agents)
+        .where(eq(agents.id, agentActorId))
+        .limit(1);
+      return { deviceId: rows[0]?.deviceId ?? null };
     },
 
     /**
@@ -346,10 +351,11 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
 
     /**
      * Sets the device_id for an agent.
-     * NOTE: device_id is not in the current schema — this is a no-op stub.
      */
-    async setAgentDeviceId(_agentActorId: string, _opts: { deviceId: string }) {
-      // device_id column not in current Drizzle schema — no-op
+    async setAgentDeviceId(agentActorId: string, opts: { deviceId: string }) {
+      await (db.update(agents) as any)
+        .set({ deviceId: opts.deviceId, updatedAt: new Date() })
+        .where(eq(agents.id, agentActorId));
     },
 
     /**

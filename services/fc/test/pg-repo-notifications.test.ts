@@ -87,17 +87,19 @@ test("putNotificationPrefs round-trips multiple upserts", async () => {
   assert.equal(out.digestFrequency, "off");
 });
 
-test("getNotificationPrefs returns stored prefs after put", async () => {
+test("getNotificationPrefs reflects persisted pushEnabled after put", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
   const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
+  // putNotificationPrefs persists only pushEnabled (enabled col).
+  // emailEnabled and digestFrequency are NOT stored; get returns defaults.
   await repo.putNotificationPrefs({ userId: actor.userId, pushEnabled: false, emailEnabled: true, digestFrequency: "daily" });
   const prefs = await repo.getNotificationPrefs();
-  assert.equal(prefs.pushEnabled, false);
-  assert.equal(prefs.emailEnabled, true);
-  assert.equal(prefs.digestFrequency, "daily");
+  assert.equal(prefs.pushEnabled, false, "pushEnabled must reflect persisted value");
+  assert.equal(prefs.emailEnabled, false, "emailEnabled is not persisted — always default false");
+  assert.equal(prefs.digestFrequency, "off", "digestFrequency is not persisted — always default off");
 });
 
 // ── muteSession / unmuteSession / listMutedSessions ──────────────────────────

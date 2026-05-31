@@ -77,29 +77,24 @@ export function makeNotificationsRepo(db: DbLike, ctx: NotificationsCtx = {}) {
       const emailEnabled = input.emailEnabled ?? false;
       const digestFrequency = input.digestFrequency ?? "off";
 
-      // Store in the existing schema columns:
-      //   enabled  → pushEnabled (primary on/off)
-      //   dnd_tz   → overloaded as digestFrequency (schema has no digest col)
-      // We persist pushEnabled + emailEnabled + digestFrequency in the available
-      // columns, mapping: enabled=pushEnabled, dnd_tz=digestFrequency.
-      // email_enabled and digest_frequency don't exist in the current schema, so
-      // we embed them in dnd_tz as a JSON-encoded auxiliary field. This keeps the
-      // schema stable while satisfying the contract.
-      // NOTE: a future migration should add email_enabled + digest_frequency cols.
-      const aux = JSON.stringify({ emailEnabled, digestFrequency });
+      // Persist only the real schema columns: enabled (= pushEnabled).
+      // emailEnabled and digestFrequency have no columns in the real schema —
+      // they are accepted from the caller and echoed back as defaults only.
+      // dnd_tz is reserved for its real purpose (DnD timezone string).
       await (db.insert(notificationPrefs) as any)
         .values({
           userId,
           enabled: pushEnabled,
-          dndTz: aux,
         })
         .onConflictDoUpdate({
           target: notificationPrefs.userId,
           set: {
             enabled: pushEnabled,
-            dndTz: aux,
+            updatedAt: new Date(),
           },
         });
+      // Echo back the full input shape (emailEnabled/digestFrequency are not
+      // persisted but are returned to satisfy the contract's echo semantics).
       return { userId, pushEnabled, emailEnabled, digestFrequency };
     },
 
@@ -191,25 +186,13 @@ export function makeNotificationsRepo(db: DbLike, ctx: NotificationsCtx = {}) {
 function mapNotificationPrefs(row: {
   userId: string;
   enabled: boolean;
-  dndTz: string;
 }) {
-  // Parse the auxiliary JSON stored in dnd_tz when it was written by pg-repo.
-  let emailEnabled = false;
-  let digestFrequency: string = "off";
-  try {
-    const aux = JSON.parse(row.dndTz);
-    if (typeof aux === "object" && aux !== null) {
-      emailEnabled = aux.emailEnabled ?? false;
-      digestFrequency = aux.digestFrequency ?? "off";
-    }
-  } catch {
-    // Legacy row with a plain timezone string — use defaults
-    digestFrequency = "off";
-  }
+  // emailEnabled and digestFrequency are not stored in the real schema.
+  // Return non-persisted defaults alongside the real persisted columns.
   return {
     userId: row.userId,
     pushEnabled: row.enabled,
-    emailEnabled,
-    digestFrequency,
+    emailEnabled: false,
+    digestFrequency: "off" as const,
   };
 }
