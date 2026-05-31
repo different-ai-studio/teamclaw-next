@@ -79,8 +79,8 @@ test("get/putTeamWorkspaceConfig roundtrip; getWorkspaceConfig merges", async ()
   assert.equal(wc.shareMode, null);
 });
 
-test("not-implemented methods throw", async () => {
+test("createTeam requires userId context", async () => {
   const { db } = await makeTestDb();
-  const repo = createPgBusinessRepository({ db, accessToken: "x" });
-  await assert.rejects(() => repo.createTeam({ name: "x" }), /not_implemented/);
+  const repo = createPgBusinessRepository({ db, accessToken: "x" }); // no userId
+  await assert.rejects(() => repo.createTeam({ name: "x" }), /userId is required|bad_request/i);
 });

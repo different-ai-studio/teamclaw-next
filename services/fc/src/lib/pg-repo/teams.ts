@@ -1,7 +1,11 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
-import { teams, teamWorkspaceConfig } from "../../db/schema/index.js";
+import { teams, teamWorkspaceConfig, actors, members, teamMembers, teamInvites } from "../../db/schema/index.js";
+import { workspaces } from "../../db/schema/workspaces.js";
+import { agentMemberAccess, agents } from "../../db/schema/agents.js";
 import { ApiError } from "../http-utils.js";
+import { requireActorForTeam } from "./authz.js";
+import { randomBytes } from "node:crypto";
 
 const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
 
@@ -138,6 +142,138 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
         aiGatewayEndpoint: provisioning.aiGatewayEndpoint,
         litellmKey: provisioning.litellmKey,
       };
+    },
+
+    /**
+     * Creates a new team for the given userId.
+     * First-team-only: rejects if the caller already has an actor in any team.
+     * Inserts: teams → actors(member) → members(active) → team_members(owner)
+     *          → workspaces('General') → team_workspace_config
+     */
+    async createTeam(input: { name: string; slug?: string; litellmTeamId?: string; aiGatewayEndpoint?: string }, ctx?: { userId?: string }) {
+      const userId = ctx?.userId;
+      if (!userId) throw new ApiError(400, "bad_request", "userId is required to create a team");
+
+      return await (db as any).transaction(async (tx: any) => {
+        // First-team-only: check if caller already has an actor in any team
+        const [existingActor] = await tx
+          .select({ id: actors.id })
+          .from(actors)
+          .where(eq(actors.userId, userId))
+          .limit(1);
+        if (existingActor) {
+          throw new ApiError(409, "conflict", "user already belongs to a team");
+        }
+
+        // Slug dedup: if no slug provided or slug conflicts, generate one
+        let slug = input.slug ?? (input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "team");
+        // Check for conflict and append random suffix if needed
+        let attempt = 0;
+        while (true) {
+          const candidateSlug = attempt === 0 ? slug : `${slug}-${randomBytes(3).toString("hex")}`;
+          const [existing] = await tx.select({ id: teams.id }).from(teams).where(eq(teams.slug, candidateSlug)).limit(1);
+          if (!existing) { slug = candidateSlug; break; }
+          attempt++;
+          if (attempt > 5) throw new ApiError(500, "internal_error", "could not generate unique slug");
+        }
+
+        // INSERT team
+        const [team] = await tx.insert(teams).values({ name: input.name, slug }).returning();
+
+        // INSERT actor (member type, linked to userId)
+        const [actor] = await tx.insert(actors).values({
+          teamId: team.id,
+          actorType: "member",
+          displayName: input.name,
+          userId,
+        }).returning();
+
+        // INSERT member (active)
+        await tx.insert(members).values({ id: actor.id, status: "active" });
+
+        // INSERT team_member (owner role)
+        await tx.insert(teamMembers).values({ teamId: team.id, memberId: actor.id, role: "owner" });
+
+        // INSERT default workspace
+        await tx.insert(workspaces).values({ teamId: team.id, name: "General", createdByMemberId: actor.id });
+
+        // INSERT team_workspace_config
+        await tx.insert(teamWorkspaceConfig).values({
+          teamId: team.id,
+          litellmTeamId: input.litellmTeamId ?? null,
+          aiGatewayEndpoint: input.aiGatewayEndpoint ?? null,
+        });
+
+        return mapTeam(team);
+      });
+    },
+
+    /**
+     * Creates a team invite for the given teamId.
+     * Resolves the caller's actorId via requireActorForTeam.
+     * Returns { token, inviteId, expiresAt, deeplink }.
+     */
+    async createTeamInvite(
+      teamId: string,
+      input: { actorType: string; displayName: string; role?: string; expiresAt?: string | null; ttlSeconds?: number; targetActorId?: string },
+      ctx?: { userId?: string },
+    ) {
+      const userId = ctx?.userId;
+      // Allow creating invites without a userId for tests / admin paths — use a null invitedByActorId fallback
+      let invitedByActorId: string | null = null;
+      if (userId) {
+        invitedByActorId = await requireActorForTeam(db, userId, teamId);
+      }
+
+      const token = randomBytes(24).toString("base64url");
+      const ttlSeconds = input.ttlSeconds ?? 7 * 24 * 60 * 60; // 7 days default
+      const expiresAt = input.expiresAt
+        ? new Date(input.expiresAt)
+        : new Date(Date.now() + ttlSeconds * 1000);
+
+      const [invite] = await (db as any)
+        .insert(teamInvites)
+        .values({
+          teamId,
+          token,
+          kind: input.actorType,
+          teamRole: input.role ?? null,
+          displayName: input.displayName,
+          invitedByActorId: invitedByActorId ?? "00000000-0000-0000-0000-000000000000",
+          expiresAt,
+          targetActorId: input.targetActorId ?? null,
+        })
+        .returning();
+
+      return {
+        token: invite.token,
+        inviteId: invite.id,
+        expiresAt: invite.expiresAt ? new Date(invite.expiresAt).toISOString() : null,
+        deeplink: null,
+      };
+    },
+
+    /**
+     * Removes an actor and all associated rows (cascade):
+     * agentMemberAccess → team_members → agents/members → actors
+     */
+    async removeTeamActor(_teamId: string, actorId: string) {
+      await (db as any).transaction(async (tx: any) => {
+        // Delete agent_member_access rows where this actor is the member
+        await tx.delete(agentMemberAccess).where(eq(agentMemberAccess.memberId, actorId));
+
+        // Delete team_members rows for this actor (memberId = actorId for members)
+        await tx.delete(teamMembers).where(eq(teamMembers.memberId, actorId));
+
+        // Delete agents row (if actor is an agent)
+        await tx.delete(agents).where(eq(agents.id, actorId));
+
+        // Delete members row (if actor is a member)
+        await tx.delete(members).where(eq(members.id, actorId));
+
+        // Finally delete the actor itself
+        await tx.delete(actors).where(eq(actors.id, actorId));
+      });
     },
 
     /**

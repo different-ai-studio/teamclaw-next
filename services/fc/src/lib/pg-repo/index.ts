@@ -18,6 +18,7 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
   void accessToken; // retained for Plan 4/5 (JWT -> actor identity / authz)
   const ctx = { userId, callerActorId };
   const teamsRepo = makeTeamsRepo(db, { provisionLiteLlm });
+  const teamsCtx = { userId };
   const ideasRepo = makeIdeasRepo(db, ctx);
   const sessionsRepo = makeSessionsRepo(db, ctx);
   const messagesRepo = makeMessagesRepo(db);
@@ -42,9 +43,9 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
     ...runtimeRepo,
     ...notificationsRepo,
     ...telemetryRepo,
-    createTeam: NI("createTeam"),
-    createTeamInvite: NI("createTeamInvite"),
-    removeTeamActor: NI("removeTeamActor"),
+    createTeam: (input: any) => teamsRepo.createTeam(input, teamsCtx),
+    createTeamInvite: (teamId: string, input: any) => teamsRepo.createTeamInvite(teamId, input, teamsCtx),
+    removeTeamActor: (teamId: string, actorId: string) => teamsRepo.removeTeamActor(teamId, actorId),
     updateCurrentActorProfile: NI("updateCurrentActorProfile"),
   } as any;
 }
