@@ -7,6 +7,7 @@ import { makeWorkspacesRepo } from "./workspaces.js";
 import { makeShortcutsRepo } from "./shortcuts.js";
 import { makeActorsRepo } from "./actors.js";
 import { makeAgentsRepo } from "./agents.js";
+import { makeRuntimeRepo } from "./runtime.js";
 
 const NI = (name: string) => async () => { throw new Error(`not_implemented:${name}`); };
 
@@ -22,6 +23,7 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
   const shortcutsRepo = makeShortcutsRepo(db, ctx);
   const actorsRepo = makeActorsRepo(db, ctx);
   const agentsRepo = makeAgentsRepo(db, ctx);
+  const runtimeRepo = makeRuntimeRepo(db);
   return {
     ...teamsRepo,
     ...ideasRepo,
@@ -33,6 +35,7 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
     ...shortcutsRepo,
     ...actorsRepo,
     ...agentsRepo,
+    ...runtimeRepo,
     createTeam: NI("createTeam"),
     createTeamInvite: NI("createTeamInvite"),
     removeTeamActor: NI("removeTeamActor"),

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, unique } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 import { agents } from "./agents.js";
 import { sessions } from "./sessions.js";
@@ -18,4 +18,6 @@ export const agentRuntimes = pgTable("agent_runtimes", {
   lastProcessedMessageId: uuid("last_processed_message_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  unique("agent_runtimes_agent_backend_uniq").on(t.agentId, t.backendSessionId),
+]);
