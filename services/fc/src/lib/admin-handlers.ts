@@ -276,7 +276,7 @@ function buildPushDeps() {
     : null;
   return { sb, apns, mqtt };
 }
-function pushDeps() {
+export function pushDeps() {
   if (_pushDeps) return _pushDeps;
   _pushDeps = buildPushDeps();
   return _pushDeps;

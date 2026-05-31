@@ -2,7 +2,7 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 import { makeTeamsRepo, type TeamsRepoDeps } from "./teams.js";
 import { makeIdeasRepo } from "./ideas.js";
 import { makeSessionsRepo } from "./sessions.js";
-import { makeMessagesRepo } from "./messages.js";
+import { makeMessagesRepo, type MessagesRepoDeps } from "./messages.js";
 import { makeWorkspacesRepo } from "./workspaces.js";
 import { makeShortcutsRepo } from "./shortcuts.js";
 import { makeActorsRepo } from "./actors.js";
@@ -13,14 +13,17 @@ import { makeTelemetryRepo } from "./telemetry.js";
 import { makeAttachmentsRepo } from "./attachments.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createPgBusinessRepository({ db, accessToken, userId, callerActorId, provisionLiteLlm }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string; provisionLiteLlm?: TeamsRepoDeps["provisionLiteLlm"] }) {
+export function createPgBusinessRepository({ db, accessToken, userId, callerActorId, provisionLiteLlm, dispatchPush }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string; provisionLiteLlm?: TeamsRepoDeps["provisionLiteLlm"]; dispatchPush?: MessagesRepoDeps["dispatchPush"] }) {
   void accessToken; // retained for Plan 4/5 (JWT -> actor identity / authz)
   const ctx = { userId, callerActorId };
   const teamsRepo = makeTeamsRepo(db, { provisionLiteLlm });
   const teamsCtx = { userId };
   const ideasRepo = makeIdeasRepo(db, ctx);
   const sessionsRepo = makeSessionsRepo(db, ctx);
-  const messagesRepo = makeMessagesRepo(db);
+  // dispatchPush's helper RPCs (push_idempotency_claim, list_session_push_targets)
+  // still use the Supabase service-role client — documented follow-up to migrate
+  // those RPCs to pg-repo once the push domain is ported.
+  const messagesRepo = makeMessagesRepo(db, { dispatchPush });
   const workspacesRepo = makeWorkspacesRepo(db);
   const shortcutsRepo = makeShortcutsRepo(db, ctx);
   const actorsRepo = makeActorsRepo(db, ctx);

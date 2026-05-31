@@ -9,6 +9,8 @@ import { getDb } from "./db/client.js";
 import { createPgBusinessRepository } from "./lib/pg-repo/index.js";
 import { createPgAuthRepository } from "./lib/pg-repo/auth.js";
 import { queryParams } from "./lib/routing-utils.js";
+import { dispatchPush } from "./lib/push-dispatch.js";
+import { pushDeps } from "./lib/admin-handlers.js";
 
 // ---------------------------------------------------------------------------
 // Environment (used only for /v1 business API). Read lazily inside the deps
@@ -55,7 +57,15 @@ export function makeAuthRepoFactory(kind: "supabase" | "postgres") {
 export function makeBusinessRepoFactory(kind: "supabase" | "postgres") {
   if (kind === "postgres") {
     return ({ accessToken }: { accessToken: string }) =>
-      createPgBusinessRepository({ db: getDb(), accessToken });
+      createPgBusinessRepository({
+        db: getDb(),
+        accessToken,
+        // Lazy push hook: pushDeps() is constructed on first call and reused.
+        // dispatchPush's helper RPCs (push_idempotency_claim,
+        // list_session_push_targets) still use the Supabase service-role client
+        // — documented follow-up to port those RPCs to pg-repo.
+        dispatchPush: async (record) => { await dispatchPush(record, pushDeps()); },
+      });
   }
   return ({ accessToken }: { accessToken: string }) =>
     createSupabaseBusinessRepository({

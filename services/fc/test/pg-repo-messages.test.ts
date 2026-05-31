@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeTestDb } from "./db/pglite.js";
 import { createPgBusinessRepository } from "../src/lib/pg-repo/index.js";
+import { makeMessagesRepo } from "../src/lib/pg-repo/messages.js";
 import { teams, actors, members, teamMembers } from "../src/db/schema/index.js";
 
 // ── Seed helpers ─────────────────────────────────────────────────────────────
@@ -242,4 +243,67 @@ test("listMessagesForSessionSince with null updatedAfter returns all messages", 
   const rows = await repo.listMessagesForSessionSince(session.id, null);
   assert.ok(Array.isArray(rows));
   assert.ok(rows.length >= 2);
+});
+
+// ── dispatchPush injection ────────────────────────────────────────────────────
+
+test("insertMessage calls injected dispatchPush once with snake_case record", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db });
+  const session = await seedSession(repo, team.id, actor.id);
+
+  const calls: any[] = [];
+  const messagesRepo = makeMessagesRepo(db, {
+    dispatchPush: async (record) => { calls.push(record); },
+  });
+
+  const msg = await messagesRepo.insertMessage(session.id, {
+    teamId: team.id,
+    kind: "text",
+    content: "Push test",
+    senderActorId: actor.id,
+  });
+
+  // Give the fire-and-forget microtask a chance to settle
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(calls.length, 1, "dispatchPush should be called exactly once");
+  const rec = calls[0];
+  assert.equal(rec.id, msg.id, "record.id should match inserted message id");
+  assert.equal(rec.session_id, session.id, "record.session_id should be snake_case");
+  assert.equal(rec.team_id, team.id, "record.team_id should be snake_case");
+  assert.equal(rec.sender_actor_id, actor.id, "record.sender_actor_id should be snake_case");
+  assert.equal(rec.kind, "text");
+  assert.equal(rec.content, "Push test");
+});
+
+test("insertMessage succeeds even when dispatchPush throws", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db });
+  const session = await seedSession(repo, team.id, actor.id);
+
+  const messagesRepo = makeMessagesRepo(db, {
+    dispatchPush: async () => { throw new Error("push failure"); },
+  });
+
+  // Should not throw despite dispatchPush failing
+  const msg = await messagesRepo.insertMessage(session.id, {
+    teamId: team.id,
+    kind: "text",
+    content: "Push throws",
+    senderActorId: actor.id,
+  });
+
+  // Wait for the swallowed rejection to settle
+  await new Promise((r) => setImmediate(r));
+
+  assert.ok(msg.id, "message should be inserted successfully");
+
+  // Verify the message is actually persisted in the DB
+  const allMsgs = await repo.listMessages(session.id);
+  assert.ok(allMsgs.some((m: any) => m.id === msg.id), "message should be in DB");
 });

@@ -16,6 +16,22 @@ import { ApiError } from "../http-utils.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbLike = PgDatabase<any, any>;
 
+/** Snake-case record shape that dispatchPush reads off the DB row. */
+export interface MessagePushRecord {
+  id: string;
+  session_id: string;
+  team_id: string;
+  sender_actor_id: string | null;
+  kind: string;
+  content: string;
+}
+
+export interface MessagesRepoDeps {
+  /** Optional push hook — called after every successful INSERT. Best-effort:
+   *  errors are logged and swallowed so insert outcome is never affected. */
+  dispatchPush?: (record: MessagePushRecord) => Promise<void>;
+}
+
 const iso = (d: Date | string | null | undefined): string | null =>
   d ? new Date(d).toISOString() : null;
 
@@ -42,7 +58,7 @@ function isPkViolation(err: any): boolean {
   return code === "23505";
 }
 
-export function makeMessagesRepo(db: DbLike) {
+export function makeMessagesRepo(db: DbLike, deps?: MessagesRepoDeps) {
   return {
     // ── listMessages ──────────────────────────────────────────────────────────
     async listMessages(sessionId: string) {
@@ -86,6 +102,23 @@ export function makeMessagesRepo(db: DbLike) {
 
       try {
         const [r] = await (db.insert(messages) as any).values(row).returning();
+
+        // Dispatch push notification best-effort: errors are caught and logged
+        // so that a push failure never rolls back or rejects the message insert.
+        if (deps?.dispatchPush) {
+          const pushRecord: MessagePushRecord = {
+            id: r.id,
+            session_id: r.sessionId,
+            team_id: r.teamId,
+            sender_actor_id: r.senderActorId ?? null,
+            kind: r.kind ?? "text",
+            content: r.content ?? "",
+          };
+          deps.dispatchPush(pushRecord).catch((err: unknown) => {
+            console.error("[push] dispatchPush failed (swallowed):", err);
+          });
+        }
+
         return mapMessage(r);
       } catch (err: any) {
         if (isPkViolation(err)) {
