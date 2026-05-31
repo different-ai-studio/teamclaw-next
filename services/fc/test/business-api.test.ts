@@ -476,7 +476,7 @@ test("GET /v1/workspaces returns workspace page", async () => {
   assert.equal(body.items[0].name, "Alpha");
   assert.deepEqual(repo.calls[0], {
     method: "listWorkspaces",
-    args: { teamId: "team-1", limit: 50, cursor: null },
+    args: { teamId: "team-1", limit: 50, cursor: null, agentId: null },
   });
 });
 
@@ -503,6 +503,9 @@ test("POST /v1/workspaces upserts workspace", async () => {
       id: "workspace-2",
       teamId: "team-1",
       name: "Beta",
+      path: null,
+      agentId: null,
+      createdByMemberId: null,
       slug: null,
       archived: false,
     },
