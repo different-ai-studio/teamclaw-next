@@ -14,11 +14,13 @@ const SECRET = "test-secret-test-secret-test-secret-xx";
 async function setup() {
   const { db } = await makeTestDb();
   const auth = buildAuth({ db, secret: SECRET, baseURL: BASE });
-  const repo = createPgAuthRepository({ auth });
   // The jwt plugin exposes the JWKS via the api; build a local keyset so
   // verifyAccessToken can verify without a running HTTP server.
   const jwks = (await auth.api.getJwks()) as unknown as JSONWebKeySet;
   const keyset = createLocalJWKSet(jwks);
+  // The repo's JWT-resolving methods (signOut/updateUser/idToken-link) verify
+  // the access_token; inject the local keyset + baseURL so they work offline.
+  const repo = createPgAuthRepository({ auth, verifyOpts: { keyset, baseURL: BASE } });
   return { auth, repo, keyset };
 }
 
@@ -134,6 +136,121 @@ test("mintSession creates a session + JWT for an existing user id", async () => 
   assert.equal(decoded.sub, userId, "minted JWT sub == user id");
   const claims = await verifyAccessToken(minted.accessToken, { keyset, baseURL: BASE });
   assert.equal(claims.sub, userId);
+});
+
+test("signOut(accessToken=JWT) actually invalidates the session (NOT a silent no-op)", async () => {
+  const { repo } = await setup();
+  // Establish a real user + session; access_token is the JWT, refresh_token is
+  // the Better-Auth session token.
+  const signedUp = await repo.signUp({ email: "signout@example.com", password: "password12345" });
+  const jwt = signedUp.access_token;
+  const sessionToken = signedUp.refresh_token!;
+
+  // Sanity: the session token currently refreshes fine.
+  const before = await repo.refreshAccessToken({ refreshToken: sessionToken });
+  assert.ok(before.accessToken, "refresh works before signOut");
+
+  // Sign out by forwarding the JWT (exactly what clients send as the bearer).
+  const out = await repo.signOut({ accessToken: jwt });
+  assert.deepEqual(out, { success: true }, "signOut returns success shape");
+
+  // The session must now be invalidated: refreshing with the same session
+  // (refresh) token must fail. If signOut were a silent no-op this would still
+  // succeed (the bug).
+  await assert.rejects(
+    () => repo.refreshAccessToken({ refreshToken: sessionToken }),
+    /invalid_refresh_token/,
+    "session is actually revoked after signOut (not a no-op)",
+  );
+});
+
+test("signOut with an invalid token is a no-op success (consistent best-effort semantics)", async () => {
+  const { repo } = await setup();
+  const out = await repo.signOut({ accessToken: "not.a.jwt" });
+  assert.deepEqual(out, { success: true });
+});
+
+test("updateUser(accessToken=JWT) actually updates the user row server-side", async () => {
+  const { auth, repo } = await setup();
+  const signedUp = await repo.signUp({ email: "update@example.com", password: "password12345" });
+  const jwt = signedUp.access_token;
+  const userId = signedUp.user.id!;
+
+  const updated = await repo.updateUser({ accessToken: jwt, body: { name: "Renamed Human" } });
+  assert.equal(updated.id, userId, "updateUser returns the same user id");
+
+  // Re-read the row directly via the internal adapter to prove persistence.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ctx = await (auth as any).$context;
+  const row = await ctx.internalAdapter.findUserById(userId);
+  assert.equal(row.name, "Renamed Human", "user row name updated server-side");
+});
+
+test("signInWithIdToken link path: resolves existing user from JWT and forwards a HMAC-valid SESSION token (not the JWT)", async () => {
+  const { auth, repo, keyset } = await setup();
+  // Create the existing (would-be anonymous) user; its access_token is a JWT.
+  const existing = await repo.signInAnonymous();
+  const jwt = existing.access_token;
+  const existingUserId = existing.user.id!;
+
+  // Wrap the real auth so signInSocial is intercepted: capture the bearer the
+  // repo forwards, then assert it's a valid Better-Auth session token for the
+  // SAME user (proving link-by-user-id, not JWT-as-bearer). We must verify the
+  // bearer against the SAME auth instance (shared secret/keys).
+  let capturedBearer: string | null = null;
+  const linkRepo = createPgAuthRepository({
+    auth: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(auth as any),
+      get $context() {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (auth as any).$context;
+      },
+      api: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...(auth as any).api,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        signInSocial: async ({ headers }: any) => {
+          capturedBearer = headers?.get("authorization") ?? null;
+          // Return a plausible Better-Auth sign-in result so envelopeFromSignIn
+          // can reshape; reuse the existing user to mimic an in-place link.
+          // We mint a fresh session for it via the real internal adapter.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = await (auth as any).$context;
+          const sess = await ctx.internalAdapter.createSession(existingUserId);
+          const user = await ctx.internalAdapter.findUserById(existingUserId);
+          return { token: sess.token, user };
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
+    verifyOpts: { keyset, baseURL: BASE },
+  });
+
+  const env = await linkRepo.signInWithIdToken({
+    provider: "apple",
+    idToken: "fake-id-token",
+    accessToken: jwt,
+  });
+
+  assert.ok(capturedBearer, "a bearer was forwarded to signInSocial");
+  const forwarded = capturedBearer!.replace(/^Bearer /i, "");
+  assert.notEqual(forwarded, jwt, "the JWT is NOT forwarded as the bearer (bug #6 fix)");
+
+  // The forwarded credential must be a real Better-Auth session token: it
+  // resolves a session for the SAME existing user via getSession.
+  const session = await auth.api.getSession({
+    headers: (() => {
+      const h = new Headers();
+      h.set("authorization", `Bearer ${forwarded}`);
+      return h;
+    })(),
+  });
+  assert.ok(session?.session, "forwarded bearer is a HMAC-valid session token");
+  assert.equal(session!.user.id, existingUserId, "session resolves the SAME (existing) user — link, not duplicate");
+
+  // And the resulting envelope is for the same user id (no new/duplicate user).
+  assert.equal(env.user.id, existingUserId, "envelope user id == existing user (no duplicate)");
 });
 
 test("toGoTrueSession reshape (unit) — covers id_token / PKCE paths deferred to deploy verification", () => {

@@ -1,8 +1,10 @@
 import { eq } from "drizzle-orm";
+import type { JWTVerifyGetKey } from "jose";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { getAuth, type Auth } from "../../auth/better-auth.js";
 import { mintSession } from "../../auth/mint-session.js";
-import { toGoTrueSession, toRefreshShape, toEpochSeconds } from "../../auth/reshape.js";
+import { toGoTrueSession, toRefreshShape, toEpochSeconds, type ReshapeUser } from "../../auth/reshape.js";
+import { verifyAccessToken } from "../../auth/verify.js";
 import { teamInvites, actors, members, teamMembers, agents, agentMemberAccess } from "../../db/schema/index.js";
 import { ApiError } from "../http-utils.js";
 import { randomUUID } from "node:crypto";
@@ -20,10 +22,21 @@ import { randomUUID } from "node:crypto";
 //     -> `{ token: <JWT> }`. The JWT has sub=userId, iss=aud=baseURL (matches
 //     verify.ts), exp ~15m.
 //   - Session (refresh) expiry comes from auth.api.getSession(...).session.expiresAt.
-export function createPgAuthRepository(opts: { auth?: Auth; db?: PgDatabase<any, any> } = {}) {
+export function createPgAuthRepository(
+  opts: {
+    auth?: Auth;
+    db?: PgDatabase<any, any>;
+    // verifyOpts lets tests inject a local JWKS + issuer/audience baseURL so
+    // the JWT-resolving methods (signOut/updateUser/idToken-link) verify the
+    // access_token without a running HTTP JWKS endpoint. Production omits it
+    // and uses the remote JWKS (verify.ts default), matching index.ts.
+    verifyOpts?: { keyset?: JWTVerifyGetKey; baseURL?: string };
+  } = {},
+) {
   // Keep getAuth() lazy — resolve inside each method so importing the module
   // needs no env. `opts.auth` lets tests inject a pglite-backed instance.
   const resolveAuth = () => opts.auth ?? getAuth();
+  const verifyJwt = (token: string) => verifyAccessToken(token, opts.verifyOpts ?? {});
 
   function bearer(sessionToken: string): Headers {
     const h = new Headers();
@@ -109,8 +122,22 @@ export function createPgAuthRepository(opts: { auth?: Auth; db?: PgDatabase<any,
 
     // --- Native OIDC (Apple / Google id_token grant) ---
     // Better-Auth signInSocial with an idToken body performs the native grant.
-    // When accessToken (a JWT) is supplied, the caller is upgrading the current
-    // (anonymous) user; Better-Auth links by passing the session in headers.
+    //
+    // anonymous-link path (accessToken present): the caller is upgrading its
+    // current (anonymous) user. The client's `accessToken` is a JWT, NOT a
+    // Better-Auth session token. Forwarding it as the bearer is the bug (#6):
+    // Better-Auth's bearer plugin HMAC-verifies the bearer as a SESSION token
+    // (split(".") -> value.hmac, two parts); a JWT has THREE parts, so the
+    // HMAC fails, the bearer hook exits without injecting a session cookie, the
+    // anonymous after-hook sees no anonymous session, onLinkAccount never runs,
+    // and signInSocial creates a DUPLICATE user instead of linking.
+    //
+    // Fix: verify the JWT -> userId (the anonymous user), then mint a REAL
+    // Better-Auth session token for that userId via internalAdapter
+    // .createSession (the same surface mintSession uses). That session token
+    // passes the bearer HMAC, so the anonymous plugin resolves the anonymous
+    // session and runs its onLinkAccount + cleanup exactly as a live client
+    // session would have.
     async signInWithIdToken({
       provider,
       idToken,
@@ -124,7 +151,14 @@ export function createPgAuthRepository(opts: { auth?: Auth; db?: PgDatabase<any,
     }) {
       const auth = resolveAuth();
       const headers = new Headers();
-      if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
+      if (accessToken) {
+        const { sub } = await verifyJwt(accessToken);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const authCtx = await (auth as any).$context;
+        const sess = await authCtx.internalAdapter.createSession(sub);
+        if (!sess?.token) throw new Error("idtoken_link_no_session_token");
+        headers.set("authorization", `Bearer ${sess.token}`);
+      }
       const result = await auth.api.signInSocial({
         body: {
           provider,
@@ -168,18 +202,47 @@ export function createPgAuthRepository(opts: { auth?: Auth; db?: PgDatabase<any,
       return envelopeFromSignIn(auth, result);
     },
 
-    // --- Pass-through-ish ---
+    // --- signOut / updateUser ---
+    // The client's `accessToken` is a JWT, NOT a Better-Auth session token, so
+    // it must NOT be forwarded as the bearer to auth.api.* (bug #6 — the bearer
+    // plugin HMAC-verifies the bearer as a 2-part session token; a 3-part JWT
+    // fails, the bearer hook exits, no session resolves, and signOut/updateUser
+    // silently no-op). Instead resolve the user from the verified JWT and act
+    // server-side by user id via internalAdapter.
     async signOut({ accessToken }: { accessToken: string }) {
       const auth = resolveAuth();
-      const out = await auth.api.signOut({ headers: bearer(accessToken) });
-      return out ?? { success: true };
+      let sub: string;
+      try {
+        ({ sub } = await verifyJwt(accessToken));
+      } catch {
+        // A signOut with an invalid/expired token is a no-op success: the
+        // caller is already not authenticated, matching prior best-effort
+        // semantics (the old bearer path also silently did nothing here).
+        return { success: true };
+      }
+      // Revoke ALL of this user's sessions server-side. deleteSessions(userId)
+      // deletes every session row for the user, so any outstanding refresh
+      // token (session token) stops validating on the next refresh/getSession.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const authCtx = await (auth as any).$context;
+      await authCtx.internalAdapter.deleteSessions(sub);
+      return { success: true };
     },
 
     async updateUser({ accessToken, body }: { accessToken: string; body: Record<string, unknown> }) {
       const auth = resolveAuth();
+      const { sub } = await verifyJwt(accessToken);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const out = await auth.api.updateUser({ headers: bearer(accessToken), body: body as any });
-      return out ?? { status: true };
+      const authCtx = await (auth as any).$context;
+      // internalAdapter.updateUser(userId, data) -> the updated user row.
+      const user: ReshapeUser = await authCtx.internalAdapter.updateUser(sub, body);
+      // Reshape to the GoTrue-ish user the client expects (same user shape
+      // toGoTrueSession emits).
+      return {
+        id: user?.id,
+        email: user?.email ?? null,
+        is_anonymous: !!(user?.isAnonymous ?? user?.is_anonymous),
+      };
     },
 
     // --- Plan 5 ---
