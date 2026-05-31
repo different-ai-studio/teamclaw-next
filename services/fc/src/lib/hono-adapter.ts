@@ -35,6 +35,22 @@ function synthEvent(c: Context, bodyText: string): any {
   };
 }
 
+// Positionally extract :param values as RAW (undecoded) path segments, matching
+// the legacy createRouter.matchRoute behavior. `routePath` is the matched Hono
+// pattern (e.g. "/v1/attachments/:path"); `parts` are the raw request segments.
+function rawParams(routePath: string | undefined, parts: string[]): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (!routePath) return params;
+  const patternParts = routePath.split("/").filter(Boolean);
+  if (patternParts.length !== parts.length) return params;
+  for (let i = 0; i < patternParts.length; i++) {
+    if (patternParts[i].startsWith(":")) {
+      params[patternParts[i].slice(1)] = parts[i];
+    }
+  }
+  return params;
+}
+
 async function buildCtxFromHono(c: Context, repository: unknown, opts: RouteOptions): Promise<LegacyCtx> {
   const isRaw = opts.rawBody === true;
   const rawBuf = isRaw ? Buffer.from(await c.req.arrayBuffer()) : undefined;
@@ -44,11 +60,17 @@ async function buildCtxFromHono(c: Context, repository: unknown, opts: RouteOpti
   const query = new URLSearchParams();
   const url = new URL(c.req.url);
   url.searchParams.forEach((v, k) => query.set(k, v));
+  const parts = url.pathname.split("/").filter(Boolean);
   return {
     repository,
     event,
-    parts: url.pathname.split("/").filter(Boolean),
-    params: c.req.param() as Record<string, string>,
+    parts,
+    // Mirror the legacy createRouter: path params are the RAW (undecoded) path
+    // segments. Hono's c.req.param() returns percent-DECODED values, which
+    // breaks equivalence for routes like /v1/attachments/:path (where the
+    // repository expects the still-encoded "foo%2Fbar.png"). Recompute the
+    // params positionally from the matched route pattern against raw segments.
+    params: rawParams(c.req.routePath, parts),
     query,
     headers,
     json: isRaw ? undefined : parseJsonBody(event),
@@ -70,8 +92,12 @@ function toResponse(c: Context, result: any, requestId: string): Response {
       headers: { Location: result.redirect, "X-Request-Id": requestId },
     });
   }
-  return new Response(JSON.stringify(result?.body), {
-    status: result?.statusCode ?? 200,
+  const status = result?.statusCode ?? 200;
+  // 204/205/304 are null-body statuses; the Response constructor throws if given
+  // a body. The body is irrelevant for these anyway.
+  const nullBody = status === 204 || status === 205 || status === 304;
+  return new Response(nullBody ? null : JSON.stringify(result?.body), {
+    status,
     headers: { "Content-Type": "application/json", "X-Request-Id": requestId },
   });
 }
@@ -114,7 +140,9 @@ export function createHonoRouterAdapter(app: Hono, deps: Deps) {
     patch: (p: string, o: RouteOptions | LegacyHandler, h?: LegacyHandler) => register("PATCH", p, o, h),
     delete: (p: string, o: RouteOptions | LegacyHandler, h?: LegacyHandler) => register("DELETE", p, o, h),
     postRaw: (p: string, o: RouteOptions | LegacyHandler, h?: LegacyHandler) =>
-      register("POST", p, typeof o === "function" ? { rawBody: true } : { ...o, rawBody: true }, h),
+      typeof o === "function"
+        ? register("POST", p, { rawBody: true }, o)
+        : register("POST", p, { ...o, rawBody: true }, h),
   };
 }
 

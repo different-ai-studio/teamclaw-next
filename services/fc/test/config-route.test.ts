@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { handleBusinessApiRequest } from "../src/lib/business-api.js";
 import { buildBootstrapConfig } from "../src/lib/routes/config.js";
 
-function withEnv(overrides: Record<string, any>, fn: () => any) {
+async function withEnv(overrides: Record<string, any>, fn: () => any) {
   const restore: Record<string, any> = {};
   for (const [key, value] of Object.entries(overrides)) {
     restore[key] = process.env[key];
@@ -11,7 +11,10 @@ function withEnv(overrides: Record<string, any>, fn: () => any) {
     else process.env[key] = value;
   }
   try {
-    return fn();
+    // Await so env is held in place until the (possibly async) callback fully
+    // resolves — otherwise the finally block restores env before an awaited
+    // handler reads it.
+    return await fn();
   } finally {
     for (const [key, value] of Object.entries(restore)) {
       if (value === undefined) delete process.env[key];
