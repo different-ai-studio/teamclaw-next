@@ -6,6 +6,7 @@ export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
   teamId: uuid("team_id").notNull().references(() => teams.id, { onDelete: "cascade" }),
   createdByMemberId: uuid("created_by_member_id").references(() => members.id, { onDelete: "set null" }),
+  agentId: uuid("agent_id"),
   name: text("name").notNull(),
   path: text("path"),
   archived: boolean("archived").notNull().default(false),

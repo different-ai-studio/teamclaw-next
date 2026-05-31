@@ -3,6 +3,7 @@ import { makeTeamsRepo } from "./teams.js";
 import { makeIdeasRepo } from "./ideas.js";
 import { makeSessionsRepo } from "./sessions.js";
 import { makeMessagesRepo } from "./messages.js";
+import { makeWorkspacesRepo } from "./workspaces.js";
 
 const NI = (name: string) => async () => { throw new Error(`not_implemented:${name}`); };
 
@@ -14,11 +15,15 @@ export function createPgBusinessRepository({ db, accessToken, userId }: { db: Pg
   const ideasRepo = makeIdeasRepo(db, ctx);
   const sessionsRepo = makeSessionsRepo(db, ctx);
   const messagesRepo = makeMessagesRepo(db);
+  const workspacesRepo = makeWorkspacesRepo(db);
   return {
     ...teamsRepo,
     ...ideasRepo,
     ...sessionsRepo,
     ...messagesRepo,
+    // workspacesRepo methods shadow teamsRepo.getTeamWorkspaceConfig / putTeamWorkspaceConfig
+    // with the contract-shape-returning implementations
+    ...workspacesRepo,
     createTeam: NI("createTeam"),
     createTeamInvite: NI("createTeamInvite"),
     removeTeamActor: NI("removeTeamActor"),

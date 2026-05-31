@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, uuid, text, timestamp, boolean, bigint, uniqueIndex, unique } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, uuid, text, timestamp, boolean, bigint, uniqueIndex, unique, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const teamShareMode = pgEnum("team_share_mode", ["oss", "managed_git", "custom_git"]);
@@ -77,6 +77,8 @@ export const teamWorkspaceConfig = pgTable("team_workspace_config", {
   syncMode: text("sync_mode"),
   ossChangeSeq: bigint("oss_change_seq", { mode: "number" }).notNull().default(0),
   litellmTeamId: text("litellm_team_id"),
+  defaultWorkspaceId: uuid("default_workspace_id"),
+  pinnedWorkspaceIds: jsonb("pinned_workspace_ids").$type<string[]>().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
