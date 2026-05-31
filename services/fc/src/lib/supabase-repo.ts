@@ -994,17 +994,12 @@ export function createSupabaseBusinessRepository(options) {
     // --- Directory resolution (frontend supabase delegate parity) ---
 
     async resolveCallerActorForTeam(teamId) {
-      // Uses the caller's bearer token + RLS to find their own actor row in
-      // this team. Returns null when caller has no actor (or isn't a member).
-      const { data, error } = await supabase
-        .from("actors")
-        .select("id")
-        .eq("team_id", teamId)
-        .eq("actor_type", "member")
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data ? { id: data.id } : null;
+      // Resolve the bearer caller's member actor in this team (not any member).
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) return null;
+      return this.resolveCurrentMemberActor(teamId, userId);
     },
 
     async resolveCurrentMemberActor(teamId, userId) {
@@ -1334,14 +1329,24 @@ export function createSupabaseBusinessRepository(options) {
       // it requires `idea_id` (NOT NULL via legacy schema gated behind
       // newer migrations) and assumes the caller as the only seat.
       const id = input.id ?? randomUUID();
+      let createdByActorId = input.createdByActorId;
+      if (!createdByActorId) {
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        const userId = userData?.user?.id;
+        if (!userId) throw new ApiError(401, "unauthorized", "no authenticated user");
+        const resolved = await this.resolveCurrentMemberActor(input.teamId, userId);
+        if (!resolved?.id) throw new ApiError(403, "forbidden", "not a member of this team");
+        createdByActorId = resolved.id;
+      }
       const insertRow: any = {
         id,
         team_id: input.teamId,
         title: input.title,
         mode: input.mode ?? "collab",
         idea_id: input.ideaId ?? null,
+        created_by_actor_id: createdByActorId,
       };
-      if (input.createdByActorId) insertRow.created_by_actor_id = input.createdByActorId;
       if (input.primaryAgentId) insertRow.primary_agent_id = input.primaryAgentId;
       const { data, error } = await supabase
         .from("sessions")
@@ -1355,7 +1360,7 @@ export function createSupabaseBusinessRepository(options) {
       const seedActorIds = Array.from(
         new Set(
           [
-            input.createdByActorId,
+            createdByActorId,
             ...additionalIds,
             ...participantIds,
           ].filter((x) => typeof x === "string" && x.length > 0),
