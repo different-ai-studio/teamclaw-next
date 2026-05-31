@@ -3,7 +3,7 @@
 // JWT verification + actor resolution for /sync/* endpoints.
 // Spec §3 auth middleware.
 
-import { createServiceRoleClient } from './supabase.mjs';
+import { createServiceRoleClient } from './supabase.js';
 
 /**
  * Verify the Supabase Bearer JWT and resolve the caller's actor_id for the

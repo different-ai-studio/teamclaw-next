@@ -1,4 +1,4 @@
-import { ApiError, extractBearerToken, optionalBearerToken } from "../http-utils.mjs";
+import { ApiError, extractBearerToken, optionalBearerToken } from "../http-utils.js";
 
 export function registerAuth(router) {
   router.post("/v1/auth/refresh", { auth: "none" }, async (ctx) => {

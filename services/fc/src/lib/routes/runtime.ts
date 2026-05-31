@@ -1,4 +1,4 @@
-import { ApiError } from "../http-utils.mjs";
+import { ApiError } from "../http-utils.js";
 
 export function registerRuntime(router) {
   // GET /v1/agents/runtimes/latest — must be registered before /v1/agents/runtimes (no path conflict, but order matters for some routers)

@@ -4,9 +4,9 @@ import {
   extractBearerToken,
   jsonResponse,
   resolveRequestId,
-} from "./http-utils.mjs";
-import { createRouter, normalizePath } from "./router.mjs";
-import { registerAllRoutes } from "./routes/index.mjs";
+} from "./http-utils.js";
+import { createRouter, normalizePath } from "./router.js";
+import { registerAllRoutes } from "./routes/index.js";
 
 export async function handleBusinessApiRequest(event, deps) {
   const requestId = resolveRequestId(event.headers);
@@ -56,4 +56,4 @@ export async function handleBusinessApiRequest(event, deps) {
   }
 }
 
-export { encodeCursor, decodeCursor } from "./router.mjs";
+export { encodeCursor, decodeCursor } from "./router.js";

@@ -3,7 +3,7 @@ import {
   getHeader,
   normalizeHeaders,
   parseJsonBody,
-} from "./http-utils.mjs";
+} from "./http-utils.js";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 100;

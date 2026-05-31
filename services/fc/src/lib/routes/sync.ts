@@ -1,4 +1,4 @@
-import { ApiError } from "../http-utils.mjs";
+import { ApiError } from "../http-utils.js";
 
 export function registerSync(router) {
   router.get("/v1/sync/actor-directory", async (ctx) => {

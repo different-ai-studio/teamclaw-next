@@ -1,4 +1,4 @@
-import { requireString, optionalStringOrNull } from "../router.mjs";
+import { requireString, optionalStringOrNull } from "../router.js";
 
 export function registerTeams(router) {
   router.get("/v1/teams", async (ctx) => {

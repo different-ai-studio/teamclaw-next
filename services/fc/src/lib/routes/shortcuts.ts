@@ -1,5 +1,5 @@
-import { ApiError } from "../http-utils.mjs";
-import { requireString } from "../router.mjs";
+import { ApiError } from "../http-utils.js";
+import { requireString } from "../router.js";
 
 export function registerShortcuts(router) {
   // Scope-based list: `?scope=personal` or `?scope=team&teamId=...`

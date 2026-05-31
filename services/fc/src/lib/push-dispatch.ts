@@ -1,5 +1,5 @@
 // services/fc/lib/push-dispatch.mjs
-import { inDnd, isForegroundDevice, truncate } from './push-filters.mjs';
+import { inDnd, isForegroundDevice, truncate } from './push-filters.js';
 
 export async function dispatchPush(msg, deps) {
   const { id: messageId, session_id, sender_actor_id, kind, content } = msg;

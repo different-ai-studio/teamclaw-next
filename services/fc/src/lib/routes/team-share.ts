@@ -1,4 +1,4 @@
-import { ApiError } from "../http-utils.mjs";
+import { ApiError } from "../http-utils.js";
 
 const VALID_MODES = new Set(["oss", "managed_git", "custom_git"]);
 const VALID_AUTH_KINDS = new Set(["ssh_key", "https_token"]);

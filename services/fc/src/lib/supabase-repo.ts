@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient as defaultCreateClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
-import { ApiError } from "./http-utils.mjs";
+import { ApiError } from "./http-utils.js";
 
 // FC runtime is Node 20 which lacks native WebSocket. supabase-js v2.45+ tries
 // to construct a RealtimeClient at createClient() time and throws without a
@@ -161,7 +161,7 @@ export function createSupabaseBusinessRepository(options) {
     async setupLiteLlm(teamId) {
       // Lazy import keeps the LiteLLM client out of cold-path repo constructors
       // and makes it trivial to inject in tests via options.provisionLiteLlm.
-      const provisioner = provisionLiteLlm ?? (await import("./team-provisioning.mjs")).provisionTeamLiteLLM;
+      const provisioner = provisionLiteLlm ?? (await import("./team-provisioning.js")).provisionTeamLiteLLM;
       // The provisioner uses the team name as an alias; we read the team row
       // (already RLS-scoped to the caller) to pass a stable display name.
       const { data: teamRow, error: teamErr } = await supabase

@@ -1,4 +1,4 @@
-import { ApiError } from "../http-utils.mjs";
+import { ApiError } from "../http-utils.js";
 
 const ALLOWED_BUCKETS = new Set(["attachments", "avatars"]);
 const DEFAULT_BUCKET = "attachments";

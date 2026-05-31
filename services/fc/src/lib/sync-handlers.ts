@@ -7,8 +7,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createServiceRoleClient } from './supabase.mjs';
-import { validateSyncPath } from './sync-path.mjs';
+import { createServiceRoleClient } from './supabase.js';
+import { validateSyncPath } from './sync-path.js';
 
 // ---------------------------------------------------------------------------
 // Env accessors

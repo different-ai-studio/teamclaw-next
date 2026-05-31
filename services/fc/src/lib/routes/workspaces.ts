@@ -1,5 +1,5 @@
-import { ApiError } from "../http-utils.mjs";
-import { requireString, encodeCursor } from "../router.mjs";
+import { ApiError } from "../http-utils.js";
+import { requireString, encodeCursor } from "../router.js";
 
 const DEFAULT_WORKSPACE_LIMIT = 50;
 const MAX_WORKSPACE_LIMIT = 200;

@@ -8,19 +8,19 @@ import STS20150401, * as $STS from "@alicloud/sts20150401";
 import OpenApi, * as $OpenApi from "@alicloud/openapi-client";
 import { nanoid } from "nanoid";
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
-import { createApnsJwtCache } from './lib/apns-jwt.mjs';
-import { createApnsClient, createHttp2Transport } from './lib/apns.mjs';
-import { dispatchPush } from './lib/push-dispatch.mjs';
-import { createMqttPublisher } from './lib/mqtt-client.mjs';
-import { handleBusinessApiRequest } from './lib/business-api.mjs';
+import { createApnsJwtCache } from './lib/apns-jwt.js';
+import { createApnsClient, createHttp2Transport } from './lib/apns.js';
+import { dispatchPush } from './lib/push-dispatch.js';
+import { createMqttPublisher } from './lib/mqtt-client.js';
+import { handleBusinessApiRequest } from './lib/business-api.js';
 import {
   createSupabaseAuthRepository,
   createSupabaseBusinessRepository,
   publishableKeyFromEnv,
-} from './lib/supabase-repo.mjs';
-import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.mjs';
-import { queryParams } from './lib/router.mjs';
-import { logSyncEvent } from './lib/sync-log.mjs';
+} from './lib/supabase-repo.js';
+import { authenticateSyncCall, authenticateJwtOnly } from './lib/sync-auth.js';
+import { queryParams } from './lib/router.js';
+import { logSyncEvent } from './lib/sync-log.js';
 import {
   handleSyncManifest,
   handleSyncUploadPrepare,
@@ -30,7 +30,7 @@ import {
   handleSyncVersions,
   handleSyncSetMode,
   handleSyncTeamMode,
-} from './lib/sync-handlers.mjs';
+} from './lib/sync-handlers.js';
 
 // ---------------------------------------------------------------------------
 // Environment

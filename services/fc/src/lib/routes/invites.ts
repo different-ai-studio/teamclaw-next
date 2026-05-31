@@ -1,4 +1,4 @@
-import { requireString } from "../router.mjs";
+import { requireString } from "../router.js";
 
 export function registerInvites(router) {
   // Anonymous (no bearer): the daemon's `amuxd init` flow has no token yet.

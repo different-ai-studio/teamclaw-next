@@ -1,5 +1,5 @@
-import { ApiError } from "../http-utils.mjs";
-import { parseLimit, decodeCursor, nextSessionCursor, requireString } from "../router.mjs";
+import { ApiError } from "../http-utils.js";
+import { parseLimit, decodeCursor, nextSessionCursor, requireString } from "../router.js";
 
 export function registerSessions(router) {
   router.get("/v1/sessions", async (ctx) => {

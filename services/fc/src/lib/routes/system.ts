@@ -1,4 +1,4 @@
-import { ApiError } from "../http-utils.mjs";
+import { ApiError } from "../http-utils.js";
 
 export function registerSystem(router) {
   router.post("/v1/heartbeat", async (ctx) => {

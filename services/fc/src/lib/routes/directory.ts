@@ -1,4 +1,4 @@
-import { ApiError } from "../http-utils.mjs";
+import { ApiError } from "../http-utils.js";
 
 export function registerDirectory(router) {
   router.get("/v1/directory/current-member-actor", async (ctx) => {

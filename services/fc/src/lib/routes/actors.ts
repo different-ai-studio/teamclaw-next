@@ -1,5 +1,5 @@
-import { ApiError } from "../http-utils.mjs";
-import { requireString } from "../router.mjs";
+import { ApiError } from "../http-utils.js";
+import { requireString } from "../router.js";
 
 const DEFAULT_ACTOR_LIMIT = 200;
 const MAX_ACTOR_LIMIT = 500;
