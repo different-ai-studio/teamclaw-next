@@ -1,6 +1,7 @@
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { makeTeamsRepo } from "./teams.js";
 import { makeIdeasRepo } from "./ideas.js";
+import { makeSessionsRepo } from "./sessions.js";
 
 const NI = (name: string) => async () => { throw new Error(`not_implemented:${name}`); };
 
@@ -10,9 +11,11 @@ export function createPgBusinessRepository({ db, accessToken, userId }: { db: Pg
   const ctx = { userId };
   const teamsRepo = makeTeamsRepo(db);
   const ideasRepo = makeIdeasRepo(db, ctx);
+  const sessionsRepo = makeSessionsRepo(db, ctx);
   return {
     ...teamsRepo,
     ...ideasRepo,
+    ...sessionsRepo,
     createTeam: NI("createTeam"),
     createTeamInvite: NI("createTeamInvite"),
     removeTeamActor: NI("removeTeamActor"),

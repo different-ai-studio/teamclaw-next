@@ -13,9 +13,15 @@ export const sessions = pgTable("sessions", {
   summary: text("summary").notNull().default(""),
   lastMessagePreview: text("last_message_preview"),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+  /** ACP / gateway integration: used by getSessionByAcp */
+  acpSessionId: text("acp_session_id"),
+  /** Gateway binding key (unique per team); used by ensureGatewaySession */
+  binding: text("binding"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => ({
+  teamBindingUniq: unique("sessions_team_binding_uniq").on(t.teamId, t.binding),
+}));
 
 export const sessionParticipants = pgTable("session_participants", {
   id: uuid("id").primaryKey().defaultRandom(),
