@@ -1,5 +1,7 @@
 import { handle } from "hono/aws-lambda";
 import { createApp } from "./app.js";
+export { resolveBackendKind } from "./lib/backend-kind.js";
+import { resolveBackendKind } from "./lib/backend-kind.js";
 import {
   createSupabaseAuthRepository,
   createSupabaseBusinessRepository,
@@ -33,14 +35,6 @@ export function syncGetQueryToBody(event: any) {
   const body: Record<string, string> = {};
   for (const [k, v] of queryParams(event)) body[k] = v;
   return body;
-}
-
-// ---------------------------------------------------------------------------
-// Backend kind selection — defaults to "supabase"; set BACKEND_KIND=postgres
-// to use the direct-postgres repo (Plan 5+).
-// ---------------------------------------------------------------------------
-export function resolveBackendKind(env: NodeJS.ProcessEnv = process.env): "supabase" | "postgres" {
-  return env.BACKEND_KIND === "postgres" ? "postgres" : "supabase";
 }
 
 export function makeAuthRepoFactory(kind: "supabase" | "postgres") {

@@ -26,14 +26,14 @@ interface SyncRequest {
 export async function handleSyncRequest({ path, httpMethod, headers, body }: SyncRequest): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
   if (path === "/sync/set-mode") {
     const auth = await authenticateJwtOnly({ headers });
-    if (!auth.ok) return json(auth.status, { error: auth.error });
-    return await handleSyncSetMode(auth.userId, body);
+    if (!auth.ok) { const a = auth as any; return json(a.status, { error: a.error }); }
+    return await handleSyncSetMode((auth as any).userId, body);
   }
 
   if (path === "/sync/team-mode") {
     const auth = await authenticateJwtOnly({ headers });
-    if (!auth.ok) return json(auth.status, { error: auth.error });
-    return await handleSyncTeamMode(auth.userId, body);
+    if (!auth.ok) { const a = auth as any; return json(a.status, { error: a.error }); }
+    return await handleSyncTeamMode((auth as any).userId, body);
   }
 
   // All other /sync/* routes require teamId + full sync auth
@@ -41,7 +41,7 @@ export async function handleSyncRequest({ path, httpMethod, headers, body }: Syn
   if (!teamId) return json(400, { error: "teamId is required" });
 
   const auth = await authenticateSyncCall({ headers, teamId });
-  if (!auth.ok) return json(auth.status, { error: auth.error });
+  if (!auth.ok) { const a = auth as any; return json(a.status, { error: a.error }); }
 
   const startedAt = Date.now();
   let result: any, errorCode: string | undefined;
