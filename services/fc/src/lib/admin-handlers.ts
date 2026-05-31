@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import {
-  S3Client,
   GetObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
+import { getS3Client, ACCESS_KEY_ID, ACCESS_KEY_SECRET, OSS_BUCKET as BUCKET, OSS_REGION as REGION, OSS_ENDPOINT as ENDPOINT } from "./oss.js";
 import STS20150401, * as $STS from "@alicloud/sts20150401";
 import OpenApi, * as $OpenApi from "@alicloud/openapi-client";
 import { nanoid } from "nanoid";
@@ -15,15 +15,9 @@ import { createMqttPublisher } from './mqtt-client.js';
 import { publishableKeyFromEnv } from './supabase-repo.js';
 
 // ---------------------------------------------------------------------------
-// Environment
+// Environment (OSS vars imported from oss.ts; others below)
 // ---------------------------------------------------------------------------
-const ACCESS_KEY_ID = () => process.env.ACCESS_KEY_ID;
-const ACCESS_KEY_SECRET = () => process.env.ACCESS_KEY_SECRET;
 const ROLE_ARN = () => process.env.ROLE_ARN;
-const BUCKET = () => process.env.BUCKET || "teamclaw-sync";
-const REGION = () => process.env.REGION || "cn-hangzhou";
-const ENDPOINT = () =>
-  process.env.ENDPOINT || "https://oss-cn-hangzhou.aliyuncs.com";
 
 // LiteLLM proxy
 const LITELLM_URL = () => process.env.LITELLM_URL || "https://ai.ucar.cc";
@@ -71,18 +65,6 @@ export function json(statusCode: number, body: unknown) {
 
 function sha256(input: string) {
   return createHash("sha256").update(input).digest("hex");
-}
-
-function getS3Client() {
-  return new S3Client({
-    region: REGION(),
-    endpoint: ENDPOINT(),
-    credentials: {
-      accessKeyId: ACCESS_KEY_ID()!,
-      secretAccessKey: ACCESS_KEY_SECRET()!,
-    },
-    forcePathStyle: false,
-  });
 }
 
 function getStsClient() {

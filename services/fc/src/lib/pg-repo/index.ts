@@ -10,6 +10,7 @@ import { makeAgentsRepo } from "./agents.js";
 import { makeRuntimeRepo } from "./runtime.js";
 import { makeNotificationsRepo } from "./notifications.js";
 import { makeTelemetryRepo } from "./telemetry.js";
+import { makeAttachmentsRepo } from "./attachments.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createPgBusinessRepository({ db, accessToken, userId, callerActorId, provisionLiteLlm }: { db: PgDatabase<any, any>; accessToken?: string; userId?: string; callerActorId?: string; provisionLiteLlm?: TeamsRepoDeps["provisionLiteLlm"] }) {
@@ -41,6 +42,7 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
     ...runtimeRepo,
     ...notificationsRepo,
     ...telemetryRepo,
+    ...makeAttachmentsRepo(),
     createTeam: (input: any) => teamsRepo.createTeam(input, teamsCtx),
     createTeamInvite: (teamId: string, input: any) => teamsRepo.createTeamInvite(teamId, input, teamsCtx),
     removeTeamActor: (teamId: string, actorId: string) => teamsRepo.removeTeamActor(teamId, actorId),
