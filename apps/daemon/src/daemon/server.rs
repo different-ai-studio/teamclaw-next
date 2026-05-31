@@ -1675,7 +1675,7 @@ impl DaemonServer {
                     *existing = workspace.clone();
                 }
 
-                if !workspace.remote_workspace_id.is_empty() {
+                if outcome.inserted && !workspace.remote_workspace_id.is_empty() {
                     if let Err(e) = self
                         .backend
                         .set_agent_default_workspace(&workspace.remote_workspace_id)
@@ -1688,6 +1688,9 @@ impl DaemonServer {
                             e
                         );
                     } else {
+                        self.workspaces
+                            .set_default_workspace_id(&workspace.workspace_id);
+                        should_save = true;
                         info!(
                             workspace_id = %workspace.remote_workspace_id,
                             path = %workspace.path,
@@ -3928,6 +3931,28 @@ impl DaemonServer {
                     .find(|w| w.workspace_id == ws.workspace_id)
                 {
                     *existing = ws.clone();
+                }
+                if outcome.inserted && !ws.remote_workspace_id.is_empty() {
+                    if let Err(e) = self
+                        .backend
+                        .set_agent_default_workspace(&ws.remote_workspace_id)
+                        .await
+                    {
+                        warn!(
+                            workspace_id = %ws.remote_workspace_id,
+                            path = %ws.path,
+                            "workspace default update failed: {}",
+                            e
+                        );
+                    } else {
+                        self.workspaces.set_default_workspace_id(&ws.workspace_id);
+                        should_save = true;
+                        info!(
+                            workspace_id = %ws.remote_workspace_id,
+                            path = %ws.path,
+                            "workspace default set"
+                        );
+                    }
                 }
                 if should_save {
                     let _ = self.workspaces.save(&self.workspaces_path);
@@ -6259,6 +6284,34 @@ mod tests {
             Some(workspace_dir.canonicalize().unwrap().to_str().unwrap())
         );
         assert_eq!(snap.default_workspace_ids, vec!["remote-ws-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn apply_add_workspace_sets_cloud_default_workspace() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        let workspace_dir = ts._tmp.path().to_path_buf();
+        let display_name = workspace_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        seed_startup_workspace_sync(&mock, &display_name, "remote-ws-1");
+
+        let add = amux::AddWorkspace {
+            path: workspace_dir.to_string_lossy().to_string(),
+        };
+        let (accepted, error, workspace) = ts.server.apply_add_workspace(&add).await;
+
+        assert!(accepted, "add workspace failed: {error}");
+        assert!(workspace.is_some());
+        assert_eq!(
+            mock.state().default_workspace_ids,
+            vec!["remote-ws-1".to_string()]
+        );
     }
 
     #[tokio::test]
