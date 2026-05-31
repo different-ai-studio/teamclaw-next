@@ -205,6 +205,7 @@ export function DaemonWorkspacesSection() {
   }
 
   const handleSetDefault = async (agentId: string, workspaceId: string, workspacePath: string) => {
+    if (!team?.id) return
     setSaving(true)
     setSettingDefaultWorkspaceId(workspaceId)
     setError(null)
