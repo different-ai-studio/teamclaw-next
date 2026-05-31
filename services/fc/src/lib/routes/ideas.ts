@@ -1,5 +1,5 @@
 import { ApiError } from "../http-utils.js";
-import { requireString, encodeCursor } from "../router.js";
+import { requireString, encodeCursor } from "../routing-utils.js";
 
 const DEFAULT_IDEA_LIMIT = 50;
 const MAX_IDEA_LIMIT = 200;

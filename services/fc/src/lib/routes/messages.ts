@@ -1,5 +1,5 @@
 import { ApiError } from "../http-utils.js";
-import { requireString } from "../router.js";
+import { requireString } from "../routing-utils.js";
 
 export function registerMessages(router) {
   router.get("/v1/sessions/:sessionId/messages", async (ctx) => {

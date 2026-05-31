@@ -1,6 +1,5 @@
 import type { Context, Hono } from "hono";
 import {
-  ApiError,
   errorResponse,
   extractBearerToken,
   normalizeHeaders,
@@ -145,5 +144,3 @@ export function createHonoRouterAdapter(app: Hono, deps: Deps) {
         : register("POST", p, { ...o, rawBody: true }, h),
   };
 }
-
-export { ApiError };

@@ -5,7 +5,7 @@ import {
   createSupabaseBusinessRepository,
   publishableKeyFromEnv,
 } from "./lib/supabase-repo.js";
-import { queryParams } from "./lib/router.js";
+import { queryParams } from "./lib/routing-utils.js";
 
 // ---------------------------------------------------------------------------
 // Environment (used only for /v1 business API). Read lazily inside the deps

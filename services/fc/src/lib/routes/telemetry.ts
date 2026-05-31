@@ -1,5 +1,5 @@
 import { ApiError } from "../http-utils.js";
-import { requireString } from "../router.js";
+import { requireString } from "../routing-utils.js";
 
 const VALID_KINDS = new Set(["positive", "negative"]);
 const VALID_PERIODS = new Set(["day", "week", "month"]);

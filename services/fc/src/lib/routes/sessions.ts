@@ -1,5 +1,5 @@
 import { ApiError } from "../http-utils.js";
-import { parseLimit, decodeCursor, nextSessionCursor, requireString } from "../router.js";
+import { parseLimit, decodeCursor, nextSessionCursor, requireString } from "../routing-utils.js";
 
 export function registerSessions(router) {
   router.get("/v1/sessions", async (ctx) => {

@@ -1,5 +1,5 @@
 import { ApiError } from "../http-utils.js";
-import { requireString } from "../router.js";
+import { requireString } from "../routing-utils.js";
 
 export function registerNotifications(router) {
   router.post("/v1/devices/push-token", async (ctx) => {
