@@ -1,11 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { supabaseAccessToken } from "../../lib/cloud-api/client";
 import { createCloudSessionsApi } from "./cloud-api";
 
-export function createConfiguredSessionsApi(client: SupabaseClient) {
-  return createCloudSessionsApi({
-    getAccessToken: async () => {
-      const { data } = await client.auth.getSession();
-      return data.session?.access_token ?? null;
-    },
-  });
+export function createConfiguredSessionsApi(
+  client: Parameters<typeof supabaseAccessToken>[0],
+) {
+  return createCloudSessionsApi({ getAccessToken: supabaseAccessToken(client) });
 }
