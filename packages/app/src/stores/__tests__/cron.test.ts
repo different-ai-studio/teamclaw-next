@@ -44,6 +44,8 @@ describe('cron store', () => {
       isLoading: false,
       error: null,
       isInitialized: false,
+      activeScope: 'global',
+      selectedWorkspacePath: null,
       selectedJobId: null,
       runs: [],
       runsLoading: false,
@@ -67,6 +69,27 @@ describe('cron store', () => {
       workspacePath: null,
     })
     expect(useCronStore.getState().isInitialized).toBe(true)
+  })
+
+  it('uses the selected workspace for workspace-scoped init and list calls', async () => {
+    useCronStore.setState({
+      activeScope: 'workspace',
+      selectedWorkspacePath: '/daemon/workspace-b',
+    })
+    mockInvoke.mockResolvedValueOnce(undefined) // cron_init
+    mockInvoke.mockResolvedValueOnce([]) // cron_list_jobs
+    mockInvoke.mockResolvedValueOnce([]) // cron_get_all_session_ids
+
+    await useCronStore.getState().init()
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'cron_init', {
+      scope: 'workspace',
+      workspacePath: '/daemon/workspace-b',
+    })
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'cron_list_jobs', {
+      scope: 'workspace',
+      workspacePath: '/daemon/workspace-b',
+    })
   })
 
   it('clearError resets error', () => {

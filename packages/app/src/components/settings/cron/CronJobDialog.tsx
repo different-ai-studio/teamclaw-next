@@ -76,10 +76,11 @@ export function CronJobDialog({
   editJob?: CronJob
 }) {
   const { t } = useTranslation()
-  const { addJob, updateJob, runJob, activeScope } = useCronStore()
+  const { addJob, updateJob, runJob, activeScope, selectedWorkspacePath } = useCronStore()
   const channelsStore = useChannelsStore()
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const effectiveWorkspacePath = selectedWorkspacePath || workspacePath || null
 
   const [form, setForm] = React.useState<JobFormState>(defaultFormState)
   const [saving, setSaving] = React.useState(false)
@@ -97,7 +98,7 @@ export function CronJobDialog({
       const { providers, hint } = await loadCronDialogModels({
         activeScope,
         teamId,
-        workspacePath,
+        workspacePath: effectiveWorkspacePath,
         messages: {
           workspaceNoPath: t(
             'settings.cron.workspaceModelsNoPath',
@@ -131,7 +132,7 @@ export function CronJobDialog({
     return () => {
       cancelled = true
     }
-  }, [open, activeScope, workspacePath, teamId, t])
+  }, [open, activeScope, effectiveWorkspacePath, teamId, t])
 
   React.useEffect(() => {
     if (open) {
