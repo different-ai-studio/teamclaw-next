@@ -253,10 +253,20 @@ export function createPgAuthRepository(
     //     inserts actor(agent) + agents + agent_member_access(admin); mints a
     //     session and returns the refreshToken.
     //   Both branches mark the invite consumed atomically in a transaction.
-    async claimInvite(token: string, ctx: { userId?: string } = {}) {
+    async claimInvite(token: string, ctx: { userId?: string; accessToken?: string } = {}) {
       const db = opts.db;
       if (!db) throw new Error("claimInvite requires db to be passed in opts");
       const auth = resolveAuth();
+
+      // The route forwards the caller's bearer (member invites) as accessToken;
+      // resolve it to a userId so the member branch can attach the actor. An
+      // explicit ctx.userId still wins (tests / internal callers). Agent invites
+      // arrive with neither and self-provision a userId below.
+      let callerUserId = ctx.userId;
+      if (!callerUserId && ctx.accessToken) {
+        const claims = await verifyJwt(ctx.accessToken);
+        callerUserId = claims.sub;
+      }
 
       // Load + validate invite
       const [invite] = await db
@@ -271,7 +281,7 @@ export function createPgAuthRepository(
       const kind = invite.kind; // "member" | "agent"
 
       if (kind === "member") {
-        const userId = ctx.userId;
+        const userId = callerUserId;
         if (!userId) throw new ApiError(400, "bad_request", "userId required for member invite claim");
 
         return await (db as any).transaction(async (tx: any) => {

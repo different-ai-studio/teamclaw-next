@@ -8,6 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createLocalJWKSet, type JSONWebKeySet } from "jose";
 import { buildAuth } from "../src/auth/better-auth.js";
 import { createPgAuthRepository } from "../src/lib/pg-repo/auth.js";
 import { makeTestDb } from "./db/pglite.js";
@@ -21,7 +22,11 @@ const SECRET = "test-secret-test-secret-test-secret-xx";
 async function setup() {
   const { db } = await makeTestDb();
   const auth = buildAuth({ db, secret: SECRET, baseURL: BASE });
-  const repo = createPgAuthRepository({ auth, db });
+  // Inject a local keyset so the repo can verify access_tokens offline (the
+  // member-claim-via-accessToken path resolves userId from a verified JWT).
+  const jwks = (await auth.api.getJwks()) as unknown as JSONWebKeySet;
+  const keyset = createLocalJWKSet(jwks);
+  const repo = createPgAuthRepository({ auth, db, verifyOpts: { keyset, baseURL: BASE } });
   return { auth, repo, db };
 }
 
@@ -116,6 +121,34 @@ test("claimInvite member: creates actor/member/team_members, returns refreshToke
   const [invite] = await db.select().from(teamInvites).where(eq(teamInvites.token, token)).limit(1);
   assert.ok(invite.consumedAt, "invite.consumedAt set");
   assert.equal(invite.consumedByActorId, result.actorId);
+});
+
+test("claimInvite member: resolves userId from the caller accessToken", async () => {
+  // The HTTP route forwards the joining user's bearer as ctx.accessToken (not a
+  // pre-resolved userId). The repo must verify it and attach the actor to that
+  // user — this is the path exercised by iOS/desktop joining via an invite link.
+  const { repo, db } = await setup();
+  const { teamId, inviterActorId } = await createTeamAndInviter(db);
+
+  // Anonymous sign-in yields a verifiable access_token (a real Better-Auth JWT).
+  const session = await repo.signInAnonymous();
+  const accessToken = session.access_token!;
+  const userId = session.user.id!;
+
+  const token = await createInvite(db, {
+    teamId,
+    invitedByActorId: inviterActorId,
+    kind: "member",
+    displayName: "Linked Member",
+    role: "member",
+  });
+
+  const result = await repo.claimInvite(token, { accessToken });
+
+  assert.equal(result.actorType, "member");
+  assert.equal(result.refreshToken, null);
+  const [actor] = await db.select().from(actors).where(eq(actors.id, result.actorId)).limit(1);
+  assert.equal(actor.userId, userId, "actor attached to the token's user");
 });
 
 test("claimInvite member: second claim with same token throws conflict", async () => {
