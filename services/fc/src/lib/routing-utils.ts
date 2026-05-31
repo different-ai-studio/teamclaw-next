@@ -43,10 +43,14 @@ export function parseLimit(value) {
 }
 
 export function queryParams(event) {
-  const direct = event.queryStringParameters || event.queryParameters || {};
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(direct)) {
-    if (value !== undefined && value !== null) params.set(key, String(value));
+  // FC 2.0 uses queryStringParameters; FC 3.0 uses queryParameters. Some events
+  // carry an empty queryStringParameters object alongside populated queryParameters.
+  for (const source of [event.queryStringParameters, event.queryParameters]) {
+    if (!source || typeof source !== "object") continue;
+    for (const [key, value] of Object.entries(source)) {
+      if (value !== undefined && value !== null) params.set(key, String(value));
+    }
   }
   let raw = event.rawQueryString ?? event.queryString ?? "";
   if (!raw) {

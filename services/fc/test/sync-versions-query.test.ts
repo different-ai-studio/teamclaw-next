@@ -53,3 +53,12 @@ test('falls back to a query string embedded in rawPath', () => {
 test('empty event yields an empty body (handler then 400s "teamId is required")', () => {
   assert.deepEqual(syncGetQueryToBody({}), {});
 });
+
+test('reads teamId from queryParameters when queryStringParameters is empty (FC 3.0)', () => {
+  const body: any = syncGetQueryToBody({
+    queryStringParameters: {},
+    queryParameters: { teamId: 'team-fc3', path: 'notes.md' },
+  });
+  assert.equal(body.teamId, 'team-fc3');
+  assert.equal(body.path, 'notes.md');
+});
