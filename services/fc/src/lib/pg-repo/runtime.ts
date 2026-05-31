@@ -284,21 +284,32 @@ export function makeRuntimeRepo(db: DbLike) {
     },
 
     /**
-     * Returns runtime_id + backend_type + current_model for all runtimes in a session.
+     * Returns the per-session runtime rows (id, runtime_id, agent_id,
+     * workspace_id, backend_type, current_model, status). The expo
+     * session-members screen reads agent_id/workspace_id/status; other callers
+     * ignore the extra fields.
      */
     async listSessionRuntimeModels(sessionId: string) {
       const rows = await db
         .select({
+          id: agentRuntimes.id,
           runtime_id: agentRuntimes.runtimeId,
+          agent_id: agentRuntimes.agentId,
+          workspace_id: agentRuntimes.workspaceId,
           backend_type: agentRuntimes.backendType,
           current_model: agentRuntimes.currentModel,
+          status: agentRuntimes.status,
         })
         .from(agentRuntimes)
         .where(eq(agentRuntimes.sessionId, sessionId));
       return rows.map((r) => ({
+        id: r.id ?? null,
         runtime_id: r.runtime_id ?? null,
+        agent_id: r.agent_id ?? null,
+        workspace_id: r.workspace_id ?? null,
         backend_type: r.backend_type ?? null,
         current_model: r.current_model ?? null,
+        status: r.status ?? null,
       }));
     },
 

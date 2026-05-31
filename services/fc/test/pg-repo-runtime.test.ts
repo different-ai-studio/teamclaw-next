@@ -285,7 +285,13 @@ test("listSessionRuntimeModels returns rows for session", async () => {
   const rows = await repo.listSessionRuntimeModels(session.id);
   assert.ok(Array.isArray(rows));
   assert.ok(rows.length >= 1);
-  assert.ok(rows.some((r: any) => r.runtime_id === "rt-models"));
+  const row = rows.find((r: any) => r.runtime_id === "rt-models");
+  assert.ok(row, "expected the upserted runtime row");
+  // Extended fields consumed by the expo session-members screen.
+  assert.equal(row.agent_id, agentActor.id);
+  assert.ok("id" in row, "id field present");
+  assert.ok("workspace_id" in row, "workspace_id field present");
+  assert.ok("status" in row, "status field present");
 });
 
 test("listRuntimeTargetsForSession returns agent+runtimeId pairs", async () => {

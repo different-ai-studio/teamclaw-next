@@ -160,6 +160,21 @@ test("DELETE /v1/messages/:messageId removes message", async () => {
   });
 });
 
+test("POST /v1/sessions/:sessionId/mark-unread clears the caller's read marker", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/sessions/session-1/mark-unread",
+    headers: { Authorization: "Bearer token" },
+  }, { createRepository: () => repo });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(repo.calls[0], {
+    method: "markSessionUnread",
+    sessionId: "session-1",
+  });
+});
+
 test("claim invite is anonymous and routes to auth repository", async () => {
   // No Authorization header — daemon's bootstrap `amuxd init` has no token
   // yet. The route must dispatch to createAuthRepository(), not require auth.
@@ -1649,6 +1664,7 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async patchSession(sessionId, patch) { calls.push({ method: "patchSession", sessionId, patch }); if (error) throw error; const store = sessions.length > 0 ? sessions : sessionStore; const s = store.find(s => s.id === sessionId); if (!s) return null; if (patch.title !== undefined) s.title = patch.title; return s; },
     async createSession(input) { calls.push({ method: "createSession", input }); if (error) throw error; const id = input.id ?? "session-new"; const newS = { id, teamId: input.teamId, title: input.title, mode: input.mode, ideaId: null, lastMessageAt: null, lastMessagePreview: null, hasUnread: false, createdAt: "2026-05-27T03:00:00Z", updatedAt: "2026-05-27T03:00:00Z", participants: (input.participantActorIds ?? []).map(a => ({ sessionId: id, actorId: a, role: "member", joinedAt: null })) }; sessionStore.push(newS); return newS; },
     async markSessionViewed(sessionId, lastReadMessageId) { calls.push({ method: "markSessionViewed", sessionId, lastReadMessageId }); if (error) throw error; },
+    async markSessionUnread(sessionId) { calls.push({ method: "markSessionUnread", sessionId }); if (error) throw error; },
     async listTeamSessionsFull(teamId) { calls.push({ method: "listTeamSessionsFull", teamId }); if (error) throw error; return [{ id: "session-1", teamId, title: "T", mode: "solo", ideaId: null, primaryAgentId: "agent-1", createdByActorId: "actor-1", summary: "s", lastMessageAt: null, lastMessagePreview: null, participantCount: 3, hasUnread: false, createdAt: "2026-05-27T01:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }]; },
     async listAgentRuntimesForTeam(teamId) { calls.push({ method: "listAgentRuntimesForTeam", teamId }); if (error) throw error; return [{ id: "rt-1", teamId, agentId: "agent-1", sessionId: "session-1", workspaceId: null, backendType: "claude_code", status: "ready", backendSessionId: "bs-1", runtimeId: "rt12abcd", currentModel: "claude-opus-4-7", lastSeenAt: "2026-05-27T01:00:00Z", createdAt: "2026-05-27T00:00:00Z", updatedAt: "2026-05-27T01:00:00Z" }]; },
     async getMeBootstrap() { calls.push({ method: "getMeBootstrap" }); if (error) throw error; return { memberActorId: "actor-1", teams: [{ id: "team-1", name: "Team", slug: "team", role: "owner" }], memberActorIdByTeam: { "team-1": "actor-1" } }; },

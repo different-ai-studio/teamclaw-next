@@ -253,6 +253,34 @@ test("hasUnread is false after markSessionViewed", async () => {
   assert.equal(found.hasUnread, false);
 });
 
+// ── markSessionUnread ──────────────────────────────────────────────────────────
+
+test("markSessionUnread deletes the caller's read marker", async () => {
+  const { db, pg } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db, userId: actor.userId });
+
+  const s = await repo.createSession({ teamId: team.id, title: "UnreadAgain", mode: "solo", participantActorIds: [actor.id] });
+  await repo.markSessionViewed(s.id);
+  const before = await pg.query("SELECT count(*)::int AS n FROM session_read_markers WHERE session_id = $1", [s.id]);
+  assert.equal(before.rows[0].n, 1);
+
+  await repo.markSessionUnread(s.id);
+  const after = await pg.query("SELECT count(*)::int AS n FROM session_read_markers WHERE session_id = $1", [s.id]);
+  assert.equal(after.rows[0].n, 0);
+});
+
+test("markSessionUnread fails closed with no identity and no trusted actor", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedActor(db, team.id);
+  const repo = createPgBusinessRepository({ db }); // no userId
+
+  const s = await repo.createSession({ teamId: team.id, title: "NoIdUnread", mode: "solo", participantActorIds: [actor.id] });
+  await assert.rejects(() => repo.markSessionUnread(s.id), /missing_auth|cannot resolve actor/i);
+});
+
 // ── getSessionByAcp ───────────────────────────────────────────────────────────
 
 test("getSessionByAcp returns null when absent", async () => {
