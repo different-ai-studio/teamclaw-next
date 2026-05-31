@@ -1921,9 +1921,26 @@ export function createSupabaseAuthRepository(options) {
     realtime: REALTIME_TRANSPORT_OPTS,
   });
 
+  // Build a Supabase client authorized as the caller, so the SECURITY DEFINER
+  // RPC sees `auth.uid()` (required for `kind='member'` claims). Lazily created
+  // per access token; the daemon's agent-claim flow has no token and reuses the
+  // shared anonClient.
+  function clientForToken(accessToken) {
+    if (!accessToken) return anonClient;
+    return createClient(supabaseUrl, publishableKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: REALTIME_TRANSPORT_OPTS,
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    });
+  }
+
   return {
-    async claimInvite(token) {
-      const { data, error } = await anonClient.rpc("claim_team_invite", { p_token: token });
+    // ctx.accessToken (optional): the joining user's bearer. Forwarded so the
+    // `claim_team_invite` RPC resolves `auth.uid()` for member invites. Absent
+    // for agent invites (daemon `amuxd init`), which the RPC self-provisions.
+    async claimInvite(token, ctx: { accessToken?: string } = {}) {
+      const client = clientForToken(ctx.accessToken);
+      const { data, error } = await client.rpc("claim_team_invite", { p_token: token });
       if (error) {
         const msg = error.message || "claim_team_invite failed";
         const lower = msg.toLowerCase();

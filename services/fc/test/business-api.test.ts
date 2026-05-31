@@ -205,6 +205,38 @@ test("claim invite is anonymous and routes to auth repository", async () => {
   assert.equal(JSON.parse(response.body).actorId, "agent-1");
 });
 
+test("claim invite forwards the caller bearer for member claims", async () => {
+  // A member joining via someone's link IS authenticated (anonymous or real).
+  // The route must forward their bearer as accessToken so the SECURITY DEFINER
+  // RPC resolves auth.uid() — otherwise member claims fail with 42501.
+  const ctxSeen = [];
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/invites/claim",
+    headers: { Authorization: "Bearer member-jwt" },
+    body: JSON.stringify({ token: "invite-token" }),
+  }, {
+    createRepository: () => fakeRepo(),
+    createAuthRepository: () => ({
+      async claimInvite(token, ctx) {
+        ctxSeen.push({ token, ctx });
+        return {
+          actorId: "member-1",
+          teamId: "team-1",
+          actorType: "member",
+          displayName: "Member",
+          refreshToken: null,
+        };
+      },
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(ctxSeen[0].token, "invite-token");
+  assert.equal(ctxSeen[0].ctx.accessToken, "member-jwt");
+  assert.equal(JSON.parse(response.body).actorId, "member-1");
+});
+
 test("missing bearer returns OpenAPI error envelope", async () => {
   const response = await handleBusinessApiRequest({
     httpMethod: "GET",
