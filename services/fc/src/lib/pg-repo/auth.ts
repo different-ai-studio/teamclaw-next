@@ -323,7 +323,21 @@ export function createPgAuthRepository(
 
         const minted = await mintSession(daemonUser.id, auth);
 
-        return await (db as any).transaction(async (tx: any) => {
+        // Compensation helper: if the DB transaction fails, clean up the orphaned
+        // Better-Auth user + session so no zombie credentials are left behind.
+        async function compensate() {
+          try {
+            await ctx2.internalAdapter.deleteSessions(daemonUser.id);
+          } catch { /* best-effort */ }
+          try {
+            if (typeof ctx2.internalAdapter.deleteUser === "function") {
+              await ctx2.internalAdapter.deleteUser(daemonUser.id);
+            }
+          } catch { /* best-effort */ }
+        }
+
+        try {
+          return await (db as any).transaction(async (tx: any) => {
           // Insert actor (agent type, userId = daemon BA user)
           const [actor] = await tx.insert(actors).values({
             teamId: invite.teamId,
@@ -363,6 +377,11 @@ export function createPgAuthRepository(
             refreshToken: minted.refreshToken,
           };
         });
+        } catch (txErr) {
+          // Transaction failed — compensate by removing the orphaned BA user+session
+          await compensate();
+          throw txErr;
+        }
       }
 
       throw new ApiError(400, "bad_request", `unsupported invite kind: ${kind}`);

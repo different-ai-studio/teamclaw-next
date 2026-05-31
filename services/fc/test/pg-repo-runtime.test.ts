@@ -332,3 +332,42 @@ test("heartbeat does not throw", async () => {
   const repo = makeRepo(db);
   await assert.doesNotReject(() => repo.heartbeat());
 });
+
+// Fix #runtime — null backendSessionId upsert should be idempotent (one row, updated)
+test("upsertAgentRuntime with null backendSessionId: two upserts → ONE row, updated", async () => {
+  const db = await makeDb();
+  const team = await seedTeam(db);
+  const agentActor = await seedAgentActor(db, team.id);
+  const session = await seedSession(db, team.id);
+  const repo = makeRepo(db, agentActor.id);
+
+  // First upsert with backendSessionId=null
+  const r1 = await repo.upsertAgentRuntime({
+    agentActorId: agentActor.id,
+    sessionId: session.id,
+    runtimeId: "rt-null-bs-1",
+    backendSessionId: null,
+    status: "running",
+  });
+  assert.ok(r1.id, "first upsert returns id");
+
+  // Second upsert with backendSessionId=null for the same agent → should update, not insert
+  const r2 = await repo.upsertAgentRuntime({
+    agentActorId: agentActor.id,
+    sessionId: session.id,
+    runtimeId: "rt-null-bs-updated",
+    backendSessionId: null,
+    status: "stopped",
+  });
+  assert.ok(r2.id, "second upsert returns id");
+  assert.equal(r1.id, r2.id, "both upserts return the same row id (no duplicate)");
+
+  // Verify only ONE row exists for this agent with null backendSessionId
+  const allRuntimes = await repo.listAgentRuntimesForTeam(team.id);
+  const nullBsRows = allRuntimes.filter(
+    (r: any) => r.agentId === agentActor.id && r.backendSessionId === null,
+  );
+  assert.equal(nullBsRows.length, 1, "exactly one row with null backendSessionId");
+  assert.equal(nullBsRows[0].runtimeId, "rt-null-bs-updated", "row reflects the updated runtimeId");
+  assert.equal(nullBsRows[0].status, "stopped", "row reflects the updated status");
+});

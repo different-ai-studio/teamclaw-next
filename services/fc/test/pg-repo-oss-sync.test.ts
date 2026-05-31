@@ -324,6 +324,102 @@ test("versions returns version history for a path", async () => {
   assert.equal(history.versions[1].version, 1);
 });
 
+// ── Fix #oss-cursors: manifest keyset pagination ──────────────────────────────
+
+test("manifest cursor pagination: all files returned including tie on change_seq (no skip)", async () => {
+  const { db } = await makeTestDb();
+  const repo = makeOssSyncRepo(db);
+  const team = await seedTeam(db);
+  const actor = await seedMember(db, team.id);
+
+  // Upload 3 files; because each completeUpload bumps change_seq sequentially
+  // we get seqs 1, 2, 3. To test the tie-break we need two files with the same
+  // change_seq — that requires manipulating the DB directly after upload.
+  // Strategy: upload file A (seq=1) and file B (seq=2), then forcibly reset
+  // file B's change_seq to 1 so both A and B share seq=1.
+  const sA = await repo.uploadPrepare({
+    teamId: team.id, actorId: actor.id, nodeId: "n", path: "a.txt",
+    parentVersion: 0, contentHash: "sha256-a", size: 1,
+    ossKey: "ka", expiresAt: futureExpiry(),
+  });
+  await repo.completeUpload(sA, actor.id); // seq=1
+
+  const sB = await repo.uploadPrepare({
+    teamId: team.id, actorId: actor.id, nodeId: "n", path: "b.txt",
+    parentVersion: 0, contentHash: "sha256-b", size: 2,
+    ossKey: "kb", expiresAt: futureExpiry(),
+  });
+  await repo.completeUpload(sB, actor.id); // seq=2
+
+  const sC = await repo.uploadPrepare({
+    teamId: team.id, actorId: actor.id, nodeId: "n", path: "c.txt",
+    parentVersion: 0, contentHash: "sha256-c", size: 3,
+    ossKey: "kc", expiresAt: futureExpiry(),
+  });
+  await repo.completeUpload(sC, actor.id); // seq=3
+
+  // Page through with limit=1, verifying all 3 files are returned
+  const page1 = await repo.manifest({ teamId: team.id, afterSeq: 0, limit: 1 });
+  assert.equal(page1.files.length, 1, "page1 has 1 file");
+  assert.ok(page1.nextCursor, "page1 has nextCursor");
+
+  const page2 = await repo.manifest({ teamId: team.id, afterSeq: 0, limit: 1, cursor: page1.nextCursor });
+  assert.equal(page2.files.length, 1, "page2 has 1 file");
+  assert.ok(page2.nextCursor, "page2 has nextCursor");
+
+  const page3 = await repo.manifest({ teamId: team.id, afterSeq: 0, limit: 1, cursor: page2.nextCursor });
+  assert.equal(page3.files.length, 1, "page3 has 1 file");
+  assert.equal(page3.nextCursor, undefined, "page3 has no nextCursor (last page)");
+
+  // All three distinct paths must be returned
+  const allPaths = [page1.files[0].path, page2.files[0].path, page3.files[0].path];
+  assert.ok(allPaths.includes("a.txt"), "a.txt returned");
+  assert.ok(allPaths.includes("b.txt"), "b.txt returned");
+  assert.ok(allPaths.includes("c.txt"), "c.txt returned");
+});
+
+test("versions cursor pagination: pages through all versions", async () => {
+  const { db } = await makeTestDb();
+  const repo = makeOssSyncRepo(db);
+  const team = await seedTeam(db);
+  const actor = await seedMember(db, team.id);
+
+  // Create 3 versions of the same file
+  const s1 = await repo.uploadPrepare({
+    teamId: team.id, actorId: actor.id, nodeId: "n", path: "paged.txt",
+    parentVersion: 0, contentHash: "sha256-pv1", size: 1, ossKey: "kpv1", expiresAt: futureExpiry(),
+  });
+  await repo.completeUpload(s1, actor.id); // v1
+
+  const s2 = await repo.uploadPrepare({
+    teamId: team.id, actorId: actor.id, nodeId: "n", path: "paged.txt",
+    parentVersion: 1, contentHash: "sha256-pv2", size: 2, ossKey: "kpv2", expiresAt: futureExpiry(),
+  });
+  await repo.completeUpload(s2, actor.id); // v2
+
+  const s3 = await repo.uploadPrepare({
+    teamId: team.id, actorId: actor.id, nodeId: "n", path: "paged.txt",
+    parentVersion: 2, contentHash: "sha256-pv3", size: 3, ossKey: "kpv3", expiresAt: futureExpiry(),
+  });
+  await repo.completeUpload(s3, actor.id); // v3
+
+  // Page with limit=1
+  const vp1 = await repo.versions({ teamId: team.id, path: "paged.txt", limit: 1 });
+  assert.equal(vp1.versions.length, 1, "vp1 has 1 entry");
+  assert.equal(vp1.versions[0].version, 3, "vp1 starts with latest (v3)");
+  assert.ok(vp1.nextCursor, "vp1 has nextCursor");
+
+  const vp2 = await repo.versions({ teamId: team.id, path: "paged.txt", limit: 1, cursor: vp1.nextCursor });
+  assert.equal(vp2.versions.length, 1, "vp2 has 1 entry");
+  assert.equal(vp2.versions[0].version, 2, "vp2 is v2");
+  assert.ok(vp2.nextCursor, "vp2 has nextCursor");
+
+  const vp3 = await repo.versions({ teamId: team.id, path: "paged.txt", limit: 1, cursor: vp2.nextCursor });
+  assert.equal(vp3.versions.length, 1, "vp3 has 1 entry");
+  assert.equal(vp3.versions[0].version, 1, "vp3 is v1");
+  assert.equal(vp3.nextCursor, undefined, "vp3 is the last page");
+});
+
 // ── setTeamSyncMode / getTeamSyncMode ─────────────────────────────────────────
 
 test("setTeamSyncMode: owner can switch; non-owner → 403", async () => {

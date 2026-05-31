@@ -8,7 +8,7 @@
  * unique index agent_runtimes_agent_backend_uniq (migration 202604220027).
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { actors, agentRuntimes, teams } from "../../db/schema/index.js";
 import { ApiError } from "../http-utils.js";
@@ -89,6 +89,46 @@ export function makeRuntimeRepo(db: DbLike) {
         currentModel: body.currentModel ?? null,
         updatedAt: now,
       } as typeof agentRuntimes.$inferInsert;
+
+      // Postgres NULL ≠ NULL in unique indexes, so when backendSessionId is null
+      // (daemon runtimes) ON CONFLICT never fires → unbounded duplicate rows.
+      // Fix: when backendSessionId is null, perform a manual SELECT + UPDATE/INSERT.
+      if ((body.backendSessionId ?? null) == null) {
+        const updateSet = {
+          sessionId: body.sessionId ?? null,
+          runtimeId: body.runtimeId ?? null,
+          backendType: body.backendType ?? "claude",
+          status: body.status ?? "running",
+          workspaceId: body.workspaceId ?? null,
+          currentModel: body.currentModel ?? null,
+          updatedAt: now,
+        };
+
+        const [existing] = await db
+          .select({ id: agentRuntimes.id })
+          .from(agentRuntimes)
+          .where(
+            and(
+              eq(agentRuntimes.agentId, body.agentActorId),
+              isNull(agentRuntimes.backendSessionId),
+            ),
+          )
+          .limit(1);
+
+        if (existing) {
+          await (db as any)
+            .update(agentRuntimes)
+            .set(updateSet)
+            .where(eq(agentRuntimes.id, existing.id));
+          return { id: existing.id };
+        } else {
+          const [inserted] = await (db as any)
+            .insert(agentRuntimes)
+            .values(row)
+            .returning({ id: agentRuntimes.id });
+          return { id: inserted?.id ?? null };
+        }
+      }
 
       const [inserted] = await (db as any)
         .insert(agentRuntimes)

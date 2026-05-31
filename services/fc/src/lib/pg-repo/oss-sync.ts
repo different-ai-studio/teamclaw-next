@@ -11,7 +11,7 @@
  *   see all amuxc_files rows with change_seq ≤ N (same atomic tx).
  */
 
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import {
   amuxcBlobs,
@@ -317,20 +317,55 @@ export function makeOssSyncRepo(db: DbLike) {
 
     /**
      * Manifest: list files (and tombstones) with change_seq > afterSeq.
-     * Supports cursor-based pagination.
+     * Supports keyset cursor-based pagination ordered by (change_seq ASC, id ASC).
+     * Cursor encodes the last seen (changeSeq, id) as "seq:id", enabling correct
+     * pagination even when multiple files share the same change_seq.
      */
     async manifest(input: ManifestInput): Promise<ManifestResult> {
-      const { teamId, afterSeq, limit = 200 } = input;
+      const { teamId, afterSeq, cursor, limit = 200 } = input;
+
+      // Parse cursor: "changeSeq:id"
+      let cursorSeq: number | null = null;
+      let cursorId: string | null = null;
+      if (cursor) {
+        const colonIdx = cursor.indexOf(":");
+        if (colonIdx !== -1) {
+          cursorSeq = parseInt(cursor.slice(0, colonIdx), 10);
+          cursorId = cursor.slice(colonIdx + 1);
+        }
+      }
+
+      // Build WHERE: (change_seq > afterSeq) AND keyset (change_seq, id) > (cursorSeq, cursorId)
+      // Keyset: change_seq > cursorSeq OR (change_seq = cursorSeq AND id > cursorId)
+      const baseFilter = and(
+        eq(amuxcFiles.teamId, teamId),
+        gt(amuxcFiles.changeSeq, afterSeq),
+      );
+
+      const whereClause =
+        cursorSeq != null && cursorId != null
+          ? and(
+              baseFilter,
+              or(
+                gt(amuxcFiles.changeSeq, cursorSeq),
+                and(
+                  sql`${amuxcFiles.changeSeq} = ${cursorSeq}`,
+                  sql`${amuxcFiles.id} > ${cursorId}`,
+                ),
+              ),
+            )
+          : baseFilter;
 
       const rows = await db
         .select()
         .from(amuxcFiles)
-        .where(and(eq(amuxcFiles.teamId, teamId), gt(amuxcFiles.changeSeq, afterSeq)))
+        .where(whereClause)
         .orderBy(amuxcFiles.changeSeq, amuxcFiles.id)
         .limit(limit + 1);
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
+      const lastRow = page[page.length - 1] as any;
 
       return {
         files: page.map((r: any) => ({
@@ -344,7 +379,7 @@ export function makeOssSyncRepo(db: DbLike) {
           updatedBy: r.updatedBy,
           updatedAt: new Date(r.updatedAt).toISOString(),
         })),
-        nextCursor: hasMore ? page[page.length - 1]?.changeSeq?.toString() : undefined,
+        nextCursor: hasMore && lastRow ? `${lastRow.changeSeq}:${lastRow.id}` : undefined,
       };
     },
 
@@ -353,7 +388,7 @@ export function makeOssSyncRepo(db: DbLike) {
      * Returns versions in descending order (newest first).
      */
     async versions(input: { teamId: string; path: string; cursor?: string; limit?: number }): Promise<VersionsResult> {
-      const { teamId, path, limit = 50 } = input;
+      const { teamId, path, cursor, limit = 50 } = input;
 
       const [file] = await db
         .select({ id: amuxcFiles.id })
@@ -363,10 +398,17 @@ export function makeOssSyncRepo(db: DbLike) {
 
       if (!file) return { versions: [] };
 
+      // Keyset cursor: versions ordered DESC; next page is WHERE version < cursorVersion
+      const cursorVersion = cursor != null ? parseInt(cursor, 10) : null;
+      const versionsWhere =
+        cursorVersion != null && !isNaN(cursorVersion)
+          ? and(eq(amuxcFileVersions.fileId, file.id), lt(amuxcFileVersions.version, cursorVersion))
+          : eq(amuxcFileVersions.fileId, file.id);
+
       const rows = await db
         .select()
         .from(amuxcFileVersions)
-        .where(eq(amuxcFileVersions.fileId, file.id))
+        .where(versionsWhere)
         .orderBy(desc(amuxcFileVersions.version))
         .limit(limit + 1);
 
