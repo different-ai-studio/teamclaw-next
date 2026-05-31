@@ -1,28 +1,42 @@
-// services/fc/lib/sync-handlers.mjs
+// services/fc/src/lib/sync-handlers.ts
 //
 // FC /sync/* endpoint handlers — OSS Sync v3 (spec §3).
 // Each export is a standalone async function; the router in index.mjs
 // dispatches here after JWT/actor auth.
+//
+// Under BACKEND_KIND=postgres: metadata ops go through makeOssSyncRepo(getDb())
+//   and S3 presign/HEAD uses src/lib/oss.ts helpers.
+// Under BACKEND_KIND=supabase (default): original Supabase path is unchanged.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand, GetObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createServiceRoleClient } from './supabase.js';
 import { validateSyncPath } from './sync-path.js';
+import { resolveBackendKind } from './backend-kind.js';
+import { getS3Client, OSS_BUCKET } from './oss.js';
+import { makeOssSyncRepo, type OssSyncRepo } from './pg-repo/oss-sync.js';
+import { resolveActorForTeam } from './pg-repo/authz.js';
+import { getDb, type Db } from '../db/client.js';
+import { ApiError } from './http-utils.js';
+import { teamWorkspaceConfig, amuxcUploadSessions } from '../db/schema/index.js';
+import { eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
-// Env accessors
+// Injectable deps — production callers omit these; tests inject stubs.
 // ---------------------------------------------------------------------------
-const ACCESS_KEY_ID     = () => process.env.ACCESS_KEY_ID     || '';
-const ACCESS_KEY_SECRET = () => process.env.ACCESS_KEY_SECRET || '';
-const BUCKET            = () => process.env.BUCKET            || 'teamclaw-sync';
-const REGION            = () => process.env.REGION            || 'cn-hangzhou';
-const ENDPOINT          = () => process.env.ENDPOINT          || 'https://oss-cn-hangzhou.aliyuncs.com';
+
+export interface SyncHandlerDeps {
+  db?: Db;
+  repo?: OssSyncRepo;
+  s3?: S3Client;
+  bucket?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-function json(statusCode, body) {
+function json(statusCode: number, body: unknown) {
   return {
     statusCode,
     headers: { 'Content-Type': 'application/json' },
@@ -30,21 +44,23 @@ function json(statusCode, body) {
   };
 }
 
-function getS3Client() {
-  return new S3Client({
-    region: REGION(),
-    endpoint: ENDPOINT(),
-    credentials: {
-      accessKeyId: ACCESS_KEY_ID(),
-      secretAccessKey: ACCESS_KEY_SECRET(),
-    },
-    forcePathStyle: false,
-  });
-}
-
-function ossKeyForHash(teamId, hash) {
+function ossKeyForHash(teamId: string, hash: string) {
   // "teams/{teamId}/blobs/sha256/<2chars>/<2chars>/<hash>"
   return `teams/${teamId}/blobs/sha256/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash}`;
+}
+
+function resolveS3(deps: SyncHandlerDeps): S3Client {
+  return deps.s3 ?? getS3Client();
+}
+
+function resolveBucket(deps: SyncHandlerDeps): string {
+  return deps.bucket ?? OSS_BUCKET();
+}
+
+function resolveRepo(deps: SyncHandlerDeps): OssSyncRepo {
+  if (deps.repo) return deps.repo;
+  const db = deps.db ?? getDb();
+  return makeOssSyncRepo(db);
 }
 
 // ---------------------------------------------------------------------------
@@ -55,14 +71,71 @@ function ossKeyForHash(teamId, hash) {
  * @param {{ userId, teamId, actorId }} caller
  * @param {object} body - { teamId, afterSeq, limit?, cursor?, snapshotSeq? }
  */
-export async function handleSyncManifest(caller, body) {
+export async function handleSyncManifest(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { afterSeq = 0, limit = 200, cursor = null, snapshotSeq: clientSnapshotSeq } = body || {};
   const teamId = caller.teamId;
 
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+
+    const pageLimit = Math.min(Math.max(1, Number(limit) || 200), 1000);
+
+    // For postgres, the repo.manifest handles pagination via cursor.
+    // snapshotSeq: for first page, we read oss_change_seq from teamWorkspaceConfig;
+    // for subsequent pages, caller supplies snapshotSeq.
+    let snapshotSeq: number;
+    if (typeof clientSnapshotSeq === 'number') {
+      snapshotSeq = clientSnapshotSeq;
+    } else {
+      // Read snapshotSeq from DB
+      const db = deps.db ?? getDb();
+      const [twc] = await db
+        .select({ ossChangeSeq: teamWorkspaceConfig.ossChangeSeq })
+        .from(teamWorkspaceConfig)
+        .where(eq(teamWorkspaceConfig.teamId, teamId))
+        .limit(1);
+      if (!twc) {
+        return json(404, { error: 'team not found or not configured for OSS sync' });
+      }
+      snapshotSeq = twc.ossChangeSeq;
+    }
+
+    const result = await repo.manifest({
+      teamId,
+      afterSeq: Number(afterSeq) || 0,
+      snapshotSeq,
+      cursor: cursor as string | undefined,
+      limit: pageLimit,
+    });
+
+    const items = result.files.map(r => ({
+      path:        r.path,
+      version:     r.currentVersion,
+      contentHash: r.contentHash,
+      size:        r.size,
+      deleted:     r.deleted,
+      changeSeq:   r.changeSeq,
+      updatedAt:   r.updatedAt,
+      updatedBy:   r.updatedBy,
+    }));
+
+    return json(200, {
+      snapshotSeq,
+      items,
+      nextCursor: result.nextCursor ?? null,
+    });
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
   // Read current snapshot seq if client didn't supply one (first page).
-  let snapshotSeq;
+  let snapshotSeq: number;
   if (typeof clientSnapshotSeq === 'number') {
     snapshotSeq = clientSnapshotSeq;
   } else {
@@ -74,7 +147,7 @@ export async function handleSyncManifest(caller, body) {
     if (twcErr || !twc) {
       return json(404, { error: 'team not found or not configured for OSS sync' });
     }
-    snapshotSeq = twc.oss_change_seq;
+    snapshotSeq = (twc as any).oss_change_seq;
   }
 
   // Decode cursor: base64 JSON { seq, id }
@@ -82,7 +155,7 @@ export async function handleSyncManifest(caller, body) {
   let cursorId  = '00000000-0000-0000-0000-000000000000';
   if (cursor) {
     try {
-      const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
+      const decoded = JSON.parse(Buffer.from(cursor as string, 'base64').toString('utf8'));
       cursorSeq = decoded.seq;
       cursorId  = decoded.id;
     } catch {
@@ -92,9 +165,6 @@ export async function handleSyncManifest(caller, body) {
 
   const pageLimit = Math.min(Math.max(1, Number(limit) || 200), 1000);
 
-  // Spec §3.1: WHERE change_seq > afterSeq AND change_seq <= snapshotSeq
-  //            AND (change_seq, id) > (cursorSeq, cursorId)
-  //            ORDER BY change_seq, id LIMIT n
   const { data: rows, error } = await supabase
     .from('amuxc_files')
     .select('id, path, current_version, content_hash, size, deleted, change_seq, updated_at, updated_by')
@@ -110,8 +180,8 @@ export async function handleSyncManifest(caller, body) {
     return json(500, { error: `manifest query failed: ${error.message}` });
   }
 
-  const hasMore = rows.length > pageLimit;
-  const items = (hasMore ? rows.slice(0, pageLimit) : rows).map(r => ({
+  const hasMore = (rows as any[]).length > pageLimit;
+  const items = (hasMore ? (rows as any[]).slice(0, pageLimit) : (rows as any[])).map(r => ({
     path:            r.path,
     version:         r.current_version,
     contentHash:     r.content_hash,
@@ -122,10 +192,10 @@ export async function handleSyncManifest(caller, body) {
     updatedBy:       r.updated_by,
   }));
 
-  let nextCursor = null;
+  let nextCursor: string | null = null;
   if (hasMore) {
     const last = items[items.length - 1];
-    const lastRow = rows.find(r => r.change_seq === last.changeSeq && r.path === last.path);
+    const lastRow = (rows as any[]).find(r => r.change_seq === last.changeSeq && r.path === last.path);
     nextCursor = Buffer.from(JSON.stringify({ seq: last.changeSeq, id: lastRow.id })).toString('base64');
   }
 
@@ -140,11 +210,15 @@ export async function handleSyncManifest(caller, body) {
  * @param {{ userId, teamId, actorId }} caller
  * @param {object} body - { teamId, path, parentVersion, contentHash, size, nodeId }
  */
-export async function handleSyncUploadPrepare(caller, body) {
+export async function handleSyncUploadPrepare(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { path, parentVersion, contentHash, size, nodeId } = body || {};
 
   // Validate path (spec §3.1.1)
-  const pathCheck = validateSyncPath(path);
+  const pathCheck = validateSyncPath(path as string);
   if (!pathCheck.ok) {
     return json(422, { error: pathCheck.message, code: pathCheck.code });
   }
@@ -161,9 +235,57 @@ export async function handleSyncUploadPrepare(caller, body) {
 
   const { teamId, actorId } = caller;
   const ossKey = ossKeyForHash(teamId, contentHash);
+  const s3 = resolveS3(deps);
+  const bucket = resolveBucket(deps);
+
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+
+    const expiresAt = new Date(Date.now() + 3600_000);
+    const sessionId = await repo.uploadPrepare({
+      teamId,
+      actorId,
+      nodeId: (nodeId as string | undefined) ?? null,
+      path: path as string,
+      parentVersion,
+      contentHash,
+      size,
+      ossKey,
+      expiresAt,
+    });
+
+    // HEAD OSS — check if blob already exists
+    let requiresUpload = true;
+    let presignedPut: string | null = null;
+
+    try {
+      const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: ossKey }));
+      if (head.ContentLength === size) {
+        requiresUpload = false;
+      }
+    } catch (e: any) {
+      if (e.$metadata?.httpStatusCode !== 404 && e.name !== 'NotFound' && e.Code !== 'NoSuchKey') {
+        console.error('[sync/prepare] HEAD OSS error:', e.message);
+      }
+    }
+
+    if (requiresUpload) {
+      const putCmd = new PutObjectCommand({ Bucket: bucket, Key: ossKey, ContentLength: size });
+      presignedPut = await getSignedUrl(s3 as any, putCmd, { expiresIn: 900 });
+    }
+
+    return json(200, {
+      uploadSessionId: sessionId,
+      ossKey,
+      requiresUpload,
+      presignedPut,
+    });
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
-  // Upsert blob (ON CONFLICT DO NOTHING)
   await supabase
     .from('amuxc_blobs')
     .upsert(
@@ -171,7 +293,6 @@ export async function handleSyncUploadPrepare(caller, body) {
       { onConflict: 'team_id,content_hash', ignoreDuplicates: true }
     );
 
-  // Insert upload session (expires 1h from now)
   const expiresAt = new Date(Date.now() + 3600_000).toISOString();
   const { data: session, error: sessionErr } = await supabase
     .from('amuxc_upload_sessions')
@@ -194,37 +315,27 @@ export async function handleSyncUploadPrepare(caller, body) {
     return json(500, { error: `Failed to create upload session: ${sessionErr.message}` });
   }
 
-  // Check if blob is already uploaded (HEAD OSS)
   let requiresUpload = true;
-  let presignedPut = null;
+  let presignedPut: string | null = null;
 
-  const s3 = getS3Client();
   try {
-    const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET(), Key: ossKey }));
+    const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: ossKey }));
     if (head.ContentLength === size) {
       requiresUpload = false;
     }
-    // Blob exists but size mismatch — still require upload (will overwrite)
-  } catch (e) {
+  } catch (e: any) {
     if (e.$metadata?.httpStatusCode !== 404 && e.name !== 'NotFound' && e.Code !== 'NoSuchKey') {
       console.error('[sync/prepare] HEAD OSS error:', e.message);
-      // Non-fatal: proceed with presigned PUT
     }
-    // 404 → requiresUpload = true
   }
 
   if (requiresUpload) {
-    // Presigned PUT locked to key/method/Content-Length, TTL 15min
-    const putCmd = new PutObjectCommand({
-      Bucket: BUCKET(),
-      Key: ossKey,
-      ContentLength: size,
-    });
+    const putCmd = new PutObjectCommand({ Bucket: bucket, Key: ossKey, ContentLength: size });
     presignedPut = await getSignedUrl(s3 as any, putCmd, { expiresIn: 900 });
   }
 
   return json(200, {
-    uploadSessionId: session.id,
+    uploadSessionId: (session as any).id,
     ossKey,
     requiresUpload,
     presignedPut,
@@ -239,16 +350,72 @@ export async function handleSyncUploadPrepare(caller, body) {
  * @param {{ userId, teamId, actorId }} caller
  * @param {object} body - { uploadSessionId }
  */
-export async function handleSyncUploadComplete(caller, body) {
+export async function handleSyncUploadComplete(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { uploadSessionId } = body || {};
   if (!uploadSessionId) {
     return json(400, { error: 'uploadSessionId is required' });
   }
 
   const { teamId, actorId } = caller;
+  const s3 = resolveS3(deps);
+  const bucket = resolveBucket(deps);
+
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+
+    // We need to fetch the session first to get oss_key + size for HEAD check.
+    // The repo.completeUpload will re-fetch + lock inside the transaction.
+    const db = deps.db ?? getDb();
+    const [session] = await db
+      .select()
+      .from(amuxcUploadSessions)
+      .where(eq(amuxcUploadSessions.id, uploadSessionId as string))
+      .limit(1);
+
+    if (!session) return json(404, { error: 'upload session not found' });
+    if (session.teamId !== teamId) return json(403, { error: 'session does not belong to this team' });
+
+    // HEAD OSS verify
+    try {
+      const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: session.ossKey }));
+      if (head.ContentLength !== session.size) {
+        return json(422, {
+          error: 'BlobMissingOrSizeMismatch',
+          expected: session.size,
+          actual: head.ContentLength,
+        });
+      }
+    } catch (e: any) {
+      return json(422, { error: 'BlobMissingOrSizeMismatch', detail: e.message });
+    }
+
+    try {
+      const result = await repo.completeUpload(uploadSessionId as string, actorId);
+      return json(200, {
+        version:     result.version,
+        contentHash: result.contentHash,
+        changeSeq:   result.changeSeq,
+      });
+    } catch (e: any) {
+      if (e instanceof ApiError) {
+        if (e.statusCode === 409) return json(409, { reason: 'cas-mismatch', remoteVersion: undefined, remoteHash: undefined });
+        if (e.statusCode === 403) return json(403, { error: e.message });
+        if (e.statusCode === 410) return json(410, { error: e.message });
+        if (e.statusCode === 404) return json(404, { error: e.message });
+      }
+      console.error('[sync/complete] pg error:', e);
+      return json(500, { error: `complete failed: ${e.message}` });
+    }
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
-  // Fetch session (needed outside tx for OSS HEAD check)
   const { data: session, error: sessionErr } = await supabase
     .from('amuxc_upload_sessions')
     .select('*')
@@ -258,39 +425,32 @@ export async function handleSyncUploadComplete(caller, body) {
   if (sessionErr || !session) {
     return json(404, { error: 'upload session not found' });
   }
-  if (session.team_id !== teamId) {
+  if ((session as any).team_id !== teamId) {
     return json(403, { error: 'session does not belong to this team' });
   }
-  if (session.actor_id !== actorId) {
+  if ((session as any).actor_id !== actorId) {
     return json(403, { error: 'session does not belong to caller' });
   }
-  if (session.status !== 'pending') {
-    return json(410, { error: `upload session is ${session.status}` });
+  if ((session as any).status !== 'pending') {
+    return json(410, { error: `upload session is ${(session as any).status}` });
   }
-  if (new Date(session.expires_at) < new Date()) {
+  if (new Date((session as any).expires_at) < new Date()) {
     return json(410, { error: 'upload session has expired' });
   }
 
-  // Step 1 (outside tx): HEAD OSS — verify blob exists and size matches
-  const s3 = getS3Client();
   try {
-    const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET(), Key: session.oss_key }));
-    if (head.ContentLength !== session.size) {
+    const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: (session as any).oss_key }));
+    if (head.ContentLength !== (session as any).size) {
       return json(422, {
         error: 'BlobMissingOrSizeMismatch',
-        expected: session.size,
+        expected: (session as any).size,
         actual: head.ContentLength,
       });
     }
-  } catch (e) {
-    return json(422, {
-      error: 'BlobMissingOrSizeMismatch',
-      detail: e.message,
-    });
+  } catch (e: any) {
+    return json(422, { error: 'BlobMissingOrSizeMismatch', detail: e.message });
   }
 
-  // Atomically complete via SQL RPC (keeps multi-statement tx atomic)
-  // The RPC implements the full CAS transaction described in spec §3.3.
   const { data: rpcResult, error: rpcErr } = await supabase
     .rpc('amuxc_complete_upload', {
       p_session_id: uploadSessionId,
@@ -298,12 +458,10 @@ export async function handleSyncUploadComplete(caller, body) {
     });
 
   if (rpcErr) {
-    // Map errcode P0409 (custom) → 409 CAS conflict
     if (rpcErr.code === 'P0409' || rpcErr.message?.includes('cas-mismatch')) {
-      // Extract remote version/hash from the error detail/hint if present
       let remoteVersion, remoteHash;
       try {
-        const detail = JSON.parse(rpcErr.hint || rpcErr.details || '{}');
+        const detail = JSON.parse(rpcErr.hint || (rpcErr as any).details || '{}');
         remoteVersion = detail.remote_version;
         remoteHash    = detail.remote_hash;
       } catch { /* ignored */ }
@@ -319,11 +477,11 @@ export async function handleSyncUploadComplete(caller, body) {
     return json(500, { error: `complete failed: ${rpcErr.message}` });
   }
 
-  if (!rpcResult || rpcResult.length === 0) {
+  if (!rpcResult || (rpcResult as any[]).length === 0) {
     return json(500, { error: 'complete RPC returned no result' });
   }
 
-  const result = rpcResult[0];
+  const result = (rpcResult as any[])[0];
   return json(200, {
     version:     result.version,
     contentHash: result.content_hash,
@@ -339,13 +497,35 @@ export async function handleSyncUploadComplete(caller, body) {
  * @param {{ userId, teamId, actorId }} caller
  * @param {object} body - { teamId, contentHash }
  */
-export async function handleSyncDownload(caller, body) {
+export async function handleSyncDownload(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { contentHash } = body || {};
   if (!contentHash || typeof contentHash !== 'string') {
     return json(400, { error: 'contentHash is required' });
   }
 
   const { teamId } = caller;
+  const s3 = resolveS3(deps);
+  const bucket = resolveBucket(deps);
+
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+    const blob = await repo.download({ teamId, contentHash });
+
+    if (!blob) return json(404, { error: 'blob not found' });
+    if (!blob.verified) return json(404, { error: 'blob not yet verified (upload not completed)' });
+
+    const getCmd = new GetObjectCommand({ Bucket: bucket, Key: blob.ossKey });
+    const downloadUrl = await getSignedUrl(s3 as any, getCmd, { expiresIn: 900 });
+
+    return json(200, { downloadUrl, size: blob.size, ttlSec: 900 });
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
   const { data: blob, error } = await supabase
@@ -358,15 +538,14 @@ export async function handleSyncDownload(caller, body) {
   if (error || !blob) {
     return json(404, { error: 'blob not found' });
   }
-  if (!blob.verified) {
+  if (!(blob as any).verified) {
     return json(404, { error: 'blob not yet verified (upload not completed)' });
   }
 
-  const s3 = getS3Client();
-  const getCmd = new GetObjectCommand({ Bucket: BUCKET(), Key: blob.oss_key });
+  const getCmd = new GetObjectCommand({ Bucket: bucket, Key: (blob as any).oss_key });
   const downloadUrl = await getSignedUrl(s3 as any, getCmd, { expiresIn: 900 });
 
-  return json(200, { downloadUrl, size: blob.size, ttlSec: 900 });
+  return json(200, { downloadUrl, size: (blob as any).size, ttlSec: 900 });
 }
 
 // ---------------------------------------------------------------------------
@@ -377,10 +556,14 @@ export async function handleSyncDownload(caller, body) {
  * @param {{ userId, teamId, actorId }} caller
  * @param {object} body - { teamId, path, parentVersion, nodeId }
  */
-export async function handleSyncDelete(caller, body) {
+export async function handleSyncDelete(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { path, parentVersion, nodeId } = body || {};
 
-  const pathCheck = validateSyncPath(path);
+  const pathCheck = validateSyncPath(path as string);
   if (!pathCheck.ok) {
     return json(422, { error: pathCheck.message, code: pathCheck.code });
   }
@@ -389,6 +572,31 @@ export async function handleSyncDelete(caller, body) {
   }
 
   const { teamId, actorId } = caller;
+
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+
+    try {
+      const result = await repo.completeDelete({
+        teamId,
+        path: path as string,
+        parentVersion,
+        actorId,
+        nodeId: (nodeId as string | undefined) ?? null,
+      });
+      return json(200, { version: result.version, changeSeq: result.changeSeq });
+    } catch (e: any) {
+      if (e instanceof ApiError) {
+        if (e.statusCode === 409) return json(409, { reason: 'cas-mismatch', remoteVersion: undefined, remoteHash: undefined });
+        if (e.statusCode === 404) return json(404, { error: 'file not found' });
+      }
+      console.error('[sync/delete] pg error:', e);
+      return json(500, { error: `delete failed: ${e.message}` });
+    }
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
   const { data: rpcResult, error: rpcErr } = await supabase
@@ -404,7 +612,7 @@ export async function handleSyncDelete(caller, body) {
     if (rpcErr.code === 'P0409' || rpcErr.message?.includes('cas-mismatch')) {
       let remoteVersion, remoteHash;
       try {
-        const detail = JSON.parse(rpcErr.hint || rpcErr.details || '{}');
+        const detail = JSON.parse(rpcErr.hint || (rpcErr as any).details || '{}');
         remoteVersion = detail.remote_version;
         remoteHash    = detail.remote_hash;
       } catch { /* ignored */ }
@@ -417,11 +625,11 @@ export async function handleSyncDelete(caller, body) {
     return json(500, { error: `delete failed: ${rpcErr.message}` });
   }
 
-  if (!rpcResult || rpcResult.length === 0) {
+  if (!rpcResult || (rpcResult as any[]).length === 0) {
     return json(500, { error: 'delete RPC returned no result' });
   }
 
-  const result = rpcResult[0];
+  const result = (rpcResult as any[])[0];
   return json(200, {
     version:   result.version,
     changeSeq: result.change_seq,
@@ -436,7 +644,11 @@ export async function handleSyncDelete(caller, body) {
  * @param {{ userId, teamId, actorId }} caller
  * @param {object} query - { teamId, path, limit?, cursor? }
  */
-export async function handleSyncVersions(caller, query) {
+export async function handleSyncVersions(
+  caller: { userId: string; teamId: string; actorId: string },
+  query: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { path, limit = 50, cursor = null } = query || {};
 
   if (!path || typeof path !== 'string') {
@@ -444,9 +656,42 @@ export async function handleSyncVersions(caller, query) {
   }
 
   const { teamId } = caller;
+
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+
+    const pageLimit = Math.min(Math.max(1, Number(limit) || 50), 500);
+    const result = await repo.versions({
+      teamId,
+      path,
+      cursor: cursor as string | undefined,
+      limit: pageLimit,
+    });
+
+    if (result.versions.length === 0) {
+      // versions() returns [] if file not found — disambiguate with not found
+      return json(404, { error: 'file not found' });
+    }
+
+    const versions = result.versions.map(r => ({
+      version:          r.version,
+      parentVersion:    r.parentVersion,
+      contentHash:      r.contentHash,
+      size:             r.size,
+      deleted:          r.deleted,
+      createdAt:        r.createdAt,
+      createdBy:        r.createdBy,
+      createdByNodeId:  r.createdByNodeId,
+      message:          null, // pg schema doesn't store message field yet
+    }));
+
+    return json(200, { versions, nextCursor: result.nextCursor ?? null });
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
-  // Find the file row
   const { data: fileRow, error: fileErr } = await supabase
     .from('amuxc_files')
     .select('id')
@@ -460,12 +705,11 @@ export async function handleSyncVersions(caller, query) {
 
   const pageLimit = Math.min(Math.max(1, Number(limit) || 50), 500);
 
-  // Decode cursor: { version, id }
-  let cursorVersion = 2147483647; // max int
+  let cursorVersion = 2147483647;
   let cursorId      = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
   if (cursor) {
     try {
-      const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
+      const decoded = JSON.parse(Buffer.from(cursor as string, 'base64').toString('utf8'));
       cursorVersion = decoded.version;
       cursorId      = decoded.id;
     } catch {
@@ -476,7 +720,7 @@ export async function handleSyncVersions(caller, query) {
   const { data: rows, error } = await supabase
     .from('amuxc_file_versions')
     .select('id, version, parent_version, content_hash, size, deleted, created_at, created_by, created_by_node_id, message')
-    .eq('file_id', fileRow.id)
+    .eq('file_id', (fileRow as any).id)
     .or(`version.lt.${cursorVersion},and(version.eq.${cursorVersion},id.lt.${cursorId})`)
     .order('version', { ascending: false })
     .order('id', { ascending: false })
@@ -486,8 +730,8 @@ export async function handleSyncVersions(caller, query) {
     return json(500, { error: `versions query failed: ${error.message}` });
   }
 
-  const hasMore = rows.length > pageLimit;
-  const versions = (hasMore ? rows.slice(0, pageLimit) : rows).map(r => ({
+  const hasMore = (rows as any[]).length > pageLimit;
+  const versions = (hasMore ? (rows as any[]).slice(0, pageLimit) : (rows as any[])).map(r => ({
     version:          r.version,
     parentVersion:    r.parent_version,
     contentHash:      r.content_hash,
@@ -499,9 +743,9 @@ export async function handleSyncVersions(caller, query) {
     message:          r.message,
   }));
 
-  let nextCursor = null;
+  let nextCursor: string | null = null;
   if (hasMore) {
-    const last = rows[pageLimit - 1];
+    const last = (rows as any[])[pageLimit - 1];
     nextCursor = Buffer.from(JSON.stringify({ version: last.version, id: last.id })).toString('base64');
   }
 
@@ -512,31 +756,48 @@ export async function handleSyncVersions(caller, query) {
 // POST /sync/set-mode — owner-only sync_mode switch (Tranche 5)
 // ---------------------------------------------------------------------------
 /**
- * Switch a team's sync_mode via the set_team_sync_mode Supabase RPC.
- * The RPC enforces owner-only access; we just proxy the PG error codes to HTTP.
- *
+ * Switch a team's sync_mode.
  * Body: { teamId: string, mode: 'git' | 'oss' }
- * Returns: { mode: string } | 400 | 401 | 403
+ * Returns: { mode: string } | 400 | 403
  */
-export async function handleSyncSetMode(userId, body) {
+export async function handleSyncSetMode(
+  userId: string,
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { teamId, mode } = body ?? {};
   if (!teamId) return json(400, { error: 'teamId is required' });
   if (!mode) return json(400, { error: 'mode is required' });
   if (mode !== 'git' && mode !== 'oss') return json(400, { error: `invalid mode: ${mode}` });
 
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const db = deps.db ?? getDb();
+    const repo = resolveRepo(deps);
+
+    // Resolve userId → actorId (ownership checked inside repo)
+    const actorId = await resolveActorForTeam(db, userId, teamId as string);
+    if (!actorId) return json(403, { error: 'caller is not a member of this team' });
+
+    try {
+      await repo.setTeamSyncMode(teamId as string, mode as 'git' | 'oss', actorId);
+      return json(200, { mode });
+    } catch (e: any) {
+      if (e instanceof ApiError) {
+        if (e.statusCode === 400) return json(400, { error: e.message });
+        if (e.statusCode === 403) return json(403, { error: e.message });
+      }
+      return json(500, { error: e.message });
+    }
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
 
-  // We need to call the RPC as the authenticated user so ownership checks work.
-  // The RPC is SECURITY DEFINER so it bypasses the guard trigger, but the
-  // owner check inside the function uses app.current_actor_id_for_team which
-  // reads request.jwt.claims — we set those via the service client + rpc context.
-  // Simpler: call via service-role; the RPC reads team_members.role to verify.
   const { data, error } = await supabase
     .rpc('set_team_sync_mode', { p_team_id: teamId, p_mode: mode });
 
   if (error) {
-    // PG errcode 22023 → invalid mode (shouldn't reach here, validated above)
-    // PG errcode 42501 → not owner / not member
     const code = error.code;
     if (code === '22023') return json(400, { error: error.message });
     if (code === '42501') return json(403, { error: error.message });
@@ -550,15 +811,31 @@ export async function handleSyncSetMode(userId, body) {
 // POST /sync/team-mode — read team sync_mode (Tranche 5)
 // ---------------------------------------------------------------------------
 /**
- * Return the sync_mode for a team (read-only, no ownership required).
- *
+ * Return the sync_mode for a team (read-only).
  * Body: { teamId: string }
  * Returns: { mode: 'git' | 'oss' | null }
  */
-export async function handleSyncTeamMode(userId, body) {
+export async function handleSyncTeamMode(
+  userId: string,
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
   const { teamId } = body ?? {};
   if (!teamId) return json(400, { error: 'teamId is required' });
 
+  if (resolveBackendKind() === 'postgres') {
+    // --- postgres path ---
+    const repo = resolveRepo(deps);
+
+    try {
+      const mode = await repo.getTeamSyncMode(teamId as string);
+      return json(200, { mode });
+    } catch (e: any) {
+      return json(500, { error: e.message });
+    }
+  }
+
+  // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .rpc('get_team_sync_mode', { p_team_id: teamId });
