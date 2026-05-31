@@ -1968,7 +1968,7 @@ export function createSupabaseAuthRepository(options) {
     async signInOtp({ email, phone, options }) {
       // GoTrue /otp accepts either `email` or `phone` (E.164). For phone the
       // `channel` option ("sms" | "whatsapp") selects delivery; default sms.
-      const body = {};
+      const body: Record<string, any> = {};
       if (typeof email === "string" && email.length > 0) body.email = email;
       if (typeof phone === "string" && phone.length > 0) {
         body.phone = phone;
@@ -1992,7 +1992,7 @@ export function createSupabaseAuthRepository(options) {
 
     async verifyOtp({ email, phone, token, type = "email" }) {
       // For phone OTP, GoTrue expects { phone, token, type: "sms" }.
-      const body = { token, type };
+      const body: Record<string, any> = { token, type };
       if (typeof email === "string" && email.length > 0) body.email = email;
       if (typeof phone === "string" && phone.length > 0) body.phone = phone;
       return goTrueRequest({

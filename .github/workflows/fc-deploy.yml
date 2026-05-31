@@ -71,7 +71,13 @@ jobs:
             -a default -f
 
       - name: Install function dependencies
-        run: npm install --omit=dev
+        run: npm install
+
+      - name: Build TypeScript (-> dist/)
+        run: npm run build
+
+      - name: Prune dev dependencies before packaging
+        run: npm prune --omit=dev
 
       - name: Deploy
         run: s deploy -y
