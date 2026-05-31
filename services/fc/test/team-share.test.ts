@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
 
-function makeRepo(overrides = {}) {
+function makeRepo(overrides: any = {}) {
   const calls = [];
   const repo = {
     calls,

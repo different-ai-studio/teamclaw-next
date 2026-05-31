@@ -1,7 +1,7 @@
 // services/fc/test/push-dispatch.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dispatchPush } from '../lib/push-dispatch.mjs';
+import { dispatchPush } from '../src/lib/push-dispatch.js';
 
 function makeDeps({ recipients, claim = true, mqtt = null }) {
   const sent = [];

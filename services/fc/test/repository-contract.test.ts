@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
-import { runBusinessRepositoryContract } from "../lib/repository-contract.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
+import { runBusinessRepositoryContract } from "../src/lib/repository-contract.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -71,13 +71,13 @@ function contractRepo() {
     { id: "workspace-1", teamId: "team-1", name: "Alpha", slug: null, archived: false, metadata: null, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
   ];
   const ideaStore = fixture("ideas-list.json").items.slice();
-  const configStore = {};
-  const messageStore = fixture("message-list.json").items.slice();
-  const sessionStore = fixture("session-list.json").items.slice().map(s => ({ ...s, participants: [{ sessionId: s.id, actorId: "actor-1", role: "owner", joinedAt: s.createdAt }] }));
-  const gatewayBindings = {};
-  const attachmentStore = {};
-  const runtimeStore = {};
-  const shareModeStore = {};
+  const configStore: Record<string, any> = {};
+  const messageStore: any[] = fixture("message-list.json").items.slice();
+  const sessionStore: any[] = fixture("session-list.json").items.slice().map((s: any) => ({ ...s, participants: [{ sessionId: s.id, actorId: "actor-1", role: "owner", joinedAt: s.createdAt }] }));
+  const gatewayBindings: Record<string, any> = {};
+  const attachmentStore: Record<string, any> = {};
+  const runtimeStore: Record<string, any> = {};
+  const shareModeStore: Record<string, any> = {};
   const feedbackStore = [];
   const reportStore = [];
   const skillStore = [];
@@ -458,7 +458,7 @@ function contractRepo() {
       assert.equal(teamId, "team-1");
       assert.ok(Array.isArray(ideaIds));
     },
-    async listShortcuts(teamId, { parentId } = {}) {
+    async listShortcuts(teamId: any, { parentId }: any = {}) {
       let items = shortcutStore.filter(s => s.teamId === teamId);
       if (parentId !== undefined) {
         items = items.filter(s => s.parentId === parentId);
@@ -508,7 +508,7 @@ function contractRepo() {
       attachmentStore[`${targetBucket}/${path}`] = { mime, bytes };
       return { path, url: `https://supabase.example.com/storage/v1/object/public/${targetBucket}/${path}` };
     },
-    async downloadAttachment(path, { bucket } = {}) {
+    async downloadAttachment(path: any, { bucket }: any = {}) {
       const targetBucket = bucket || "attachments";
       const entry = attachmentStore[`${targetBucket}/${path}`];
       if (!entry) return null;
@@ -519,8 +519,8 @@ function contractRepo() {
       runtimeStore[id] = body;
       return { id };
     },
-    async getAgentRuntime({ sessionId, runtimeId, backendSessionId }) {
-      const entry = Object.values(runtimeStore).find(r =>
+    async getAgentRuntime({ sessionId, runtimeId, backendSessionId }: any) {
+      const entry: any = Object.values(runtimeStore).find((r: any) =>
         r.sessionId === sessionId &&
         (runtimeId === undefined || r.runtimeId === runtimeId) &&
         (backendSessionId === undefined || r.backendSessionId === backendSessionId)

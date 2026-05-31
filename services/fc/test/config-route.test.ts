@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
-import { buildBootstrapConfig } from "../lib/routes/config.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
+import { buildBootstrapConfig } from "../src/lib/routes/config.js";
 
-function withEnv(overrides, fn) {
-  const restore = {};
+function withEnv(overrides: Record<string, any>, fn: () => any) {
+  const restore: Record<string, any> = {};
   for (const [key, value] of Object.entries(overrides)) {
     restore[key] = process.env[key];
     if (value === undefined) delete process.env[key];

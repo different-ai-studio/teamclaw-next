@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { logSyncEvent } from '../lib/sync-log.mjs';
+import { logSyncEvent } from '../src/lib/sync-log.js';
 
 /**
  * Unit tests for logSyncEvent (spec §5.4.1).

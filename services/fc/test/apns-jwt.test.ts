@@ -1,7 +1,7 @@
 // services/fc/test/apns-jwt.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApnsJwtCache } from '../lib/apns-jwt.mjs';
+import { createApnsJwtCache } from '../src/lib/apns-jwt.js';
 
 // ES256 dev key for tests only — DO NOT use in production.
 const TEST_P8 = `-----BEGIN PRIVATE KEY-----

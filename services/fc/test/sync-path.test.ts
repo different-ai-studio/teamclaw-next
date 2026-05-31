@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateSyncPath, ALLOWED_PREFIXES } from '../lib/sync-path.mjs';
+import { validateSyncPath, ALLOWED_PREFIXES } from '../src/lib/sync-path.js';
 
 // ---------------------------------------------------------------------------
 // Allowed paths (should all return { ok: true })

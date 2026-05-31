@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
-import { createSupabaseAuthRepository } from "../lib/supabase-repo.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
+import { createSupabaseAuthRepository } from "../src/lib/supabase-repo.js";
 
 function stubGoTrue(responses) {
   const calls = [];

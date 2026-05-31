@@ -8,11 +8,11 @@ import {
   normalizeError,
   parseJsonBody,
   resolveRequestId,
-} from "../lib/http-utils.mjs";
+} from "../src/lib/http-utils.js";
 
 test("resolveRequestId reuses only log-safe request ids", () => {
   assert.equal(resolveRequestId({ "X-Request-Id": "abcDEF_123-xyz" }), "abcDEF_123-xyz");
-  assert.equal(resolveRequestId({ "X-Request-Id": "../bad" }, () => "generated-id-123"), "generatedid123");
+  assert.equal(resolveRequestId({ "X-Request-Id": "../bad" }, () => "generated-id-123" as any), "generatedid123");
   assert.equal(resolveRequestId({}, () => "01234567-89ab-cdef-0123-456789abcdef"), "0123456789abcdef0123456789abcdef");
 });
 
@@ -36,7 +36,7 @@ test("parseJsonBody decodes plain and base64 json bodies", () => {
 });
 
 test("parseJsonBody returns invalid_json for malformed bodies", () => {
-  assert.throws(() => parseJsonBody({ body: "{" }), (err) => {
+  assert.throws(() => parseJsonBody({ body: "{" }), (err: any) => {
     assert.equal(err.code, "invalid_json");
     assert.equal(err.statusCode, 400);
     return true;

@@ -15,10 +15,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { syncGetQueryToBody } from '../index.mjs';
+import { syncGetQueryToBody } from '../src/index.js';
 
 test('reads teamId & path from queryStringParameters (FC 2.0)', () => {
-  const body = syncGetQueryToBody({
+  const body: any = syncGetQueryToBody({
     queryStringParameters: { teamId: 'team-123', path: 'knowledge/托尔斯泰.md', cursor: '10' },
   });
   assert.equal(body.teamId, 'team-123');
@@ -27,7 +27,7 @@ test('reads teamId & path from queryStringParameters (FC 2.0)', () => {
 });
 
 test('reads teamId & path from queryParameters (FC 3.0)', () => {
-  const body = syncGetQueryToBody({
+  const body: any = syncGetQueryToBody({
     queryParameters: { teamId: 'team-456', path: 'a/b.md' },
   });
   assert.equal(body.teamId, 'team-456');
@@ -35,7 +35,7 @@ test('reads teamId & path from queryParameters (FC 3.0)', () => {
 });
 
 test('falls back to rawQueryString when no structured params', () => {
-  const body = syncGetQueryToBody({
+  const body: any = syncGetQueryToBody({
     rawQueryString: 'teamId=team-789&path=c.md',
   });
   assert.equal(body.teamId, 'team-789');
@@ -43,7 +43,7 @@ test('falls back to rawQueryString when no structured params', () => {
 });
 
 test('falls back to a query string embedded in rawPath', () => {
-  const body = syncGetQueryToBody({
+  const body: any = syncGetQueryToBody({
     rawPath: '/sync/versions?teamId=team-abc&path=d.md',
   });
   assert.equal(body.teamId, 'team-abc');

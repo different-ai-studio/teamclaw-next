@@ -1,7 +1,7 @@
 // services/fc/test/push-filters.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inDnd, isForegroundDevice, truncate } from '../lib/push-filters.mjs';
+import { inDnd, isForegroundDevice, truncate } from '../src/lib/push-filters.js';
 
 test('inDnd: disabled when start is null', () => {
   assert.equal(inDnd({ dnd_start_min: null }, new Date()), false);

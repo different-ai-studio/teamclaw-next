@@ -1,7 +1,7 @@
 // services/fc/test/apns.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApnsClient } from '../lib/apns.mjs';
+import { createApnsClient } from '../src/lib/apns.js';
 
 function fakeJwt() { return { async get() { return 'jwt-token'; } }; }
 

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
-import { createSupabaseAuthRepository } from "../lib/supabase-repo.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
+import { createSupabaseAuthRepository } from "../src/lib/supabase-repo.js";
 
 function authDeps(fetchImpl) {
   const auth = createSupabaseAuthRepository({
@@ -26,7 +26,7 @@ test("GET /v1/auth/oauth/google/authorize 302s to GoTrue authorize", async () =>
     body: null,
   }, deps);
   assert.equal(res.statusCode, 302);
-  const loc = res.headers.Location;
+  const loc = (res.headers as any).Location;
   assert.ok(loc.startsWith("https://example.supabase.co/auth/v1/authorize?"));
   const u = new URL(loc);
   assert.equal(u.searchParams.get("provider"), "google");

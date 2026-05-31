@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
-import { ApiError } from "../lib/http-utils.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
+import { ApiError } from "../src/lib/http-utils.js";
 
 function bearerHeaders() {
   return { Authorization: "Bearer test-token", "X-Request-Id": "req_litellm_test" };
 }
 
-function makeRepo({ result, error } = {}) {
+function makeRepo({ result, error }: any = {}) {
   const calls = [];
   return {
     calls,

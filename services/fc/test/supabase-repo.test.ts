@@ -4,7 +4,7 @@ import {
   createSupabaseBusinessRepository,
   createSupabaseAuthRepository,
   publishableKeyFromEnv,
-} from "../lib/supabase-repo.mjs";
+} from "../src/lib/supabase-repo.js";
 
 test("createSupabaseBusinessRepository creates caller-scoped Supabase client", async () => {
   const calls = [];
@@ -174,7 +174,7 @@ test("repository throws upstream errors without hiding Supabase error codes", as
     },
   }));
 
-  await assert.rejects(() => repo.listSessions(), (err) => {
+  await assert.rejects(() => repo.listSessions(), (err: any) => {
     assert.equal(err.code, "42501");
     return true;
   });
@@ -216,7 +216,7 @@ test("createSupabaseAuthRepository refreshAccessToken throws on auth failure", a
 
   await assert.rejects(
     () => repo.refreshAccessToken({ refreshToken: "bad-rt" }),
-    (err) => {
+    (err: any) => {
       assert.equal(err.statusCode, 401);
       assert.equal(err.code, "missing_auth");
       return true;
@@ -383,7 +383,7 @@ test("setupLiteLlm throws 503 when provisioner returns null", async () => {
   );
   await assert.rejects(
     () => repo.setupLiteLlm("team-5"),
-    (err) => err.code === "litellm_unavailable",
+    (err: any) => err.code === "litellm_unavailable",
   );
 });
 
@@ -497,7 +497,7 @@ test("upsertAgentRuntime throws 400 missing_team when team cannot be resolved", 
         runtimeId: "rtid-3",
         backendSessionId: "bsid-3",
       }),
-    (err) => err.statusCode === 400 && err.code === "missing_team",
+    (err: any) => err.statusCode === 400 && err.code === "missing_team",
   );
 });
 
@@ -530,7 +530,7 @@ function fakeSupabase({
   };
 }
 
-function createTableQuery(table, calls, data, error, hooks = {}) {
+function createTableQuery(table: any, calls: any, data: any, error: any, hooks: any = {}) {
   const { onInsert, onUpsert, upsertData } = hooks;
   return {
     select(columns) {

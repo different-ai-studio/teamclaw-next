@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleBusinessApiRequest } from "../lib/business-api.mjs";
+import { handleBusinessApiRequest } from "../src/lib/business-api.js";
 
 function makeRepo(overrides = {}) {
   const calls = [];
@@ -27,7 +27,7 @@ function makeRepo(overrides = {}) {
   };
 }
 
-async function request(repo, { method, path, body, headers = {}, query = {} }) {
+async function request(repo: any, { method, path, body, headers = {}, query = {} }: { method: any; path: any; body?: any; headers?: any; query?: any }) {
   return handleBusinessApiRequest(
     {
       httpMethod: method,

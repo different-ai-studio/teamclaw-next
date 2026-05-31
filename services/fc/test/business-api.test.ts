@@ -4,7 +4,7 @@ import {
   decodeCursor,
   encodeCursor,
   handleBusinessApiRequest,
-} from "../lib/business-api.mjs";
+} from "../src/lib/business-api.js";
 
 test("handleBusinessApiRequest routes list sessions with bearer-scoped repository", async () => {
   const repo = fakeRepo({
@@ -1500,7 +1500,7 @@ test("GET /v1/attachments/:path returns binary response", async () => {
     headers: { Authorization: "Bearer token" },
   }, { createRepository: () => repo });
   assert.equal(response.statusCode, 200);
-  assert.equal(response.isBase64Encoded, true);
+  assert.equal((response as any).isBase64Encoded, true);
   assert.equal(response.headers["Content-Type"], "image/png");
   const decoded = Buffer.from(response.body, "base64");
   assert.deepEqual(decoded, Buffer.from("fake-image-bytes"));
