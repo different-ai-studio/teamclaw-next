@@ -17,25 +17,35 @@ export function registerAuth(router) {
 
   router.post("/v1/auth/signin-otp", { auth: "none" }, async (ctx) => {
     const body = ctx.json ?? {};
-    if (!body.email || typeof body.email !== "string") {
-      throw new ApiError(400, "validation_failed", "email is required");
+    const hasEmail = typeof body.email === "string" && body.email.length > 0;
+    const hasPhone = typeof body.phone === "string" && body.phone.length > 0;
+    if (!hasEmail && !hasPhone) {
+      throw new ApiError(400, "validation_failed", "email or phone is required");
     }
-    const out = await ctx.repository.signInOtp({ email: body.email, options: body.options });
+    const out = await ctx.repository.signInOtp({
+      email: hasEmail ? body.email : undefined,
+      phone: hasPhone ? body.phone : undefined,
+      options: body.options,
+    });
     return { body: out };
   });
 
   router.post("/v1/auth/verify-otp", { auth: "none" }, async (ctx) => {
     const body = ctx.json ?? {};
-    if (!body.email || typeof body.email !== "string") {
-      throw new ApiError(400, "validation_failed", "email is required");
+    const hasEmail = typeof body.email === "string" && body.email.length > 0;
+    const hasPhone = typeof body.phone === "string" && body.phone.length > 0;
+    if (!hasEmail && !hasPhone) {
+      throw new ApiError(400, "validation_failed", "email or phone is required");
     }
     if (!body.token || typeof body.token !== "string") {
       throw new ApiError(400, "validation_failed", "token is required");
     }
+    // GoTrue verify type defaults to "email"; phone OTP must pass "sms".
     const out = await ctx.repository.verifyOtp({
-      email: body.email,
+      email: hasEmail ? body.email : undefined,
+      phone: hasPhone ? body.phone : undefined,
       token: body.token,
-      type: body.type ?? "email",
+      type: body.type ?? (hasPhone ? "sms" : "email"),
     });
     return { body: out };
   });

@@ -13,6 +13,12 @@ resources:
       timeout: 30
       memorySize: 256
       logConfig: auto
+      internetAccess: true
+      vpcConfig:
+        vpcId: vpc-wz96ujjns2sochtdj0rav
+        securityGroupId: sg-wz95jypmeanqrkpy4vi8
+        vSwitchIds:
+          - vsw-wz9ecwto44b29foo8id9r
       code: ./
       environmentVariables:
         ACCESS_KEY_ID: ${env('ACCESS_KEY_ID')}

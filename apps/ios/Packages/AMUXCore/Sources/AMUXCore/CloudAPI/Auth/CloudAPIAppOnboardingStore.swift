@@ -140,6 +140,24 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         }
     }
 
+    public func sendPhoneOTP(phone: String) async throws {
+        await ensureStarted()
+        // GoTrue sends an SMS code for the E.164 phone; FC defaults channel sms.
+        try await auth.postVoid(
+            "/v1/auth/signin-otp",
+            body: PhoneOTPRequest(phone: phone, options: .init(shouldCreateUser: true))
+        )
+    }
+
+    public func verifyPhoneOTP(phone: String, token: String) async throws {
+        await ensureStarted()
+        let g: GoTrueSession = try await auth.post(
+            "/v1/auth/verify-otp",
+            body: VerifyPhoneOTPRequest(phone: phone, token: token, type: "sms")
+        )
+        try await store(g)
+    }
+
     public func signInWithAppleCredential(idToken: String, nonce: String) async throws {
         await ensureStarted()
         let g: GoTrueSession = try await auth.post(
@@ -420,6 +438,20 @@ private struct OTPRequest: Encodable, Sendable {
 
 private struct VerifyOTPRequest: Encodable, Sendable {
     let email: String
+    let token: String
+    let type: String
+}
+
+private struct PhoneOTPRequest: Encodable, Sendable {
+    let phone: String
+    let options: Options
+    struct Options: Encodable, Sendable {
+        let shouldCreateUser: Bool
+    }
+}
+
+private struct VerifyPhoneOTPRequest: Encodable, Sendable {
+    let phone: String
     let token: String
     let type: String
 }

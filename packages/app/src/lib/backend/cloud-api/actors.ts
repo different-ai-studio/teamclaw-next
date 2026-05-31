@@ -122,12 +122,12 @@ export function createActorsModule(client: CloudApiClient): ActorsBackend {
       });
     },
     async updateAgentDefaults(input) {
-      await client.patch<void>(`/v1/agents/${encodeURIComponent(input.agentId)}/defaults`, {
-        defaultAgentType: input.defaultAgentType ?? null,
-        supportedAgentTypes: input.agentTypes ?? null,
-        agentKind: input.agentKind ?? null,
-        defaultWorkspaceId: input.defaultWorkspaceId ?? null,
-      });
+      const body: Record<string, unknown> = {};
+      if (input.defaultAgentType !== undefined) body.defaultAgentType = input.defaultAgentType;
+      if (input.agentTypes !== undefined) body.supportedAgentTypes = input.agentTypes;
+      if (input.agentKind !== undefined) body.agentKind = input.agentKind;
+      if (input.defaultWorkspaceId !== undefined) body.defaultWorkspaceId = input.defaultWorkspaceId;
+      await client.patch<void>(`/v1/agents/${encodeURIComponent(input.agentId)}/defaults`, body);
     },
     async listAgentAccess(agentId) {
       const out = await client.get<{ items: CloudAgentAccess[] }>(`/v1/agents/${encodeURIComponent(agentId)}/access`);

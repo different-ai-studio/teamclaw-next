@@ -86,7 +86,7 @@ test("POST /v1/auth/signin-otp surfaces 422 invalid email", async () => {
   assert.equal(body.error.code, "validation_failed");
 });
 
-test("POST /v1/auth/signin-otp rejects missing email", async () => {
+test("POST /v1/auth/signin-otp rejects missing email and phone", async () => {
   const stub = stubGoTrue({});
   const res = await handleBusinessApiRequest({
     httpMethod: "POST",
@@ -95,6 +95,23 @@ test("POST /v1/auth/signin-otp rejects missing email", async () => {
     body: "{}",
   }, authDeps(stub));
   assert.equal(res.statusCode, 400);
+});
+
+test("POST /v1/auth/signin-otp forwards phone with sms channel to /otp", async () => {
+  const stub = stubGoTrue({
+    "POST /auth/v1/otp": () => new Response(JSON.stringify({}), { status: 200 }),
+  });
+  const res = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/auth/signin-otp",
+    headers: {},
+    body: JSON.stringify({ phone: "+8613800138000" }),
+  }, authDeps(stub));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(stub.calls[0].init.body), {
+    phone: "+8613800138000",
+    channel: "sms",
+  });
 });
 
 test("POST /v1/auth/verify-otp proxies email+token+type", async () => {
@@ -117,6 +134,39 @@ test("POST /v1/auth/verify-otp proxies email+token+type", async () => {
     token: "123456",
     type: "email",
   });
+});
+
+test("POST /v1/auth/verify-otp proxies phone with default sms type", async () => {
+  const stub = stubGoTrue({
+    "POST /auth/v1/verify": () => new Response(JSON.stringify({
+      access_token: "at",
+      refresh_token: "rt",
+      user: { id: "u" },
+    }), { status: 200 }),
+  });
+  const res = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/auth/verify-otp",
+    headers: {},
+    body: JSON.stringify({ phone: "+8613800138000", token: "123456" }),
+  }, authDeps(stub));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(stub.calls[0].init.body), {
+    token: "123456",
+    type: "sms",
+    phone: "+8613800138000",
+  });
+});
+
+test("POST /v1/auth/verify-otp rejects missing email and phone", async () => {
+  const stub = stubGoTrue({});
+  const res = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/auth/verify-otp",
+    headers: {},
+    body: JSON.stringify({ token: "123456" }),
+  }, authDeps(stub));
+  assert.equal(res.statusCode, 400);
 });
 
 test("POST /v1/auth/signout requires bearer and forwards to /logout", async () => {

@@ -520,4 +520,47 @@ describe('startAgentRuntimesAsync', () => {
       }),
     )
   })
+
+  it('returns failures when runtimeStart is rejected', async () => {
+    mockTables({
+      runtimes: [],
+      actors: [{ id: 'remote-agent', agent_types: ['opencode'], default_agent_type: 'opencode' }],
+    })
+    mockRuntimeStart.mockResolvedValueOnce({
+      accepted: false,
+      runtimeId: '',
+      sessionId: 'sess-1',
+      rejectedReason: 'daemon busy',
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    const failures = await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['remote-agent'],
+    })
+
+    expect(failures).toEqual([
+      { agentActorId: 'remote-agent', reason: 'daemon busy' },
+    ])
+  })
+
+  it('returns failures when runtimeStart throws (e.g. RPC timeout)', async () => {
+    mockTables({
+      runtimes: [],
+      actors: [{ id: 'remote-agent', agent_types: ['opencode'], default_agent_type: 'opencode' }],
+    })
+    mockRuntimeStart.mockRejectedValueOnce(new Error('RPC timeout'))
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    const failures = await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['remote-agent'],
+    })
+
+    expect(failures).toEqual([
+      { agentActorId: 'remote-agent', reason: 'RPC timeout' },
+    ])
+  })
 })
