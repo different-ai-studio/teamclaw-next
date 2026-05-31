@@ -1,4 +1,5 @@
 import { pgEnum, pgTable, uuid, text, timestamp, boolean, bigint, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const teamShareMode = pgEnum("team_share_mode", ["oss", "managed_git", "custom_git"]);
 
@@ -26,7 +27,7 @@ export const actors = pgTable("actors", {
   userId: uuid("user_id"),
   invitedByActorId: uuid("invited_by_actor_id"),
 }, (t) => ({
-  teamUserIdx: uniqueIndex("actors_team_user_idx").on(t.teamId, t.userId),
+  teamUserIdx: uniqueIndex("actors_team_user_idx").on(t.teamId, t.userId).where(sql`"user_id" IS NOT NULL`),
 }));
 
 export const members = pgTable("members", {

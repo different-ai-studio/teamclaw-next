@@ -2,7 +2,6 @@ import { betterAuth } from "better-auth";
 import { jwt, bearer, anonymous, emailOTP, genericOAuth } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb } from "../db/client.js";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import * as schema from "../db/schema/index.js";
 import { sendOtpEmail } from "./otp-delivery.js";
 
@@ -15,9 +14,7 @@ function build() {
   return betterAuth({
     baseURL,
     secret,
-    // schema cast to any: Better-Auth tables (user, session, account, etc.)
-    // are added to schema in Task 2. Until then this avoids a type error.
-    database: drizzleAdapter(getDb(), { provider: "pg", schema: schema as any }),
+    database: drizzleAdapter(getDb(), { provider: "pg", schema }),
     emailAndPassword: { enabled: true },
     socialProviders: {
       apple: { clientId: process.env.APPLE_CLIENT_ID ?? "", clientSecret: process.env.APPLE_CLIENT_SECRET ?? "" },
