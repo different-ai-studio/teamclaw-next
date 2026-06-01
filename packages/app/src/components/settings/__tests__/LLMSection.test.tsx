@@ -81,6 +81,7 @@ import { LLMSection } from '../LLMSection'
 describe('LLMSection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('fetch', vi.fn())
     mocks.providerState.providers = []
     mocks.providerState.providersLoading = false
     mocks.providerState.configuredProviders = []
@@ -162,6 +163,50 @@ describe('LLMSection', () => {
 
     await waitFor(() => {
       expect(mocks.providerState.completeOAuthCallback).toHaveBeenCalledWith('openai', 0, 'oa-code-123')
+    })
+  })
+
+  it('validates an OpenAI-compatible custom provider and fills returned models', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'gpt-4o' },
+          { id: 'gpt-4.1', name: 'GPT-4.1' },
+        ],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<LLMSection />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Custom' }))
+    fireEvent.change(screen.getByPlaceholderText('e.g. My OpenAI Proxy'), {
+      target: { value: 'OpenAI' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('e.g. https://api.openai.com/v1'), {
+      target: { value: 'https://api.openai.com/v1/' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('sk-...'), {
+      target: { value: 'sk-test' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Validate & fetch models' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.openai.com/v1/models',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer sk-test',
+          }),
+        }),
+      )
+    })
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-4o')).toBeTruthy()
+      expect(screen.getByDisplayValue('gpt-4.1')).toBeTruthy()
     })
   })
 })

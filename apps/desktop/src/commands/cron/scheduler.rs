@@ -535,8 +535,22 @@ impl CronScheduler {
                 .await
             {
                 Ok(Ok(r)) => {
+                    // Always stamp session_id first — even if the turn itself
+                    // failed the cloud session was already created, so the UI
+                    // "view session" button can navigate to the partial chat.
                     record.session_id = Some(r.session_id.clone());
                     self.persist_run_and_notify_ui(&record).await;
+
+                    if let Some(agent_err) = r.agent_error {
+                        // Session created but ACP turn failed (e.g. timeout).
+                        record.status = RunStatus::Failed;
+                        record.finished_at = Some(Utc::now());
+                        record.error = Some(format!("agent error: {agent_err}"));
+                        self.persist_run_and_notify_ui(&record).await;
+                        self.update_job_after_run(&job, started_at, &my_workspace)
+                            .await;
+                        return;
+                    }
                     r.text
                 }
                 Ok(Err(e)) => {

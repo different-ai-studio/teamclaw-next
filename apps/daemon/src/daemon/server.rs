@@ -843,7 +843,7 @@ impl DaemonServer {
             };
 
         // Drive the turn through the ACP runtime.
-        let text = {
+        let turn_result = {
             let mut mgr = self.agents.lock().await;
             mgr.send_prompt_and_await_reply(
                 &acp_sid,
@@ -851,13 +851,24 @@ impl DaemonServer {
                 Duration::from_secs(parsed.timeout_secs),
             )
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?
         };
 
-        Ok(serde_json::json!({
-            "text": text,
-            "session_id": remote_session_id,
-        }))
+        // Always return the cloud session_id so the desktop can stamp it into
+        // the run record even when the turn itself fails (ACP timeout, etc.).
+        // On success: { "text": "...", "session_id": "..." }
+        // On failure: { "session_id": "...", "agent_error": "..." }
+        // The caller wraps this in  { "ok": true/false, "result": ... }
+        // — the desktop amuxd_client reads "session_id" and optional "agent_error".
+        match turn_result {
+            Ok(text) => Ok(serde_json::json!({
+                "text": text,
+                "session_id": remote_session_id,
+            })),
+            Err(e) => Ok(serde_json::json!({
+                "session_id": remote_session_id,
+                "agent_error": e.to_string(),
+            })),
+        }
     }
 
     /// Persist a new per-platform channel config (parsed from the second line

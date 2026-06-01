@@ -145,6 +145,7 @@ export interface ProviderState {
   // custom providers (defined in the legacy workspace config) as "connected"
   // even after auth is removed, so we track them here and filter during refreshes.
   _disconnectedIds: Set<string>
+  _workspacePath: string | null
 
   // Actions
   refreshAuthMethods: () => Promise<void>
@@ -179,6 +180,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   currentModelKey: null,
   customProviderIds: [],
   _disconnectedIds: new Set<string>(),
+  _workspacePath: null,
 
   refreshAuthMethods: async () => {
     set({ authMethods: {} })
@@ -443,6 +445,16 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Initialize all data at once
   initAll: async () => {
+    const workspacePathAtStart = useWorkspaceStore.getState().workspacePath
+    const previousWorkspacePath = get()._workspacePath
+    const workspaceChanged =
+      previousWorkspacePath !== null && previousWorkspacePath !== workspacePathAtStart
+    if (workspaceChanged) {
+      set({ currentModelKey: null, _workspacePath: workspacePathAtStart ?? null })
+    } else if (previousWorkspacePath === null) {
+      set({ _workspacePath: workspacePathAtStart ?? null })
+    }
+
     await Promise.all([
       get().refreshProviders().catch(() => undefined),
       get().refreshConfiguredProviders().catch(() => undefined),
