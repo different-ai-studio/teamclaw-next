@@ -47,6 +47,11 @@ impl AcpHostPool {
         }
     }
 
+    /// Number of prewarmed hosts currently alive in the pool.
+    pub fn host_count(&self) -> usize {
+        self.hosts.len()
+    }
+
     /// Pre-warm one host per configured agent type (empty team env).
     pub async fn prewarm(&mut self, launch_configs: &HashMap<amux::AgentType, AgentLaunchConfig>) {
         for (&agent_type, launch) in launch_configs {
