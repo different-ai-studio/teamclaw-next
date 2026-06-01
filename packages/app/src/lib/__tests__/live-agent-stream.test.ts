@@ -34,16 +34,16 @@ describe("live agent stream event helpers", () => {
     expect(
       normalizeToolUseEvent({
         toolId: "tool-1",
-        toolName: "Bash",
+        toolName: "Execute ps command",
         toolKind: "execute",
         description: "Execute ps command",
-        params: { command: "ps aux" },
+        params: { command: "ps aux", description: "Execute ps command" },
       }),
     ).toEqual({
       toolId: "tool-1",
-      toolName: "Bash",
+      toolName: "bash",
       description: "Execute ps command",
-      params: { command: "ps aux" },
+      params: { command: "ps aux", description: "Execute ps command" },
       toolKind: "execute",
     });
   });

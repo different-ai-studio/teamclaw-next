@@ -18,6 +18,94 @@ import {
 } from "lucide-react";
 import type { ToolCall } from "@/stores/session";
 
+export type ToolCallLike = Pick<ToolCall, "name" | "toolKind" | "arguments">;
+
+/** ACP `tool_kind` → canonical UI route id (matches daemon `kind_to_canonical_name`). */
+export function toolNameFromKind(toolKind?: string): string {
+  switch (toolKind) {
+    case "execute":
+      return "bash";
+    case "search":
+      return "grep";
+    case "read":
+      return "read";
+    case "edit":
+      return "edit";
+    case "fetch":
+      return "web_search";
+    case "delete":
+      return "delete";
+    case "move":
+      return "move";
+    case "think":
+      return "think";
+    default:
+      return "";
+  }
+}
+
+function hasArgument(
+  args: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  return Boolean(args && key in args);
+}
+
+export function matchesWriteTool(toolCall: ToolCallLike): boolean {
+  return isWriteTool(toolCall.name);
+}
+
+export function matchesEditTool(toolCall: ToolCallLike): boolean {
+  if (toolCall.toolKind === "edit") return true;
+  return isEditTool(toolCall.name);
+}
+
+export function matchesReadTool(toolCall: ToolCallLike): boolean {
+  if (toolCall.toolKind === "read") return true;
+  return isReadTool(toolCall.name);
+}
+
+export function matchesCommandTool(toolCall: ToolCallLike): boolean {
+  if (toolCall.toolKind === "execute") return true;
+  return isCommandTool(toolCall.name);
+}
+
+export function matchesTodoTool(toolCall: ToolCallLike): boolean {
+  const args = toolCall.arguments as Record<string, unknown> | undefined;
+  if (hasArgument(args, "todos")) return true;
+  return isTodoTool(toolCall.name);
+}
+
+export function matchesTaskTool(toolCall: ToolCallLike): boolean {
+  const args = toolCall.arguments as Record<string, unknown> | undefined;
+  if (hasArgument(args, "subagent_type") || hasArgument(args, "task_id")) {
+    return true;
+  }
+  return isTaskTool(toolCall.name);
+}
+
+export function matchesSkillTool(toolCall: ToolCallLike): boolean {
+  return isSkillTool(toolCall.name);
+}
+
+export function matchesRoleSkillTool(toolCall: ToolCallLike): boolean {
+  return isRoleSkillTool(toolCall.name);
+}
+
+export function matchesRoleLoadTool(toolCall: ToolCallLike): boolean {
+  return isRoleLoadTool(toolCall.name);
+}
+
+export function matchesQuestionTool(toolCall: ToolCallLike): boolean {
+  const args = toolCall.arguments as Record<string, unknown> | undefined;
+  if (hasArgument(args, "questions")) return true;
+  return isQuestionTool(toolCall.name);
+}
+
+export function displayToolName(toolCall: ToolCallLike): string {
+  return toolNameFromKind(toolCall.toolKind) || toolCall.name;
+}
+
 type TranslateFn = (
   key: string,
   fallback?: string,

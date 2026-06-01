@@ -612,14 +612,9 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                 has_raw_input = tc.raw_input.is_some(),
                 "ACP ToolCall"
             );
-            let tool_name =
-                if tc.title.is_empty() || tc.title == "undefined" || tc.title.starts_with('"') {
-                    kind_to_name(&tc.kind)
-                } else {
-                    tc.title.clone()
-                };
+            let (tool_name, params) =
+                tool_use_wire_fields(&tc.kind, &tc.title, tc.raw_input.as_ref());
             let description = tool_call_description(tc.raw_input.as_ref(), Some(&tc.content));
-            let params = tool_call_params(tc.raw_input.as_ref());
             vec![amux::AcpEvent {
                 event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
                     tool_id: tc.tool_call_id.to_string(),
@@ -679,31 +674,30 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                     model: String::new(),
                 }]
             } else {
-                let clean_title = tcu
+                let kind = tcu
+                    .fields
+                    .kind
+                    .as_ref()
+                    .unwrap_or(&acp::ToolKind::Other);
+                let title = tcu
                     .fields
                     .title
-                    .as_ref()
-                    .map(|title| title.trim_matches('"').to_string())
-                    .filter(|title| !title.is_empty() && title != "undefined")
+                    .as_deref()
                     .unwrap_or_default();
+                let (tool_name, params) =
+                    tool_use_wire_fields(kind, title, tcu.fields.raw_input.as_ref());
                 let description = tool_call_description(
                     tcu.fields.raw_input.as_ref(),
                     tcu.fields.content.as_deref(),
                 );
-                let params = tool_call_params(tcu.fields.raw_input.as_ref());
-                if !description.is_empty() || !clean_title.is_empty() {
+                if !description.is_empty() || !tool_name.is_empty() {
                     vec![amux::AcpEvent {
                         event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
                             tool_id,
-                            tool_name: clean_title,
+                            tool_name,
                             description,
                             params,
-                            tool_kind: tcu
-                                .fields
-                                .kind
-                                .as_ref()
-                                .map(kind_to_snake)
-                                .unwrap_or_default(),
+                            tool_kind: kind_to_snake(kind),
                         })),
                         model: String::new(),
                     }]
@@ -793,18 +787,46 @@ fn plan_status_to_snake(s: &acp::PlanEntryStatus) -> String {
     .to_string()
 }
 
-fn kind_to_name(kind: &acp::ToolKind) -> String {
-    match kind {
-        acp::ToolKind::Search => "Search".into(),
-        acp::ToolKind::Read => "Read".into(),
-        acp::ToolKind::Edit => "Edit".into(),
-        acp::ToolKind::Fetch => "WebSearch".into(),
-        acp::ToolKind::Execute => "Bash".into(),
-        acp::ToolKind::Delete => "Delete".into(),
-        acp::ToolKind::Move => "Move".into(),
-        acp::ToolKind::Think => "Think".into(),
-        _ => format!("{:?}", kind),
+fn clean_tool_title(title: &str) -> String {
+    let trimmed = title.trim().trim_matches('"').trim();
+    if trimmed.is_empty() || trimmed == "undefined" {
+        String::new()
+    } else {
+        trimmed.to_string()
     }
+}
+
+/// Canonical wire id for UI routing — from ACP `ToolKind`, never from `title`.
+fn kind_to_canonical_name(kind: &acp::ToolKind) -> String {
+    match kind {
+        acp::ToolKind::Search => "grep".into(),
+        acp::ToolKind::Read => "read".into(),
+        acp::ToolKind::Edit => "edit".into(),
+        acp::ToolKind::Fetch => "web_search".into(),
+        acp::ToolKind::Execute => "bash".into(),
+        acp::ToolKind::Delete => "delete".into(),
+        acp::ToolKind::Move => "move".into(),
+        acp::ToolKind::Think => "think".into(),
+        _ => "other".into(),
+    }
+}
+
+/// Map ACP tool call to wire fields. Human `title` → params.description only.
+fn tool_use_wire_fields(
+    kind: &acp::ToolKind,
+    title: &str,
+    raw_input: Option<&serde_json::Value>,
+) -> (String, HashMap<String, String>) {
+    let mut params = tool_call_params(raw_input);
+    let human_title = clean_tool_title(title);
+    if !human_title.is_empty() && !params.contains_key("description") {
+        params.insert("description".to_string(), human_title);
+    }
+    (kind_to_canonical_name(kind), params)
+}
+
+fn kind_to_name(kind: &acp::ToolKind) -> String {
+    kind_to_canonical_name(kind)
 }
 
 // ACP ToolKind → snake_case wire string for `AcpToolUse.tool_kind`.
@@ -1692,10 +1714,26 @@ mod tests {
     }
 
     #[test]
+    fn tool_use_wire_fields_maps_execute_kind_not_title() {
+        let (tool_name, params) = tool_use_wire_fields(
+            &acp::ToolKind::Execute,
+            "Execute ps command",
+            Some(&serde_json::json!({ "command": "ps aux" })),
+        );
+        assert_eq!(tool_name, "bash");
+        assert_eq!(params.get("command"), Some(&"ps aux".to_string()));
+        assert_eq!(
+            params.get("description"),
+            Some(&"Execute ps command".to_string())
+        );
+    }
+
+    #[test]
     fn translates_tool_call_update_raw_input_to_tool_use_update() {
         let update = acp::ToolCallUpdate::new(
             "tool-1",
             acp::ToolCallUpdateFields::new()
+                .kind(acp::ToolKind::Search)
                 .title("grep")
                 .raw_input(serde_json::json!({
                     "pattern": "MQTT",
@@ -1709,6 +1747,10 @@ mod tests {
             amux::acp_event::Event::ToolUse(tool) => {
                 assert_eq!(tool.tool_id, "tool-1");
                 assert_eq!(tool.tool_name, "grep");
+                assert_eq!(
+                    tool.params.get("description"),
+                    Some(&"grep".to_string())
+                );
                 assert_eq!(tool.params.get("pattern"), Some(&"MQTT".to_string()));
                 assert_eq!(
                     tool.params.get("path"),
