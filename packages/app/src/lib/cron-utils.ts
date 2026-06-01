@@ -279,6 +279,8 @@ export interface JobFormState {
   cronTz: string
   message: string
   model: string
+  /** Backend the model belongs to: "opencode" | "claude" | "codex" | "" (auto). */
+  backend: string
   deliveryEnabled: boolean
   deliveryChannel: DeliveryChannel
   deliveryTargetMode: string
@@ -301,6 +303,7 @@ export const defaultFormState: JobFormState = {
   cronTz: '',
   message: '',
   model: '',
+  backend: '',
   deliveryEnabled: false,
   deliveryChannel: 'discord',
   deliveryTargetMode: 'dm',
@@ -347,6 +350,7 @@ export function jobToFormState(job: CronJob): JobFormState {
     cronTz: job.schedule.tz || '',
     message: job.payload.message,
     model: job.payload.model || '',
+    backend: job.payload.backend || '',
     deliveryEnabled: !!job.delivery,
     deliveryChannel,
     deliveryTargetMode: parsed.mode,
@@ -396,6 +400,9 @@ export function formStateToPayload(form: JobFormState): CronPayload {
   return {
     message: form.message,
     model: form.model || undefined,
+    // Only pin a backend when a model is chosen; "use default model" leaves both
+    // empty so the daemon falls back to its default_agent_type ("auto").
+    backend: form.model && form.backend ? form.backend : undefined,
     useWorktree: form.useWorktree || undefined,
     worktreeBranch: form.useWorktree && form.worktreeBranch ? form.worktreeBranch : undefined,
   }

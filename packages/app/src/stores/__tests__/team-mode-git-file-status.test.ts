@@ -11,9 +11,9 @@ vi.mock('@/lib/utils', () => ({
   isTauri: () => true,
 }))
 
-vi.mock('@/lib/teamclaw-config', () => ({
-  getCustomProviderConfig: vi.fn().mockResolvedValue(null),
-  removeCustomProviderFromConfig: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/lib/daemon-local-client', () => ({
+  encodeWorkspaceId: (path: string) => path,
+  deleteDaemonProviderAuth: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/lib/team-provider', () => ({

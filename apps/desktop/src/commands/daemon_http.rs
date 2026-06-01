@@ -151,3 +151,154 @@ pub async fn list_local_daemon_workspaces() -> Result<Vec<LocalDaemonWorkspace>,
         })
         .collect())
 }
+
+fn encode_workspace_id(workspace_path: &str) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    URL_SAFE_NO_PAD.encode(workspace_path.as_bytes())
+}
+
+#[derive(Debug, Deserialize)]
+struct DaemonAuthExchangeResponse {
+    token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DaemonProviderInfo {
+    id: String,
+    #[serde(default)]
+    models: Vec<String>,
+}
+
+/// `GET /v1/workspaces/:id/providers` — canonical LLM provider list for a workspace.
+pub async fn fetch_workspace_provider_model_keys(workspace_path: &str) -> Option<std::collections::HashSet<String>> {
+    let amuxd_dir = dirs::home_dir()?.join(".amuxd");
+    let port: u16 = std::fs::read_to_string(amuxd_dir.join("amuxd.http.port"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    let root_token = std::fs::read_to_string(amuxd_dir.join("amuxd.http.token"))
+        .ok()?
+        .trim()
+        .to_string();
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let exchange: DaemonAuthExchangeResponse = client
+        .post(format!("{base}/v1/auth/exchange"))
+        .header("Authorization", format!("Bearer {root_token}"))
+        .json(&serde_json::json!({
+            "scopes": ["workspace:read"],
+            "ttl_seconds": 300,
+        }))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    let ws_id = encode_workspace_id(workspace_path);
+    let providers: Vec<DaemonProviderInfo> = client
+        .get(format!("{base}/v1/workspaces/{ws_id}/providers"))
+        .header("Authorization", format!("Bearer {}", exchange.token))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    let mut keys = std::collections::HashSet::new();
+    for provider in providers {
+        for model_id in provider.models {
+            keys.insert(format!(
+                "{}/{}",
+                provider.id.to_lowercase(),
+                model_id.to_lowercase()
+            ));
+        }
+    }
+    Some(keys)
+}
+
+#[derive(Debug, Deserialize)]
+struct DaemonCatalogModel {
+    #[serde(rename = "ref")]
+    model_ref: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DaemonBackendCatalog {
+    #[serde(default)]
+    models: Vec<DaemonCatalogModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DaemonModelCatalog {
+    #[serde(default)]
+    backends: Vec<DaemonBackendCatalog>,
+}
+
+/// `GET /v1/workspaces/:id/model-catalog` — model refs across every configured
+/// backend (OpenCode, Claude Code, Codex), lowercased for case-insensitive
+/// validation. Unlike `fetch_workspace_provider_model_keys` (OpenCode only)
+/// this is the source of truth for cron model validation, since a cron job may
+/// pin a Claude or Codex model that the OpenCode provider list never reports.
+pub async fn fetch_workspace_model_catalog_keys(
+    workspace_path: &str,
+) -> Option<std::collections::HashSet<String>> {
+    let amuxd_dir = dirs::home_dir()?.join(".amuxd");
+    let port: u16 = std::fs::read_to_string(amuxd_dir.join("amuxd.http.port"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    let root_token = std::fs::read_to_string(amuxd_dir.join("amuxd.http.token"))
+        .ok()?
+        .trim()
+        .to_string();
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let exchange: DaemonAuthExchangeResponse = client
+        .post(format!("{base}/v1/auth/exchange"))
+        .header("Authorization", format!("Bearer {root_token}"))
+        .json(&serde_json::json!({
+            "scopes": ["workspace:read"],
+            "ttl_seconds": 300,
+        }))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    let ws_id = encode_workspace_id(workspace_path);
+    let catalog: DaemonModelCatalog = client
+        .get(format!("{base}/v1/workspaces/{ws_id}/model-catalog"))
+        .header("Authorization", format!("Bearer {}", exchange.token))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    let mut keys = std::collections::HashSet::new();
+    for backend in catalog.backends {
+        for model in backend.models {
+            keys.insert(model.model_ref.to_lowercase());
+        }
+    }
+    Some(keys)
+}

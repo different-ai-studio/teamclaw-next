@@ -369,8 +369,21 @@ impl OpenCodeCompatStore {
         workspace_path.join("opencode.json")
     }
 
+    fn teamclaw_json_path(workspace_path: &std::path::Path) -> PathBuf {
+        workspace_path.join("teamclaw.json")
+    }
+
     fn allowlist_path(workspace_path: &std::path::Path) -> PathBuf {
         workspace_path.join(".teamclaw").join("allowlist.json")
+    }
+
+    /// True when `options.apiKey` is a non-empty literal or `${env_ref}` placeholder.
+    fn provider_entry_authenticated(entry: &OcProviderEntry) -> bool {
+        entry
+            .options
+            .get("apiKey")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.trim().is_empty())
     }
 
     fn read_opencode_json(
@@ -383,6 +396,27 @@ impl OpenCodeCompatStore {
         let content = std::fs::read_to_string(&path)
             .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
         serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
+    }
+
+    /// Legacy workspace-root `teamclaw.json` may still define custom providers.
+    fn read_teamclaw_json(
+        workspace_path: &std::path::Path,
+    ) -> Result<OpencodeJson, WorkspaceControlError> {
+        let path = Self::teamclaw_json_path(workspace_path);
+        if !path.exists() {
+            return Ok(OpencodeJson::default());
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
+    }
+
+    fn merged_provider_entries(
+        workspace_path: &std::path::Path,
+    ) -> Result<HashMap<String, OcProviderEntry>, WorkspaceControlError> {
+        let mut merged = Self::read_teamclaw_json(workspace_path)?.provider;
+        merged.extend(Self::read_opencode_json(workspace_path)?.provider);
+        Ok(merged)
     }
 
     fn write_opencode_json(
@@ -451,10 +485,9 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         workspace_id: &str,
     ) -> Result<Vec<ProviderInfo>, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
-        let cfg = Self::read_opencode_json(&wpath)?;
+        let merged = Self::merged_provider_entries(&wpath)?;
 
-        let providers = cfg
-            .provider
+        let providers = merged
             .iter()
             .map(|(id, entry)| {
                 let base_url = entry
@@ -462,7 +495,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
                     .get("baseURL")
                     .and_then(|v| v.as_str())
                     .map(str::to_owned);
-                let authenticated = entry.options.contains_key("apiKey");
+                let authenticated = Self::provider_entry_authenticated(entry);
                 let models = entry.models.keys().cloned().collect();
                 ProviderInfo {
                     id: id.clone(),
@@ -856,6 +889,47 @@ mod tests {
         let store = make_store();
         let providers = store.get_providers(&ws_id(dir.path())).unwrap();
         assert!(providers.is_empty());
+    }
+
+    #[test]
+    fn get_providers_merges_teamclaw_json_with_opencode() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("teamclaw.json"),
+            r#"{
+  "provider": {
+    "scnet": {
+      "name": "scnet",
+      "options": { "baseURL": "https://api.example.com/v1", "apiKey": "${scnet_api_key}" },
+      "models": { "MiniMax-M2.5": { "name": "MiniMax-M2.5" } }
+    }
+  }
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("opencode.json"),
+            r#"{
+  "provider": {
+    "team": {
+      "name": "Team",
+      "options": { "baseURL": "https://team.example/v1", "apiKey": "sk-team" },
+      "models": { "gpt-5.2": { "name": "gpt-5.2" } }
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let store = make_store();
+        let providers = store.get_providers(&ws_id(root)).unwrap();
+        assert_eq!(providers.len(), 2);
+        let scnet = providers.iter().find(|p| p.id == "scnet").unwrap();
+        assert!(scnet.authenticated);
+        assert!(scnet.models.contains(&"MiniMax-M2.5".to_owned()));
+        let team = providers.iter().find(|p| p.id == "team").unwrap();
+        assert!(team.authenticated);
     }
 
     #[test]

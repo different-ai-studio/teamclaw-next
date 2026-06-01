@@ -1,7 +1,5 @@
 import { create } from 'zustand'
-import {
-  removeCustomProviderFromConfig,
-} from '@/lib/teamclaw-config'
+import { deleteDaemonProviderAuth, encodeWorkspaceId } from '@/lib/daemon-local-client'
 import { loadTeamProviderFile, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'
 import { useProviderStore } from './provider'
 import { useWorkspaceStore } from './workspace'
@@ -297,10 +295,9 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
     // Set state immediately to trigger UI updates
     set({ teamModeType: null, teamModelConfig: null, _appliedConfigKey: null, teamGitFileSyncStatusMap: {} })
 
-    // Remove team provider from teamclaw config
     if (workspacePath) {
       try {
-        await removeCustomProviderFromConfig(workspacePath, TEAM_PROVIDER_ID)
+        await deleteDaemonProviderAuth(encodeWorkspaceId(workspacePath), TEAM_PROVIDER_ID)
       } catch { /* ignore */ }
     }
 

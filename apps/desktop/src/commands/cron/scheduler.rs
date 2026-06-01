@@ -485,14 +485,29 @@ impl CronScheduler {
             wt_guard.path.as_deref(),
         );
 
-        // Preserved from the OpenCode path: parse `job.payload.model` (a short
-        // name like "sonnet") into `(provider, model)`. Kept identical so any
-        // job-config docs/tests still apply.
-        let model_param = job
+        // Honor `payload.model` only when that pair still exists in the workspace
+        // config for this run (workspace-scoped path, or daemon default for global).
+        let model_workspace_path = working_directory
+            .clone()
+            .or_else(super::workspace_models::default_daemon_workspace_path);
+        let available_models = match model_workspace_path.as_deref() {
+            Some(path) => super::workspace_models::list_workspace_model_keys(path).await,
+            None => std::collections::HashSet::new(),
+        };
+        let model_param = super::workspace_models::resolve_cron_model_override(
+            &available_models,
+            model_workspace_path.as_deref(),
+            job.payload.model.as_deref(),
+        );
+
+        // Pin the backend the job was created for. Empty/absent → omit so the
+        // daemon falls back to its default_agent_type ("auto" selection).
+        let agent_type = job
             .payload
-            .model
-            .as_ref()
-            .and_then(|m| crate::commands::gateway::parse_model_preference(m));
+            .backend
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
 
         let prompt_future = crate::commands::cron::amuxd_client::prompt_await(
             crate::commands::cron::amuxd_client::PromptAwaitRequest {
@@ -507,6 +522,7 @@ impl CronScheduler {
                         model: m,
                     }
                 }),
+                agent_type,
                 timeout_secs: 300,
             },
         );
@@ -543,9 +559,11 @@ impl CronScheduler {
 
                     if let Some(agent_err) = r.agent_error {
                         // Session created but ACP turn failed (e.g. timeout).
+                        // agent_err already carries any "agent error: " prefix from
+                        // the daemon's AmuxError::Agent formatter — don't double it.
                         record.status = RunStatus::Failed;
                         record.finished_at = Some(Utc::now());
-                        record.error = Some(format!("agent error: {agent_err}"));
+                        record.error = Some(agent_err);
                         self.persist_run_and_notify_ui(&record).await;
                         self.update_job_after_run(&job, started_at, &my_workspace)
                             .await;
@@ -839,6 +857,7 @@ mod tests {
             payload: CronPayload {
                 message: "test".to_string(),
                 model: None,
+                backend: None,
                 timeout_seconds: None,
                 use_worktree: None,
                 worktree_branch: None,

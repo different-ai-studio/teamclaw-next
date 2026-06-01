@@ -23,6 +23,12 @@ pub struct PromptAwaitRequest<'a> {
     pub working_directory: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_override: Option<ModelOverride<'a>>,
+    /// Backend the job pins, e.g. "opencode" | "claude" | "codex". When `None`
+    /// the field is omitted and amuxd falls back to its `default_agent_type`
+    /// (the "auto" selection). A pinned backend ensures a Claude-configured job
+    /// runs on Claude even when OpenCode is the daemon default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<&'a str>,
     pub timeout_secs: u64,
 }
 
@@ -206,6 +212,7 @@ mod tests {
                 job_name: None,
                 working_directory: None,
                 model_override: None,
+                agent_type: None,
                 timeout_secs: 300,
             },
         )
@@ -214,6 +221,39 @@ mod tests {
 
         assert_eq!(resp.text, "hello back");
         assert_eq!(resp.session_id, "sid-1");
+    }
+
+    #[tokio::test]
+    async fn omits_agent_type_when_none() {
+        let sock_path = mock_server(|req| {
+            assert!(
+                req.get("agent_type").is_none(),
+                "agent_type must be omitted for the 'auto' selection so amuxd \
+                 falls back to default_agent_type; got: {req}"
+            );
+            serde_json::json!({
+                "ok": true,
+                "result": { "text": "ok", "session_id": "sid-auto" }
+            })
+            .to_string()
+        })
+        .await;
+
+        prompt_await_at(
+            &sock_path,
+            PromptAwaitRequest {
+                cmd: "prompt-await",
+                session_key: "cron/j1/r1",
+                message: "hi",
+                job_name: None,
+                working_directory: None,
+                model_override: None,
+                agent_type: None,
+                timeout_secs: 300,
+            },
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -226,6 +266,7 @@ mod tests {
                 Some("anthropic")
             );
             assert_eq!(req["model_override"]["model"].as_str(), Some("sonnet"));
+            assert_eq!(req["agent_type"].as_str(), Some("claude"));
             serde_json::json!({
                 "ok": true,
                 "result": { "text": "ok", "session_id": "sid-2" }
@@ -246,6 +287,7 @@ mod tests {
                     provider: "anthropic",
                     model: "sonnet",
                 }),
+                agent_type: Some("claude"),
                 timeout_secs: 300,
             },
         )
@@ -269,6 +311,7 @@ mod tests {
                 job_name: None,
                 working_directory: None,
                 model_override: None,
+                agent_type: None,
                 timeout_secs: 300,
             },
         )
@@ -297,6 +340,7 @@ mod tests {
                 job_name: None,
                 working_directory: None,
                 model_override: None,
+                agent_type: None,
                 timeout_secs: 300,
             },
         )
@@ -317,6 +361,7 @@ mod tests {
                 job_name: None,
                 working_directory: None,
                 model_override: None,
+                agent_type: None,
                 timeout_secs: 300,
             },
         )
@@ -342,6 +387,7 @@ mod tests {
                 job_name: None,
                 working_directory: None,
                 model_override: None,
+                agent_type: None,
                 timeout_secs: 300,
             },
         )

@@ -4,18 +4,21 @@ import {
   listDaemonWorkspaces,
 } from '@/lib/daemon-workspaces'
 import {
+  isDaemonHttpAvailable,
+  getDaemonModelCatalog,
   encodeWorkspaceId,
-  getDaemonProviders,
-  type DaemonProviderInfo,
 } from '@/lib/daemon-local-client'
 import { loadTeamProviderFormState, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'
-import {
-  getCustomProviderConfig,
-  getCustomProviderIds,
-} from '@/lib/teamclaw-config'
 import { workspacePathsMatch } from '@/stores/session-utils'
+import { loadConfiguredProvidersForWorkspace } from '@/stores/provider'
 import type { ConfiguredProvider } from '@/stores/provider'
 import type { CronScope } from '@/stores/cron'
+import { isTauri } from '@/lib/utils'
+
+/** Backend a team-shared (`_meta/provider.json`) model runs on. Those are
+ *  OpenCode-compatible provider models, so they execute on the OpenCode
+ *  backend regardless of the daemon default. */
+const TEAM_SHARED_BACKEND = 'opencode'
 
 /** Map daemon HTTP workspace path to the canonical path registered on this daemon. */
 export async function resolveDaemonWorkspacePath(
@@ -59,41 +62,20 @@ export function defaultLocalDaemonWorkspacePath(rows: LocalDaemonWorkspace[]): s
   return null
 }
 
-function daemonProvidersToCronOptions(
-  daemonProviders: DaemonProviderInfo[],
-): ConfiguredProvider[] {
-  return daemonProviders
-    .filter((p) => p.authenticated && p.models.length > 0)
-    .map((p) => ({
-      id: p.id,
-      name: p.display_name,
-      models: p.models.map((modelId) => ({ id: modelId, name: modelId })),
-    }))
+async function waitForDaemonHttpReady(timeoutMs = 8000): Promise<boolean> {
+  if (!isTauri()) return false
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await isDaemonHttpAvailable()) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return false
 }
 
-async function loadDaemonProvidersForPath(workspacePath: string): Promise<ConfiguredProvider[]> {
-  const daemonProviders = await getDaemonProviders(encodeWorkspaceId(workspacePath))
-  if (!daemonProviders) return []
-  return daemonProvidersToCronOptions(daemonProviders)
-}
-
-async function loadWorkspaceConfigProviders(workspacePath: string): Promise<ConfiguredProvider[]> {
-  const ids = await getCustomProviderIds(workspacePath).catch(() => [])
-  const providers = await Promise.all(
-    ids.map(async (id): Promise<ConfiguredProvider | null> => {
-      const config = await getCustomProviderConfig(workspacePath, id).catch(() => null)
-      if (!config || config.models.length === 0) return null
-      return {
-        id,
-        name: config.name || id,
-        models: config.models.map((model) => ({
-          id: model.modelId,
-          name: model.modelName || model.modelId,
-        })),
-      }
-    }),
-  )
-  return providers.filter((provider): provider is ConfiguredProvider => provider !== null)
+async function loadDaemonProvidersForPath(workspacePath: string): Promise<ConfiguredProvider[] | null> {
+  const snapshot = await loadConfiguredProvidersForWorkspace(workspacePath)
+  if (!snapshot) return null
+  return snapshot.configuredProviders
 }
 
 async function loadTeamSharedProvider(workspacePath: string): Promise<ConfiguredProvider | null> {
@@ -106,36 +88,88 @@ async function loadTeamSharedProvider(workspacePath: string): Promise<Configured
   }
 }
 
+/** A single selectable model in the cron dialog, carrying its backend so the
+ *  scheduler can pin the job to the right agent runtime. */
+export interface CronModelOption {
+  /** `"<providerSegment>/<modelId>"` — stored verbatim as `payload.model`. */
+  ref: string
+  name: string
+}
+
+/** Models grouped by the agent backend that runs them. */
+export interface CronModelGroup {
+  /** "opencode" | "claude" | "codex" — stored as `payload.backend`. */
+  backend: string
+  label: string
+  models: CronModelOption[]
+}
+
+/** Map a catalog backend id to its `_meta/provider.json` team-shared group, if any. */
+function teamSharedGroup(teamShared: ConfiguredProvider | null): CronModelGroup | null {
+  if (!teamShared || teamShared.models.length === 0) return null
+  return {
+    backend: TEAM_SHARED_BACKEND,
+    label: teamShared.name,
+    models: teamShared.models.map((m) => ({
+      ref: `${TEAM_SHARED_PROVIDER_ID}/${m.id}`,
+      name: m.name,
+    })),
+  }
+}
+
+/** Fetch the daemon model catalog for a resolved workspace path and fold in the
+ *  optional team-shared group. Returns `null` when the daemon is unreachable. */
+async function loadCatalogGroupsForPath(workspacePath: string): Promise<{
+  groups: CronModelGroup[]
+  automationDefaultBackend: string | null
+} | null> {
+  const catalog = await getDaemonModelCatalog(encodeWorkspaceId(workspacePath))
+  if (catalog === null) return null
+
+  const teamShared = await loadTeamSharedProvider(workspacePath)
+  const sharedGroup = teamSharedGroup(teamShared)
+
+  const catalogGroups: CronModelGroup[] = catalog.backends
+    .map((b) => ({
+      backend: b.backend,
+      label: b.label,
+      models: b.models.map((m) => ({ ref: m.ref, name: m.display_name })),
+    }))
+    .filter((g) => g.models.length > 0)
+
+  const groups = sharedGroup ? [sharedGroup, ...catalogGroups] : catalogGroups
+  return {
+    groups,
+    automationDefaultBackend: catalog.automation_default_backend,
+  }
+}
+
 /**
- * Workspace + team-shared models for the cron job dialog (mirrors LLM settings sources).
- * Team shared comes from `{teamclaw-team}/_meta/provider.json`; other providers from daemon
- * opencode config at the resolved workspace path.
+ * Workspace models for the cron job dialog — daemon HTTP providers plus optional
+ * team shared from `{teamclaw-team}/_meta/provider.json`.
  */
 export async function loadCronDialogProviders(workspacePath: string): Promise<ConfiguredProvider[]> {
-  const [daemonProviders, configProviders, teamShared] = await Promise.all([
+  const [daemonProviders, teamShared] = await Promise.all([
     loadDaemonProvidersForPath(workspacePath),
-    loadWorkspaceConfigProviders(workspacePath),
     loadTeamSharedProvider(workspacePath),
   ])
 
-  const byId = new Map<string, ConfiguredProvider>()
-  for (const provider of daemonProviders) {
-    if (provider.id !== TEAM_SHARED_PROVIDER_ID) byId.set(provider.id, provider)
-  }
-  for (const provider of configProviders) {
-    if (provider.id !== TEAM_SHARED_PROVIDER_ID) byId.set(provider.id, provider)
-  }
-  const workspaceProviders = Array.from(byId.values())
+  if (daemonProviders === null) return teamShared ? [teamShared] : []
+
+  const workspaceProviders = daemonProviders.filter((p) => p.id !== TEAM_SHARED_PROVIDER_ID)
 
   if (workspaceProviders.length > 0) {
     return teamShared ? [teamShared, ...workspaceProviders] : workspaceProviders
   }
   if (teamShared) return [teamShared]
-  return daemonProviders
+  return []
 }
 
 export type CronDialogModelLoadResult = {
-  providers: ConfiguredProvider[]
+  groups: CronModelGroup[]
+  /** Backend the daemon picks when a job specifies none ("auto"); the dialog
+   *  surfaces it as the default. `null` when no backend is configured. */
+  automationDefaultBackend: string | null
   hint: string | null
 }
 
@@ -143,13 +177,16 @@ export type CronDialogModelLoadResult = {
 export async function loadCronDialogModels(args: {
   activeScope: CronScope
   teamId: string | null
-  workspacePath: string | null
+  /** Workspace-scoped cron only — explicit daemon workspace path, not the UI session workspace. */
+  selectedWorkspacePath: string | null
   localWorkspaces?: LocalDaemonWorkspace[]
   messages: {
     workspaceNoPath: string
     globalNoTeam: string
     globalNoDefault: string
     globalNoDefaultPath: string
+    daemonUnavailable: string
+    noConfiguredModels: string
     loadFailed: string
   }
 }): Promise<CronDialogModelLoadResult> {
@@ -157,18 +194,15 @@ export async function loadCronDialogModels(args: {
   let hint: string | null = null
 
   if (args.activeScope === 'workspace') {
-    if (!args.workspacePath) {
+    if (!args.selectedWorkspacePath) {
       hint = args.messages.workspaceNoPath
     } else {
-      targetPath = args.workspacePath
+      targetPath = args.selectedWorkspacePath
     }
   } else {
     const localWorkspaces = args.localWorkspaces ?? await listLocalDaemonWorkspaces()
     targetPath = defaultLocalDaemonWorkspacePath(localWorkspaces)
     if (!targetPath && args.teamId) {
-      // Compatibility fallback for registries written before
-      // `default_workspace_id` existed: use the cloud default for this daemon
-      // when it resolves to a local daemon workspace path.
       const agent = await getCurrentDaemonWorkspaceAgent(args.teamId).catch(() => null)
       const workspaces = agent ? await listDaemonWorkspaces(args.teamId, agent.id).catch(() => []) : []
       const defaultWs = workspaces.find((w) => w.id === agent?.defaultWorkspaceId)
@@ -185,18 +219,40 @@ export async function loadCronDialogModels(args: {
   }
 
   if (!targetPath) {
-    return { providers: [], hint }
+    return { groups: [], automationDefaultBackend: null, hint }
   }
 
   const resolvedPath = await resolveDaemonWorkspacePath(args.teamId, targetPath)
   if (!resolvedPath) {
-    return { providers: [], hint: args.messages.loadFailed }
+    return { groups: [], automationDefaultBackend: null, hint: args.messages.loadFailed }
+  }
+
+  if (isTauri()) {
+    const daemonReady = await waitForDaemonHttpReady()
+    if (!daemonReady) {
+      return { groups: [], automationDefaultBackend: null, hint: args.messages.daemonUnavailable }
+    }
   }
 
   try {
-    const providers = await loadCronDialogProviders(resolvedPath)
-    return { providers, hint: providers.length === 0 ? args.messages.loadFailed : null }
+    const catalog = await loadCatalogGroupsForPath(resolvedPath)
+    if (catalog === null) {
+      return { groups: [], automationDefaultBackend: null, hint: args.messages.loadFailed }
+    }
+
+    if (catalog.groups.length === 0) {
+      return {
+        groups: [],
+        automationDefaultBackend: catalog.automationDefaultBackend,
+        hint: args.messages.noConfiguredModels,
+      }
+    }
+    return {
+      groups: catalog.groups,
+      automationDefaultBackend: catalog.automationDefaultBackend,
+      hint: null,
+    }
   } catch {
-    return { providers: [], hint: args.messages.loadFailed }
+    return { groups: [], automationDefaultBackend: null, hint: args.messages.loadFailed }
   }
 }

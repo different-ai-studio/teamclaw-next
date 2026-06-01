@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores/ui'
 import { getBackend } from '@/lib/backend'
@@ -39,21 +40,24 @@ import {
 } from '@/stores/cron'
 
 export async function ensureCronSessionVisible(sessionId: string): Promise<void> {
-  const listStore = useSessionListStore.getState()
-  if (listStore.rows.some((row) => row.id === sessionId)) return
-
+  // Fetch session's team from cloud (always do this to verify access)
   const teamId = await getBackend().sessions.getSessionTeamId(sessionId)
   if (!teamId) {
-    throw new Error('Cron session was not found')
+    throw new Error(`对话不存在或无访问权限 (sessionId: ${sessionId.slice(0, 8)}...)`)
   }
 
+  // Switch teams if needed
   const activeTeamId = useCurrentTeamStore.getState().team?.id ?? null
-  if (activeTeamId && activeTeamId !== teamId) {
+  if (activeTeamId !== teamId) {
     await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId)
   }
 
+  // Skip upsert if already in list (may have been added by previous call)
+  if (useSessionListStore.getState().rows.some((row) => row.id === sessionId)) return
+
+  // Fetch display row for title, then upsert into list store
   const [displayRow] = await getBackend().sessions.listSessionDisplayRows(teamId, [sessionId])
-  listStore.upsertRows([
+  useSessionListStore.getState().upsertRows([
     {
       id: sessionId,
       title: displayRow?.title || 'Cron job',
@@ -210,12 +214,16 @@ export function CronHistoryDialog({
     setViewError(null)
     try {
       await ensureCronSessionVisible(sessionId)
-      await useUIStore.getState().switchToSession(sessionId)
-      await useSessionMessageStore.getState().reloadActiveSessionMessages()
-      onOpenChange(false)
     } catch (error) {
-      setViewError(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setViewError(message)
+      toast.error(message)
+      return
     }
+    // Close the dialog first, then navigate so the chat view is visible
+    onOpenChange(false)
+    await useUIStore.getState().switchToSession(sessionId)
+    await useSessionMessageStore.getState().reloadActiveSessionMessages()
   }, [onOpenChange])
 
   React.useEffect(() => {
@@ -224,6 +232,16 @@ export function CronHistoryDialog({
       loadRuns(job.id)
     }
   }, [open, job?.id])
+
+  // Auto-refresh while any run is still in progress
+  const hasRunningRun = runs.some((r) => r.status === 'running')
+  React.useEffect(() => {
+    if (!open || !job || !hasRunningRun) return
+    const id = setInterval(() => {
+      loadRuns(job.id)
+    }, 5000)
+    return () => clearInterval(id)
+  }, [open, job?.id, hasRunningRun])
 
   if (!job) return null
 

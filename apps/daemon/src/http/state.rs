@@ -23,6 +23,12 @@ pub struct DaemonMetadata {
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub actor_id: String,
     pub backend_kind: String,
+    /// Agent backends this daemon has configured (subset of
+    /// `["claude", "opencode", "codex"]`), as reported by
+    /// `supported_agent_type_names`. Drives the per-backend model catalog
+    /// (`GET /v1/workspaces/:id/model-catalog`). Empty in focused tests that
+    /// build metadata via `metadata()` without daemon config.
+    pub configured_agent_types: Vec<String>,
 }
 
 #[derive(Clone)]

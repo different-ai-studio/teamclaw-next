@@ -3,10 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mocks = vi.hoisted(() => ({
   listDaemonWorkspaces: vi.fn(),
   getCurrentDaemonWorkspaceAgent: vi.fn(),
-  getDaemonProviders: vi.fn(),
+  isDaemonHttpAvailable: vi.fn(),
+  getDaemonModelCatalog: vi.fn(),
+  loadConfiguredProvidersForWorkspace: vi.fn(),
   loadTeamProviderFormState: vi.fn(),
-  getCustomProviderIds: vi.fn(),
-  getCustomProviderConfig: vi.fn(),
+  isTauri: vi.fn(),
 }))
 
 vi.mock('@/lib/daemon-workspaces', () => ({
@@ -18,10 +19,14 @@ vi.mock('@/lib/daemon-local-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/daemon-local-client')>()
   return {
     ...actual,
-    getDaemonProviders: mocks.getDaemonProviders,
-    encodeWorkspaceId: (path: string) => `ws:${path}`,
+    isDaemonHttpAvailable: mocks.isDaemonHttpAvailable,
+    getDaemonModelCatalog: mocks.getDaemonModelCatalog,
   }
 })
+
+vi.mock('@/stores/provider', () => ({
+  loadConfiguredProvidersForWorkspace: mocks.loadConfiguredProvidersForWorkspace,
+}))
 
 vi.mock('@/lib/team-provider', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/team-provider')>()
@@ -31,9 +36,8 @@ vi.mock('@/lib/team-provider', async (importOriginal) => {
   }
 })
 
-vi.mock('@/lib/teamclaw-config', () => ({
-  getCustomProviderIds: mocks.getCustomProviderIds,
-  getCustomProviderConfig: mocks.getCustomProviderConfig,
+vi.mock('@/lib/utils', () => ({
+  isTauri: mocks.isTauri,
 }))
 
 import {
@@ -67,50 +71,44 @@ describe('resolveDaemonWorkspacePath', () => {
       '~/projects/MyApp',
     )
     expect(resolved).toBe('/Users/me/projects/MyApp')
-    expect(mocks.getDaemonProviders).not.toHaveBeenCalled()
   })
 })
 
 describe('loadCronDialogProviders', () => {
   beforeEach(() => {
-    mocks.getDaemonProviders.mockReset()
+    mocks.loadConfiguredProvidersForWorkspace.mockReset()
     mocks.loadTeamProviderFormState.mockReset()
-    mocks.getCustomProviderIds.mockReset()
-    mocks.getCustomProviderConfig.mockReset()
     mocks.loadTeamProviderFormState.mockResolvedValue(null)
-    mocks.getCustomProviderIds.mockResolvedValue([])
   })
 
-  it('prefers workspace daemon providers over team-only opencode entry', async () => {
-    mocks.getDaemonProviders.mockResolvedValue([
-      {
-        id: 'team',
-        display_name: 'Team',
-        authenticated: true,
-        models: ['team-model'],
-      },
-      {
-        id: 'anthropic',
-        display_name: 'Anthropic',
-        authenticated: true,
-        models: ['claude-sonnet-4-6'],
-      },
-    ])
+  it('loads models from daemon configured providers', async () => {
+    mocks.loadConfiguredProvidersForWorkspace.mockResolvedValue({
+      configuredProviders: [
+        {
+          id: 'anthropic',
+          name: 'Anthropic',
+          models: [{ id: 'claude-sonnet-4-6', name: 'claude-sonnet-4-6' }],
+        },
+      ],
+      models: [],
+    })
 
     const providers = await loadCronDialogProviders('/Users/me/projects/MyApp')
     expect(providers.map((p) => p.id)).toEqual(['anthropic'])
     expect(providers[0].models[0].id).toBe('claude-sonnet-4-6')
   })
 
-  it('includes team shared from provider.json alongside workspace providers', async () => {
-    mocks.getDaemonProviders.mockResolvedValue([
-      {
-        id: 'custom',
-        display_name: 'Custom',
-        authenticated: true,
-        models: ['my-model'],
-      },
-    ])
+  it('includes team shared from provider.json alongside daemon providers', async () => {
+    mocks.loadConfiguredProvidersForWorkspace.mockResolvedValue({
+      configuredProviders: [
+        {
+          id: 'custom',
+          name: 'Custom',
+          models: [{ id: 'my-model', name: 'my-model' }],
+        },
+      ],
+      models: [],
+    })
     mocks.loadTeamProviderFormState.mockResolvedValue({
       enabled: true,
       baseUrl: 'https://llm.example',
@@ -120,40 +118,29 @@ describe('loadCronDialogProviders', () => {
     const providers = await loadCronDialogProviders('/ws')
     expect(providers.map((p) => p.id)).toEqual(['team', 'custom'])
   })
-
-  it('merges providers from teamclaw.json config when daemon providers only include team', async () => {
-    mocks.getDaemonProviders.mockResolvedValue([
-      {
-        id: 'team',
-        display_name: 'Team',
-        authenticated: true,
-        models: ['gpt-5.2'],
-      },
-    ])
-    mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
-    mocks.getCustomProviderConfig.mockResolvedValue({
-      name: 'scnet',
-      baseURL: 'https://api.scnet.cn/api/llm/v1',
-      models: [{ modelId: 'MiniMax-M2.5', modelName: 'MiniMax-M2.5' }],
-    })
-
-    const providers = await loadCronDialogProviders('/ws')
-    expect(providers.map((p) => p.id)).toEqual(['scnet'])
-    expect(providers[0].models[0].id).toBe('MiniMax-M2.5')
-  })
 })
 
 describe('loadCronDialogModels', () => {
   beforeEach(() => {
     mocks.getCurrentDaemonWorkspaceAgent.mockReset()
     mocks.listDaemonWorkspaces.mockReset()
-    mocks.getDaemonProviders.mockReset()
+    mocks.isDaemonHttpAvailable.mockReset()
+    mocks.getDaemonModelCatalog.mockReset()
     mocks.loadTeamProviderFormState.mockReset()
-    mocks.getCustomProviderIds.mockReset()
-    mocks.getCustomProviderConfig.mockReset()
     mocks.loadTeamProviderFormState.mockResolvedValue(null)
-    mocks.getCustomProviderIds.mockResolvedValue([])
+    mocks.isTauri.mockReturnValue(true)
+    mocks.isDaemonHttpAvailable.mockResolvedValue(true)
   })
+
+  const messages = {
+    workspaceNoPath: 'no path',
+    globalNoTeam: 'no team',
+    globalNoDefault: 'no default',
+    globalNoDefaultPath: 'no default path',
+    daemonUnavailable: 'daemon down',
+    noConfiguredModels: 'no models',
+    loadFailed: 'load failed',
+  }
 
   it('falls back to cloud daemon default when local registry has no default flag', async () => {
     mocks.getCurrentDaemonWorkspaceAgent.mockResolvedValue({
@@ -167,18 +154,27 @@ describe('loadCronDialogModels', () => {
         archived: false,
       },
     ])
-    mocks.getCustomProviderIds.mockResolvedValue(['scnet'])
-    mocks.getCustomProviderConfig.mockResolvedValue({
-      name: 'scnet',
-      baseURL: 'https://api.scnet.cn/api/llm/v1',
-      models: [{ modelId: 'MiniMax-M2.5', modelName: 'MiniMax-M2.5' }],
+    mocks.getDaemonModelCatalog.mockResolvedValue({
+      automation_default_backend: 'opencode',
+      backends: [
+        {
+          backend: 'opencode',
+          label: 'OpenCode',
+          models: [
+            {
+              ref: 'scnet/MiniMax-M2.5',
+              model_id: 'MiniMax-M2.5',
+              display_name: 'MiniMax-M2.5',
+            },
+          ],
+        },
+      ],
     })
-    mocks.getDaemonProviders.mockResolvedValue([])
 
     const result = await loadCronDialogModels({
       activeScope: 'global',
       teamId: 'team-1',
-      workspacePath: null,
+      selectedWorkspacePath: null,
       localWorkspaces: [
         {
           workspaceId: 'local-1',
@@ -189,16 +185,83 @@ describe('loadCronDialogModels', () => {
           isDefault: false,
         },
       ],
-      messages: {
-        workspaceNoPath: 'no path',
-        globalNoTeam: 'no team',
-        globalNoDefault: 'no default',
-        globalNoDefaultPath: 'no default path',
-        loadFailed: 'load failed',
-      },
+      messages,
     })
 
     expect(result.hint).toBeNull()
-    expect(result.providers[0].id).toBe('scnet')
+    expect(result.automationDefaultBackend).toBe('opencode')
+    expect(result.groups[0].backend).toBe('opencode')
+    expect(result.groups[0].models[0].ref).toBe('scnet/MiniMax-M2.5')
+    expect(mocks.getDaemonModelCatalog).toHaveBeenCalled()
+  })
+
+  it('groups Claude and Codex backends and prepends team-shared models', async () => {
+    mocks.loadTeamProviderFormState.mockResolvedValue({
+      enabled: true,
+      baseUrl: 'https://llm.example',
+      models: [{ id: 'shared-1', name: 'Shared 1' }],
+    })
+    mocks.getDaemonModelCatalog.mockResolvedValue({
+      automation_default_backend: 'claude',
+      backends: [
+        {
+          backend: 'claude',
+          label: 'Claude Code',
+          models: [
+            {
+              ref: 'claude-code/claude-sonnet-4-6',
+              model_id: 'claude-sonnet-4-6',
+              display_name: 'Claude Sonnet 4.6',
+            },
+          ],
+        },
+        // Empty backend groups are dropped so the picker stays tidy.
+        { backend: 'codex', label: 'Codex', models: [] },
+      ],
+    })
+
+    const result = await loadCronDialogModels({
+      activeScope: 'workspace',
+      teamId: null,
+      selectedWorkspacePath: '/ws',
+      messages,
+    })
+
+    expect(result.hint).toBeNull()
+    expect(result.automationDefaultBackend).toBe('claude')
+    // team-shared first, pinned to the opencode backend; codex dropped (empty).
+    expect(result.groups.map((g) => g.label)).toEqual(['Team Shared', 'Claude Code'])
+    expect(result.groups[0].backend).toBe('opencode')
+    expect(result.groups[0].models[0].ref).toBe('team/shared-1')
+    expect(result.groups[1].backend).toBe('claude')
+  })
+
+  it('reports daemon unavailable when HTTP probe never succeeds', async () => {
+    vi.useFakeTimers()
+    mocks.isDaemonHttpAvailable.mockResolvedValue(false)
+
+    const promise = loadCronDialogModels({
+      activeScope: 'global',
+      teamId: null,
+      selectedWorkspacePath: null,
+      localWorkspaces: [
+        {
+          workspaceId: 'local-1',
+          remoteWorkspaceId: 'r1',
+          path: '/Users/me/copilot-ws-v2',
+          displayName: 'copilot-ws-v2',
+          teamId: null,
+          isDefault: true,
+        },
+      ],
+      messages,
+    })
+
+    await vi.advanceTimersByTimeAsync(9000)
+    const result = await promise
+    vi.useRealTimers()
+
+    expect(result.groups).toEqual([])
+    expect(result.hint).toBe('daemon down')
   })
 })

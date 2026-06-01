@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  getCustomProviderIds: vi.fn(),
-  getCustomProviderConfig: vi.fn(),
   getDaemonProviders: vi.fn(),
   workspacePath: '/workspace/demo',
   runtimeById: {} as Record<string, any>,
@@ -62,11 +60,6 @@ vi.mock('@/stores/runtime-state-store', () => ({
 }))
 
 vi.mock('@/lib/opencode/config', () => ({
-  addCustomProviderToConfig: vi.fn(),
-  updateCustomProviderConfig: vi.fn(),
-  getCustomProviderIds: mocks.getCustomProviderIds,
-  getCustomProviderConfig: mocks.getCustomProviderConfig,
-  removeCustomProviderFromConfig: vi.fn(),
   providerApiKeyName: vi.fn((id: string) => `PROVIDER_${id.toUpperCase()}_API_KEY`),
 }))
 
@@ -76,11 +69,8 @@ describe('provider store initAll', () => {
     localStorage.clear()
     mocks.workspacePath = '/workspace/demo'
     mocks.runtimeById = {}
-    mocks.getCustomProviderIds.mockReset()
-    mocks.getCustomProviderConfig.mockReset()
     mocks.getDaemonProviders.mockReset()
     mocks.getDaemonProviders.mockResolvedValue(null)
-    mocks.getCustomProviderIds.mockResolvedValue([])
   })
 
   it('ignores daemon runtime models when initializing model settings', async () => {

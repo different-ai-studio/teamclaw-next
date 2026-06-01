@@ -2504,6 +2504,8 @@
       "globalModelsNoDefaultPath": "Cannot resolve the default workspace path. Check Daemon > Workspace settings.",
       "globalModelsNoTeam": "Cannot determine team context. Please sign in and join a team first.",
       "modelsLoadFailed": "Failed to load models",
+      "modelsDaemonUnavailable": "Daemon HTTP is not ready. Wait for startup to finish, then try again.",
+      "modelsNoConfigured": "No configured models for this workspace. Add a provider in LLM settings, or use global cron with the daemon default workspace.",
       "workspaceModelsNoPath": "Select a workspace first to load available models.",
       "workspaceSelectLabel": "Select workspace",
       "workspaceSelectPlaceholder": "Select a workspace…",

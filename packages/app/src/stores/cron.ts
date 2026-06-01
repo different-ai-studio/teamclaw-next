@@ -2,18 +2,15 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { withAsync } from '@/lib/store-utils'
 import { getPreferredLanguage } from '@/lib/locale'
-import { useWorkspaceStore } from '@/stores/workspace'
-
 // ==================== Types ====================
 
 export type ScheduleKind = 'at' | 'every' | 'cron'
 export type CronScope = 'global' | 'workspace'
 
 function cronInvokeArgs(scope: CronScope, selectedWorkspacePath: string | null) {
-  const workspacePath = selectedWorkspacePath || useWorkspaceStore.getState().workspacePath
   return {
     scope,
-    workspacePath: scope === 'workspace' && workspacePath ? workspacePath : null,
+    workspacePath: scope === 'workspace' ? selectedWorkspacePath : null,
   }
 }
 
@@ -28,6 +25,10 @@ export interface CronSchedule {
 export interface CronPayload {
   message: string
   model?: string // "provider/model"
+  /** Backend the job runs on: "opencode" | "claude" | "codex". Absent/empty
+   *  means "auto" — the daemon uses its default_agent_type. Pairs with `model`,
+   *  whose `provider/model` ref is selected from this backend's catalog group. */
+  backend?: string
   /** @deprecated Compatibility only. Runtime ignores this and new saves omit it. */
   timeoutSeconds?: number
   useWorktree?: boolean
@@ -179,11 +180,8 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   setScope: async (scope: CronScope) => {
-    const fallbackWorkspacePath =
-      get().selectedWorkspacePath || useWorkspaceStore.getState().workspacePath || null
     set({
       activeScope: scope,
-      selectedWorkspacePath: scope === 'workspace' ? fallbackWorkspacePath : get().selectedWorkspacePath,
       isInitialized: false,
       jobs: [],
       error: null,

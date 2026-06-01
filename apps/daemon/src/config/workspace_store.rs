@@ -161,7 +161,7 @@ impl WorkspaceStore {
 
 #[cfg(test)]
 mod tests {
-    use super::WorkspaceStore;
+    use super::{StoredWorkspace, WorkspaceStore};
 
     #[test]
     fn team_id_defaults_to_none_and_roundtrips() {

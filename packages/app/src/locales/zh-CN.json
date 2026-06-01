@@ -2504,6 +2504,8 @@
       "globalModelsNoDefaultPath": "无法解析默认工作区路径，请在「Daemon > 工作区」中确认配置。",
       "globalModelsNoTeam": "无法确定团队上下文，请先登录并加入团队。",
       "modelsLoadFailed": "模型加载失败",
+      "modelsDaemonUnavailable": "Daemon HTTP 尚未就绪，请等待应用启动完成后再试。",
+      "modelsNoConfigured": "当前工作区没有已配置的模型。请在 LLM 设置中添加 Provider，或使用全局定时任务（Daemon 默认工作区）。",
       "workspaceModelsNoPath": "请先选择一个工作区以加载可用模型。",
       "workspaceSelectLabel": "选择工作区",
       "workspaceSelectPlaceholder": "选择一个工作区…",

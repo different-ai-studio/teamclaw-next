@@ -22,7 +22,6 @@ import {
   type CronJob,
   type CronScope,
 } from '@/stores/cron'
-import { useWorkspaceStore } from '@/stores/workspace'
 import { ToggleSwitch } from './shared'
 import { getDeliveryTargetDisplay } from '@/lib/cron-utils'
 import { CronJobDialog } from './cron/CronJobDialog'
@@ -190,7 +189,6 @@ export function CronSection() {
     runJob,
     clearError,
   } = useCronStore()
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const [formOpen, setFormOpen] = React.useState(false)
   const [editJob, setEditJob] = React.useState<CronJob | undefined>(undefined)
@@ -230,24 +228,16 @@ export function CronSection() {
   React.useEffect(() => {
     if (activeScope !== 'workspace') return
     if (selectedWorkspacePath) return
-    const firstPath = workspaceOptions[0]?.path || workspacePath || null
+    const firstPath = workspaceOptions[0]?.path ?? null
     if (!firstPath) return
     void setSelectedWorkspacePath(firstPath)
-  }, [
-    activeScope,
-    selectedWorkspacePath,
-    setSelectedWorkspacePath,
-    workspaceOptions,
-    workspacePath,
-  ])
+  }, [activeScope, selectedWorkspacePath, setSelectedWorkspacePath, workspaceOptions])
 
   const handleScopeChange = (scope: CronScope) => {
     if (scope === activeScope) return
-    if (scope === 'workspace' && !selectedWorkspacePath && !workspacePath && workspaceOptions.length === 0) return
+    if (scope === 'workspace' && !selectedWorkspacePath && workspaceOptions.length === 0) return
     void setScope(scope)
   }
-
-  const currentWorkspaceSelection = selectedWorkspacePath || workspacePath || ''
 
   const handleOpenCreate = () => {
     setEditJob(undefined)
@@ -300,13 +290,14 @@ export function CronSection() {
           <button
             type="button"
             onClick={() => handleScopeChange('workspace')}
-            disabled={!workspacePath}
+            disabled={workspaceOptionsLoading || workspaceOptions.length === 0}
             className={cn(
               'rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors',
               activeScope === 'workspace'
                 ? 'bg-panel text-foreground'
                 : 'text-muted-foreground hover:bg-panel/60',
-              !workspacePath && 'cursor-not-allowed opacity-40',
+              (workspaceOptionsLoading || workspaceOptions.length === 0) &&
+                'cursor-not-allowed opacity-40',
             )}
           >
             {t('settings.cron.scopeWorkspace', 'Workspace tasks')}
@@ -320,7 +311,7 @@ export function CronSection() {
               )
             : t(
                 'settings.cron.scopeWorkspaceHint',
-                'Runs in the current workspace — suitable for project files, git worktrees, and MCP/skills.',
+                'Runs in the selected daemon workspace — suitable for project files, git worktrees, and MCP/skills.',
               )}
         </p>
         {activeScope === 'workspace' && (
@@ -329,19 +320,14 @@ export function CronSection() {
               {t('settings.cron.workspaceSelectLabel', 'Workspace')}
             </label>
             <select
-              value={currentWorkspaceSelection}
-              disabled={workspaceOptionsLoading || (workspaceOptions.length === 0 && !workspacePath)}
+              value={selectedWorkspacePath ?? ''}
+              disabled={workspaceOptionsLoading || workspaceOptions.length === 0}
               onChange={(event) => void setSelectedWorkspacePath(event.target.value || null)}
               className="h-8 rounded-lg border border-border-soft bg-background px-2 text-[12.5px] text-foreground"
             >
-              {!currentWorkspaceSelection && (
+              {!selectedWorkspacePath && (
                 <option value="">
                   {t('settings.cron.workspaceSelectPlaceholder', 'Select workspace')}
-                </option>
-              )}
-              {workspacePath && !workspaceOptions.some((row) => row.path === workspacePath) && (
-                <option value={workspacePath}>
-                  {t('settings.cron.currentWorkspaceOption', 'Current workspace')} · {workspacePath}
                 </option>
               )}
               {workspaceOptions.map((workspace) => (

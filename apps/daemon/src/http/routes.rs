@@ -54,6 +54,10 @@ pub fn build(state: HttpState) -> Router {
                 .delete(workspaces::delete_provider_auth),
         )
         .route(
+            "/v1/workspaces/:id/model-catalog",
+            get(workspaces::get_model_catalog),
+        )
+        .route(
             "/v1/workspaces/:id/permissions",
             get(workspaces::get_permissions).put(workspaces::put_permissions),
         )

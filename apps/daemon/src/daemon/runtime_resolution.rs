@@ -57,6 +57,19 @@ pub(crate) fn runtime_start_initial_model_override(
     (!model_id.is_empty()).then(|| model_id.to_string())
 }
 
+/// Map a backend name (as emitted by `supported_agent_type_names` and stored on
+/// cron jobs) to its `amux::AgentType`. Returns `None` for unknown/empty names
+/// so callers can fall back to the daemon default. Accepts the common aliases
+/// for claude-code so it tolerates either wire spelling.
+pub(crate) fn agent_type_from_name(name: &str) -> Option<amux::AgentType> {
+    match name.trim() {
+        "opencode" => Some(amux::AgentType::Opencode),
+        "codex" => Some(amux::AgentType::Codex),
+        "claude" | "claude_code" | "claude-code" => Some(amux::AgentType::ClaudeCode),
+        _ => None,
+    }
+}
+
 pub(crate) fn supported_agent_type_names(config: &DaemonConfig) -> Vec<String> {
     let mut names = Vec::new();
     if config.agents.claude_code.is_some() {
@@ -231,6 +244,34 @@ mod tests {
             runtime_start_initial_model_override(&start).as_deref(),
             Some("opencode/deepseek-v4-flash-free")
         );
+    }
+
+    #[test]
+    fn agent_type_from_name_maps_known_backends() {
+        assert_eq!(
+            agent_type_from_name("opencode"),
+            Some(amux::AgentType::Opencode)
+        );
+        assert_eq!(agent_type_from_name("codex"), Some(amux::AgentType::Codex));
+        assert_eq!(
+            agent_type_from_name("claude"),
+            Some(amux::AgentType::ClaudeCode)
+        );
+        // claude-code aliases tolerated for either wire spelling.
+        assert_eq!(
+            agent_type_from_name("claude-code"),
+            Some(amux::AgentType::ClaudeCode)
+        );
+        assert_eq!(
+            agent_type_from_name("claude_code"),
+            Some(amux::AgentType::ClaudeCode)
+        );
+    }
+
+    #[test]
+    fn agent_type_from_name_returns_none_for_unknown_or_empty() {
+        assert_eq!(agent_type_from_name(""), None);
+        assert_eq!(agent_type_from_name("gpt"), None);
     }
 
     #[test]

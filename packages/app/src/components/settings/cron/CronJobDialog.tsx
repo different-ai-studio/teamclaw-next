@@ -48,10 +48,9 @@ import {
   type DeliveryChannel,
 } from '@/stores/cron'
 import { useChannelsStore } from '@/stores/channels'
-import type { ConfiguredProvider } from '@/stores/provider'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCurrentTeamStore } from '@/stores/current-team'
-import { loadCronDialogModels } from '@/lib/cron-workspace-models'
+import { loadCronDialogModels, type CronModelGroup } from '@/lib/cron-workspace-models'
 import { ToggleSwitch } from '../shared'
 import {
   type JobFormState,
@@ -78,27 +77,36 @@ export function CronJobDialog({
   const { t } = useTranslation()
   const { addJob, updateJob, runJob, activeScope, selectedWorkspacePath } = useCronStore()
   const channelsStore = useChannelsStore()
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady)
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
-  const effectiveWorkspacePath = selectedWorkspacePath || workspacePath || null
 
   const [form, setForm] = React.useState<JobFormState>(defaultFormState)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [advancedOptionsOpen, setAdvancedOptionsOpen] = React.useState(false)
-  const [scopeProviders, setScopeProviders] = React.useState<ConfiguredProvider[]>([])
+  const [modelGroups, setModelGroups] = React.useState<CronModelGroup[]>([])
   const [modelHint, setModelHint] = React.useState<string | null>(null)
   const advancedScrollAnchorRef = React.useRef<HTMLDivElement>(null)
+
+  // ref → backend lookup so selecting a model pins the backend it runs on.
+  const backendByRef = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const group of modelGroups) {
+      for (const model of group.models) map.set(model.ref, group.backend)
+    }
+    return map
+  }, [modelGroups])
 
   React.useEffect(() => {
     if (!open) return
     let cancelled = false
 
     ;(async () => {
-      const { providers, hint } = await loadCronDialogModels({
+      const { groups, hint } = await loadCronDialogModels({
         activeScope,
         teamId,
-        workspacePath: effectiveWorkspacePath,
+        selectedWorkspacePath:
+          activeScope === 'workspace' ? selectedWorkspacePath : null,
         messages: {
           workspaceNoPath: t(
             'settings.cron.workspaceModelsNoPath',
@@ -116,15 +124,23 @@ export function CronJobDialog({
             'settings.cron.globalModelsNoDefaultPath',
             'Default workspace has no local path on this daemon.',
           ),
+          daemonUnavailable: t(
+            'settings.cron.modelsDaemonUnavailable',
+            'Daemon HTTP is not ready. Wait for the app to finish starting, then try again.',
+          ),
+          noConfiguredModels: t(
+            'settings.cron.modelsNoConfigured',
+            'No configured models for this workspace. Add a provider in LLM settings, or use global cron with the daemon default workspace.',
+          ),
           loadFailed: t('settings.cron.modelsLoadFailed', 'Failed to load models.'),
         },
       })
       if (cancelled) return
-      setScopeProviders(providers)
+      setModelGroups(groups)
       setModelHint(hint)
     })().catch(() => {
       if (!cancelled) {
-        setScopeProviders([])
+        setModelGroups([])
         setModelHint(t('settings.cron.modelsLoadFailed', 'Failed to load models.'))
       }
     })
@@ -132,7 +148,16 @@ export function CronJobDialog({
     return () => {
       cancelled = true
     }
-  }, [open, activeScope, effectiveWorkspacePath, teamId, t])
+  }, [open, activeScope, selectedWorkspacePath, teamId, daemonHttpReady, t])
+
+  // Drop a saved model that is no longer in this workspace's catalog, clearing
+  // its pinned backend too so the job reverts to the "auto" default.
+  React.useEffect(() => {
+    if (!open || !form.model || modelGroups.length === 0) return
+    if (!backendByRef.has(form.model)) {
+      setForm((prev) => ({ ...prev, model: '', backend: '' }))
+    }
+  }, [open, form.model, modelGroups, backendByRef])
 
   React.useEffect(() => {
     if (open) {
@@ -313,7 +338,11 @@ export function CronJobDialog({
                     <Box className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                     <Select
                       value={form.model || '__default__'}
-                      onValueChange={(v) => update({ model: v === '__default__' ? '' : v })}
+                      onValueChange={(v) =>
+                        v === '__default__'
+                          ? update({ model: '', backend: '' })
+                          : update({ model: v, backend: backendByRef.get(v) ?? '' })
+                      }
                     >
                       <SelectTrigger
                         className="h-7 min-h-7 w-fit max-w-[min(100%,18rem)] shrink justify-start gap-1 border-0 bg-transparent shadow-none font-mono text-xs py-0 pl-1 pr-0.5 hover:bg-muted/60 focus:ring-0 focus:ring-offset-0 data-[state=open]:bg-muted/60 [&_svg]:h-3 [&_svg]:w-3 [&_svg]:shrink-0"
@@ -338,20 +367,20 @@ export function CronJobDialog({
                             {modelHint}
                           </div>
                         )}
-                        {!modelHint && scopeProviders.length === 0 && (
+                        {!modelHint && modelGroups.length === 0 && (
                           <div className="px-2 py-6 text-center text-[13px] text-muted-foreground">
                             {t('settings.cron.noModels', 'No models configured. Please configure providers in LLM Settings first.')}
                           </div>
                         )}
-                        {scopeProviders.map((provider) => (
-                          <React.Fragment key={provider.id}>
+                        {modelGroups.map((group) => (
+                          <React.Fragment key={group.backend + '|' + group.label}>
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t first:border-t-0">
-                              {provider.name}
+                              {group.label}
                             </div>
-                            {provider.models.map((model) => (
+                            {group.models.map((model) => (
                               <SelectItem
-                                key={`${provider.id}/${model.id}`}
-                                value={`${provider.id}/${model.id}`}
+                                key={model.ref}
+                                value={model.ref}
                                 className="pl-6"
                               >
                                 {model.name}

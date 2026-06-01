@@ -14,8 +14,6 @@ import {
 } from '@/lib/daemon-local-client'
 import {
   type CustomProviderConfig,
-  getCustomProviderConfig,
-  getCustomProviderIds,
   providerApiKeyName,
 } from '@/lib/opencode/config'
 
@@ -314,23 +312,19 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Refresh custom provider IDs. Tries daemon first; falls back to config.ts.
+  // Refresh custom provider IDs from the daemon workspace-control API.
   refreshCustomProviderIds: async (workspacePath: string) => {
     const wsId = encodeWorkspaceId(workspacePath)
     try {
       const daemonProviders = await getDaemonProviders(wsId)
-      if (daemonProviders !== null) {
-        set({ customProviderIds: daemonProviders.map((p) => p.id) })
-        return
-      }
-    } catch {
-      // fall through to legacy
-    }
-    try {
-      const ids = await getCustomProviderIds(workspacePath)
-      set({ customProviderIds: ids })
+      set({
+        customProviderIds: (daemonProviders ?? [])
+          .filter((p) => p.id !== 'team' && p.authenticated)
+          .map((p) => p.id),
+      })
     } catch (err) {
       console.error('Failed to load custom provider IDs:', err)
+      set({ customProviderIds: [] })
     }
   },
 
@@ -391,25 +385,18 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  // Get a custom provider config. Tries daemon first; falls back to config.ts.
+  // Get a custom provider config from the daemon workspace-control API.
   getCustomProvider: async (workspacePath: string, providerId: string) => {
     const wsId = encodeWorkspaceId(workspacePath)
     try {
       const providers = await getDaemonProviders(wsId)
-      if (providers !== null) {
-        const p = providers.find((x) => x.id === providerId)
-        if (!p) return null
-        return {
-          name: p.display_name,
-          baseURL: p.base_url ?? '',
-          models: p.models.map((id) => ({ modelId: id, modelName: id })),
-        } satisfies CustomProviderConfig
-      }
-    } catch {
-      // fall through
-    }
-    try {
-      return await getCustomProviderConfig(workspacePath, providerId)
+      const p = providers?.find((x) => x.id === providerId)
+      if (!p) return null
+      return {
+        name: p.display_name,
+        baseURL: p.base_url ?? '',
+        models: p.models.map((id) => ({ modelId: id, modelName: id })),
+      } satisfies CustomProviderConfig
     } catch (err) {
       console.error('Failed to get custom provider:', err)
       return null
