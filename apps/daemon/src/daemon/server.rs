@@ -846,10 +846,59 @@ impl DaemonServer {
         // The caller wraps this in  { "ok": true/false, "result": ... }
         // — the desktop amuxd_client reads "session_id" and optional "agent_error".
         match turn_result {
-            Ok(text) => Ok(serde_json::json!({
-                "text": text,
-                "session_id": remote_session_id,
-            })),
+            Ok(reply) => {
+                // `send_prompt_and_await_reply` drains the ACP channel directly,
+                // bypassing `forward_agent_event`, so we must persist the finalized
+                // AgentReply here — same path as collab chat (TOML + live + cloud).
+                if !reply.content.is_empty() {
+                    if let Some(tc) = self.teamclaw.as_ref() {
+                        let actor_id = self.actor_id.clone();
+                        let (model, seq) = {
+                            let mut mgr = self.agents.lock().await;
+                            let agent_id = mgr
+                                .agent_id_by_acp_session(&acp_sid)
+                                .unwrap_or_default();
+                            let model = mgr
+                                .current_model(&agent_id)
+                                .cloned()
+                                .unwrap_or_default();
+                            let seq = mgr
+                                .get_handle_mut(&agent_id)
+                                .map(|h| h.next_sequence())
+                                .unwrap_or(0);
+                            (model, seq)
+                        };
+                        tc.emit_agent_message(
+                            &remote_session_id,
+                            &actor_id,
+                            crate::proto::teamclaw::MessageKind::AgentReply,
+                            &reply.content,
+                            &reply.metadata_json,
+                            &model,
+                            &reply.turn_id,
+                            seq,
+                            true,
+                            Some(&self.backend),
+                        )
+                        .await;
+                        info!(
+                            session_id = %remote_session_id,
+                            turn_id = %reply.turn_id,
+                            bytes = reply.content.len(),
+                            "cron: persisted AgentReply to session/live and cloud"
+                        );
+                    } else {
+                        warn!(
+                            session_id = %remote_session_id,
+                            "cron: teamclaw SessionManager unavailable; AgentReply not persisted"
+                        );
+                    }
+                }
+                Ok(serde_json::json!({
+                    "text": reply.content,
+                    "session_id": remote_session_id,
+                }))
+            }
             Err(e) => Ok(serde_json::json!({
                 "session_id": remote_session_id,
                 "agent_error": e.to_string(),

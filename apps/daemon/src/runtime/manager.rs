@@ -1405,7 +1405,7 @@ impl RuntimeManager {
         acp_session_id: &str,
         prompt: &str,
         timeout_duration: Duration,
-    ) -> crate::error::Result<String> {
+    ) -> crate::error::Result<super::turn_aggregator::EmittedMessage> {
         let agent_id = self
             .agent_id_by_acp_session(acp_session_id)
             .ok_or_else(|| {
@@ -1483,7 +1483,7 @@ impl RuntimeManager {
 
             for m in emitted {
                 if matches!(m.kind, crate::proto::teamclaw::MessageKind::AgentReply) {
-                    return Ok(m.content);
+                    return Ok(m);
                 }
             }
         }

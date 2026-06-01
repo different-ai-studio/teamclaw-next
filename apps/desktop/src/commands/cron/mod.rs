@@ -86,8 +86,7 @@ fn global_cron_root() -> Result<String, String> {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join(crate::commands::APP_SHORT_NAME)
         .join("cron-global");
-    std::fs::create_dir_all(&base)
-        .map_err(|e| format!("Failed to create global cron dir: {e}"))?;
+    std::fs::create_dir_all(&base).map_err(|e| format!("Failed to create global cron dir: {e}"))?;
     Ok(base.to_string_lossy().to_string())
 }
 
@@ -118,8 +117,7 @@ async fn require_instance(
     registry: &State<'_, crate::commands::window::WindowRegistry>,
     cron_state: &State<'_, CronState>,
 ) -> Result<CronInstance, String> {
-    let (storage_path, _) =
-        resolve_cron_paths(scope, workspace_path, window, registry).await?;
+    let (storage_path, _) = resolve_cron_paths(scope, workspace_path, window, registry).await?;
     cron_state
         .try_instance_for(&storage_path)
         .await
@@ -174,9 +172,7 @@ pub async fn cron_init(
 
     instance.scheduler.start().await;
 
-    println!(
-        "[Cron] System initialized (scope={scope:?}, storage={storage_path})"
-    );
+    println!("[Cron] System initialized (scope={scope:?}, storage={storage_path})");
     Ok(())
 }
 
