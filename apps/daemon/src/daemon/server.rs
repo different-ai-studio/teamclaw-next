@@ -1034,12 +1034,23 @@ impl DaemonServer {
                 Some(std::sync::Arc::new(
                     crate::config::OpenCodeCompatStore::new(),
                 ));
+            let opencode_binary = self
+                .config
+                .agents
+                .opencode
+                .as_ref()
+                .map(|c| c.binary.clone())
+                .unwrap_or_else(|| "opencode".to_string());
+            let opencode_settings = Some(std::sync::Arc::new(
+                crate::opencode_settings::OpenCodeSettingsService::new(opencode_binary),
+            ));
             match crate::http::spawn(
                 http_cfg,
                 meta,
                 runtime,
                 workspace_control,
                 runtime_supervisor,
+                opencode_settings,
             )
             .await
             {

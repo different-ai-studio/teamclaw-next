@@ -352,6 +352,17 @@ impl RuntimeManager {
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         let launch = self.launch_config_for(agent_type);
+        let mut extra_env = extra_env;
+        if matches!(
+            agent_type,
+            amux::AgentType::Opencode | amux::AgentType::Codex
+        ) {
+            let worktree_path = std::path::Path::new(worktree);
+            if let Err(e) = crate::config::ensure_opencode_xdg_dirs(worktree_path) {
+                tracing::warn!(worktree, error = %e, "failed to ensure opencode xdg dirs for ACP");
+            }
+            extra_env.extend(crate::config::opencode_workspace_xdg_env(worktree_path));
+        }
         let is_gateway = mcp_config_path.is_some();
         let resume_requested = resume_acp_session_id.is_some();
         let (cmd_tx, startup) = self
@@ -627,6 +638,20 @@ impl RuntimeManager {
                         | amux::AgentStatus::Idle
                 )
         })
+    }
+
+    /// Invalidate long-lived OpenCode/Codex ACP hosts after provider credentials change.
+    pub fn evict_acp_hosts_after_provider_auth_change(&mut self) {
+        let removed = self.acp_host_pool.evict_agent_types(&[
+            amux::AgentType::Opencode,
+            amux::AgentType::Codex,
+        ]);
+        if removed > 0 {
+            info!(
+                removed,
+                "evicted ACP hosts so new sessions pick up provider auth"
+            );
+        }
     }
 
     /// Stop all runtimes for a workspace (used after settings reload).

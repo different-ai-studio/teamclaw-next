@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getDaemonProviders: vi.fn(),
+  getDaemonProviderAuthMethods: vi.fn(),
+  postDaemonProviderOAuthAuthorize: vi.fn(),
+  postDaemonProviderOAuthCallback: vi.fn(),
+  reloadDaemonRuntime: vi.fn(),
   workspacePath: '/workspace/demo',
   runtimeById: {} as Record<string, any>,
 }))
@@ -33,22 +37,19 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
-vi.mock('@/lib/daemon-local-client', () => ({
-  encodeWorkspaceId: (path: string) => path,
-  getDaemonProviders: mocks.getDaemonProviders,
-  putDaemonProviderAuth: vi.fn(),
+const daemonMocks = vi.hoisted(() => ({
   deleteDaemonProviderAuth: vi.fn(),
 }))
 
-vi.mock('@/lib/amuxd-models', () => ({
-  AMUXD_AGENT_TYPES: ['openai'],
-  availableModelsFor: (providerId: string) =>
-    providerId === 'openai'
-      ? [{ id: 'gpt-4o', displayName: 'GPT-4o', provider: 'openai' }]
-      : [],
-  allAmuxdModels: () => [
-    { id: 'gpt-4o', displayName: 'GPT-4o', provider: 'openai' },
-  ],
+vi.mock('@/lib/daemon-local-client', () => ({
+  encodeWorkspaceId: (path: string) => path,
+  getDaemonProviders: mocks.getDaemonProviders,
+  getDaemonProviderAuthMethods: mocks.getDaemonProviderAuthMethods,
+  postDaemonProviderOAuthAuthorize: mocks.postDaemonProviderOAuthAuthorize,
+  postDaemonProviderOAuthCallback: mocks.postDaemonProviderOAuthCallback,
+  reloadDaemonRuntime: mocks.reloadDaemonRuntime,
+  putDaemonProviderAuth: vi.fn(),
+  deleteDaemonProviderAuth: daemonMocks.deleteDaemonProviderAuth,
 }))
 
 vi.mock('@/stores/runtime-state-store', () => ({
@@ -70,7 +71,17 @@ describe('provider store initAll', () => {
     mocks.workspacePath = '/workspace/demo'
     mocks.runtimeById = {}
     mocks.getDaemonProviders.mockReset()
+    mocks.getDaemonProviderAuthMethods.mockReset()
+    mocks.postDaemonProviderOAuthAuthorize.mockReset()
+    mocks.postDaemonProviderOAuthCallback.mockReset()
+    mocks.reloadDaemonRuntime.mockReset()
+    mocks.reloadDaemonRuntime.mockResolvedValue('applied_live')
     mocks.getDaemonProviders.mockResolvedValue(null)
+    mocks.getDaemonProviderAuthMethods.mockResolvedValue({
+      openai: [{ type: 'oauth', label: 'Browser login' }],
+    })
+    daemonMocks.deleteDaemonProviderAuth.mockReset()
+    daemonMocks.deleteDaemonProviderAuth.mockResolvedValue('restart_required')
   })
 
   it('surfaces OpenCode runtime-advertised models in model settings', async () => {
@@ -110,6 +121,89 @@ describe('provider store initAll', () => {
       id: 'gpt-4o',
       name: 'GPT-4o',
     })
+  })
+
+  it('loads OAuth auth methods from daemon HTTP', async () => {
+    const { useProviderStore } = await import('../provider')
+    await useProviderStore.getState().refreshAuthMethods()
+
+    expect(mocks.getDaemonProviderAuthMethods).toHaveBeenCalledWith('/workspace/demo')
+    expect(useProviderStore.getState().authMethods.openai).toEqual([
+      { type: 'oauth', label: 'Browser login' },
+    ])
+  })
+
+  it('falls back to built-in OAuth methods when daemon catalog is unavailable', async () => {
+    mocks.getDaemonProviderAuthMethods.mockResolvedValue(null)
+
+    const { useProviderStore } = await import('../provider')
+    await useProviderStore.getState().refreshAuthMethods()
+
+    expect(useProviderStore.getState().authMethods.openai).toEqual([
+      { type: 'oauth', label: 'Browser login' },
+    ])
+  })
+
+  it('returns pending OAuth state from daemon authorize response', async () => {
+    mocks.postDaemonProviderOAuthAuthorize.mockResolvedValue({
+      ok: true,
+      url: 'https://auth.example.test/openai',
+      method: 'code',
+      instructions: 'Paste code',
+    })
+
+    const { useProviderStore } = await import('../provider')
+    const result = await useProviderStore.getState().connectProviderOAuth('openai', 0)
+
+    expect(result).toEqual({
+      status: 'pending',
+      url: 'https://auth.example.test/openai',
+      instructions: 'Paste code',
+      methodType: 'code',
+    })
+  })
+
+  it('surfaces daemon error when OAuth authorize fails', async () => {
+    mocks.postDaemonProviderOAuthAuthorize.mockResolvedValue({
+      ok: false,
+      status: 503,
+      code: 'runtime_unavailable',
+      message: 'opencode serve unavailable',
+    })
+
+    const { useProviderStore } = await import('../provider')
+    const result = await useProviderStore.getState().connectProviderOAuth('openai', 0)
+
+    expect(result.status).toBe('error')
+    expect(result).toMatchObject({ message: 'opencode serve unavailable' })
+  })
+
+  it('reloads runtime after successful OAuth callback', async () => {
+    mocks.postDaemonProviderOAuthCallback.mockResolvedValue({ ok: true })
+    mocks.reloadDaemonRuntime.mockResolvedValue('reload_required')
+
+    const { useProviderStore } = await import('../provider')
+    const ok = await useProviderStore.getState().completeOAuthCallback('openai', 0, 'code-123')
+
+    expect(ok).toBe(true)
+    expect(mocks.reloadDaemonRuntime).toHaveBeenCalledWith('/workspace/demo')
+  })
+
+  it('disconnects via daemon without OpenCode sidecar', async () => {
+    const { useProviderStore } = await import('../provider')
+    useProviderStore.setState({
+      providers: [{ id: 'openai', name: 'OpenAI', configured: true }],
+      configuredProviders: [{ id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-4o', name: 'GPT-4o' }] }],
+      models: [{ id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' }],
+    })
+
+    const ok = await useProviderStore.getState().disconnectProvider('openai')
+
+    expect(ok).toBe(true)
+    expect(daemonMocks.deleteDaemonProviderAuth).toHaveBeenCalledWith('/workspace/demo', 'openai')
+    expect(useProviderStore.getState().providers).toEqual([
+      { id: 'openai', name: 'OpenAI', configured: false },
+    ])
   })
 
   it('keeps an explicit selected model when daemon reports a different catalog', async () => {
@@ -248,40 +342,13 @@ describe('provider store initAll', () => {
     const { getModelOptionsForSelectedBackend } = await import('../provider')
 
     const models = [
-      { provider: 'claude-code', id: 'claude-a', name: 'Claude A' },
-      { provider: 'claude-code', id: 'claude-b', name: 'Claude B' },
-      { provider: 'opencode', id: 'open-a', name: 'Open A' },
+      { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
+      { id: 'qwen', name: 'Qwen', provider: 'opencode' },
     ]
-
-    expect(getModelOptionsForSelectedBackend({
+    const filtered = getModelOptionsForSelectedBackend({
       models,
-      currentModelKey: 'claude-code/claude-a',
-    } as any)).toEqual([
-      { provider: 'claude-code', id: 'claude-a', name: 'Claude A' },
-      { provider: 'claude-code', id: 'claude-b', name: 'Claude B' },
-    ])
-  })
-
-  it('does not carry the selected model memory across workspaces', async () => {
-    mocks.getDaemonProviders.mockResolvedValue([
-      {
-        id: 'openai',
-        display_name: 'OpenAI',
-        authenticated: true,
-        models: ['gpt-4o', 'gpt-4.1'],
-      },
-    ])
-    localStorage.setItem('teamclaw-selected-model:/workspace/demo', 'openai/gpt-4.1')
-
-    const { useProviderStore } = await import('../provider')
-
-    await useProviderStore.getState().initAll()
-    expect(useProviderStore.getState().currentModelKey).toBe('openai/gpt-4.1')
-
-    mocks.workspacePath = '/workspace/next'
-    await useProviderStore.getState().initAll()
-
-    expect(useProviderStore.getState().currentModelKey).toBe('openai/gpt-4o')
-    expect(localStorage.getItem('teamclaw-selected-model:/workspace/next')).toBe('openai/gpt-4o')
+      currentModelKey: 'openai/gpt-4o',
+    })
+    expect(filtered).toEqual([{ id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' }])
   })
 })

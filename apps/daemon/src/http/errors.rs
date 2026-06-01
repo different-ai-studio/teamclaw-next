@@ -31,6 +31,8 @@ pub enum ErrorCode {
     Conflict,
     BadRequest,
     Internal,
+    /// Reserved for endpoints defined but not yet implemented (e.g. provider OAuth phase 2).
+    NotImplemented,
 }
 
 impl ErrorCode {
@@ -46,6 +48,7 @@ impl ErrorCode {
             ErrorCode::EventGone => StatusCode::GONE,
             ErrorCode::BadRequest => StatusCode::BAD_REQUEST,
             ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCode::NotImplemented => StatusCode::NOT_IMPLEMENTED,
         }
     }
 
@@ -63,6 +66,7 @@ impl ErrorCode {
             ErrorCode::Conflict => "Conflict",
             ErrorCode::BadRequest => "Bad request",
             ErrorCode::Internal => "Internal server error",
+            ErrorCode::NotImplemented => "Not implemented",
         }
     }
 }
@@ -121,6 +125,14 @@ impl HttpError {
 
     pub fn internal(detail: impl Into<String>) -> Self {
         Self::new(ErrorCode::Internal, detail)
+    }
+
+    pub fn not_implemented(detail: impl Into<String>) -> Self {
+        Self::new(ErrorCode::NotImplemented, detail)
+    }
+
+    pub fn runtime_unavailable(detail: impl Into<String>) -> Self {
+        Self::new(ErrorCode::RuntimeUnavailable, detail)
     }
 
     pub fn rate_limited(retry_after_secs: u64) -> Self {

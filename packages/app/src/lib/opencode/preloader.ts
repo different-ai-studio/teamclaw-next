@@ -101,17 +101,25 @@ export function waitForOpenCodeBootstrapped(
   workspacePath: string,
   port?: number,
 ): Promise<PreloadResult> {
-  if (current?.path !== workspacePath) {
-    void startOpenCode(workspacePath, port);
-  }
+  const started =
+    current?.path === workspacePath ? current.promise : startOpenCode(workspacePath, port);
 
   if (!current || current.path !== workspacePath) {
     return Promise.reject(new Error("OpenCode preload was not initialized"));
   }
 
-  return current.bootstrappedResult
+  const bootstrapped = current.bootstrappedResult
     ? Promise.resolve(current.bootstrappedResult)
     : current.bootstrapped;
+
+  // Reject when `start_opencode` fails instead of waiting forever for an event.
+  return Promise.race([
+    bootstrapped,
+    started.then((result) => {
+      if (result.url?.trim()) return result;
+      throw new Error("OpenCode sidecar started without URL");
+    }),
+  ]);
 }
 
 /** Check whether a preload is in-flight (or resolved) for the given path. */

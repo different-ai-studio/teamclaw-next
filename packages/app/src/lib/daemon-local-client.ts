@@ -234,6 +234,107 @@ export async function getDaemonProviders(
   return result.ok ? result.data : null
 }
 
+// ─── Provider auth catalog & OAuth (Phase 1 catalog, Phase 2 execution) ─────
+
+export type DaemonProviderAuthMethod = {
+  type: 'oauth' | 'api'
+  label: string
+}
+
+export type DaemonProviderAuthMethods = Record<string, DaemonProviderAuthMethod[]>
+
+export async function getDaemonProviderAuthMethods(
+  workspaceId: string,
+): Promise<DaemonProviderAuthMethods | null> {
+  const result = await daemonFetch<DaemonProviderAuthMethods>(
+    `/v1/workspaces/${workspaceId}/provider-auth-methods`,
+  )
+  return result.ok ? result.data : null
+}
+
+export type DaemonOAuthAuthorizeResult =
+  | { ok: true; url: string; method: 'auto' | 'code'; instructions: string }
+  | { ok: false; status: number; code?: string; message: string }
+
+export type DaemonOAuthCallbackResult =
+  | { ok: true; outcome: DaemonApplyOutcome }
+  | { ok: false; status: number; code?: string; message: string }
+
+function problemDetailFromErrorBody(error: string): { code?: string; detail: string } {
+  try {
+    const parsed = JSON.parse(error) as { code?: string; detail?: string }
+    return {
+      code: parsed.code,
+      detail: parsed.detail ?? error,
+    }
+  } catch {
+    return { detail: error }
+  }
+}
+
+export async function postDaemonProviderOAuthAuthorize(
+  workspaceId: string,
+  providerId: string,
+  methodIndex: number,
+  inputs?: Record<string, string>,
+): Promise<DaemonOAuthAuthorizeResult> {
+  const result = await daemonFetch<{
+    url: string
+    method: string
+    instructions: string
+  }>(
+    `/v1/workspaces/${workspaceId}/providers/${encodeURIComponent(providerId)}/oauth/authorize`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ method_index: methodIndex, inputs: inputs ?? {} }),
+    },
+  )
+  if (result.ok) {
+    const method =
+      result.data.method === 'auto' || result.data.method === 'code'
+        ? result.data.method
+        : 'code'
+    return {
+      ok: true,
+      url: result.data.url,
+      method,
+      instructions: result.data.instructions,
+    }
+  }
+  const problem = problemDetailFromErrorBody(result.error)
+  return {
+    ok: false,
+    status: result.status,
+    code: problem.code,
+    message: problem.detail,
+  }
+}
+
+export async function postDaemonProviderOAuthCallback(
+  workspaceId: string,
+  providerId: string,
+  methodIndex: number,
+  code?: string,
+): Promise<DaemonOAuthCallbackResult> {
+  const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
+    `/v1/workspaces/${workspaceId}/providers/${encodeURIComponent(providerId)}/oauth/callback`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ method_index: methodIndex, code: code ?? null }),
+    },
+  )
+  if (result.ok) {
+    return { ok: true, outcome: result.data.outcome }
+  }
+  const problem = problemDetailFromErrorBody(result.error)
+  return {
+    ok: false,
+    status: result.status,
+    code: problem.code,
+    message: problem.detail,
+  }
+}
+
 /** Mirrors Rust `workspaces::CatalogModel`. `ref` is `"<providerSegment>/<modelId>"`. */
 export interface DaemonCatalogModel {
   ref: string

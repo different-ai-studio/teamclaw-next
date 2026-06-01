@@ -12,8 +12,16 @@ import {
   putDaemonProviderAuth,
   deleteDaemonProviderAuth,
   getDaemonProviders,
+  getDaemonProviderAuthMethods,
+  postDaemonProviderOAuthAuthorize,
+  postDaemonProviderOAuthCallback,
+  reloadDaemonRuntime,
   type DaemonProviderInfo,
 } from '@/lib/daemon-local-client'
+import {
+  fallbackProviderAuthMethods,
+  mergeProviderAuthMethods,
+} from '@/lib/daemon-provider-auth'
 import {
   type CustomProviderConfig,
   providerApiKeyName,
@@ -60,6 +68,19 @@ function daemonProvidersToConfigured(
   })
 
   return { configuredProviders, providers }
+}
+
+async function reloadRuntimeAfterProviderChange(workspacePath: string): Promise<void> {
+  try {
+    const outcome = await reloadDaemonRuntime(encodeWorkspaceId(workspacePath))
+    if (outcome === 'restart_required') {
+      toast.info('Agent restart required', {
+        description: 'Provider credentials changed. Start a new session to use the updated connection.',
+      })
+    }
+  } catch (err) {
+    console.warn('[LLM] runtime reload after provider change failed:', err)
+  }
 }
 
 function providerDisplayName(providerId: string): string {
@@ -336,17 +357,71 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   _workspacePath: null,
 
   refreshAuthMethods: async () => {
-    set({ authMethods: {} })
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    if (!workspacePath) {
+      set({ authMethods: fallbackProviderAuthMethods() })
+      return
+    }
+    try {
+      const methods = await getDaemonProviderAuthMethods(encodeWorkspaceId(workspacePath))
+      if (methods) {
+        set({
+          authMethods: mergeProviderAuthMethods(
+            methods as Record<string, ProviderAuthMethod[]>,
+          ),
+        })
+        return
+      }
+    } catch (err) {
+      console.error('Failed to load auth methods from daemon:', err)
+    }
+    set({ authMethods: fallbackProviderAuthMethods() })
   },
 
-  connectProviderOAuth: async () => ({
-    status: 'error' as const,
-    message: 'OAuth provider login is not available without the legacy OpenCode sidecar',
-  }),
+  connectProviderOAuth: async (providerId, methodIndex) => {
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    if (!workspacePath) {
+      return { status: 'error' as const, message: 'No workspace selected' }
+    }
+    const result = await postDaemonProviderOAuthAuthorize(
+      encodeWorkspaceId(workspacePath),
+      providerId,
+      methodIndex,
+    )
+    if (!result.ok) {
+      toast.error('OAuth login failed', { description: result.message })
+      return { status: 'error' as const, message: result.message }
+    }
+    return {
+      status: 'pending' as const,
+      url: result.url,
+      instructions: result.instructions,
+      methodType: result.method,
+    }
+  },
 
-  completeOAuthCallback: async () => {
-    toast.error('OAuth login failed', { description: 'OAuth is not available via the daemon control plane yet' })
-    return false
+  completeOAuthCallback: async (providerId, methodIndex, code) => {
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    if (!workspacePath) return false
+    const result = await postDaemonProviderOAuthCallback(
+      encodeWorkspaceId(workspacePath),
+      providerId,
+      methodIndex,
+      code,
+    )
+    if (!result.ok) {
+      toast.error('OAuth login failed', { description: result.message })
+      return false
+    }
+    set((state) => {
+      const newDisconnected = new Set(state._disconnectedIds)
+      newDisconnected.delete(providerId)
+      return { _disconnectedIds: newDisconnected }
+    })
+    toast.success('Provider connected', { description: `Successfully connected ${providerId}` })
+    await reloadRuntimeAfterProviderChange(workspacePath)
+    await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
+    return true
   },
 
   refreshProviders: async () => {
@@ -422,6 +497,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         newDisconnected.delete(providerId)
         return { _disconnectedIds: newDisconnected }
       })
+      await reloadRuntimeAfterProviderChange(workspacePath)
       await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       return true
     } catch (err) {
@@ -441,6 +517,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
     try {
       await deleteDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId)
+      await reloadRuntimeAfterProviderChange(workspacePath)
       toast.success('Provider disconnected', { description: `Successfully disconnected ${providerId}` })
       set((state) => {
         const newDisconnected = new Set(state._disconnectedIds)
