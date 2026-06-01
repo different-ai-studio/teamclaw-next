@@ -20,6 +20,11 @@ type StoreAuthSession = AuthSession & {
 interface AuthState {
   session: StoreAuthSession | null;
   loading: boolean;
+  // Dedicated flag for the post-authentication "upgrade account" flow. It must
+  // stay SEPARATE from `loading`: AuthGate tears the whole app subtree down and
+  // shows a splash whenever `loading` is true while a session exists, which
+  // would unmount the upgrade dialog (and reset its open state) mid-request.
+  upgradeLoading: boolean;
   authFlow: AuthFlow;
   errorMessage: string | null;
   otpEmail: string | null;
@@ -62,6 +67,7 @@ async function claimInviteToken(token: string): Promise<AuthClaimResult | { erro
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   loading: true,
+  upgradeLoading: false,
   authFlow: "idle",
   errorMessage: null,
   otpEmail: null,
@@ -175,14 +181,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
       return false;
     }
-    set({ loading: true, errorMessage: null });
+    // Use `upgradeLoading`, never the global `loading` — see AuthState.
+    set({ upgradeLoading: true, errorMessage: null });
     try {
       await getBackend().auth.sendUpgradeEmailOtp(email);
     } catch (error) {
-      set({ loading: false, errorMessage: errorMessageFor(error) });
+      set({ upgradeLoading: false, errorMessage: errorMessageFor(error) });
       return false;
     }
-    set({ loading: false, upgradeEmail: email });
+    set({ upgradeLoading: false, upgradeEmail: email });
     return true;
   },
   verifyUpgradeEmailOtp: async (code) => {
@@ -195,17 +202,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ errorMessage: "No pending upgrade. Re-enter your email." });
       return false;
     }
-    set({ loading: true, errorMessage: null });
+    // Use `upgradeLoading`, never the global `loading` — see AuthState.
+    set({ upgradeLoading: true, errorMessage: null });
     try {
       const session = await getBackend().auth.verifyUpgradeEmailOtp(email, code);
-      set({ session: storeSession(session), loading: false, upgradeEmail: null });
+      set({ session: storeSession(session), upgradeLoading: false, upgradeEmail: null });
     } catch (error) {
-      set({ loading: false, errorMessage: errorMessageFor(error) });
+      set({ upgradeLoading: false, errorMessage: errorMessageFor(error) });
       return false;
     }
     return true;
   },
-  resetUpgradeOtp: () => set({ upgradeEmail: null, errorMessage: null }),
+  resetUpgradeOtp: () => set({ upgradeEmail: null, upgradeLoading: false, errorMessage: null }),
   signOut: async () => {
     await getBackend().auth.signOut();
     set({ session: null, authFlow: "idle", otpEmail: null, upgradeEmail: null });
