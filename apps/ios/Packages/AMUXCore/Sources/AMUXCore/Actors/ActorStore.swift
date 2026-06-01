@@ -29,6 +29,12 @@ public final class ActorStore {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+        // Scope the shared SwiftData cache to the active team up front, before the
+        // network fetch, so actors from a previously-viewed team can't leak into
+        // the (unscoped) Actors and Members @Query views as phantom members — not
+        // even briefly while the fetch is in flight.
+        ActorCacheSynchronizer.deleteForeignTeams(currentTeamID: teamID,
+                                                  modelContext: modelContext)
         do {
             let remote = try await repository.listActors(teamID: teamID)
             ActorCacheSynchronizer.upsert(remote, modelContext: modelContext)
