@@ -21,7 +21,8 @@ use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
 use crate::daemon::binding_target::parse_binding_to_target;
 use crate::daemon::prompt_await::parse_prompt_await_payload;
 use crate::daemon::runtime_resolution::{
-    resolve_requested_agent_type, runtime_start_initial_model_override, supported_agent_type_names,
+    agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
+    supported_agent_type_names,
 };
 use crate::daemon::runtime_cursor::{
     compute_effective_cursor_from_messages, last_unanswered_mention_idx,
@@ -787,6 +788,16 @@ impl DaemonServer {
                     .await
                     .map_err(|e| anyhow::anyhow!("create_cron_session: {e}"))?;
 
+                // Resolve the job's pinned backend (if any) against the
+                // daemon's configured agents. `None` (no agent_type on the
+                // wire) keeps the "auto" behavior: RuntimeManager falls back to
+                // default_agent_type. An explicit-but-unconfigured backend is
+                // rerouted by resolve_requested_agent_type rather than failing.
+                let agent_type_override = parsed
+                    .agent_type
+                    .and_then(agent_type_from_name)
+                    .map(|requested| resolve_requested_agent_type(&self.config, requested));
+
                 let mut mgr = self.agents.lock().await;
                 let acp_sid = mgr
                     .create_gateway_session_with_model(
@@ -797,6 +808,7 @@ impl DaemonServer {
                         parsed.model_override.clone(),
                         Some(&sb_sid), // bind AgentReply to the cloud session
                         Some(working_directory.as_str()),
+                        agent_type_override,
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
@@ -957,7 +969,11 @@ impl DaemonServer {
             .clone()
             .unwrap_or_else(crate::config::HttpConfig::default);
         let _http_handle = {
-            let meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
+            let mut meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
+            // Expose configured backends so the model-catalog endpoint can
+            // group models per backend (opencode providers vs claude/codex
+            // static tables).
+            meta.configured_agent_types = supported_agent_type_names(&self.config);
             let runtime: Arc<dyn crate::http::runtime_adapter::RuntimeAdapter> =
                 crate::http::runtime_adapter::RuntimeManagerAdapter::new(
                     self.agents.clone(),

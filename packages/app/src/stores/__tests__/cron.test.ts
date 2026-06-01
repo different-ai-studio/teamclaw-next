@@ -71,6 +71,23 @@ describe('cron store', () => {
     expect(useCronStore.getState().isInitialized).toBe(true)
   })
 
+  it('passes null workspace path for workspace scope when none is selected', async () => {
+    useCronStore.setState({
+      activeScope: 'workspace',
+      selectedWorkspacePath: null,
+    })
+    mockInvoke.mockResolvedValueOnce(undefined)
+    mockInvoke.mockResolvedValueOnce([])
+    mockInvoke.mockResolvedValueOnce([])
+
+    await useCronStore.getState().init()
+
+    expect(mockInvoke).toHaveBeenCalledWith('cron_init', {
+      scope: 'workspace',
+      workspacePath: null,
+    })
+  })
+
   it('uses the selected workspace for workspace-scoped init and list calls', async () => {
     useCronStore.setState({
       activeScope: 'workspace',

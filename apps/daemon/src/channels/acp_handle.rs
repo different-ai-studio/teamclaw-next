@@ -107,10 +107,11 @@ impl AmuxdAcpHandle {
         };
 
         // Consult per-session override so the spawn picks up the desired
-        // model. Stored as (provider, model); only model is threaded through
-        // to the spawn — provider is currently informational (claude-code
-        // binary == anthropic) but kept so future multi-provider routing
-        // can dispatch on it without another schema change.
+        // model. Stored as (provider, model); both fields are forwarded to
+        // `create_gateway_session_with_model`, which calls `resolve_initial_model`
+        // to build the correct ACP model id per backend:
+        //   - ClaudeCode: maps short names (sonnet→claude-sonnet-4-6), drops provider
+        //   - OpenCode/Codex: rejoins as "provider/model" (required by ACP)
         let model_arg: Option<(String, String)> = {
             let overrides = self.model_override.lock().await;
             overrides.get(session).cloned()
@@ -124,6 +125,8 @@ impl AmuxdAcpHandle {
                 "Gateway session",
                 model_arg,
                 remote_session_id.as_deref(),
+                None,
+                // Gateway channels run on the daemon default backend.
                 None,
             )
             .await
@@ -423,5 +426,70 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
         map.remove(session);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::mock::MockBackend;
+    use crate::runtime::RuntimeManager;
+
+    fn make_handle() -> AmuxdAcpHandle {
+        AmuxdAcpHandle {
+            manager: Arc::new(Mutex::new(RuntimeManager::new(
+                RuntimeManager::default_launch_configs(),
+                None,
+            ))),
+            logical_to_acp: Arc::new(Mutex::new(HashMap::new())),
+            team_id: "team-test".to_string(),
+            model_override: Arc::new(Mutex::new(HashMap::new())),
+            backend: Arc::new(MockBackend::default()),
+        }
+    }
+
+    /// Verify `set_model` stores `(provider, model)` as a tuple so the
+    /// lazy-spawn in `resolve_or_spawn` forwards BOTH to
+    /// `create_gateway_session_with_model`.  The provider must be preserved
+    /// because `resolve_initial_model` needs it to reconstruct the full ACP
+    /// model id for OpenCode/Codex backends.
+    #[tokio::test]
+    async fn set_model_stores_provider_and_model_tuple() {
+        let handle = make_handle();
+        let session = AmuxSessionId::from("sess-1");
+
+        // Simulate a user choosing an OpenCode provider/model.
+        // set_model validates against list_models(), which for ClaudeCode
+        // returns the three hardcoded models. Use one of those to avoid a
+        // validation error; the important assertion is that the tuple is
+        // stored intact.
+        handle
+            .set_model(&session, "anthropic", "sonnet")
+            .await
+            .unwrap();
+
+        let overrides = handle.model_override.lock().await;
+        let stored = overrides.get("sess-1").cloned().unwrap();
+        assert_eq!(stored.0, "anthropic", "provider must be stored");
+        assert_eq!(stored.1, "sonnet", "model must be stored");
+    }
+
+    #[tokio::test]
+    async fn set_model_updates_existing_override() {
+        let handle = make_handle();
+        let session = AmuxSessionId::from("sess-2");
+
+        handle
+            .set_model(&session, "anthropic", "sonnet")
+            .await
+            .unwrap();
+        handle
+            .set_model(&session, "anthropic", "opus")
+            .await
+            .unwrap();
+
+        let overrides = handle.model_override.lock().await;
+        let stored = overrides.get("sess-2").cloned().unwrap();
+        assert_eq!(stored.1, "opus", "second set_model must overwrite");
     }
 }

@@ -234,6 +234,40 @@ export async function getDaemonProviders(
   return result.ok ? result.data : null
 }
 
+/** Mirrors Rust `workspaces::CatalogModel`. `ref` is `"<providerSegment>/<modelId>"`. */
+export interface DaemonCatalogModel {
+  ref: string
+  model_id: string
+  display_name: string
+}
+
+/** Mirrors Rust `workspaces::BackendCatalog`. `backend` is "opencode" | "claude" | "codex". */
+export interface DaemonBackendCatalog {
+  backend: string
+  label: string
+  models: DaemonCatalogModel[]
+}
+
+/** Mirrors Rust `workspaces::ModelCatalog`. */
+export interface DaemonModelCatalog {
+  automation_default_backend: string | null
+  backends: DaemonBackendCatalog[]
+}
+
+/**
+ * `GET /v1/workspaces/:id/model-catalog` — models grouped by the agent backend
+ * that would run them (OpenCode, Claude Code, Codex). Source of truth for the
+ * cron dialog, replacing the OpenCode-only provider list.
+ */
+export async function getDaemonModelCatalog(
+  workspaceId: string,
+): Promise<DaemonModelCatalog | null> {
+  const result = await daemonFetch<DaemonModelCatalog>(
+    `/v1/workspaces/${workspaceId}/model-catalog`,
+  )
+  return result.ok ? result.data : null
+}
+
 export async function putDaemonProviderAuth(
   workspaceId: string,
   providerId: string,

@@ -5,20 +5,12 @@ const mockMkdir = vi.fn()
 const mockReadTextFile = vi.fn()
 const mockWriteTextFile = vi.fn()
 const mockRemove = vi.fn()
-const mockAddCustomProviderToConfig = vi.fn()
-const mockRemoveCustomProviderFromConfig = vi.fn()
-
 vi.mock('@tauri-apps/plugin-fs', () => ({
   exists: mockExists,
   mkdir: mockMkdir,
   readTextFile: mockReadTextFile,
   writeTextFile: mockWriteTextFile,
   remove: mockRemove,
-}))
-
-vi.mock('@/lib/teamclaw-config', () => ({
-  addCustomProviderToConfig: mockAddCustomProviderToConfig,
-  removeCustomProviderFromConfig: mockRemoveCustomProviderFromConfig,
 }))
 
 vi.mock('@/lib/build-config', () => ({
@@ -33,8 +25,6 @@ describe('team provider file helpers', () => {
     mockReadTextFile.mockResolvedValue('')
     mockWriteTextFile.mockResolvedValue(undefined)
     mockRemove.mockResolvedValue(undefined)
-    mockAddCustomProviderToConfig.mockResolvedValue('team')
-    mockRemoveCustomProviderFromConfig.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -101,16 +91,13 @@ describe('team provider file helpers', () => {
 
     expect(result?.provider.baseURL).toBe('https://ai.ucar.cc')
     expect(result?.provider.models).toHaveLength(2)
-    expect(mockAddCustomProviderToConfig).not.toHaveBeenCalled()
   })
 
-  it('returns null when provider.json is absent and never writes the legacy config', async () => {
+  it('returns null when provider.json is absent', async () => {
     const { loadTeamProviderFile } = await import('@/lib/team-provider')
     const result = await loadTeamProviderFile('/workspace')
 
     expect(result).toBeNull()
-    expect(mockAddCustomProviderToConfig).not.toHaveBeenCalled()
-    expect(mockRemoveCustomProviderFromConfig).not.toHaveBeenCalled()
   })
 
   it('saveTeamProviderFile is a no-op on null provider (no implicit deletion)', async () => {

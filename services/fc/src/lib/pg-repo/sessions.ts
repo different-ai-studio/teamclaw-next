@@ -22,6 +22,7 @@ import {
   sessionParticipants,
   sessionReadMarkers,
   actors,
+  agentMemberAccess,
 } from "../../db/schema/index.js";
 import { ApiError } from "../http-utils.js";
 import { requireActorForTeam, resolveActorForTeam } from "./authz.js";
@@ -469,6 +470,28 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
       await (db.insert(sessionParticipants) as any)
         .values([{ sessionId: id, actorId: input.primaryAgentActorId }])
         .onConflictDoNothing();
+
+      // Mirror gateway sessions: add human admins so desktop "查看对话" works
+      // under sessions_select_if_participant_or_creator RLS.
+      const adminRows = await db
+        .select({ memberId: agentMemberAccess.memberId })
+        .from(agentMemberAccess)
+        .where(
+          and(
+            eq(agentMemberAccess.agentId, input.primaryAgentActorId),
+            eq(agentMemberAccess.permissionLevel, "admin"),
+          ),
+        );
+      if (adminRows.length > 0) {
+        await (db.insert(sessionParticipants) as any)
+          .values(
+            adminRows.map((row) => ({
+              sessionId: id,
+              actorId: row.memberId,
+            })),
+          )
+          .onConflictDoNothing();
+      }
 
       return { sessionId: r.id, ...mapSessionFull(r, []) };
     },

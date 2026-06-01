@@ -1471,6 +1471,29 @@ export function createSupabaseBusinessRepository(options) {
           { onConflict: "session_id,actor_id" },
         );
       if (partError) throw partError;
+
+      // Mirror gateway sessions: add human admins of the primary agent so
+      // desktop users can open cron run history via "查看对话". Without this,
+      // sessions_select_if_participant_or_creator hides the row from members
+      // who are not the agent actor (see 202605060001_sessions_select_only_participants).
+      const { data: adminRows, error: adminErr } = await supabase.rpc(
+        "list_agent_admin_member_actor_ids",
+        { p_agent_actor_id: input.primaryAgentActorId },
+      );
+      if (adminErr) throw adminErr;
+      const adminActorIds = (adminRows ?? [])
+        .map((row) => (typeof row === "string" ? row : row?.member_actor_id))
+        .filter((id) => typeof id === "string" && id.length > 0);
+      if (adminActorIds.length > 0) {
+        const { error: adminPartErr } = await supabase
+          .from("session_participants")
+          .upsert(
+            adminActorIds.map((actor_id) => ({ session_id: id, actor_id })),
+            { onConflict: "session_id,actor_id" },
+          );
+        if (adminPartErr) throw adminPartErr;
+      }
+
       return { sessionId: data.id, ...mapSessionFull(data) };
     },
 

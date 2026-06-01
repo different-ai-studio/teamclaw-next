@@ -129,6 +129,36 @@ pub fn model_id_for_short_name(short: &str) -> Option<String> {
     }
 }
 
+/// Resolve the initial ACP model id to apply for a gateway/cron session,
+/// given the backend that will actually run and the caller's
+/// `(provider, model)` override.
+///
+/// The ACP model-id shape differs per backend, so the `provider` segment must
+/// be handled differently:
+///
+/// - **Claude Code**: model ids are bare (e.g. `claude-sonnet-4-6`). Short
+///   names (`sonnet`/`opus`/`haiku`) map to full ids; `provider` is irrelevant
+///   because the claude-code binary is anthropic-only.
+/// - **OpenCode / Codex**: the ACP model id is itself `provider/model`
+///   (e.g. `scnet/MiniMax-M2.5`), so we re-join the segments. The previous
+///   behavior passed only the bare `model`, producing an id the agent could
+///   not match — it silently fell back to its default model. Re-joining fixes
+///   that. When `provider` is empty we pass `model` through unchanged.
+pub fn resolve_initial_model(agent_type: amux::AgentType, provider: &str, model: &str) -> String {
+    match agent_type {
+        amux::AgentType::ClaudeCode => {
+            model_id_for_short_name(model).unwrap_or_else(|| model.to_string())
+        }
+        _ => {
+            if provider.is_empty() {
+                model.to_string()
+            } else {
+                format!("{provider}/{model}")
+            }
+        }
+    }
+}
+
 pub struct RuntimeManager {
     agents: HashMap<String, RuntimeHandle>,
     pub aggregators: std::collections::HashMap<String, TurnAggregator>,
@@ -1252,6 +1282,7 @@ impl RuntimeManager {
             None,
             None,
             None,
+            None,
         )
         .await
     }
@@ -1264,6 +1295,7 @@ impl RuntimeManager {
     /// before threading through to the adapter. `provider` is currently
     /// unused (claude-code adapter == anthropic) but kept on the signature
     /// for future multi-provider routing.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_gateway_session_with_model(
         &mut self,
         _team_id: &str,
@@ -1273,6 +1305,11 @@ impl RuntimeManager {
         model_override: Option<(String, String)>,
         remote_session_id: Option<&str>,
         working_directory: Option<&str>,
+        // Backend to run on. `None` falls back to `default_agent_type` (the
+        // gateway path and "auto" cron selection); cron jobs that pin a backend
+        // pass `Some(..)` so a job created for Claude does not run on OpenCode
+        // just because OpenCode is the daemon default.
+        agent_type_override: Option<amux::AgentType>,
     ) -> crate::error::Result<String> {
         // Gateway sessions don't yet have a "real" workspace concept — they
         // run against a freshly-created scratch dir so the ACP process has a
@@ -1300,9 +1337,15 @@ impl RuntimeManager {
             }
         };
 
+        // Resolve the initial model against the backend that will actually
+        // run this session. For OpenCode/Codex the ACP model id is
+        // `provider/model`, so the override's provider segment must be
+        // preserved — dropping it (the previous behavior) made the agent
+        // silently fall back to its default model.
+        let agent_type = agent_type_override.unwrap_or_else(|| self.default_agent_type());
         let initial_model: Option<String> = model_override
             .as_ref()
-            .map(|(_provider, model)| model_id_for_short_name(model).unwrap_or(model.clone()));
+            .map(|(provider, model)| resolve_initial_model(agent_type, provider, model));
 
         // Write the MCP config BEFORE spawning claude-code so the
         // `--mcp-config` path it gets points at a real file. The config
@@ -1325,7 +1368,6 @@ impl RuntimeManager {
         };
 
         let workspace_id = format!("gateway:{binding}");
-        let agent_type = self.default_agent_type();
         let agent_id = self
             .spawn_agent_with_model(
                 agent_type,
@@ -1518,6 +1560,50 @@ mod tests {
     fn current_model_returns_none_for_unknown_agent() {
         let mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         assert_eq!(mgr.current_model("agent-1"), None);
+    }
+
+    #[test]
+    fn resolve_initial_model_claude_maps_short_name() {
+        assert_eq!(
+            resolve_initial_model(amux::AgentType::ClaudeCode, "anthropic", "sonnet"),
+            "claude-sonnet-4-6"
+        );
+        assert_eq!(
+            resolve_initial_model(amux::AgentType::ClaudeCode, "", "opus"),
+            "claude-opus-4-7"
+        );
+    }
+
+    #[test]
+    fn resolve_initial_model_claude_passes_full_id_unchanged() {
+        // A full claude id is not a known short name; it must pass through and
+        // the provider segment must be ignored (the binary is anthropic-only).
+        assert_eq!(
+            resolve_initial_model(amux::AgentType::ClaudeCode, "anthropic", "claude-sonnet-4-6"),
+            "claude-sonnet-4-6"
+        );
+    }
+
+    #[test]
+    fn resolve_initial_model_opencode_rejoins_provider() {
+        // Regression: OpenCode ACP model ids are `provider/model`. Dropping the
+        // provider made set_session_model miss and fall back to the default.
+        assert_eq!(
+            resolve_initial_model(amux::AgentType::Opencode, "scnet", "MiniMax-M2.5"),
+            "scnet/MiniMax-M2.5"
+        );
+        assert_eq!(
+            resolve_initial_model(amux::AgentType::Codex, "openai", "gpt-5.5"),
+            "openai/gpt-5.5"
+        );
+    }
+
+    #[test]
+    fn resolve_initial_model_opencode_empty_provider_passes_model_through() {
+        assert_eq!(
+            resolve_initial_model(amux::AgentType::Opencode, "", "MiniMax-M2.5"),
+            "MiniMax-M2.5"
+        );
     }
 
     #[test]

@@ -46,6 +46,11 @@ pub struct CronPayload {
     /// Optional model override ("provider/model")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Backend the job runs on: "opencode" | "claude" | "codex". `None`/empty
+    /// means "auto" — the daemon picks its `default_agent_type`. Pairs with
+    /// `model`: the model ref is selected from this backend's catalog group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
     /// Deprecated compatibility field. Old job JSON may contain this value, but
     /// cron execution ignores it and new saves omit it.
     #[serde(skip_serializing_if = "Option::is_none")]

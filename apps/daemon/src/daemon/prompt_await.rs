@@ -8,6 +8,11 @@ pub(crate) struct PromptAwaitPayload<'a> {
     pub job_name: Option<&'a str>,
     pub working_directory: Option<&'a str>,
     pub model_override: Option<(String, String)>,
+    // Backend the cron job should run on, e.g. "opencode" | "claude" | "codex".
+    // Optional: when absent the daemon falls back to default_agent_type, which
+    // is the desktop's "auto" selection. The string is resolved against the
+    // daemon's configured backends by the caller (handle_prompt_await).
+    pub agent_type: Option<&'a str>,
     pub timeout_secs: u64,
 }
 
@@ -44,6 +49,10 @@ pub(crate) fn parse_prompt_await_payload(
             let mo = m.get("model").and_then(|v| v.as_str())?;
             Some((p.to_string(), mo.to_string()))
         });
+    let agent_type = payload
+        .get("agent_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
     let timeout_secs = payload
         .get("timeout_secs")
         .and_then(|v| v.as_u64())
@@ -56,6 +65,7 @@ pub(crate) fn parse_prompt_await_payload(
         job_name,
         working_directory,
         model_override,
+        agent_type,
         timeout_secs,
     })
 }
@@ -98,6 +108,7 @@ mod tests {
         assert!(parsed.job_name.is_none());
         assert!(parsed.working_directory.is_none());
         assert!(parsed.model_override.is_none());
+        assert!(parsed.agent_type.is_none());
         assert_eq!(parsed.timeout_secs, 300);
     }
 
@@ -109,11 +120,13 @@ mod tests {
             "job_name": "Nightly digest",
             "working_directory": "/tmp/wt",
             "model_override": { "provider": "anthropic", "model": "sonnet" },
+            "agent_type": "claude",
             "timeout_secs": 120
         });
         let parsed = parse_prompt_await_payload(&p).unwrap();
         assert_eq!(parsed.job_name, Some("Nightly digest"));
         assert_eq!(parsed.working_directory, Some("/tmp/wt"));
+        assert_eq!(parsed.agent_type, Some("claude"));
         assert_eq!(
             parsed.model_override.as_ref().map(|m| m.0.as_str()),
             Some("anthropic")
@@ -136,5 +149,72 @@ mod tests {
         let p = json!({ "session_key": "cron/j1/r1", "message": "hi", "job_name": "My Job" });
         let parsed = parse_prompt_await_payload(&p).unwrap();
         assert_eq!(parsed.job_name, Some("My Job"));
+    }
+
+    // ── Regression: cron × backend model override round-trip ──────────────
+    //
+    // The desktop cron scheduler splits `payload.model` ("provider/model") into
+    // (provider, model) and serialises them as separate JSON fields.  The parse
+    // layer must capture BOTH so `create_gateway_session_with_model` can pass
+    // the full tuple to `resolve_initial_model`.
+    //
+    // For OpenCode the full re-joined id ("scnet/MiniMax-M2.5") is what the
+    // ACP `set_session_model` call expects.  Dropping the provider caused silent
+    // fallback to the workspace default — this test documents the contract.
+
+    #[test]
+    fn parse_preserves_provider_for_opencode_style_model() {
+        // Simulates a cron payload for an OpenCode workspace that has a custom
+        // provider "scnet" with model "MiniMax-M2.5".  The provider must NOT be
+        // discarded; `resolve_initial_model` will later re-join it.
+        let p = json!({
+            "session_key": "cron/job-opencode/run-1",
+            "message": "summarise PRs",
+            "model_override": { "provider": "scnet", "model": "MiniMax-M2.5" }
+        });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        let (provider, model) = parsed.model_override.unwrap();
+        assert_eq!(provider, "scnet");
+        assert_eq!(model, "MiniMax-M2.5");
+    }
+
+    #[test]
+    fn parse_preserves_provider_for_claude_style_model() {
+        // Simulates a cron payload for a Claude Code workspace using a short
+        // name. `resolve_initial_model` will expand "sonnet" to the full ACP id
+        // on the daemon side; the parse layer must just preserve both fields.
+        let p = json!({
+            "session_key": "cron/job-claude/run-1",
+            "message": "run tests",
+            "model_override": { "provider": "anthropic", "model": "sonnet" }
+        });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        let (provider, model) = parsed.model_override.unwrap();
+        assert_eq!(provider, "anthropic");
+        assert_eq!(model, "sonnet");
+    }
+
+    #[test]
+    fn parse_treats_empty_agent_type_as_absent() {
+        // The desktop sends `agent_type: ""` for the "auto" selection; it must
+        // be treated as absent so the daemon falls back to default_agent_type.
+        let p = json!({
+            "session_key": "cron/j1/r1",
+            "message": "hi",
+            "agent_type": ""
+        });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert!(parsed.agent_type.is_none());
+    }
+
+    #[test]
+    fn parse_preserves_explicit_agent_type() {
+        let p = json!({
+            "session_key": "cron/j1/r1",
+            "message": "hi",
+            "agent_type": "opencode"
+        });
+        let parsed = parse_prompt_await_payload(&p).unwrap();
+        assert_eq!(parsed.agent_type, Some("opencode"));
     }
 }
