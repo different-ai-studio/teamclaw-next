@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use teamclaw_types::services_defaults::services_defaults;
 
 const APP_CONFIG_DIR: &str = ".teamclaw";
 const LEGACY_CONFIG_DIR: &str = "amux";
@@ -71,13 +70,15 @@ fn legacy_teamclaw_json_path() -> PathBuf {
 const DEFAULT_CLOUD_API_URL: &str = "https://cloud.ucar.cc";
 
 fn default_server_config() -> ServerConfig {
-    let d = services_defaults();
+    // MQTT is delivered by the Cloud API (`/v1/config/bootstrap`, applied after
+    // sign-in), never hardcoded. Only the fields needed to *reach* the Cloud API
+    // have defaults here. `cloud_api_url` is the bootstrap of the bootstrap.
     ServerConfig {
         backend_kind: Some("cloud_api".to_string()),
         cloud_api_url: Some(DEFAULT_CLOUD_API_URL.to_string()),
-        mqtt_host: Some(d.mqtt_host.clone()),
-        mqtt_port: Some(d.mqtt_port),
-        mqtt_use_tls: Some(d.mqtt_use_tls),
+        mqtt_host: None,
+        mqtt_port: None,
+        mqtt_use_tls: None,
         mqtt_username: None,
         mqtt_password: None,
     }
@@ -105,15 +106,9 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
         // Fill the canonical production URL when no override is set.
         config.cloud_api_url = defaults.cloud_api_url;
     }
-    if config.mqtt_host.as_deref().unwrap_or("").trim().is_empty() {
-        config.mqtt_host = defaults.mqtt_host;
-    }
-    if config.mqtt_port.is_none() {
-        config.mqtt_port = defaults.mqtt_port;
-    }
-    if config.mqtt_use_tls.is_none() {
-        config.mqtt_use_tls = defaults.mqtt_use_tls;
-    }
+    // MQTT host/port/tls are intentionally NOT defaulted here: they are
+    // delivered by the Cloud API bootstrap after sign-in. A blank value stays
+    // blank so the client surfaces "MQTT 未配置" rather than a stale default.
     if config
         .mqtt_username
         .as_deref()
@@ -283,12 +278,13 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let d = services_defaults();
+        // Only Cloud-API-reachability fields are defaulted. MQTT is delivered by
+        // the Cloud API bootstrap after sign-in, never hardcoded here.
         assert_eq!(loaded.backend_kind.as_deref(), Some("cloud_api"));
         assert_eq!(loaded.cloud_api_url.as_deref(), Some(DEFAULT_CLOUD_API_URL));
-        assert_eq!(loaded.mqtt_host.as_deref(), Some(d.mqtt_host.as_str()));
-        assert_eq!(loaded.mqtt_port, Some(d.mqtt_port));
-        assert_eq!(loaded.mqtt_use_tls, Some(d.mqtt_use_tls));
+        assert_eq!(loaded.mqtt_host, None);
+        assert_eq!(loaded.mqtt_port, None);
+        assert_eq!(loaded.mqtt_use_tls, None);
         assert!(current.exists());
     }
 
