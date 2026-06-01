@@ -7,6 +7,9 @@ use crate::proto::amux;
 pub struct WorkspaceStore {
     #[serde(default)]
     pub workspaces: Vec<StoredWorkspace>,
+    /// Local workspace id used when cron/desktop omit an explicit working directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +39,10 @@ impl WorkspaceStore {
 
     pub fn load(path: &Path) -> crate::error::Result<Self> {
         if !path.exists() {
-            return Ok(Self { workspaces: vec![] });
+            return Ok(Self {
+                workspaces: vec![],
+                default_workspace_id: None,
+            });
         }
         let content = std::fs::read_to_string(path).map_err(|e| {
             crate::error::AmuxError::Config(format!("read {}: {}", path.display(), e))
@@ -119,6 +125,25 @@ impl WorkspaceStore {
             .find(|w| w.workspace_id == workspace_id || w.remote_workspace_id == workspace_id)
     }
 
+    pub fn set_default_workspace_id(&mut self, workspace_id: &str) {
+        if self.find_by_id(workspace_id).is_some() {
+            self.default_workspace_id = Some(workspace_id.to_string());
+        }
+    }
+
+    /// Resolved path for cron / implicit cwd: explicit default, else sole workspace.
+    pub fn default_workspace_path(&self) -> Option<&str> {
+        if let Some(id) = self.default_workspace_id.as_deref() {
+            if let Some(ws) = self.find_by_id(id) {
+                return Some(ws.path.as_str());
+            }
+        }
+        if self.workspaces.len() == 1 {
+            return Some(self.workspaces[0].path.as_str());
+        }
+        None
+    }
+
     pub fn to_proto_list(&self) -> amux::WorkspaceList {
         amux::WorkspaceList {
             workspaces: self
@@ -162,7 +187,10 @@ mod tests {
     #[test]
     fn add_reports_when_workspace_was_inserted() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store = WorkspaceStore { workspaces: vec![] };
+        let mut store = WorkspaceStore {
+            workspaces: vec![],
+            default_workspace_id: None,
+        };
 
         let first = store.add(dir.path().to_str().unwrap()).unwrap();
         let second = store.add(dir.path().to_str().unwrap()).unwrap();
@@ -171,5 +199,44 @@ mod tests {
         assert!(!second.inserted);
         assert_eq!(first.workspace.path, second.workspace.path);
         assert_eq!(store.workspaces.len(), 1);
+    }
+
+    #[test]
+    fn default_workspace_path_prefers_explicit_default() {
+        let mut store = WorkspaceStore {
+            workspaces: vec![
+                StoredWorkspace {
+                    workspace_id: "a".into(),
+                    remote_workspace_id: String::new(),
+                    path: "/tmp/a".into(),
+                    display_name: "a".into(),
+                    team_id: None,
+                },
+                StoredWorkspace {
+                    workspace_id: "b".into(),
+                    remote_workspace_id: String::new(),
+                    path: "/tmp/b".into(),
+                    display_name: "b".into(),
+                    team_id: None,
+                },
+            ],
+            default_workspace_id: Some("b".into()),
+        };
+        assert_eq!(store.default_workspace_path(), Some("/tmp/b"));
+    }
+
+    #[test]
+    fn default_workspace_path_falls_back_to_single_workspace() {
+        let store = WorkspaceStore {
+            workspaces: vec![StoredWorkspace {
+                workspace_id: "only".into(),
+                remote_workspace_id: String::new(),
+                path: "/tmp/only".into(),
+                display_name: "only".into(),
+                team_id: None,
+            }],
+            default_workspace_id: None,
+        };
+        assert_eq!(store.default_workspace_path(), Some("/tmp/only"));
     }
 }

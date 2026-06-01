@@ -39,6 +39,10 @@ pub struct PromptAwaitResponse {
     /// under. The cron scheduler stamps this into `CronRunRecord.session_id`
     /// so the UI's "view session" button can navigate to it.
     pub session_id: String,
+    /// Set when the cloud session was created but the ACP turn itself failed
+    /// (e.g. timeout). The scheduler should still record `session_id` and
+    /// surface the error, so the user can navigate to the partial conversation.
+    pub agent_error: Option<String>,
 }
 
 /// Convenience entry point: connect to amuxd's default sock path (resolved
@@ -98,8 +102,15 @@ pub async fn prompt_await_at(
     }
     #[derive(serde::Deserialize)]
     struct WireResult {
+        #[serde(default)]
         text: String,
         session_id: String,
+        /// Set when the cloud session was created but the ACP turn failed
+        /// (e.g. model timeout). The client receives both the error message
+        /// and the session_id so the run record can still link to the
+        /// partial conversation in the chat panel.
+        #[serde(default)]
+        agent_error: Option<String>,
     }
 
     let parsed: Wire = serde_json::from_str(body.trim())
@@ -112,12 +123,21 @@ pub async fn prompt_await_at(
     let r = parsed
         .result
         .ok_or_else(|| "amuxd bad response: ok=true but missing result".to_string())?;
+    // agent_error means the session was created but the turn itself failed.
+    if let Some(ref ae) = r.agent_error {
+        return Ok(PromptAwaitResponse {
+            text: String::new(),
+            session_id: r.session_id,
+            agent_error: Some(ae.clone()),
+        });
+    }
     if r.text.is_empty() {
         return Err("amuxd returned empty text".into());
     }
     Ok(PromptAwaitResponse {
         text: r.text,
         session_id: r.session_id,
+        agent_error: None,
     })
 }
 

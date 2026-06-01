@@ -52,6 +52,35 @@ const MAINSTREAM_PROVIDER_IDS = new Set([
   'zhipuai',
 ])
 
+type OpenAICompatibleModel = {
+  id: string
+  name?: string
+}
+
+function openAICompatibleModelsUrl(baseURL: string): string {
+  return `${baseURL.trim().replace(/\/+$/, '')}/models`
+}
+
+async function fetchOpenAICompatibleModels(baseURL: string, apiKey: string): Promise<OpenAICompatibleModel[]> {
+  const response = await fetch(openAICompatibleModelsUrl(baseURL), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+    },
+  })
+  if (!response.ok) {
+    throw new Error(`OpenAI-compatible validation failed (${response.status})`)
+  }
+  const payload = await response.json() as { data?: Array<{ id?: unknown; name?: unknown }> }
+  return (payload.data ?? [])
+    .map((model) => ({
+      id: typeof model.id === 'string' ? model.id.trim() : '',
+      name: typeof model.name === 'string' ? model.name.trim() : undefined,
+    }))
+    .filter((model) => model.id.length > 0)
+}
+
 function WorkspacePathCard({
   path,
   t,
@@ -132,6 +161,8 @@ export const LLMSection = React.memo(function LLMSection() {
     outputLimit: string
   }>>([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
   const [isAddingCustom, setIsAddingCustom] = React.useState(false)
+  const [isValidatingCustom, setIsValidatingCustom] = React.useState(false)
+  const [customValidationMessage, setCustomValidationMessage] = React.useState<string | null>(null)
 
   // Delete confirmation state
   const [deletingProviderId, setDeletingProviderId] = React.useState<string | null>(null)
@@ -430,6 +461,7 @@ export const LLMSection = React.memo(function LLMSection() {
     setCustomBaseURL('')
     setCustomApiKey('')
     setCustomModels([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
+    setCustomValidationMessage(null)
     setCustomDialogOpen(true)
   }
 
@@ -448,7 +480,44 @@ export const LLMSection = React.memo(function LLMSection() {
         contextLimit: m.limit?.context?.toString() || '',
         outputLimit: m.limit?.output?.toString() || '',
       })))
+      setCustomValidationMessage(null)
       setCustomDialogOpen(true)
+    }
+  }
+
+  const handleUseOpenAIDefaults = () => {
+    setCustomName((name) => name.trim() || 'OpenAI')
+    setCustomBaseURL('https://api.openai.com/v1')
+    setCustomValidationMessage(null)
+  }
+
+  const handleValidateCustomProvider = async () => {
+    const baseURL = customBaseURL.trim()
+    const apiKey = customApiKey.trim()
+    if (!baseURL || !apiKey) return
+
+    setIsValidatingCustom(true)
+    setCustomValidationMessage(null)
+    try {
+      const models = await fetchOpenAICompatibleModels(baseURL, apiKey)
+      if (models.length > 0) {
+        setCustomModels(models.map((model) => ({
+          modelId: model.id,
+          modelName: model.name || '',
+          contextLimit: '',
+          outputLimit: '',
+        })))
+        setCustomValidationMessage(t('settings.llm.openaiValidationSuccess', {
+          count: models.length,
+          defaultValue: `Validated and loaded ${models.length} models.`,
+        }))
+      } else {
+        setCustomValidationMessage(t('settings.llm.openaiValidationNoModels', 'Validated, but no models were returned.'))
+      }
+    } catch (error) {
+      setCustomValidationMessage(error instanceof Error ? error.message : t('settings.llm.openaiValidationFailed', 'Validation failed.'))
+    } finally {
+      setIsValidatingCustom(false)
     }
   }
 
@@ -1121,7 +1190,20 @@ export const LLMSection = React.memo(function LLMSection() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-[13px] font-medium">{t('settings.llm.baseUrl', 'Base URL')}</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[13px] font-medium">{t('settings.llm.baseUrl', 'Base URL')}</label>
+                {!editingProviderId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={handleUseOpenAIDefaults}
+                    className="text-muted-foreground"
+                  >
+                    {t('settings.llm.useOpenAIDefaults', 'Use OpenAI defaults')}
+                  </Button>
+                )}
+              </div>
               <Input
                 value={customBaseURL}
                 onChange={(e) => setCustomBaseURL(e.target.value)}
@@ -1148,6 +1230,20 @@ export const LLMSection = React.memo(function LLMSection() {
                   />
                   <Shield className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleValidateCustomProvider}
+                  disabled={isValidatingCustom || !customBaseURL.trim() || !customApiKey.trim()}
+                  className="w-full gap-2"
+                >
+                  {isValidatingCustom ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  {t('settings.llm.validateOpenAIModels', 'Validate & fetch models')}
+                </Button>
+                {customValidationMessage && (
+                  <p className="text-xs text-muted-foreground">{customValidationMessage}</p>
+                )}
               </div>
             )}
 

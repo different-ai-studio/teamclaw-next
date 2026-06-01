@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getCustomProviderIds: vi.fn(),
   getCustomProviderConfig: vi.fn(),
   getDaemonProviders: vi.fn(),
+  workspacePath: '/workspace/demo',
   runtimeById: {} as Record<string, any>,
 }))
 
@@ -25,7 +26,7 @@ vi.mock('@/lib/storage', () => ({
 vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: {
     getState: () => ({
-      workspacePath: '/workspace/demo',
+      workspacePath: mocks.workspacePath,
     }),
   },
 }))
@@ -73,6 +74,7 @@ describe('provider store initAll', () => {
   beforeEach(() => {
     vi.resetModules()
     localStorage.clear()
+    mocks.workspacePath = '/workspace/demo'
     mocks.runtimeById = {}
     mocks.getCustomProviderIds.mockReset()
     mocks.getCustomProviderConfig.mockReset()
@@ -236,5 +238,28 @@ describe('provider store initAll', () => {
       { provider: 'claude-code', id: 'claude-a', name: 'Claude A' },
       { provider: 'claude-code', id: 'claude-b', name: 'Claude B' },
     ])
+  })
+
+  it('does not carry the selected model memory across workspaces', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'openai',
+        display_name: 'OpenAI',
+        authenticated: true,
+        models: ['gpt-4o', 'gpt-4.1'],
+      },
+    ])
+    localStorage.setItem('teamclaw-selected-model:/workspace/demo', 'openai/gpt-4.1')
+
+    const { useProviderStore } = await import('../provider')
+
+    await useProviderStore.getState().initAll()
+    expect(useProviderStore.getState().currentModelKey).toBe('openai/gpt-4.1')
+
+    mocks.workspacePath = '/workspace/next'
+    await useProviderStore.getState().initAll()
+
+    expect(useProviderStore.getState().currentModelKey).toBe('openai/gpt-4o')
+    expect(localStorage.getItem('teamclaw-selected-model:/workspace/next')).toBe('openai/gpt-4o')
   })
 })

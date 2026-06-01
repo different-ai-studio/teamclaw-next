@@ -79,9 +79,17 @@ impl CloudApiBackend {
 
     fn with_optional_persist(cfg: CloudApiConfig, persist_path: Option<PathBuf>) -> Self {
         let refresh_token = cfg.refresh_token.clone();
+        // Force HTTP/1.1: Alibaba Cloud Function Compute (FC) closes idle
+        // HTTP/2 streams after ~60 s, causing the next request on the same
+        // connection to fail with "error sending request".  HTTP/1.1 keeps
+        // each request on its own connection and avoids the silent reuse bug.
+        let http = reqwest::Client::builder()
+            .http1_only()
+            .build()
+            .unwrap_or_default();
         Self {
             cfg,
-            http: reqwest::Client::new(),
+            http,
             token: Arc::new(Mutex::new(TokenState {
                 refresh_token,
                 access_token: None,

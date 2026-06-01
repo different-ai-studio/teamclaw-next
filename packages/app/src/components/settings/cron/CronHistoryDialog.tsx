@@ -17,6 +17,10 @@ import {
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores/ui'
+import { getBackend } from '@/lib/backend'
+import { useSessionListStore } from '@/stores/session-list-store'
+import { useSessionMessageStore } from '@/stores/session-message-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import {
   Dialog,
   DialogContent,
@@ -34,7 +38,44 @@ import {
   type CronRunRecord,
 } from '@/stores/cron'
 
-export function RunRecordCard({ run, onViewSession }: { run: CronRunRecord; onViewSession?: (sessionId: string) => void }) {
+export async function ensureCronSessionVisible(sessionId: string): Promise<void> {
+  const listStore = useSessionListStore.getState()
+  if (listStore.rows.some((row) => row.id === sessionId)) return
+
+  const teamId = await getBackend().sessions.getSessionTeamId(sessionId)
+  if (!teamId) {
+    throw new Error('Cron session was not found')
+  }
+
+  const activeTeamId = useCurrentTeamStore.getState().team?.id ?? null
+  if (activeTeamId && activeTeamId !== teamId) {
+    await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId)
+  }
+
+  const [displayRow] = await getBackend().sessions.listSessionDisplayRows(teamId, [sessionId])
+  listStore.upsertRows([
+    {
+      id: sessionId,
+      title: displayRow?.title || 'Cron job',
+      team_id: teamId,
+      last_message_at: null,
+      last_message_preview: null,
+      mode: 'collab',
+      idea_id: null,
+      has_unread: false,
+      created_at: null,
+      updated_at: null,
+    },
+  ])
+}
+
+export function RunRecordCard({
+  run,
+  onViewSession,
+}: {
+  run: CronRunRecord
+  onViewSession?: (sessionId: string) => void | Promise<void>
+}) {
   const { t } = useTranslation()
   const [isHovered, setIsHovered] = React.useState(false)
   const statusColor = getRunStatusColor(run.status)
@@ -47,6 +88,17 @@ export function RunRecordCard({ run, onViewSession }: { run: CronRunRecord; onVi
         ).toFixed(1) + 's'
       : '...'
   const showHeartbeat = !!run.lastHeartbeatAt && (run.status === 'running' || run.status === 'stale')
+  const [viewing, setViewing] = React.useState(false)
+
+  const handleViewSession = async () => {
+    if (!run.sessionId || !onViewSession || viewing) return
+    setViewing(true)
+    try {
+      await onViewSession(run.sessionId)
+    } finally {
+      setViewing(false)
+    }
+  }
 
   return (
     <div className="rounded-lg border p-3 space-y-1.5">
@@ -130,9 +182,10 @@ export function RunRecordCard({ run, onViewSession }: { run: CronRunRecord; onVi
           variant="ghost"
           size="sm"
           className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => onViewSession(run.sessionId!)}
+          disabled={viewing}
+          onClick={handleViewSession}
         >
-          <MessageSquare className="h-3 w-3 mr-1" />
+          {viewing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <MessageSquare className="h-3 w-3 mr-1" />}
           {t('settings.cron.viewConversation')}
         </Button>
       )}
@@ -151,14 +204,23 @@ export function CronHistoryDialog({
 }) {
   const { t } = useTranslation()
   const { runs, runsLoading, loadRuns } = useCronStore()
+  const [viewError, setViewError] = React.useState<string | null>(null)
 
-  const handleViewSession = React.useCallback((sessionId: string) => {
-    useUIStore.getState().switchToSession(sessionId)
-    onOpenChange(false)
+  const handleViewSession = React.useCallback(async (sessionId: string) => {
+    setViewError(null)
+    try {
+      await ensureCronSessionVisible(sessionId)
+      await useUIStore.getState().switchToSession(sessionId)
+      await useSessionMessageStore.getState().reloadActiveSessionMessages()
+      onOpenChange(false)
+    } catch (error) {
+      setViewError(error instanceof Error ? error.message : String(error))
+    }
   }, [onOpenChange])
 
   React.useEffect(() => {
     if (open && job) {
+      setViewError(null)
       loadRuns(job.id)
     }
   }, [open, job?.id])
@@ -194,6 +256,11 @@ export function CronHistoryDialog({
                 <RunRecordCard key={run.runId} run={run} onViewSession={handleViewSession} />
               ))}
             </div>
+          )}
+          {viewError && (
+            <p className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {viewError}
+            </p>
           )}
         </ScrollArea>
 
