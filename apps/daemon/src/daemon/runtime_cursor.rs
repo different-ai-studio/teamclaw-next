@@ -79,6 +79,20 @@ pub(crate) fn last_unanswered_mention_idx(messages: &[StoredMessage], my_actor: 
     })
 }
 
+/// Rows strictly after `cursor` in API sort order. Unknown cursor → full slice.
+pub(crate) fn messages_strictly_after_cursor(
+    messages: &[StoredMessage],
+    cursor: Option<&str>,
+) -> Vec<StoredMessage> {
+    let Some(cursor_id) = cursor.filter(|s| !s.is_empty()) else {
+        return messages.to_vec();
+    };
+    let Some(idx) = message_index(messages, cursor_id) else {
+        return messages.to_vec();
+    };
+    messages.get(idx + 1..).map(|s| s.to_vec()).unwrap_or_default()
+}
+
 /// Whether any inbound row in the slice still needs routing (unanswered @ or silent).
 pub(crate) fn slice_has_actionable_inbound(messages: &[StoredMessage], my_actor: &str) -> bool {
     messages.iter().any(|m| {
@@ -151,6 +165,19 @@ mod tests {
             row("u2", "human", &["agent"], 3),
         ];
         assert_eq!(last_unanswered_mention_idx(&msgs, "agent"), Some(2));
+    }
+
+    #[test]
+    fn messages_after_cursor_excludes_through_cursor_id() {
+        let msgs = vec![
+            row("u1", "human", &["agent"], 1),
+            row("a1", "agent", &[], 2),
+            row("u2", "human", &["agent"], 3),
+        ];
+        let tail = messages_strictly_after_cursor(&msgs, Some("u1"));
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail[0].id, "a1");
+        assert_eq!(tail[1].id, "u2");
     }
 
     #[test]

@@ -791,13 +791,17 @@ const control: V2E2EControl = {
       .getState()
       .messages[sessionId]?.find((candidate) => candidate.messageId === message.messageId);
     if (existing) {
-      useV2StreamingStore.getState().clearActor(sessionId, actorId);
+      useV2StreamingStore.getState().clearActor(sessionId, actorId, {
+        includeArchives: true,
+      });
       return existing;
     }
     const teamId = resolveTeamId(sessionId);
     useSessionStore.getState().appendMessage(sessionId, message);
     updateSessionPreview(sessionId, message);
-    useV2StreamingStore.getState().clearActor(sessionId, actorId);
+    useV2StreamingStore.getState().clearActor(sessionId, actorId, {
+      includeArchives: true,
+    });
     await persistMessages([message], teamId);
     return message;
   },

@@ -238,6 +238,63 @@ describe("v2-streaming-store", () => {
     expect(stream.parts[3].text).toContain("Memory Top 3");
   });
 
+  it("finalize collapses multiple post-tool preview text parts into one", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+    store.ingestReplyPreview("s1", "a1", "CPU Top 3:\n1. foo");
+    store.ingestReplyPreview("s1", "a1", "Memory Top 3:\n1. bar");
+
+    store.finalize("s1", "a1", "CPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar");
+
+    const [finalized] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(finalized.active).toBe(false);
+    expect(finalized.parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(finalized.parts[2].text).toBe(
+      "CPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar",
+    );
+  });
+
+  it("releaseActorAfterPersist skipArchive only drops archived rows for the current streamId", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+    const firstStreamId = useV2StreamingStore.getState().byKey["s1::a1"].streamId;
+    store.releaseActorAfterPersist("s1", "a1");
+    expect(useV2StreamingStore.getState().archived).toHaveLength(1);
+    expect(useV2StreamingStore.getState().archived[0].streamId).toBe(firstStreamId);
+
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-2",
+      toolName: "bash",
+      description: "df",
+      params: { command: "df -h" },
+      toolKind: "execute",
+    });
+    const secondStreamId = useV2StreamingStore.getState().byKey["s1::a1"].streamId;
+    expect(secondStreamId).not.toBe(firstStreamId);
+
+    store.releaseActorAfterPersist("s1", "a1", {
+      persistedPartsJson: JSON.stringify([
+        { id: "t2", type: "tool-call", toolCallId: "tool-2", toolCall: { id: "tool-2" } },
+      ]),
+    });
+
+    expect(useV2StreamingStore.getState().archived).toHaveLength(1);
+    expect(useV2StreamingStore.getState().archived[0].streamId).toBe(firstStreamId);
+  });
+
   it("releaseActorAfterPersist skips archive when parts_json already has tools", () => {
     const store = useV2StreamingStore.getState();
     store.pushToolUse("s1", "a1", {

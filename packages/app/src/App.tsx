@@ -107,6 +107,7 @@ import {
   mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
+  rememberLiveEventId,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 import { useUIStore } from "@/stores/ui";
@@ -706,6 +707,7 @@ function AppContent() {
     Record<string, ReturnType<typeof setTimeout>>
   >({});
   const pendingStreamReplySinceRef = useRef<Record<string, number>>({});
+  const seenLiveEventIdsRef = useRef<Set<string>>(new Set());
 
   function clearPendingStreamReplyTimer(streamKey: string) {
     const timer = pendingStreamReplyTimersRef.current[streamKey];
@@ -883,6 +885,17 @@ function AppContent() {
           }
 
           if (!sid) return;
+
+          if (
+            env.topic.includes("/session/") &&
+            !rememberLiveEventId(
+              seenLiveEventIdsRef.current,
+              sid,
+              decoded.envelope.eventId,
+            )
+          ) {
+            return;
+          }
 
           if (
             decoded.envelope.eventType === "session_participant.created" ||

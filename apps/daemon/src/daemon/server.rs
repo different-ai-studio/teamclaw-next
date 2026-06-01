@@ -25,7 +25,7 @@ use crate::daemon::runtime_resolution::{
 };
 use crate::daemon::runtime_cursor::{
     compute_effective_cursor_from_messages, last_unanswered_mention_idx,
-    slice_has_actionable_inbound,
+    messages_strictly_after_cursor, slice_has_actionable_inbound,
 };
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids,
@@ -2589,37 +2589,42 @@ impl DaemonServer {
         }
     }
 
+    /// Advance in-memory cursor immediately; persist to Cloud in the background.
     async fn persist_runtime_cursor(&self, runtime_id: &str, message_id: &str) {
         if message_id.is_empty() {
             return;
         }
-        self.agents
-            .lock()
-            .await
-            .advance_message_cursor(runtime_id, message_id);
+        {
+            let mut agents = self.agents.lock().await;
+            agents.advance_message_cursor(runtime_id, message_id);
+        }
         let row_id = self
             .agents
             .lock()
             .await
             .backend_runtime_row_id(runtime_id);
         if let Some(row_id) = row_id {
-            if let Err(e) = self
-                .backend
-                .update_runtime_cursor(&row_id, message_id)
-                .await
-            {
-                warn!(?e, runtime_id, "update_runtime_cursor failed");
-            }
+            let backend = self.backend.clone();
+            let message_id = message_id.to_string();
+            let runtime_id = runtime_id.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = backend.update_runtime_cursor(&row_id, &message_id).await {
+                    warn!(?e, runtime_id, "update_runtime_cursor failed");
+                }
+            });
         }
     }
 
     /// Align in-memory and persisted cursor with messages that already have an
     /// agent reply, so catchup does not re-prompt completed @mentions.
-    async fn reconcile_runtime_cursor(&mut self, runtime_id: &str) {
+    ///
+    /// Returns the full session message list when fetch succeeds so
+    /// [`Self::catchup_runtime`] can slice locally instead of refetching.
+    async fn reconcile_runtime_cursor(&mut self, runtime_id: &str) -> Option<Vec<crate::backend::StoredMessage>> {
         let (session_id, floor) = {
             let agents = self.agents.lock().await;
             let Some(h) = agents.get_handle(runtime_id) else {
-                return;
+                return None;
             };
             (
                 h.session_id.clone(),
@@ -2627,7 +2632,7 @@ impl DaemonServer {
             )
         };
         if session_id.is_empty() {
-            return;
+            return None;
         }
 
         let messages = match self
@@ -2638,11 +2643,11 @@ impl DaemonServer {
             Ok(m) => m,
             Err(e) => {
                 warn!(?e, runtime_id, "reconcile_runtime_cursor: messages fetch failed");
-                return;
+                return None;
             }
         };
         if messages.is_empty() {
-            return;
+            return None;
         }
 
         let floor = floor.as_deref().filter(|s| !s.is_empty());
@@ -2659,6 +2664,7 @@ impl DaemonServer {
             );
             self.persist_runtime_cursor(runtime_id, &id).await;
         }
+        Some(messages)
     }
 
     fn mark_superseded_runtime_rows_stopped(&mut self, superseded: &[String]) {
@@ -2696,7 +2702,7 @@ impl DaemonServer {
             return false;
         }
 
-        self.reconcile_runtime_cursor(runtime_id).await;
+        let reconciled_all = self.reconcile_runtime_cursor(runtime_id).await;
 
         let last_processed_message_id = self
             .agents
@@ -2705,15 +2711,19 @@ impl DaemonServer {
             .get_handle(runtime_id)
             .and_then(|h| h.last_processed_message_id.clone());
 
-        let messages = match self
-            .backend
-            .messages_after_cursor(&session_id, last_processed_message_id.as_deref())
-            .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                warn!(?e, runtime_id, "catchup messages_after_cursor failed");
-                return false;
+        let messages = if let Some(all) = reconciled_all {
+            messages_strictly_after_cursor(&all, last_processed_message_id.as_deref())
+        } else {
+            match self
+                .backend
+                .messages_after_cursor(&session_id, last_processed_message_id.as_deref())
+                .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!(?e, runtime_id, "catchup messages_after_cursor failed");
+                    return false;
+                }
             }
         };
         if messages.is_empty() {

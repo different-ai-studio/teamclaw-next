@@ -27,6 +27,8 @@ export interface AgentStreamEntry {
   errorDetails: string | null;
   lastUpdate: number;           // ms epoch
   active: boolean;              // true while streaming; false after finalize
+  /** Per-turn id; archived rows copy it for precise skipArchive cleanup. */
+  streamId: string;
 }
 
 export interface ArchivedEntry extends AgentStreamEntry {
@@ -82,7 +84,11 @@ interface State {
     actorId: string,
     opts?: { persistedPartsJson?: string },
   ) => void;
-  clearActor: (sessionId: string, actorId: string) => void;
+  clearActor: (
+    sessionId: string,
+    actorId: string,
+    opts?: { includeArchives?: boolean },
+  ) => void;
   clearSession: (sessionId: string) => void;
 }
 
@@ -104,10 +110,17 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
     errorDetails: null,
     lastUpdate: Date.now(),
     active: true,
+    streamId: nextStreamId(sessionId, actorId),
   };
 }
 
 let archiveCounter = 0;
+let streamCounter = 0;
+
+function nextStreamId(sessionId: string, actorId: string): string {
+  streamCounter += 1;
+  return `${sessionId}::${actorId}::stream-${streamCounter}`;
+}
 
 function persistSessionPlan(
   persisted: Record<string, PersistedSessionPlan>,
@@ -232,14 +245,17 @@ function replacePostToolTextPart(parts: MessagePart[], text: string): MessagePar
   const lastToolIndex = lastIndexWhere(parts, (part) => part.type === "tool-call");
   if (lastToolIndex === -1) return appendTextPart(parts, text);
 
-  const existingTextIndex = parts.findIndex(
-    (part, index) => index > lastToolIndex && part.type === "text",
-  );
-  if (existingTextIndex === -1) return placePostToolTextPart(parts, text);
+  const prefix = parts.slice(0, lastToolIndex + 1);
+  const tail = parts.slice(lastToolIndex + 1);
+  const firstTextIdx = tail.findIndex((part) => part.type === "text");
+  if (firstTextIdx === -1) return placePostToolTextPart(parts, text);
 
-  return parts.map((part, index) =>
-    index === existingTextIndex ? replacePartText(part, text) : part,
-  );
+  // Multiple non-cumulative AGENT_REPLY previews append several text parts
+  // after the last tool; finalize must collapse them to a single final text.
+  const beforeText = tail.slice(0, firstTextIdx);
+  const consolidated = replacePartText(tail[firstTextIdx], text);
+  const afterText = tail.slice(firstTextIdx + 1).filter((part) => part.type !== "text");
+  return [...prefix, ...beforeText, consolidated, ...afterText];
 }
 
 function placePostToolTextPart(parts: MessagePart[], text: string): MessagePart[] {
@@ -835,7 +851,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           !(
             entry.sessionId === sessionId &&
             entry.actorId === actorId &&
-            Math.abs(entry.lastUpdate - existing.lastUpdate) < 2_000
+            entry.streamId === existing.streamId
           ),
       );
     }
@@ -886,13 +902,19 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  clearActor: (sessionId, actorId) => {
+  clearActor: (sessionId, actorId, opts) => {
     const state = get();
     const key = k(sessionId, actorId);
     const existing = state.byKey[key];
     const next = { ...state.byKey };
     delete next[key];
-    const archivedPlan = [...state.archived]
+    const archived = opts?.includeArchives
+      ? state.archived.filter(
+          (entry) =>
+            !(entry.sessionId === sessionId && entry.actorId === actorId),
+        )
+      : state.archived;
+    const archivedPlan = [...archived]
       .reverse()
       .find(
         (entry) =>
@@ -911,7 +933,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     );
     set({
       byKey: next,
-      archived: state.archived,
+      archived,
       persistedPlansBySession,
     });
   },
