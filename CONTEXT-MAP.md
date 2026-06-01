@@ -11,7 +11,6 @@ TeamClaw 是一个多端协同的 AI Agent 平台，本仓库划分为以下 bou
 | desktop | `apps/desktop/`, `packages/app/` | Tauri 桌面端：UI、editor、chat、RAG、streaming、命令网关 |
 | daemon | `apps/daemon/` | amuxd：ACP runtime、session/agent 生命周期、MQTT/Supabase 桥接 |
 | ios | `apps/ios/` | iOS 客户端：Outbox、dedup key、SwiftData/libsql 同步 |
-| android | `apps/android/` | Android 客户端：iOS parity 路线图 |
 | mobile-rn | `apps/expo/` | React Native / Expo 客户端 |
 | team-api | `services/fc/` | Alibaba FC 团队后端：team、member、budget、managed-git |
 | data | `services/supabase/` | Supabase 数据层：schema、RLS、migrations |

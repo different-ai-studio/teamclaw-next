@@ -71,7 +71,4 @@ copy_if_present "apps/daemon/.env"
 # Expo local app config, if present on this machine.
 copy_if_present "apps/expo/.env"
 
-# Android simulator builds need the local SDK path.
-copy_if_present "apps/android/local.properties"
-
 echo "Created $worktree_path on $branch_name"
