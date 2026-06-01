@@ -1,4 +1,5 @@
 import { AgentStatus } from "@/lib/proto/amux_pb";
+import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 
 export const PENDING_AGENT_REPLY_FALLBACK_MS = 1_200;
 export const PENDING_AGENT_REPLY_TOOL_GRACE_MS = 3_000;
@@ -6,6 +7,55 @@ export const PENDING_AGENT_REPLY_HARD_TIMEOUT_MS = 8_000;
 
 export function agentStreamKey(sessionId: string, actorId: string): string {
   return `${sessionId}::${actorId}`;
+}
+
+const SEEN_LIVE_EVENT_IDS_CAP = 2_000;
+
+/** Dedupe MQTT live envelopes that may be redelivered with the same eventId. */
+export function rememberLiveEventId(
+  seen: Set<string>,
+  sessionId: string,
+  eventId: string | undefined,
+): boolean {
+  if (!eventId) return true;
+  const key = `${sessionId}::${eventId}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  if (seen.size > SEEN_LIVE_EVENT_IDS_CAP) {
+    const oldest = seen.values().next().value;
+    if (oldest) seen.delete(oldest);
+  }
+  return true;
+}
+
+/** Collapse multiple parked AGENT_REPLY rows into one session message. */
+export function mergePendingAgentReplies(
+  pending: TeamclawMessage[],
+  streamEntry?: { outputText?: string },
+): TeamclawMessage | null {
+  if (pending.length === 0) return null;
+  const last = pending[pending.length - 1];
+  const streamText = streamEntry?.outputText?.trim();
+  if (streamText) return { ...last, content: streamText };
+
+  const chunks: string[] = [];
+  for (const message of pending) {
+    const text = message.content?.trim();
+    if (!text) continue;
+    const previous = chunks[chunks.length - 1];
+    if (!previous) {
+      chunks.push(text);
+      continue;
+    }
+    if (text === previous || previous.includes(text)) continue;
+    if (text.includes(previous)) {
+      chunks[chunks.length - 1] = text;
+      continue;
+    }
+    chunks.push(text);
+  }
+  if (chunks.length === 0) return last;
+  return { ...last, content: chunks.join("\n\n") };
 }
 
 function stringField(record: Record<string, unknown>, ...keys: string[]): string {

@@ -7,6 +7,9 @@ use crate::proto::amux;
 pub struct WorkspaceStore {
     #[serde(default)]
     pub workspaces: Vec<StoredWorkspace>,
+    /// Local 8-char id of the workspace last set as agent default via cloud API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +39,10 @@ impl WorkspaceStore {
 
     pub fn load(path: &Path) -> crate::error::Result<Self> {
         if !path.exists() {
-            return Ok(Self { workspaces: vec![] });
+            return Ok(Self {
+                workspaces: vec![],
+                default_workspace_id: None,
+            });
         }
         let content = std::fs::read_to_string(path).map_err(|e| {
             crate::error::AmuxError::Config(format!("read {}: {}", path.display(), e))
@@ -119,6 +125,10 @@ impl WorkspaceStore {
             .find(|w| w.workspace_id == workspace_id || w.remote_workspace_id == workspace_id)
     }
 
+    pub fn set_default_workspace_id(&mut self, workspace_id: &str) {
+        self.default_workspace_id = Some(workspace_id.to_owned());
+    }
+
     pub fn to_proto_list(&self) -> amux::WorkspaceList {
         amux::WorkspaceList {
             workspaces: self
@@ -160,9 +170,27 @@ mod tests {
     }
 
     #[test]
+    fn set_default_workspace_id_roundtrips_in_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("workspaces.toml");
+        let mut store = WorkspaceStore {
+            workspaces: vec![],
+            default_workspace_id: None,
+        };
+        store.set_default_workspace_id("abc12345");
+        store.save(&toml_path).unwrap();
+
+        let reloaded = WorkspaceStore::load(&toml_path).unwrap();
+        assert_eq!(reloaded.default_workspace_id.as_deref(), Some("abc12345"));
+    }
+
+    #[test]
     fn add_reports_when_workspace_was_inserted() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store = WorkspaceStore { workspaces: vec![] };
+        let mut store = WorkspaceStore {
+            workspaces: vec![],
+            default_workspace_id: None,
+        };
 
         let first = store.add(dir.path().to_str().unwrap()).unwrap();
         let second = store.add(dir.path().to_str().unwrap()).unwrap();

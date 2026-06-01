@@ -95,7 +95,7 @@ const CATCHUP_THRESHOLD = 120;   // buffer chars before catchup kicks in (~0.67s
 const CATCHUP_RATIO = 0.05;      // fraction of excess buffer to drain per frame
 
 /** Compute how many chars to reveal this frame, adapting to buffer backlog. */
-function adaptiveCharsPerFrame(bufferLen: number): number {
+export function adaptiveCharsPerFrame(bufferLen: number): number {
   if (bufferLen <= CATCHUP_THRESHOLD) return Math.min(BASE_CHARS_PER_FRAME, bufferLen);
   const excess = bufferLen - CATCHUP_THRESHOLD;
   return Math.min(bufferLen, Math.ceil(BASE_CHARS_PER_FRAME + excess * CATCHUP_RATIO));

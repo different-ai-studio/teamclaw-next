@@ -113,6 +113,16 @@ export type EnsureAgentRuntimeArgs = {
 /**
  * Idempotent: ensure session live subscription, session membership, and
  * daemon runtimeStart for each agent. Safe to call on @-mention and on send.
+ *
+ * TODO(perf-runtime-start-throttle): Opening or re-activating a session often
+ * fires runtimeStart even when the daemon dedup-reuses an existing runtime.
+ * That path still does Cloud session fetch, MQTT live unsub/sub on switch, and
+ * full-history `reconcile_runtime_cursor` (see `apply_start_runtime` dedup in
+ * amuxd). Consider client-side TTL dedupe by (sessionId, workspace, agentIds)
+ * and a daemon fast path that skips full reconcile/catchup when already live.
+ *
+ * Do NOT implement this TODO unless the user explicitly requests it — ignore
+ * during routine work. 无用户明确指令时不要实现本 TODO，日常开发请忽略。
  */
 export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs): Promise<void> {
   const agentActorIds = [...new Set(args.agentActorIds.map((id) => id.trim()).filter(Boolean))];

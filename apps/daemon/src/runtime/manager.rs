@@ -283,6 +283,7 @@ impl RuntimeManager {
             remote_session_id,
             None,
             None,
+            None,
             HashMap::new(),
         )
         .await
@@ -306,6 +307,7 @@ impl RuntimeManager {
         remote_session_id: Option<&str>,
         initial_model_override: Option<String>,
         mcp_config_path: Option<PathBuf>,
+        resume_acp_session_id: Option<String>,
         extra_env: HashMap<String, String>,
     ) -> crate::error::Result<String> {
         let agent_id = Uuid::new_v4().to_string()[..8].to_string();
@@ -321,6 +323,7 @@ impl RuntimeManager {
 
         let launch = self.launch_config_for(agent_type);
         let is_gateway = mcp_config_path.is_some();
+        let resume_requested = resume_acp_session_id.is_some();
         let (cmd_tx, startup) = self
             .acp_host_pool
             .attach_session(
@@ -328,7 +331,7 @@ impl RuntimeManager {
                 &launch,
                 extra_env,
                 worktree.to_string(),
-                None,
+                resume_acp_session_id,
                 mcp_config_path,
                 initial_model_override.clone(),
                 prompt.to_string(),
@@ -339,15 +342,29 @@ impl RuntimeManager {
 
         handle.cmd_tx = Some(cmd_tx);
 
-        info!(agent_id, worktree, "agent attached via shared ACP host");
         self.agents.insert(agent_id.clone(), handle);
         self.aggregators
             .insert(agent_id.clone(), TurnAggregator::new());
 
         if let Some(h) = self.agents.get_mut(&agent_id) {
             h.available_models = startup.available_models;
-            h.acp_session_id = startup.acp_session_id;
+            h.acp_session_id = startup.acp_session_id.clone();
             h.status = amux::AgentStatus::Active;
+        }
+        if resume_requested {
+            info!(
+                agent_id,
+                worktree,
+                backend_session_id = %startup.acp_session_id,
+                "agent attached via shared ACP host (ACP resume requested)"
+            );
+        } else {
+            info!(
+                agent_id,
+                worktree,
+                backend_session_id = %startup.acp_session_id,
+                "agent attached via shared ACP host"
+            );
         }
         if let Some(model_id) = startup.initial_model {
             self.set_current_model(&agent_id, &model_id);
@@ -1319,6 +1336,7 @@ impl RuntimeManager {
                 remote_session_id,
                 initial_model,
                 mcp_cfg_path,
+                None,
                 HashMap::new(),
             )
             .await?;
@@ -1852,6 +1870,7 @@ mod tests {
                 tmp.path().to_str().unwrap(),
                 "",
                 "workspace-1",
+                None,
                 None,
                 None,
                 None,

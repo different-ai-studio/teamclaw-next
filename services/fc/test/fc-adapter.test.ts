@@ -73,6 +73,17 @@ test("normalizeFcEvent: leaves event unchanged when queryStringParameters is emp
   assert.equal((event as any).rawQueryString, undefined);
 });
 
+test("normalizeFcEvent: backfills rawQueryString from queryParameters (FC 3.0)", () => {
+  const event = {
+    rawPath: "/v1/sync/actor-directory",
+    queryParameters: { teamId: "t1", since: "2024-01-01" },
+  };
+  normalizeFcEvent(event as any);
+  const params = new URLSearchParams((event as any).rawQueryString);
+  assert.equal(params.get("teamId"), "t1");
+  assert.equal(params.get("since"), "2024-01-01");
+});
+
 test("hono/aws-lambda base64-encodes binary (png) round-trip", async () => {
   const app = new Hono();
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);

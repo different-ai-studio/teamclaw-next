@@ -25,6 +25,12 @@ pub(crate) fn format_idea_prompt(session_id: &str, event: &IdeaEvent) -> String 
 
 /// Extract the `mention_actor_ids` array from a cloud `messages.metadata`
 /// JSON string. Returns an empty Vec when the field is absent or malformed.
+pub(crate) fn is_mentioned_to(metadata_json: &str, my_actor: &str) -> bool {
+    parse_mention_actor_ids(metadata_json)
+        .iter()
+        .any(|a| a == my_actor)
+}
+
 pub(crate) fn parse_mention_actor_ids(metadata_json: &str) -> Vec<String> {
     serde_json::from_str::<serde_json::Value>(metadata_json)
         .ok()
