@@ -47,6 +47,38 @@ describe("runtime command sender", () => {
     }
     expect(envelope.acpCommand.command.value.requestId).toBe("perm-1");
   });
+
+  it("publishes a cancel ACP command to the runtime command topic", async () => {
+    const mqtt = { publish: vi.fn().mockResolvedValue(undefined) };
+    const sender = createRuntimeCommandSender({
+      mqtt,
+      teamId: "team-1",
+      peerId: "teamclaw-desktop-member-1",
+      senderActorId: "member-actor-1",
+      commandId: () => "command-2",
+      nowSeconds: () => 1_779_430_400,
+    });
+
+    await sender.sendCancel({
+      targetDeviceId: "device-1",
+      runtimeId: "rt-abcd",
+    });
+
+    expect(mqtt.publish).toHaveBeenCalledTimes(1);
+    const [topic, bytes, retain] = mqtt.publish.mock.calls[0] as [
+      string,
+      Uint8Array,
+      boolean,
+    ];
+    expect(topic).toBe("amux/team-1/device/device-1/runtime/rt-abcd/commands");
+    expect(retain).toBe(false);
+
+    const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
+    expect(envelope.runtimeId).toBe("rt-abcd");
+    expect(envelope.deviceId).toBe("device-1");
+    expect(envelope.commandId).toBe("command-2");
+    expect(envelope.acpCommand?.command.case).toBe("cancel");
+  });
 });
 
 describe("resolvePermissionRuntimeTarget", () => {

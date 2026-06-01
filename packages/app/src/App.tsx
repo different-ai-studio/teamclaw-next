@@ -107,6 +107,7 @@ import {
   mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
+  registerDiscardPendingStreamReply,
   rememberLiveEventId,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
@@ -783,6 +784,18 @@ function AppContent() {
       schedulePendingStreamReplyFallback(sessionId, actorId, pendingReply);
     }, PENDING_AGENT_REPLY_FALLBACK_MS);
   }
+
+  useEffect(() => {
+    registerDiscardPendingStreamReply((sessionId, actorId) => {
+      const streamKey = agentStreamKey(sessionId, actorId);
+      clearPendingStreamReplyTimer(streamKey);
+      delete pendingStreamReplySinceRef.current[streamKey];
+      delete pendingStreamRepliesRef.current[streamKey];
+    });
+    return () => {
+      registerDiscardPendingStreamReply(null);
+    };
+  }, []);
 
   useEffect(() => {
     if (!mqttAuthKey || !userId || !mqttTeamId || !mqttAccessToken) return;

@@ -88,7 +88,11 @@ function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: bool
 // Component
 // ────────────────────────────────────────────────────────────────────────────
 
-export function AgentSelectorDock({ activeSessionId, engagedAgents, onRemoveAgent }: AgentSelectorDockProps) {
+export function AgentSelectorDock({
+  activeSessionId,
+  engagedAgents,
+  onRemoveAgent,
+}: AgentSelectorDockProps) {
   const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
   const [agentToBackendType, setAgentToBackendType] = React.useState<Map<string, string>>(new Map())
   const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
