@@ -921,7 +921,8 @@ function AppContent() {
 
           // Case 1: final message.created
           if (decoded.message) {
-            const senderActorId = decoded.message.senderActorId;
+            const msg = decoded.message;
+            const senderActorId = msg.senderActorId;
             const streamingStore = useV2StreamingStore.getState();
             const streamKey = senderActorId ? agentStreamKey(sid, senderActorId) : "";
             const streamEntry = streamKey
@@ -930,7 +931,7 @@ function AppContent() {
             if (
               streamEntry &&
               senderActorId &&
-              decoded.message.kind === MessageKind.AGENT_REPLY
+              msg.kind === MessageKind.AGENT_REPLY
             ) {
               // AGENT_REPLY rows can be emitted for intermediate output
               // chunks before later tool calls arrive. Keep them parked until
@@ -942,13 +943,13 @@ function AppContent() {
               streamingStore.ingestReplyPreview(
                 sid,
                 senderActorId,
-                decoded.message.content,
+                msg.content,
               );
               const pendingReplies =
                 pendingStreamRepliesRef.current[streamKey] ?? [];
               if (
                 !pendingReplies.some(
-                  (message) => message.messageId === decoded.message.messageId,
+                  (message) => message.messageId === msg.messageId,
                 )
               ) {
                 if (pendingReplies.length === 0) {
@@ -956,13 +957,13 @@ function AppContent() {
                 }
                 pendingStreamRepliesRef.current[streamKey] = [
                   ...pendingReplies,
-                  decoded.message,
+                  msg,
                 ];
               }
               schedulePendingStreamReplyFallback(
                 sid,
                 senderActorId,
-                decoded.message,
+                msg,
               );
             } else if (streamEntry && senderActorId) {
               streamingStore.finalize(
@@ -1274,15 +1275,22 @@ function AppContent() {
   const currentSessionId = useSessionSelectionStore((s) => s.currentSessionId);
   const hasCurrentSession = Boolean(currentSessionId);
   const messageRefreshTrigger = useSessionMessageStore((s) => s.messageRefreshTrigger);
+  const messageRefreshForceFull = useSessionMessageStore((s) => s.messageRefreshForceFull);
   const prevRefreshTriggerRef = useRef(0);
   useEffect(() => {
     if (!currentSessionId) return;
     if (isV2E2EControlActive()) return;
-    // A refresh-trigger bump on the SAME session = user pressed ↻.
+    // A refresh-trigger bump on the SAME session = user pressed ↻, or an
+    // explicit full reload (e.g. opening a cron session from run history).
+    const triggerBumped =
+      messageRefreshTrigger !== prevRefreshTriggerRef.current;
     const forceFull =
-      messageRefreshTrigger !== prevRefreshTriggerRef.current &&
-      prevRefreshTriggerRef.current !== 0;
+      messageRefreshForceFull ||
+      (triggerBumped && prevRefreshTriggerRef.current !== 0);
     prevRefreshTriggerRef.current = messageRefreshTrigger;
+    if (messageRefreshForceFull) {
+      useSessionMessageStore.setState({ messageRefreshForceFull: false });
+    }
     let cancelled = false;
     const kindMap: Record<string, MessageKind> = {
       text: MessageKind.TEXT,
@@ -1401,7 +1409,7 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [currentSessionId, messageRefreshTrigger, workspacePath]);
+  }, [currentSessionId, messageRefreshTrigger, messageRefreshForceFull, workspacePath]);
 
   /** When left dock opens, hide the main sidebar; restore prior expansion when it closes. */
   const restoreSidebarAfterLeftDockRef = useRef<boolean | null>(null);

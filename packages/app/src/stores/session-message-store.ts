@@ -7,15 +7,18 @@ const EMPTY_MESSAGES: Message[] = [];
 type SessionMessageState = {
   messages: Record<string, Message[]>;
   messageRefreshTrigger: number;
+  /** When true, the next App.tsx history load uses a full cloud/cache sync. */
+  messageRefreshForceFull: boolean;
   appendMessage: (sessionId: string, message: Message) => void;
   setMessages: (sessionId: string, messages: Message[]) => void;
   currentMessages: () => Message[];
-  reloadActiveSessionMessages: () => Promise<void>;
+  reloadActiveSessionMessages: (opts?: { full?: boolean }) => Promise<void>;
 };
 
 export const useSessionMessageStore = create<SessionMessageState>((set, get) => ({
   messages: {},
   messageRefreshTrigger: 0,
+  messageRefreshForceFull: false,
   appendMessage: (sessionId, message) => {
     const cur = get().messages[sessionId] ?? [];
     if (cur.some((m) => m.messageId === message.messageId)) return;
@@ -29,7 +32,10 @@ export const useSessionMessageStore = create<SessionMessageState>((set, get) => 
     if (!sessionId) return EMPTY_MESSAGES;
     return get().messages[sessionId] ?? EMPTY_MESSAGES;
   },
-  reloadActiveSessionMessages: async () => {
-    set({ messageRefreshTrigger: get().messageRefreshTrigger + 1 });
+  reloadActiveSessionMessages: async (opts) => {
+    set({
+      messageRefreshTrigger: get().messageRefreshTrigger + 1,
+      messageRefreshForceFull: opts?.full ?? false,
+    });
   },
 }));

@@ -69,11 +69,7 @@ mod tests {
     fn resolve_rejects_stale_model() {
         let mut available = HashSet::new();
         available.insert("anthropic/claude-sonnet-4-6".into());
-        let out = resolve_cron_model_override(
-            &available,
-            Some("/ws"),
-            Some("scnet/MiniMax-M2.5"),
-        );
+        let out = resolve_cron_model_override(&available, Some("/ws"), Some("scnet/MiniMax-M2.5"));
         assert!(out.is_none());
     }
 
@@ -81,11 +77,7 @@ mod tests {
     fn resolve_accepts_configured_model() {
         let mut available = HashSet::new();
         available.insert("scnet/minimax-m2.5".into());
-        let out = resolve_cron_model_override(
-            &available,
-            Some("/ws"),
-            Some("scnet/MiniMax-M2.5"),
-        );
+        let out = resolve_cron_model_override(&available, Some("/ws"), Some("scnet/MiniMax-M2.5"));
         assert_eq!(out, Some(("scnet".into(), "MiniMax-M2.5".into())));
     }
 

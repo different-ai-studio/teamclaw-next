@@ -14,6 +14,7 @@ beforeEach(() => {
   useSessionMessageStore.setState({
     messages: {},
     messageRefreshTrigger: 0,
+    messageRefreshForceFull: false,
   });
 });
 
@@ -55,5 +56,11 @@ describe("session-message-store", () => {
     await useSessionMessageStore.getState().reloadActiveSessionMessages();
 
     expect(useSessionMessageStore.getState().messageRefreshTrigger).toBe(1);
+  });
+
+  it("sets force-full flag when requested", async () => {
+    await useSessionMessageStore.getState().reloadActiveSessionMessages({ full: true });
+
+    expect(useSessionMessageStore.getState().messageRefreshForceFull).toBe(true);
   });
 });

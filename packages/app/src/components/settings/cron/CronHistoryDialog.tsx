@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores/ui'
 import { getBackend } from '@/lib/backend'
 import { useSessionListStore } from '@/stores/session-list-store'
+import { hydrateCronSessionMessages } from '@/lib/cron-session-messages'
 import { useSessionMessageStore } from '@/stores/session-message-store'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import {
@@ -78,7 +79,7 @@ export function RunRecordCard({
   onViewSession,
 }: {
   run: CronRunRecord
-  onViewSession?: (sessionId: string) => void | Promise<void>
+  onViewSession?: (sessionId: string, run: CronRunRecord) => void | Promise<void>
 }) {
   const { t } = useTranslation()
   const [isHovered, setIsHovered] = React.useState(false)
@@ -98,7 +99,7 @@ export function RunRecordCard({
     if (!run.sessionId || !onViewSession || viewing) return
     setViewing(true)
     try {
-      await onViewSession(run.sessionId)
+      await onViewSession(run.sessionId, run)
     } finally {
       setViewing(false)
     }
@@ -210,7 +211,7 @@ export function CronHistoryDialog({
   const { runs, runsLoading, loadRuns } = useCronStore()
   const [viewError, setViewError] = React.useState<string | null>(null)
 
-  const handleViewSession = React.useCallback(async (sessionId: string) => {
+  const handleViewSession = React.useCallback(async (sessionId: string, run: CronRunRecord) => {
     setViewError(null)
     try {
       await ensureCronSessionVisible(sessionId)
@@ -223,7 +224,11 @@ export function CronHistoryDialog({
     // Close the dialog first, then navigate so the chat view is visible
     onOpenChange(false)
     await useUIStore.getState().switchToSession(sessionId)
-    await useSessionMessageStore.getState().reloadActiveSessionMessages()
+    await hydrateCronSessionMessages(sessionId, {
+      fallbackSummary: run.responseSummary,
+      runId: run.runId,
+    })
+    await useSessionMessageStore.getState().reloadActiveSessionMessages({ full: true })
   }, [onOpenChange])
 
   React.useEffect(() => {

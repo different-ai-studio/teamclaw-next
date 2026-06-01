@@ -112,9 +112,15 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   const hasOrderedThinking = orderedParts.some((part) => part.type === "reasoning");
   const hasThinking = !hasOrderedThinking && entry.thinkingText.length > 0;
   const hasError = !!entry.errorMessage;
-  const lastLiveTextPartIndex = entry.active
-    ? visibleOrderedParts.findLastIndex((part) => part.type === "text")
-    : -1;
+  let lastLiveTextPartIndex = -1;
+  if (entry.active) {
+    for (let i = visibleOrderedParts.length - 1; i >= 0; i--) {
+      if (visibleOrderedParts[i]?.type === "text") {
+        lastLiveTextPartIndex = i;
+        break;
+      }
+    }
+  }
 
   if (!hasVisibleOrderedParts && !showOutput && !hasFallbackToolCalls && !hasThinking && !hasError) {
     return null;

@@ -56,6 +56,10 @@ vi.mock('@/stores/session-list-store', () => ({
   },
 }))
 
+vi.mock('@/lib/cron-session-messages', () => ({
+  hydrateCronSessionMessages: vi.fn().mockResolvedValue(1),
+}))
+
 vi.mock('@/stores/session-message-store', () => ({
   useSessionMessageStore: {
     getState: () => ({ reloadActiveSessionMessages: vi.fn() }),

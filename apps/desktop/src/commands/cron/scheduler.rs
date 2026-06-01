@@ -353,7 +353,11 @@ impl CronScheduler {
         worktree_path
             .filter(|path| !path.is_empty())
             .map(str::to_string)
-            .or_else(|| execution_workspace.filter(|path| !path.is_empty()).map(str::to_string))
+            .or_else(|| {
+                execution_workspace
+                    .filter(|path| !path.is_empty())
+                    .map(str::to_string)
+            })
     }
 
     /// Execute a single cron job
@@ -405,7 +409,9 @@ impl CronScheduler {
         }
 
         if use_worktree {
-            let wt_base = execution_workspace.as_deref().unwrap_or(my_workspace.as_str());
+            let wt_base = execution_workspace
+                .as_deref()
+                .unwrap_or(my_workspace.as_str());
             let wt_dir = std::path::Path::new(wt_base)
                 .join(".worktrees")
                 .join(format!("cron-{}-{}", job.id, run_id));
@@ -914,10 +920,7 @@ mod tests {
 
     #[test]
     fn global_cron_run_without_worktree_leaves_directory_to_daemon_default() {
-        assert_eq!(
-            CronScheduler::working_directory_for_run(None, None),
-            None
-        );
+        assert_eq!(CronScheduler::working_directory_for_run(None, None), None);
     }
 
     // ── run reconciliation ──────────────────────────────────────────────────
