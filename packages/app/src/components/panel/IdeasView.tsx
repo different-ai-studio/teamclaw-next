@@ -9,7 +9,7 @@ import { SidebarCollapseToggle } from '@/components/app-sidebar'
 import { TrafficLights } from '@/components/ui/traffic-lights'
 import { useSidebar } from '@/components/ui/sidebar'
 import { getBackend } from '@/lib/backend'
-import { useSessionListStore } from '@/stores/session-list-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { formatRelativeTime } from '@/lib/date-format'
 import { cn, isTauri } from '@/lib/utils'
 import * as localCache from '@/lib/local-cache'
@@ -36,7 +36,7 @@ export interface UseIdeasForTeamResult {
 }
 
 export function useIdeasForTeam(): UseIdeasForTeamResult {
-  const sessionRows = useSessionListStore(s => s.rows)
+  const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null)
   const [teamId, setTeamId] = React.useState<string | null>(null)
   const [ideas, setIdeas] = React.useState<IdeaRow[]>([])
   const [creators, setCreators] = React.useState<IdeaCreatorMap>(new Map())
@@ -46,9 +46,8 @@ export function useIdeasForTeam(): UseIdeasForTeamResult {
 
   React.useEffect(() => {
     if (teamId) return
-    const fromSession = sessionRows[0]?.team_id
-    if (fromSession) {
-      setTeamId(fromSession)
+    if (currentTeamId) {
+      setTeamId(currentTeamId)
       return
     }
     let cancelled = false
@@ -62,7 +61,7 @@ export function useIdeasForTeam(): UseIdeasForTeamResult {
       if (actorRow?.team_id) setTeamId(actorRow.team_id)
     })()
     return () => { cancelled = true }
-  }, [sessionRows, teamId])
+  }, [currentTeamId, teamId])
 
   React.useEffect(() => {
     if (!teamId) return

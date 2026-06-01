@@ -2,7 +2,7 @@ import type { SessionsCache } from "./session-cache";
 import { groupSessionsByRecency, type SessionGroup, type SessionSummary } from "./session-types";
 import { setUnreadSessionCount } from "./unread-store";
 
-type SessionsApi = ReturnType<(typeof import("./session-api"))["createSessionsApi"]>;
+type SessionsApi = ReturnType<(typeof import("./cloud-api"))["createCloudSessionsApi"]>;
 
 type SessionsControllerListener = () => void;
 

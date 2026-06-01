@@ -1032,6 +1032,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       });
       teamIdForSend = await getBackend().sessions.getSessionTeamId(sid);
     }
+    // Creating a brand-new session: there is no `sid` yet and no session-list
+    // row to read team_id from, so fall back to the currently selected team.
+    // Without this, createSessionShell() posts teamId: null and the Cloud API
+    // rejects it with "teamId is required".
+    if (!teamIdForSend) {
+      teamIdForSend = useCurrentTeamStore.getState().team?.id ?? null;
+    }
     sessionFlowLog("send.team_resolved", {
       sessionId: sid,
       teamId: teamIdForSend,

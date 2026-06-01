@@ -19,6 +19,7 @@ import {
   defaultNotificationPrefs,
   type NotificationPrefs as PushPrefs,
 } from "../../src/features/notifications/notification-prefs-api";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { supabase } from "../../src/lib/supabase/client";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
@@ -48,7 +49,7 @@ export default function NotificationsRoute() {
   const [pushPrefs, setPushPrefs] = useState<PushPrefs>(defaultNotificationPrefs);
   const userIdRef = useRef<string | null>(null);
   const pushApiRef = useRef(
-    createNotificationPrefsApi(supabase, () => userIdRef.current),
+    createNotificationPrefsApi({ getAccessToken: supabaseAccessToken(supabase) }),
   );
 
   useEffect(() => {

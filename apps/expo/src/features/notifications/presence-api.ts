@@ -1,35 +1,27 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 
 export type PresenceApi = {
   writeForeground: (deviceId: string, until: Date) => Promise<void>;
 };
 
-export function createPresenceApi(
-  client: SupabaseClient,
-  userId: () => string | null,
-): PresenceApi {
+/** Writes foreground presence via the Cloud API (POST /v1/presence/foreground).
+ * FC derives user_id from the bearer token. */
+export function createPresenceApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): PresenceApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
   return {
     async writeForeground(deviceId, until) {
-      const uid = userId();
-      if (!uid) return;
-      const result = await client.from("client_presence").upsert(
-        {
-          user_id: uid,
-          device_id: deviceId,
-          foreground_until: until.toISOString(),
-        },
-        { onConflict: "user_id,device_id" },
-      );
-      throwIfSupabaseError(result.error);
+      await client.post("/v1/presence/foreground", {
+        deviceId,
+        foregroundUntil: until.toISOString(),
+      });
     },
   };
-}
-
-function throwIfSupabaseError(error: unknown) {
-  if (!error) return;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    throw new Error(typeof message === "string" ? message : "Supabase presence error");
-  }
-  throw new Error("Supabase presence error");
 }

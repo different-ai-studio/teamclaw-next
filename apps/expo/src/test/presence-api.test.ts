@@ -1,41 +1,50 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPresenceApi } from "../features/notifications/presence-api";
 
 describe("createPresenceApi", () => {
-  it("upserts the foreground lease for the authenticated user/device", async () => {
-    const upsert = vi.fn().mockResolvedValue({ error: null });
-    const from = vi.fn().mockReturnValue({ upsert });
-    const api = createPresenceApi({ from } as unknown as SupabaseClient, () => "user-1");
+  it("POSTs the foreground lease to the Cloud API (user derived from bearer)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const api = createPresenceApi({
+      baseUrl: "https://cloud.test",
+      getAccessToken: async () => "tok",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
 
     await api.writeForeground("device-1", new Date("2026-05-22T08:00:45.000Z"));
 
-    expect(from).toHaveBeenCalledWith("client_presence");
-    expect(upsert).toHaveBeenCalledWith(
-      {
-        user_id: "user-1",
-        device_id: "device-1",
-        foreground_until: "2026-05-22T08:00:45.000Z",
-      },
-      { onConflict: "user_id,device_id" },
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://cloud.test/v1/presence/foreground");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      deviceId: "device-1",
+      foregroundUntil: "2026-05-22T08:00:45.000Z",
+    });
+  });
+
+  it("throws when there is no access token", async () => {
+    const fetchImpl = vi.fn();
+    const api = createPresenceApi({
+      baseUrl: "https://cloud.test",
+      getAccessToken: async () => null,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await expect(
+      api.writeForeground("device-1", new Date("2026-05-22T08:00:45.000Z")),
+    ).rejects.toThrow("access token");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("throws Cloud API write errors", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "rls denied" } }), { status: 403 }),
     );
-  });
-
-  it("does nothing when there is no signed-in user", async () => {
-    const upsert = vi.fn();
-    const from = vi.fn().mockReturnValue({ upsert });
-    const api = createPresenceApi({ from } as unknown as SupabaseClient, () => null);
-
-    await api.writeForeground("device-1", new Date("2026-05-22T08:00:45.000Z"));
-
-    expect(from).not.toHaveBeenCalled();
-  });
-
-  it("throws Supabase write errors", async () => {
-    const upsert = vi.fn().mockResolvedValue({ error: { message: "rls denied" } });
-    const from = vi.fn().mockReturnValue({ upsert });
-    const api = createPresenceApi({ from } as unknown as SupabaseClient, () => "user-1");
+    const api = createPresenceApi({
+      baseUrl: "https://cloud.test",
+      getAccessToken: async () => "tok",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
 
     await expect(
       api.writeForeground("device-1", new Date("2026-05-22T08:00:45.000Z")),

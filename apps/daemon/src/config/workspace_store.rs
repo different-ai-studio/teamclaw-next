@@ -7,7 +7,7 @@ use crate::proto::amux;
 pub struct WorkspaceStore {
     #[serde(default)]
     pub workspaces: Vec<StoredWorkspace>,
-    /// Local workspace id used when cron/desktop omit an explicit working directory.
+    /// Local workspace id for cron/desktop implicit cwd and cloud API agent default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_workspace_id: Option<String>,
 }
@@ -182,6 +182,27 @@ mod tests {
         store.save(&toml_path).unwrap();
         let reloaded = WorkspaceStore::load(&toml_path).unwrap();
         assert_eq!(reloaded.workspaces[0].team_id.as_deref(), Some("team-7"));
+    }
+
+    #[test]
+    fn set_default_workspace_id_roundtrips_in_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("workspaces.toml");
+        let mut store = WorkspaceStore {
+            workspaces: vec![StoredWorkspace {
+                workspace_id: "abc12345".into(),
+                remote_workspace_id: String::new(),
+                path: dir.path().to_string_lossy().into(),
+                display_name: "test".into(),
+                team_id: None,
+            }],
+            default_workspace_id: None,
+        };
+        store.set_default_workspace_id("abc12345");
+        store.save(&toml_path).unwrap();
+
+        let reloaded = WorkspaceStore::load(&toml_path).unwrap();
+        assert_eq!(reloaded.default_workspace_id.as_deref(), Some("abc12345"));
     }
 
     #[test]

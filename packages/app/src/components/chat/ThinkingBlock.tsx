@@ -6,6 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useStreamRevealText } from "@/hooks/useStreamRevealText";
 
 interface ThinkingBlockProps {
   content: string;
@@ -21,6 +22,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(isOpen);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const revealedContent = useStreamRevealText(content, isStreaming);
 
   React.useEffect(() => {
     if (!isStreaming) setOpen(isOpen);
@@ -30,11 +32,11 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
     if (isStreaming && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [isStreaming, content]);
+  }, [isStreaming, revealedContent]);
 
   const compactContent = React.useMemo(
-    () => content.replace(/\n{2,}/g, "\n"),
-    [content],
+    () => revealedContent.replace(/\n{2,}/g, "\n"),
+    [revealedContent],
   );
 
   if (isStreaming) {

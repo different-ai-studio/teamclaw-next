@@ -33,7 +33,7 @@ vi.mock("../ui/theme", () => ({
     body: { fontFamily: "System", fontSize: 14 },
   },
 }));
-vi.mock("../features/shortcuts/shortcut-api", () => ({ createShortcutsApi: vi.fn() }));
+vi.mock("../features/shortcuts/api-provider", () => ({ createConfiguredShortcutsApi: vi.fn() }));
 
 import { openShortcutTarget } from "../features/shortcuts/ShortcutsDrawer";
 import type { Shortcut } from "../features/shortcuts/shortcut-types";

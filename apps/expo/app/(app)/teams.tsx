@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,8 @@ import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
+import { createTeamsApi } from "../../src/features/teams/teams-api";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
 type Membership = {
@@ -37,18 +39,16 @@ export default function TeamsRoute() {
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
+  const teamsApi = useMemo(
+    () => createTeamsApi({ getAccessToken: supabaseAccessToken(supabase) }),
+    [],
+  );
+
   const commitRename = async (teamId: string) => {
     const next = renameDraft.trim();
     if (!next) return;
     try {
-      const result = await supabase
-        .from("teams")
-        .update({ name: next, updated_at: new Date().toISOString() })
-        .eq("id", teamId);
-      if (result.error) {
-        setError(result.error.message);
-        return;
-      }
+      await teamsApi.renameTeam(teamId, next);
       setMemberships((prev) =>
         prev.map((m) => (m.teamId === teamId ? { ...m, name: next } : m)),
       );
@@ -71,15 +71,7 @@ export default function TeamsRoute() {
           style: "destructive",
           onPress: async () => {
             try {
-              const result = await supabase
-                .from("team_members")
-                .delete()
-                .eq("team_id", membership.teamId)
-                .eq("member_id", memberActorId);
-              if (result.error) {
-                setError(result.error.message);
-                return;
-              }
+              await teamsApi.leaveTeam(membership.teamId, memberActorId);
               setMemberships((prev) =>
                 prev.filter((m) => m.teamId !== membership.teamId),
               );
@@ -99,40 +91,15 @@ export default function TeamsRoute() {
     }
     setIsLoading(true);
     try {
-      const result = (await supabase
-        .from("team_members")
-        .select("role, teams!inner(id, name, slug)")
-        .eq("member_id", memberActorId)) as {
-        data:
-          | Array<{
-              role: string | null;
-              teams: { id: string; name: string | null; slug: string | null } | null;
-            }>
-          | null;
-        error: { message?: string } | null;
-      };
-      if (result.error) {
-        setError(result.error.message ?? "Couldn't load teams.");
-        setMemberships([]);
-      } else {
-        setMemberships(
-          (result.data ?? [])
-            .filter((row) => row.teams)
-            .map((row) => ({
-              teamId: row.teams!.id,
-              name: row.teams!.name ?? "Unnamed team",
-              slug: row.teams!.slug ?? "",
-              role: row.role ?? "member",
-            })),
-        );
-        setError(null);
-      }
+      const { memberships: next } = await teamsApi.listMemberships();
+      setMemberships(next);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load teams.");
     } finally {
       setIsLoading(false);
     }
-  }, [memberActorId]);
+  }, [memberActorId, teamsApi]);
 
   useEffect(() => {
     void load();

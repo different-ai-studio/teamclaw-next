@@ -1,43 +1,31 @@
+import { cloudApiBaseUrl, createCloudApiClient } from "../../lib/cloud-api/client";
 import type { Actor, ActorType } from "./actor-types";
 
-type SupabaseError = { message?: string } | null;
+/**
+ * Cloud-only actors provider. Mirrors the iOS CloudAPIActorRepository: the team
+ * directory (GET /v1/teams/:id/actors) is the single source for actor rows.
+ *
+ * NOTE — the directory does NOT carry `ownerMemberId` or `deviceId` (they live
+ * on the agents table, not the actor_directory view). Like iOS, owner-gating
+ * moves to GET /v1/agents/:id/permission and device routing to
+ * GET /v1/agents/:id/device-id (see agent-access-api). Actors surfaced here
+ * therefore expose null for both; consumers that need them fetch on demand.
+ */
 
-type QueryResult<T> = {
-  data: T;
-  error: SupabaseError;
-};
-
-type ActorsClient = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  from: (table: string) => any;
-  rpc?: (
-    fn: string,
-    args?: Record<string, unknown>,
-  ) => PromiseLike<{ data: unknown; error: SupabaseError }>;
-};
-
-type ActorRow = {
+// FC mapDirectoryActor camelCase shape.
+type CloudActor = {
   id: string;
-  team_id: string | null;
-  actor_type: string | null;
-  display_name: string | null;
-  last_active_at: string | null;
-  avatar_url: string | null;
-};
-
-type MembershipRow = {
-  member_id: string;
-  role: string | null;
-};
-
-type AgentRow = {
-  id: string;
-  agent_types: string[] | null;
-  default_agent_type: string | null;
-  default_workspace_id: string | null;
-  owner_member_id: string | null;
-  visibility: string | null;
-  device_id: string | null;
+  teamId?: string | null;
+  kind?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  teamRole?: string | null;
+  agentTypes?: string[] | null;
+  agentKind?: string | null;
+  defaultAgentType?: string | null;
+  defaultWorkspaceId?: string | null;
+  visibility?: string | null;
+  lastActiveAt?: string | null;
 };
 
 export type ActorInviteResult = {
@@ -46,13 +34,7 @@ export type ActorInviteResult = {
   expiresAt: string;
 };
 
-function throwIfError(error: SupabaseError): void {
-  if (error?.message) {
-    throw new Error(error.message);
-  }
-}
-
-function toActorType(value: string | null): ActorType {
+function toActorType(value: string | null | undefined): ActorType {
   switch (value) {
     case "agent":
       return "agent";
@@ -64,32 +46,26 @@ function toActorType(value: string | null): ActorType {
   }
 }
 
-function toActor(
-  row: ActorRow,
-  role: string | null,
-  agentTypes: string[],
-  defaultAgentType: string | null,
-  defaultWorkspaceId: string | null,
-  ownerMemberId: string | null,
-  visibility: string | null,
-  deviceId: string | null,
-): Actor {
-  const agentKind = defaultAgentType ?? agentTypes[0] ?? null;
+function toActor(row: CloudActor): Actor {
+  const agentTypes = row.agentTypes ?? [];
+  const defaultAgentType = row.defaultAgentType ?? null;
   return {
     actorId: row.id,
-    teamId: row.team_id ?? "",
-    actorType: toActorType(row.actor_type),
-    displayName: row.display_name?.trim() || "Unnamed",
-    role,
-    lastActiveAt: row.last_active_at ?? null,
-    avatarUrl: row.avatar_url ?? null,
+    teamId: row.teamId ?? "",
+    actorType: toActorType(row.kind),
+    displayName: row.displayName?.trim() || "Unnamed",
+    role: row.teamRole ?? null,
+    lastActiveAt: row.lastActiveAt ?? null,
+    avatarUrl: row.avatarUrl ?? null,
     agentTypes,
     defaultAgentType,
-    defaultWorkspaceId,
-    ownerMemberId,
-    visibility: visibility === "personal" ? "personal" : visibility === "team" ? "team" : null,
-    deviceId,
-    agentKind,
+    defaultWorkspaceId: row.defaultWorkspaceId ?? null,
+    // Not exposed by the directory view — sourced on demand via agent-access.
+    ownerMemberId: null,
+    visibility:
+      row.visibility === "personal" ? "personal" : row.visibility === "team" ? "team" : null,
+    deviceId: null,
+    agentKind: row.agentKind ?? defaultAgentType ?? agentTypes[0] ?? null,
   };
 }
 
@@ -97,120 +73,125 @@ function buildInviteDeeplink(token: string): string {
   return `teamclaw://invite/${token}`;
 }
 
-export function createActorsApi(client: ActorsClient) {
-  async function callRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
-    if (!client.rpc) throw new Error("Supabase RPC client is unavailable");
-    const result = await client.rpc(name, args);
-    throwIfError(result.error);
-    return result.data;
-  }
+export type ActorsApi = {
+  listActors: (teamId: string) => Promise<Actor[]>;
+  listActorSessionIds: (actorId: string) => Promise<string[]>;
+  removeActor: (actorId: string) => Promise<void>;
+  updateAgentDefaults: (
+    agentId: string,
+    patch: { defaultWorkspaceId?: string | null; defaultAgentType?: string | null },
+  ) => Promise<void>;
+  updateCurrentActorProfile: (
+    actorId: string,
+    patch: { displayName: string; avatarUrl: string | null },
+  ) => Promise<void>;
+  createReinvite: (input: {
+    teamId: string;
+    actor: Actor;
+    ttlSeconds?: number;
+  }) => Promise<ActorInviteResult>;
+  createInvite: (input: {
+    teamId: string;
+    kind: "member" | "agent";
+    displayName: string;
+    teamRole?: string | null;
+    agentKind?: string | null;
+    ttlSeconds?: number;
+  }) => Promise<ActorInviteResult>;
+};
+
+export function createActorsApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): ActorsApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
 
   return {
-    async listActors(teamId: string): Promise<Actor[]> {
-      const actorResult = (await client
-        .from("actors")
-        .select("id, team_id, actor_type, display_name, last_active_at, avatar_url")
-        .eq("team_id", teamId)
-        .order("display_name", { ascending: true })) as QueryResult<ActorRow[] | null>;
-      throwIfError(actorResult.error);
-
-      const rows = actorResult.data ?? [];
-      if (rows.length === 0) return [];
-
-      const memberIds = rows
-        .filter((row) => row.actor_type === "member")
-        .map((row) => row.id);
-      const agentIds = rows
-        .filter((row) => row.actor_type === "agent")
-        .map((row) => row.id);
-
-      let rolesByMemberId = new Map<string, string>();
-      if (memberIds.length > 0) {
-        const membershipResult = (await client
-          .from("team_members")
-          .select("member_id, role")
-          .eq("team_id", teamId)
-          .in("member_id", memberIds)) as QueryResult<MembershipRow[] | null>;
-        throwIfError(membershipResult.error);
-        rolesByMemberId = new Map(
-          (membershipResult.data ?? []).map((row) => [row.member_id, row.role ?? "member"]),
-        );
-      }
-
-      let agentById = new Map<string, AgentRow>();
-      if (agentIds.length > 0) {
-        const agentResult = (await client
-          .from("agents")
-          .select(
-            "id, agent_types, default_agent_type, default_workspace_id, owner_member_id, visibility, device_id",
-          )
-          .in("id", agentIds)) as QueryResult<AgentRow[] | null>;
-        if (!agentResult.error) {
-          agentById = new Map((agentResult.data ?? []).map((row) => [row.id, row]));
-        }
-        // Agents are visibility-filtered (actor_directory hides personal
-        // agents); errors are best-effort and shouldn't block the actor list.
-      }
-
-      return rows.map((row) =>
-        toActor(
-          row,
-          rolesByMemberId.get(row.id) ?? null,
-          agentById.get(row.id)?.agent_types ?? [],
-          agentById.get(row.id)?.default_agent_type ?? null,
-          agentById.get(row.id)?.default_workspace_id ?? null,
-          agentById.get(row.id)?.owner_member_id ?? null,
-          agentById.get(row.id)?.visibility ?? null,
-          agentById.get(row.id)?.device_id ?? null,
-        ),
+    async listActors(teamId) {
+      if (!teamId) return [];
+      const result = await client.get<{ items: CloudActor[] }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/actors?limit=500`,
       );
+      return (result.items ?? []).map(toActor);
     },
 
-    async removeActor(actorId: string): Promise<void> {
-      await callRpc("remove_team_actor", { p_actor_id: actorId });
+    async listActorSessionIds(actorId) {
+      if (!actorId) return [];
+      const result = await client.get<{ items: string[] }>(
+        `/v1/actors/${encodeURIComponent(actorId)}/sessions`,
+      );
+      return result.items ?? [];
     },
 
-    async updateAgentDefaults(
-      agentId: string,
-      patch: {
-        defaultWorkspaceId?: string | null;
-        defaultAgentType?: string | null;
-      },
-    ): Promise<void> {
-      await callRpc("update_agent_defaults", {
-        p_agent_id: agentId,
-        p_default_workspace_id: patch.defaultWorkspaceId ?? null,
-        p_agent_kind: null,
-        p_default_agent_type: patch.defaultAgentType ?? null,
+    async removeActor(actorId) {
+      await client.del(`/v1/actors/${encodeURIComponent(actorId)}`);
+    },
+
+    async updateAgentDefaults(agentId, patch) {
+      await client.patch(`/v1/agents/${encodeURIComponent(agentId)}/defaults`, {
+        defaultWorkspaceId: patch.defaultWorkspaceId ?? null,
+        defaultAgentType: patch.defaultAgentType ?? null,
+        agentKind: null,
       });
     },
 
-    async createReinvite({
-      teamId,
-      actor,
-      ttlSeconds = 60 * 60 * 24 * 7,
-    }: {
-      teamId: string;
-      actor: Actor;
-      ttlSeconds?: number;
-    }): Promise<ActorInviteResult> {
+    async updateCurrentActorProfile(actorId, patch) {
+      await client.patch(`/v1/actors/${encodeURIComponent(actorId)}/profile`, {
+        displayName: patch.displayName,
+        avatarUrl: patch.avatarUrl,
+      });
+    },
+
+    async createReinvite({ teamId, actor, ttlSeconds = 60 * 60 * 24 * 7 }) {
       const kind = actor.actorType === "agent" ? "agent" : "member";
-      const data = await callRpc("create_team_invite", {
-        p_team_id: teamId,
-        p_kind: kind,
-        p_display_name: actor.displayName,
-        p_team_role: kind === "member" ? actor.role ?? "member" : null,
-        p_agent_kind: kind === "agent" ? "daemon" : null,
-        p_ttl_seconds: ttlSeconds,
-        p_target_actor_id: actor.actorId,
-      });
-      const row = Array.isArray(data) ? data[0] : data;
-      const record = row as { token?: string; deeplink?: string; expires_at?: string } | null;
-      if (!record?.token) throw new Error("Invite created but token was missing.");
+      const row = await client.post<{ token?: string; deeplink?: string; expiresAt?: string }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/invites`,
+        {
+          kind,
+          displayName: actor.displayName,
+          teamRole: kind === "member" ? actor.role ?? "member" : null,
+          agentKind: kind === "agent" ? "daemon" : null,
+          ttlSeconds,
+          targetActorId: actor.actorId,
+        },
+      );
+      if (!row?.token) throw new Error("Invite created but token was missing.");
       return {
-        token: record.token,
-        deeplink: buildInviteDeeplink(record.token),
-        expiresAt: record.expires_at ?? "",
+        token: row.token,
+        deeplink: row.deeplink || buildInviteDeeplink(row.token),
+        expiresAt: row.expiresAt ?? "",
+      };
+    },
+
+    async createInvite({
+      teamId,
+      kind,
+      displayName,
+      teamRole = null,
+      agentKind = null,
+      ttlSeconds = 60 * 60 * 24 * 7,
+    }) {
+      const row = await client.post<{ token?: string; deeplink?: string; expiresAt?: string }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/invites`,
+        {
+          kind,
+          displayName,
+          teamRole: kind === "member" ? teamRole : null,
+          agentKind: kind === "agent" ? agentKind : null,
+          ttlSeconds,
+          targetActorId: null,
+        },
+      );
+      if (!row?.token) throw new Error("Invite created but token was missing.");
+      return {
+        token: row.token,
+        deeplink: row.deeplink || buildInviteDeeplink(row.token),
+        expiresAt: row.expiresAt ?? "",
       };
     },
   };

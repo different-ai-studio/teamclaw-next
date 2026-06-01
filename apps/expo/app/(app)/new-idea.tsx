@@ -17,6 +17,9 @@ import {
 import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
+import { createWorkspacesApi } from "../../src/features/workspaces/workspace-api";
+import { createIdeasApi } from "../../src/features/ideas/idea-api";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { supabase } from "../../src/lib/supabase/client";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
 
@@ -37,17 +40,20 @@ export default function NewIdeaRoute() {
     if (!teamId) return;
     let cancelled = false;
     void (async () => {
-      const result = (await supabase
-        .from("workspaces")
-        .select("id, name, archived")
-        .eq("team_id", teamId)
-        .order("name", { ascending: true })) as {
-        data: Array<{ id: string; name: string; archived: boolean }> | null;
-        error: { message?: string } | null;
-      };
-      if (cancelled) return;
-      const rows = (result.data ?? []).filter((row) => !row.archived);
-      setWorkspaces(rows.map((row) => ({ id: row.id, name: row.name })));
+      try {
+        const rows = await createWorkspacesApi({
+          getAccessToken: supabaseAccessToken(supabase),
+        }).list(teamId);
+        if (cancelled) return;
+        setWorkspaces(
+          rows
+            .filter((row) => !row.archived)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((row) => ({ id: row.id, name: row.name })),
+        );
+      } catch {
+        if (!cancelled) setWorkspaces([]);
+      }
     })();
     return () => {
       cancelled = true;
@@ -94,30 +100,17 @@ export default function NewIdeaRoute() {
     setIsBusy(true);
     setError(null);
     try {
-      const result = (await supabase
-        .from("ideas")
-        .insert({
-          team_id: teamId,
-          created_by_actor_id: memberActorId,
-          title: title.trim(),
-          description: description.trim(),
-          status: "open",
-          archived: false,
-          workspace_id: pickedWorkspaceId,
-        })
-        .select("id")
-        .single()) as {
-        data: { id?: string } | null;
-        error: { message?: string } | null;
-      };
-      if (result.error) {
-        setError(result.error.message ?? "Couldn't create idea.");
-        return;
-      }
+      const idea = await createIdeasApi({
+        getAccessToken: supabaseAccessToken(supabase),
+      }).createIdea({
+        teamId,
+        title: title.trim(),
+        description: description.trim(),
+        workspaceId: pickedWorkspaceId,
+      });
       router.back();
-      const id = result.data?.id;
-      if (id) {
-        router.push(`/(app)/idea-detail?ideaId=${id}`);
+      if (idea.ideaId) {
+        router.push(`/(app)/idea-detail?ideaId=${idea.ideaId}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create idea.");

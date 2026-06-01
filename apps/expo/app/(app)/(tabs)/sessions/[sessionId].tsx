@@ -24,6 +24,7 @@ import { createSessionDetailController } from "../../../../src/features/sessions
 import { emptyTimelineState } from "../../../../src/features/sessions/timeline-reducer";
 import { createSessionDetailCache } from "../../../../src/features/sessions/session-detail-cache";
 import { createSessionMutesApi } from "../../../../src/features/sessions/session-mutes";
+import { supabaseAccessToken } from "../../../../src/lib/cloud-api/client";
 import { SessionDetailScreen } from "../../../../src/features/sessions/screens/SessionDetailScreen";
 import { impactLight, selectionTick, successTone } from "../../../../src/lib/haptics";
 import { showToast } from "../../../../src/ui/Toast";
@@ -278,7 +279,7 @@ export default function SessionDetailRoute() {
       const uid = data.session?.user.id ?? null;
       if (cancelled) return;
       userIdRef.current = uid;
-      const mutes = createSessionMutesApi(supabase, () => userIdRef.current);
+      const mutes = createSessionMutesApi({ getAccessToken: supabaseAccessToken(supabase) });
       try {
         const muted = await mutes.isMuted(sessionId);
         if (!cancelled) setIsMuted(muted);
@@ -320,7 +321,7 @@ export default function SessionDetailRoute() {
   useEffect(() => {
     if (!currentTeam?.id) return;
     let cancelled = false;
-    void createActorsApi(supabase)
+    void createActorsApi({ getAccessToken: supabaseAccessToken(supabase) })
       .listActors(currentTeam.id)
       .then((rows) => {
         if (!cancelled) setTeamActors(rows);
@@ -590,7 +591,7 @@ export default function SessionDetailRoute() {
           onClearReply={() => controller?.setReplyTarget(null)}
           onDeleteMessage={async (messageId) => {
             try {
-              await supabase.from("messages").delete().eq("id", messageId);
+              await createConfiguredSessionsApi(supabase).deleteMessage(messageId);
               successTone();
               showToast("success", "Message deleted");
               void controller?.load();
@@ -663,10 +664,9 @@ export default function SessionDetailRoute() {
                   setIsMuted(next);
                   selectionTick();
                   try {
-                    await createSessionMutesApi(
-                      supabase,
-                      () => userIdRef.current,
-                    ).setMuted(sessionId, next);
+                    await createSessionMutesApi({
+                      getAccessToken: supabaseAccessToken(supabase),
+                    }).setMuted(sessionId, next);
                     showToast("success", next ? "已静音" : "已取消静音");
                   } catch (err) {
                     setIsMuted(!next);

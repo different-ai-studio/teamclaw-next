@@ -1,10 +1,26 @@
 import { AlertCircle } from "lucide-react";
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
+import { useStreamRevealText } from "@/hooks/useStreamRevealText";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
 import { ThinkingBlock } from "./ThinkingBlock";
 import type { MessagePart } from "@/stores/session-types";
+
+function StreamRevealedResponse({
+  text,
+  reveal,
+}: {
+  text: string;
+  reveal: boolean;
+}) {
+  const displayed = useStreamRevealText(text, reveal);
+  return (
+    <MessageContent>
+      <MessageResponse>{displayed}</MessageResponse>
+    </MessageContent>
+  );
+}
 
 // Plan entries used to render inline here as a card. They now surface in
 // the TodoList dock above the prompt input (v1 style) — see `planTodos`
@@ -34,6 +50,7 @@ function renderOrderedPart(
   part: MessagePart,
   showText: boolean,
   isStreamingReasoning: boolean,
+  revealText: boolean,
 ) {
   if (part.type === "reasoning") {
     const text = part.text || part.content || "";
@@ -65,9 +82,7 @@ function renderOrderedPart(
   const text = part.text || part.content || "";
   if (!text) return null;
   return (
-    <MessageContent key={part.id}>
-      <MessageResponse>{text}</MessageResponse>
-    </MessageContent>
+    <StreamRevealedResponse key={part.id} text={text} reveal={revealText} />
   );
 }
 
@@ -97,6 +112,9 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
   const hasOrderedThinking = orderedParts.some((part) => part.type === "reasoning");
   const hasThinking = !hasOrderedThinking && entry.thinkingText.length > 0;
   const hasError = !!entry.errorMessage;
+  const lastLiveTextPartIndex = entry.active
+    ? visibleOrderedParts.findLastIndex((part) => part.type === "text")
+    : -1;
 
   if (!hasVisibleOrderedParts && !showOutput && !hasFallbackToolCalls && !hasThinking && !hasError) {
     return null;
@@ -130,6 +148,9 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
                   entry.active &&
                     part.type === "reasoning" &&
                     index === visibleOrderedParts.length - 1,
+                  entry.active &&
+                    part.type === "text" &&
+                    index === lastLiveTextPartIndex,
                 ),
               )}
             </div>
@@ -151,9 +172,7 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
           )}
 
           {showOutput && (
-            <MessageContent>
-              <MessageResponse>{entry.outputText}</MessageResponse>
-            </MessageContent>
+            <StreamRevealedResponse text={entry.outputText} reveal={entry.active} />
           )}
 
           {hasError && (

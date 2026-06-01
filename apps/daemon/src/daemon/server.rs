@@ -24,10 +24,18 @@ use crate::daemon::runtime_resolution::{
     agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
     supported_agent_type_names,
 };
+use crate::daemon::runtime_cursor::{
+    compute_effective_cursor_from_messages, last_unanswered_mention_idx,
+    messages_strictly_after_cursor, slice_has_actionable_inbound,
+};
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids,
     resolve_mention_actor_ids,
 };
+use crate::daemon::session_resume::resolve_backend_session_id;
+
+#[path = "collab_runtime_ensure.rs"]
+mod collab_runtime_ensure;
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
@@ -215,40 +223,6 @@ pub(crate) struct OfflineRestartPlan {
     pub backend: amux::AgentType,
     pub local_workspace_id: String,
     pub unread_count: usize,
-}
-
-/// Pure decision half of [`DaemonServer::resume_historical_runtimes_for_session`].
-///
-/// Given every resumable `StoredSession` for one conversation, keep only the
-/// single most-recent (`created_at`) row and report the rest as superseded
-/// `runtime_id`s. The daemon is a single actor/participant in a session, so it
-/// must hold at most one live runtime per conversation regardless of
-/// agent_type / workspace. Each desktop session-start / model-switch /
-/// workspace-change spawns a fresh `runtime_id`, so a session accumulates
-/// several non-stopped historical rows across restarts; resuming more than one
-/// brings up multiple live agents that each answer the same @mention (the
-/// duplicate-reply bug — including the case where the duplicates live in
-/// different workspaces). Exposed as a free fn so the invariant is
-/// unit-testable without spawning ACP processes.
-pub(crate) fn dedup_resumable_runtimes(
-    stored_sessions: Vec<StoredSession>,
-) -> (Vec<StoredSession>, Vec<String>) {
-    let mut keep: Option<StoredSession> = None;
-    let mut superseded: Vec<String> = Vec::new();
-    for stored in stored_sessions {
-        match keep.take() {
-            Some(existing) if existing.created_at >= stored.created_at => {
-                superseded.push(stored.runtime_id.clone());
-                keep = Some(existing);
-            }
-            Some(existing) => {
-                superseded.push(existing.runtime_id.clone());
-                keep = Some(stored);
-            }
-            None => keep = Some(stored),
-        }
-    }
-    (keep.into_iter().collect(), superseded)
 }
 
 pub struct DaemonServer {
@@ -1909,13 +1883,14 @@ impl DaemonServer {
                 }
             };
 
+            if !slice_has_actionable_inbound(&messages, &my_actor) {
+                continue;
+            }
+
             let unread_count = messages
                 .iter()
                 .filter(|m| m.sender_actor_id != my_actor)
                 .count();
-            if unread_count == 0 {
-                continue;
-            }
 
             let backend_requested = match prior.backend_type.as_str() {
                 "claude" | "claude_code" => amux::AgentType::ClaudeCode,
@@ -2514,9 +2489,8 @@ impl DaemonServer {
         // the time the client fires runtimeStart). Both funnel through this
         // sink, so deduping here (keyed by message_id) guarantees each message
         // is prompted/queued exactly once regardless of which path wins the
-        // race. The in-memory cache is also seeded across restarts by the
-        // persisted `last_processed_message_id` cursor, so cold starts replay
-        // only genuinely-new rows.
+        // race. Cross-restart dedup relies on `last_processed_message_id` and
+        // catchup reconcile (see `reconcile_runtime_cursor`), not this cache.
         if !message.message_id.is_empty() {
             if let Some(tc) = self.teamclaw.as_mut() {
                 if !tc.should_process_message(session_id, &message.message_id) {
@@ -2610,22 +2584,8 @@ impl DaemonServer {
                     }
                 };
 
-                // Cursor advances to this message id (in-memory + backend).
-                self.agents.lock().await.advance_message_cursor(
-                    &runtime_id,
-                    &message.message_id,
-                );
-                let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
-                if let Some(row_id) = row_id_opt {
-                    let sb = self.backend.clone();
-                    let row = row_id.clone();
-                    let last = message.message_id.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = sb.update_runtime_cursor(&row, &last).await {
-                            warn!(?e, "update_runtime_cursor failed (mentioned)");
-                        }
-                    });
-                }
+                self.persist_runtime_cursor(&runtime_id, &message.message_id)
+                    .await;
             } else {
                 // Silent: queue for next real prompt.
                 {
@@ -2639,153 +2599,99 @@ impl DaemonServer {
                         });
                     }
                 }
-                self.agents.lock().await.advance_message_cursor(
-                    &runtime_id,
-                    &message.message_id,
-                );
-                let row_id_opt = self.agents.lock().await.backend_runtime_row_id(&runtime_id);
-                if let Some(row_id) = row_id_opt {
-                    let sb = self.backend.clone();
-                    let row = row_id.clone();
-                    let last = message.message_id.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = sb.update_runtime_cursor(&row, &last).await {
-                            warn!(?e, "update_runtime_cursor failed (silent)");
-                        }
-                    });
-                }
+                self.persist_runtime_cursor(&runtime_id, &message.message_id)
+                    .await;
             }
         }
     }
 
-    async fn resume_historical_runtimes_for_session(&mut self, session_id: &str) -> bool {
-        let stored_sessions = self.sessions.resumable_sessions_for_session(session_id);
-        if stored_sessions.is_empty() {
-            return false;
+    /// Advance in-memory cursor immediately; persist to Cloud in the background.
+    async fn persist_runtime_cursor(&self, runtime_id: &str, message_id: &str) {
+        if message_id.is_empty() {
+            return;
         }
-
-        // Collapse to a single runtime per session. `StoredSession`s are keyed
-        // by runtime_id and every desktop session-start / model-switch /
-        // workspace-change spawns a fresh runtime_id, so a single conversation
-        // accumulates several non-stopped historical rows across restarts.
-        // Resuming more than one brings up multiple live agents for one session
-        // — each then answers the same @mention, which is the duplicate-reply
-        // the user sees after restart (including duplicates that live in
-        // different workspaces). Keep only the most recent row; the rest are
-        // superseded and marked Stopped so they neither resume now nor linger
-        // as resumable on disk.
-        let (keep, superseded) = dedup_resumable_runtimes(stored_sessions);
-
-        if !superseded.is_empty() {
-            for runtime_id in &superseded {
-                if let Some(s) = self.sessions.find_by_id_mut(runtime_id) {
-                    s.status = amux::AgentStatus::Stopped as i32;
-                }
-            }
-            let _ = self.sessions.save(&self.sessions_path);
-            info!(
-                session_id = %session_id,
-                superseded = ?superseded,
-                "resume_historical: marked superseded duplicate runtimes Stopped (one live runtime per session)"
-            );
+        {
+            let mut agents = self.agents.lock().await;
+            agents.advance_message_cursor(runtime_id, message_id);
         }
-
-        let mut resumed_any = false;
-        for stored in keep {
-            if self
-                .agents
-                .lock()
-                .await
-                .get_handle(&stored.runtime_id)
-                .is_some()
-            {
-                resumed_any = true;
-                continue;
-            }
-
-            let at =
-                amux::AgentType::try_from(stored.agent_type).unwrap_or(amux::AgentType::ClaudeCode);
-            let remote_workspace_id =
-                self.workspaces
-                    .find_by_id(&stored.workspace_id)
-                    .and_then(|w| {
-                        (!w.remote_workspace_id.is_empty()).then_some(w.remote_workspace_id.clone())
-                    });
-
-            info!(
-                runtime_id = %stored.runtime_id,
-                session_id = %session_id,
-                "lazy-resuming historical runtime for session/live message"
-            );
-
-            let resume_res = self
-                .agents
-                .lock()
-                .await
-                .resume_agent(
-                    &stored.runtime_id,
-                    &stored.acp_session_id,
-                    at,
-                    &stored.worktree,
-                    &stored.workspace_id,
-                    remote_workspace_id.as_deref(),
-                    Some(session_id),
-                    "",
-                )
-                .await;
-
-            let new_acp_sid = match resume_res {
-                Ok(sid) => sid,
-                Err(e) => {
-                    warn!(
-                        runtime_id = %stored.runtime_id,
-                        session_id = %session_id,
-                        "session/live lazy resume failed: {}",
-                        e
-                    );
-                    continue;
+        let row_id = self
+            .agents
+            .lock()
+            .await
+            .backend_runtime_row_id(runtime_id);
+        if let Some(row_id) = row_id {
+            let backend = self.backend.clone();
+            let message_id = message_id.to_string();
+            let runtime_id = runtime_id.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = backend.update_runtime_cursor(&row_id, &message_id).await {
+                    warn!(?e, runtime_id, "update_runtime_cursor failed");
                 }
+            });
+        }
+    }
+
+    /// Align in-memory and persisted cursor with messages that already have an
+    /// agent reply, so catchup does not re-prompt completed @mentions.
+    ///
+    /// Returns the full session message list when fetch succeeds so
+    /// [`Self::catchup_runtime`] can slice locally instead of refetching.
+    async fn reconcile_runtime_cursor(&mut self, runtime_id: &str) -> Option<Vec<crate::backend::StoredMessage>> {
+        let (session_id, floor) = {
+            let agents = self.agents.lock().await;
+            let Some(h) = agents.get_handle(runtime_id) else {
+                return None;
             };
-
-            match self
-                .backend
-                .fetch_agent_runtime_for_session(session_id, &stored.runtime_id, &new_acp_sid)
-                .await
-            {
-                Ok(Some(row)) => {
-                    self.agents.lock().await.set_backend_runtime_metadata(
-                        &stored.runtime_id,
-                        Some(row.id),
-                        row.last_processed_message_id,
-                    );
-                }
-                Ok(None) => {
-                    warn!(
-                        runtime_id = %stored.runtime_id,
-                        session_id = %session_id,
-                        "resumed runtime has no matching agent_runtimes row"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        runtime_id = %stored.runtime_id,
-                        session_id = %session_id,
-                        "fetch_agent_runtime_for_session failed after resume: {}",
-                        e
-                    );
-                }
-            }
-
-            if let Some(s) = self.sessions.find_by_id_mut(&stored.runtime_id) {
-                s.acp_session_id = new_acp_sid;
-                s.status = amux::AgentStatus::Active as i32;
-            }
-            let _ = self.sessions.save(&self.sessions_path);
-            self.publish_runtime_state_by_id(&stored.runtime_id).await;
-            resumed_any |= self.catchup_runtime(&stored.runtime_id).await;
+            (
+                h.session_id.clone(),
+                h.last_processed_message_id.clone(),
+            )
+        };
+        if session_id.is_empty() {
+            return None;
         }
 
-        resumed_any
+        let messages = match self
+            .backend
+            .messages_after_cursor(&session_id, None)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(?e, runtime_id, "reconcile_runtime_cursor: messages fetch failed");
+                return None;
+            }
+        };
+        if messages.is_empty() {
+            return None;
+        }
+
+        let floor = floor.as_deref().filter(|s| !s.is_empty());
+        let effective = compute_effective_cursor_from_messages(
+            &messages,
+            &self.actor_id,
+            floor,
+        );
+        if let Some(id) = effective {
+            info!(
+                runtime_id,
+                cursor = %id,
+                "reconcile_runtime_cursor: advanced from message history"
+            );
+            self.persist_runtime_cursor(runtime_id, &id).await;
+        }
+        Some(messages)
+    }
+
+    fn mark_superseded_runtime_rows_stopped(&mut self, superseded: &[String]) {
+        for runtime_id in superseded {
+            if let Some(s) = self.sessions.find_by_id_mut(runtime_id) {
+                s.status = amux::AgentStatus::Stopped as i32;
+            }
+        }
+        if !superseded.is_empty() {
+            let _ = self.sessions.save(&self.sessions_path);
+        }
     }
 
     /// Replay any session messages that arrived before this runtime was spawned.
@@ -2801,26 +2707,39 @@ impl DaemonServer {
     /// `@daemon` rows are compacted into `pending_silent` even though they
     /// nominally mention us.
     pub async fn catchup_runtime(&mut self, runtime_id: &str) -> bool {
-        let (session_id, last_processed_message_id) = {
+        let session_id = {
             let agents = self.agents.lock().await;
             let Some(h) = agents.get_handle(runtime_id) else {
                 return false;
             };
-            (h.session_id.clone(), h.last_processed_message_id.clone())
+            h.session_id.clone()
         };
         if session_id.is_empty() {
             return false;
         }
 
-        let messages = match self
-            .backend
-            .messages_after_cursor(&session_id, last_processed_message_id.as_deref())
+        let reconciled_all = self.reconcile_runtime_cursor(runtime_id).await;
+
+        let last_processed_message_id = self
+            .agents
+            .lock()
             .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                warn!(?e, runtime_id, "catchup messages_after_cursor failed");
-                return false;
+            .get_handle(runtime_id)
+            .and_then(|h| h.last_processed_message_id.clone());
+
+        let messages = if let Some(all) = reconciled_all {
+            messages_strictly_after_cursor(&all, last_processed_message_id.as_deref())
+        } else {
+            match self
+                .backend
+                .messages_after_cursor(&session_id, last_processed_message_id.as_deref())
+                .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!(?e, runtime_id, "catchup messages_after_cursor failed");
+                    return false;
+                }
             }
         };
         if messages.is_empty() {
@@ -2828,17 +2747,18 @@ impl DaemonServer {
         }
 
         let my_actor = self.actor_id.clone();
-        // Find the last index in the replay slice where someone other than
-        // us @-mentioned us. Earlier @-mentions get demoted to silent
-        // context; the message at this index triggers a real prompt via
-        // route_session_message's mention path. None means no @-mentions
-        // in the entire replay slice (the whole batch is silent context).
-        let last_mention_idx = messages.iter().rposition(|m| {
-            m.sender_actor_id != my_actor
-                && parse_mention_actor_ids(&m.metadata_json)
-                    .iter()
-                    .any(|a| a == &my_actor)
-        });
+        if !slice_has_actionable_inbound(&messages, &my_actor) {
+            debug!(
+                runtime_id,
+                session_id = %session_id,
+                "catchup_runtime: no actionable inbound messages after reconcile"
+            );
+            return false;
+        }
+
+        // Only the last *unanswered* @mention triggers a real prompt; earlier
+        // @-mentions (including already-answered ones) are silent context.
+        let last_mention_idx = last_unanswered_mention_idx(&messages, &my_actor);
 
         info!(
             runtime_id,
@@ -2865,8 +2785,6 @@ impl DaemonServer {
                 created_at: m.created_at,
                 ..Default::default()
             };
-            // Pass empty mentions for stale rows so the silent-queue branch
-            // runs even when the row originally @-mentioned us.
             let effective_mentions: &[String] = if Some(idx) == last_mention_idx {
                 &mention_ids
             } else {
@@ -4359,6 +4277,12 @@ impl DaemonServer {
                 runtime_id = %existing,
                 "apply_start_runtime: dedup hit; reusing existing runtime"
             );
+            // TODO(perf-runtime-start-throttle): See the same id on the client
+            // (`ensureAgentRuntimesForSession` in packages/app). Dedup still runs
+            // ensure_collab_session_registered, refresh_membership MQTT, reconcile
+            // (full `messages_after_cursor`), and catchup — costly on large sessions.
+            // Do NOT implement unless the user explicitly asks — ignore routinely.
+            // 无用户明确指令时不要实现本 TODO，日常开发请忽略。
             // Still register the session + subscribe to session/live. The
             // spawn path does this before returning; skipping it on dedup left
             // runtimes that were reused without a live subscription, so
@@ -4474,7 +4398,44 @@ impl DaemonServer {
             }
         }
 
+        if !session_id.is_empty() && !ws_id.is_empty() {
+            if let Some(outcome) = self
+                .try_resume_runtime_for_start(
+                    session_id,
+                    agent_type,
+                    &ws_id,
+                    initial_prompt,
+                    initial_model_override.as_deref(),
+                )
+                .await
+            {
+                return Ok(outcome);
+            }
+        }
+
         let session_id_opt = (!session_id.is_empty()).then_some(session_id);
+        let resume_acp_session_id = if !session_id.is_empty() && !ws_id.is_empty() {
+            resolve_backend_session_id(
+                &self.backend,
+                &self.actor_id,
+                session_id,
+                &self.sessions,
+                agent_type,
+                &ws_id,
+            )
+            .await
+        } else {
+            None
+        };
+        if let Some(ref sid) = resume_acp_session_id {
+            info!(
+                session_id,
+                workspace_id = %ws_id,
+                backend_session_id = %sid,
+                "apply_start_runtime: spawning with ACP resume (no matching stored runtime row)"
+            );
+        }
+
         let team_shared_config =
             load_team_shared_config_for_workspace(Path::new(&resolved_worktree));
         let extra_env = if let Some(config) = team_shared_config.as_ref() {
@@ -4498,6 +4459,7 @@ impl DaemonServer {
                 session_id_opt,
                 initial_model_override,
                 None,
+                resume_acp_session_id,
                 extra_env,
             )
             .await;
@@ -6034,6 +5996,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn catchup_runtime_skips_prompt_when_last_mention_already_answered() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_messages_response(
+            &srv,
+            "session-1",
+            serde_json::json!([
+                make_message_row(
+                    "msg-user",
+                    "session-1",
+                    "human-1",
+                    &["agent-actor"],
+                    "please review",
+                    "2025-05-22T01:00:01Z",
+                ),
+                make_message_row(
+                    "msg-agent",
+                    "session-1",
+                    "agent-actor",
+                    &[],
+                    "done reviewing",
+                    "2025-05-22T01:00:02Z",
+                ),
+            ]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
+        fixture.server.catchup_runtime("rt1").await;
+
+        let agents = fixture.server.agents.lock().await;
+        assert!(
+            agents.last_sent_to("rt1").is_none(),
+            "answered @mention must not trigger send_prompt on catchup"
+        );
+        assert_eq!(
+            agents
+                .get_handle("rt1")
+                .unwrap()
+                .last_processed_message_id
+                .as_deref(),
+            Some("msg-user"),
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_skips_when_last_mention_already_answered() {
+        let srv = MockServer::start().await;
+        auth_token_mock(&srv).await;
+        mock_agent_runtime_row(&srv, "sess-answered", None, None, "claude").await;
+        mock_messages_response(
+            &srv,
+            "sess-answered",
+            serde_json::json!([
+                make_message_row(
+                    "msg-user",
+                    "sess-answered",
+                    "human-1",
+                    &["agent-actor"],
+                    "ping",
+                    "2025-05-22T01:00:01Z",
+                ),
+                make_message_row(
+                    "msg-agent",
+                    "sess-answered",
+                    "agent-actor",
+                    &[],
+                    "pong",
+                    "2025-05-22T01:00:02Z",
+                ),
+            ]),
+        )
+        .await;
+
+        let mut fixture = test_server_with_cloud_api(test_cloud_api_with_url(srv.uri()));
+        add_membership(&mut fixture, "sess-answered").await;
+
+        let plan = fixture.server.plan_auto_restart_offline_sessions().await;
+        assert!(
+            plan.is_empty(),
+            "already-answered @mention should not schedule auto_restart"
+        );
+    }
+
+    #[tokio::test]
     async fn catchup_runtime_with_no_mentions_routes_everything_silent() {
         let srv = MockServer::start().await;
         auth_token_mock(&srv).await;
@@ -6111,7 +6158,7 @@ mod tests {
             make_stored_session("rt-other", "s1", amux::AgentType::Codex, "ws-1", 150),
         ];
 
-        let (keep, mut superseded) = dedup_resumable_runtimes(stored);
+        let (keep, mut superseded) = crate::daemon::session_resume::dedup_resumable_runtimes(stored);
         superseded.sort();
 
         assert_eq!(
@@ -6140,7 +6187,7 @@ mod tests {
             make_stored_session("rt-b", "s1", amux::AgentType::ClaudeCode, "ws-2", 50),
         ];
 
-        let (keep, superseded) = dedup_resumable_runtimes(stored);
+        let (keep, superseded) = crate::daemon::session_resume::dedup_resumable_runtimes(stored);
         assert_eq!(
             keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
             vec!["rt-a"],

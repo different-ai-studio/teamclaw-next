@@ -10,7 +10,7 @@ describe("Expo Cloud API provider", () => {
     vi.stubEnv("EXPO_PUBLIC_BACKEND_KIND", "cloud_api");
     vi.stubEnv("EXPO_PUBLIC_CLOUD_API_URL", "https://fc.example.com");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      if (String(url).endsWith("/v1/sessions?limit=50")) {
+      if (String(url).endsWith("/v1/teams/team-1/sessions")) {
         return response({
           items: [{
             id: "session-1",
@@ -18,13 +18,16 @@ describe("Expo Cloud API provider", () => {
             title: "Plan",
             mode: "collab",
             ideaId: null,
+            primaryAgentId: null,
+            createdByActorId: null,
+            summary: null,
+            participantCount: 0,
             lastMessageAt: "2026-05-27T01:00:00Z",
             lastMessagePreview: "hello",
             hasUnread: true,
             createdAt: "2026-05-27T00:00:00Z",
             updatedAt: "2026-05-27T01:00:00Z",
           }],
-          nextCursor: null,
         });
       }
       if (String(url).endsWith("/v1/sessions/session-1/messages") && init?.method === "POST") {

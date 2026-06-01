@@ -16,7 +16,9 @@ import {
 import { useOnboarding } from "../_layout";
 import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
-import { uuidV4 } from "../../src/lib/uuid";
+import { createActorsApi } from "../../src/features/actors/actor-api";
+import { uploadAvatar } from "../../src/features/sessions/attachment-upload";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { supabase } from "../../src/lib/supabase/client";
 import { showToast } from "../../src/ui/Toast";
 import { colors, hai, radii, spacing, typography } from "../../src/ui/theme";
@@ -44,25 +46,17 @@ export default function EditProfileRoute() {
     let cancelled = false;
     void (async () => {
       try {
-        const result = await supabase
-          .from("actors")
-          .select("display_name, avatar_url")
-          .eq("id", memberActorId)
-          .maybeSingle();
+        const actors = await createActorsApi({
+          getAccessToken: supabaseAccessToken(supabase),
+        }).listActors(teamId);
         if (cancelled) return;
-        if (result.error) {
-          setError(result.error.message);
-        } else {
-          const row = result.data as
-            | { display_name?: string; avatar_url?: string }
-            | null;
-          const name = row?.display_name ?? "";
-          const avatar = row?.avatar_url ?? null;
-          setDisplayName(name);
-          setInitialName(name);
-          setAvatarUrl(avatar);
-          setInitialAvatarUrl(avatar);
-        }
+        const me = actors.find((actor) => actor.actorId === memberActorId);
+        const name = me?.displayName ?? "";
+        const avatar = me?.avatarUrl ?? null;
+        setDisplayName(name);
+        setInitialName(name);
+        setAvatarUrl(avatar);
+        setInitialAvatarUrl(avatar);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Couldn't load your profile.");
@@ -100,24 +94,12 @@ export default function EditProfileRoute() {
       const asset = picked.assets[0];
       setIsUploading(true);
 
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const ext = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
-      const path = `${memberActorId}/${uuidV4()}.${ext}`;
-
-      const upload = await supabase.storage
-        .from("avatars")
-        .upload(path, blob, {
-          cacheControl: "3600",
-          contentType: blob.type || `image/${ext}`,
-          upsert: false,
-        });
-      if (upload.error) {
-        setError(upload.error.message);
-        return;
-      }
-      const publicUrl = supabase.storage.from("avatars").getPublicUrl(path)
-        .data?.publicUrl ?? null;
+      const publicUrl = await uploadAvatar({
+        getAccessToken: supabaseAccessToken(supabase),
+        actorId: memberActorId,
+        localUri: asset.uri,
+        fallbackMime: asset.mimeType ?? "image/jpeg",
+      });
       setAvatarUrl(publicUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't upload avatar.");
@@ -131,19 +113,12 @@ export default function EditProfileRoute() {
     setIsSaving(true);
     setError(null);
     try {
-      const result = await supabase
-        .from("actors")
-        .update({
-          display_name: displayName.trim(),
-          avatar_url: avatarUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", memberActorId);
-      if (result.error) {
-        setError(result.error.message);
-        setIsSaving(false);
-        return;
-      }
+      await createActorsApi({
+        getAccessToken: supabaseAccessToken(supabase),
+      }).updateCurrentActorProfile(memberActorId, {
+        displayName: displayName.trim(),
+        avatarUrl,
+      });
       showToast("success", "Profile saved");
       router.back();
     } catch (err) {

@@ -27,6 +27,8 @@ export interface AgentStreamEntry {
   errorDetails: string | null;
   lastUpdate: number;           // ms epoch
   active: boolean;              // true while streaming; false after finalize
+  /** Per-turn id; archived rows copy it for precise skipArchive cleanup. */
+  streamId: string;
 }
 
 export interface ArchivedEntry extends AgentStreamEntry {
@@ -74,7 +76,19 @@ interface State {
   ingestReplyPreview: (sessionId: string, actorId: string, text: string) => void;
   finalize: (sessionId: string, actorId: string, finalText: string) => void;
   finishSessionActor: (sessionId: string, actorId: string) => void;
-  clearActor: (sessionId: string, actorId: string) => void;
+  /** Re-open live rendering after statusChange marked the turn inactive too early. */
+  markActorStreamActive: (sessionId: string, actorId: string) => void;
+  /** Drop live byKey; archive tools/thinking only when parts_json did not persist them. */
+  releaseActorAfterPersist: (
+    sessionId: string,
+    actorId: string,
+    opts?: { persistedPartsJson?: string },
+  ) => void;
+  clearActor: (
+    sessionId: string,
+    actorId: string,
+    opts?: { includeArchives?: boolean },
+  ) => void;
   clearSession: (sessionId: string) => void;
 }
 
@@ -96,10 +110,17 @@ function emptyEntry(sessionId: string, actorId: string): AgentStreamEntry {
     errorDetails: null,
     lastUpdate: Date.now(),
     active: true,
+    streamId: nextStreamId(sessionId, actorId),
   };
 }
 
 let archiveCounter = 0;
+let streamCounter = 0;
+
+function nextStreamId(sessionId: string, actorId: string): string {
+  streamCounter += 1;
+  return `${sessionId}::${actorId}::stream-${streamCounter}`;
+}
 
 function persistSessionPlan(
   persisted: Record<string, PersistedSessionPlan>,
@@ -122,6 +143,22 @@ function entryParts(entry: AgentStreamEntry): MessagePart[] {
   return Array.isArray(entry.parts) ? entry.parts : [];
 }
 
+/** True when persisted parts_json already carries tool/thinking for ChatMessage. */
+export function persistedPartsCoverLiveArtifacts(partsJson: string | undefined): boolean {
+  if (!partsJson?.trim()) return false;
+  try {
+    const parts = JSON.parse(partsJson) as MessagePart[];
+    if (!Array.isArray(parts)) return false;
+    return parts.some(
+      (part) =>
+        (part.type === "tool-call" && Boolean(part.toolCall)) ||
+        (part.type === "reasoning" && Boolean(part.text || part.content)),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function appendOverlappingChunk(existing: string, chunk: string): string {
   if (!existing || !chunk) return existing + chunk;
   const maxOverlap = Math.min(existing.length, chunk.length);
@@ -136,7 +173,7 @@ function appendOverlappingChunk(existing: string, chunk: string): string {
 function appendTextPart(parts: MessagePart[], delta: string): MessagePart[] {
   const last = parts[parts.length - 1];
   if (last?.type === "text") {
-    const text = `${last.text || last.content || ""}${delta}`;
+    const text = appendOverlappingChunk(last.text || last.content || "", delta);
     return [
       ...parts.slice(0, -1),
       {
@@ -196,6 +233,31 @@ function lastIndexWhere<T>(items: T[], predicate: (item: T) => boolean): number 
   return -1;
 }
 
+function hasTextAfterLastTool(parts: MessagePart[]): boolean {
+  const lastToolIndex = lastIndexWhere(parts, (part) => part.type === "tool-call");
+  if (lastToolIndex === -1) return false;
+  return parts.some(
+    (part, index) => index > lastToolIndex && part.type === "text",
+  );
+}
+
+function replacePostToolTextPart(parts: MessagePart[], text: string): MessagePart[] {
+  const lastToolIndex = lastIndexWhere(parts, (part) => part.type === "tool-call");
+  if (lastToolIndex === -1) return appendTextPart(parts, text);
+
+  const prefix = parts.slice(0, lastToolIndex + 1);
+  const tail = parts.slice(lastToolIndex + 1);
+  const firstTextIdx = tail.findIndex((part) => part.type === "text");
+  if (firstTextIdx === -1) return placePostToolTextPart(parts, text);
+
+  // Multiple non-cumulative AGENT_REPLY previews append several text parts
+  // after the last tool; finalize must collapse them to a single final text.
+  const beforeText = tail.slice(0, firstTextIdx);
+  const consolidated = replacePartText(tail[firstTextIdx], text);
+  const afterText = tail.slice(firstTextIdx + 1).filter((part) => part.type !== "text");
+  return [...prefix, ...beforeText, consolidated, ...afterText];
+}
+
 function placePostToolTextPart(parts: MessagePart[], text: string): MessagePart[] {
   const lastToolIndex = lastIndexWhere(parts, (part) => part.type === "tool-call");
   if (lastToolIndex === -1) return appendTextPart(parts, text);
@@ -207,9 +269,20 @@ function placePostToolTextPart(parts: MessagePart[], text: string): MessagePart[
     const existing = parts[existingTextIndex];
     const existingText = existing.text || existing.content || "";
     if (existingText === text || existingText.includes(text)) return parts;
-    return parts.map((part, index) =>
-      index === existingTextIndex ? replacePartText(part, text) : part,
-    );
+    if (text.includes(existingText)) {
+      return parts.map((part, index) =>
+        index === existingTextIndex ? replacePartText(part, text) : part,
+      );
+    }
+    return [
+      ...parts,
+      {
+        id: `stream:text:reply-preview:${Date.now()}:${parts.length}`,
+        type: "text",
+        text,
+        content: text,
+      },
+    ];
   }
 
   const toolPart = parts[lastToolIndex];
@@ -370,20 +443,24 @@ function previewTextUpdate(
     };
   }
 
-  // Last-resort mismatch: keep the visible preview current without trying
-  // to diff unrelated partial strings. With tool parts present, ChatMessage
-  // renders ordered `parts` instead of `content`, so the preview text must
-  // be placed after the latest tool call to remain visible.
+  // Last-resort mismatch: daemon may emit multiple non-cumulative AGENT_REPLY
+  // chunks (e.g. CPU then memory). Append distinct segments instead of
+  // replacing earlier preview text.
+  const postToolTextExists = hasTextAfterLastTool(parts);
+  const mergedOutput =
+    postToolTextExists &&
+    current &&
+    text !== current &&
+    !current.includes(text) &&
+    !text.includes(current)
+      ? `${current}\n\n${text}`
+      : text;
   return {
-    outputText: text,
+    outputText: mergedOutput,
     parts: parts.some((part) => part.type === "tool-call")
       ? placePostToolTextPart(parts, text)
       : parts.some((part) => part.type === "text")
-        ? parts.map((part, index) =>
-            index === lastIndexWhere(parts, (p) => p.type === "text")
-              ? replacePartText(part, text)
-              : part,
-          )
+        ? appendTextPart(parts, text)
         : appendTextPart(parts, text),
   };
 }
@@ -425,7 +502,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         ...state.byKey,
         [k(sessionId, actorId)]: {
           ...entry,
-          outputText: entry.outputText + delta,
+          outputText: appendOverlappingChunk(entry.outputText, delta),
           parts: appendTextPart(entryParts(entry), delta),
           lastUpdate: Date.now(),
           active: true,
@@ -703,6 +780,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       });
       return;
     }
+    const parts = entryParts(existing);
     set({
       byKey: {
         ...get().byKey,
@@ -710,8 +788,10 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           ...existing,
           outputText: finalText || existing.outputText,
           parts: finalText
-            ? previewTextUpdate(existing, finalText).parts
-            : entryParts(existing),
+            ? parts.some((part) => part.type === "tool-call")
+              ? replacePostToolTextPart(parts, finalText)
+              : previewTextUpdate(existing, finalText).parts
+            : parts,
           lastUpdate: Date.now(),
           active: false,
         },
@@ -738,13 +818,67 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  clearActor: (sessionId, actorId) => {
+  markActorStreamActive: (sessionId, actorId) => {
+    const key = k(sessionId, actorId);
+    const existing = get().byKey[key];
+    if (!existing || existing.active) return;
+    set({
+      byKey: {
+        ...get().byKey,
+        [key]: {
+          ...existing,
+          active: true,
+          lastUpdate: Date.now(),
+        },
+      },
+    });
+  },
+
+  releaseActorAfterPersist: (sessionId, actorId, opts) => {
     const state = get();
     const key = k(sessionId, actorId);
     const existing = state.byKey[key];
     const next = { ...state.byKey };
     delete next[key];
-    const archivedPlan = [...state.archived]
+
+    const skipArchive = persistedPartsCoverLiveArtifacts(opts?.persistedPartsJson);
+    let archived = state.archived;
+    if (skipArchive && existing) {
+      // Remove a stale archived bubble from the same flush (ChatMessage now
+      // renders tool/thinking via parts_json).
+      archived = archived.filter(
+        (entry) =>
+          !(
+            entry.sessionId === sessionId &&
+            entry.actorId === actorId &&
+            entry.streamId === existing.streamId
+          ),
+      );
+    }
+    if (
+      !skipArchive &&
+      existing &&
+      (existing.outputText ||
+        existing.thinkingText ||
+        entryParts(existing).length > 0 ||
+        existing.toolCalls.length > 0)
+    ) {
+      const toolCalls = finishUnresolvedTools(existing.toolCalls);
+      archiveCounter += 1;
+      archived = [
+        ...archived,
+        {
+          ...existing,
+          archiveId: `${sessionId}::${actorId}::${archiveCounter}`,
+          active: false,
+          toolCalls,
+          parts: syncToolParts(entryParts(existing), toolCalls),
+          lastUpdate: Date.now(),
+        },
+      ];
+    }
+
+    const archivedPlan = [...archived]
       .reverse()
       .find(
         (entry) =>
@@ -763,9 +897,43 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     );
     set({
       byKey: next,
-      archived: state.archived.filter(
-        (e) => !(e.sessionId === sessionId && e.actorId === actorId),
-      ),
+      archived,
+      persistedPlansBySession,
+    });
+  },
+
+  clearActor: (sessionId, actorId, opts) => {
+    const state = get();
+    const key = k(sessionId, actorId);
+    const existing = state.byKey[key];
+    const next = { ...state.byKey };
+    delete next[key];
+    const archived = opts?.includeArchives
+      ? state.archived.filter(
+          (entry) =>
+            !(entry.sessionId === sessionId && entry.actorId === actorId),
+        )
+      : state.archived;
+    const archivedPlan = [...archived]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.sessionId === sessionId &&
+          entry.actorId === actorId &&
+          entry.planEntries.length > 0,
+      );
+    const planEntries = existing?.planEntries.length
+      ? existing.planEntries
+      : (archivedPlan?.planEntries ?? []);
+    const persistedPlansBySession = persistSessionPlan(
+      state.persistedPlansBySession,
+      sessionId,
+      actorId,
+      planEntries,
+    );
+    set({
+      byKey: next,
+      archived,
       persistedPlansBySession,
     });
   },

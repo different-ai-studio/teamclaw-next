@@ -15,7 +15,7 @@ import {
 } from "react-native";
 
 import { useOnboarding } from "../_layout";
-import { createShortcutsApi } from "../../src/features/shortcuts/shortcut-api";
+import { createConfiguredShortcutsApi } from "../../src/features/shortcuts/api-provider";
 import {
   isLeafShortcut,
   type Shortcut,
@@ -49,7 +49,7 @@ export default function ShortcutsRoute() {
     setError(null);
     void (async () => {
       try {
-        const rows = await createShortcutsApi(supabase).listShortcuts(teamId);
+        const rows = await createConfiguredShortcutsApi(supabase).listShortcuts(teamId);
         if (!cancelled) setShortcuts(rows);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Couldn't load shortcuts.");
@@ -86,7 +86,7 @@ export default function ShortcutsRoute() {
     const next = editDraft.trim();
     if (!next) return;
     try {
-      await createShortcutsApi(supabase).renameShortcut(id, next);
+      await createConfiguredShortcutsApi(supabase).renameShortcut(id, next);
       setShortcuts((prev) =>
         prev.map((row) => (row.id === id ? { ...row, label: next } : row)),
       );
@@ -108,7 +108,7 @@ export default function ShortcutsRoute() {
           style: "destructive",
           onPress: async () => {
             try {
-              await createShortcutsApi(supabase).deleteShortcut(shortcut.id);
+              await createConfiguredShortcutsApi(supabase).deleteShortcut(shortcut.id);
               setShortcuts((prev) => prev.filter((row) => row.id !== shortcut.id));
             } catch (err) {
               setError(err instanceof Error ? err.message : "Couldn't delete.");

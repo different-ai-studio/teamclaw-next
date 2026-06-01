@@ -414,6 +414,19 @@ paths:
           description: OK
         "401":
           $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionId}/mark-unread:
+    post:
+      operationId: markSessionUnread
+      summary: Mark session unread
+      description: Deletes the calling actor's read marker so the session re-derives as unread.
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: OK
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/teams/{teamId}/sessions:
     get:
       operationId: listTeamSessions
@@ -1004,7 +1017,7 @@ paths:
           $ref: "#/components/responses/Error"
     patch:
       operationId: patchWorkspace
-      summary: Update workspace name or archived status
+      summary: Update workspace name, archived status, path, or bound agent
       tags: [Workspaces]
       parameters:
         - name: workspaceId
@@ -1024,6 +1037,15 @@ paths:
                   type: string
                 archived:
                   type: boolean
+                path:
+                  type:
+                    - string
+                    - "null"
+                agentId:
+                  type:
+                    - string
+                    - "null"
+                  description: Bind (uuid) or unbind (null) the agent that owns this workspace.
                 metadata:
                   type: object
                   additionalProperties: true

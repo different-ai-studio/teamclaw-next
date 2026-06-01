@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { isTauri } from '@/lib/utils'
 import { clearTeam } from '@/lib/local-cache'
 import { useSessionListStore } from '@/stores/session-list-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncSessionsForTeam } from '@/lib/sync/session-sync'
@@ -24,7 +25,7 @@ export function CacheSection() {
   const [running, setRunning] = React.useState(false)
   const [done, setDone] = React.useState(false)
 
-  const teamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
 
   async function handleRefreshAll() {
     if (!teamId || running) return

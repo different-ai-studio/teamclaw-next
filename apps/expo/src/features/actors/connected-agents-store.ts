@@ -21,7 +21,7 @@ type Subscriber = {
 
 type Deps = {
   teamId: string;
-  api: AgentAccessApi;
+  api: Pick<AgentAccessApi, "listConnectedAgents" | "shareAgentToTeam" | "makeAgentPersonal">;
   subscriber: Subscriber;
   cache?: ConnectedAgentsCache;
 };

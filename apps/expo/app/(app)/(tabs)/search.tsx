@@ -7,9 +7,10 @@ import type { Actor } from "../../../src/features/actors/actor-types";
 import { createIdeasApi } from "../../../src/features/ideas/idea-api";
 import type { Idea } from "../../../src/features/ideas/idea-types";
 import { SearchScreen } from "../../../src/features/search/screens/SearchScreen";
-import { createSessionsApi } from "../../../src/features/sessions/session-api";
+import { createConfiguredSessionsApi } from "../../../src/features/sessions/api-provider";
 import type { SessionSummary } from "../../../src/features/sessions/session-types";
 import { supabase } from "../../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../../src/lib/cloud-api/client";
 
 export default function SearchIndexRoute() {
   const router = useRouter();
@@ -27,9 +28,9 @@ export default function SearchIndexRoute() {
     let cancelled = false;
     setIsLoading(true);
     (async () => {
-      const sessionsApi = createSessionsApi(supabase);
-      const ideasApi = createIdeasApi(supabase);
-      const actorsApi = createActorsApi(supabase);
+      const sessionsApi = createConfiguredSessionsApi(supabase);
+      const ideasApi = createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) });
+      const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
       try {
         const [nextSessions, nextIdeas, nextActors] = await Promise.all([
           sessionsApi.listSessions(teamId),

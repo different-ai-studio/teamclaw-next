@@ -42,25 +42,13 @@ describe("actor management", () => {
 
   it("only lets an agent owner manage authorized humans", () => {
     expect(
-      canManageAuthorizedHumans({
-        actorType: "agent",
-        ownerMemberId: "member-1",
-        currentMemberActorId: "member-1",
-      }),
+      canManageAuthorizedHumans({ actorType: "agent", isOwner: true }),
     ).toBe(true);
     expect(
-      canManageAuthorizedHumans({
-        actorType: "agent",
-        ownerMemberId: "member-2",
-        currentMemberActorId: "member-1",
-      }),
+      canManageAuthorizedHumans({ actorType: "agent", isOwner: false }),
     ).toBe(false);
     expect(
-      canManageAuthorizedHumans({
-        actorType: "member",
-        ownerMemberId: "member-1",
-        currentMemberActorId: "member-1",
-      }),
+      canManageAuthorizedHumans({ actorType: "member", isOwner: true }),
     ).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { Modal } from "react-native";
 
 import { routeToHref, useOnboarding } from "../../../_layout";
 import { createActorsApi } from "../../../../src/features/actors/actor-api";
+import { supabaseAccessToken } from "../../../../src/lib/cloud-api/client";
 import {
   loadPinnedSessions,
   subscribePinnedSessions,
@@ -79,7 +80,7 @@ export default function SessionsIndexRoute() {
   useEffect(() => {
     if (!activeTeamId) return;
     let cancelled = false;
-    void createActorsApi(supabase)
+    void createActorsApi({ getAccessToken: supabaseAccessToken(supabase) })
       .listActors(activeTeamId)
       .then((rows) => {
         if (cancelled) return;
@@ -172,12 +173,10 @@ export default function SessionsIndexRoute() {
       onInviteAgent={() => router.push("/(app)/invite")}
       onArchiveBatch={async (sessionIds) => {
         const now = new Date().toISOString();
+        const api = createConfiguredSessionsApi(supabase);
         for (const id of sessionIds) {
           try {
-            await supabase
-              .from("sessions")
-              .update({ archived_at: now })
-              .eq("id", id);
+            await api.setSessionArchived(id, now);
           } catch {
             // continue
           }

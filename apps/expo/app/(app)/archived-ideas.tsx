@@ -18,6 +18,7 @@ import { Hairline } from "../../src/ui/atoms/Hairline";
 import { SectionEyebrow } from "../../src/ui/atoms/SectionEyebrow";
 import { SkeletonRow } from "../../src/ui/atoms/SkeletonRow";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { colors, radii, spacing, typography } from "../../src/ui/theme";
 
 export default function ArchivedIdeasRoute() {
@@ -32,7 +33,7 @@ export default function ArchivedIdeasRoute() {
     if (!teamId) return;
     setIsLoading(true);
     try {
-      const all = await createIdeasApi(supabase).listIdeas(teamId, {
+      const all = await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId, {
         includeArchived: true,
       });
       setIdeas(all.filter((row) => row.archived));
@@ -49,7 +50,7 @@ export default function ArchivedIdeasRoute() {
   const handleRestore = async (id: string) => {
     setRestoring(id);
     try {
-      await createIdeasApi(supabase).unarchive(id);
+      await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).unarchive(id);
       setIdeas((prev) => prev.filter((row) => row.ideaId !== id));
     } finally {
       setRestoring(null);

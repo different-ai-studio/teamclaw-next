@@ -6,7 +6,9 @@ import { createActorsApi } from "../../src/features/actors/actor-api";
 import { createIdeasApi } from "../../src/features/ideas/idea-api";
 import type { Idea, IdeaStatus } from "../../src/features/ideas/idea-types";
 import { IdeaDetailScreen } from "../../src/features/ideas/screens/IdeaDetailScreen";
+import { createConfiguredSessionsApi } from "../../src/features/sessions/api-provider";
 import { supabase } from "../../src/lib/supabase/client";
+import { supabaseAccessToken } from "../../src/lib/cloud-api/client";
 import { showToast } from "../../src/ui/Toast";
 
 type BusyAction = "toggleStatus" | "archive" | "save" | null;
@@ -31,7 +33,7 @@ export default function IdeaDetailRoute() {
     if (!teamId || !ideaId) return;
     setIsRefreshing(true);
     try {
-      const fresh = await createIdeasApi(supabase).listIdeas(teamId);
+      const fresh = await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).listIdeas(teamId);
       const found = fresh.find((row) => row.ideaId === ideaId) ?? null;
       setIdea(found);
     } finally {
@@ -48,8 +50,8 @@ export default function IdeaDetailRoute() {
     setIsLoading(true);
     void (async () => {
       try {
-        const ideasApi = createIdeasApi(supabase);
-        const actorsApi = createActorsApi(supabase);
+        const ideasApi = createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) });
+        const actorsApi = createActorsApi({ getAccessToken: supabaseAccessToken(supabase) });
         const [ideas, actors] = await Promise.all([
           ideasApi.listIdeas(teamId),
           actorsApi.listActors(teamId),
@@ -64,23 +66,17 @@ export default function IdeaDetailRoute() {
           setCreatorName(null);
         }
 
-        const related = (await supabase
-          .from("sessions")
-          .select("id, title, last_message_at")
-          .eq("idea_id", ideaId)
-          .order("last_message_at", { ascending: false })
-          .limit(5)) as {
-          data:
-            | Array<{ id: string; title: string | null; last_message_at: string | null }>
-            | null;
-          error: { message?: string } | null;
-        };
+        const related = await createConfiguredSessionsApi(supabase).listSessionsForIdea(
+          teamId,
+          ideaId,
+          5,
+        );
         if (cancelled) return;
         setRelatedSessions(
-          (related.data ?? []).map((row) => ({
-            sessionId: row.id,
+          related.map((row) => ({
+            sessionId: row.sessionId,
             title: row.title ?? "",
-            lastMessageAt: row.last_message_at ?? "",
+            lastMessageAt: row.lastMessageAt ?? "",
           })),
         );
       } catch {
@@ -102,7 +98,7 @@ export default function IdeaDetailRoute() {
         setBusyAction("toggleStatus");
         const next: IdeaStatus = idea.status === "done" ? "open" : "done";
         try {
-          await createIdeasApi(supabase).updateStatus(idea.ideaId, next);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).updateStatus(idea.ideaId, next);
           setIdea({ ...idea, status: next, updatedAt: new Date().toISOString() });
         } catch {
           // Surface via screen busy state release — keep idea as-is.
@@ -117,7 +113,7 @@ export default function IdeaDetailRoute() {
         if (next === idea.status) return;
         setBusyAction("toggleStatus");
         try {
-          await createIdeasApi(supabase).updateStatus(idea.ideaId, next);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).updateStatus(idea.ideaId, next);
           setIdea({ ...idea, status: next, updatedAt: new Date().toISOString() });
           showToast("success", `Marked ${next.replace("_", " ")}`);
         } catch (err) {
@@ -135,7 +131,7 @@ export default function IdeaDetailRoute() {
     ? async () => {
         setBusyAction("archive");
         try {
-          await createIdeasApi(supabase).archive(idea.ideaId);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).archive(idea.ideaId);
           showToast("success", "Idea archived");
           router.back();
         } catch (err) {
@@ -152,7 +148,7 @@ export default function IdeaDetailRoute() {
     ? async (patch: { title: string; description: string }) => {
         setBusyAction("save");
         try {
-          await createIdeasApi(supabase).updateContent(idea.ideaId, patch);
+          await createIdeasApi({ getAccessToken: supabaseAccessToken(supabase) }).updateContent(idea.ideaId, patch);
           setIdea({
             ...idea,
             title: patch.title,

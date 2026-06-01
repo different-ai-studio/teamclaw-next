@@ -1,4 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  cloudApiBaseUrl,
+  createCloudApiClient,
+  supabaseAccessToken,
+} from "../../lib/cloud-api/client";
 
 export type InviteClaimResult = {
   actorId: string;
@@ -13,79 +17,53 @@ export type InviteApi = {
 };
 
 /**
- * Calls Postgres RPC `claim_team_invite` to redeem an invite token. Returns
- * the same shape iOS reads in `SupabaseActorRepository.claimInvite`. Mirrors
- * iOS so the onboarding coordinator can interoperate with the same backend.
+ * Cloud-only invite claimer. Redeems a token via `POST /v1/invites/claim`,
+ * which proxies the Postgres `claim_team_invite` RPC server-side and returns
+ * the camelCase ClaimResult `{ actorId, teamId, actorType, displayName,
+ * refreshToken }`. Mirrors iOS `CloudAPIInviteClaimer`.
  */
-export function createInviteApi(client: SupabaseClient): InviteApi {
+export function createInviteApi(args: {
+  getAccessToken: () => Promise<string | null>;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): InviteApi {
+  const client = createCloudApiClient({
+    baseUrl: args.baseUrl ?? cloudApiBaseUrl(),
+    getAccessToken: args.getAccessToken,
+    fetchImpl: args.fetchImpl,
+  });
+
   return {
     async claim(token) {
       const trimmed = token.trim();
       if (!trimmed) {
         throw new Error("Invite token is empty.");
       }
-      const result = await client.rpc("claim_team_invite", { token: trimmed });
-      if (result.error) {
-        throw new Error(result.error.message ?? "Couldn't claim invite.");
-      }
-      const rows = Array.isArray(result.data) ? result.data : [result.data];
-      const row = rows[0] as
-        | {
-            actor_id?: string;
-            team_id?: string;
-            actor_type?: string;
-            display_name?: string;
-            refresh_token?: string | null;
-          }
-        | null
-        | undefined;
-      if (!row?.actor_id || !row?.team_id) {
+      const result = await client.post<InviteClaimResult>("/v1/invites/claim", {
+        token: trimmed,
+      });
+      if (!result?.actorId || !result?.teamId) {
         throw new Error("Invite claim returned no actor/team — token may be expired.");
       }
       return {
-        actorId: row.actor_id,
-        teamId: row.team_id,
-        actorType: row.actor_type ?? "member",
-        displayName: row.display_name ?? "",
-        refreshToken: row.refresh_token ?? null,
+        actorId: result.actorId,
+        teamId: result.teamId,
+        actorType: result.actorType ?? "member",
+        displayName: result.displayName ?? "",
+        refreshToken: result.refreshToken ?? null,
       };
     },
   };
 }
 
-export function createConfiguredInviteApi(client: SupabaseClient): InviteApi {
-  const baseUrl = process.env.EXPO_PUBLIC_CLOUD_API_URL?.trim();
-  if (process.env.EXPO_PUBLIC_BACKEND_KIND !== "cloud_api" || !baseUrl) {
-    return createInviteApi(client);
-  }
-
-  return {
-    async claim(token) {
-      const trimmed = token.trim();
-      if (!trimmed) {
-        throw new Error("Invite token is empty.");
-      }
-      const { data } = await client.auth.getSession();
-      const accessToken = data.session?.access_token;
-      if (!accessToken) {
-        throw new Error("Missing auth session access token.");
-      }
-      const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/v1/invites/claim`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          "X-Request-Id": Math.random().toString(36).slice(2).padEnd(12, "0").slice(0, 12),
-        },
-        body: JSON.stringify({ token: trimmed }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body?.error?.message ?? "Couldn't claim invite.");
-      }
-      return body as InviteClaimResult;
-    },
-  };
+/**
+ * Production wiring helper. Bridges the transitional Supabase access token into
+ * the cloud-only claimer until the auth layer itself moves off the SDK.
+ */
+export function createConfiguredInviteApi(
+  client: Parameters<typeof supabaseAccessToken>[0],
+): InviteApi {
+  return createInviteApi({ getAccessToken: supabaseAccessToken(client) });
 }
 
 /**

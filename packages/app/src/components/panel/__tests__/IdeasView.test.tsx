@@ -30,6 +30,16 @@ vi.mock('@/stores/session-list-store', () => ({
   ),
 }))
 
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: Object.assign(
+    (sel: any) => sel({ team: { id: 'team-1', name: 'Team One', slug: 'team-one' } }),
+    {
+      subscribe: vi.fn(() => () => {}),
+      getState: vi.fn(() => ({ team: { id: 'team-1', name: 'Team One', slug: 'team-one' } })),
+    },
+  ),
+}))
+
 vi.mock('@/components/ui/sidebar', () => ({
   useSidebar: () => ({ state: 'expanded', sidebarState: 'expanded', open: true, setOpen: vi.fn(), openMobile: false, setOpenMobile: vi.fn(), isMobile: false, toggleSidebar: vi.fn() }),
 }))

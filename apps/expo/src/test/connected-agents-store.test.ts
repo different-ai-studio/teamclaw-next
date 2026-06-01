@@ -12,6 +12,8 @@ function fakeApi(agents: ConnectedAgent[]): AgentAccessApi {
     listAuthorizedHumans: vi.fn().mockResolvedValue([]),
     grantAuthorizedHuman: vi.fn().mockResolvedValue(undefined),
     revokeAuthorizedHuman: vi.fn().mockResolvedValue(undefined),
+    getAgentDeviceId: vi.fn().mockResolvedValue(null),
+    canManageAgent: vi.fn().mockResolvedValue(false),
   };
 }
 
