@@ -361,28 +361,48 @@ fn backend_from_provider_config(config: ProviderConfig) -> crate::error::Result<
     }
 }
 
-async fn apply_bootstrap_overrides(backend: &Arc<dyn Backend>, config: &mut DaemonConfig) {
-    let mqtt = match backend.fetch_bootstrap_mqtt().await {
-        Ok(Some(mqtt)) => mqtt,
-        Ok(None) => return,
-        Err(e) => {
-            tracing::warn!(error = %e, "bootstrap fetch failed; keeping local mqtt config");
-            return;
+/// Resolve the MQTT broker from `/v1/config/bootstrap`. The Cloud API is the
+/// authoritative source: a fetched value wins (so operators can rotate the
+/// broker without redeploying daemons), and falls back only to an explicit
+/// invite `?broker=` override already present in `config`. If neither yields a
+/// broker URL, startup fails — there is no hardcoded default.
+async fn apply_bootstrap_overrides(
+    backend: &Arc<dyn Backend>,
+    config: &mut DaemonConfig,
+) -> crate::error::Result<()> {
+    match backend.fetch_bootstrap_mqtt().await {
+        Ok(Some(mqtt)) => {
+            let previous = config.mqtt.broker_url.clone();
+            config.mqtt.broker_url = mqtt.url;
+            if mqtt.username.is_some() {
+                config.mqtt.username = mqtt.username;
+            }
+            if mqtt.password.is_some() {
+                config.mqtt.password = mqtt.password;
+            }
+            info!(
+                previous_broker = %previous,
+                broker = %config.mqtt.broker_url,
+                "applied bootstrap mqtt override from cloud api"
+            );
         }
-    };
-    let previous = config.mqtt.broker_url.clone();
-    config.mqtt.broker_url = mqtt.url;
-    if mqtt.username.is_some() {
-        config.mqtt.username = mqtt.username;
+        Ok(None) => {
+            // Keep the invite `?broker=` override if one was supplied at init.
+        }
+        Err(e) => {
+            // Keep the invite override (if any); the empty-check below decides.
+            tracing::warn!(error = %e, "bootstrap mqtt fetch failed; relying on invite broker override if present");
+        }
     }
-    if mqtt.password.is_some() {
-        config.mqtt.password = mqtt.password;
+
+    if config.mqtt.broker_url.trim().is_empty() {
+        return Err(crate::error::AmuxError::Config(
+            "Cloud API did not provision an MQTT broker (/v1/config/bootstrap returned no mqtt) \
+             and no invite `?broker=` override was supplied; cannot start"
+                .to_string(),
+        ));
     }
-    info!(
-        previous_broker = %previous,
-        broker = %config.mqtt.broker_url,
-        "applied bootstrap mqtt override from cloud api"
-    );
+    Ok(())
 }
 
 impl DaemonServer {
@@ -409,10 +429,11 @@ impl DaemonServer {
             crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
         })?;
 
-        // Best-effort: pull MQTT broker config from /v1/config/bootstrap so
-        // operators can rotate the broker without redeploying daemons. Any
-        // failure falls through to the local mqtt.* config.
-        apply_bootstrap_overrides(&backend, &mut config).await;
+        // Authoritative: resolve the MQTT broker from /v1/config/bootstrap.
+        // There is no hardcoded fallback — if the Cloud API delivers no broker
+        // and the invite carried no `?broker=` override, this fails fast with a
+        // clear error rather than connecting to a stale/empty broker.
+        apply_bootstrap_overrides(&backend, &mut config).await?;
 
         let mqtt = MqttClient::new(&config, &actor_id, &token)?;
 

@@ -23,7 +23,6 @@
     "rust:build": "node scripts/rust-cli.js build --manifest-path apps/desktop/Cargo.toml",
     "daemon:run": "scripts/run-daemon.sh",
     "daemon:ctl": "scripts/amuxdctl.sh",
-    "pocketbase:preview-config": "node scripts/pocketbase-preview-config.mjs",
     "daemon:build": "cargo build -p amuxd",
     "daemon:test": "cargo test -p amuxd",
     "ios:generate": "cd apps/ios && xcodegen generate",

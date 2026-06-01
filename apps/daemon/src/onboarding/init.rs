@@ -3,11 +3,6 @@ use crate::onboarding::invite_url::{self, ParsedInvite};
 use crate::provider_config::{CloudApiConfig, ProviderConfig};
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
-use teamclaw_types::services_defaults::services_defaults;
-
-fn default_mqtt_broker_url() -> String {
-    services_defaults().mqtt_broker_url()
-}
 
 const DEFAULT_CLOUD_API_URL: &str = "https://cloud.ucar.cc";
 
@@ -22,8 +17,10 @@ pub struct InitOutcome {
 ///  1. parse token
 ///  2. POST `/v1/invites/claim` against the Cloud API (anonymous — no bearer)
 ///  3. persist `~/.amuxd/backend.toml` with `kind = "cloud_api"`
-///  4. write `daemon.toml` with the shared-broker defaults if absent, or
-///     preserve the existing one's device.id while refreshing team_id
+///  4. write `daemon.toml` if absent (broker_url left empty unless the invite
+///     carries a `?broker=` override — the daemon resolves it from
+///     `/v1/config/bootstrap` at startup), or preserve the existing one's
+///     device.id while refreshing team_id
 pub async fn run(raw_url: &str, config_path: Option<&Path>) -> Result<InitOutcome> {
     let invite = invite_url::parse(raw_url)?;
 
@@ -197,7 +194,9 @@ fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
             name: display_name.to_string(),
         },
         mqtt: MqttConfig {
-            broker_url: default_mqtt_broker_url(),
+            // Empty by default: the daemon fills the broker from
+            // /v1/config/bootstrap at startup (apply_bootstrap_overrides).
+            broker_url: String::new(),
             username: None,
             password: None,
         },
@@ -223,10 +222,9 @@ fn daemon_config_for_invite(
     // value makes EMQX reject the daemon's CONNECT (LWT topic denied).
     daemon_cfg.device.id = actor_id.to_string();
     daemon_cfg.team_id = Some(team_id.to_string());
-    daemon_cfg.mqtt.broker_url = invite
-        .broker_url
-        .clone()
-        .unwrap_or_else(default_mqtt_broker_url);
+    // Honor an explicit `?broker=` invite override; otherwise leave empty so the
+    // daemon resolves the broker from /v1/config/bootstrap at startup.
+    daemon_cfg.mqtt.broker_url = invite.broker_url.clone().unwrap_or_default();
     daemon_cfg
 }
 
@@ -253,7 +251,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_invite_uses_default_broker_url() {
+    fn invite_without_broker_leaves_broker_url_empty() {
+        // No `?broker=` override → broker_url stays empty; the daemon resolves it
+        // from /v1/config/bootstrap at startup (apply_bootstrap_overrides).
         let cfg = daemon_config_for_invite(
             None,
             "macmini-5",
@@ -264,7 +264,7 @@ mod tests {
                 broker_url: None,
             },
         );
-        assert_eq!(cfg.mqtt.broker_url, default_mqtt_broker_url());
+        assert_eq!(cfg.mqtt.broker_url, "");
     }
 
     #[test]
