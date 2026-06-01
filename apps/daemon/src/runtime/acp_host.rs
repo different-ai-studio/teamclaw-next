@@ -52,6 +52,17 @@ impl AcpHostPool {
         self.hosts.len()
     }
 
+    /// Drop cached ACP host processes so the next attach spawns fresh binaries.
+    ///
+    /// Required after provider OAuth / apiKey changes: long-lived `opencode acp`
+    /// hosts only read auth state at process start.
+    pub fn evict_agent_types(&mut self, agent_types: &[amux::AgentType]) -> usize {
+        let before = self.hosts.len();
+        self.hosts
+            .retain(|key, _| !agent_types.contains(&key.agent_type));
+        before.saturating_sub(self.hosts.len())
+    }
+
     /// Pre-warm one host per configured agent type (empty team env).
     pub async fn prewarm(&mut self, launch_configs: &HashMap<amux::AgentType, AgentLaunchConfig>) {
         for (&agent_type, launch) in launch_configs {
@@ -173,5 +184,40 @@ impl AcpHostPool {
 impl Default for AcpHostPool {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evict_agent_types_removes_matching_hosts_only() {
+        let mut pool = AcpHostPool::new();
+        pool.hosts.insert(
+            HostKey {
+                agent_type: amux::AgentType::Opencode,
+                env_fingerprint: 1,
+            },
+            HostEntry {
+                cmd_tx: mpsc::channel(1).0,
+            },
+        );
+        pool.hosts.insert(
+            HostKey {
+                agent_type: amux::AgentType::ClaudeCode,
+                env_fingerprint: 2,
+            },
+            HostEntry {
+                cmd_tx: mpsc::channel(1).0,
+            },
+        );
+        let removed = pool.evict_agent_types(&[amux::AgentType::Opencode]);
+        assert_eq!(removed, 1);
+        assert_eq!(pool.hosts.len(), 1);
+        assert_eq!(
+            pool.hosts.keys().next().unwrap().agent_type,
+            amux::AgentType::ClaudeCode
+        );
     }
 }

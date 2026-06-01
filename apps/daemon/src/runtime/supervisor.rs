@@ -288,9 +288,11 @@ impl RuntimeSupervisor {
         let workspace_path_str = workspace_path.to_string_lossy();
         let stopped = {
             let mut manager = self.agents.lock().await;
-            manager
+            let stopped = manager
                 .stop_runtimes_for_workspace(&workspace_path_str, workspace_id)
-                .await
+                .await;
+            manager.evict_acp_hosts_after_provider_auth_change();
+            stopped
         };
 
         if stopped > 0 {

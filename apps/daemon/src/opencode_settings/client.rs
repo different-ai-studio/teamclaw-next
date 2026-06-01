@@ -6,6 +6,19 @@ use serde_json::Value;
 
 use super::{OAuthAuthorizeResult, OpenCodeSettingsError};
 
+#[derive(Debug, Clone)]
+pub struct LiveProviderSummary {
+    pub id: String,
+    pub display_name: String,
+    pub model_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LiveProviderCatalog {
+    pub connected: Vec<String>,
+    pub providers: HashMap<String, LiveProviderSummary>,
+}
+
 #[derive(Clone)]
 pub struct OpenCodeSettingsClient {
     http: reqwest::Client,
@@ -107,16 +120,58 @@ impl OpenCodeSettingsClient {
     }
 
     pub async fn fetch_connected_provider_ids(&self) -> Result<Vec<String>, OpenCodeSettingsError> {
+        Ok(self.fetch_provider_catalog().await?.connected)
+    }
+
+    /// Live OpenCode provider catalog (`GET /provider`) — models + connected ids.
+    pub async fn fetch_provider_catalog(
+        &self,
+    ) -> Result<LiveProviderCatalog, OpenCodeSettingsError> {
         let value: Value = self.get_json("/provider").await?;
         let connected = value
             .get("connected")
             .and_then(|v| v.as_array())
             .cloned()
-            .unwrap_or_default();
-        Ok(connected
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|v| v.as_str().map(str::to_owned))
-            .collect())
+            .collect();
+
+        let mut providers = std::collections::HashMap::new();
+        let all = value
+            .get("all")
+            .or_else(|| value.get("providers"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for entry in all {
+            let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let display_name = entry
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(id)
+                .to_string();
+            let model_ids = entry
+                .get("models")
+                .and_then(|models| models.as_object())
+                .map(|models| models.keys().cloned().collect())
+                .unwrap_or_default();
+            providers.insert(
+                id.to_string(),
+                LiveProviderSummary {
+                    id: id.to_string(),
+                    display_name,
+                    model_ids,
+                },
+            );
+        }
+
+        Ok(LiveProviderCatalog {
+            connected,
+            providers,
+        })
     }
 
     async fn get_json(&self, path: &str) -> Result<Value, OpenCodeSettingsError> {

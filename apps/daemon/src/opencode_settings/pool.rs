@@ -69,6 +69,15 @@ impl OpenCodeSettingsService {
         );
         Ok(OpenCodeSettingsClient::new(base_url, workspace))
     }
+
+    /// Stop the loopback settings server for a workspace (e.g. after OAuth writes new auth).
+    pub async fn drop_workspace_instance(&self, workspace: &Path) {
+        let key = workspace.to_string_lossy().to_string();
+        let mut instances = self.instances.lock().await;
+        if let Some(mut entry) = instances.remove(&key) {
+            let _ = entry.child.kill().await;
+        }
+    }
 }
 
 async fn spawn_settings_server(

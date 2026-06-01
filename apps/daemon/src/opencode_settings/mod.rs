@@ -7,7 +7,7 @@
 mod client;
 mod pool;
 
-pub use client::OpenCodeSettingsClient;
+pub use client::{LiveProviderCatalog, LiveProviderSummary, OpenCodeSettingsClient};
 pub use pool::OpenCodeSettingsService;
 
 use std::path::Path;
@@ -79,7 +79,17 @@ impl OpenCodeSettingsService {
         let client = self.client_for_workspace(workspace).await?;
         client
             .oauth_callback(provider_id, method_index, code)
-            .await
+            .await?;
+        self.drop_workspace_instance(workspace).await;
+        Ok(())
+    }
+
+    pub async fn provider_catalog(
+        &self,
+        workspace: &Path,
+    ) -> Result<LiveProviderCatalog, OpenCodeSettingsError> {
+        let client = self.client_for_workspace(workspace).await?;
+        client.fetch_provider_catalog().await
     }
 
     pub async fn remove_provider_auth(

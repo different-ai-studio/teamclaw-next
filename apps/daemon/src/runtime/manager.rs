@@ -640,6 +640,20 @@ impl RuntimeManager {
         })
     }
 
+    /// Invalidate long-lived OpenCode/Codex ACP hosts after provider credentials change.
+    pub fn evict_acp_hosts_after_provider_auth_change(&mut self) {
+        let removed = self.acp_host_pool.evict_agent_types(&[
+            amux::AgentType::Opencode,
+            amux::AgentType::Codex,
+        ]);
+        if removed > 0 {
+            info!(
+                removed,
+                "evicted ACP hosts so new sessions pick up provider auth"
+            );
+        }
+    }
+
     /// Stop all runtimes for a workspace (used after settings reload).
     pub async fn stop_runtimes_for_workspace(
         &mut self,

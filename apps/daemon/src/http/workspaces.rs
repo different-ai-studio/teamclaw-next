@@ -20,6 +20,7 @@ use std::sync::Arc;
 use crate::config::provider_auth::{
     builtin_provider_auth_methods, ProviderAuthMethodsResponse,
 };
+use crate::opencode_settings::LiveProviderCatalog;
 use crate::opencode_settings::OpenCodeSettingsError;
 use crate::config::workspace_control::{
     decode_workspace_path, AllowlistRule, ApplyOutcome, ManagedSkillDto, McpServerConfig,
@@ -139,7 +140,9 @@ pub async fn get_providers(
         .map_err(map_control_err)?;
     if let Some(settings) = state.opencode_settings.as_ref() {
         if let Ok(wpath) = workspace_path_or_404(&workspace_id).await {
-            if let Ok(connected) = settings.connected_provider_ids(&wpath).await {
+            if let Ok(catalog) = settings.provider_catalog(&wpath).await {
+                merge_live_provider_catalog(&mut providers, &catalog);
+            } else if let Ok(connected) = settings.connected_provider_ids(&wpath).await {
                 for provider in &mut providers {
                     if connected.iter().any(|id| id == &provider.id) {
                         provider.authenticated = true;
@@ -149,6 +152,43 @@ pub async fn get_providers(
         }
     }
     Ok(Json(providers))
+}
+
+fn merge_live_provider_catalog(
+    providers: &mut Vec<ProviderInfo>,
+    catalog: &LiveProviderCatalog,
+) {
+    for connected_id in &catalog.connected {
+        if let Some(live) = catalog.providers.get(connected_id) {
+            if let Some(existing) = providers.iter_mut().find(|p| p.id == *connected_id) {
+                existing.authenticated = true;
+                if existing.models.is_empty() {
+                    existing.models = live.model_ids.clone();
+                }
+                if existing.display_name == existing.id {
+                    existing.display_name = live.display_name.clone();
+                }
+            } else {
+                providers.push(ProviderInfo {
+                    id: live.id.clone(),
+                    display_name: live.display_name.clone(),
+                    authenticated: true,
+                    base_url: None,
+                    models: live.model_ids.clone(),
+                });
+            }
+        } else if let Some(existing) = providers.iter_mut().find(|p| p.id == *connected_id) {
+            existing.authenticated = true;
+        } else {
+            providers.push(ProviderInfo {
+                id: connected_id.clone(),
+                display_name: connected_id.clone(),
+                authenticated: true,
+                base_url: None,
+                models: Vec::new(),
+            });
+        }
+    }
 }
 
 /// `POST /v1/workspaces/:id/providers/:provider_id/auth`
