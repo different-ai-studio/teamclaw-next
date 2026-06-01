@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { AgentStatus } from "@/lib/proto/amux_pb";
+import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import {
   PENDING_AGENT_REPLY_FALLBACK_MS,
   PENDING_AGENT_REPLY_HARD_TIMEOUT_MS,
   PENDING_AGENT_REPLY_TOOL_GRACE_MS,
   isTerminalAgentStatus,
+  mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
+  rememberLiveEventId,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 
@@ -159,5 +162,34 @@ describe("live agent stream event helpers", () => {
         1_000,
       ),
     ).toBe(true);
+  });
+
+  it("dedupes repeated live event ids per session", () => {
+    const seen = new Set<string>();
+    expect(rememberLiveEventId(seen, "s1", "evt-1")).toBe(true);
+    expect(rememberLiveEventId(seen, "s1", "evt-1")).toBe(false);
+    expect(rememberLiveEventId(seen, "s2", "evt-1")).toBe(true);
+  });
+
+  it("merges parked agent replies using stream outputText", () => {
+    const pending = [
+      { messageId: "m1", content: "CPU Top 3" },
+      { messageId: "m2", content: "Memory Top 3" },
+    ] as TeamclawMessage[];
+    expect(
+      mergePendingAgentReplies(pending, {
+        outputText: "CPU Top 3\n\nMemory Top 3",
+      })?.content,
+    ).toBe("CPU Top 3\n\nMemory Top 3");
+  });
+
+  it("joins distinct parked chunks when stream outputText is empty", () => {
+    const pending = [
+      { messageId: "m1", content: "CPU Top 3" },
+      { messageId: "m2", content: "Memory Top 3" },
+    ] as TeamclawMessage[];
+    expect(mergePendingAgentReplies(pending)?.content).toBe(
+      "CPU Top 3\n\nMemory Top 3",
+    );
   });
 });

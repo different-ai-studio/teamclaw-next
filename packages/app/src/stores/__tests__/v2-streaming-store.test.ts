@@ -37,6 +37,31 @@ describe("v2-streaming-store", () => {
     expect(streams[0].thinkingText).toBe("This is the 8th time");
   });
 
+  it("appendOutput merges cumulative snapshot chunks", () => {
+    const store = useV2StreamingStore.getState();
+    for (const chunk of [
+      "/Users",
+      "/Users/haigang",
+      "/Users/haigang.ye/project/external/teamclaw-next",
+    ]) {
+      store.appendOutput("s1", "a1", chunk);
+    }
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.outputText).toBe("/Users/haigang.ye/project/external/teamclaw-next");
+    expect(stream.parts[0].text).toBe("/Users/haigang.ye/project/external/teamclaw-next");
+  });
+
+  it("appendOutput tolerates duplicate delivery of the same chunks", () => {
+    const store = useV2StreamingStore.getState();
+    for (const chunk of ["/Users", "/ha", "igang", ".ye"]) {
+      store.appendOutput("s1", "a1", chunk);
+      store.appendOutput("s1", "a1", chunk);
+    }
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.outputText).toBe("/Users/haigang.ye");
+    expect(stream.parts[0].text).toBe("/Users/haigang.ye");
+  });
+
   it("keeps thinking segments in ACP event order", () => {
     const store = useV2StreamingStore.getState();
     store.appendThinking("s1", "a1", "Plan first.");
@@ -186,6 +211,133 @@ describe("v2-streaming-store", () => {
     expect(selectStreamsForSession(useV2StreamingStore.getState(), "s1")[0].parts).toHaveLength(3);
   });
 
+  it("appends distinct reply preview segments after tool calls", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+
+    store.ingestReplyPreview("s1", "a1", "CPU Top 3:\n1. foo");
+    store.ingestReplyPreview("s1", "a1", "Memory Top 3:\n1. bar");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.outputText).toContain("CPU Top 3");
+    expect(stream.outputText).toContain("Memory Top 3");
+    expect(stream.parts.map((p) => p.type)).toEqual([
+      "text",
+      "tool-call",
+      "text",
+      "text",
+    ]);
+    expect(stream.parts[2].text).toContain("CPU Top 3");
+    expect(stream.parts[3].text).toContain("Memory Top 3");
+  });
+
+  it("finalize collapses multiple post-tool preview text parts into one", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Before tool.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+    store.ingestReplyPreview("s1", "a1", "CPU Top 3:\n1. foo");
+    store.ingestReplyPreview("s1", "a1", "Memory Top 3:\n1. bar");
+
+    store.finalize("s1", "a1", "CPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar");
+
+    const [finalized] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(finalized.active).toBe(false);
+    expect(finalized.parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(finalized.parts[2].text).toBe(
+      "CPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar",
+    );
+  });
+
+  it("releaseActorAfterPersist skipArchive only drops archived rows for the current streamId", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+    const firstStreamId = useV2StreamingStore.getState().byKey["s1::a1"].streamId;
+    store.releaseActorAfterPersist("s1", "a1");
+    expect(useV2StreamingStore.getState().archived).toHaveLength(1);
+    expect(useV2StreamingStore.getState().archived[0].streamId).toBe(firstStreamId);
+
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-2",
+      toolName: "bash",
+      description: "df",
+      params: { command: "df -h" },
+      toolKind: "execute",
+    });
+    const secondStreamId = useV2StreamingStore.getState().byKey["s1::a1"].streamId;
+    expect(secondStreamId).not.toBe(firstStreamId);
+
+    store.releaseActorAfterPersist("s1", "a1", {
+      persistedPartsJson: JSON.stringify([
+        { id: "t2", type: "tool-call", toolCallId: "tool-2", toolCall: { id: "tool-2" } },
+      ]),
+    });
+
+    expect(useV2StreamingStore.getState().archived).toHaveLength(1);
+    expect(useV2StreamingStore.getState().archived[0].streamId).toBe(firstStreamId);
+  });
+
+  it("releaseActorAfterPersist skips archive when parts_json already has tools", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+
+    store.releaseActorAfterPersist("s1", "a1", {
+      persistedPartsJson: JSON.stringify([
+        { id: "t1", type: "tool-call", toolCallId: "tool-1", toolCall: { id: "tool-1" } },
+      ]),
+    });
+
+    const state = useV2StreamingStore.getState();
+    expect(state.byKey["s1::a1"]).toBeUndefined();
+    expect(state.archived).toHaveLength(0);
+    expect(selectStreamsForSession(state, "s1")).toHaveLength(0);
+  });
+
+  it("releaseActorAfterPersist archives tool calls when parts_json did not persist them", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "ps",
+      params: { command: "ps aux" },
+      toolKind: "execute",
+    });
+    store.appendOutput("s1", "a1", "Done.");
+
+    store.releaseActorAfterPersist("s1", "a1");
+
+    const state = useV2StreamingStore.getState();
+    expect(state.byKey["s1::a1"]).toBeUndefined();
+    expect(state.archived).toHaveLength(1);
+    expect(state.archived[0].toolCalls).toHaveLength(1);
+    expect(state.archived[0].parts.some((part) => part.type === "tool-call")).toBe(true);
+    expect(selectStreamsForSession(state, "s1")).toHaveLength(1);
+  });
+
   it("places reply previews after the latest tool when final text is not cumulative", () => {
     const store = useV2StreamingStore.getState();
     store.appendOutput("s1", "a1", "Before tool.");
@@ -213,6 +365,21 @@ describe("v2-streaming-store", () => {
     expect(finalized.active).toBe(false);
     expect(finalized.parts).toHaveLength(3);
     expect(finalized.parts[2].text).toBe("Updated final answer.");
+  });
+
+  it("markActorStreamActive re-opens a stream after finishSessionActor", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Hello");
+    store.finishSessionActor("s1", "a1");
+
+    expect(useV2StreamingStore.getState().byKey["s1::a1"].active).toBe(false);
+
+    store.markActorStreamActive("s1", "a1");
+    store.appendOutput("s1", "a1", " world");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.active).toBe(true);
+    expect(stream.outputText).toBe("Hello world");
   });
 
   it("finishSessionActor stops unresolved tool calls from loading", () => {

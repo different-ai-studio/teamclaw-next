@@ -104,8 +104,10 @@ import {
   PENDING_AGENT_REPLY_FALLBACK_MS,
   agentStreamKey,
   isTerminalAgentStatus,
+  mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
+  rememberLiveEventId,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 import { useUIStore } from "@/stores/ui";
@@ -700,11 +702,12 @@ function AppContent() {
     teamId: mqttTeamId,
     accessToken: mqttAccessToken,
   });
-  const pendingStreamRepliesRef = useRef<Record<string, TeamclawMessage>>({});
+  const pendingStreamRepliesRef = useRef<Record<string, TeamclawMessage[]>>({});
   const pendingStreamReplyTimersRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
   >({});
   const pendingStreamReplySinceRef = useRef<Record<string, number>>({});
+  const seenLiveEventIdsRef = useRef<Set<string>>(new Set());
 
   function clearPendingStreamReplyTimer(streamKey: string) {
     const timer = pendingStreamReplyTimersRef.current[streamKey];
@@ -726,20 +729,27 @@ function AppContent() {
         reply,
       );
       useSessionMessageStore.getState().appendMessage(sessionId, enrichedReply);
-      useV2StreamingStore.getState().clearActor(sessionId, actorId);
+      const persistedPartsJson = (enrichedReply as { partsJson?: string }).partsJson;
+      useV2StreamingStore.getState().releaseActorAfterPersist(sessionId, actorId, {
+        persistedPartsJson,
+      });
     })();
   }
 
   function flushPendingStreamReply(sessionId: string, actorId: string): boolean {
     const streamKey = agentStreamKey(sessionId, actorId);
-    const pendingReply = pendingStreamRepliesRef.current[streamKey];
-    if (!pendingReply) return false;
+    const pendingReplies = pendingStreamRepliesRef.current[streamKey];
+    if (!pendingReplies?.length) return false;
+
+    const streamEntry = useV2StreamingStore.getState().byKey[streamKey];
+    const mergedReply = mergePendingAgentReplies(pendingReplies, streamEntry);
+    if (!mergedReply) return false;
 
     clearPendingStreamReplyTimer(streamKey);
     delete pendingStreamReplySinceRef.current[streamKey];
     delete pendingStreamRepliesRef.current[streamKey];
     useV2StreamingStore.getState().finishSessionActor(sessionId, actorId);
-    appendStreamReplyAfterPartsPersist(sessionId, actorId, pendingReply);
+    appendStreamReplyAfterPartsPersist(sessionId, actorId, mergedReply);
     return true;
   }
 
@@ -752,7 +762,8 @@ function AppContent() {
     clearPendingStreamReplyTimer(streamKey);
     pendingStreamReplySinceRef.current[streamKey] ??= Date.now();
     pendingStreamReplyTimersRef.current[streamKey] = setTimeout(() => {
-      const pendingReply = pendingStreamRepliesRef.current[streamKey];
+      const pendingReplies = pendingStreamRepliesRef.current[streamKey];
+      const pendingReply = pendingReplies?.[pendingReplies.length - 1];
       if (!pendingReply || pendingReply.messageId !== reply.messageId) return;
 
       const streamEntry = useV2StreamingStore.getState().byKey[streamKey];
@@ -876,6 +887,17 @@ function AppContent() {
           if (!sid) return;
 
           if (
+            env.topic.includes("/session/") &&
+            !rememberLiveEventId(
+              seenLiveEventIdsRef.current,
+              sid,
+              decoded.envelope.eventId,
+            )
+          ) {
+            return;
+          }
+
+          if (
             decoded.envelope.eventType === "session_participant.created" ||
             decoded.envelope.eventType === "session_participant.updated" ||
             decoded.envelope.eventType === "session_participant.deleted" ||
@@ -911,37 +933,37 @@ function AppContent() {
               decoded.message.kind === MessageKind.AGENT_REPLY
             ) {
               // AGENT_REPLY rows can be emitted for intermediate output
-              // chunks before later tool calls arrive. Keep the newest reply
-              // parked until the ACP status event marks the turn terminal;
-              // otherwise live rendering diverges from reload rendering.
-              if (streamEntry.active) {
-                streamingStore.ingestReplyPreview(
-                  sid,
-                  senderActorId,
-                  decoded.message.content,
-                );
-                if (
-                  pendingStreamRepliesRef.current[streamKey]?.messageId !==
-                  decoded.message.messageId
-                ) {
+              // chunks before later tool calls arrive. Keep them parked until
+              // terminal status + flush. statusChange may mark the stream
+              // inactive first; re-activate so acp deltas keep rendering.
+              if (!streamEntry.active) {
+                streamingStore.markActorStreamActive(sid, senderActorId);
+              }
+              streamingStore.ingestReplyPreview(
+                sid,
+                senderActorId,
+                decoded.message.content,
+              );
+              const pendingReplies =
+                pendingStreamRepliesRef.current[streamKey] ?? [];
+              if (
+                !pendingReplies.some(
+                  (message) => message.messageId === decoded.message.messageId,
+                )
+              ) {
+                if (pendingReplies.length === 0) {
                   delete pendingStreamReplySinceRef.current[streamKey];
                 }
-                pendingStreamRepliesRef.current[streamKey] = decoded.message;
-                schedulePendingStreamReplyFallback(
-                  sid,
-                  senderActorId,
+                pendingStreamRepliesRef.current[streamKey] = [
+                  ...pendingReplies,
                   decoded.message,
-                );
-              } else {
-                appendStreamReplyAfterPartsPersist(
-                  sid,
-                  senderActorId,
-                  decoded.message,
-                );
-                clearPendingStreamReplyTimer(streamKey);
-                delete pendingStreamRepliesRef.current[streamKey];
-                delete pendingStreamReplySinceRef.current[streamKey];
+                ];
               }
+              schedulePendingStreamReplyFallback(
+                sid,
+                senderActorId,
+                decoded.message,
+              );
             } else if (streamEntry && senderActorId) {
               streamingStore.finalize(
                 sid,

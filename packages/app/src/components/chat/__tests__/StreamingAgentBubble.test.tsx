@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { StreamingAgentBubble } from "../StreamingAgentBubble";
 import { selectStreamsForSession, useV2StreamingStore } from "@/stores/v2-streaming-store";
 
@@ -21,6 +21,14 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 beforeEach(() => {
   useV2StreamingStore.setState({ byKey: {}, archived: [] });
 });
+
+async function flushStreamReveal() {
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  }
+}
 
 describe("StreamingAgentBubble", () => {
   it("does not render an archived text-only stream after persisted reply takes over", () => {
@@ -158,7 +166,7 @@ describe("StreamingAgentBubble", () => {
     expect(container.textContent).toContain("Live answer.");
   });
 
-  it("renders live text and tool calls in ACP event order", () => {
+  it("renders live text and tool calls in ACP event order", async () => {
     const { container } = render(
       <StreamingAgentBubble
         entry={{
@@ -213,19 +221,21 @@ describe("StreamingAgentBubble", () => {
       />,
     );
 
-    const text = container.textContent ?? "";
-    const beforeIndex = text.indexOf("Before tool.");
-    const toolIndex = text.indexOf("Grep");
-    const afterIndex = text.indexOf("After tool.");
-
-    expect(beforeIndex).toBeGreaterThanOrEqual(0);
-    expect(toolIndex).toBeGreaterThanOrEqual(0);
-    expect(afterIndex).toBeGreaterThanOrEqual(0);
-    expect(beforeIndex).toBeLessThan(toolIndex);
-    expect(toolIndex).toBeLessThan(afterIndex);
+    await flushStreamReveal();
+    await waitFor(() => {
+      const text = container.textContent ?? "";
+      const beforeIndex = text.indexOf("Before tool.");
+      const toolIndex = text.indexOf("Grep");
+      const afterIndex = text.indexOf("After tool.");
+      expect(beforeIndex).toBeGreaterThanOrEqual(0);
+      expect(toolIndex).toBeGreaterThanOrEqual(0);
+      expect(afterIndex).toBeGreaterThanOrEqual(0);
+      expect(beforeIndex).toBeLessThan(toolIndex);
+      expect(toolIndex).toBeLessThan(afterIndex);
+    });
   });
 
-  it("renders independent thinking blocks in ACP event order and collapses completed ones", () => {
+  it("renders independent thinking blocks in ACP event order and collapses completed ones", async () => {
     const { container } = render(
       <StreamingAgentBubble
         entry={{
@@ -292,10 +302,13 @@ describe("StreamingAgentBubble", () => {
       />,
     );
 
+    await flushStreamReveal();
+    await waitFor(() => {
+      expect(container.textContent ?? "").toContain("Plan third.");
+    });
     const text = container.textContent ?? "";
     expect(text).not.toContain("Plan first.");
     expect(text).not.toContain("Plan second.");
-    expect(text).toContain("Plan third.");
 
     const thinkingButtons = Array.from(container.querySelectorAll("button")).filter((button) =>
       button.textContent?.includes("Thinking Process"),

@@ -650,6 +650,7 @@ impl RuntimeManagerAdapter {
                     Some(&session_id.to_string()),
                     model,
                     None,
+                    None,
                     HashMap::new(),
                 )
                 .await
