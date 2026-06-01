@@ -136,9 +136,7 @@ pub async fn list_local_daemon_workspaces() -> Result<Vec<LocalDaemonWorkspace>,
         .into_iter()
         .map(|workspace| {
             let is_default = default_id
-                .map(|id| {
-                    id == workspace.workspace_id || id == workspace.remote_workspace_id
-                })
+                .map(|id| id == workspace.workspace_id || id == workspace.remote_workspace_id)
                 .unwrap_or(false);
             LocalDaemonWorkspace {
                 workspace_id: workspace.workspace_id,
@@ -170,7 +168,9 @@ struct DaemonProviderInfo {
 }
 
 /// `GET /v1/workspaces/:id/providers` — canonical LLM provider list for a workspace.
-pub async fn fetch_workspace_provider_model_keys(workspace_path: &str) -> Option<std::collections::HashSet<String>> {
+pub async fn fetch_workspace_provider_model_keys(
+    workspace_path: &str,
+) -> Option<std::collections::HashSet<String>> {
     let amuxd_dir = dirs::home_dir()?.join(".amuxd");
     let port: u16 = std::fs::read_to_string(amuxd_dir.join("amuxd.http.port"))
         .ok()?

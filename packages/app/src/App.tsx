@@ -921,7 +921,8 @@ function AppContent() {
 
           // Case 1: final message.created
           if (decoded.message) {
-            const senderActorId = decoded.message.senderActorId;
+            const msg = decoded.message;
+            const senderActorId = msg.senderActorId;
             const streamingStore = useV2StreamingStore.getState();
             const streamKey = senderActorId ? agentStreamKey(sid, senderActorId) : "";
             const streamEntry = streamKey
@@ -930,7 +931,7 @@ function AppContent() {
             if (
               streamEntry &&
               senderActorId &&
-              decoded.message.kind === MessageKind.AGENT_REPLY
+              msg.kind === MessageKind.AGENT_REPLY
             ) {
               // AGENT_REPLY rows can be emitted for intermediate output
               // chunks before later tool calls arrive. Keep them parked until
@@ -942,13 +943,13 @@ function AppContent() {
               streamingStore.ingestReplyPreview(
                 sid,
                 senderActorId,
-                decoded.message.content,
+                msg.content,
               );
               const pendingReplies =
                 pendingStreamRepliesRef.current[streamKey] ?? [];
               if (
                 !pendingReplies.some(
-                  (message) => message.messageId === decoded.message.messageId,
+                  (message) => message.messageId === msg.messageId,
                 )
               ) {
                 if (pendingReplies.length === 0) {
@@ -956,13 +957,13 @@ function AppContent() {
                 }
                 pendingStreamRepliesRef.current[streamKey] = [
                   ...pendingReplies,
-                  decoded.message,
+                  msg,
                 ];
               }
               schedulePendingStreamReplyFallback(
                 sid,
                 senderActorId,
-                decoded.message,
+                msg,
               );
             } else if (streamEntry && senderActorId) {
               streamingStore.finalize(
