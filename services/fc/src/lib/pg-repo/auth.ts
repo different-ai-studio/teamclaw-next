@@ -90,19 +90,29 @@ export function createPgAuthRepository(
       return envelopeFromSignIn(auth, result);
     },
 
-    // --- Email OTP ---
-    async signInOtp({ email, options }: { email: string; options?: unknown }) {
+    // --- Email OTP (phone OTP — see note) ---
+    async signInOtp({ email, phone, options }: { email?: string; phone?: string; options?: unknown }) {
       void options; // GoTrue accepts options (e.g. shouldCreateUser); Better-Auth always creates.
+      // Phone (SMS) OTP under BACKEND_KIND=postgres is NOT yet wired: Better-Auth's
+      // emailOTP plugin is email-only; phone needs the phoneNumber plugin + an SMS
+      // provider (deploy follow-up). Fail loudly rather than silently drop the SMS.
+      if (phone && (!email || email.length === 0)) {
+        throw new ApiError(501, "phone_otp_unsupported", "phone OTP requires the Better-Auth phoneNumber plugin + SMS provider (not yet configured under BACKEND_KIND=postgres)");
+      }
       const auth = resolveAuth();
       // Better-Auth: send a sign-in OTP. Returns { success: true }; clients
       // expect a GoTrue-ish empty-ish ack after sending.
-      await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
+      await auth.api.sendVerificationOTP({ body: { email: email!, type: "sign-in" } });
       return {};
     },
 
-    async verifyOtp({ email, token }: { email: string; token: string; type?: string }) {
+    async verifyOtp({ email, phone, token }: { email?: string; phone?: string; token: string; type?: string }) {
+      // See signInOtp: phone OTP is not yet supported under BACKEND_KIND=postgres.
+      if (phone && (!email || email.length === 0)) {
+        throw new ApiError(501, "phone_otp_unsupported", "phone OTP requires the Better-Auth phoneNumber plugin + SMS provider (not yet configured under BACKEND_KIND=postgres)");
+      }
       const auth = resolveAuth();
-      const result = await auth.api.signInEmailOTP({ body: { email, otp: token } });
+      const result = await auth.api.signInEmailOTP({ body: { email: email!, otp: token } });
       return envelopeFromSignIn(auth, result);
     },
 

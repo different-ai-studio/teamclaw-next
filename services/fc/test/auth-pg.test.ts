@@ -121,6 +121,24 @@ test("email OTP full round trip through the repository -> GoTrue envelope", asyn
   assert.equal(env.token_type, "bearer");
 });
 
+test("phone-only OTP fails loudly with 501 (no SMS provider under postgres)", async () => {
+  const { repo } = await setup();
+
+  // signInOtp: phone-only must reject rather than silently send to undefined email.
+  await assert.rejects(
+    () => repo.signInOtp({ phone: "+15555550123" }),
+    (err: any) => err?.statusCode === 501 && err?.code === "phone_otp_unsupported",
+    "signInOtp with phone-only rejects 501 phone_otp_unsupported",
+  );
+
+  // verifyOtp: same guard.
+  await assert.rejects(
+    () => repo.verifyOtp({ phone: "+15555550123", token: "000000", type: "sms" }),
+    (err: any) => err?.statusCode === 501 && err?.code === "phone_otp_unsupported",
+    "verifyOtp with phone-only rejects 501 phone_otp_unsupported",
+  );
+});
+
 test("mintSession creates a session + JWT for an existing user id", async () => {
   const { auth, repo, keyset } = await setup();
   // Create a user via the repo, capture its id.
