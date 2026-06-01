@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/lib/utils'
 import { ensureJwtSynced } from '@/lib/jwt-bridge'
+import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
 
 // ---------------------------------------------------------------------------
 // Types — mirror FC GET /v1/teams/:id/share-mode response (camelCase JSON)
@@ -111,6 +112,9 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
       teamId,
       workspacePath,
     })
+    // Materialize the daemon's global dir + workspace symlink now (best-effort)
+    // so the synced directory exists immediately instead of after a restart.
+    await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)
     return res
   },
@@ -121,6 +125,7 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
       'team_share_enable_managed_git',
       { teamId, workspacePath },
     )
+    await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)
     return res
   },
@@ -131,6 +136,7 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
       'team_share_enable_custom_git',
       { teamId, workspacePath, input },
     )
+    await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)
     return res
   },

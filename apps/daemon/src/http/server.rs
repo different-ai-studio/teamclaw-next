@@ -572,4 +572,72 @@ mod tests {
         assert!(body["uptime_seconds"].as_i64().unwrap() >= 0);
         handle.shutdown().await;
     }
+
+    // `boot()` mints a default-scope token (no `workspace:write`), so a
+    // `/v1/team/link` POST with it is rejected by `require_scope` *before* any
+    // daemon-config / filesystem work — a hermetic check of the route wiring.
+    #[tokio::test]
+    async fn team_link_requires_workspace_write_scope() {
+        let (handle, client, base, session_token) = boot().await;
+        let resp = client
+            .post(format!("{base}/v1/team/link"))
+            .bearer_auth(&session_token)
+            .json(&serde_json::json!({"path": "/tmp/ws"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 403);
+        handle.shutdown().await;
+    }
+
+    // With `workspace:write` granted, an empty `path` is rejected by the
+    // handler's own validation — again before the single-team config load, so
+    // the test never touches the real `~/.amuxd/daemon.toml`.
+    #[tokio::test]
+    async fn team_link_rejects_empty_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("token");
+        let cfg = HttpConfig {
+            bind: "127.0.0.1:0".into(),
+            token_file: Some(token_path.clone()),
+            port_file: Some(dir.path().join("port")),
+            heartbeat_interval: std::time::Duration::from_secs(5),
+            ..HttpConfig::default()
+        };
+        let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
+        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None, None)
+            .await
+            .unwrap();
+        let base = format!("http://{}", handle.local_addr);
+        let root = std::fs::read_to_string(&token_path)
+            .unwrap()
+            .trim()
+            .to_owned();
+        let client = reqwest::Client::new();
+        let exchanged: serde_json::Value = client
+            .post(format!("{base}/v1/auth/exchange"))
+            .bearer_auth(&root)
+            .json(&serde_json::json!({
+                "scopes": ["workspace:write"],
+                "ttl_seconds": 3600,
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let token = exchanged["token"].as_str().unwrap().to_string();
+
+        let resp = client
+            .post(format!("{base}/v1/team/link"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({"path": "   "}))
+            .send()
+            .await
+            .unwrap();
+        // `HttpError::validation` → 422 Unprocessable Entity.
+        assert_eq!(resp.status().as_u16(), 422);
+        handle.shutdown().await;
+    }
 }

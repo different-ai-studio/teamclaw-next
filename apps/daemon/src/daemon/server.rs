@@ -168,9 +168,13 @@ pub(crate) fn group_workspaces_by_team(
 /// until the next restart. Factored out as a free function so every binding
 /// path (startup sweep, startup registration, AddWorkspace RPC) can trigger it
 /// on demand. Safe to call repeatedly; an empty `team_id` is a no-op.
-pub(crate) fn ensure_team_link(team_id: &str, ws_path: &str) {
+pub(crate) fn ensure_team_link(
+    team_id: &str,
+    ws_path: &str,
+) -> crate::config::workspace_link::LinkStatus {
+    use crate::config::workspace_link::LinkStatus;
     if team_id.trim().is_empty() || ws_path.trim().is_empty() {
-        return;
+        return LinkStatus::Fallback;
     }
     let global_dir = crate::config::global_team_store::global_team_dir(team_id);
     // Git-backed teams clone/pull into the global dir first (`git clone` needs
@@ -185,7 +189,7 @@ pub(crate) fn ensure_team_link(team_id: &str, ws_path: &str) {
     // Create the fixed shared layout if missing (idempotent).
     if let Err(e) = crate::config::global_team_store::ensure_initialized(team_id) {
         warn!(team_id, "global team dir init failed: {e}");
-        return;
+        return LinkStatus::Fallback;
     }
     let ws_root = Path::new(ws_path);
     let status = crate::config::workspace_link::ensure_workspace_link(ws_root, team_id);
@@ -198,6 +202,7 @@ pub(crate) fn ensure_team_link(team_id: &str, ws_path: &str) {
         effective = %effective.display(),
         "team link: {status:?}"
     );
+    status
 }
 
 /// Pure policy for which team_id (if any) to stamp on a freshly-added

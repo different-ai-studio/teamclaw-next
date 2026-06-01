@@ -15,6 +15,7 @@ use super::limit::{body_limit_layer, rate_limit_layer};
 use super::observ::request_id_layer;
 use super::sessions;
 use super::state::HttpState;
+use super::team;
 use super::workspaces;
 
 pub fn build(state: HttpState) -> Router {
@@ -109,6 +110,9 @@ pub fn build(state: HttpState) -> Router {
             "/v1/workspaces/:id/runtime/reload",
             post(workspaces::reload_runtime),
         )
+        // Team-share: materialize the global dir + workspace symlink on demand
+        // (called by the app right after enabling/joining team-share).
+        .route("/v1/team/link", post(team::link_team_workspace))
         .layer(body_limit_layer(body_cap))
         .layer(middleware::from_fn_with_state(
             state.clone(),

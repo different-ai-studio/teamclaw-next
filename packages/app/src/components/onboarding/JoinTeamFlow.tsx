@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { Loader2 } from 'lucide-react'
 
 import { TeamSecretEntry } from '@/components/settings/team/TeamSecretEntry'
+import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
 
 type Phase = 'loading' | 'not_opened' | 'initializing' | 'secret_prompt' | 'error'
 
@@ -63,6 +64,11 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
           setPhase('not_opened')
           return
         }
+        // Materialize the daemon's global dir + workspace symlink now
+        // (best-effort) so the synced directory exists immediately rather than
+        // waiting for the daemon's next start or the first runtime.
+        await linkDaemonTeamWorkspace(workspacePath)
+        if (cancelled) return
         setMode(res.shareMode)
         setPhase('secret_prompt')
       } catch (e) {
