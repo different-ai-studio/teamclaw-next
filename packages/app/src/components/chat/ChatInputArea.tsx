@@ -23,6 +23,10 @@ import {
 import { FileMentionPopover } from "./FileMentionPopover";
 import { MentionPopover } from "./MentionPopover";
 import { AgentSelectorDock } from "./AgentSelectorDock";
+import {
+  StreamingAgentsBar,
+  type ActiveStreamingAgent,
+} from "./StreamingAgentsBar";
 import { CommandPopover } from "./CommandPopover";
 import type { Command as ChatCommand } from "./CommandPopover";
 import { FileInputButton } from "./FileInputButton";
@@ -155,6 +159,8 @@ interface ChatInputAreaProps {
   engagedAgents: AttachedAgent[];
   onEngageAgent: (agent: AttachedAgent) => void;
   onRemoveAgent: (agentId: string) => void;
+  activeStreamingAgents?: ReadonlyArray<ActiveStreamingAgent>;
+  onInterruptAgent?: (agentId: string) => void;
 }
 
 function isImagePath(path: string): boolean {
@@ -183,6 +189,8 @@ export function ChatInputArea({
   engagedAgents = [],
   onEngageAgent = () => {},
   onRemoveAgent = () => {},
+  activeStreamingAgents = [],
+  onInterruptAgent,
 }: ChatInputAreaProps) {
   const { t } = useTranslation();
 
@@ -285,6 +293,12 @@ export function ChatInputArea({
     >
       <div className={cn("relative w-full", compact ? "" : "mx-auto max-w-3xl")}>
         {/* Permission & Error UI (rendered above input so it's visible) */}
+        {onInterruptAgent ? (
+          <StreamingAgentsBar
+            agents={activeStreamingAgents}
+            onInterrupt={onInterruptAgent}
+          />
+        ) : null}
         {headerContent}
 
         <div className="relative">

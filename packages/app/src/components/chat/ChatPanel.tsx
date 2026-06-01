@@ -45,6 +45,12 @@ import { MessageList, type MessageListHandle } from "./MessageList";
 import { SessionErrorAlert } from "./SessionErrorAlert";
 import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
+import {
+  interruptAgentActor,
+  interruptAllActiveAgents,
+} from "@/lib/teamclaw/interrupt-agent";
+import { isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
+import { toast } from "sonner";
 import { AcpStreamDebugPanel } from "./AcpStreamDebugPanel";
 import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
@@ -362,6 +368,51 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const acts = useSessionStore.getState();
   const abortSession = acts.abortSession;
   const removeFromQueue = acts.removeFromQueue;
+
+  const handleInterruptAgent = React.useCallback(
+    (agentActorId: string) => {
+      if (!activeSessionId) return;
+      void (async () => {
+        try {
+          await interruptAgentActor({
+            sessionId: activeSessionId,
+            agentActorId,
+          });
+        } catch (error) {
+          toast.error(
+            t("chat.interruptFailed", "无法打断 agent 回复"),
+            {
+              description:
+                error instanceof Error ? error.message : String(error),
+            },
+          );
+        }
+      })();
+    },
+    [activeSessionId, t],
+  );
+
+  const handleAbort = React.useCallback(() => {
+    if (!activeSessionId) return;
+    if (isOpenCodeSessionId(activeSessionId)) {
+      void abortSession();
+      return;
+    }
+    void (async () => {
+      try {
+        await interruptAllActiveAgents(activeSessionId);
+      } catch (error) {
+        toast.error(
+          t("chat.interruptFailed", "无法打断 agent 回复"),
+          {
+            description:
+              error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    })();
+  }, [activeSessionId, abortSession, t]);
+
   const loadSessions = acts.loadSessions;
   const resetSessions = acts.resetSessions;
   const clearSessionError = acts.clearSessionError;
@@ -414,6 +465,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     },
     [],
   );
+
+  const activeStreamingAgents = React.useMemo(() => {
+    const seen = new Set<string>();
+    const agents: Array<{ actorId: string; displayName?: string }> = [];
+    for (const entry of v2Streams) {
+      if (!entry.active || seen.has(entry.actorId)) continue;
+      seen.add(entry.actorId);
+      const engaged = engagedAgents.find((agent) => agent.id === entry.actorId);
+      agents.push({
+        actorId: entry.actorId,
+        displayName: engaged?.displayName,
+      });
+    }
+    return agents;
+  }, [v2Streams, engagedAgents]);
 
   // Existing sessions can be reopened after a reload with no in-memory
   // engaged agents selected. If there is exactly one agent participant,
@@ -629,7 +695,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     return () => clearTimeout(t);
   }, [activeSessionId, displaySessionId]);
 
-  const isStreaming = !!streamingMessageId;
+  const isStreaming = !!streamingMessageId || activeStreamingAgents.length > 0;
 
   // ── Provider & Team mode init ──────────────────────────────────────
   // Merged to avoid race condition: team mode restarts the agent, which
@@ -1927,12 +1993,14 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
               });
             }}
             onRemoveAgent={removeAgentForSession}
+            activeStreamingAgents={activeStreamingAgents}
+            onInterruptAgent={handleInterruptAgent}
             imageFiles={imageFiles}
             onImageFilesChange={handleImageFilesChange}
             onRemoveImageFile={removeImageFile}
             onSubmit={handleSubmit}
             isStreaming={isStreaming}
-            onAbort={abortSession}
+            onAbort={handleAbort}
             messageQueue={messageQueue}
             onRemoveFromQueue={removeFromQueue}
             onHeightChange={handleInputHeightChange}

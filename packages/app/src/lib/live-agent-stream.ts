@@ -9,6 +9,21 @@ export function agentStreamKey(sessionId: string, actorId: string): string {
   return `${sessionId}::${actorId}`;
 }
 
+let discardPendingStreamReplyHandler:
+  | ((sessionId: string, actorId: string) => void)
+  | null = null;
+
+/** App registers a handler to drop parked AGENT_REPLY rows without persisting. */
+export function registerDiscardPendingStreamReply(
+  handler: ((sessionId: string, actorId: string) => void) | null,
+): void {
+  discardPendingStreamReplyHandler = handler;
+}
+
+export function discardPendingStreamReply(sessionId: string, actorId: string): void {
+  discardPendingStreamReplyHandler?.(sessionId, actorId);
+}
+
 const SEEN_LIVE_EVENT_IDS_CAP = 2_000;
 
 /** Dedupe MQTT live envelopes that may be redelivered with the same eventId. */
