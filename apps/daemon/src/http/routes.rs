@@ -54,6 +54,18 @@ pub fn build(state: HttpState) -> Router {
                 .delete(workspaces::delete_provider_auth),
         )
         .route(
+            "/v1/workspaces/:id/provider-auth-methods",
+            get(workspaces::get_provider_auth_methods),
+        )
+        .route(
+            "/v1/workspaces/:id/providers/:provider_id/oauth/authorize",
+            post(workspaces::post_provider_oauth_authorize),
+        )
+        .route(
+            "/v1/workspaces/:id/providers/:provider_id/oauth/callback",
+            post(workspaces::post_provider_oauth_callback),
+        )
+        .route(
             "/v1/workspaces/:id/model-catalog",
             get(workspaces::get_model_catalog),
         )

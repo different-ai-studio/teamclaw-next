@@ -192,6 +192,13 @@ pub fn prepare_workspace(workspace_path: &Path) -> Result<(), WorkspaceControlEr
 
     ensure_default_permissions(workspace_path)?;
     ensure_inherent_mcp(workspace_path)?;
+    if let Err(e) = crate::config::ensure_opencode_xdg_dirs(workspace_path) {
+        tracing::warn!(
+            workspace = %workspace_path.display(),
+            error = %e,
+            "failed to create .opencode xdg dirs"
+        );
+    }
     ensure_inherent_skills_in_dir(&workspace_path.join(".teamclaw/skills"))?;
     ensure_inherent_skills_in_dir(&workspace_path.join(".opencode/skills"))?;
 
@@ -246,7 +253,7 @@ impl RuntimeSupervisor {
         // NOTE: status reads must be side-effect free. Workspace bootstrap
         // (writing opencode.json defaults, syncing skill dirs) happens at
         // runtime start (`runtime_adapter` spawn) and on explicit
-        // `reload_workspace`, not here — otherwise polling this GET endpoint
+        // `reload_workspace`, not here � otherwise polling this GET endpoint
         // would silently rewrite config and delete/recreate skill dirs.
         let manager = self.agents.lock().await;
         let agent_type = manager.default_agent_type();
@@ -314,5 +321,6 @@ mod tests {
         assert!(cfg.get("permission").is_some());
 
         assert!(dir.path().join(".teamclaw/skills/create-role/SKILL.md").is_file());
+        assert!(dir.path().join(".opencode/data").is_dir());
     }
 }

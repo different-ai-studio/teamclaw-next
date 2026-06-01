@@ -355,6 +355,7 @@ export const LLMSection = React.memo(function LLMSection() {
     setOAuthMethodType(null)
     setOAuthCodeInput('')
     setConnectDialogOpen(true)
+    void refreshAuthMethods()
   }
 
   const handleConnectSubmit = async () => {

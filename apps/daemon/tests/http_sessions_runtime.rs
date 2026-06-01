@@ -4,6 +4,8 @@ mod backend;
 mod config;
 #[path = "../src/error.rs"]
 mod error;
+#[path = "../src/opencode_settings/mod.rs"]
+mod opencode_settings;
 #[path = "../src/http/mod.rs"]
 mod http;
 #[path = "../src/proto.rs"]
@@ -183,7 +185,14 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         None,
     )));
     let runtime = RuntimeManagerAdapter::new(manager.clone(), 256);
-    let handle = http::spawn(cfg, http::server::metadata("actor".into(), "test"), runtime, None, None)
+    let handle = http::spawn(
+        cfg,
+        http::server::metadata("actor".into(), "test"),
+        runtime,
+        None,
+        None,
+        None,
+    )
         .await
         .expect("spawn http server");
     let base = format!("http://{}", handle.local_addr);

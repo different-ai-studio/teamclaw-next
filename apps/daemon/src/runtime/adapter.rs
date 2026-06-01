@@ -1138,7 +1138,7 @@ fn build_acp_process_command(
         c
     };
     for (key, value) in extra_env {
-        if std::env::var_os(key).is_none() {
+        if crate::config::is_forced_workspace_xdg_key(key) || std::env::var_os(key).is_none() {
             cmd.env(key, value);
         }
     }

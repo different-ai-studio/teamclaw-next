@@ -46,6 +46,8 @@ pub struct HttpState {
     /// that case.
     pub workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
     pub runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
+    /// Loopback `opencode serve` pool for provider OAuth (settings only).
+    pub opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
 }
 
 impl HttpState {
@@ -56,6 +58,7 @@ impl HttpState {
         runtime: Arc<dyn RuntimeAdapter>,
         workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
         runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
+        opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
     ) -> Self {
         Self {
             config: Arc::new(config),
@@ -67,6 +70,7 @@ impl HttpState {
             limiter: RateLimiter::new(),
             workspace_control,
             runtime_supervisor,
+            opencode_settings,
         }
     }
 }

@@ -10,6 +10,7 @@ mod http;
 mod mqtt;
 mod nats;
 mod onboarding;
+mod opencode_settings;
 mod proto;
 mod provider_config;
 mod runtime;
