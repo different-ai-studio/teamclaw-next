@@ -73,15 +73,16 @@ describe('provider store initAll', () => {
     mocks.getDaemonProviders.mockResolvedValue(null)
   })
 
-  it('ignores daemon runtime models when initializing model settings', async () => {
+  it('surfaces OpenCode runtime-advertised models in model settings', async () => {
     mocks.runtimeById = {
       'runtime-1': {
         info: {
-          agentType: 1,
+          agentType: 2,
           availableModels: [
-            { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6' },
+            { id: 'openai/gpt-4o', displayName: 'GPT-4o' },
+            { id: 'opencode/qwen3.6-plus-free', displayName: 'OpenCode Zen/Qwen3.6 Plus Free' },
           ],
-          currentModel: 'claude-sonnet-4-6',
+          currentModel: 'openai/gpt-4o',
         },
       },
     }
@@ -91,11 +92,24 @@ describe('provider store initAll', () => {
     await useProviderStore.getState().initAll()
 
     const state = useProviderStore.getState()
-    expect(state.models).toEqual([])
-    expect(state.configuredProviders).toEqual([])
-    expect(state.providers).toEqual([])
-    expect(state.currentModelKey).toBeNull()
-    expect(getSelectedModelOption(state)).toBeNull()
+    expect(state.providers).toEqual(
+      expect.arrayContaining([
+        { id: 'openai', name: 'OpenAI', configured: true },
+        { id: 'opencode', name: 'OpenCode', configured: true },
+      ]),
+    )
+    expect(state.models).toEqual(
+      expect.arrayContaining([
+        { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o' },
+        { provider: 'opencode', id: 'qwen3.6-plus-free', name: 'OpenCode Zen/Qwen3.6 Plus Free' },
+      ]),
+    )
+    expect(state.currentModelKey).toBe('openai/gpt-4o')
+    expect(getSelectedModelOption(state)).toMatchObject({
+      provider: 'openai',
+      id: 'gpt-4o',
+      name: 'GPT-4o',
+    })
   })
 
   it('keeps an explicit selected model when daemon reports a different catalog', async () => {
@@ -118,7 +132,7 @@ describe('provider store initAll', () => {
     expect(useProviderStore.getState().currentModelKey).toBe('opencode/opencode/big-pickle')
   })
 
-  it('does not recover a saved model when daemon providers are unavailable', async () => {
+  it('shows OpenAI as a connectable provider when daemon providers are unavailable', async () => {
     localStorage.setItem('teamclaw-selected-model:/workspace/demo', 'openai/gpt-4o')
 
     const { useProviderStore } = await import('../provider')
@@ -128,6 +142,7 @@ describe('provider store initAll', () => {
     const state = useProviderStore.getState()
     expect(state.models).toEqual([])
     expect(state.configuredProviders).toEqual([])
+    expect(state.providers).toEqual([{ id: 'openai', name: 'OpenAI', configured: false }])
     expect(state.currentModelKey).toBeNull()
   })
 

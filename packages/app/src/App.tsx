@@ -1274,15 +1274,22 @@ function AppContent() {
   const currentSessionId = useSessionSelectionStore((s) => s.currentSessionId);
   const hasCurrentSession = Boolean(currentSessionId);
   const messageRefreshTrigger = useSessionMessageStore((s) => s.messageRefreshTrigger);
+  const messageRefreshForceFull = useSessionMessageStore((s) => s.messageRefreshForceFull);
   const prevRefreshTriggerRef = useRef(0);
   useEffect(() => {
     if (!currentSessionId) return;
     if (isV2E2EControlActive()) return;
-    // A refresh-trigger bump on the SAME session = user pressed ↻.
+    // A refresh-trigger bump on the SAME session = user pressed ↻, or an
+    // explicit full reload (e.g. opening a cron session from run history).
+    const triggerBumped =
+      messageRefreshTrigger !== prevRefreshTriggerRef.current;
     const forceFull =
-      messageRefreshTrigger !== prevRefreshTriggerRef.current &&
-      prevRefreshTriggerRef.current !== 0;
+      messageRefreshForceFull ||
+      (triggerBumped && prevRefreshTriggerRef.current !== 0);
     prevRefreshTriggerRef.current = messageRefreshTrigger;
+    if (messageRefreshForceFull) {
+      useSessionMessageStore.setState({ messageRefreshForceFull: false });
+    }
     let cancelled = false;
     const kindMap: Record<string, MessageKind> = {
       text: MessageKind.TEXT,
@@ -1401,7 +1408,7 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [currentSessionId, messageRefreshTrigger, workspacePath]);
+  }, [currentSessionId, messageRefreshTrigger, messageRefreshForceFull, workspacePath]);
 
   /** When left dock opens, hide the main sidebar; restore prior expansion when it closes. */
   const restoreSidebarAfterLeftDockRef = useRef<boolean | null>(null);

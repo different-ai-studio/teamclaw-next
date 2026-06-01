@@ -5,6 +5,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { workspaceScopedKey } from '@/lib/storage'
 import { sessionFlowLog } from '@/lib/session-flow-log'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useRuntimeStateStore } from '@/stores/runtime-state-store'
+import { AgentType } from '@/lib/proto/amux_pb'
 import {
   encodeWorkspaceId,
   putDaemonProviderAuth,
@@ -18,6 +20,9 @@ import {
 } from '@/lib/opencode/config'
 
 const SELECTED_MODEL_BASE = `${appShortName}-selected-model`
+const DEFAULT_CONNECTABLE_PROVIDERS: ProviderEntry[] = [
+  { id: 'openai', name: 'OpenAI', configured: false },
+]
 
 function selectedModelStorageKey(): string {
   return workspaceScopedKey(SELECTED_MODEL_BASE, useWorkspaceStore.getState().workspacePath)
@@ -57,6 +62,136 @@ function daemonProvidersToConfigured(
   return { configuredProviders, providers }
 }
 
+function providerDisplayName(providerId: string): string {
+  switch (providerId.toLowerCase()) {
+    case 'openai':
+      return 'OpenAI'
+    case 'opencode':
+      return 'OpenCode'
+    case 'claude-code':
+      return 'Claude Code'
+    case 'codex':
+      return 'Codex'
+    default:
+      return providerId
+        .split(/[-_\s]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ') || providerId
+  }
+}
+
+function splitRuntimeModelId(agentType: AgentType, runtimeModelId: string): [string, string] {
+  const trimmed = runtimeModelId.trim()
+  const slash = trimmed.indexOf('/')
+  if (slash > 0) {
+    return [trimmed.slice(0, slash), trimmed.slice(slash + 1)]
+  }
+  switch (agentType) {
+    case AgentType.OPENCODE:
+      return ['opencode', trimmed]
+    case AgentType.CODEX:
+      return ['codex', trimmed]
+    case AgentType.CLAUDE_CODE:
+      return ['claude-code', trimmed]
+    default:
+      return ['opencode', trimmed]
+  }
+}
+
+function runtimeModelsToConfigured(disconnectedIds: Set<string>): ConfiguredProvider[] {
+  const byProvider = new Map<string, ConfiguredProvider>()
+  const entries = Object.values(useRuntimeStateStore.getState().byRuntimeId)
+
+  for (const entry of entries) {
+    const agentType = entry.info.agentType
+    if (agentType !== AgentType.OPENCODE && agentType !== AgentType.CODEX) continue
+
+    for (const runtimeModel of entry.info.availableModels) {
+      const modelRef = runtimeModel.id?.trim()
+      if (!modelRef) continue
+
+      const [providerId, modelId] = splitRuntimeModelId(agentType, modelRef)
+      if (!providerId || !modelId || disconnectedIds.has(providerId)) continue
+
+      let provider = byProvider.get(providerId)
+      if (!provider) {
+        provider = {
+          id: providerId,
+          name: providerDisplayName(providerId),
+          models: [],
+        }
+        byProvider.set(providerId, provider)
+      }
+      if (!provider.models.some((model) => model.id === modelId)) {
+        provider.models.push({
+          id: modelId,
+          name: runtimeModel.displayName?.trim() || modelId,
+        })
+      }
+    }
+  }
+
+  return Array.from(byProvider.values())
+}
+
+function mergeConfiguredProviders(
+  configuredProviders: ConfiguredProvider[],
+  runtimeProviders: ConfiguredProvider[],
+): ConfiguredProvider[] {
+  const merged = new Map<string, ConfiguredProvider>()
+
+  for (const provider of [...configuredProviders, ...runtimeProviders]) {
+    const existing = merged.get(provider.id)
+    if (!existing) {
+      merged.set(provider.id, {
+        id: provider.id,
+        name: provider.name,
+        models: [...provider.models],
+      })
+      continue
+    }
+    for (const model of provider.models) {
+      if (!existing.models.some((existingModel) => existingModel.id === model.id)) {
+        existing.models.push(model)
+      }
+    }
+  }
+
+  return Array.from(merged.values())
+}
+
+function mergeProviderEntries(
+  providers: ProviderEntry[],
+  configuredProviders: ConfiguredProvider[],
+): ProviderEntry[] {
+  const byProvider = new Map(
+    [...DEFAULT_CONNECTABLE_PROVIDERS, ...providers].map((provider) => [
+      provider.id,
+      { ...provider },
+    ]),
+  )
+
+  for (const provider of configuredProviders) {
+    const existing = byProvider.get(provider.id)
+    if (existing) {
+      existing.configured = true
+      if (!existing.name) existing.name = provider.name
+    } else {
+      byProvider.set(provider.id, {
+        id: provider.id,
+        name: provider.name,
+        configured: true,
+      })
+    }
+  }
+
+  return Array.from(byProvider.values()).sort((a, b) => {
+    if (a.configured !== b.configured) return a.configured ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
 const daemonProvidersInflight = new Map<string, Promise<DaemonProviderInfo[] | null>>()
 
 async function loadDaemonProvidersForWorkspace(workspacePath: string): Promise<DaemonProviderInfo[] | null> {
@@ -78,8 +213,15 @@ async function loadDaemonProviderSnapshot(
   providers: ProviderEntry[]
 } | null> {
   const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
-  if (daemonProviders === null) return null
-  return daemonProvidersToConfigured(daemonProviders, disconnectedIds)
+  const snapshot = daemonProvidersToConfigured(daemonProviders ?? [], disconnectedIds)
+  const configuredProviders = mergeConfiguredProviders(
+    snapshot.configuredProviders,
+    runtimeModelsToConfigured(disconnectedIds),
+  )
+  return {
+    configuredProviders,
+    providers: mergeProviderEntries(snapshot.providers, configuredProviders),
+  }
 }
 
 /** Load configured models for an explicit workspace path (cron scope, etc.). */
@@ -460,17 +602,19 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       set({ providersLoading: true, configuredProvidersLoading: true })
       try {
         const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
-        if (daemonProviders !== null) {
-          const snapshot = daemonProvidersToConfigured(daemonProviders, get()._disconnectedIds)
-          set({
-            providers: snapshot.providers,
-            configuredProviders: snapshot.configuredProviders,
-            models: flattenConfiguredProviders(snapshot.configuredProviders),
-            customProviderIds: daemonProviders
-              .filter((p) => p.id !== 'team' && p.authenticated)
-              .map((p) => p.id),
-          })
-        }
+        const baseSnapshot = daemonProvidersToConfigured(daemonProviders ?? [], get()._disconnectedIds)
+        const configuredProviders = mergeConfiguredProviders(
+          baseSnapshot.configuredProviders,
+          runtimeModelsToConfigured(get()._disconnectedIds),
+        )
+        set({
+          providers: mergeProviderEntries(baseSnapshot.providers, configuredProviders),
+          configuredProviders,
+          models: flattenConfiguredProviders(configuredProviders),
+          customProviderIds: (daemonProviders ?? [])
+            .filter((p) => p.id !== 'team' && p.authenticated)
+            .map((p) => p.id),
+        })
       } catch (err) {
         console.error('Failed to initialize providers:', err)
       } finally {
