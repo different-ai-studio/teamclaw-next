@@ -3956,7 +3956,17 @@ impl DaemonServer {
                 {
                     *existing = ws.clone();
                 }
-                if outcome.inserted && !ws.remote_workspace_id.is_empty() {
+                // Set as cloud + local default when:
+                //   (a) newly inserted — always promote first workspace on
+                //       a fresh daemon; OR
+                //   (b) no local default is stored yet — covers the case
+                //       where the user clicked "Set default" in the UI on an
+                //       existing workspace; the UI calls addWorkspace to
+                //       re-register the path, so we use the absence of a
+                //       local default as the signal to persist it now.
+                let needs_default = outcome.inserted
+                    || self.workspaces.default_workspace_id.is_none();
+                if needs_default && !ws.remote_workspace_id.is_empty() {
                     if let Err(e) = self
                         .backend
                         .set_agent_default_workspace(&ws.remote_workspace_id)
