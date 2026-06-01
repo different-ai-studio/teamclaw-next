@@ -59,15 +59,28 @@ function daemonProvidersToConfigured(
   return { configuredProviders, providers }
 }
 
-async function loadDaemonProviderSnapshot(disconnectedIds: Set<string>): Promise<{
+async function loadDaemonProviderSnapshot(
+  workspacePath: string,
+  disconnectedIds: Set<string>,
+): Promise<{
   configuredProviders: ConfiguredProvider[]
   providers: ProviderEntry[]
 } | null> {
-  const workspacePath = useWorkspaceStore.getState().workspacePath
-  if (!workspacePath) return null
   const daemonProviders = await getDaemonProviders(encodeWorkspaceId(workspacePath))
   if (daemonProviders === null) return null
   return daemonProvidersToConfigured(daemonProviders, disconnectedIds)
+}
+
+/** Load configured models for an explicit workspace path (cron scope, etc.). */
+export async function loadConfiguredProvidersForWorkspace(
+  workspacePath: string,
+): Promise<{ configuredProviders: ConfiguredProvider[]; models: ModelOption[] } | null> {
+  const snapshot = await loadDaemonProviderSnapshot(workspacePath, new Set())
+  if (!snapshot) return null
+  return {
+    configuredProviders: snapshot.configuredProviders,
+    models: flattenConfiguredProviders(snapshot.configuredProviders),
+  }
 }
 
 export interface ProviderAuthMethod {
@@ -132,6 +145,7 @@ export interface ProviderState {
   // custom providers (defined in the legacy workspace config) as "connected"
   // even after auth is removed, so we track them here and filter during refreshes.
   _disconnectedIds: Set<string>
+  _workspacePath: string | null
 
   // Actions
   refreshAuthMethods: () => Promise<void>
@@ -166,6 +180,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   currentModelKey: null,
   customProviderIds: [],
   _disconnectedIds: new Set<string>(),
+  _workspacePath: null,
 
   refreshAuthMethods: async () => {
     set({ authMethods: {} })
@@ -184,7 +199,12 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   refreshProviders: async () => {
     set({ providersLoading: true })
     try {
-      const snapshot = await loadDaemonProviderSnapshot(get()._disconnectedIds)
+      const workspacePath = useWorkspaceStore.getState().workspacePath
+      if (!workspacePath) {
+        set({ providersLoading: false })
+        return
+      }
+      const snapshot = await loadDaemonProviderSnapshot(workspacePath, get()._disconnectedIds)
       if (!snapshot) {
         set({ providersLoading: false })
         return
@@ -199,7 +219,12 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   refreshConfiguredProviders: async () => {
     set({ configuredProvidersLoading: true })
     try {
-      const snapshot = await loadDaemonProviderSnapshot(get()._disconnectedIds)
+      const workspacePath = useWorkspaceStore.getState().workspacePath
+      if (!workspacePath) {
+        set({ configuredProvidersLoading: false })
+        return
+      }
+      const snapshot = await loadDaemonProviderSnapshot(workspacePath, get()._disconnectedIds)
       if (!snapshot) {
         set({ configuredProvidersLoading: false })
         return
@@ -420,6 +445,16 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Initialize all data at once
   initAll: async () => {
+    const workspacePathAtStart = useWorkspaceStore.getState().workspacePath
+    const previousWorkspacePath = get()._workspacePath
+    const workspaceChanged =
+      previousWorkspacePath !== null && previousWorkspacePath !== workspacePathAtStart
+    if (workspaceChanged) {
+      set({ currentModelKey: null, _workspacePath: workspacePathAtStart ?? null })
+    } else if (previousWorkspacePath === null) {
+      set({ _workspacePath: workspacePathAtStart ?? null })
+    }
+
     await Promise.all([
       get().refreshProviders().catch(() => undefined),
       get().refreshConfiguredProviders().catch(() => undefined),

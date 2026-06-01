@@ -10,7 +10,6 @@ import { useSidebar } from '@/components/ui/sidebar'
 import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatRelativeTime } from '@/lib/date-format'
-import { useSessionListStore } from '@/stores/session-list-store'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useUIStore } from '@/stores/ui'
 import { cn, isTauri } from '@/lib/utils'
@@ -44,7 +43,6 @@ export interface UseActorsForTeamResult {
 }
 
 export function useActorsForTeam(): UseActorsForTeamResult {
-  const sessionRows = useSessionListStore((s) => s.rows)
   const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const [fallbackTeamId, setFallbackTeamId] = React.useState<string | null>(null)
   const [actors, setActors] = React.useState<ActorRow[]>([])
@@ -58,17 +56,15 @@ export function useActorsForTeam(): UseActorsForTeamResult {
       setFallbackTeamId(null)
       return
     }
-    const fromSession = sessionRows[0]?.team_id ?? null
-    if (fromSession) setFallbackTeamId(fromSession)
     let cancelled = false
     void (async () => {
       const session = await getBackend().auth.getSession()
       if (!session?.user || cancelled) return
       const actorRow = await getBackend().directory.resolveFirstMemberActorForUser(session.user.id)
-      if (!cancelled && !fromSession) setFallbackTeamId(actorRow?.team_id ?? null)
+      if (!cancelled) setFallbackTeamId(actorRow?.team_id ?? null)
     })()
     return () => { cancelled = true }
-  }, [sessionRows, currentTeamId])
+  }, [currentTeamId])
 
   React.useEffect(() => {
     if (!teamId) return

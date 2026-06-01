@@ -76,12 +76,43 @@ test("normalizeFcEvent: leaves event unchanged when queryStringParameters is emp
 test("normalizeFcEvent: backfills rawQueryString from queryParameters (FC 3.0)", () => {
   const event = {
     rawPath: "/v1/sync/actor-directory",
-    queryParameters: { teamId: "t1", since: "2024-01-01" },
+    queryStringParameters: {},
+    queryParameters: { teamId: "t1", since: "2026-05-01T00:00:00Z" },
   };
   normalizeFcEvent(event as any);
   const params = new URLSearchParams((event as any).rawQueryString);
   assert.equal(params.get("teamId"), "t1");
-  assert.equal(params.get("since"), "2024-01-01");
+  assert.equal(params.get("since"), "2026-05-01T00:00:00Z");
+});
+
+test("normalizeFcEvent: prefers queryParameters when queryStringParameters is empty", () => {
+  const event = {
+    rawPath: "/v1/sync/actor-directory",
+    queryParameters: { teamId: "fc3-team" },
+  };
+  normalizeFcEvent(event as any);
+  assert.equal(new URLSearchParams((event as any).rawQueryString).get("teamId"), "fc3-team");
+});
+
+test("handler forwards FC 3.0 queryParameters to GET /v1/sync/actor-directory", async () => {
+  const res: any = await handler(
+    {
+      rawPath: "/v1/sync/actor-directory",
+      requestContext: { http: { method: "GET" } },
+      headers: { authorization: "Bearer not-a-real-jwt" },
+      queryStringParameters: {},
+      queryParameters: { teamId: "fc3-handler-team" },
+      body: "",
+      isBase64Encoded: false,
+    },
+    {},
+  );
+  const body = JSON.parse(res.body);
+  assert.notEqual(
+    body?.error?.message,
+    "teamId is required",
+    "queryParameters were not backfilled into rawQueryString for Hono",
+  );
 });
 
 test("hono/aws-lambda base64-encodes binary (png) round-trip", async () => {

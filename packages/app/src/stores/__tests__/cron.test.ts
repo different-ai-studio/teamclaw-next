@@ -8,7 +8,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: {
-    getState: () => ({ workspacePath: '/test/workspace' }),
+    getState: () => ({ scope: 'global',
+      workspacePath: null }),
   },
 }))
 
@@ -43,6 +44,8 @@ describe('cron store', () => {
       isLoading: false,
       error: null,
       isInitialized: false,
+      activeScope: 'global',
+      selectedWorkspacePath: null,
       selectedJobId: null,
       runs: [],
       runsLoading: false,
@@ -61,8 +64,32 @@ describe('cron store', () => {
     mockInvoke.mockResolvedValueOnce([]) // cron_list_jobs via loadJobs
     mockInvoke.mockResolvedValueOnce([]) // cron_get_all_session_ids via loadCronSessionIds
     await useCronStore.getState().init()
-    expect(mockInvoke).toHaveBeenCalledWith('cron_init', { workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_init', {
+      scope: 'global',
+      workspacePath: null,
+    })
     expect(useCronStore.getState().isInitialized).toBe(true)
+  })
+
+  it('uses the selected workspace for workspace-scoped init and list calls', async () => {
+    useCronStore.setState({
+      activeScope: 'workspace',
+      selectedWorkspacePath: '/daemon/workspace-b',
+    })
+    mockInvoke.mockResolvedValueOnce(undefined) // cron_init
+    mockInvoke.mockResolvedValueOnce([]) // cron_list_jobs
+    mockInvoke.mockResolvedValueOnce([]) // cron_get_all_session_ids
+
+    await useCronStore.getState().init()
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'cron_init', {
+      scope: 'workspace',
+      workspacePath: '/daemon/workspace-b',
+    })
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'cron_list_jobs', {
+      scope: 'workspace',
+      workspacePath: '/daemon/workspace-b',
+    })
   })
 
   it('clearError resets error', () => {
@@ -280,7 +307,11 @@ describe('cron store actions', () => {
     const job = await useCronStore.getState().addJob(baseRequest)
     expect(job).toEqual(mockJob)
     expect(useCronStore.getState().jobs).toContainEqual(mockJob)
-    expect(mockInvoke).toHaveBeenCalledWith('cron_add_job', { request: baseRequest, workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_add_job', {
+      request: baseRequest,
+      scope: 'global',
+      workspacePath: null,
+    })
   })
 
   it('addJob propagates errors', async () => {
@@ -298,7 +329,8 @@ describe('cron store actions', () => {
     expect(useCronStore.getState().jobs[0].name).toBe('Updated Job')
     expect(mockInvoke).toHaveBeenCalledWith('cron_update_job', {
       request: { id: 'job-1', name: 'Updated Job' },
-      workspacePath: '/test/workspace',
+      scope: 'global',
+      workspacePath: null,
     })
   })
 
@@ -307,7 +339,11 @@ describe('cron store actions', () => {
     mockInvoke.mockResolvedValueOnce(undefined)
     await useCronStore.getState().removeJob('job-1')
     expect(useCronStore.getState().jobs).toHaveLength(0)
-    expect(mockInvoke).toHaveBeenCalledWith('cron_remove_job', { jobId: 'job-1', workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_remove_job', {
+      jobId: 'job-1',
+      scope: 'global',
+      workspacePath: null,
+    })
   })
 
   it('removeJob clears selectedJobId when the removed job was selected', async () => {
@@ -325,7 +361,8 @@ describe('cron store actions', () => {
     expect(mockInvoke).toHaveBeenCalledWith('cron_toggle_enabled', {
       jobId: 'job-1',
       enabled: false,
-      workspacePath: '/test/workspace',
+      scope: 'global',
+      workspacePath: null,
     })
   })
 
@@ -339,7 +376,8 @@ describe('cron store actions', () => {
     expect(mockInvoke).toHaveBeenCalledWith('cron_get_runs', {
       jobId: 'job-1',
       limit: 50,
-      workspacePath: '/test/workspace',
+      scope: 'global',
+      workspacePath: null,
     })
   })
 
@@ -364,7 +402,10 @@ describe('cron store actions', () => {
     mockInvoke.mockResolvedValueOnce([mockJob])
     await useCronStore.getState().loadJobs()
     expect(useCronStore.getState().jobs).toEqual([mockJob])
-    expect(mockInvoke).toHaveBeenCalledWith('cron_list_jobs', { workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_list_jobs', {
+      scope: 'global',
+      workspacePath: null,
+    })
   })
 
   it('reinit resets initialized flag and reloads jobs', async () => {
@@ -374,26 +415,36 @@ describe('cron store actions', () => {
     mockInvoke.mockResolvedValueOnce([]) // cron_get_all_session_ids
     await useCronStore.getState().reinit()
     expect(useCronStore.getState().isInitialized).toBe(true)
-    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'cron_init', { workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'cron_init', {
+      scope: 'global',
+      workspacePath: null,
+    })
   })
 
-  it('runJob passes workspacePath', async () => {
+  it('runJob passes scope args', async () => {
     mockInvoke.mockResolvedValueOnce(undefined)
     await useCronStore.getState().runJob('job-1')
-    expect(mockInvoke).toHaveBeenCalledWith('cron_run_job', { jobId: 'job-1', workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_run_job', {
+      jobId: 'job-1',
+      scope: 'global',
+      workspacePath: null,
+    })
   })
 
-  it('loadCronSessionIds passes workspacePath', async () => {
+  it('loadCronSessionIds passes scope args', async () => {
     mockInvoke.mockResolvedValueOnce(['sess-1'])
     await useCronStore.getState().loadCronSessionIds()
-    expect(mockInvoke).toHaveBeenCalledWith('cron_get_all_session_ids', { workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_get_all_session_ids', {
+      scope: 'global',
+      workspacePath: null,
+    })
     expect(useCronStore.getState().cronSessionIds).toEqual(new Set(['sess-1']))
   })
 
-  it('refreshDelivery passes workspacePath', async () => {
+  it('refreshDelivery invokes cron_refresh_delivery', async () => {
     mockInvoke.mockResolvedValueOnce(undefined)
     await useCronStore.getState().refreshDelivery()
-    expect(mockInvoke).toHaveBeenCalledWith('cron_refresh_delivery', { workspacePath: '/test/workspace' })
+    expect(mockInvoke).toHaveBeenCalledWith('cron_refresh_delivery')
   })
 
   it('toggleShowCronSessions flips the flag', () => {

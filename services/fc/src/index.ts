@@ -101,9 +101,12 @@ const app = createApp({
 
 const honoHandler = handle(app);
 
-// FC 3.0 HTTP trigger may populate queryStringParameters / queryParameters but
-// leave rawQueryString empty. hono/aws-lambda's v2 processor reads ONLY
-// rawQueryString — backfill it via queryParams() (same helper as route handlers).
+// FC 3.0 HTTP trigger may populate queryParameters (or queryStringParameters)
+// but leave rawQueryString empty/absent. hono/aws-lambda's v2 processor (used
+// when event.rawPath exists) reads ONLY rawQueryString for the query string —
+// it does NOT fall back to structured params. Backfill rawQueryString via
+// queryParams() so GET query params (e.g. /v1/sync/actor-directory?teamId=…)
+// are not silently dropped.
 export function normalizeFcEvent(event: any): any {
   if (!event.rawQueryString || event.rawQueryString === "") {
     const s = queryParams(event).toString();

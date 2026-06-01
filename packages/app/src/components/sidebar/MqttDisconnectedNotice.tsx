@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
-import { useSessionListStore } from '@/stores/session-list-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { useUIStore } from '@/stores/ui'
 import { useMqttConnected } from '@/hooks/useMqttConnected'
 
@@ -11,11 +11,11 @@ import { useMqttConnected } from '@/hooks/useMqttConnected'
 export function MqttDisconnectedNotice() {
   const { t } = useTranslation()
   const userId = useAuthStore((s) => s.session?.user.id ?? null)
-  const firstTeamId = useSessionListStore((s) => s.rows[0]?.team_id ?? null)
+  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const openSettings = useUIStore((s) => s.openSettings)
   const connected = useMqttConnected()
 
-  const expected = !!userId && !!firstTeamId
+  const expected = !!userId && !!currentTeamId
   if (!expected) return null
   if (connected !== false) return null
 

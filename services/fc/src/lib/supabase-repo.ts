@@ -994,17 +994,12 @@ export function createSupabaseBusinessRepository(options) {
     // --- Directory resolution (frontend supabase delegate parity) ---
 
     async resolveCallerActorForTeam(teamId) {
-      // Uses the caller's bearer token + RLS to find their own actor row in
-      // this team. Returns null when caller has no actor (or isn't a member).
-      const { data, error } = await supabase
-        .from("actors")
-        .select("id")
-        .eq("team_id", teamId)
-        .eq("actor_type", "member")
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data ? { id: data.id } : null;
+      // Resolve the bearer caller's member actor in this team (not any member).
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) return null;
+      return this.resolveCurrentMemberActor(teamId, userId);
     },
 
     async resolveCurrentMemberActor(teamId, userId) {
@@ -1334,14 +1329,24 @@ export function createSupabaseBusinessRepository(options) {
       // it requires `idea_id` (NOT NULL via legacy schema gated behind
       // newer migrations) and assumes the caller as the only seat.
       const id = input.id ?? randomUUID();
+      let createdByActorId = input.createdByActorId;
+      if (!createdByActorId) {
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        const userId = userData?.user?.id;
+        if (!userId) throw new ApiError(401, "unauthorized", "no authenticated user");
+        const resolved = await this.resolveCurrentMemberActor(input.teamId, userId);
+        if (!resolved?.id) throw new ApiError(403, "forbidden", "not a member of this team");
+        createdByActorId = resolved.id;
+      }
       const insertRow: any = {
         id,
         team_id: input.teamId,
         title: input.title,
         mode: input.mode ?? "collab",
         idea_id: input.ideaId ?? null,
+        created_by_actor_id: createdByActorId,
       };
-      if (input.createdByActorId) insertRow.created_by_actor_id = input.createdByActorId;
       if (input.primaryAgentId) insertRow.primary_agent_id = input.primaryAgentId;
       const { data, error } = await supabase
         .from("sessions")
@@ -1355,7 +1360,7 @@ export function createSupabaseBusinessRepository(options) {
       const seedActorIds = Array.from(
         new Set(
           [
-            input.createdByActorId,
+            createdByActorId,
             ...additionalIds,
             ...participantIds,
           ].filter((x) => typeof x === "string" && x.length > 0),
@@ -1921,9 +1926,26 @@ export function createSupabaseAuthRepository(options) {
     realtime: REALTIME_TRANSPORT_OPTS,
   });
 
+  // Build a Supabase client authorized as the caller, so the SECURITY DEFINER
+  // RPC sees `auth.uid()` (required for `kind='member'` claims). Lazily created
+  // per access token; the daemon's agent-claim flow has no token and reuses the
+  // shared anonClient.
+  function clientForToken(accessToken) {
+    if (!accessToken) return anonClient;
+    return createClient(supabaseUrl, publishableKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: REALTIME_TRANSPORT_OPTS,
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    });
+  }
+
   return {
-    async claimInvite(token) {
-      const { data, error } = await anonClient.rpc("claim_team_invite", { p_token: token });
+    // ctx.accessToken (optional): the joining user's bearer. Forwarded so the
+    // `claim_team_invite` RPC resolves `auth.uid()` for member invites. Absent
+    // for agent invites (daemon `amuxd init`), which the RPC self-provisions.
+    async claimInvite(token, ctx: { accessToken?: string } = {}) {
+      const client = clientForToken(ctx.accessToken);
+      const { data, error } = await client.rpc("claim_team_invite", { p_token: token });
       if (error) {
         const msg = error.message || "claim_team_invite failed";
         const lower = msg.toLowerCase();
@@ -2158,7 +2180,10 @@ function outgoingMessageRow(sessionId, input) {
     sender_actor_id: input.senderActorId,
     kind: input.kind ?? "text",
     content: input.content,
-    metadata: input.metadata ?? null,
+    // Column is `jsonb not null default '{}'`. An explicit NULL bypasses the
+    // default and trips the not-null constraint, so default to {} here (mirrors
+    // the pg-repo backend). iOS sends no metadata when a message has no mentions.
+    metadata: input.metadata ?? {},
     model: input.model ?? null,
     turn_id: input.turnId ?? null,
     reply_to_message_id: input.replyToMessageId ?? null,

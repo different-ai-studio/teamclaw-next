@@ -732,6 +732,19 @@ impl DaemonServer {
     ) -> anyhow::Result<serde_json::Value> {
         let parsed = parse_prompt_await_payload(payload)?;
 
+        let working_directory = match parsed.working_directory.filter(|s| !s.is_empty()) {
+            Some(dir) => dir.to_string(),
+            None => self
+                .workspaces
+                .default_workspace_path()
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no working directory: configure a default workspace in Daemon > Workspace settings"
+                    )
+                })?,
+        };
+
         // The daemon must have been onboarded (team_id present) before any
         // cron prompt can be honored — the gateway-session model expects a
         // team. Surface a clean error rather than panicking inside the
@@ -783,7 +796,7 @@ impl DaemonServer {
                         "cron",                                    // title (display only)
                         parsed.model_override.clone(),
                         Some(&sb_sid), // bind AgentReply to the cloud session
-                        parsed.working_directory, // spawn in caller-supplied worktree if Some(_)
+                        Some(working_directory.as_str()),
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
@@ -804,7 +817,7 @@ impl DaemonServer {
             };
 
         // Drive the turn through the ACP runtime.
-        let text = {
+        let turn_result = {
             let mut mgr = self.agents.lock().await;
             mgr.send_prompt_and_await_reply(
                 &acp_sid,
@@ -812,13 +825,24 @@ impl DaemonServer {
                 Duration::from_secs(parsed.timeout_secs),
             )
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?
         };
 
-        Ok(serde_json::json!({
-            "text": text,
-            "session_id": remote_session_id,
-        }))
+        // Always return the cloud session_id so the desktop can stamp it into
+        // the run record even when the turn itself fails (ACP timeout, etc.).
+        // On success: { "text": "...", "session_id": "..." }
+        // On failure: { "session_id": "...", "agent_error": "..." }
+        // The caller wraps this in  { "ok": true/false, "result": ... }
+        // — the desktop amuxd_client reads "session_id" and optional "agent_error".
+        match turn_result {
+            Ok(text) => Ok(serde_json::json!({
+                "text": text,
+                "session_id": remote_session_id,
+            })),
+            Err(e) => Ok(serde_json::json!({
+                "session_id": remote_session_id,
+                "agent_error": e.to_string(),
+            })),
+        }
     }
 
     /// Persist a new per-platform channel config (parsed from the second line
@@ -3840,7 +3864,17 @@ impl DaemonServer {
                 {
                     *existing = ws.clone();
                 }
-                if outcome.inserted && !ws.remote_workspace_id.is_empty() {
+                // Set as cloud + local default when:
+                //   (a) newly inserted — always promote first workspace on
+                //       a fresh daemon; OR
+                //   (b) no local default is stored yet — covers the case
+                //       where the user clicked "Set default" in the UI on an
+                //       existing workspace; the UI calls addWorkspace to
+                //       re-register the path, so we use the absence of a
+                //       local default as the signal to persist it now.
+                let needs_default = outcome.inserted
+                    || self.workspaces.default_workspace_id.is_none();
+                if needs_default && !ws.remote_workspace_id.is_empty() {
                     if let Err(e) = self
                         .backend
                         .set_agent_default_workspace(&ws.remote_workspace_id)

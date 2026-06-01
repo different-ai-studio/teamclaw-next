@@ -812,12 +812,12 @@ impl RuntimeManager {
     /// session's `primary_agent_id` would point to a dead slot.
     /// Used to populate the `primary_agent_id` of newly created collab sessions
     /// in v1 (multi-agent sessions are out of scope).
-    /// Number of registered agent runtimes (any status). Used by
-    /// `handle_prompt_await` to short-circuit when the daemon has never
-    /// spawned a runtime — that path returns `"no local agent runtime"`
-    /// to the caller rather than attempting to spawn one ad-hoc.
+    /// Whether any agent infrastructure is available: either an active session
+    /// or a prewarmed ACP host. Used by `handle_prompt_await` to gate cron
+    /// execution without requiring the Tauri app to have created a session
+    /// first (which would break cron on fresh daemon starts).
     pub fn agent_count(&self) -> usize {
-        self.agents.len()
+        self.agents.len() + self.acp_host_pool.host_count()
     }
 
     pub fn first_running_agent_id(&self) -> Option<String> {

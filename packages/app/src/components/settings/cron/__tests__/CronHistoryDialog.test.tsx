@@ -1,5 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+
+const mocks = vi.hoisted(() => ({
+  getSessionTeamId: vi.fn(),
+  listSessionDisplayRows: vi.fn(),
+  upsertRows: vi.fn(),
+  reloadAndSwitchTo: vi.fn(),
+  currentTeam: { id: 'team-1' } as { id: string } | null,
+}))
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -30,7 +38,45 @@ vi.mock('@/stores/ui', () => ({
   },
 }))
 
-import { RunRecordCard } from '../CronHistoryDialog'
+vi.mock('@/lib/backend', () => ({
+  getBackend: () => ({
+    sessions: {
+      getSessionTeamId: mocks.getSessionTeamId,
+      listSessionDisplayRows: mocks.listSessionDisplayRows,
+    },
+  }),
+}))
+
+vi.mock('@/stores/session-list-store', () => ({
+  useSessionListStore: {
+    getState: () => ({
+      rows: [],
+      upsertRows: mocks.upsertRows,
+    }),
+  },
+}))
+
+vi.mock('@/stores/session-message-store', () => ({
+  useSessionMessageStore: {
+    getState: () => ({ reloadActiveSessionMessages: vi.fn() }),
+  },
+}))
+
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: {
+    getState: () => ({
+      team: mocks.currentTeam,
+      reloadAndSwitchTo: mocks.reloadAndSwitchTo,
+    }),
+  },
+}))
+
+import { RunRecordCard, ensureCronSessionVisible } from '../CronHistoryDialog'
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.currentTeam = { id: 'team-1' }
+})
 
 describe('RunRecordCard', () => {
   it('shows the last heartbeat for running runs', () => {
@@ -65,5 +111,42 @@ describe('RunRecordCard', () => {
     )
 
     expect(screen.getByText(/Last heartbeat:/)).toBeTruthy()
+  })
+
+  it('switches to the cron session team before inserting the session row', async () => {
+    mocks.currentTeam = { id: 'team-old' }
+    mocks.reloadAndSwitchTo.mockResolvedValueOnce(undefined)
+    mocks.getSessionTeamId.mockResolvedValueOnce('team-new')
+    mocks.listSessionDisplayRows.mockResolvedValueOnce([{ id: 'session-2', title: 'Cron: Other Team' }])
+
+    await ensureCronSessionVisible('session-2')
+
+    expect(mocks.reloadAndSwitchTo).toHaveBeenCalledWith('team-new')
+    expect(mocks.upsertRows).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'session-2',
+        team_id: 'team-new',
+      }),
+    ])
+  })
+})
+
+describe('ensureCronSessionVisible', () => {
+  it('upserts a display row for cron sessions missing from the sidebar list', async () => {
+    mocks.getSessionTeamId.mockResolvedValueOnce('team-1')
+    mocks.listSessionDisplayRows.mockResolvedValueOnce([{ id: 'session-1', title: 'Cron: Daily' }])
+
+    await ensureCronSessionVisible('session-1')
+
+    expect(mocks.getSessionTeamId).toHaveBeenCalledWith('session-1')
+    expect(mocks.listSessionDisplayRows).toHaveBeenCalledWith('team-1', ['session-1'])
+    expect(mocks.upsertRows).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'session-1',
+        team_id: 'team-1',
+        title: 'Cron: Daily',
+        mode: 'collab',
+      }),
+    ])
   })
 })

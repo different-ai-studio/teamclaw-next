@@ -121,7 +121,7 @@ test("insertMessage writes a messages row and maps response", async () => {
     sender_actor_id: "actor-1",
     kind: "text",
     content: "hello",
-    metadata: null,
+    metadata: {},
     model: null,
     turn_id: null,
     reply_to_message_id: null,
@@ -165,6 +165,43 @@ test("auth repo claimInvite calls claim_team_invite RPC anonymously", async () =
   // Auth repo must NOT attach a caller bearer header.
   assert.equal(createCalls.length, 1);
   assert.equal(createCalls[0].options.global, undefined);
+});
+
+test("auth repo claimInvite forwards the caller bearer for member claims", async () => {
+  // Member claims arrive authenticated: the joining user's bearer must reach
+  // PostgREST so the RPC resolves auth.uid(). The repo builds a per-token client
+  // with an Authorization header instead of using the shared anon client.
+  const createCalls = [];
+  const repo = createSupabaseAuthRepository({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "publishable-key",
+    createClient(url, key, options) {
+      createCalls.push({ url, key, options });
+      return fakeSupabase({
+        rpcData: {
+          claim_team_invite: [{
+            actor_id: "actor-9",
+            team_id: "team-9",
+            actor_type: "member",
+            display_name: "Joiner",
+            refresh_token: null,
+          }],
+        },
+      });
+    },
+  });
+
+  assert.deepEqual(await repo.claimInvite("invite-token", { accessToken: "member-jwt" }), {
+    actorId: "actor-9",
+    teamId: "team-9",
+    actorType: "member",
+    displayName: "Joiner",
+    refreshToken: null,
+  });
+  // Two clients: the shared anon client at construction, then a per-token
+  // authed client carrying the caller bearer.
+  assert.equal(createCalls.length, 2);
+  assert.equal(createCalls[1].options.global.headers.Authorization, "Bearer member-jwt");
 });
 
 test("repository throws upstream errors without hiding Supabase error codes", async () => {

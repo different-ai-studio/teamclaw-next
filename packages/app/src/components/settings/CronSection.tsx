@@ -20,11 +20,17 @@ import {
   formatRelativeTime,
   getChannelDisplayName,
   type CronJob,
+  type CronScope,
 } from '@/stores/cron'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { ToggleSwitch } from './shared'
 import { getDeliveryTargetDisplay } from '@/lib/cron-utils'
 import { CronJobDialog } from './cron/CronJobDialog'
 import { CronHistoryDialog } from './cron/CronHistoryDialog'
+import {
+  listLocalDaemonWorkspaces,
+  type LocalDaemonWorkspace,
+} from '@/lib/cron-workspace-models'
 
 // ==================== Job Card ====================
 
@@ -170,24 +176,78 @@ function JobCard({
 
 export function CronSection() {
   const { t } = useTranslation()
-  const { jobs, isLoading, error, loadJobs, removeJob, toggleEnabled, runJob, clearError } =
-    useCronStore()
+  const {
+    jobs,
+    isLoading,
+    error,
+    activeScope,
+    selectedWorkspacePath,
+    setScope,
+    setSelectedWorkspacePath,
+    loadJobs,
+    removeJob,
+    toggleEnabled,
+    runJob,
+    clearError,
+  } = useCronStore()
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const [formOpen, setFormOpen] = React.useState(false)
   const [editJob, setEditJob] = React.useState<CronJob | undefined>(undefined)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [historyJob, setHistoryJob] = React.useState<CronJob | null>(null)
+  const [workspaceOptions, setWorkspaceOptions] = React.useState<LocalDaemonWorkspace[]>([])
+  const [workspaceOptionsLoading, setWorkspaceOptionsLoading] = React.useState(false)
 
-  // Cron backend init runs from `useCronInit` when the workspace + OpenCode are ready.
-  // Periodically refresh job list while this section is mounted.
-  // Refresh jobs periodically (every 30 seconds)
   React.useEffect(() => {
     loadJobs()
     const interval = setInterval(() => {
       loadJobs()
     }, 30000)
     return () => clearInterval(interval)
-  }, [loadJobs])
+  }, [loadJobs, activeScope])
+
+  React.useEffect(() => {
+    let cancelled = false
+    setWorkspaceOptionsLoading(true)
+    ;(async () => {
+      const rows = await listLocalDaemonWorkspaces()
+      if (cancelled) return
+      setWorkspaceOptions(rows.filter((row) => !!row.path))
+    })()
+      .catch(() => {
+        if (!cancelled) setWorkspaceOptions([])
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceOptionsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (activeScope !== 'workspace') return
+    if (selectedWorkspacePath) return
+    const firstPath = workspaceOptions[0]?.path || workspacePath || null
+    if (!firstPath) return
+    void setSelectedWorkspacePath(firstPath)
+  }, [
+    activeScope,
+    selectedWorkspacePath,
+    setSelectedWorkspacePath,
+    workspaceOptions,
+    workspacePath,
+  ])
+
+  const handleScopeChange = (scope: CronScope) => {
+    if (scope === activeScope) return
+    if (scope === 'workspace' && !selectedWorkspacePath && !workspacePath && workspaceOptions.length === 0) return
+    void setScope(scope)
+  }
+
+  const currentWorkspaceSelection = selectedWorkspacePath || workspacePath || ''
 
   const handleOpenCreate = () => {
     setEditJob(undefined)
@@ -221,6 +281,77 @@ export function CronSection() {
           <Plus className="h-4 w-4 mr-1" />
           {t('settings.cron.newJob', 'New Job')}
         </Button>
+      </div>
+
+      <div className="rounded-[14px] border border-border-soft bg-paper p-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleScopeChange('global')}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors',
+              activeScope === 'global'
+                ? 'bg-panel text-foreground'
+                : 'text-muted-foreground hover:bg-panel/60',
+            )}
+          >
+            {t('settings.cron.scopeGlobal', 'Global tasks')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScopeChange('workspace')}
+            disabled={!workspacePath}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors',
+              activeScope === 'workspace'
+                ? 'bg-panel text-foreground'
+                : 'text-muted-foreground hover:bg-panel/60',
+              !workspacePath && 'cursor-not-allowed opacity-40',
+            )}
+          >
+            {t('settings.cron.scopeWorkspace', 'Workspace tasks')}
+          </button>
+        </div>
+        <p className="text-[12px] text-muted-foreground leading-relaxed">
+          {activeScope === 'global'
+            ? t(
+                'settings.cron.scopeGlobalHint',
+                'Runs use the daemon default workspace. Changing the default updates future runs.',
+              )
+            : t(
+                'settings.cron.scopeWorkspaceHint',
+                'Runs in the current workspace — suitable for project files, git worktrees, and MCP/skills.',
+              )}
+        </p>
+        {activeScope === 'workspace' && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <label className="text-[11px] font-medium uppercase tracking-wide text-faint">
+              {t('settings.cron.workspaceSelectLabel', 'Workspace')}
+            </label>
+            <select
+              value={currentWorkspaceSelection}
+              disabled={workspaceOptionsLoading || (workspaceOptions.length === 0 && !workspacePath)}
+              onChange={(event) => void setSelectedWorkspacePath(event.target.value || null)}
+              className="h-8 rounded-lg border border-border-soft bg-background px-2 text-[12.5px] text-foreground"
+            >
+              {!currentWorkspaceSelection && (
+                <option value="">
+                  {t('settings.cron.workspaceSelectPlaceholder', 'Select workspace')}
+                </option>
+              )}
+              {workspacePath && !workspaceOptions.some((row) => row.path === workspacePath) && (
+                <option value={workspacePath}>
+                  {t('settings.cron.currentWorkspaceOption', 'Current workspace')} · {workspacePath}
+                </option>
+              )}
+              {workspaceOptions.map((workspace) => (
+                <option key={workspace.workspaceId} value={workspace.path}>
+                  {workspace.displayName || workspace.path} · {workspace.path}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Error */}

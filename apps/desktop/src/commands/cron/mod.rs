@@ -9,7 +9,9 @@ use scheduler::CronScheduler;
 use storage::CronStorage;
 use types::*;
 
+use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
 /// Per-workspace cron runtime. Cheap to clone (storage and scheduler are
@@ -65,18 +67,62 @@ impl CronState {
     }
 }
 
-/// Resolve workspace_path for the calling window and look up the cron instance.
-/// Errors if the cron system hasn't been initialized for this workspace yet.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CronScope {
+    Global,
+    Workspace,
+}
+
+impl Default for CronScope {
+    fn default() -> Self {
+        Self::Global
+    }
+}
+
+fn global_cron_root() -> Result<String, String> {
+    let base = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(crate::commands::APP_SHORT_NAME)
+        .join("cron-global");
+    std::fs::create_dir_all(&base)
+        .map_err(|e| format!("Failed to create global cron dir: {e}"))?;
+    Ok(base.to_string_lossy().to_string())
+}
+
+/// Storage key + optional execution cwd for workspace-scoped runs.
+async fn resolve_cron_paths(
+    scope: CronScope,
+    workspace_path: Option<String>,
+    window: &tauri::WebviewWindow,
+    registry: &State<'_, crate::commands::window::WindowRegistry>,
+) -> Result<(String, Option<String>), String> {
+    match scope {
+        CronScope::Global => Ok((global_cron_root()?, None)),
+        CronScope::Workspace => {
+            let path = match workspace_path.filter(|p| !p.is_empty()) {
+                Some(p) => p,
+                None => crate::commands::window::current_workspace_for_window(window, registry)?,
+            };
+            Ok((path.clone(), Some(path)))
+        }
+    }
+}
+
+/// Look up the cron instance for a scope. Errors if `cron_init` has not run yet.
 async fn require_instance(
+    scope: CronScope,
+    workspace_path: Option<String>,
     window: &tauri::WebviewWindow,
     registry: &State<'_, crate::commands::window::WindowRegistry>,
     cron_state: &State<'_, CronState>,
 ) -> Result<CronInstance, String> {
-    let workspace_path = crate::commands::window::current_workspace_for_window(window, registry)?;
+    let (storage_path, _) =
+        resolve_cron_paths(scope, workspace_path, window, registry).await?;
     cron_state
-        .try_instance_for(&workspace_path)
+        .try_instance_for(&storage_path)
         .await
-        .ok_or_else(|| format!("Cron not initialized for workspace: {}", workspace_path))
+        .ok_or_else(|| format!("Cron not initialized (scope={scope:?})"))
 }
 
 // ==================== Tauri Commands ====================
@@ -93,25 +139,25 @@ pub async fn cron_init(
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
     gateway_state: State<'_, crate::commands::gateway::GatewayState>,
+    scope: Option<CronScope>,
     workspace_path: Option<String>,
 ) -> Result<(), String> {
-    // The frontend may pass an explicit workspace; otherwise we resolve from
-    // the calling window. Cron no longer requires a running OpenCode sidecar.
-    let workspace_path = match workspace_path.filter(|p| !p.is_empty()) {
-        Some(p) => p,
-        None => crate::commands::window::current_workspace_for_window(&window, &registry)?,
-    };
-    if !std::path::Path::new(&workspace_path).is_dir() {
-        return Err(format!("Workspace not found: {}", workspace_path));
+    let scope = scope.unwrap_or_default();
+    let (storage_path, execution_workspace) =
+        resolve_cron_paths(scope, workspace_path, &window, &registry).await?;
+
+    if scope == CronScope::Workspace && !std::path::Path::new(&storage_path).is_dir() {
+        return Err(format!("Workspace not found: {}", storage_path));
     }
 
-    // Get-or-create per-workspace instance, then stop its old scheduler
-    // (if any) before reloading. This is workspace-local — peer workspaces
-    // are unaffected.
-    let instance = cron_state.instance_for(&workspace_path).await;
+    let instance = cron_state.instance_for(&storage_path).await;
     instance.scheduler.stop().await;
 
-    instance.storage.init(&workspace_path).await;
+    instance.storage.init(&storage_path).await;
+    instance
+        .scheduler
+        .set_execution_workspace(execution_workspace)
+        .await;
     instance.scheduler.set_app_handle(app);
 
     let session_mapping = gateway_state.shared_session_mapping.clone();
@@ -120,17 +166,15 @@ pub async fn cron_init(
         .set_session_mapping(session_mapping)
         .await;
 
-    let delivery_mgr = DeliveryManager::new(workspace_path.clone());
+    let delivery_mgr = DeliveryManager::new(storage_path.clone());
     instance.scheduler.set_delivery(delivery_mgr).await;
 
-    // Reconcile runs left active by a previous app/executor process.
     instance.scheduler.reconcile_interrupted_runs().await;
 
     instance.scheduler.start().await;
 
     println!(
-        "[Cron] System initialized for workspace: {}",
-        workspace_path
+        "[Cron] System initialized (scope={scope:?}, storage={storage_path})"
     );
     Ok(())
 }
@@ -141,8 +185,17 @@ pub async fn cron_list_jobs(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<Vec<CronJob>, String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
     Ok(instance.storage.list_jobs().await)
 }
 
@@ -153,8 +206,17 @@ pub async fn cron_add_job(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<CronJob, String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
 
     let now = chrono::Utc::now();
     let id = uuid::Uuid::new_v4().to_string();
@@ -190,8 +252,17 @@ pub async fn cron_update_job(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<CronJob, String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
 
     let mut job = instance
         .storage
@@ -237,8 +308,17 @@ pub async fn cron_remove_job(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<(), String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
     instance.storage.remove_job(&job_id).await?;
     println!("[Cron] Job removed: {}", job_id);
     Ok(())
@@ -252,8 +332,17 @@ pub async fn cron_toggle_enabled(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<(), String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
     instance.storage.toggle_enabled(&job_id, enabled).await?;
 
     if enabled {
@@ -278,8 +367,17 @@ pub async fn cron_run_job(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<(), String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
 
     let job = instance
         .storage
@@ -305,8 +403,17 @@ pub async fn cron_get_runs(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<Vec<CronRunRecord>, String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
     let limit = limit.unwrap_or(50);
     Ok(instance.storage.get_runs(&job_id, Some(limit)).await)
 }
@@ -317,8 +424,17 @@ pub async fn cron_get_all_session_ids(
     window: tauri::WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
     cron_state: State<'_, CronState>,
+    scope: Option<CronScope>,
+    workspace_path: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let instance = require_instance(&window, &registry, &cron_state).await?;
+    let instance = require_instance(
+        scope.unwrap_or_default(),
+        workspace_path,
+        &window,
+        &registry,
+        &cron_state,
+    )
+    .await?;
     Ok(instance.storage.get_all_session_ids().await)
 }
 
