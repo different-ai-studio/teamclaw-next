@@ -35,6 +35,7 @@ pub mod observ;
 pub mod runtime_adapter;
 pub mod sessions;
 pub mod state;
+pub mod team;
 pub mod tokens;
 pub mod workspaces;
 
