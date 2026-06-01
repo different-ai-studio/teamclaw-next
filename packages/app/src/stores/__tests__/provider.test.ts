@@ -164,6 +164,23 @@ describe('provider store initAll', () => {
     })
   })
 
+  it('loads daemon providers once during initAll', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'custom-openai',
+        display_name: 'Custom OpenAI',
+        authenticated: true,
+        models: ['my-model'],
+      },
+    ])
+
+    const { useProviderStore } = await import('../provider')
+
+    await useProviderStore.getState().initAll()
+
+    expect(mocks.getDaemonProviders).toHaveBeenCalledTimes(1)
+  })
+
   it('falls back to a custom provider when a saved model is not in the daemon catalog', async () => {
     mocks.getDaemonProviders.mockResolvedValue([
       {

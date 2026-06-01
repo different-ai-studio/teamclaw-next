@@ -57,6 +57,19 @@ function daemonProvidersToConfigured(
   return { configuredProviders, providers }
 }
 
+const daemonProvidersInflight = new Map<string, Promise<DaemonProviderInfo[] | null>>()
+
+async function loadDaemonProvidersForWorkspace(workspacePath: string): Promise<DaemonProviderInfo[] | null> {
+  const existing = daemonProvidersInflight.get(workspacePath)
+  if (existing) return existing
+
+  const request = getDaemonProviders(encodeWorkspaceId(workspacePath)).finally(() => {
+    daemonProvidersInflight.delete(workspacePath)
+  })
+  daemonProvidersInflight.set(workspacePath, request)
+  return request
+}
+
 async function loadDaemonProviderSnapshot(
   workspacePath: string,
   disconnectedIds: Set<string>,
@@ -64,7 +77,7 @@ async function loadDaemonProviderSnapshot(
   configuredProviders: ConfiguredProvider[]
   providers: ProviderEntry[]
 } | null> {
-  const daemonProviders = await getDaemonProviders(encodeWorkspaceId(workspacePath))
+  const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
   if (daemonProviders === null) return null
   return daemonProvidersToConfigured(daemonProviders, disconnectedIds)
 }
@@ -314,9 +327,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Refresh custom provider IDs from the daemon workspace-control API.
   refreshCustomProviderIds: async (workspacePath: string) => {
-    const wsId = encodeWorkspaceId(workspacePath)
     try {
-      const daemonProviders = await getDaemonProviders(wsId)
+      const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
       set({
         customProviderIds: (daemonProviders ?? [])
           .filter((p) => p.id !== 'team' && p.authenticated)
@@ -387,9 +399,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Get a custom provider config from the daemon workspace-control API.
   getCustomProvider: async (workspacePath: string, providerId: string) => {
-    const wsId = encodeWorkspaceId(workspacePath)
     try {
-      const providers = await getDaemonProviders(wsId)
+      const providers = await loadDaemonProvidersForWorkspace(workspacePath)
       const p = providers?.find((x) => x.id === providerId)
       if (!p) return null
       return {
@@ -442,15 +453,29 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       set({ _workspacePath: workspacePathAtStart ?? null })
     }
 
-    await Promise.all([
-      get().refreshProviders().catch(() => undefined),
-      get().refreshConfiguredProviders().catch(() => undefined),
-      get().refreshCurrentModel().catch(() => undefined),
-    ])
+    await get().refreshCurrentModel().catch(() => undefined)
 
     const workspacePath = useWorkspaceStore.getState().workspacePath
     if (workspacePath) {
-      await get().refreshCustomProviderIds(workspacePath).catch(() => undefined)
+      set({ providersLoading: true, configuredProvidersLoading: true })
+      try {
+        const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
+        if (daemonProviders !== null) {
+          const snapshot = daemonProvidersToConfigured(daemonProviders, get()._disconnectedIds)
+          set({
+            providers: snapshot.providers,
+            configuredProviders: snapshot.configuredProviders,
+            models: flattenConfiguredProviders(snapshot.configuredProviders),
+            customProviderIds: daemonProviders
+              .filter((p) => p.id !== 'team' && p.authenticated)
+              .map((p) => p.id),
+          })
+        }
+      } catch (err) {
+        console.error('Failed to initialize providers:', err)
+      } finally {
+        set({ providersLoading: false, configuredProvidersLoading: false })
+      }
     }
 
     const { currentModelKey } = get()
