@@ -47,6 +47,8 @@ anyhow = "1"
 thiserror = "2"
 rand = "0.8"
 subtle = "2"
+getrandom = "0.2"
+walkdir = "2"
 humantime-serde = "1"
 parking_lot = "0.12"
 

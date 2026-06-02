@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use crate::config::HttpConfig;
 use crate::config::workspace_control::WorkspaceControlStore;
+use crate::config::HttpConfig;
 
 use super::limit::RateLimiter;
 use super::runtime_adapter::RuntimeAdapter;
@@ -48,9 +48,14 @@ pub struct HttpState {
     pub runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
     /// Loopback `opencode serve` pool for provider OAuth (settings only).
     pub opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
+    /// Daemon-owned team sync dispatcher (drives `/v1/team/sync*`).
+    pub sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
 }
 
 impl HttpState {
+    // sync_dispatcher was added in the daemon-owns-team-sync pass; constructor
+    // is intentionally wide to avoid a builder while the field set is stable.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: HttpConfig,
         tokens: TokenStore,
@@ -59,6 +64,7 @@ impl HttpState {
         workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
         runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
         opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
+        sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
     ) -> Self {
         Self {
             config: Arc::new(config),
@@ -71,6 +77,7 @@ impl HttpState {
             workspace_control,
             runtime_supervisor,
             opencode_settings,
+            sync_dispatcher,
         }
     }
 }

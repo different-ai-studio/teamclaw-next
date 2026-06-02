@@ -14,6 +14,7 @@ mod opencode_settings;
 mod proto;
 mod provider_config;
 mod runtime;
+mod sync;
 mod team_shared_env;
 mod team_shared_git;
 mod teamclaw;

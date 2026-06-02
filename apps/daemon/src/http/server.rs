@@ -67,6 +67,7 @@ pub async fn spawn(
     workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
     runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
     opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
+    sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
 ) -> anyhow::Result<HttpHandle> {
     // Resolve token + port files (defaults live in DaemonConfig::config_dir).
     let token_path = http
@@ -112,6 +113,7 @@ pub async fn spawn(
         workspace_control,
         runtime_supervisor,
         opencode_settings,
+        sync_dispatcher,
     );
 
     spawn_reapers(state.clone());
@@ -183,6 +185,14 @@ mod tests {
     use super::*;
     use crate::config::HttpConfig;
 
+    /// A fresh, empty sync dispatcher for HTTP harness tests.
+    fn test_dispatcher() -> crate::sync::dispatch::SyncDispatcher {
+        crate::sync::dispatch::SyncDispatcher::new(
+            crate::sync::secret_store::SecretStore::new(),
+            None,
+        )
+    }
+
     #[tokio::test]
     async fn spawn_and_healthz_responds() {
         let dir = tempfile::tempdir().unwrap();
@@ -195,7 +205,9 @@ mod tests {
         };
         let meta = metadata("actor-test".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None).await.unwrap();
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher())
+            .await
+            .unwrap();
         let url = format!("http://{}/v1/healthz", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["status"], "ok");
@@ -214,9 +226,17 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None, None, None)
-            .await
-            .unwrap();
+        let handle = spawn(
+            cfg,
+            metadata("actor".into(), "test"),
+            runtime,
+            None,
+            None,
+            None,
+            test_dispatcher(),
+        )
+        .await
+        .unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root = std::fs::read_to_string(&token_path)
             .unwrap()
@@ -252,9 +272,17 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, metadata("a".into(), "test"), runtime, None, None, None)
-            .await
-            .unwrap();
+        let handle = spawn(
+            cfg,
+            metadata("a".into(), "test"),
+            runtime,
+            None,
+            None,
+            None,
+            test_dispatcher(),
+        )
+        .await
+        .unwrap();
         let base = format!("http://{}", handle.local_addr);
         let client = reqwest::Client::new();
         let mut last_status = 0;
@@ -429,9 +457,17 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(2);
-        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None, None, None)
-            .await
-            .unwrap();
+        let handle = spawn(
+            cfg,
+            metadata("actor".into(), "test"),
+            runtime,
+            None,
+            None,
+            None,
+            test_dispatcher(),
+        )
+        .await
+        .unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root = std::fs::read_to_string(&token_path)
             .unwrap()
@@ -495,7 +531,9 @@ mod tests {
         };
         let meta = metadata("actor-x".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None).await.unwrap();
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher())
+            .await
+            .unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root_token = std::fs::read_to_string(&token_path).unwrap();
         let root_token = root_token.trim();
@@ -564,7 +602,9 @@ mod tests {
         };
         let meta = metadata("actor-abc".into(), "cloud_api");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None).await.unwrap();
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher())
+            .await
+            .unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
         let body: serde_json::Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body["actor_id"], "actor-abc");
@@ -590,6 +630,46 @@ mod tests {
         handle.shutdown().await;
     }
 
+    // `boot()` mints a default-scope token, which includes `workspace:read`, so
+    // `GET /v1/team/sync/status` is authorized. For an unknown team the
+    // dispatcher returns the zero-value `SyncStatus` (`syncing: false`) without
+    // touching the filesystem or daemon config — a hermetic check of the route +
+    // dispatcher wiring through `HttpState`.
+    #[tokio::test]
+    async fn team_sync_status_returns_default_for_unknown_team() {
+        let (handle, client, base, session_token) = boot().await;
+        let resp = client
+            .get(format!("{base}/v1/team/sync/status?teamId=t"))
+            .bearer_auth(&session_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["syncing"], false);
+        handle.shutdown().await;
+    }
+
+    // `GET /v1/team/conflicts` for an unknown team is hermetic: the OSS sidecar
+    // scan runs against `~/.amuxd/teams/zzznonexistent/teamclaw-team` (which does
+    // not exist — read-only, returns no files) and the in-memory dispatcher
+    // status is the zero value (`conflicts == 0`), so no git-backup marker is
+    // appended. The result is an empty array without touching real team state.
+    #[tokio::test]
+    async fn team_conflicts_empty_for_unknown_team() {
+        let (handle, client, base, session_token) = boot().await;
+        let resp = client
+            .get(format!("{base}/v1/team/conflicts?teamId=zzznonexistent"))
+            .bearer_auth(&session_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body, serde_json::json!([]));
+        handle.shutdown().await;
+    }
+
     // With `workspace:write` granted, an empty `path` is rejected by the
     // handler's own validation — again before the single-team config load, so
     // the test never touches the real `~/.amuxd/daemon.toml`.
@@ -605,9 +685,17 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None, None)
-            .await
-            .unwrap();
+        let handle = spawn(
+            cfg,
+            metadata("actor".into(), "test"),
+            runtime,
+            None,
+            None,
+            None,
+            test_dispatcher(),
+        )
+        .await
+        .unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root = std::fs::read_to_string(&token_path)
             .unwrap()
