@@ -1,8 +1,0 @@
-[package]
-name = "teamclaw-sync"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-# Serialization — version_types are plain serde structs
-serde = { version = "1", features = ["derive"] }
