@@ -160,6 +160,9 @@ fn main() -> anyhow::Result<()> {
                 Ok::<(), anyhow::Error>(())
             })?;
         }
+        Commands::Doctor => {
+            cli::doctor::run()?;
+        }
         Commands::InstallOpencode { force } => {
             cli::install_opencode::run(force)?;
         }

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -226,6 +226,53 @@ fn post_process(path: &Path) {
 #[cfg(not(target_os = "macos"))]
 fn post_process(_path: &Path) {}
 
+#[derive(Debug, Serialize)]
+pub struct ComponentStatus {
+    pub present: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoctorReport {
+    pub opencode: ComponentStatus,
+    pub git: ComponentStatus,
+    pub amuxd: ComponentStatus,
+}
+
+fn probe_version(cmd: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(cmd).args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    Some(s.lines().next().unwrap_or("").trim().to_string())
+}
+
+pub fn doctor() -> DoctorReport {
+    let oc_path = opencode_bin_path();
+    let oc_present = oc_path.exists();
+    let opencode = ComponentStatus {
+        present: oc_present,
+        version: installed_version().ok().flatten(),
+        path: oc_present.then(|| oc_path.to_string_lossy().to_string()),
+    };
+    let git = ComponentStatus {
+        present: probe_version("git", &["--version"]).is_some(),
+        version: probe_version("git", &["--version"]),
+        path: None,
+    };
+    let amuxd_path = DaemonConfig::config_dir()
+        .join("bin")
+        .join(if cfg!(windows) { "amuxd.exe" } else { "amuxd" });
+    let amuxd = ComponentStatus {
+        present: amuxd_path.exists(),
+        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        path: amuxd_path.exists().then(|| amuxd_path.to_string_lossy().to_string()),
+    };
+    DoctorReport { opencode, git, amuxd }
+}
+
 pub async fn run_install(force: bool) -> anyhow::Result<()> {
     let lock = OpencodeLock::parse(LOCK_JSON)?;
     let target = current_target()?;
@@ -383,6 +430,19 @@ mod tests {
             github_url("v1.2.3", "opencode-darwin-arm64.zip"),
             "https://github.com/anomalyco/opencode/releases/download/v1.2.3/opencode-darwin-arm64.zip"
         );
+    }
+
+    #[test]
+    fn doctor_report_serializes() {
+        let report = DoctorReport {
+            opencode: ComponentStatus { present: true, version: Some("v1".into()), path: Some("/x".into()) },
+            git: ComponentStatus { present: false, version: None, path: None },
+            amuxd: ComponentStatus { present: true, version: Some("0.1.0".into()), path: Some("/a".into()) },
+        };
+        let v: serde_json::Value = serde_json::to_value(&report).unwrap();
+        assert_eq!(v["opencode"]["present"], serde_json::json!(true));
+        assert_eq!(v["git"]["present"], serde_json::json!(false));
+        assert_eq!(v["amuxd"]["version"], serde_json::json!("0.1.0"));
     }
 
     #[test]
