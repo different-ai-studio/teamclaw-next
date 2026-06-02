@@ -13,9 +13,13 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
   const { requirements, installing, output, errors, loaded, listRequirements, install, requiredSatisfied } =
     useSetupStore()
 
+  // AuthGate already triggers the load before mounting us; guard avoids a
+  // redundant IPC round-trip while keeping this component self-contained.
   React.useEffect(() => {
-    void listRequirements()
-  }, [listRequirements])
+    if (!loaded) void listRequirements()
+  }, [loaded, listRequirements])
+
+  const allReady = requiredSatisfied()
 
   if (!loaded) {
     return (
@@ -85,10 +89,10 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
 
         <Button
           className="mt-2 h-10 bg-coral text-paper hover:opacity-90"
-          disabled={!requiredSatisfied() || installing !== null}
+          disabled={!allReady || installing !== null}
           onClick={onDone}
         >
-          {requiredSatisfied() ? '继续' : '请先安装必需项'}
+          {allReady ? '继续' : '请先安装必需项'}
         </Button>
       </div>
     </div>

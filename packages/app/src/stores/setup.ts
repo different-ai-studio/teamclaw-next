@@ -52,6 +52,9 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     const { invoke } = await import('@tauri-apps/api/core')
     const { listen } = await import('@tauri-apps/api/event')
     set({ installing: id })
+    // Listener lives only for this install and is removed in finally. The wizard
+    // is modal/non-dismissible during install, so unmount-mid-install is not a
+    // concern; applyProgress writes to the singleton store regardless.
     const unlisten = await listen<SetupProgress>('setup-progress', (event) => {
       applyProgress(event.payload)
     })
@@ -75,6 +78,8 @@ export function applyProgress(p: SetupProgress) {
     const errors = { ...s.errors }
     let requirements = s.requirements
 
+    // 'started' is intentionally a no-op: `installing` is already set client-side
+    // by install() before the backend runs.
     if (p.status === 'running' && p.line) {
       output[p.id] = [...(output[p.id] ?? []), p.line]
     }
