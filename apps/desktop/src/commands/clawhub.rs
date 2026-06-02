@@ -259,14 +259,9 @@ fn skills_dir(workspace_path: &str) -> PathBuf {
         .join("skills")
 }
 
-fn global_skills_dir(workspace_path: &str) -> PathBuf {
-    // Under XDG isolation, "global" skills live inside the workspace:
-    // <workspace>/.opencode/config/opencode/skills/
-    PathBuf::from(workspace_path)
-        .join(".opencode")
-        .join("config")
-        .join("opencode")
-        .join("skills")
+fn global_skills_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or_else(|| "HOME directory not found".to_string())?;
+    Ok(crate::opencode_paths::global_opencode_config_skills_dir(&home))
 }
 
 fn validate_slug(slug: &str) -> Result<(), String> {
@@ -538,7 +533,7 @@ pub fn clawhub_install(
         .as_ref()
         .ok_or_else(|| "Workspace path required for skill installation".to_string())?;
     let skills = if is_global {
-        global_skills_dir(ws_path)
+        global_skills_dir()?
     } else {
         skills_dir(ws_path)
     };
@@ -746,4 +741,37 @@ pub fn clawhub_update(
 
     // Re-install with force to update (workspace install)
     clawhub_install(Some(workspace_path), slug, version, Some(true), Some(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    struct HomeGuard;
+
+    impl HomeGuard {
+        fn set(path: &Path) -> Self {
+            std::env::set_var("HOME", path);
+            Self
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("HOME");
+        }
+    }
+
+    #[test]
+    fn global_skills_dir_uses_home_config_opencode_skills() {
+        let home_dir = tempdir().unwrap();
+        let _home = HomeGuard::set(home_dir.path());
+        let dir = global_skills_dir().unwrap();
+        assert_eq!(
+            dir,
+            home_dir.path().join(".config/opencode/skills")
+        );
+    }
 }

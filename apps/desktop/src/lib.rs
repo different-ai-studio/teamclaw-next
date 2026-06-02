@@ -42,6 +42,7 @@ use tauri_plugin_aptabase::EventTracker;
 
 pub mod commands;
 mod local_cache;
+pub mod opencode_paths;
 pub mod mqtt;
 pub mod process_util;
 pub mod proto;
