@@ -29,7 +29,8 @@ pub fn global_plugin_update_state_path(home: &Path) -> PathBuf {
 
 /// OpenCode npm plugin cache directory for a normalized package spec key.
 pub fn global_plugin_cache_dir(home: &Path, normalized_spec_key: &str) -> PathBuf {
-    home.join(".cache/opencode/packages").join(normalized_spec_key)
+    home.join(".cache/opencode/packages")
+        .join(normalized_spec_key)
 }
 
 /// Legacy per-workspace isolated DB from the old XDG-redirect layout.
@@ -116,7 +117,10 @@ mod tests {
 
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0], global_opencode_db_path(home));
-        assert_eq!(candidates[1], isolated_opencode_db_path(Path::new(workspace)));
+        assert_eq!(
+            candidates[1],
+            isolated_opencode_db_path(Path::new(workspace))
+        );
     }
 
     #[test]

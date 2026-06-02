@@ -5,6 +5,16 @@
  */
 import '@testing-library/jest-dom'
 
+// --- i18n bootstrap ---------------------------------------------------------
+// Initialize the shared i18n singleton (and bind it to react-i18next) for every
+// test file. Components only call useTranslation(); whether the real i18n
+// instance was initialized used to depend on whether a test's import graph
+// happened to pull in '@/lib/i18n', so the same component rendered translated
+// copy in one test and raw keys in another. Importing it here makes that
+// deterministic. VITE_LOCALE=zh-CN (vite.config test.env) pins it to the
+// production-default Chinese locale.
+import '@/lib/i18n'
+
 // --- CSS.escape (used by FileTree querySelector selectors) -----------------
 // In some Vitest worker contexts `globalThis.CSS` is undefined.
 function cssEscapeIdent(value: string): string {

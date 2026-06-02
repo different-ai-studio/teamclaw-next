@@ -103,7 +103,7 @@ describe('SessionListColumn', () => {
 
   it('shows a quiet unread indicator for unread inactive sessions', () => {
     render(<SessionListColumn />)
-    expect(screen.getByLabelText('Unread')).toBeInTheDocument()
+    expect(screen.getByLabelText('未读')).toBeInTheDocument()
   })
 
   it('filters to pinned sessions in "pinned" mode', () => {
@@ -123,9 +123,9 @@ describe('SessionListColumn', () => {
 
   it('shows cron filter button only in "all" mode', () => {
     const { rerender } = render(<SessionListColumn />)
-    expect(screen.getByRole('button', { name: /scheduled|all sessions/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /显示定时会话|显示全部会话/ })).toBeInTheDocument()
     useUIStore.setState({ sidebarFilter: { kind: 'pinned' } })
     rerender(<SessionListColumn />)
-    expect(screen.queryByRole('button', { name: /scheduled|all sessions/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /显示定时会话|显示全部会话/ })).not.toBeInTheDocument()
   })
 })

@@ -54,13 +54,9 @@ async fn deliver_secrets_and_link(
     git_credential: Option<&str>,
     git_branch: Option<&str>,
 ) -> Option<String> {
-    if let Err(e) = team_sync_proxy::daemon_team_secrets(
-        team_id,
-        oss_team_secret,
-        git_credential,
-        git_branch,
-    )
-    .await
+    if let Err(e) =
+        team_sync_proxy::daemon_team_secrets(team_id, oss_team_secret, git_credential, git_branch)
+            .await
     {
         return Some(format!("daemon secret delivery deferred: {e}"));
     }

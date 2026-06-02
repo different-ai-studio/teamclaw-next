@@ -484,9 +484,7 @@ pub async fn team_shared_git_validate(
 ///
 /// Setup is owned by the daemon now (team-share enable + `/v1/team/link`).
 #[tauri::command]
-pub async fn team_shared_git_setup(
-    config: serde_json::Value,
-) -> Result<serde_json::Value, String> {
+pub async fn team_shared_git_setup(config: serde_json::Value) -> Result<serde_json::Value, String> {
     let _ = config;
     Ok(serde_json::json!({
         "sharedDirPath": "",

@@ -261,7 +261,9 @@ fn skills_dir(workspace_path: &str) -> PathBuf {
 
 fn global_skills_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "HOME directory not found".to_string())?;
-    Ok(crate::opencode_paths::global_opencode_config_skills_dir(&home))
+    Ok(crate::opencode_paths::global_opencode_config_skills_dir(
+        &home,
+    ))
 }
 
 fn validate_slug(slug: &str) -> Result<(), String> {
@@ -769,9 +771,6 @@ mod tests {
         let home_dir = tempdir().unwrap();
         let _home = HomeGuard::set(home_dir.path());
         let dir = global_skills_dir().unwrap();
-        assert_eq!(
-            dir,
-            home_dir.path().join(".config/opencode/skills")
-        );
+        assert_eq!(dir, home_dir.path().join(".config/opencode/skills"));
     }
 }
