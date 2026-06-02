@@ -7,16 +7,15 @@
 //!
 //!   fc_client.rs      — reqwest FC client with JWT injection and error mapping
 //!   error.rs          — SyncError unified error type
-//!   crypto.rs         — AMXC blob envelope (still used by fc_client::get_blob)
 //!   path_validator.rs — client-side mirror of FC validateSyncPath (referenced
 //!                       by error.rs's From impl)
 //!   get_fc_endpoint_and_jwt() — reads teamclaw.json for FC endpoint + JWT
 //!
 //! The deleted engine submodules were: engine, scanner, state, manifest,
-//! conflict — plus the `oss_sync_*` Tauri command surface, which now lives in
+//! conflict, crypto — plus the blob-transfer/version methods on FcClient and
+//! the `oss_sync_*` Tauri command surface, which now live in
 //! `crate::commands::team_sync_proxy` as thin daemon proxies.
 
-pub mod crypto;
 pub mod error;
 pub mod fc_client;
 pub mod path_validator;
