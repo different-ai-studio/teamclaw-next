@@ -605,7 +605,7 @@ mod tests {
             ..HttpConfig::default()
         };
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None, None)
+        let handle = spawn(cfg, metadata("actor".into(), "test"), runtime, None, None, None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
