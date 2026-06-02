@@ -5,15 +5,17 @@ import { Input } from '@/components/ui/input'
 import { useDaemonOnboardingStore, type Visibility } from '@/stores/daemon-onboarding'
 
 export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
-  const { status, busy, error, ownedAgents, refresh, loadOwnedAgents, createNewAgent, bindExistingAgent, forceReset } =
+  const { status, loaded, busy, error, ownedAgents, refresh, loadOwnedAgents, createNewAgent, bindExistingAgent, forceReset } =
     useDaemonOnboardingStore()
   const [mode, setMode] = React.useState<'new' | 'bind'>('new')
   const [name, setName] = React.useState('')
   const [visibility, setVisibility] = React.useState<Visibility>('team')
 
+  // AuthGate already refreshes before mounting us; guard avoids a redundant
+  // round-trip while keeping this component self-contained.
   React.useEffect(() => {
-    void refresh()
-  }, [refresh])
+    if (!loaded) void refresh()
+  }, [loaded, refresh])
 
   React.useEffect(() => {
     if (status === 'ready') onDone()

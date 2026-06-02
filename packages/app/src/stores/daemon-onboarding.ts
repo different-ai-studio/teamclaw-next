@@ -45,7 +45,9 @@ async function onboard(teamId: string, displayName: string, targetActorId: strin
     kind: 'agent',
     displayName,
     agentKind: 'claude',
-    ttlSeconds: null,
+    // Short TTL: this invite is claimed immediately by `amuxd init`; a tight
+    // window avoids leaving orphan agent invites if init fails.
+    ttlSeconds: 600,
     targetActorId,
   })
   const inviteUrl = `teamclaw://invite?token=${encodeURIComponent(invite.token)}`
@@ -77,10 +79,10 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
     const rows = await getBackend().actors.listConnectedAgents(teamId)
     set({
       ownedAgents: rows
-        .filter((r: any) => r.isOwner ?? r.is_owner)
-        .map((r: any) => ({
-          agentId: r.agentId ?? r.agent_id ?? r.id,
-          displayName: r.displayName ?? r.display_name ?? '',
+        .filter((r) => r.is_owner)
+        .map((r) => ({
+          agentId: r.agent_id ?? r.id,
+          displayName: r.display_name ?? '',
           visibility: r.visibility ?? 'team',
         })),
     })
@@ -123,6 +125,8 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('daemon_clear')
+      // Optimistically clear the mismatch screen while refresh re-resolves.
+      set({ status: 'unknown' })
       await get().refresh()
     } catch (e) {
       set({ error: String(e) })
