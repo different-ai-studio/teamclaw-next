@@ -160,6 +160,9 @@ fn main() -> anyhow::Result<()> {
                 Ok::<(), anyhow::Error>(())
             })?;
         }
+        Commands::InstallOpencode { force } => {
+            cli::install_opencode::run(force)?;
+        }
         Commands::Channel(args) => {
             let path = config::DaemonConfig::default_path();
             cli::channel::run(args, &path)?;

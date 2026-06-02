@@ -1,6 +1,7 @@
 pub mod channel;
 pub mod clear;
 pub mod config_cmd;
+pub mod install_opencode;
 pub mod mcp_server;
 pub mod process;
 pub mod test_client;
@@ -63,6 +64,12 @@ pub enum Commands {
     Channel(ChannelArgs),
     /// Read and edit daemon.toml values by dotted key.
     Config(ConfigArgs),
+    /// Download and install the opencode binary into ~/.amuxd/bin/opencode.
+    InstallOpencode {
+        /// Reinstall even if the locked version is already present.
+        #[arg(long)]
+        force: bool,
+    },
     /// Run the MCP (Model Context Protocol) server on stdio. Spawned by
     /// claude-code via `--mcp-config`; bridges tool calls to amuxd over
     /// `amuxd.sock`. Exposes a single `send` tool that lets the agent
