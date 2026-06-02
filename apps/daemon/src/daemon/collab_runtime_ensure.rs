@@ -71,6 +71,12 @@ impl DaemonServer {
                 if out.already_live_first.is_none() {
                     out.already_live_first = Some(stored.runtime_id.clone());
                 }
+                self.refresh_live_runtime_env(
+                    &stored.runtime_id,
+                    &stored.worktree,
+                    &stored.workspace_id,
+                )
+                .await;
                 continue;
             }
 

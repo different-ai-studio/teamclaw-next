@@ -626,6 +626,47 @@ impl RuntimeManager {
         Ok(new_acp_sid)
     }
 
+    /// Re-bind a live runtime with freshly assembled env (after env-var edits or
+    /// dedup reuse on `runtimeStart`).
+    pub async fn refresh_agent_runtime_env(
+        &mut self,
+        agent_id: &str,
+        runtime_env: SpawnRuntimeEnv,
+    ) -> crate::error::Result<()> {
+        let (acp_sid, agent_type, worktree, workspace_id, session_id) = {
+            let Some(handle) = self.agents.get(agent_id) else {
+                return Err(crate::error::AmuxError::Agent(format!(
+                    "refresh_agent_runtime_env: agent {agent_id} not found"
+                )));
+            };
+            if handle.acp_session_id.is_empty() {
+                return Ok(());
+            }
+            (
+                handle.acp_session_id.clone(),
+                handle.agent_type,
+                handle.worktree.clone(),
+                handle.workspace_id.clone(),
+                handle.session_id.clone(),
+            )
+        };
+
+        self.stop_agent(agent_id).await;
+        self.resume_agent(
+            agent_id,
+            &acp_sid,
+            agent_type,
+            &worktree,
+            &workspace_id,
+            None,
+            (!session_id.is_empty()).then_some(session_id.as_str()),
+            "",
+            runtime_env,
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn stop_agent(&mut self, agent_id: &str) -> Option<RuntimeHandle> {
         if let Some(mut handle) = self.agents.remove(agent_id) {
             self.aggregators.remove(agent_id);
@@ -1395,6 +1436,8 @@ impl RuntimeManager {
         logical_session_id: &str,
         binding: &str,
         title: &str,
+        device_id: &str,
+        device_name: &str,
     ) -> crate::error::Result<String> {
         self.create_gateway_session_with_model(
             team_id,
@@ -1405,6 +1448,8 @@ impl RuntimeManager {
             None,
             None,
             None,
+            device_id,
+            device_name,
         )
         .await
     }
@@ -1420,7 +1465,7 @@ impl RuntimeManager {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_gateway_session_with_model(
         &mut self,
-        _team_id: &str,
+        team_id: &str,
         logical_session_id: &str,
         binding: &str,
         _title: &str,
@@ -1432,6 +1477,8 @@ impl RuntimeManager {
         // pass `Some(..)` so a job created for Claude does not run on OpenCode
         // just because OpenCode is the daemon default.
         agent_type_override: Option<amux::AgentType>,
+        device_id: &str,
+        device_name: &str,
     ) -> crate::error::Result<String> {
         // Gateway sessions don't yet have a "real" workspace concept — they
         // run against a freshly-created scratch dir so the ACP process has a
@@ -1490,6 +1537,14 @@ impl RuntimeManager {
         };
 
         let workspace_id = format!("gateway:{binding}");
+        let skip_workspace_prepare = worktree.starts_with("/tmp/amuxd-gateway-");
+        let runtime_env = crate::runtime::env_assembly::prepare_and_assemble_spawn_runtime_env(
+            std::path::Path::new(&worktree),
+            (!team_id.is_empty()).then_some(team_id),
+            device_id,
+            device_name,
+            skip_workspace_prepare,
+        );
         let agent_id = self
             .spawn_agent_with_model(
                 agent_type,
@@ -1501,7 +1556,7 @@ impl RuntimeManager {
                 initial_model,
                 mcp_cfg_path,
                 None,
-                SpawnRuntimeEnv::default(),
+                runtime_env,
             )
             .await?;
 
@@ -2360,5 +2415,69 @@ mod tests {
         // Second sweep: nothing left, buffer is empty.
         assert!(mgr.evict_idle(60).await.is_empty());
         assert!(mgr.drain_evicted().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refresh_agent_runtime_env_errors_when_agent_missing() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        let err = mgr
+            .refresh_agent_runtime_env("missing-runtime", SpawnRuntimeEnv::default())
+            .await
+            .expect_err("missing agent should fail");
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn refresh_agent_runtime_env_noops_without_acp_session() {
+        let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
+        mgr.add_test_runtime("rt1", "agent-1", "session-1");
+        mgr.refresh_agent_runtime_env("rt1", SpawnRuntimeEnv::default())
+            .await
+            .expect("empty acp_session_id should no-op");
+        assert!(mgr.get_handle("rt1").is_some());
+    }
+
+    #[tokio::test]
+    async fn refresh_agent_runtime_env_stops_before_failed_resume() {
+        let worktree = tempfile::tempdir().unwrap();
+        crate::runtime::supervisor::prepare_workspace(worktree.path()).unwrap();
+
+        let runtime_env = crate::runtime::env_assembly::assemble_spawn_runtime_env(
+            worktree.path(),
+            None,
+            "dev-refresh",
+            "Refresh Test",
+        )
+        .expect("assemble env");
+
+        let mut configs = HashMap::new();
+        configs.insert(
+            amux::AgentType::ClaudeCode,
+            AgentLaunchConfig::new(
+                "/definitely/not/a/teamclaw-agent-binary",
+                Vec::new(),
+                "claude",
+            ),
+        );
+        let mut mgr = RuntimeManager::new(configs, None);
+        let mut handle = super::super::handle::RuntimeHandle::test_dummy();
+        handle.agent_id = "rt-refresh".to_string();
+        handle.acp_session_id = "acp-existing".to_string();
+        handle.worktree = worktree.path().to_string_lossy().into_owned();
+        handle.workspace_id = "ws-1".to_string();
+        mgr.agents.insert("rt-refresh".to_string(), handle);
+
+        let refresh = mgr
+            .refresh_agent_runtime_env("rt-refresh", runtime_env)
+            .await;
+        assert!(
+            refresh.is_err(),
+            "resume without ACP binary should fail after stop: {:?}",
+            refresh
+        );
+        assert!(
+            mgr.get_handle("rt-refresh").is_none(),
+            "failed refresh should not leave a stale handle"
+        );
     }
 }

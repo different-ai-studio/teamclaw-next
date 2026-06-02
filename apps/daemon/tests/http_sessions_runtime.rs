@@ -20,6 +20,8 @@ mod team_link;
 mod team_shared_git;
 #[path = "../src/team_shared_env.rs"]
 mod team_shared_env;
+#[path = "../src/sync/mod.rs"]
+mod sync;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,7 +51,7 @@ struct SessionDetails {
 }
 
 struct TestApp {
-    _handle: http::HttpHandle,
+    _handle: http::server::HttpHandle,
     client: Client,
     base: String,
     session_token: String,
@@ -190,7 +192,11 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         std::collections::HashMap::new(),
         None,
     )));
-    let runtime = RuntimeManagerAdapter::new(manager.clone(), 256);
+    let runtime = RuntimeManagerAdapter::new(manager.clone(), 256, "dev-test", "Test");
+    let sync_dispatcher = sync::dispatch::SyncDispatcher::new(
+        sync::secret_store::SecretStore::new(),
+        None,
+    );
     let handle = http::spawn(
         cfg,
         http::server::metadata("actor".into(), "test"),
@@ -198,6 +204,7 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         None,
         None,
         None,
+        sync_dispatcher,
     )
         .await
         .expect("spawn http server");

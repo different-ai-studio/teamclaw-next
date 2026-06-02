@@ -59,6 +59,8 @@ pub struct AmuxdAcpHandle {
     /// binding is required to write the per-session MCP config file
     /// that mounts the `send` tool.
     pub backend: Arc<dyn Backend>,
+    pub device_id: String,
+    pub device_name: String,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was
@@ -128,6 +130,8 @@ impl AmuxdAcpHandle {
                 None,
                 // Gateway channels run on the daemon default backend.
                 None,
+                &self.device_id,
+                &self.device_name,
             )
             .await
             .map_err(|e| AcpError::Create(e.to_string()))?
@@ -445,6 +449,8 @@ mod tests {
             team_id: "team-test".to_string(),
             model_override: Arc::new(Mutex::new(HashMap::new())),
             backend: Arc::new(MockBackend::default()),
+            device_id: "dev-test".to_string(),
+            device_name: "Test".to_string(),
         }
     }
 

@@ -22,6 +22,8 @@ mod team_link;
 mod team_shared_git;
 #[path = "../src/team_shared_env.rs"]
 mod team_shared_env;
+#[path = "../src/sync/mod.rs"]
+mod sync;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,7 +42,7 @@ fn ws_id(path: &std::path::Path) -> String {
 }
 
 struct TestApp {
-    _handle: http::HttpHandle,
+    _handle: http::server::HttpHandle,
     client: Client,
     base: String,
     session_token: String,
@@ -62,9 +64,13 @@ async fn test_app_with_workspace_store(
         std::collections::HashMap::new(),
         None,
     )));
-    let runtime = RuntimeManagerAdapter::new(manager, 256);
+    let runtime = RuntimeManagerAdapter::new(manager, 256, "dev-test", "Test");
     let workspace_control: Arc<dyn config::WorkspaceControlStore> =
         Arc::new(OpenCodeCompatStore::new());
+    let sync_dispatcher = sync::dispatch::SyncDispatcher::new(
+        sync::secret_store::SecretStore::new(),
+        None,
+    );
     let handle = http::spawn(
         cfg,
         http::server::metadata("actor".into(), "test"),
@@ -72,6 +78,7 @@ async fn test_app_with_workspace_store(
         Some(workspace_control),
         None,
         opencode_settings,
+        sync_dispatcher,
     )
     .await
     .expect("spawn http server");

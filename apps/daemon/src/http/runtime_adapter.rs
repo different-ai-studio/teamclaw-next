@@ -29,7 +29,6 @@ use uuid::Uuid;
 
 use crate::proto::amux;
 use crate::runtime::adapter::{runtime_envelopes_from_acp_event, RuntimeEnvelope};
-use crate::runtime::supervisor::prepare_workspace;
 use crate::runtime::RuntimeManager;
 
 use super::errors::HttpError;
@@ -533,6 +532,8 @@ pub struct RuntimeManagerAdapter {
     manager: Arc<tokio::sync::Mutex<RuntimeManager>>,
     sessions: Arc<RwLock<HashMap<Uuid, ManagedSession>>>,
     backlog_cap: usize,
+    device_id: String,
+    device_name: String,
 }
 
 struct ManagedSession {
@@ -548,11 +549,18 @@ struct ManagedSession {
 }
 
 impl RuntimeManagerAdapter {
-    pub fn new(manager: Arc<tokio::sync::Mutex<RuntimeManager>>, backlog_cap: usize) -> Arc<Self> {
+    pub fn new(
+        manager: Arc<tokio::sync::Mutex<RuntimeManager>>,
+        backlog_cap: usize,
+        device_id: impl Into<String>,
+        device_name: impl Into<String>,
+    ) -> Arc<Self> {
         let adapter = Arc::new(Self {
             manager,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             backlog_cap,
+            device_id: device_id.into(),
+            device_name: device_name.into(),
         });
         Self::spawn_event_pump(&adapter);
         adapter
@@ -636,9 +644,14 @@ impl RuntimeManagerAdapter {
         #[cfg(not(test))]
         {
             let worktree = resolve_spawn_worktree(workspace_id.as_deref())?;
-            prepare_workspace(std::path::Path::new(&worktree)).map_err(|e| {
-                HttpError::internal(format!("prepare workspace for runtime spawn: {e}"))
-            })?;
+            let worktree_path = std::path::Path::new(&worktree);
+            let runtime_env = crate::runtime::env_assembly::prepare_and_assemble_spawn_runtime_env(
+                worktree_path,
+                None,
+                &self.device_id,
+                &self.device_name,
+                false,
+            );
             let mut manager = self.manager.lock().await;
             manager
                 .spawn_agent_with_model(
@@ -651,7 +664,7 @@ impl RuntimeManagerAdapter {
                     model,
                     None,
                     None,
-                    crate::runtime::SpawnRuntimeEnv::default(),
+                    runtime_env,
                 )
                 .await
                 .map_err(|e| HttpError::internal(format!("spawn runtime: {e}")))
@@ -1297,14 +1310,15 @@ mod tests {
     use tokio::sync::mpsc;
 
     fn test_manager_adapter(backlog_cap: usize) -> Arc<RuntimeManagerAdapter> {
-        Arc::new(RuntimeManagerAdapter {
-            manager: Arc::new(tokio::sync::Mutex::new(RuntimeManager::new(
+        RuntimeManagerAdapter::new(
+            Arc::new(tokio::sync::Mutex::new(RuntimeManager::new(
                 std::collections::HashMap::new(),
                 None,
             ))),
-            sessions: Arc::new(RwLock::new(HashMap::new())),
             backlog_cap,
-        })
+            "dev-test",
+            "Test",
+        )
     }
 
     #[tokio::test]
@@ -1402,6 +1416,8 @@ mod tests {
                 None,
             ))),
             256,
+            "dev-test",
+            "Test",
         );
         let token_id = Uuid::new_v4();
         let snap = adapter

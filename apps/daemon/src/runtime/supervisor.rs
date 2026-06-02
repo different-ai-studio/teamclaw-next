@@ -8,7 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::Mutex as AsyncMutex;
-use tracing::info;
+use tracing::{info, warn};
+
+/// Matches `apps/desktop/src/commands/introspect_api.rs` — desktop Tauri hosts the API.
+const INTROSPECT_API_PORT: u16 = 13144;
+const TEAM_SKILLS_PATH: &str = "teamclaw-team/skills";
 
 use crate::config::workspace_control::{
     ApplyOutcome, RuntimeStatus, WorkspaceControlError,
@@ -141,9 +145,201 @@ fn ensure_inherent_mcp(workspace_path: &Path) -> Result<(), WorkspaceControlErro
         changed = true;
     }
 
+    ensure_extended_inherent_config(workspace_path, &mut config, &mut changed)?;
+
     if changed {
         write_json_pretty(&config_path, &config)?;
     }
+    Ok(())
+}
+
+fn resolve_executable(path: PathBuf) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path);
+    }
+    #[cfg(windows)]
+    {
+        let with_exe = path.with_extension("exe");
+        if with_exe.is_file() {
+            return Some(with_exe);
+        }
+    }
+    None
+}
+
+fn runtime_target_triple() -> &'static str {
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    {
+        return "aarch64-apple-darwin";
+    }
+    #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
+    {
+        return "x86_64-apple-darwin";
+    }
+    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+    {
+        return "aarch64-unknown-linux-gnu";
+    }
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    {
+        return "x86_64-unknown-linux-gnu";
+    }
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    {
+        return "x86_64-pc-windows-msvc";
+    }
+    #[allow(unreachable_code)]
+    "unknown-unknown-unknown"
+}
+
+fn resolve_introspect_binary() -> Option<String> {
+    if std::process::Command::new("sh")
+        .arg("-lc")
+        .arg("command -v teamclaw-introspect")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return Some("teamclaw-introspect".to_string());
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for candidate in [
+                dir.join(format!("teamclaw-introspect-{}", runtime_target_triple())),
+                dir.join("teamclaw-introspect"),
+            ] {
+                if let Some(resolved) = resolve_executable(candidate) {
+                    return Some(resolved.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        for root in [cwd.clone(), cwd.join(".."), cwd.join("../.."), cwd.join("../../..")] {
+            let candidate = root
+                .join("apps/desktop/binaries")
+                .join(format!("teamclaw-introspect-{}", runtime_target_triple()));
+            if let Some(resolved) = resolve_executable(candidate) {
+                return Some(resolved.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    None
+}
+
+fn introspect_command_stale(existing: &serde_json::Value) -> bool {
+    existing
+        .get("command")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .map(|p| !Path::new(p).exists())
+        .unwrap_or(true)
+}
+
+/// Port of desktop `ensure_inherent_config` (teamclaw-introspect, autoui, skills.paths).
+fn ensure_extended_inherent_config(
+    workspace_path: &Path,
+    config: &mut serde_json::Value,
+    changed: &mut bool,
+) -> Result<(), WorkspaceControlError> {
+    let obj = config
+        .as_object_mut()
+        .ok_or_else(|| WorkspaceControlError::Parse("opencode.json root is not an object".into()))?;
+
+    let workspace_path_str = workspace_path.to_string_lossy();
+
+    {
+        let mcp = obj.entry("mcp").or_insert_with(|| serde_json::json!({}));
+        let mcp_obj = mcp
+            .as_object_mut()
+            .ok_or_else(|| WorkspaceControlError::Parse("mcp is not an object".into()))?;
+
+        let needs_introspect = match mcp_obj.get("teamclaw-introspect") {
+            Some(existing) => introspect_command_stale(existing),
+            None => true,
+        };
+        if needs_introspect {
+            if let Some(introspect_bin) = resolve_introspect_binary() {
+                mcp_obj.insert(
+                    "teamclaw-introspect".to_string(),
+                    serde_json::json!({
+                        "type": "local",
+                        "enabled": true,
+                        "command": [
+                            introspect_bin,
+                            "--workspace", workspace_path_str.as_ref(),
+                            "--api-port", INTROSPECT_API_PORT.to_string()
+                        ]
+                    }),
+                );
+                *changed = true;
+            } else {
+                warn!(
+                    workspace = %workspace_path.display(),
+                    "teamclaw-introspect binary not found; skipping MCP registration"
+                );
+            }
+        }
+
+        if !mcp_obj.contains_key("autoui") {
+            mcp_obj.insert(
+                "autoui".to_string(),
+                serde_json::json!({
+                    "type": "local",
+                    "enabled": true,
+                    "command": ["npx", "-y", "autoui-mcp@latest"],
+                    "environment": {
+                        "QWEN_API_KEY": "${QWEN_API_KEY}",
+                        "QWEN_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "QWEN_MODEL": "qwen3-vl-flash"
+                    }
+                }),
+            );
+            *changed = true;
+        } else if let Some(autoui) = mcp_obj.get_mut("autoui").and_then(|v| v.as_object_mut()) {
+            let needs_restore = autoui
+                .get("environment")
+                .and_then(|v| v.as_object())
+                .map(|env| env.is_empty())
+                .unwrap_or(true);
+            if needs_restore {
+                autoui.insert(
+                    "environment".to_string(),
+                    serde_json::json!({
+                        "QWEN_API_KEY": "${QWEN_API_KEY}",
+                        "QWEN_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "QWEN_MODEL": "qwen3-vl-flash"
+                    }),
+                );
+                *changed = true;
+            }
+        }
+    }
+
+    {
+        let skills = obj.entry("skills").or_insert_with(|| serde_json::json!({}));
+        let skills_obj = skills
+            .as_object_mut()
+            .ok_or_else(|| WorkspaceControlError::Parse("skills is not an object".into()))?;
+        let paths_val = skills_obj
+            .entry("paths")
+            .or_insert_with(|| serde_json::json!([]));
+        let paths = paths_val
+            .as_array_mut()
+            .ok_or_else(|| WorkspaceControlError::Parse("skills.paths is not an array".into()))?;
+        if !paths
+            .iter()
+            .any(|v| v.as_str() == Some(TEAM_SKILLS_PATH))
+        {
+            paths.push(serde_json::json!(TEAM_SKILLS_PATH));
+            *changed = true;
+        }
+    }
+
     Ok(())
 }
 
@@ -323,8 +519,40 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("opencode.json")).unwrap())
                 .unwrap();
         assert!(cfg.get("permission").is_some());
+        assert!(cfg.get("mcp").and_then(|m| m.get("autoui")).is_some());
+        assert!(cfg
+            .get("skills")
+            .and_then(|s| s.get("paths"))
+            .and_then(|p| p.as_array())
+            .map(|paths| paths.iter().any(|v| v.as_str() == Some("teamclaw-team/skills")))
+            .unwrap_or(false));
 
         assert!(dir.path().join(".teamclaw/skills/create-role/SKILL.md").is_file());
         assert!(!dir.path().join(".opencode/data").exists());
+    }
+
+    #[test]
+    fn prepare_workspace_autoui_has_qwen_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        prepare_workspace(dir.path()).unwrap();
+
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("opencode.json")).unwrap())
+                .unwrap();
+        let autoui_env = cfg
+            .pointer("/mcp/autoui/environment")
+            .and_then(|v| v.as_object())
+            .expect("autoui environment");
+        assert_eq!(
+            autoui_env.get("QWEN_API_KEY").and_then(|v| v.as_str()),
+            Some("${QWEN_API_KEY}")
+        );
+        assert_eq!(
+            autoui_env
+                .get("QWEN_BASE_URL")
+                .and_then(|v| v.as_str())
+                .map(str::len),
+            Some("https://dashscope.aliyuncs.com/compatible-mode/v1".len())
+        );
     }
 }

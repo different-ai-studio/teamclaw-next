@@ -504,6 +504,8 @@ impl DaemonServer {
             team_id: team_id.clone(),
             model_override: Arc::new(AsyncMutex::new(HashMap::new())),
             backend: self.backend.clone(),
+            device_id: self.config.device.id.clone(),
+            device_name: self.config.device.name.clone(),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
             client: self.backend.clone(),
@@ -760,6 +762,8 @@ impl DaemonServer {
                         Some(&sb_sid), // bind AgentReply to the cloud session
                         Some(working_directory.as_str()),
                         agent_type_override,
+                        &self.config.device.id,
+                        &self.config.device.name,
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
@@ -974,6 +978,8 @@ impl DaemonServer {
                 crate::http::runtime_adapter::RuntimeManagerAdapter::new(
                     self.agents.clone(),
                     http_cfg.max_event_backlog,
+                    self.config.device.id.clone(),
+                    self.config.device.name.clone(),
                 );
             let runtime_supervisor =
                 Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
@@ -4291,6 +4297,10 @@ impl DaemonServer {
                 runtime_id = %existing,
                 "apply_start_runtime: dedup hit; reusing existing runtime"
             );
+            if let Some(handle) = self.agents.lock().await.get_handle(&existing) {
+                self.refresh_live_runtime_env(&existing, &handle.worktree, &handle.workspace_id)
+                    .await;
+            }
             // TODO(perf-runtime-start-throttle): See the same id on the client
             // (`ensureAgentRuntimesForSession` in packages/app). Dedup still runs
             // ensure_collab_session_registered, refresh_membership MQTT, reconcile
