@@ -61,6 +61,17 @@ vi.mock("../SetupWizard", () => ({
   ),
 }));
 
+vi.mock("@/stores/daemon-onboarding", () => ({
+  useDaemonOnboardingStore: (selector: (s: { status: string; loaded: boolean; refresh: () => Promise<void> }) => unknown) =>
+    selector({ status: 'ready', loaded: true, refresh: async () => {} }),
+}));
+
+vi.mock("../DaemonOnboardingWizard", () => ({
+  DaemonOnboardingWizard: ({ onDone }: { onDone: () => void }) => (
+    <button onClick={onDone}>Daemon onboarding wizard</button>
+  ),
+}));
+
 vi.mock("../DesktopOnboarding", () => ({
   DesktopOnboarding: () => <div>Desktop onboarding</div>,
 }));

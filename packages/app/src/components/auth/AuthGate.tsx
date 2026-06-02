@@ -10,6 +10,8 @@ import { LoginScreen } from "./LoginScreen";
 import { LobsterLoader } from "./LobsterLoader";
 import { SetupWizard } from "@/components/auth/SetupWizard";
 import { useSetupStore } from "@/stores/setup";
+import { DaemonOnboardingWizard } from "@/components/auth/DaemonOnboardingWizard";
+import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -29,6 +31,11 @@ export function AuthGate({ children }: AuthGateProps) {
   const listSetup = useSetupStore((s) => s.listRequirements);
   const [setupAck, setSetupAck] = useState(false);
 
+  const daemonStatus = useDaemonOnboardingStore((s) => s.status);
+  const daemonLoaded = useDaemonOnboardingStore((s) => s.loaded);
+  const refreshDaemonOnboarding = useDaemonOnboardingStore((s) => s.refresh);
+  const [daemonOnboardingAck, setDaemonOnboardingAck] = useState(false);
+
   useEffect(() => {
     if (isTauri()) void listSetup();
   }, [listSetup]);
@@ -46,6 +53,10 @@ export function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     document.getElementById("skeleton")?.remove();
   }, []);
+
+  useEffect(() => {
+    if (isTauri() && session && bootstrap === "ready") void refreshDaemonOnboarding()
+  }, [session, bootstrap, refreshDaemonOnboarding]);
 
   // After auth: ensure the user belongs to at least one team. If not (fresh
   // signup, no invites), auto-create a temporary team so the UI lands
@@ -154,6 +165,17 @@ export function AuthGate({ children }: AuthGateProps) {
         </p>
       </div>
     );
+  }
+
+  // Daemon team onboarding: after login + workspace bootstrap, ensure the local
+  // daemon is bound to the current team (new agent / bind existing / force-reset).
+  if (isTauri() && !daemonOnboardingAck) {
+    if (!daemonLoaded) {
+      return <div className="flex h-screen items-center justify-center bg-background" />;
+    }
+    if (daemonStatus === 'needs-onboard' || daemonStatus === 'mismatch') {
+      return <DaemonOnboardingWizard onDone={() => setDaemonOnboardingAck(true)} />;
+    }
   }
 
   return <>{children}</>;
