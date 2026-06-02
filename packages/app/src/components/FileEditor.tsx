@@ -30,6 +30,7 @@ import { supportsPreview } from "@/components/editors/utils";
 import { useAutoSave } from "@/components/editors/useAutoSave";
 import { ConflictBanner } from "@/components/editors/ConflictBanner";
 import { useSessionStore } from "@/stores/session";
+import { sendAgentPromptInActiveSession } from "@/lib/session-send-agent";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTeamPermissions } from "@/lib/team-permissions";
 import { useTeamModeStore } from '@/stores/team-mode'
@@ -945,8 +946,7 @@ export function FileEditor({
               filePath={filePath}
               isDark={isDark}
               onSendToAgent={(agentPrompt) => {
-                const { sendMessage } = useSessionStore.getState();
-                sendMessage(agentPrompt);
+                void sendAgentPromptInActiveSession(agentPrompt);
               }}
             />
           </Suspense>

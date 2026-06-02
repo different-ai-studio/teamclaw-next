@@ -49,7 +49,6 @@ import {
   interruptAgentActor,
   interruptAllActiveAgents,
 } from "@/lib/teamclaw/interrupt-agent";
-import { isOpenCodeSessionId } from "@/lib/opencode/sdk-client";
 import { toast } from "sonner";
 import { AcpStreamDebugPanel } from "./AcpStreamDebugPanel";
 import { TodoList } from "./TodoList";
@@ -366,7 +365,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // Actions — accessed via getState() to avoid creating subscriptions.
   // Zustand actions are stable references; subscribing to them wastes equality checks.
   const acts = useSessionStore.getState();
-  const abortSession = acts.abortSession;
   const removeFromQueue = acts.removeFromQueue;
 
   const handleInterruptAgent = React.useCallback(
@@ -394,10 +392,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   const handleAbort = React.useCallback(() => {
     if (!activeSessionId) return;
-    if (isOpenCodeSessionId(activeSessionId)) {
-      void abortSession();
-      return;
-    }
     void (async () => {
       try {
         await interruptAllActiveAgents(activeSessionId);
@@ -411,7 +405,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         );
       }
     })();
-  }, [activeSessionId, abortSession, t]);
+  }, [activeSessionId, t]);
 
   const loadSessions = acts.loadSessions;
   const resetSessions = acts.resetSessions;

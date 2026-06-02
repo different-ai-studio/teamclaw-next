@@ -36,8 +36,6 @@ const mocks = vi.hoisted(() => {
     teamModeState,
     shellOpen: vi.fn(),
     dialogOpen: vi.fn(),
-    initOpenCodeClient: vi.fn(),
-    restartOpencode: vi.fn(),
   }
 })
 
@@ -69,7 +67,6 @@ vi.mock('@/lib/team-permissions', () => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: mocks.shellOpen }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.dialogOpen }))
-vi.mock('@/lib/opencode/restart', () => ({ restartOpencode: mocks.restartOpencode }))
 vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' '), isTauri: () => false }))
 vi.mock('../shared', () => ({
   SettingCard: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
