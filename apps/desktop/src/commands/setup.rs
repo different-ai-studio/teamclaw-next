@@ -185,10 +185,8 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
                     emit_progress(app, SetupProgress { id: "opencode".into(), status: "running".into(), line: Some(line), error: None });
                 }
             }
-            CommandEvent::Terminated(payload) => {
-                if payload.code.unwrap_or(-1) != 0 {
-                    last_err = Some(format!("amuxd install-opencode exited with code {:?}", payload.code));
-                }
+            CommandEvent::Terminated(payload) if payload.code.unwrap_or(-1) != 0 => {
+                last_err = Some(format!("amuxd install-opencode exited with code {:?}", payload.code));
             }
             _ => {}
         }
