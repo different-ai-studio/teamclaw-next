@@ -101,8 +101,9 @@ test("pg createTeamInvite persists kind and agentKind for agent invites", async 
   const repo = createPgBusinessRepository({ db, userId });
   const result = await repo.createTeamInvite(teamId, {
     kind: "agent", displayName: "Build Bot", agentKind: "claude", teamRole: null, targetActorId: null,
-  } as any);
+  });
   assert.ok(result.token, "token present");
+  assert.ok(result.inviteId, "pg repo returns inviteId");
   const [row] = await db.select().from(teamInvites).where(eq(teamInvites.token, result.token));
   assert.equal(row.kind, "agent");
   assert.equal(row.agentKind, "claude");
@@ -120,10 +121,10 @@ test("pg createTeamInvite rejects re-invite by non-owner and allows owner", asyn
 
   const otherRepo = createPgBusinessRepository({ db, userId: otherUser });
   await assert.rejects(
-    () => otherRepo.createTeamInvite(teamId, { kind: "agent", displayName: "x", agentKind: "claude", targetActorId: agentActor.id } as any),
+    () => otherRepo.createTeamInvite(teamId, { kind: "agent", displayName: "x", agentKind: "claude", targetActorId: agentActor.id }),
     /forbidden|owner/i,
   );
   const ownerRepo = createPgBusinessRepository({ db, userId: ownerUser });
-  const ok = await ownerRepo.createTeamInvite(teamId, { kind: "agent", displayName: "x", agentKind: "claude", targetActorId: agentActor.id } as any);
+  const ok = await ownerRepo.createTeamInvite(teamId, { kind: "agent", displayName: "x", agentKind: "claude", targetActorId: agentActor.id });
   assert.ok(ok.token);
 });
