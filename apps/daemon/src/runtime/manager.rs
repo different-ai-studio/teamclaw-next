@@ -352,17 +352,6 @@ impl RuntimeManager {
         handle.available_models = crate::runtime::models::available_models_for(agent_type);
 
         let launch = self.launch_config_for(agent_type);
-        let mut extra_env = extra_env;
-        if matches!(
-            agent_type,
-            amux::AgentType::Opencode | amux::AgentType::Codex
-        ) {
-            let worktree_path = std::path::Path::new(worktree);
-            if let Err(e) = crate::config::ensure_opencode_xdg_dirs(worktree_path) {
-                tracing::warn!(worktree, error = %e, "failed to ensure opencode xdg dirs for ACP");
-            }
-            extra_env.extend(crate::config::opencode_workspace_xdg_env(worktree_path));
-        }
         let is_gateway = mcp_config_path.is_some();
         let resume_requested = resume_acp_session_id.is_some();
         let (cmd_tx, startup) = self
@@ -819,6 +808,33 @@ impl RuntimeManager {
         self.send_set_model(runtime_id, model_id).await?;
         self.set_current_model(runtime_id, model_id);
         Ok(())
+    }
+
+    /// Apply `desired_model` when it differs from the runtime's current model.
+    /// Returns true when a new model was forwarded to ACP.
+    pub async fn maybe_apply_model(&mut self, runtime_id: &str, desired_model: &str) -> bool {
+        let desired = desired_model.trim();
+        if desired.is_empty() {
+            return false;
+        }
+        let current = self
+            .current_model(runtime_id)
+            .cloned()
+            .unwrap_or_default();
+        if desired == current {
+            return false;
+        }
+        match self.set_model(runtime_id, desired).await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(
+                    runtime_id,
+                    model_id = desired,
+                    "maybe_apply_model failed: {e}"
+                );
+                false
+            }
+        }
     }
 
     /// Forward a `SetModel` command onto the agent's ACP command channel.
