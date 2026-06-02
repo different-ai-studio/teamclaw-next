@@ -90,6 +90,26 @@ async function seedSingleAgentSession(opts: {
   });
 }
 
+async function messageListDistanceFromBottom(): Promise<number> {
+  const code = `
+    (() => {
+      let el = document.querySelector('[data-testid="v2-message-list"]');
+      if (!el) return "999999";
+      let node = el;
+      while (node) {
+        const style = window.getComputedStyle(node);
+        const oy = style.overflowY;
+        if ((oy === "auto" || oy === "scroll") && node.scrollHeight > node.clientHeight + 1) {
+          return String(node.scrollHeight - node.scrollTop - node.clientHeight);
+        }
+        node = node.parentElement;
+      }
+      return "0";
+    })()
+  `;
+  return Number(await executeJs(code));
+}
+
 describe("V2 PR streaming integrity (spec D8/D9)", () => {
   beforeAll(async () => {
     await launchV2E2EApp();
@@ -158,5 +178,38 @@ describe("V2 PR streaming integrity (spec D8/D9)", () => {
     expect(await textOccurrences('[data-testid="v2-message-list"]', finalText)).toBe(1);
     expect(await textOccurrences('[data-testid="v2-message-list"]', streamingText)).toBe(0);
     expect(await domText('[data-testid="v2-message-list"]')).toContain(userPrompt);
+  });
+
+  it("V2-D9: long agent reply keeps the message list scrolled to the bottom", async () => {
+    const runId = nextRunId("d9");
+    const memberId = id(runId, "member");
+    const agentId = id(runId, "agent");
+    const sessionId = id(runId, "session");
+
+    await seedSingleAgentSession({ runId, sessionId, memberId, agentId, title: "D9 长回复滚动" });
+
+    await v2Call("appendMessage", {
+      sessionId,
+      messageId: id(runId, "user-prompt"),
+      senderActorId: memberId,
+      kind: "text",
+      content: "写一段很长的说明",
+      createdAt: new Date().toISOString(),
+    });
+    await waitForText("写一段很长的说明");
+
+    const line = "这是一段用于撑高消息列表的较长文本,确保内容超过视口高度。";
+    for (let i = 0; i < 40; i++) {
+      await v2Call("emitAgentDelta", { sessionId, actorId: agentId, delta: `${i}. ${line}\n` });
+    }
+    await waitForSelector(
+      `[data-testid="v2-streaming-agent"][data-session-id="${sessionId}"][data-actor-id="${agentId}"]`,
+    );
+
+    await waitFor(
+      "message list pinned to bottom during long stream",
+      () => messageListDistanceFromBottom(),
+      (dist) => dist <= 24,
+    );
   });
 });
