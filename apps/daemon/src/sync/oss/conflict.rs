@@ -3,6 +3,9 @@
 //! Name format: `<dir>/<stem>.conflict.<unix_ts>.<short_cipher_hash[0..8]>.<ext>`
 //! (or no ext if original had none).
 //!
+//! NOTE: `original_from_conflict` is reserved for the OSS conflict resolution UI.
+#![allow(dead_code)]
+//!
 //! Scanner skips all `*.conflict.*` files so they are never uploaded.
 
 use std::path::Path;

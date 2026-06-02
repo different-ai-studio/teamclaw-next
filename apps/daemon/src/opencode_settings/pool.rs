@@ -89,17 +89,12 @@ async fn spawn_settings_server(
     }
 
     let port = find_available_port().await?;
-    let _ = crate::config::ensure_opencode_xdg_dirs(workspace);
-    let xdg_env = crate::config::opencode_workspace_xdg_env(workspace);
 
     let mut cmd = Command::new(binary);
     cmd.arg("serve")
         .arg("--port")
         .arg(port.to_string())
         .current_dir(workspace);
-    for (key, value) in &xdg_env {
-        cmd.env(key, value);
-    }
     let mut cmd = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { Copy, Check, FolderGit2, Link2 } from 'lucide-react'
 
 import { cn, isTauri, copyToClipboard } from '@/lib/utils'
@@ -33,30 +34,31 @@ interface TeamSyncPathsData {
 
 const STATUS_META: Record<
   LinkStatus,
-  { label: string; className: string }
+  { labelKey: string; className: string }
 > = {
   symlink: {
-    label: '已软链',
+    labelKey: 'settings.teamShare.linkStatus.linked',
     className:
       'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
   },
   real_dir: {
-    label: '本地目录（待迁移）',
+    labelKey: 'settings.teamShare.linkStatus.pendingMigration',
     className: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
   },
   missing: {
-    label: '未链接',
+    labelKey: 'settings.teamShare.linkStatus.unlinked',
     className: 'bg-muted text-muted-foreground',
   },
 }
 
 function CopyButton({ value }: { value: string }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = React.useState(false)
   return (
     <button
       type="button"
-      aria-label="复制路径"
-      title="复制路径"
+      aria-label={t('settings.teamShare.copyPath')}
+      title={t('settings.teamShare.copyPath')}
       className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       onClick={() => {
         void copyToClipboard(value)
@@ -82,6 +84,7 @@ export function TeamSyncPaths({
   workspacePath: string | null
   className?: string
 }) {
+  const { t } = useTranslation()
   const [data, setData] = React.useState<TeamSyncPathsData | null>(null)
 
   React.useEffect(() => {
@@ -114,14 +117,16 @@ export function TeamSyncPaths({
         className,
       )}
     >
-      <h4 className="mb-3 text-[13px] font-medium text-foreground/80">同步路径</h4>
+      <h4 className="mb-3 text-[13px] font-medium text-foreground/80">
+        {t('settings.teamShare.syncPaths')}
+      </h4>
 
       {/* Real sync directory */}
       {data.realDir && (
         <div className="mb-3">
           <div className="mb-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
             <FolderGit2 className="h-3.5 w-3.5" />
-            真实同步目录
+            {t('settings.teamShare.realSyncDir')}
             <span
               className={cn(
                 'ml-1 rounded px-1.5 py-0.5 text-[10px]',
@@ -130,7 +135,9 @@ export function TeamSyncPaths({
                   : 'bg-muted text-muted-foreground',
               )}
             >
-              {data.realDirExists ? '存在' : '尚未创建'}
+              {data.realDirExists
+                ? t('settings.teamShare.dirExists')
+                : t('settings.teamShare.dirNotCreated')}
             </span>
           </div>
           <div className="flex items-start gap-2 rounded-md border border-border/40 bg-background/50 px-2.5 py-1.5">
@@ -147,7 +154,9 @@ export function TeamSyncPaths({
         <div>
           <div className="mb-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
             <Link2 className="h-3.5 w-3.5" />
-            工作区软链（{data.links.length}）
+            {t('settings.teamShare.workspaceSymlinks', {
+              count: data.links.length,
+            })}
           </div>
           <ul className="divide-y divide-border/40 rounded-md border border-border/40">
             {data.links.map((link) => {
@@ -164,7 +173,7 @@ export function TeamSyncPaths({
                       </span>
                       {link.isCurrent && (
                         <span className="shrink-0 rounded bg-coral/15 px-1.5 py-0.5 text-[10px] text-coral">
-                          当前
+                          {t('settings.teamShare.current')}
                         </span>
                       )}
                     </div>
@@ -182,7 +191,7 @@ export function TeamSyncPaths({
                         meta.className,
                       )}
                     >
-                      {meta.label}
+                      {t(meta.labelKey)}
                     </span>
                     <CopyButton value={link.linkPath} />
                   </div>

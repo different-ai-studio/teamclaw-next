@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { Loader2 } from 'lucide-react'
 
@@ -37,6 +38,7 @@ interface Props {
  * Per spec: the team secret must be entered manually. We do not auto-import.
  */
 export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
+  const { t } = useTranslation()
   const [phase, setPhase] = useState<Phase>('loading')
   const [mode, setMode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -86,7 +88,7 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
     return (
       <div className="flex items-center gap-2 text-sm text-neutral-600">
         <Loader2 className="h-4 w-4 animate-spin" />
-        <span>{phase === 'loading' ? '正在检查团队共享状态…' : '正在初始化团队工作区…'}</span>
+        <span>{phase === 'loading' ? t('onboarding.joinTeam.checkingStatus') : t('onboarding.joinTeam.initializing')}</span>
       </div>
     )
   }
@@ -94,9 +96,9 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
   if (phase === 'not_opened') {
     return (
       <div className="space-y-1">
-        <p className="text-sm font-medium">已加入团队</p>
+        <p className="text-sm font-medium">{t('onboarding.joinTeam.joined')}</p>
         <p className="text-[12px] text-neutral-600">
-          团队共享未开通，待 owner 开通后即可同步。
+          {t('onboarding.joinTeam.shareNotOpened')}
         </p>
       </div>
     )
@@ -104,7 +106,7 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
 
   if (phase === 'error') {
     return (
-      <p className="text-[12px] text-red-500">加入流程失败：{error}</p>
+      <p className="text-[12px] text-red-500">{t('onboarding.joinTeam.failed', { error })}</p>
     )
   }
 
@@ -112,9 +114,9 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <p className="text-sm font-medium">已加入团队（模式：{mode ?? '未知'}）</p>
+        <p className="text-sm font-medium">{t('onboarding.joinTeam.joinedWithMode', { mode: mode ?? t('onboarding.joinTeam.unknownMode') })}</p>
         <p className="text-[12px] text-neutral-600">
-          请输入团队密钥以解密共享内容。密钥由邀请人提供。
+          {t('onboarding.joinTeam.enterSecret')}
         </p>
       </div>
       <TeamSecretEntry teamId={teamId} workspacePath={workspacePath} onSaved={onDone} />

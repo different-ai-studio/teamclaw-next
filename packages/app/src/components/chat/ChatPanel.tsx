@@ -65,7 +65,7 @@ import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
-import { selectAgentModel } from "@/lib/runtime-state-resolve";
+import { selectAgentModel, providerModelKeyFromOption } from "@/lib/runtime-state-resolve";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -639,6 +639,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     return found;
   }, [currentModelKey, providerModels]);
 
+  const selectedModelKey = React.useMemo(
+    () => (currentModelKey ?? providerModelKeyFromOption(selectedModelOption)) || null,
+    [currentModelKey, selectedModelOption],
+  );
+
   // ── Refs ───────────────────────────────────────────────────────────────
   const messageListRef = React.useRef<MessageListHandle>(null);
 
@@ -1048,8 +1053,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         engagedAgentIds: engagedAgents.map((a) => a.id),
       }, "warn");
       void import("sonner").then(({ toast }) => {
-        toast.warning("请输入消息内容", {
-          description: "已选择 Agent 时需要输入文字或附件才会发送。",
+        toast.warning(t("chat.toast.emptyMessageTitle", "请输入消息内容"), {
+          description: t(
+            "chat.toast.emptyMessageWithAgent",
+            "已选择 Agent 时需要输入文字或附件才会发送。",
+          ),
         });
       });
       return;
@@ -1139,9 +1147,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         resolvedMentionActorIds: mentionActorIds,
       }, "warn");
       void import("sonner").then(({ toast }) => {
-        toast.warning("已 @Agent 但无法路由消息", {
-          description:
+        toast.warning(t("chat.toast.mentionRouteFailedTitle", "已 @Agent 但无法路由消息"), {
+          description: t(
+            "chat.toast.mentionRouteFailedBody",
             "消息未包含可解析的 Agent @-mention，daemon 不会回复。请确认 Agent 已加入此会话。",
+          ),
         });
       });
     }
@@ -1286,9 +1296,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                   agentId: agentRuntimeIdsForSend[0],
                   available: [],
                   byRuntimeId: useRuntimeStateStore.getState().byRuntimeId,
-                  providerFallback: selectedModelOption?.id,
+                  providerFallback: selectedModelKey ?? undefined,
                 }).modelId || ""
-              : selectedModelOption?.id ?? "";
+              : selectedModelKey ?? "";
           const outgoingMetadata = {
             mention_actor_ids: mentionActorIds,
             ...(displayMentionActorIds.length > 0
@@ -1599,7 +1609,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             sessionId,
             teamId: teamIdForSend,
             agentActorIds: agentIds,
-            modelId: selectedModelOption?.id,
+            modelId: selectedModelKey ?? undefined,
             reason: "session_create",
           });
         });
@@ -1975,8 +1985,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onEngageAgent={(a) => {
               if (!activeSessionId) {
                 void import("sonner").then(({ toast }) => {
-                  toast.info("请先发送一条消息创建会话", {
-                    description: "@ Agent 需要在已打开的会话中使用。",
+                  toast.info(t("chat.toast.sendFirstToCreateSession", "请先发送一条消息创建会话"), {
+                    description: t(
+                      "chat.toast.mentionNeedsOpenSession",
+                      "@ Agent 需要在已打开的会话中使用。",
+                    ),
                   });
                 });
                 return;

@@ -93,13 +93,6 @@ pub struct TeamGitResult {
     pub total_bytes: u64,
 }
 
-// Thresholds for the pre-sync warning: if any is breached and the caller did
-// not pass `force=true`, `team_sync_repo` returns `needs_confirmation` instead
-// of committing.
-const SYNC_PRECHECK_MAX_FILE_COUNT: usize = 50;
-const SYNC_PRECHECK_MAX_SINGLE_FILE_BYTES: u64 = 10 * 1024 * 1024;
-const SYNC_PRECHECK_MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
-
 /// Team metadata stored in _meta/team.json (committed to Git)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1398,88 +1391,6 @@ pub async fn team_generate_gitignore(
         message: ".gitignore ensured".to_string(),
         ..Default::default()
     })
-}
-
-/// Scan untracked files in the team repo and return `(new_files, total_bytes)`
-/// if any pre-sync threshold is breached. Advisory — returns `None` on git
-/// errors so the sync flow is never blocked by precheck telemetry.
-fn detect_precheck_breach(team_dir: &str) -> Option<(Vec<SyncPrecheckFile>, u64)> {
-    let output = Command::new("git")
-        .no_window()
-        .args(["status", "--porcelain", "-z", "-uall"])
-        .current_dir(team_dir)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let paths = parse_untracked_paths(&output.stdout);
-    let mut new_files: Vec<SyncPrecheckFile> = Vec::with_capacity(paths.len());
-    let mut total_bytes: u64 = 0;
-    for rel_path in paths {
-        let abs = Path::new(team_dir).join(&rel_path);
-        let size_bytes = std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0);
-        total_bytes = total_bytes.saturating_add(size_bytes);
-        new_files.push(SyncPrecheckFile {
-            path: rel_path,
-            size_bytes,
-        });
-    }
-
-    let count_breach = new_files.len() > SYNC_PRECHECK_MAX_FILE_COUNT;
-    let single_breach = new_files
-        .iter()
-        .any(|f| f.size_bytes > SYNC_PRECHECK_MAX_SINGLE_FILE_BYTES);
-    let total_breach = total_bytes > SYNC_PRECHECK_MAX_TOTAL_BYTES;
-    if count_breach || single_breach || total_breach {
-        Some((new_files, total_bytes))
-    } else {
-        None
-    }
-}
-
-/// 1.5 - Sync team repo: fetch + reset --hard (in workspace/teamclaw-team).
-///
-/// Pass `force=Some(true)` to skip the pre-sync size/count check. When `force`
-/// is false/None and a threshold is breached, returns
-/// `TeamGitResult { success: false, needs_confirmation: true, new_files, total_bytes }`
-/// without touching the repo — the caller must confirm and re-invoke with force.
-#[tauri::command]
-pub async fn team_sync_repo(
-    workspace_path: Option<String>,
-    secrets_state: State<'_, crate::commands::shared_secrets::SharedSecretsState>,
-    force: Option<bool>,
-) -> Result<TeamGitResult, String> {
-    // Note: this command is also called from the introspect_api HTTP path
-    // (`team_sync_all::sync_git`), which has no calling-window context.
-    // We keep the legacy single-instance fallback here. In multi-window mode
-    // the frontend should always pass `workspacePath`; if it doesn't, the
-    // single-instance fallback errors safely instead of silently routing wrong.
-    let workspace_path = workspace_path
-        .filter(|p| !p.is_empty())
-        .ok_or_else(|| "No workspace path set. Please select a workspace first.".to_string())?;
-    let json = read_workspace_config(&workspace_path)?;
-    let team = json
-        .get("team")
-        .cloned()
-        .map(serde_json::from_value::<TeamConfig>)
-        .transpose()
-        .map_err(|e| format!("Failed to parse team config: {}", e))?
-        .ok_or_else(|| "No team configured for this workspace".to_string())?;
-    if !team.enabled {
-        return Err("Team shared Git sync is disabled for this workspace".to_string());
-    }
-
-    let config = crate::commands::team_shared_git::TeamSharedGitConfig {
-        workspace_path,
-        git_url: team.git_url,
-        git_branch: team.git_branch,
-        git_token: team.git_token,
-        shared_dir_name: Some(team.shared_dir_name),
-    };
-    crate::commands::team_shared_git::sync_shared_git_repo(&config, Some(&secrets_state), force)
 }
 
 /// 1.6 - Disconnect team repo: remove the configured shared team directory

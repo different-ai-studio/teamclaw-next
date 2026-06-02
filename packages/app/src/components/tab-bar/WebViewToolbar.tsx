@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { ArrowLeft, ArrowRight, RotateCw, Lock } from "lucide-react"
 import { cn, isTauri } from "@/lib/utils"
 import { normalizeUrl } from "@/lib/webview-utils"
@@ -14,6 +15,7 @@ interface WebViewToolbarProps {
 }
 
 export function WebViewToolbar({ url: rawUrl, label, zoomLevel }: WebViewToolbarProps) {
+  const { t } = useTranslation()
   const url = normalizeUrl(rawUrl)
   const [currentUrl, setCurrentUrl] = useState(url)
   const [progress, setProgress] = useState(0)
@@ -124,13 +126,13 @@ export function WebViewToolbar({ url: rawUrl, label, zoomLevel }: WebViewToolbar
       )}
       <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/30">
         {/* Navigation buttons */}
-        <NavButton onClick={goBack} title="Back">
+        <NavButton onClick={goBack} title={t("webview.back")}>
           <ArrowLeft className="h-3.5 w-3.5" />
         </NavButton>
-        <NavButton onClick={goForward} title="Forward">
+        <NavButton onClick={goForward} title={t("webview.forward")}>
           <ArrowRight className="h-3.5 w-3.5" />
         </NavButton>
-        <NavButton onClick={reload} title="Reload">
+        <NavButton onClick={reload} title={t("webview.reload")}>
           <RotateCw className="h-3.5 w-3.5" />
         </NavButton>
 

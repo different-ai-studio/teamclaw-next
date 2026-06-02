@@ -24,7 +24,8 @@ use async_trait::async_trait;
 
 use crate::backend::{
     AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
-    BackendSessionAndParticipants, ClaimResult, StoredMessage, WorkspaceRow, WorkspaceUpsert,
+    BackendSessionAndParticipants, ClaimResult, ShareModeConfig, StoredMessage, WorkspaceRow,
+    WorkspaceUpsert,
 };
 
 /// Owned snapshot of an `AgentRuntimeUpsert` so tests can assert without
@@ -204,6 +205,12 @@ impl Backend for MockBackend {
 
     async fn auth_token(&self) -> BackendResult<String> {
         Ok(self.auth_token.clone())
+    }
+
+    async fn team_share_config(&self, _team_id: &str) -> BackendResult<ShareModeConfig> {
+        // No team-share configured by default; tests that need a populated
+        // config can construct one directly via `ShareModeConfig`.
+        Ok(ShareModeConfig::default())
     }
 
     async fn claim_team_invite(&self, _token: &str) -> BackendResult<ClaimResult> {
@@ -644,7 +651,9 @@ mod tests {
     #[tokio::test]
     async fn set_agent_default_workspace_records_workspace_id() {
         let (be, state) = dyn_backend();
-        be.set_agent_default_workspace("ws-remote-42").await.unwrap();
+        be.set_agent_default_workspace("ws-remote-42")
+            .await
+            .unwrap();
         assert_eq!(
             state.lock().unwrap().default_workspace_ids,
             vec!["ws-remote-42".to_string()]

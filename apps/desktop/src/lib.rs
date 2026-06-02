@@ -42,6 +42,7 @@ use tauri_plugin_aptabase::EventTracker;
 
 pub mod commands;
 mod local_cache;
+pub mod opencode_paths;
 pub mod mqtt;
 pub mod process_util;
 pub mod proto;
@@ -296,7 +297,6 @@ pub fn run() {
             wvm
         })
         .manage(commands::window_chrome::MainWindowState::default())
-        .manage(tokio::sync::Mutex::new(commands::team_webdav::WebDavManagedState::default()))
         .manage(commands::version_commands::VersionStoreState::default())
         .manage(commands::shared_secrets::SharedSecretsState::default())
         .manage::<crate::mqtt::MqttBus>(std::sync::Arc::new(crate::mqtt::MqttBusInner::new()))
@@ -423,11 +423,11 @@ pub fn run() {
             commands::team::init_git_team_secrets,
             commands::team::get_git_team_secret,
             commands::team::team_generate_gitignore,
-            commands::team::team_sync_repo,
+            commands::team_sync_proxy::team_sync_repo,
             commands::team::team_disconnect_repo,
-            commands::team_shared_git::team_shared_git_validate,
-            commands::team_shared_git::team_shared_git_setup,
-            commands::team_shared_git::team_shared_git_sync,
+            commands::team_sync_proxy::team_shared_git_validate,
+            commands::team_sync_proxy::team_shared_git_setup,
+            commands::team_sync_proxy::team_shared_git_sync,
             commands::device_identity::get_persistent_device_id,
             commands::device_token::generate_device_token,
             commands::version_commands::team_list_file_versions,
@@ -505,14 +505,7 @@ pub fn run() {
             commands::workspace_files::read_workspace_text_file,
             commands::workspace_files::read_workspace_binary_file,
             commands::window_chrome::show_main_window,
-            commands::team_webdav::webdav_connect,
-            commands::team_webdav::webdav_sync,
-            commands::team_webdav::webdav_disconnect,
-            commands::team_webdav::webdav_export_config,
-            commands::team_webdav::webdav_import_config,
-            commands::team_webdav::webdav_get_status,
-            commands::team_webdav::get_team_mode,
-commands::team_share::team_share_create,
+            commands::team_share::team_share_create,
             commands::team_share::enable::team_share_enable_oss,
             commands::team_share::enable::team_share_enable_managed_git,
             commands::team_share::enable::team_share_enable_custom_git,
@@ -521,16 +514,15 @@ commands::team_share::team_share_create,
             commands::team_share::enable::team_sync_paths,
             commands::team_share::join::team_share_join_existing,
             commands::team_litellm::team_litellm_setup,
-            commands::oss_sync::oss_sync_now,
-            commands::oss_sync::oss_sync_status,
-            commands::oss_sync::oss_sync_list_versions,
-            commands::oss_sync::oss_sync_get_version_content,
-            commands::oss_sync::oss_sync_restore_version,
-            commands::oss_sync::oss_sync_resolve_conflict,
-            commands::oss_sync::oss_sync_set_jwt,
-            commands::oss_sync::oss_sync_set_team_sync_mode,
-            commands::oss_sync::oss_sync_get_team_sync_mode,
-            commands::oss_sync::oss_sync_set_local_sync_mode,
+            commands::team_sync_proxy::oss_sync_now,
+            commands::team_sync_proxy::oss_sync_status,
+            commands::team_sync_proxy::oss_sync_list_versions,
+            commands::team_sync_proxy::oss_sync_get_version_content,
+            commands::team_sync_proxy::oss_sync_restore_version,
+            commands::team_sync_proxy::oss_sync_resolve_conflict,
+            commands::team_sync_proxy::oss_sync_set_team_sync_mode,
+            commands::team_sync_proxy::oss_sync_get_team_sync_mode,
+            commands::team_sync_proxy::oss_sync_set_local_sync_mode,
         ])
         .setup(|app| {
             let setup_t0 = std::time::Instant::now();

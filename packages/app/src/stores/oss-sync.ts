@@ -32,44 +32,26 @@ export interface VersionPage {
   nextCursor: string | null
 }
 
-// Per-file sync status, aligned with git-mode file-tree coloring
-// (`modified`/`new`) plus OSS-only `conflict`. `synced` files are omitted from
-// the map by `refresh()` (no color), matching git-mode behavior.
-export interface OssSyncFileStatus {
-  status: 'synced' | 'modified' | 'new' | 'conflict'
-  syncedVersion?: number
-  conflicts?: string[] // sibling .conflict.* file paths
-}
-
-export interface OssSyncConflict {
-  path: string
-  conflictFilePath: string
-  remoteCipherHash: string
-  timestamp: number
-}
-
-// Mirrors Rust SyncedFile (oss_sync_status -> recentFiles).
-export interface SyncedFile {
-  path: string
-  syncedVersion: number
-  dirty: boolean
-  /** Local mtime in unix seconds. */
-  mtime: number
-}
-
 // ---------------------------------------------------------------------------
 // State interface
+//
+// The desktop now proxies team-sync to the amuxd daemon. `oss_sync_status`
+// returns the daemon's AGGREGATE status — no per-file detail, no dirty/total
+// counts. The old `fileStates` / `recentFiles` / `dirtyCount` / `totalFiles` /
+// `lastServerSeq` fields no longer exist.
 // ---------------------------------------------------------------------------
 
 export interface OssSyncState {
+  /** Active team id (from the current-team store), null when no team. */
+  teamId: string | null
+  /** Daemon-reported share mode, or null when team-share isn't enabled. */
+  mode: string | null
   syncing: boolean
   lastSyncAt: string | null
-  teamId: string | null
-  dirtyCount: number
-  totalFiles: number
-  recentFiles: SyncedFile[]
-  fileStatusMap: Record<string, OssSyncFileStatus>
-  conflicts: OssSyncConflict[]
+  /** Aggregate counters from the last daemon sync (may be zeros). */
+  pulled: number
+  pushed: number
+  conflicts: number
   lastError: string | null
 
   refresh(workspacePath: string): Promise<void>
@@ -79,10 +61,13 @@ export interface OssSyncState {
     path: string,
     cursor?: string | null,
   ): Promise<VersionPage>
-  getVersionContent(
-    workspacePath: string,
-    contentHash: string,
-  ): Promise<string>
+  /**
+   * Fetch a version's plaintext. The daemon does NOT yet support this — the
+   * command returns an Err, which we surface as a rejected promise with a clear
+   * message. Callers (history providers) already degrade to a "preview
+   * unavailable" state on rejection rather than crashing.
+   */
+  getVersionContent(workspacePath: string, contentHash: string): Promise<string>
   restoreVersion(
     workspacePath: string,
     path: string,
@@ -99,19 +84,15 @@ export interface OssSyncState {
 // Rust command result shapes
 // ---------------------------------------------------------------------------
 
+// Daemon aggregate status (oss_sync_status).
 interface SyncStatusResult {
-  teamId: string | null
-  lastServerSeq: number
-  lastSyncAt: string
-  dirtyCount: number
-  totalFiles: number
-  // Per-file status from the Rust scan. `synced` entries are kept out of the
-  // store map (no color). Optional for backward-compat with older binaries.
-  fileStates?: Array<{
-    path: string
-    status: 'synced' | 'modified' | 'new' | 'conflict'
-  }>
-  recentFiles?: SyncedFile[]
+  mode: string | null
+  lastSyncAt: string | null
+  syncing: boolean
+  lastError: string | null
+  pulled: number
+  pushed: number
+  conflicts: number
 }
 
 interface SyncNowResult {
@@ -125,14 +106,13 @@ interface SyncNowResult {
 // ---------------------------------------------------------------------------
 
 export const useOssSyncStore = create<OssSyncState>((set, get) => ({
+  teamId: null,
+  mode: null,
   syncing: false,
   lastSyncAt: null,
-  teamId: null,
-  dirtyCount: 0,
-  totalFiles: 0,
-  recentFiles: [],
-  fileStatusMap: {},
-  conflicts: [],
+  pulled: 0,
+  pushed: 0,
+  conflicts: 0,
   lastError: null,
 
   async refresh(workspacePath: string) {
@@ -140,7 +120,7 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
     const teamId = activeTeamId()
     if (!teamId) {
       // No active team → nothing to report; keep an empty, non-error status.
-      set({ teamId: null, dirtyCount: 0, totalFiles: 0, recentFiles: [] })
+      set({ teamId: null, mode: null, pulled: 0, pushed: 0, conflicts: 0 })
       return
     }
     try {
@@ -148,20 +128,15 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
         workspacePath,
         teamId,
       })
-      // Build the per-file status map for file-tree coloring. Drop `synced`
-      // entries so the map only carries files that should be colored.
-      const fileStatusMap: Record<string, OssSyncFileStatus> = {}
-      for (const f of status.fileStates ?? []) {
-        if (f.status === 'synced') continue
-        fileStatusMap[f.path] = { status: f.status }
-      }
       set({
-        teamId: status.teamId,
-        lastSyncAt: status.lastSyncAt,
-        fileStatusMap,
-        dirtyCount: status.dirtyCount,
-        totalFiles: status.totalFiles,
-        recentFiles: status.recentFiles ?? [],
+        teamId,
+        mode: status.mode ?? null,
+        lastSyncAt: status.lastSyncAt ?? null,
+        syncing: status.syncing ?? false,
+        pulled: status.pulled ?? 0,
+        pushed: status.pushed ?? 0,
+        conflicts: status.conflicts ?? 0,
+        lastError: status.lastError ?? null,
       })
     } catch (e) {
       set({ lastError: String(e) })
@@ -177,8 +152,16 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
     }
     set({ syncing: true, lastError: null })
     try {
-      await invoke<SyncNowResult>('oss_sync_now', { workspacePath, teamId })
-      // Re-fetch status to get fresh lastSyncAt and team info.
+      const result = await invoke<SyncNowResult>('oss_sync_now', {
+        workspacePath,
+        teamId,
+      })
+      set({
+        pulled: result.pulled ?? 0,
+        pushed: result.pushed ?? 0,
+        conflicts: result.conflicts ?? 0,
+      })
+      // Re-fetch status to get fresh lastSyncAt / mode from the daemon.
       await get().refresh(workspacePath)
     } catch (e) {
       set({ lastError: String(e) })
@@ -204,6 +187,9 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
     workspacePath: string,
     contentHash: string,
   ): Promise<string> {
+    // The daemon does not yet support version content fetch; the command
+    // returns an Err. Let it reject so the history UI shows "preview
+    // unavailable" instead of attempting to render undefined content.
     return invoke<string>('oss_sync_get_version_content', {
       workspacePath,
       teamId: activeTeamId(),
@@ -235,36 +221,39 @@ export const useOssSyncStore = create<OssSyncState>((set, get) => ({
   },
 }))
 
-// JWT bridge note: pushing the Supabase token into teamclaw.json now lives in
-// `@/lib/jwt-bridge` (initialized at app startup from main.tsx). It used to live
-// here, but this store only loads when the Version History UI opens, so flows
-// that never touch OSS sync (team-share, LiteLLM) ran without a JWT.
+// JWT bridge note: pushing the FC token into teamclaw.json used to live here,
+// then moved to `@/lib/jwt-bridge`. The daemon now self-supplies its FC JWT, so
+// that bridge is a no-op (see jwt-bridge.ts).
 
 // ---------------------------------------------------------------------------
-// Tauri event listener — auto-update store on each engine tick.
+// Tauri event listener — auto-update store on each daemon tick.
 // ---------------------------------------------------------------------------
 
 if (isTauri()) {
-  // Rust engine emits "oss-sync-status" after each tick.
-  // NOTE: Tranche 2 did not add this emit yet — this listener is a no-op until
-  // engine.rs adds:
-  //   app.emit("oss-sync-status", payload)?;
-  // Filed as a TODO in engine.rs. When wired, the payload shape should include
-  // teamId, lastSyncAt, pulled, pushed, conflicts so the store can update
-  // without an extra round-trip.
+  // The backend may emit "oss-sync-status" with the daemon's aggregate shape.
   listen<{
-    teamId?: string | null
+    mode?: string | null
     lastSyncAt?: string | null
     syncing?: boolean
+    pulled?: number
+    pushed?: number
+    conflicts?: number
+    lastError?: string | null
   }>('oss-sync-status', (e) => {
     useOssSyncStore.setState((s) => ({
       ...s,
-      ...(e.payload.teamId !== undefined ? { teamId: e.payload.teamId } : {}),
+      ...(e.payload.mode !== undefined ? { mode: e.payload.mode } : {}),
       ...(e.payload.lastSyncAt !== undefined
         ? { lastSyncAt: e.payload.lastSyncAt }
         : {}),
-      ...(e.payload.syncing !== undefined
-        ? { syncing: e.payload.syncing }
+      ...(e.payload.syncing !== undefined ? { syncing: e.payload.syncing } : {}),
+      ...(e.payload.pulled !== undefined ? { pulled: e.payload.pulled } : {}),
+      ...(e.payload.pushed !== undefined ? { pushed: e.payload.pushed } : {}),
+      ...(e.payload.conflicts !== undefined
+        ? { conflicts: e.payload.conflicts }
+        : {}),
+      ...(e.payload.lastError !== undefined
+        ? { lastError: e.payload.lastError }
         : {}),
     }))
   }).catch((err) => console.warn('[oss-sync] event subscribe failed', err))

@@ -550,9 +550,6 @@ pub async fn start_opencode_inner(
             if let Err(e) = refresh_npm_plugins_if_needed(&ws_for_config) {
                 eprintln!("[OpenCode] Warning: failed to refresh npm plugins: {}", e);
             }
-            if let Err(e) = sync_global_auth_to_workspace(&ws_for_config) {
-                eprintln!("[OpenCode] Warning: failed to sync global auth: {}", e);
-            }
         }),
         // Branch 2: inherent skills (writes to .opencode/skills/, no opencode.json conflict)
         tokio::task::spawn_blocking(move || {
@@ -680,34 +677,14 @@ pub async fn start_opencode_inner(
         workspace_path
     );
 
-    // Build sidecar command, also injecting secrets as process env vars (backup)
-    //
-    // XDG isolation: redirect all OpenCode data/config/state/cache directories
-    // into <workspace>/.opencode/ so each workspace is fully self-contained
-    // and independent of any system-installed OpenCode.
-    let xdg_base = std::path::PathBuf::from(&workspace_path).join(".opencode");
+    // Build sidecar command, also injecting secrets as process env vars (backup).
+    // OpenCode uses the user's global data directories (no per-workspace XDG override).
     let mut sidecar_command = app
         .shell()
         .sidecar("opencode")
         .map_err(|e| format!("Failed to create sidecar command: {}", e))?
         .args(["serve", "--port", &port_str])
-        .current_dir(&workspace_path)
-        .env(
-            "XDG_DATA_HOME",
-            xdg_base.join("data").to_string_lossy().as_ref(),
-        )
-        .env(
-            "XDG_CONFIG_HOME",
-            xdg_base.join("config").to_string_lossy().as_ref(),
-        )
-        .env(
-            "XDG_STATE_HOME",
-            xdg_base.join("state").to_string_lossy().as_ref(),
-        )
-        .env(
-            "XDG_CACHE_HOME",
-            xdg_base.join("cache").to_string_lossy().as_ref(),
-        );
+        .current_dir(&workspace_path);
     // Inject device identity as environment variables
     let device_id = super::device_identity::get_device_id().unwrap_or_default();
     if !device_id.is_empty() {
@@ -1327,7 +1304,8 @@ fn ensure_team_provider(workspace_path: &str) -> Result<(), String> {
 }
 
 fn refresh_npm_plugins_if_needed(workspace_path: &str) -> Result<(), String> {
-    let state_path = plugin_update_state_path(workspace_path);
+    let home = dirs::home_dir().ok_or_else(|| "HOME directory not found".to_string())?;
+    let state_path = crate::opencode_paths::global_plugin_update_state_path(&home);
     let ttl = std::time::Duration::from_secs(PLUGIN_UPDATE_TTL_SECS);
     if !should_check_plugin_updates(&state_path, ttl) {
         return Ok(());
@@ -1382,7 +1360,7 @@ fn refresh_npm_plugins_if_needed(workspace_path: &str) -> Result<(), String> {
             continue;
         };
 
-        let cache_dir = plugin_cache_dir(workspace_path, &plugin.spec);
+        let cache_dir = plugin_cache_dir(&home, &plugin.spec);
         let Some(local_version) = read_installed_plugin_version(&cache_dir, &plugin.package_name)?
         else {
             continue;
@@ -1408,84 +1386,6 @@ fn refresh_npm_plugins_if_needed(workspace_path: &str) -> Result<(), String> {
     }
 
     write_plugin_update_state(&state_path)?;
-    Ok(())
-}
-
-/// Mirror OAuth credentials from the user's global opencode auth.json into the
-/// workspace's isolated auth.json. Without this, OAuth-based providers
-/// (Anthropic, OpenAI sign-in, Copilot, etc.) and plugins like
-/// opencode-claude-auth that branch on `auth.type === "oauth"` see no
-/// credentials in teamclaw's sidecar because XDG_DATA_HOME is redirected to
-/// `<workspace>/.opencode/data`.
-///
-/// Only OAuth entries are copied. API-key entries stay per-workspace.
-/// Existing workspace entries are never overwritten.
-fn sync_global_auth_to_workspace(workspace_path: &str) -> Result<(), String> {
-    let Some(home) = dirs::home_dir() else {
-        return Ok(());
-    };
-    let global_auth_path = home.join(".local/share/opencode/auth.json");
-    if !global_auth_path.exists() {
-        return Ok(());
-    }
-
-    let global_content = std::fs::read_to_string(&global_auth_path)
-        .map_err(|e| format!("read global auth.json: {}", e))?;
-    let global: serde_json::Value = serde_json::from_str(&global_content)
-        .map_err(|e| format!("parse global auth.json: {}", e))?;
-    let Some(global_obj) = global.as_object() else {
-        return Ok(());
-    };
-
-    let workspace_auth_path = std::path::PathBuf::from(workspace_path)
-        .join(".opencode")
-        .join("data")
-        .join("opencode")
-        .join("auth.json");
-    if let Some(parent) = workspace_auth_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create workspace auth dir: {}", e))?;
-    }
-
-    let workspace_content =
-        std::fs::read_to_string(&workspace_auth_path).unwrap_or_else(|_| "{}".to_string());
-    let mut workspace_value: serde_json::Value =
-        serde_json::from_str(&workspace_content).unwrap_or_else(|_| serde_json::json!({}));
-    let workspace_obj = workspace_value
-        .as_object_mut()
-        .ok_or_else(|| "workspace auth.json root is not an object".to_string())?;
-
-    let mut added = Vec::new();
-    for (provider_id, entry) in global_obj {
-        if entry.get("type").and_then(|t| t.as_str()) != Some("oauth") {
-            continue;
-        }
-        if workspace_obj.contains_key(provider_id) {
-            continue;
-        }
-        workspace_obj.insert(provider_id.clone(), entry.clone());
-        added.push(provider_id.clone());
-    }
-
-    if added.is_empty() {
-        return Ok(());
-    }
-
-    let new_content = serde_json::to_string_pretty(&workspace_value)
-        .map_err(|e| format!("serialize workspace auth.json: {}", e))?;
-    std::fs::write(&workspace_auth_path, new_content)
-        .map_err(|e| format!("write workspace auth.json: {}", e))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ =
-            std::fs::set_permissions(&workspace_auth_path, std::fs::Permissions::from_mode(0o600));
-    }
-
-    println!(
-        "[OpenCode] Synced OAuth providers from global auth.json: {:?}",
-        added
-    );
     Ok(())
 }
 
@@ -1567,13 +1467,6 @@ fn fetch_latest_npm_version(
         .map(str::to_string))
 }
 
-fn plugin_update_state_path(workspace_path: &str) -> PathBuf {
-    Path::new(workspace_path)
-        .join(".opencode")
-        .join("state")
-        .join("plugin-update-check.json")
-}
-
 fn should_check_plugin_updates(state_path: &Path, ttl: std::time::Duration) -> bool {
     let Ok(content) = std::fs::read_to_string(state_path) else {
         return true;
@@ -1610,13 +1503,8 @@ fn write_plugin_update_state(state_path: &Path) -> Result<(), String> {
     })
 }
 
-fn plugin_cache_dir(workspace_path: &str, spec: &str) -> PathBuf {
-    Path::new(workspace_path)
-        .join(".opencode")
-        .join("cache")
-        .join("opencode")
-        .join("packages")
-        .join(normalized_plugin_cache_key(spec))
+fn plugin_cache_dir(home: &Path, spec: &str) -> PathBuf {
+    crate::opencode_paths::global_plugin_cache_dir(home, &normalized_plugin_cache_key(spec))
 }
 
 fn normalized_plugin_cache_key(spec: &str) -> String {
@@ -2445,6 +2333,20 @@ mod tests {
     }
 
     #[test]
+    fn get_opencode_db_path_uses_shared_resolver() {
+        let workspace_dir = tempdir().unwrap();
+        let home_dir = tempdir().unwrap();
+        let _home = HomeGuard::set(home_dir.path());
+
+        let global_db = crate::opencode_paths::global_opencode_db_path(home_dir.path());
+        std::fs::create_dir_all(global_db.parent().unwrap()).unwrap();
+        std::fs::write(&global_db, b"db").unwrap();
+
+        let resolved = get_opencode_db_path(&workspace_dir.path().to_string_lossy()).unwrap();
+        assert_eq!(resolved, global_db.to_string_lossy());
+    }
+
+    #[test]
     fn load_local_personal_secrets_migrates_from_legacy_reader_not_read_env_blob() {
         let _home_guard = home_lock().lock().unwrap();
         let home_dir = tempdir().unwrap();
@@ -2612,26 +2514,7 @@ pub async fn stop_opencode(
 // ─── OpenCode DB allowlist commands ──────────────────────────────────
 
 fn get_opencode_db_path(workspace_path: &str) -> Result<String, String> {
-    // With XDG isolation, the DB lives at <workspace>/.opencode/data/opencode/opencode.db
-    let isolated_path =
-        std::path::PathBuf::from(workspace_path).join(".opencode/data/opencode/opencode.db");
-    if isolated_path.exists() {
-        return Ok(isolated_path.to_string_lossy().to_string());
-    }
-
-    // Fallback to legacy global path for workspaces that haven't been re-launched yet
-    let home =
-        std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
-    let legacy_path = format!("{}/.local/share/opencode/opencode.db", home);
-    if std::path::Path::new(&legacy_path).exists() {
-        return Ok(legacy_path);
-    }
-
-    Err(format!(
-        "OpenCode database not found at: {} or {}",
-        isolated_path.display(),
-        legacy_path
-    ))
+    crate::opencode_paths::resolve_opencode_db_path(workspace_path)
 }
 
 /// Look up the project_id for a given workspace path from the project table.

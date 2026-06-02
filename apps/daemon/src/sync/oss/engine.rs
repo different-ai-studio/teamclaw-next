@@ -7,8 +7,6 @@
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use tauri::{Emitter, Manager};
-
 use super::{
     conflict::write_conflict_sidecar,
     crypto::{decrypt_blob, encrypt_blob, sha256_hex},
@@ -18,18 +16,6 @@ use super::{
     scanner::scan_workspace,
     state::LocalSyncState,
 };
-use crate::commands::shared_secrets_crypto::derive_key;
-use crate::commands::team_secret_store::load_team_secret;
-
-/// The directory the OSS engine scans for this workspace. It is the
-/// `teamclaw-team` entry (a symlink to the team's global copy once the daemon
-/// has linked it). Returned as an owned String to match existing call sites.
-pub(crate) fn team_content_root(workspace_path: &str) -> String {
-    Path::new(workspace_path)
-        .join(crate::commands::TEAM_REPO_DIR)
-        .to_string_lossy()
-        .into_owned()
-}
 
 /// Summary returned by `tick()`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -41,23 +27,15 @@ pub struct TickResult {
 
 /// Run a full sync tick: PULL then PUSH (spec §4.3).
 pub async fn tick(
-    workspace_path: &str,
+    content_root: &str,
     team_id: &str,
+    team_secret: &str,
     fc: &FcClient,
-    app: &tauri::AppHandle,
 ) -> Result<TickResult, SyncError> {
-    let team_secret = load_team_secret(workspace_path, team_id)
-        .map_err(|e| SyncError::State(format!("load team_secret: {e}")))?;
-    let key = derive_key(&team_secret).map_err(SyncError::Crypto)?;
-
-    // Synced content lives in the team shared dir (<workspace>/teamclaw-team),
-    // not the workspace root. Scan / upload / download all operate under this
-    // content root; team secret, JWT and local sync state stay at the workspace
-    // root (.teamclaw/...).
-    let content_root = team_content_root(workspace_path);
-
-    let mut state =
-        LocalSyncState::load(workspace_path, team_id).map_err(|e| SyncError::State(e))?;
+    let key = crate::team_shared_env::derive_key(team_secret)
+        .map_err(|e| SyncError::Crypto(e.to_string()))?;
+    // content_root is now a parameter (the global team dir).
+    let mut state = LocalSyncState::load_at(team_id).map_err(SyncError::State)?;
 
     // ── PULL ─────────────────────────────────────────────────────────────────
     // Paginate /sync/manifest fully before advancing last_server_seq.
@@ -84,10 +62,10 @@ pub async fn tick(
         // Spec §4.3: path-validate all manifest items (defense vs. malicious remote).
         validate(&item.path).map_err(SyncError::from)?;
 
-        let abs_path = Path::new(&content_root).join(&item.path);
+        let abs_path = Path::new(content_root).join(&item.path);
 
         if let Some(parent) = abs_path.parent() {
-            validate_no_symlink_escape(Path::new(&content_root), &abs_path)
+            validate_no_symlink_escape(Path::new(content_root), &abs_path)
                 .map_err(SyncError::from)?;
             let _ = parent; // ensure compiler doesn't strip the validation
         }
@@ -136,7 +114,7 @@ pub async fn tick(
 
         // Download and overwrite.
         match download_and_write(
-            &content_root,
+            content_root,
             &item.path,
             &remote_cipher_hash,
             item.version,
@@ -147,7 +125,7 @@ pub async fn tick(
         .await
         {
             Ok(_) => pulled += 1,
-            Err(e) => log::warn!("[oss_sync] pull {}: {e}", item.path),
+            Err(e) => tracing::warn!("[oss_sync] pull {}: {e}", item.path),
         }
     }
 
@@ -158,7 +136,7 @@ pub async fn tick(
 
     // ── PUSH ─────────────────────────────────────────────────────────────────
     // Re-scan to pick up current mtime/size/dirty flags.
-    let scan = scan_workspace(&content_root, &state);
+    let scan = scan_workspace(content_root, &state);
 
     // Apply scan results back into state.
     for scanned in &scan {
@@ -196,20 +174,20 @@ pub async fn tick(
     let mut push_conflicts = 0u32;
 
     for path in all_dirty {
-        match upload_one(&content_root, &path, team_id, &key, fc, &mut state).await {
+        match upload_one(content_root, &path, team_id, &key, fc, &mut state).await {
             Ok(_) => pushed += 1,
             Err(SyncError::Conflict {
                 remote_version,
                 remote_cipher_hash,
             }) => {
                 push_conflicts += 1;
-                log::warn!(
+                tracing::warn!(
                     "[oss_sync] push conflict {}: remote_version={:?}",
                     path,
                     remote_version
                 );
                 // Write local content as conflict sidecar.
-                let abs_path = Path::new(&content_root).join(&path);
+                let abs_path = Path::new(content_root).join(&path);
                 if let Ok(local_bytes) = std::fs::read(&abs_path) {
                     let local_cipher_hash = state
                         .files
@@ -223,7 +201,7 @@ pub async fn tick(
                 if let Some(hash) = remote_cipher_hash {
                     let version = remote_version.unwrap_or(0);
                     let _ = download_and_write(
-                        &content_root,
+                        content_root,
                         &path,
                         &hash,
                         version,
@@ -234,34 +212,30 @@ pub async fn tick(
                     .await;
                 }
             }
-            Err(e) => log::warn!("[oss_sync] push {}: {e}", path),
+            Err(e) => tracing::warn!("[oss_sync] push {}: {e}", path),
         }
     }
 
     state.touch_sync_at();
-    state
-        .save(workspace_path)
-        .map_err(|e| SyncError::State(e))?;
+    state.save_at(team_id).map_err(SyncError::State)?;
 
-    let dirty_count = state.files.values().filter(|f| f.dirty).count();
     let conflict_count = pull_conflicts + push_conflicts;
 
-    let _ = app.emit(
-        "oss-sync-status",
-        serde_json::json!({
-            "teamId": team_id,
-            "lastSyncAt": chrono::Utc::now().to_rfc3339(),
-            "syncing": false,
-            "dirtyCount": dirty_count,
-            "conflicts": conflict_count,
-        }),
-    );
-
-    Ok(TickResult {
+    let result = TickResult {
         pulled,
         pushed,
         conflicts: conflict_count,
-    })
+    };
+
+    tracing::info!(
+        team_id,
+        pulled = result.pulled,
+        pushed = result.pushed,
+        conflicts = result.conflicts,
+        "oss sync tick complete"
+    );
+
+    Ok(result)
 }
 
 /// Download a remote blob, verify cipher_hash, decrypt, write to disk,
@@ -380,20 +354,4 @@ async fn upload_one(
     );
 
     Ok(())
-}
-
-#[cfg(test)]
-mod content_root_tests {
-    use super::*;
-
-    #[test]
-    fn content_root_is_team_repo_dir_under_workspace() {
-        let root = team_content_root("/tmp/ws");
-        assert_eq!(
-            root,
-            Path::new("/tmp/ws")
-                .join(crate::commands::TEAM_REPO_DIR)
-                .to_string_lossy()
-        );
-    }
 }

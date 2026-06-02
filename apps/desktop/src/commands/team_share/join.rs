@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::team_sync_proxy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,7 +55,14 @@ pub async fn team_share_join_existing_impl(
     // The team shared dir is created and linked by the daemon (one global copy
     // per team, exposed via a `teamclaw-team` symlink). Joining no longer
     // eagerly creates a per-workspace real directory; the daemon's sweep links
-    // it (and consolidates any legacy real dir into the global copy).
+    // it (and consolidates any legacy real dir into the global copy). Trigger
+    // the link now so the symlink appears immediately. The joiner's team secret
+    // is delivered separately via `team_share_set_team_secret`. Non-fatal: a
+    // momentarily-unreachable daemon must not fail the join — its sweep links
+    // the workspace once reachable.
+    if let Err(e) = team_sync_proxy::daemon_team_link(&workspace_path).await {
+        eprintln!("team_share_join_existing: daemon link deferred: {e}");
+    }
 
     // NOTE: team_id / share_mode / git_remote_url / litellm_team_id are NOT
     // written to teamclaw.json anymore. They duplicated the Cloud API (teams /

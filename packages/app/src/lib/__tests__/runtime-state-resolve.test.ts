@@ -144,6 +144,19 @@ describe("selectAgentModel — canonical model resolver", () => {
     expect(res.modelId).toBe("big-pickle");
   });
 
+  it("falls back to provider/model key when neither pick nor retain available", () => {
+    const empty = { ...byRuntimeId, [agentUuid]: { ...byRuntimeId[agentUuid], info: { ...byRuntimeId[agentUuid].info, currentModel: "" } } };
+    const res = selectAgentModel({
+      sessionId,
+      agentId: agentUuid,
+      available,
+      byRuntimeId: empty,
+      providerFallback: "openai/gpt-4o",
+    });
+    expect(res.source).toBe("fallback");
+    expect(res.modelId).toBe("openai/gpt-4o");
+  });
+
   it("falls back to provider fallback when neither pick nor retain available", () => {
     const empty = { ...byRuntimeId, [agentUuid]: { ...byRuntimeId[agentUuid], info: { ...byRuntimeId[agentUuid].info, currentModel: "" } } };
     const res = selectAgentModel({

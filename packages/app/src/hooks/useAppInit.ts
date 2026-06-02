@@ -11,6 +11,7 @@
  *  - Telemetry consent dialog
  */
 import { useEffect, useRef, useState, useCallback } from "react";
+import i18n from "@/lib/i18n";
 import { isTauri } from "@/lib/utils";
 import { useTabsStore } from "@/stores/tabs";
 import { urlToLabel } from "@/lib/webview-utils";
@@ -159,12 +160,12 @@ export function useWorkspaceInit() {
         setOpenCodeReady(false);
         const message =
           probe.reason === "port_file_missing"
-            ? "amuxd daemon 未连接：HTTP 控制面未就绪（~/.amuxd/amuxd.http.port 不存在）。请重启 amuxd，或确认运行的是本分支构建的版本。"
+            ? i18n.t("daemon.connection.portFileMissing")
             : probe.reason === "token_exchange_failed"
-              ? "amuxd daemon HTTP 已启动但鉴权失败：请重启 amuxd 后重试。"
+              ? i18n.t("daemon.connection.tokenExchangeFailed")
               : probe.reason === "health_check_failed"
-                ? "amuxd daemon HTTP 无响应：请确认 amuxd 进程仍在运行。"
-                : "amuxd daemon 未连接：请确认 amuxd 已启动且 HTTP 控制面可用";
+                ? i18n.t("daemon.connection.healthCheckFailed")
+                : i18n.t("daemon.connection.notConnected");
         setOpenCodeError(message);
       }
     })();
@@ -388,7 +389,6 @@ export function useGitReposInit() {
   const workspaceReady = !!workspacePath;
   const { initialize: initGitRepos, syncAll: syncGitRepos } = useGitReposStore();
   const prevWorkspaceRef = useRef<string | null>(null);
-  const teamSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Local git repos init — re-runs when workspace changes
   useEffect(() => {
@@ -423,26 +423,14 @@ export function useGitReposInit() {
             const teamConfig = config as { enabled?: boolean } | null;
             if (teamConfig?.enabled) {
               const doSync = () => {
+                // The daemon proxy no longer returns a size precheck
+                // (`needsConfirmation`) — it always proceeds.
                 invoke("team_sync_repo", { force: false, workspacePath })
                   .then(async (result: unknown) => {
                     const r = result as {
                       success: boolean;
                       message: string;
-                      needsConfirmation?: boolean;
-                      newFiles?: Array<{ path: string; sizeBytes: number }>;
-                      totalBytes?: number;
                     };
-                    if (r.needsConfirmation) {
-                      console.warn(
-                        "[App] Team sync blocked by precheck — waiting for user confirmation in Settings",
-                        { count: r.newFiles?.length ?? 0, totalBytes: r.totalBytes ?? 0 },
-                      );
-                      const { toast } = await import("sonner");
-                      toast.warning(
-                        `检测到 ${r.newFiles?.length ?? 0} 个较大的新文件待同步，请在设置 → 团队中确认`,
-                      );
-                      return;
-                    }
                     if (r.success) {
                       const { useTeamModeStore } = await import("@/stores/team-mode");
                       useTeamModeStore.setState({ teamGitLastSyncAt: new Date().toISOString() });
@@ -459,15 +447,11 @@ export function useGitReposInit() {
                   });
               };
 
-              console.log("[App] Team config found, syncing team repo...");
+              // One-time initial sync on workspace open. The amuxd daemon now
+              // runs its own 300s sync timer, so the desktop no longer needs a
+              // redundant 5-minute poll here.
+              console.log("[App] Team config found, syncing team repo (initial)...");
               doSync();
-
-              // Periodic sync every 5 minutes
-              const intervalId = setInterval(() => {
-                console.log("[App] Periodic team repo sync...");
-                doSync();
-              }, 5 * 60 * 1000);
-              teamSyncIntervalRef.current = intervalId;
             }
           })
           .catch((err: unknown) => {
@@ -499,12 +483,6 @@ export function useGitReposInit() {
       }
     })();
 
-    return () => {
-      if (teamSyncIntervalRef.current) {
-        clearInterval(teamSyncIntervalRef.current);
-        teamSyncIntervalRef.current = null;
-      }
-    };
   }, [workspacePath, workspaceReady]);
 
   // Real-time: refresh team-git file status and member roles when team files change

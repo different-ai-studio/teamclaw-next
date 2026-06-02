@@ -1,8 +1,8 @@
 //! In-daemon OpenCode **settings** HTTP surface (`opencode serve`).
 //!
 //! Chat/session traffic uses the ACP runtime; provider OAuth and auth-method
-//! discovery use a short-lived loopback `opencode serve` per workspace, with
-//! XDG dirs isolated under `<workspace>/.opencode/` (same layout as desktop).
+//! discovery use a short-lived loopback `opencode serve` per workspace. OpenCode
+//! data (OAuth, DB, cache) is shared globally under the user's default paths.
 
 mod client;
 mod pool;

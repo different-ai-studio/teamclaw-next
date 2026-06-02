@@ -14,7 +14,6 @@ vi.mock('react-i18next', () => ({
 }))
 
 const mockInvoke = vi.fn(async (cmd: string) => {
-  if (cmd === 'webdav_get_status') return null
   if (cmd === 'get_device_info') return { nodeId: 'test-node', platform: 'macos', arch: 'aarch64', hostname: 'test-mac' }
   if (cmd === 'unified_team_get_members') return []
   if (cmd === 'unified_team_get_my_role') return null

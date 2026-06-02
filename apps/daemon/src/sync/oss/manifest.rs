@@ -3,6 +3,9 @@
 //! The actual pagination logic lives in `engine::tick()`.
 //! This module exists to host the unit tests of the cursor-based pagination
 //! contract: `last_server_seq` must only advance after `nextCursor == null`.
+//!
+//! NOTE: `drain_manifest` is reserved for use once the OSS pull path is wired in.
+#![allow(dead_code)]
 
 use super::fc_client::{ManifestItem, ManifestPage};
 
@@ -37,7 +40,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::oss_sync::fc_client::ManifestItem;
+    use crate::sync::oss::fc_client::ManifestItem;
 
     fn make_item(path: &str, version: i32, change_seq: i64) -> ManifestItem {
         ManifestItem {

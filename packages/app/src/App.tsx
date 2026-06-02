@@ -647,10 +647,10 @@ function AppContent() {
         duration: Infinity,
         description: t(
           "workspace.daemonUnavailableHint",
-          "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
+          "Start amuxd on this machine (e.g. pnpm daemon:run), confirm the HTTP port/token files exist under ~/.amuxd/, then retry.",
         ),
         action: {
-          label: t("common.retry", "重试"),
+          label: t("common.retry", "Retry"),
           onClick: () => window.location.reload(),
         },
       });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { X, ChevronUp, ChevronDown } from "lucide-react"
 import { isTauri } from "@/lib/utils"
 
@@ -8,6 +9,7 @@ interface FindInPageBarProps {
 }
 
 export function FindInPageBar({ label, onClose }: FindInPageBarProps) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState("")
   const [found, setFound] = useState<boolean | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -69,22 +71,22 @@ export function FindInPageBar({ label, onClose }: FindInPageBarProps) {
         value={query}
         onChange={(e) => { setQuery(e.target.value); setFound(null) }}
         onKeyDown={handleKeyDown}
-        placeholder="Find in page..."
+        placeholder={t("search.findInPage")}
         className="flex-1 min-w-0 px-2 py-0.5 text-xs rounded border bg-background/80 outline-none focus:ring-1 focus:ring-primary"
       />
       {found === false && query && (
-        <span className="text-xs text-destructive shrink-0">No matches</span>
+        <span className="text-xs text-destructive shrink-0">{t("search.noMatches")}</span>
       )}
       <button
         onClick={() => doFind(false)}
-        title="Previous (Shift+Enter)"
+        title={t("search.previousShiftEnter")}
         className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
       >
         <ChevronUp className="h-3.5 w-3.5" />
       </button>
       <button
         onClick={() => doFind(true)}
-        title="Next (Enter)"
+        title={t("search.nextEnter")}
         className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
       >
         <ChevronDown className="h-3.5 w-3.5" />

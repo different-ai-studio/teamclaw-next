@@ -204,24 +204,24 @@ describe('locale helpers', () => {
     vi.resetModules()
   })
 
-  it('uses the system language when there is no saved language', async () => {
+  it('defaults to English when there is no saved language (system language is not auto-detected)', async () => {
     setNavigatorLanguage('zh-CN')
-
-    const { getPreferredLanguage } = await import('../locale')
-
-    expect(getPreferredLanguage()).toBe('zh-CN')
-  })
-
-  it('prefers a saved language over the system language', async () => {
-    setNavigatorLanguage('zh-CN')
-    store[`${appShortName}-language`] = 'en'
 
     const { getPreferredLanguage } = await import('../locale')
 
     expect(getPreferredLanguage()).toBe('en')
   })
 
-  it('falls back to English for unsupported system languages', async () => {
+  it('prefers a saved language over the English default', async () => {
+    setNavigatorLanguage('en')
+    store[`${appShortName}-language`] = 'zh-CN'
+
+    const { getPreferredLanguage } = await import('../locale')
+
+    expect(getPreferredLanguage()).toBe('zh-CN')
+  })
+
+  it('defaults to English for an unsupported saved or system language', async () => {
     setNavigatorLanguage('fr-FR')
 
     const { getPreferredLanguage } = await import('../locale')
