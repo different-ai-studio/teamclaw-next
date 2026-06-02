@@ -6,6 +6,7 @@
 - **第一交付范围**: **单人 + 单 agent**。包含单人的 **git/oss 工作区文件同步** 与 **owner 级 team LLM provider 设置**;不涉及多人协作(成员邀请/加入、成员管理)、多 agent 聊天。
 - **目标**: **桌面端先跑通** —— 一条 `登录 → 建会话 → 发消息收到流式回复 → 权限/编辑` 的单人端到端主链路必须全绿
 - **交付**: 本清单文档 + 适合自动化部分的测试代码(复用现有 tauri-mcp e2e / v2-e2e / FC vitest / daemon cargo)
+- **现有自动化已覆盖(勿重复造)**: `tests/v2-e2e/pr/conversation-critical-path.test.ts`(V2-PR-01..04)已确定性覆盖 **C1/C2**(会话列表+排序)、**C3**(切换保持各自历史)、**D2**(发送→流式生命周期)、**D4**(工具 calling→completed→failed)、**D7**(agent error surface)。FC `services/fc/test/auth-pg.test.ts` 已覆盖 **B1 后端**(emailOTP signInOtp→capture→verifyOtp 全程)。自动化新增工作应只补**缺口**:D3/D5/D6/D8/D9/D10、权限 approve/deny 交互(E2)、C4/C5、A4 等。
 
 ## 模型/账号前提(影响用例设计)
 
