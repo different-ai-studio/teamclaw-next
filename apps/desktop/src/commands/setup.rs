@@ -1,5 +1,11 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+/// Tauri event name carrying `SetupProgress` to the first-run wizard UI.
+const SETUP_PROGRESS_EVENT: &str = "setup-progress";
+/// Per-user amuxd state directory (under the home dir).
+const AMUXD_DIR: &str = ".amuxd";
 
 /// One installable/checkable prerequisite shown in the first-run wizard.
 #[derive(Debug, Clone, Serialize)]
@@ -15,7 +21,7 @@ pub struct RequirementStatus {
 /// True if `~/.amuxd/bin/<name>` (or the .exe variant on Windows) exists under `home`.
 fn bin_present(home: &Path, name_unix: &str, name_win: &str) -> bool {
     let name = if cfg!(windows) { name_win } else { name_unix };
-    home.join(".amuxd").join("bin").join(name).exists()
+    home.join(AMUXD_DIR).join("bin").join(name).exists()
 }
 
 /// Rust target triple for the current host (matches the sidecar naming convention).
@@ -76,8 +82,6 @@ fn locate_bundled_amuxd() -> Option<PathBuf> {
     None
 }
 
-use tauri::{AppHandle, Emitter, Manager, Runtime};
-
 #[tauri::command]
 pub async fn setup_list_requirements<R: Runtime>(
     app: AppHandle<R>,
@@ -124,7 +128,7 @@ pub struct SetupProgress {
 }
 
 fn emit_progress<R: Runtime>(app: &AppHandle<R>, p: SetupProgress) {
-    let _ = app.emit("setup-progress", p);
+    let _ = app.emit(SETUP_PROGRESS_EVENT, p);
 }
 
 /// Copy the bundled amuxd binary into ~/.amuxd/bin/amuxd (install only — no service/start).
@@ -132,7 +136,7 @@ fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     emit_progress(app, SetupProgress { id: "amuxd".into(), status: "started".into(), line: None, error: None });
     let src = locate_bundled_amuxd().ok_or_else(|| "bundled amuxd binary not found".to_string())?;
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
-    let bin_dir = home.join(".amuxd").join("bin");
+    let bin_dir = home.join(AMUXD_DIR).join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
     let dest = bin_dir.join(if cfg!(windows) { "amuxd.exe" } else { "amuxd" });
     std::fs::copy(&src, &dest).map_err(|e| format!("copy amuxd failed: {e}"))?;
@@ -153,7 +157,9 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
     use tauri_plugin_shell::ShellExt;
 
     emit_progress(app, SetupProgress { id: "opencode".into(), status: "started".into(), line: None, error: None });
-    let (mut rx, _child) = app
+    // `_child_guard` must stay alive until `rx` is fully drained: dropping the
+    // CommandChild early can terminate the sidecar before install finishes.
+    let (mut rx, _child_guard) = app
         .shell()
         .sidecar("amuxd")
         .map_err(|e| format!("sidecar amuxd: {e}"))?
@@ -161,6 +167,9 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
         .spawn()
         .map_err(|e| format!("spawn amuxd: {e}"))?;
 
+    // Note: we record failure in `last_err` and only act on it after the event
+    // loop ends — Terminated is not guaranteed to be the final event, so we keep
+    // draining stdout/stderr after it before deciding success/failure.
     let mut last_err: Option<String> = None;
     while let Some(event) = rx.recv().await {
         match event {
@@ -194,6 +203,11 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
 
 /// Best-effort git install guidance. macOS triggers the Xcode CLT installer; other
 /// platforms return an error so the UI shows manual instructions (git is optional).
+///
+/// On macOS this returns Ok as soon as the Xcode CLT dialog is spawned — git is
+/// not actually present yet, and `xcode-select --install` exits non-zero when the
+/// tools are already installed (we intentionally don't treat that as an error).
+/// The caller should re-poll `setup_list_requirements` to confirm git presence.
 fn install_git<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     emit_progress(app, SetupProgress { id: "git".into(), status: "started".into(), line: None, error: None });
     #[cfg(target_os = "macos")]
