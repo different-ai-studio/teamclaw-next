@@ -4,6 +4,13 @@ import { Check, Filter, Loader2, Plus, Search, Sparkles, User as UserIcon, Users
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
+import { ActorDetailDialog } from '@/components/sidebar/ActorDetailDialog'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from '@/components/ui/context-menu'
 import { SidebarCollapseToggle } from '@/components/app-sidebar'
 import { TrafficLights } from '@/components/ui/traffic-lights'
 import { useSidebar } from '@/components/ui/sidebar'
@@ -176,7 +183,7 @@ export function isActorOnline(lastActiveAt: string | null): boolean {
 
 type ActorTypeFilter = 'all' | 'agent' | 'member'
 
-function ActorRowView({ actor }: { actor: ActorRow }) {
+function ActorRowView({ actor, onViewProfile }: { actor: ActorRow; onViewProfile: (actor: ActorRow) => void }) {
   const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
   // Members: heartbeat-based — last_active_at within 5min.
@@ -207,42 +214,52 @@ function ActorRowView({ actor }: { actor: ActorRow }) {
       ? t(`actors.role.${actor.team_role}`, actor.team_role)
       : t('actors.type.member', 'Team')
   return (
-    <button
-      type="button"
-      onClick={() => enterActorDraft({ id: actor.id, displayName: actor.display_name, kind: actor.actor_type })}
-      className="flex w-full items-center gap-2.5 border-b border-border-soft px-4 py-2.5 text-left hover:bg-selected focus:outline-none focus-visible:bg-selected"
-    >
-      <div className={cn(
-        'relative flex h-10 w-10 shrink-0 items-center justify-center text-[16px] font-semibold text-white',
-        isAgent ? 'rounded-[11px] ring-[1.5px] ring-coral' : 'rounded-full',
-      )} style={{ backgroundColor: colors.bg, color: colors.fg }}>
-        {initial || (isAgent ? <Sparkles className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />)}
-        <span className={cn(
-          'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background',
-          isAgent ? 'bg-coral' : online ? 'bg-emerald-500' : 'bg-faint',
-        )} aria-label={status ?? (online ? 'online' : 'offline')} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[13px] font-semibold leading-[19px] text-foreground">{actor.display_name}</span>
-          {isAgent && (
-            <span className="shrink-0 rounded-[5px] border border-coral px-1.5 py-0 font-mono text-[9.5px] font-semibold leading-[15px] text-coral">
-              Agent
-            </span>
-          )}
-        </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11.5px] leading-[18px] text-muted-foreground">
-          <span className="truncate">{subtitle}</span>
-          {status && (
-            <>
-              <span className="text-faint">·</span>
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint" aria-label={status} />
-            </>
-          )}
-        </div>
-      </div>
-      {lastActive && <span className="ml-2 shrink-0 font-mono text-[11.5px] text-faint">{lastActive}</span>}
-    </button>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={() => enterActorDraft({ id: actor.id, displayName: actor.display_name, kind: actor.actor_type })}
+          className="flex w-full items-center gap-2.5 border-b border-border-soft px-4 py-2.5 text-left hover:bg-selected focus:outline-none focus-visible:bg-selected"
+        >
+          <div className={cn(
+            'relative flex h-10 w-10 shrink-0 items-center justify-center text-[16px] font-semibold text-white',
+            isAgent ? 'rounded-[11px] ring-[1.5px] ring-coral' : 'rounded-full',
+          )} style={{ backgroundColor: colors.bg, color: colors.fg }}>
+            {initial || (isAgent ? <Sparkles className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />)}
+            <span className={cn(
+              'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background',
+              isAgent ? 'bg-coral' : online ? 'bg-emerald-500' : 'bg-faint',
+            )} aria-label={status ?? (online ? 'online' : 'offline')} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-[13px] font-semibold leading-[19px] text-foreground">{actor.display_name}</span>
+              {isAgent && (
+                <span className="shrink-0 rounded-[5px] border border-coral px-1.5 py-0 font-mono text-[9.5px] font-semibold leading-[15px] text-coral">
+                  Agent
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11.5px] leading-[18px] text-muted-foreground">
+              <span className="truncate">{subtitle}</span>
+              {status && (
+                <>
+                  <span className="text-faint">·</span>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint" aria-label={status} />
+                </>
+              )}
+            </div>
+          </div>
+          {lastActive && <span className="ml-2 shrink-0 font-mono text-[11.5px] text-faint">{lastActive}</span>}
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem onSelect={() => onViewProfile(actor)}>
+          <UserIcon className="h-4 w-4" />
+          {t('actors.contextMenu.viewProfile', 'View profile')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -285,6 +302,7 @@ export function ActorsView() {
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [filter, setFilter] = React.useState<ActorTypeFilter>('all')
   const [inviteOpen, setInviteOpen] = React.useState(false)
+  const [detailFor, setDetailFor] = React.useState<ActorRow | null>(null)
 
   const counts = React.useMemo(() => ({
     all: actors.length,
@@ -336,7 +354,7 @@ export function ActorsView() {
 
     return (
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {visibleActors.map((a) => <ActorRowView key={a.id} actor={a} />)}
+        {visibleActors.map((a) => <ActorRowView key={a.id} actor={a} onViewProfile={setDetailFor} />)}
       </div>
     )
   }
@@ -406,6 +424,7 @@ export function ActorsView() {
       </div>
       {renderBody()}
       <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+      <ActorDetailDialog actor={detailFor} onOpenChange={(open) => { if (!open) setDetailFor(null) }} />
     </div>
   )
 }
