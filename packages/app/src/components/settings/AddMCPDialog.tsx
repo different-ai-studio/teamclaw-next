@@ -270,7 +270,7 @@ export function AddMCPDialog({
                       <p className="text-foreground">
                         {t(
                           'settings.mcp.inherentEnvNotice',
-                          '此服务器的环境变量由"环境变量"设置统一管理，请前往配置以下变量：',
+                          'This server\'s environment variables are managed centrally in the "Environment Variables" settings. Please configure the following variables there:',
                         )}
                       </p>
                       {requiredEnvKeys.length > 0 && (
@@ -287,7 +287,7 @@ export function AddMCPDialog({
                       <p className="text-xs text-muted-foreground">
                         {t(
                           'settings.mcp.inherentEnvHint',
-                          '在"设置 → 环境变量"中填写后，重启 OpenCode 即可生效。',
+                          'After filling them in under "Settings → Environment Variables", restart OpenCode for the changes to take effect.',
                         )}
                       </p>
                     </div>

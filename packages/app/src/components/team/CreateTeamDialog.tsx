@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { Loader2 } from 'lucide-react'
 
@@ -40,6 +41,7 @@ export function CreateTeamDialog({
   onOpenChange,
   onCreated,
 }: Props) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,17 +72,17 @@ export function CreateTeamDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建团队</DialogTitle>
+          <DialogTitle>{t('team.createDialog.title')}</DialogTitle>
           <DialogDescription>
-            创建后请在「设置 → 团队共享」与「LLM 配置」中分别开通共享与 LiteLLM。
+            {t('team.createDialog.description')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label htmlFor="create-team-name">团队名称</Label>
+          <Label htmlFor="create-team-name">{t('team.createDialog.nameLabel')}</Label>
           <Input
             id="create-team-name"
             value={name}
-            placeholder="例如：设计组"
+            placeholder={t('team.createDialog.namePlaceholder')}
             autoFocus
             disabled={busy}
             onChange={(e) => {
@@ -106,11 +108,11 @@ export function CreateTeamDialog({
             disabled={busy}
             onClick={() => onOpenChange(false)}
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
             {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            创建
+            {t('common.create')}
           </Button>
         </DialogFooter>
       </DialogContent>

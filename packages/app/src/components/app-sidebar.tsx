@@ -66,6 +66,7 @@ function SessionActivityBadge({ activity }: { activity?: SessionListActivity }) 
 
 /** Sidebar collapse control only (workspace variant sidebar header). */
 export function SidebarCollapseToggle({ className }: { className?: string }) {
+  const { t } = useTranslation()
   const { toggleSidebar } = useSidebar()
   return (
     <Button
@@ -73,8 +74,8 @@ export function SidebarCollapseToggle({ className }: { className?: string }) {
       size="icon"
       className={cn("h-7 w-7 text-muted-foreground hover:text-foreground", className)}
       onClick={toggleSidebar}
-      title="Collapse sidebar"
-      aria-label="Collapse sidebar"
+      title={t("navigation.collapseSidebar")}
+      aria-label={t("navigation.collapseSidebar")}
     >
       <PanelLeftIcon className="h-4 w-4" />
     </Button>

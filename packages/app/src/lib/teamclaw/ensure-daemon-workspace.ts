@@ -1,4 +1,5 @@
 import { getBackend } from '@/lib/backend'
+import i18n from '@/lib/i18n'
 import { addWorkspace, fetchWorkspaces } from '@/lib/teamclaw-rpc'
 import type { WorkspaceInfo } from '@/lib/proto/amux_pb'
 import { workspacePathsMatch } from '@/stores/session-utils'
@@ -66,7 +67,10 @@ export async function ensureDaemonWorkspaceRegistered(
       targetDeviceId,
     })
     const message = error instanceof Error ? error.message : String(error)
-    await notifyDaemonWorkspaceError('无法加载 workspace 信息', `${agentLabel}：${message}`)
+    await notifyDaemonWorkspaceError(
+      i18n.t('daemon.workspace.loadInfoFailedTitle'),
+      i18n.t('daemon.workspace.labeledMessage', { agentLabel, message }),
+    )
     throw new Error(`Failed to load cloud workspace ${cloudId}: ${message}`, { cause: error })
   }
 
@@ -77,7 +81,10 @@ export async function ensureDaemonWorkspaceRegistered(
       cloudWorkspaceId: cloudId,
       targetDeviceId,
     }, 'warn')
-    await notifyDaemonWorkspaceError('Workspace 缺少路径', `${agentLabel}：云端 workspace 未配置本地目录路径。`)
+    await notifyDaemonWorkspaceError(
+      i18n.t('daemon.workspace.missingPathTitle'),
+      i18n.t('daemon.workspace.missingPathDesc', { agentLabel }),
+    )
     throw new Error(message)
   }
 
@@ -99,7 +106,10 @@ export async function ensureDaemonWorkspaceRegistered(
       targetDeviceId,
     })
     const message = error instanceof Error ? error.message : String(error)
-    await notifyDaemonWorkspaceError('无法读取 Agent workspace 列表', `${agentLabel}：${message}`)
+    await notifyDaemonWorkspaceError(
+      i18n.t('daemon.workspace.listFailedTitle'),
+      i18n.t('daemon.workspace.labeledMessage', { agentLabel, message }),
+    )
     throw new Error(`fetchWorkspaces failed for ${targetDeviceId}: ${message}`, { cause: error })
   }
 
@@ -147,8 +157,8 @@ export async function ensureDaemonWorkspaceRegistered(
     })
     const message = error instanceof Error ? error.message : String(error)
     await notifyDaemonWorkspaceError(
-      'Agent workspace 注册失败',
-      `${agentLabel}：无法在 daemon 上注册目录 ${cloudPath}。${message}`,
+      i18n.t('daemon.workspace.registerFailedTitle'),
+      i18n.t('daemon.workspace.registerFailedDesc', { agentLabel, cloudPath, message }),
     )
     throw new Error(`addWorkspace failed for ${targetDeviceId} path ${cloudPath}: ${message}`, { cause: error })
   }

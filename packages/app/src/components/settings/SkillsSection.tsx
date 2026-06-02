@@ -1364,7 +1364,7 @@ ${skillContent.trim()}`
                 <div className="space-y-2 flex-1 min-h-[300px]">
                   <label className="text-[13px] font-medium">{t('settings.skills.content', 'Content (Markdown)')}</label>
                   <div className="h-[400px] rounded-md border border-input overflow-hidden">
-                    <Suspense fallback={<div className="h-full flex items-center justify-center text-muted-foreground text-[13px]">Loading editor...</div>}>
+                    <Suspense fallback={<div className="h-full flex items-center justify-center text-muted-foreground text-[13px]">{t('settings.skills.loadingEditor', 'Loading editor...')}</div>}>
                       <CodeEditor
                         content={skillContent}
                         filename="SKILL.md"

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ const HEX64 = /^[0-9a-fA-F]{64}$/
  * onboarding where the joiner must paste the secret from the inviter.
  */
 export function TeamSecretEntry({ teamId, workspacePath, onSaved }: Props) {
+  const { t } = useTranslation()
   const setSecret = useTeamShareStore((s) => s.setSecret)
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
@@ -33,7 +35,7 @@ export function TeamSecretEntry({ teamId, workspacePath, onSaved }: Props) {
 
   async function handleSave() {
     if (!valid) {
-      setError('团队密钥必须是 64 位十六进制字符。')
+      setError(t('settings.teamSecret.invalidError'))
       return
     }
     setSaving(true)
@@ -52,7 +54,7 @@ export function TeamSecretEntry({ teamId, workspacePath, onSaved }: Props) {
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="team-secret">团队密钥（64 位十六进制）</Label>
+      <Label htmlFor="team-secret">{t('settings.teamSecret.label')}</Label>
       <Input
         id="team-secret"
         className="font-mono text-[12px]"
@@ -69,15 +71,15 @@ export function TeamSecretEntry({ teamId, workspacePath, onSaved }: Props) {
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={handleSave} disabled={saving || !valid}>
           {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-          保存
+          {t('common.save')}
         </Button>
         {!valid && trimmed.length > 0 && (
           <span className="text-[12px] text-amber-600">
-            需要恰好 64 位十六进制字符。
+            {t('settings.teamSecret.lengthHint')}
           </span>
         )}
         {savedOk && (
-          <span className="text-[12px] text-emerald-600">已保存。</span>
+          <span className="text-[12px] text-emerald-600">{t('settings.teamSecret.savedOk')}</span>
         )}
       </div>
       {error && <p className="text-[12px] text-red-500">{error}</p>}
