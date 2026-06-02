@@ -358,39 +358,69 @@ export function createPgAuthRepository(
 
         try {
           return await (db as any).transaction(async (tx: any) => {
-          // Insert actor (agent type, userId = daemon BA user)
-          const [actor] = await tx.insert(actors).values({
-            teamId: invite.teamId,
-            actorType: "agent",
-            displayName: invite.displayName,
-            userId: daemonUser.id,
-            invitedByActorId: invite.invitedByActorId,
-          }).returning();
+          let actorId: string;
 
-          // Insert agents row
-          await tx.insert(agents).values({
-            id: actor.id,
-            agentKind: invite.agentKind ?? "daemon",
-            status: "active",
-            visibility: "team",
-          });
+          if (invite.targetActorId) {
+            // Rebind path: reuse the existing actor + agent rows, just update them.
+            const [old] = await tx.select({ userId: actors.userId }).from(actors).where(eq(actors.id, invite.targetActorId)).limit(1);
 
-          // Insert agent_member_access: grant admin to invitedByActorId
-          // (invitedByActorId is a member actor; use it as the memberId)
-          await tx.insert(agentMemberAccess).values({
-            agentId: actor.id,
-            memberId: invite.invitedByActorId,
-            permissionLevel: "admin",
-            grantedByMemberId: invite.invitedByActorId,
-          });
+            await (tx.update(actors) as any)
+              .set({ userId: daemonUser.id, invitedByActorId: invite.invitedByActorId, lastActiveAt: null, updatedAt: new Date() })
+              .where(eq(actors.id, invite.targetActorId));
+
+            await (tx.update(agents) as any)
+              .set({ ownerMemberId: invite.invitedByActorId, visibility: "team", updatedAt: new Date() })
+              .where(eq(agents.id, invite.targetActorId));
+
+            await (tx.insert(agentMemberAccess) as any)
+              .values({ agentId: invite.targetActorId, memberId: invite.invitedByActorId, permissionLevel: "admin", grantedByMemberId: invite.invitedByActorId })
+              .onConflictDoUpdate({ target: [agentMemberAccess.agentId, agentMemberAccess.memberId], set: { permissionLevel: "admin" } });
+
+            actorId = invite.targetActorId;
+
+            // Best-effort: clean up old BA user if it was a different daemon user
+            if (old?.userId && old.userId !== daemonUser.id) {
+              try { await ctx2.internalAdapter.deleteSessions(old.userId); } catch { /* ignore */ }
+              try {
+                if (typeof ctx2.internalAdapter.deleteUser === "function") {
+                  await ctx2.internalAdapter.deleteUser(old.userId);
+                }
+              } catch { /* ignore */ }
+            }
+          } else {
+            // New agent path: insert actor + agents row
+            const [actor] = await tx.insert(actors).values({
+              teamId: invite.teamId,
+              actorType: "agent",
+              displayName: invite.displayName,
+              userId: daemonUser.id,
+              invitedByActorId: invite.invitedByActorId,
+            }).returning();
+
+            await tx.insert(agents).values({
+              id: actor.id,
+              agentKind: invite.agentKind ?? "daemon",
+              status: "active",
+              visibility: "team",
+            });
+
+            await tx.insert(agentMemberAccess).values({
+              agentId: actor.id,
+              memberId: invite.invitedByActorId,
+              permissionLevel: "admin",
+              grantedByMemberId: invite.invitedByActorId,
+            });
+
+            actorId = actor.id;
+          }
 
           // Mark invite consumed
           await (tx.update(teamInvites) as any)
-            .set({ consumedAt: new Date(), consumedByActorId: actor.id })
+            .set({ consumedAt: new Date(), consumedByActorId: actorId })
             .where(eq(teamInvites.token, token));
 
           return {
-            actorId: actor.id,
+            actorId,
             teamId: invite.teamId,
             actorType: "agent" as const,
             displayName: invite.displayName,
