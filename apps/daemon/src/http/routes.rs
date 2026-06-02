@@ -118,6 +118,8 @@ pub fn build(state: HttpState) -> Router {
             "/v1/team/versions/restore",
             post(team_sync::restore_version),
         )
+        .route("/v1/team/file", get(team_sync::get_file))
+        .route("/v1/team/changed", get(team_sync::list_changed))
         .layer(body_limit_layer(body_cap))
         .layer(middleware::from_fn_with_state(
             state.clone(),

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::auth::{require_scope, Principal};
 use super::errors::HttpError;
 use super::state::HttpState;
+use crate::sync::versions::{self, ChangedFile, VersionEntry};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -197,7 +198,7 @@ pub struct VersionsQuery {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListVersionsResponse {
-    pub versions: Vec<crate::sync::oss::fc_client::VersionInfo>,
+    pub versions: Vec<VersionEntry>,
     pub next_cursor: Option<String>,
 }
 
@@ -238,13 +239,36 @@ pub async fn list_versions(
     Query(q): Query<VersionsQuery>,
 ) -> Result<Json<ListVersionsResponse>, HttpError> {
     require_scope(&principal, "workspace:read")?;
+    let team_dir = crate::config::global_team_store::global_team_dir(&q.team_id);
+
+    if versions::is_git_team(&team_dir) {
+        let entries = versions::git_list_versions(&team_dir, &q.path);
+        return Ok(Json(ListVersionsResponse {
+            versions: entries,
+            next_cursor: None,
+        }));
+    }
+
     let (fc, _secret) = fc_client_from_store(&state, &q.team_id, q.fc_endpoint).await?;
-    let (versions, next_cursor) = fc
+    let (infos, next_cursor) = fc
         .list_versions(&q.team_id, &q.path, q.cursor)
         .await
         .map_err(|e| HttpError::internal(e.to_string()))?;
+    let entries = infos
+        .into_iter()
+        .map(|v| VersionEntry {
+            reference: v
+                .content_hash
+                .clone()
+                .unwrap_or_else(|| v.version.to_string()),
+            author: v.created_by,
+            timestamp: v.created_at,
+            deleted: v.deleted,
+            message: v.message,
+        })
+        .collect();
     Ok(Json(ListVersionsResponse {
-        versions,
+        versions: entries,
         next_cursor,
     }))
 }
@@ -336,6 +360,117 @@ pub async fn restore_version(
     st.save_at(&body.team_id)
         .map_err(|e| HttpError::internal(format!("save sync state: {e}")))?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileQuery {
+    pub team_id: String,
+    pub path: String,
+    #[serde(rename = "ref")]
+    pub reference: String,
+    #[serde(default)]
+    pub fc_endpoint: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContentResponse {
+    pub content: Option<String>,
+}
+
+/// `GET /v1/team/file?teamId=&path=&ref=&fcEndpoint=` — resolve one file's
+/// content at a given version. git mode: `git show <ref>:<path>`. oss mode:
+/// `ref` is either a content hash or the reserved "baseline" token (resolves to
+/// the last-synced cipher hash from local sync state); the blob is downloaded +
+/// decrypted. Missing file/version yields `{ content: null }`.
+pub async fn get_file(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Query(q): Query<FileQuery>,
+) -> Result<Json<FileContentResponse>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let team_dir = crate::config::global_team_store::global_team_dir(&q.team_id);
+
+    if versions::is_git_team(&team_dir) {
+        let content = versions::git_show(&team_dir, &q.reference, &q.path);
+        return Ok(Json(FileContentResponse { content }));
+    }
+
+    let cipher_hash = if q.reference == "baseline" {
+        crate::sync::oss::state::LocalSyncState::load_at(&q.team_id)
+            .ok()
+            .and_then(|st| st.files.get(&q.path).map(|f| f.synced_cipher_hash.clone()))
+            .filter(|h| !h.is_empty())
+    } else {
+        Some(q.reference.clone())
+    };
+    let Some(cipher_hash) = cipher_hash else {
+        return Ok(Json(FileContentResponse { content: None }));
+    };
+
+    let (fc, secret) = fc_client_from_store(&state, &q.team_id, q.fc_endpoint).await?;
+    let key = crate::team_shared_env::derive_key(&secret)
+        .map_err(|e| HttpError::internal(format!("derive key: {e}")))?;
+    let dl = fc
+        .download(&q.team_id, &cipher_hash)
+        .await
+        .map_err(|e| HttpError::internal(e.to_string()))?;
+    let blob = fc
+        .get_blob(&dl.download_url, &cipher_hash)
+        .await
+        .map_err(|e| HttpError::internal(e.to_string()))?;
+    let plaintext = crate::sync::oss::crypto::decrypt_blob(&blob, &key)
+        .map_err(|e| HttpError::internal(format!("decrypt: {e}")))?;
+    let content =
+        String::from_utf8(plaintext).map_err(|e| HttpError::internal(format!("utf8: {e}")))?;
+    Ok(Json(FileContentResponse {
+        content: Some(content),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedQuery {
+    pub team_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedResponse {
+    pub files: Vec<ChangedFile>,
+}
+
+/// `GET /v1/team/changed?teamId=` — list files with local changes. git mode:
+/// `git status --porcelain`. oss mode: dirty entries from the per-team
+/// `LocalSyncState`.
+pub async fn list_changed(
+    principal: Principal,
+    State(_state): State<HttpState>,
+    Query(q): Query<ChangedQuery>,
+) -> Result<Json<ChangedResponse>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let team_dir = crate::config::global_team_store::global_team_dir(&q.team_id);
+
+    if versions::is_git_team(&team_dir) {
+        return Ok(Json(ChangedResponse {
+            files: versions::git_changed(&team_dir),
+        }));
+    }
+
+    let files = crate::sync::oss::state::LocalSyncState::load_at(&q.team_id)
+        .map(|st| {
+            st.files
+                .into_iter()
+                .filter(|(_, f)| f.dirty)
+                .map(|(path, f)| ChangedFile {
+                    path,
+                    status: if f.deleted_local { "deleted" } else { "modified" }.to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Json(ChangedResponse { files }))
 }
 
 /// Resolve the team_id for a workspace from the daemon's onboarded team

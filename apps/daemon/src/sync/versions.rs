@@ -3,9 +3,6 @@
 //! git mode: read-only `git log/show/status` against the team clone.
 //! oss mode: FC version list + blob download/decrypt (see http/team_sync.rs).
 
-// HTTP wiring is added in a later task; suppress dead-code lints until then.
-#![allow(dead_code)]
-
 use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
