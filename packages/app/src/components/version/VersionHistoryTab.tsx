@@ -1,84 +1,73 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useVersionHistoryStore } from '@/stores/version-history'
-import { useWorkspaceStore } from '@/stores/workspace'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { VersionedFileList } from '@/components/version/VersionedFileList'
 import { VersionList } from '@/components/version/VersionList'
 import { VersionPreview } from '@/components/version/VersionPreview'
 
 export function VersionHistoryTab() {
   const { t } = useTranslation()
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const teamId = useCurrentTeamStore((s) => s.team?.id)
 
   const {
     versionedFiles,
     fileVersions,
     selectedFile,
-    selectedVersionIndex,
+    selectedRef,
     loading,
     loadVersionedFiles,
     loadFileVersions,
+    fetchVersionContent,
     restoreFileVersion,
     selectFile,
     selectVersion,
   } = useVersionHistoryStore()
 
-  const [docTypeFilter, setDocTypeFilter] = useState<string | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [versionContent, setVersionContent] = useState<string | null>(null)
 
   useEffect(() => {
-    if (workspacePath) {
-      loadVersionedFiles(workspacePath)
+    if (teamId) {
+      loadVersionedFiles(teamId)
     }
-  }, [workspacePath, loadVersionedFiles])
+  }, [teamId, loadVersionedFiles])
 
-  const handleFileSelect = (path: string, docType: string) => {
-    selectFile(path, docType)
-    if (workspacePath) {
-      loadFileVersions(workspacePath, docType, path)
-    }
-  }
-
-  const handleFilterChange = (filter: string | null) => {
-    setDocTypeFilter(filter)
-    if (workspacePath) {
-      loadVersionedFiles(workspacePath, filter ?? undefined)
+  const handleFileSelect = (path: string) => {
+    selectFile(path)
+    if (teamId) {
+      loadFileVersions(teamId, path)
     }
   }
 
-  const handleVersionSelect = (index: number) => {
-    if (index === -1) {
-      selectVersion(null)
+  const handleVersionSelect = (ref: string) => {
+    selectVersion(ref)
+  }
+
+  // Fetch the selected version's content lazily.
+  useEffect(() => {
+    let cancelled = false
+    if (teamId && selectedFile && selectedRef) {
+      fetchVersionContent(teamId, selectedFile.path, selectedRef).then((content) => {
+        if (!cancelled) setVersionContent(content)
+      })
     } else {
-      selectVersion(index)
+      setVersionContent(null)
     }
-  }
+    return () => {
+      cancelled = true
+    }
+  }, [teamId, selectedFile, selectedRef, fetchVersionContent])
 
   const handleRestore = async () => {
-    if (!workspacePath || !selectedFile || selectedVersionIndex === null) return
+    if (!teamId || !selectedFile || !selectedRef) return
     setRestoring(true)
     try {
-      await restoreFileVersion(
-        workspacePath,
-        selectedFile.docType,
-        selectedFile.path,
-        selectedVersionIndex,
-      )
+      await restoreFileVersion(teamId, selectedFile.path, selectedRef)
     } finally {
       setRestoring(false)
     }
   }
-
-  const selectedVersion =
-    selectedVersionIndex !== null
-      ? (fileVersions.find((v) => v.index === selectedVersionIndex) ?? null)
-      : null
-
-  const selectedFileInfo = selectedFile
-    ? versionedFiles.find(
-        (f) => f.path === selectedFile.path && f.docType === selectedFile.docType,
-      )
-    : null
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -92,10 +81,7 @@ export function VersionHistoryTab() {
           <VersionedFileList
             files={versionedFiles}
             selectedPath={selectedFile?.path ?? null}
-            selectedDocType={selectedFile?.docType ?? null}
             onSelect={handleFileSelect}
-            docTypeFilter={docTypeFilter}
-            onFilterChange={handleFilterChange}
           />
         </div>
       </div>
@@ -109,10 +95,8 @@ export function VersionHistoryTab() {
           {selectedFile ? (
             <VersionList
               versions={fileVersions}
-              selectedIndex={selectedVersionIndex}
+              selectedRef={selectedRef}
               onSelect={handleVersionSelect}
-              currentUpdatedBy={selectedFileInfo?.latestUpdateBy}
-              currentUpdatedAt={selectedFileInfo?.latestUpdateAt}
             />
           ) : (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground px-3 text-center">
@@ -125,8 +109,9 @@ export function VersionHistoryTab() {
       {/* Right: Version preview */}
       <div className="flex-1 overflow-hidden flex flex-col">
         <VersionPreview
-          version={selectedVersion}
-          canRestore={selectedVersionIndex !== null}
+          hasSelection={selectedRef !== null}
+          content={versionContent}
+          canRestore={selectedRef !== null}
           onRestore={handleRestore}
           restoring={restoring}
         />

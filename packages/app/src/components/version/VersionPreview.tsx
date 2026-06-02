@@ -14,7 +14,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import type { FileVersion } from '@/stores/version-history'
 
 interface DiffLine {
   type: 'added' | 'removed' | 'unchanged'
@@ -95,15 +94,20 @@ function SimpleDiff({ oldContent, newContent }: SimpleDiffProps) {
 type TabMode = 'content' | 'diff'
 
 interface VersionPreviewProps {
-  version: FileVersion | null
-  currentContent?: string
+  /** Whether a version is currently selected. */
+  hasSelection: boolean
+  /** Content of the selected version (fetched lazily by the parent). */
+  content: string | null
+  /** Current (working) content to diff against. */
+  currentContent?: string | null
   canRestore: boolean
   onRestore: () => void
   restoring: boolean
 }
 
 export function VersionPreview({
-  version,
+  hasSelection,
+  content,
   currentContent,
   canRestore,
   onRestore,
@@ -112,7 +116,7 @@ export function VersionPreview({
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabMode>('content')
 
-  if (!version) {
+  if (!hasSelection) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         {t('versionHistory.selectVersionPrompt', 'Select a historical version')}
@@ -183,14 +187,10 @@ export function VersionPreview({
       <ScrollArea className="flex-1">
         {tab === 'content' ? (
           <pre className="p-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">
-            {version.content}
+            {content ?? ''}
           </pre>
-        ) : currentContent !== undefined ? (
-          <SimpleDiff oldContent={currentContent} newContent={version.content} />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground p-4">
-            {t('versionHistory.currentContentUnavailable', 'Current content is unavailable')}
-          </div>
+          <SimpleDiff oldContent={currentContent ?? ''} newContent={content ?? ''} />
         )}
       </ScrollArea>
     </div>

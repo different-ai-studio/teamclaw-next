@@ -22,52 +22,16 @@ function formatRelativeTime(isoString: string, t: TFunction, language: string): 
 
 interface VersionListProps {
   versions: FileVersion[]
-  selectedIndex: number | null
-  onSelect: (index: number) => void
-  currentUpdatedBy?: string
-  currentUpdatedAt?: string
+  selectedRef: string | null
+  onSelect: (ref: string) => void
 }
 
-export function VersionList({
-  versions,
-  selectedIndex,
-  onSelect,
-  currentUpdatedBy,
-  currentUpdatedAt,
-}: VersionListProps) {
+export function VersionList({ versions, selectedRef, onSelect }: VersionListProps) {
   const { t, i18n } = useTranslation()
 
   return (
     <ScrollArea className="h-full">
       <div className="py-2">
-        {currentUpdatedBy && (
-          <>
-            <div className="px-3 py-1 text-xs font-medium text-muted-foreground">
-              {t('versionHistory.currentVersion', 'Current version')}
-            </div>
-            <div
-              className={cn(
-                'mx-1 cursor-pointer rounded-md px-3 py-2',
-                selectedIndex === null
-                  ? 'bg-accent font-medium'
-                  : 'hover:bg-accent/50'
-              )}
-              onClick={() => onSelect(-1)}
-            >
-              <div className="text-sm font-medium">{t('versionHistory.currentFile', 'Current file')}</div>
-              <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                <span>{currentUpdatedBy}</span>
-                {currentUpdatedAt && (
-                  <>
-                    <span>·</span>
-                    <span>{formatRelativeTime(currentUpdatedAt, t, i18n.language)}</span>
-                  </>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-
         <div className="mt-2 px-3 py-1 text-xs font-medium text-muted-foreground">
           {t('versionHistory.historicalVersionsTitle', 'Historical versions')}
         </div>
@@ -77,23 +41,23 @@ export function VersionList({
           </div>
         )}
         {versions.map((version, i) => {
-          const isSelected = selectedIndex === version.index
+          const isSelected = selectedRef === version.ref
           return (
             <div
-              key={version.index}
+              key={version.ref}
               className={cn(
                 'mx-1 cursor-pointer rounded-md px-3 py-2',
                 isSelected ? 'bg-accent font-medium' : 'hover:bg-accent/50'
               )}
-              onClick={() => onSelect(version.index)}
+              onClick={() => onSelect(version.ref)}
             >
               <div className="text-sm">
                 {t('versionHistory.versionLabel', { number: versions.length - i })}
               </div>
               <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                <span>{version.updatedBy}</span>
+                <span>{version.author ?? ''}</span>
                 <span>·</span>
-                <span>{formatRelativeTime(version.updatedAt, t, i18n.language)}</span>
+                <span>{formatRelativeTime(version.timestamp, t, i18n.language)}</span>
               </div>
             </div>
           )

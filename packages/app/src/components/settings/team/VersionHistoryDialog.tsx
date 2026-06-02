@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useVersionHistoryStore } from '@/stores/version-history'
-import { useWorkspaceStore } from '@/stores/workspace'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { VersionList } from '@/components/version/VersionList'
 import { VersionPreview } from '@/components/version/VersionPreview'
 import type { VersionedFileInfo } from '@/stores/version-history'
@@ -15,54 +15,56 @@ interface VersionHistoryDialogProps {
 
 export function VersionHistoryDialog({ file, onClose }: VersionHistoryDialogProps) {
   const { t } = useTranslation()
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const teamId = useCurrentTeamStore((s) => s.team?.id)
 
   const {
     fileVersions,
-    selectedVersionIndex,
+    selectedRef,
     loading,
     loadFileVersions,
+    fetchVersionContent,
     restoreFileVersion,
     selectFile,
     selectVersion,
   } = useVersionHistoryStore()
 
   const [restoring, setRestoring] = useState(false)
+  const [versionContent, setVersionContent] = useState<string | null>(null)
 
   useEffect(() => {
-    selectFile(file.path, file.docType)
-    if (workspacePath) {
-      loadFileVersions(workspacePath, file.docType, file.path)
+    selectFile(file.path)
+    if (teamId) {
+      loadFileVersions(teamId, file.path)
     }
-  }, [file.path, file.docType, workspacePath, selectFile, loadFileVersions])
+  }, [file.path, teamId, selectFile, loadFileVersions])
 
-  const handleVersionSelect = (index: number) => {
-    if (index === -1) {
-      selectVersion(null)
-    } else {
-      selectVersion(index)
-    }
+  const handleVersionSelect = (ref: string) => {
+    selectVersion(ref)
   }
 
+  useEffect(() => {
+    let cancelled = false
+    if (teamId && selectedRef) {
+      fetchVersionContent(teamId, file.path, selectedRef).then((content) => {
+        if (!cancelled) setVersionContent(content)
+      })
+    } else {
+      setVersionContent(null)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [teamId, file.path, selectedRef, fetchVersionContent])
+
   const handleRestore = async () => {
-    if (!workspacePath || selectedVersionIndex === null) return
+    if (!teamId || !selectedRef) return
     setRestoring(true)
     try {
-      await restoreFileVersion(
-        workspacePath,
-        file.docType,
-        file.path,
-        selectedVersionIndex,
-      )
+      await restoreFileVersion(teamId, file.path, selectedRef)
     } finally {
       setRestoring(false)
     }
   }
-
-  const selectedVersion =
-    selectedVersionIndex !== null
-      ? (fileVersions.find((v) => v.index === selectedVersionIndex) ?? null)
-      : null
 
   const fileName = file.path.split('/').pop() ?? file.path
 
@@ -73,9 +75,7 @@ export function VersionHistoryDialog({ file, onClose }: VersionHistoryDialogProp
         <div className="flex items-center justify-between border-b px-4 py-3 shrink-0">
           <div>
             <h3 className="text-[13px] font-semibold">{fileName}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {t('settings.team.historicalVersions', { count: file.versionCount })}
-            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">{file.status}</p>
           </div>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="h-4 w-4" />
@@ -93,10 +93,8 @@ export function VersionHistoryDialog({ file, onClose }: VersionHistoryDialogProp
             ) : (
               <VersionList
                 versions={fileVersions}
-                selectedIndex={selectedVersionIndex}
+                selectedRef={selectedRef}
                 onSelect={handleVersionSelect}
-                currentUpdatedBy={file.latestUpdateBy}
-                currentUpdatedAt={file.latestUpdateAt}
               />
             )}
           </div>
@@ -104,8 +102,9 @@ export function VersionHistoryDialog({ file, onClose }: VersionHistoryDialogProp
           {/* Right: Version preview */}
           <div className="flex-1 overflow-hidden">
             <VersionPreview
-              version={selectedVersion}
-              canRestore={selectedVersionIndex !== null}
+              hasSelection={selectedRef !== null}
+              content={versionContent}
+              canRestore={selectedRef !== null}
               onRestore={handleRestore}
               restoring={restoring}
             />
