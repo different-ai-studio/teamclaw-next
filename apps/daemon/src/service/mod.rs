@@ -64,14 +64,30 @@ pub fn install_service() -> anyhow::Result<()> {
     let plist_path = plist_dir.join(format!("{LAUNCHD_LABEL}.plist"));
     std::fs::write(&plist_path, launchd_plist(&exe))?;
     let uid = nix_uid();
-    let _ = std::process::Command::new("launchctl")
-        .args(["bootout", &format!("gui/{uid}/{LAUNCHD_LABEL}")])
-        .status();
-    let status = std::process::Command::new("launchctl")
-        .args(["bootstrap", &format!("gui/{uid}")])
-        .arg(&plist_path)
-        .status()?;
-    anyhow::ensure!(status.success(), "launchctl bootstrap failed");
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+
+    // `launchctl bootout` is asynchronous; a bootout-then-bootstrap pair races and
+    // hits "Bootstrap failed: 5: Input/output error" when the job was already loaded.
+    // Instead: if already loaded, restart in place (kickstart -k re-execs the same
+    // program path, picking up an upgraded binary); only bootstrap when not loaded.
+    let already_loaded = std::process::Command::new("launchctl")
+        .args(["print", &target])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if already_loaded {
+        let status = std::process::Command::new("launchctl")
+            .args(["kickstart", "-k", &target])
+            .status()?;
+        anyhow::ensure!(status.success(), "launchctl kickstart failed");
+    } else {
+        let status = std::process::Command::new("launchctl")
+            .args(["bootstrap", &format!("gui/{uid}")])
+            .arg(&plist_path)
+            .status()?;
+        anyhow::ensure!(status.success(), "launchctl bootstrap failed");
+    }
     Ok(())
 }
 
@@ -109,10 +125,15 @@ pub fn install_service() -> anyhow::Result<()> {
     let _ = std::process::Command::new("loginctl")
         .args(["enable-linger"])
         .status();
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "enable", "amuxd.service"])
+        .status();
+    // `restart` starts the unit if stopped and restarts it if running, so an
+    // upgraded binary takes effect on re-install.
     let status = std::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", "amuxd.service"])
+        .args(["--user", "restart", "amuxd.service"])
         .status()?;
-    anyhow::ensure!(status.success(), "systemctl --user enable --now failed");
+    anyhow::ensure!(status.success(), "systemctl --user restart failed");
     Ok(())
 }
 
