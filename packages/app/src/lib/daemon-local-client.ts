@@ -49,20 +49,6 @@ let _inflight: Promise<DaemonConnection | null> | null = null
 async function getConnection(): Promise<DaemonConnection | null> {
   if (!isTauri()) return null
 
-  // Return cached connection if still valid (5 min buffer before expiry).
-  if (_connection && Date.now() < _connection.expiresAt - 5 * 60 * 1000) {
-    return _connection
-  }
-
-  // Coalesce concurrent callers.
-  if (_inflight) return _inflight
-  _inflight = _fetchConnection().finally(() => {
-    _inflight = null
-  })
-  return _inflight
-}
-
-async function _fetchConnection(): Promise<DaemonConnection | null> {
   let info: DaemonHttpInfo | null
   try {
     info = await invoke<DaemonHttpInfo | null>('get_daemon_http_info')
@@ -71,6 +57,29 @@ async function _fetchConnection(): Promise<DaemonConnection | null> {
   }
   if (!info) return null
 
+  // Return cached session when the daemon port is unchanged and token still valid.
+  if (
+    _connection &&
+    _connection.baseUrl === info.base_url &&
+    Date.now() < _connection.expiresAt - 5 * 60 * 1000
+  ) {
+    return _connection
+  }
+
+  // Daemon restarted on a new port — drop stale session before re-exchange.
+  if (_connection && _connection.baseUrl !== info.base_url) {
+    invalidateDaemonConnection()
+  }
+
+  // Coalesce concurrent callers.
+  if (_inflight) return _inflight
+  _inflight = _fetchConnection(info).finally(() => {
+    _inflight = null
+  })
+  return _inflight
+}
+
+async function _fetchConnection(info: DaemonHttpInfo): Promise<DaemonConnection | null> {
   // Exchange root token for a scoped session token.
   try {
     const resp = await fetch(`${info.base_url}/v1/auth/exchange`, {
@@ -131,7 +140,7 @@ export async function probeDaemonHttp(): Promise<DaemonHttpProbe> {
 
   invalidateDaemonConnection()
   _connection = null
-  const conn = await _fetchConnection()
+  const conn = await _fetchConnection(info)
   if (!conn) return { ok: false, reason: 'token_exchange_failed' }
 
   try {
@@ -160,18 +169,29 @@ async function daemonFetch<T>(
   init?: RequestInit,
   // Internal: set false to disable the single re-auth retry (prevents loops).
   allowReauth = true,
+  allowNetworkRetry = true,
 ): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string }> {
   const conn = await getConnection()
   if (!conn) return { ok: false, status: 0, error: 'daemon HTTP not available' }
 
-  const resp = await fetch(`${conn.baseUrl}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${conn.sessionToken}`,
-      ...(init?.headers ?? {}),
-    },
-  })
+  let resp: Response
+  try {
+    resp = await fetch(`${conn.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${conn.sessionToken}`,
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (allowNetworkRetry) {
+      invalidateDaemonConnection()
+      return daemonFetch<T>(path, init, allowReauth, false)
+    }
+    return { ok: false, status: 0, error: message }
+  }
 
   if (!resp.ok) {
     // A 401 means our cached session token was rejected — most commonly because
@@ -648,12 +668,19 @@ export async function putDaemonMcp(
 
 export async function reloadDaemonRuntime(
   workspaceId: string,
-): Promise<DaemonApplyOutcome | null> {
+): Promise<DaemonApplyOutcome> {
   const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
     `/v1/workspaces/${workspaceId}/runtime/reload`,
     { method: 'POST' },
   )
-  return result.ok ? result.data.outcome : null
+  if (!result.ok) {
+    throw new Error(
+      result.status > 0
+        ? `daemon runtime reload failed (${result.status}): ${result.error}`
+        : result.error,
+    )
+  }
+  return result.data.outcome
 }
 
 // ─── Team share ───────────────────────────────────────────────────────────────

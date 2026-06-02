@@ -52,6 +52,7 @@ pub fn build(allowed_origins: &[String]) -> Result<Option<CorsLayer>, HttpError>
         .allow_methods([
             Method::GET,
             Method::POST,
+            Method::PUT,
             Method::DELETE,
             Method::OPTIONS,
             Method::PATCH,

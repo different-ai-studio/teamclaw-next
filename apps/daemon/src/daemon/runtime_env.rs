@@ -43,48 +43,4 @@ impl DaemonServer {
         )
         .map_err(|e| e.to_string())
     }
-
-    /// Re-bind a live runtime so env vars and resolved `opencode.json` match disk.
-    pub(super) async fn refresh_live_runtime_env(
-        &self,
-        runtime_id: &str,
-        worktree: &str,
-        workspace_id: &str,
-    ) {
-        let is_live = self
-            .agents
-            .lock()
-            .await
-            .get_handle(runtime_id)
-            .is_some();
-        if !is_live {
-            return;
-        }
-        match self.assemble_spawn_runtime_env_for_worktree(worktree, workspace_id) {
-            Ok(runtime_env) => {
-                if let Err(e) = self
-                    .agents
-                    .lock()
-                    .await
-                    .refresh_agent_runtime_env(runtime_id, runtime_env)
-                    .await
-                {
-                    tracing::warn!(
-                        runtime_id,
-                        worktree,
-                        error = %e,
-                        "refresh_live_runtime_env failed"
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    runtime_id,
-                    worktree,
-                    error = %e,
-                    "refresh_live_runtime_env: assemble runtime env failed"
-                );
-            }
-        }
-    }
 }

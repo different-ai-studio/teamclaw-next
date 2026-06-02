@@ -2445,12 +2445,9 @@ impl DaemonServer {
 
         let runtime_ids = self.coalesce_session_runtimes(session_id).await;
         if runtime_ids.is_empty() {
-            if self
+            let _resumed = self
                 .resume_historical_runtimes_for_session(session_id)
-                .await
-            {
-                return;
-            }
+                .await;
 
             let runtime_ids = self.coalesce_session_runtimes(session_id).await;
             if !runtime_ids.is_empty() {
@@ -4291,16 +4288,30 @@ impl DaemonServer {
         }
 
         if let Some(existing) = existing_runtime {
+            let still_live = self
+                .agents
+                .lock()
+                .await
+                .get_handle(&existing)
+                .is_some();
+            if !still_live {
+                warn!(
+                    session_id,
+                    runtime_id = %existing,
+                    "apply_start_runtime: dedup target not live; falling through to resume/spawn"
+                );
+            } else {
             info!(
                 session_id,
                 workspace_id = %ws_id,
                 runtime_id = %existing,
                 "apply_start_runtime: dedup hit; reusing existing runtime"
             );
-            if let Some(handle) = self.agents.lock().await.get_handle(&existing) {
-                self.refresh_live_runtime_env(&existing, &handle.worktree, &handle.workspace_id)
-                    .await;
-            }
+            // Do NOT stop/resume the live runtime here. runtimeStart fires on
+            // every send/@-mention; refresh_agent_runtime_env would kill the
+            // agent mid-session and leave no replier when resume fails or races
+            // with send_prompt. Env reload is handled by POST .../runtime/reload
+            // after the user edits env vars in Settings.
             // TODO(perf-runtime-start-throttle): See the same id on the client
             // (`ensureAgentRuntimesForSession` in packages/app). Dedup still runs
             // ensure_collab_session_registered, refresh_membership MQTT, reconcile
@@ -4357,6 +4368,7 @@ impl DaemonServer {
                 runtime_id: existing,
                 session_id: session_id.to_string(),
             });
+            }
         }
 
         // If iOS handed us a cloud session_id, pull the row + participants
@@ -4473,13 +4485,30 @@ impl DaemonServer {
             sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), &config);
         }
 
-        let runtime_env = self
-            .assemble_spawn_runtime_env_for_worktree(&resolved_worktree, &ws_id)
-            .map_err(|e| StartRuntimeError {
-                error_code: "ENV_ASSEMBLE_FAILED".to_string(),
-                error_message: format!("assemble_runtime_env failed: {e}"),
-                failed_stage: "env_setup".to_string(),
-            })?;
+        if let Err(e) =
+            crate::runtime::supervisor::prepare_workspace(Path::new(&resolved_worktree))
+        {
+            warn!(
+                workspace = %resolved_worktree,
+                error = %e,
+                "apply_start_runtime: prepare_workspace failed before spawn"
+            );
+        }
+
+        let runtime_env = match self.assemble_spawn_runtime_env_for_worktree(
+            &resolved_worktree,
+            &ws_id,
+        ) {
+            Ok(env) => env,
+            Err(e) => {
+                warn!(
+                    workspace = %resolved_worktree,
+                    error = %e,
+                    "apply_start_runtime: assemble runtime env failed; continuing with empty env"
+                );
+                crate::runtime::SpawnRuntimeEnv::default()
+            }
+        };
         // Spawn.
         let spawn_res = self
             .agents

@@ -71,12 +71,6 @@ impl DaemonServer {
                 if out.already_live_first.is_none() {
                     out.already_live_first = Some(stored.runtime_id.clone());
                 }
-                self.refresh_live_runtime_env(
-                    &stored.runtime_id,
-                    &stored.worktree,
-                    &stored.workspace_id,
-                )
-                .await;
                 continue;
             }
 
@@ -202,6 +196,21 @@ impl DaemonServer {
         let runtime_id = result
             .already_live_first
             .or_else(|| result.resumed_runtime_ids.into_iter().next())?;
+
+        if self
+            .agents
+            .lock()
+            .await
+            .get_handle(&runtime_id)
+            .is_none()
+        {
+            warn!(
+                runtime_id = %runtime_id,
+                session_id = %cloud_session_id,
+                "try_resume_runtime_for_start: resume reported success but runtime is not live"
+            );
+            return None;
+        }
 
         Some(StartRuntimeOutcome {
             runtime_id,

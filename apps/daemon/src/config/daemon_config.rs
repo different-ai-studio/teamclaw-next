@@ -45,7 +45,7 @@ pub struct HttpConfig {
     /// Origins allowed by the CORS layer. `*` is rejected; supply
     /// concrete origins like `http://localhost:5173`. Empty list disables
     /// CORS (same-origin only).
-    #[serde(default)]
+    #[serde(default = "default_allowed_origins")]
     pub allowed_origins: Vec<String>,
     /// Idle session TTL. Sessions with no activity for this long are
     /// closed and removed from the registry.
@@ -93,6 +93,7 @@ fn default_allowed_origins() -> Vec<String> {
         "http://localhost:1420".into(),
         "http://127.0.0.1:5173".into(),
         "http://localhost:5173".into(),
+        "http://tauri.localhost".into(),
         "tauri://localhost".into(),
         "https://tauri.localhost".into(),
     ]
@@ -389,5 +390,22 @@ encoding_aes_key = "k"
                 .map(|c| (c.binary.clone(), c.default_flags.clone())),
             Some(("opencode".to_string(), vec!["acp".to_string()]))
         );
+    }
+}
+
+#[cfg(test)]
+mod http_config_tests {
+    use super::*;
+
+    #[test]
+    fn http_config_deserialize_empty_section_keeps_default_cors_origins() {
+        let cfg: HttpConfig = toml::from_str(
+            r#"
+bind = "127.0.0.1:0"
+"#,
+        )
+        .unwrap();
+        assert!(cfg.allowed_origins.iter().any(|o| o.contains(":1420")));
+        assert!(cfg.allowed_origins.iter().any(|o| o.contains("tauri.localhost")));
     }
 }
