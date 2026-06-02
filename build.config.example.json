@@ -38,7 +38,7 @@
     "forcePathStyle": false
   },
   "defaults": {
-    "locale": "zh-CN",
+    "locale": "all",
     "theme": "system"
   },
   "device": {
