@@ -1,12 +1,9 @@
-//! teamclaw-sync: WebDAV sync support for TeamClaw.
+//! teamclaw-sync: shared sync types for TeamClaw.
 //!
-//! This crate contains:
-//! - WebDAV sync logic (PROPFIND parser, diff, download, crypto)
-//! - Version history types
-//!
-//! Tauri command wrappers remain in the main crate.
+//! The WebDAV sync engine was removed when the daemon (amuxd) took over all
+//! team sync. What remains is the version-history type surface shared with the
+//! desktop crate's Tauri commands.
 
-pub mod team_webdav;
 pub mod version_types;
 
 pub use version_types::{FileVersion, VersionedFileInfo, MAX_VERSIONS};

@@ -6713,17 +6713,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "password-hash"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
-dependencies = [
- "base64ct",
- "rand_core 0.6.4",
- "subtle",
-]
-
-[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6737,8 +6726,6 @@ checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest",
  "hmac",
- "password-hash",
- "sha2",
 ]
 
 [[package]]
@@ -7505,15 +7492,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
 dependencies = [
  "encoding_rs",
- "memchr",
-]
-
-[[package]]
-name = "quick-xml"
-version = "0.36.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
-dependencies = [
  "memchr",
 ]
 
@@ -10549,25 +10527,7 @@ dependencies = [
 name = "teamclaw-sync"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "futures",
- "getrandom 0.2.17",
- "hex",
- "keyring",
- "log",
- "pbkdf2",
- "quick-xml 0.36.2",
- "reqwest 0.11.27",
  "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tracing",
- "url",
- "urlencoding",
 ]
 
 [[package]]
