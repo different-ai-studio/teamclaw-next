@@ -356,41 +356,64 @@ export function createPgAuthRepository(
           } catch { /* best-effort */ }
         }
 
+        let oldDaemonUserId: string | null = null;
+        let result!: { actorId: string; teamId: string; actorType: "agent"; displayName: string; refreshToken: string | null };
         try {
-          return await (db as any).transaction(async (tx: any) => {
-          // Insert actor (agent type, userId = daemon BA user)
-          const [actor] = await tx.insert(actors).values({
-            teamId: invite.teamId,
-            actorType: "agent",
-            displayName: invite.displayName,
-            userId: daemonUser.id,
-            invitedByActorId: invite.invitedByActorId,
-          }).returning();
+          result = await (db as any).transaction(async (tx: any) => {
+          let actorId: string;
 
-          // Insert agents row
-          await tx.insert(agents).values({
-            id: actor.id,
-            agentKind: invite.agentKind ?? "daemon",
-            status: "active",
-            visibility: "team",
-          });
+          if (invite.targetActorId) {
+            // Rebind path: reuse the existing actor + agent rows, just update them.
+            const [old] = await tx.select({ userId: actors.userId }).from(actors).where(eq(actors.id, invite.targetActorId)).limit(1);
+            oldDaemonUserId = old?.userId ?? null;
 
-          // Insert agent_member_access: grant admin to invitedByActorId
-          // (invitedByActorId is a member actor; use it as the memberId)
-          await tx.insert(agentMemberAccess).values({
-            agentId: actor.id,
-            memberId: invite.invitedByActorId,
-            permissionLevel: "admin",
-            grantedByMemberId: invite.invitedByActorId,
-          });
+            await (tx.update(actors) as any)
+              .set({ userId: daemonUser.id, invitedByActorId: invite.invitedByActorId, lastActiveAt: null, updatedAt: new Date() })
+              .where(eq(actors.id, invite.targetActorId));
+
+            await (tx.update(agents) as any)
+              .set({ ownerMemberId: invite.invitedByActorId, visibility: "team", updatedAt: new Date() })
+              .where(eq(agents.id, invite.targetActorId));
+
+            await (tx.insert(agentMemberAccess) as any)
+              .values({ agentId: invite.targetActorId, memberId: invite.invitedByActorId, permissionLevel: "admin", grantedByMemberId: invite.invitedByActorId })
+              .onConflictDoUpdate({ target: [agentMemberAccess.agentId, agentMemberAccess.memberId], set: { permissionLevel: "admin" } });
+
+            actorId = invite.targetActorId;
+          } else {
+            // New agent path: insert actor + agents row
+            const [actor] = await tx.insert(actors).values({
+              teamId: invite.teamId,
+              actorType: "agent",
+              displayName: invite.displayName,
+              userId: daemonUser.id,
+              invitedByActorId: invite.invitedByActorId,
+            }).returning();
+
+            await tx.insert(agents).values({
+              id: actor.id,
+              agentKind: invite.agentKind ?? "daemon",
+              status: "active",
+              visibility: "team",
+            });
+
+            await tx.insert(agentMemberAccess).values({
+              agentId: actor.id,
+              memberId: invite.invitedByActorId,
+              permissionLevel: "admin",
+              grantedByMemberId: invite.invitedByActorId,
+            });
+
+            actorId = actor.id;
+          }
 
           // Mark invite consumed
           await (tx.update(teamInvites) as any)
-            .set({ consumedAt: new Date(), consumedByActorId: actor.id })
+            .set({ consumedAt: new Date(), consumedByActorId: actorId })
             .where(eq(teamInvites.token, token));
 
           return {
-            actorId: actor.id,
+            actorId,
             teamId: invite.teamId,
             actorType: "agent" as const,
             displayName: invite.displayName,
@@ -402,6 +425,20 @@ export function createPgAuthRepository(
           await compensate();
           throw txErr;
         }
+
+        // Best-effort cleanup of the previous daemon user the agent was bound to.
+        // Done AFTER commit and OUTSIDE the drizzle tx: pglite is single-connection, so a
+        // Better-Auth adapter query issued inside the open tx would deadlock. Idempotent.
+        if (oldDaemonUserId && oldDaemonUserId !== daemonUser.id) {
+          try { await ctx2.internalAdapter.deleteSessions(oldDaemonUserId); } catch { /* ignore */ }
+          try {
+            if (typeof ctx2.internalAdapter.deleteUser === "function") {
+              await ctx2.internalAdapter.deleteUser(oldDaemonUserId);
+            }
+          } catch { /* ignore */ }
+        }
+
+        return result;
       }
 
       throw new ApiError(400, "bad_request", `unsupported invite kind: ${kind}`);

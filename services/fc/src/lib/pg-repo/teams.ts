@@ -4,7 +4,7 @@ import { teams, teamWorkspaceConfig, actors, members, teamMembers, teamInvites }
 import { workspaces } from "../../db/schema/workspaces.js";
 import { agentMemberAccess, agents } from "../../db/schema/agents.js";
 import { ApiError } from "../http-utils.js";
-import { requireActorForTeam } from "./authz.js";
+import { requireActorForTeam, checkAgentOwnership } from "./authz.js";
 import { randomBytes } from "node:crypto";
 
 const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
@@ -215,7 +215,7 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
      */
     async createTeamInvite(
       teamId: string,
-      input: { actorType: string; displayName: string; role?: string; expiresAt?: string | null; ttlSeconds?: number; targetActorId?: string },
+      input: { kind?: string; actorType?: string; displayName: string; teamRole?: string | null; role?: string; agentKind?: string | null; expiresAt?: string | null; ttlSeconds?: number | null; targetActorId?: string | null },
       ctx?: { userId?: string },
     ) {
       const userId = ctx?.userId;
@@ -223,6 +223,17 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
       let invitedByActorId: string | null = null;
       if (userId) {
         invitedByActorId = await requireActorForTeam(db, userId, teamId);
+      }
+
+      // Derive canonical field values from either production keys (kind/teamRole) or legacy keys (actorType/role)
+      const kind = input.kind ?? input.actorType ?? "member";
+      const teamRole = input.teamRole !== undefined ? input.teamRole : (input.role ?? null);
+
+      // Owner check: only the agent owner may re-invite an existing agent actor
+      if (input.targetActorId) {
+        if (!userId) throw new ApiError(401, "missing_identity", "re-inviting an agent requires authentication");
+        const owns = await checkAgentOwnership(db, userId, input.targetActorId);
+        if (!owns) throw new ApiError(403, "forbidden", "only the agent owner can re-invite this agent");
       }
 
       const token = randomBytes(24).toString("base64url");
@@ -236,8 +247,9 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
         .values({
           teamId,
           token,
-          kind: input.actorType,
-          teamRole: input.role ?? null,
+          kind,
+          teamRole,
+          agentKind: input.agentKind ?? null,
           displayName: input.displayName,
           invitedByActorId: invitedByActorId ?? "00000000-0000-0000-0000-000000000000",
           expiresAt,

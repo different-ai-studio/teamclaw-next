@@ -1,0 +1,158 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// Hoisted, mutable test state shared with the module mocks below.
+const h = vi.hoisted(() => ({
+  isTauriVal: true,
+  currentTeam: null as { id: string } | null,
+  daemonTeam: null as string | null,
+  // Successive probe results; the last entry persists once the queue drains.
+  probeQueue: [] as Array<{ ok: boolean; reason?: string; baseUrl?: string }>,
+  invokeCalls: [] as string[],
+  installServiceShouldThrow: false,
+}))
+
+vi.mock('@/lib/utils', () => ({ isTauri: () => h.isTauriVal }))
+vi.mock('@/lib/backend', () => ({ getBackend: () => ({}) }))
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: { getState: () => ({ team: h.currentTeam }) },
+}))
+vi.mock('@/lib/daemon-local-client', () => ({
+  invalidateDaemonConnection: vi.fn(),
+  probeDaemonHttp: vi.fn(async () =>
+    h.probeQueue.length > 1
+      ? h.probeQueue.shift()!
+      : (h.probeQueue[0] ?? { ok: false, reason: 'not_running' }),
+  ),
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async (cmd: string) => {
+    h.invokeCalls.push(cmd)
+    if (cmd === 'get_daemon_team_id') return h.daemonTeam
+    if (cmd === 'daemon_install_service') {
+      if (h.installServiceShouldThrow) throw new Error('install-service boom')
+      return undefined
+    }
+    return undefined
+  }),
+}))
+
+import { useDaemonOnboardingStore } from '../daemon-onboarding'
+
+const reset = () =>
+  useDaemonOnboardingStore.setState({
+    status: 'unknown',
+    loaded: false,
+    busy: false,
+    error: null,
+    ownedAgents: [],
+  })
+
+beforeEach(() => {
+  h.isTauriVal = true
+  h.currentTeam = null
+  h.daemonTeam = null
+  h.probeQueue = []
+  h.invokeCalls = []
+  h.installServiceShouldThrow = false
+  reset()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('daemon-onboarding refresh() orchestration', () => {
+  it('web (non-tauri) short-circuits to ready', async () => {
+    h.isTauriVal = false
+    await useDaemonOnboardingStore.getState().refresh()
+    const s = useDaemonOnboardingStore.getState()
+    expect(s.status).toBe('ready')
+    expect(s.loaded).toBe(true)
+    // No daemon IPC on web.
+    expect(h.invokeCalls).toEqual([])
+  })
+
+  it('unknown when there is no current team yet (does not block)', async () => {
+    h.currentTeam = null
+    h.daemonTeam = 't1'
+    await useDaemonOnboardingStore.getState().refresh()
+    expect(useDaemonOnboardingStore.getState().status).toBe('unknown')
+  })
+
+  it('needs-onboard when daemon is bound to no team', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = null
+    await useDaemonOnboardingStore.getState().refresh()
+    expect(useDaemonOnboardingStore.getState().status).toBe('needs-onboard')
+  })
+
+  it('mismatch when daemon team differs — and does NOT probe http', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't2'
+    await useDaemonOnboardingStore.getState().refresh()
+    expect(useDaemonOnboardingStore.getState().status).toBe('mismatch')
+    // Team-level states never reach the health probe / recovery path.
+    expect(h.invokeCalls).toEqual(['get_daemon_team_id'])
+  })
+
+  it('ready when team matches and the daemon is already healthy', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't1'
+    h.probeQueue = [{ ok: true, baseUrl: 'http://127.0.0.1:1' }]
+    await useDaemonOnboardingStore.getState().refresh()
+    expect(useDaemonOnboardingStore.getState().status).toBe('ready')
+    // Healthy on first probe → no recovery attempt.
+    expect(h.invokeCalls).not.toContain('daemon_install_service')
+  })
+
+  it('matched-but-down → starting → auto-recovers to ready', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't1'
+    // refresh first probe (down), ensureHealthy probe (still down → install-service),
+    // then the first poll iteration succeeds.
+    h.probeQueue = [
+      { ok: false, reason: 'not_running' },
+      { ok: false, reason: 'not_running' },
+      { ok: true, baseUrl: 'http://127.0.0.1:1' },
+    ]
+    vi.useFakeTimers()
+    const p = useDaemonOnboardingStore.getState().refresh()
+    await vi.advanceTimersByTimeAsync(600) // one sleep(500) poll tick
+    await p
+    const s = useDaemonOnboardingStore.getState()
+    expect(s.status).toBe('ready')
+    expect(s.error).toBeNull()
+    expect(h.invokeCalls).toContain('daemon_install_service')
+  })
+
+  it('matched-but-token-invalid that never heals → error with retry hint', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't1'
+    // Every probe stays unhealthy; recovery exhausts its 12 polls.
+    h.probeQueue = [{ ok: false, reason: 'token_invalid' }]
+    vi.useFakeTimers()
+    const p = useDaemonOnboardingStore.getState().refresh()
+    await vi.advanceTimersByTimeAsync(12 * 500 + 100) // drain all poll ticks
+    await p
+    const s = useDaemonOnboardingStore.getState()
+    expect(s.status).toBe('error')
+    expect(s.error).toMatch(/amuxd/)
+    expect(h.invokeCalls).toContain('daemon_install_service')
+  })
+
+  it('recovery survives install-service throwing (falls through to polling)', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't1'
+    h.installServiceShouldThrow = true
+    h.probeQueue = [
+      { ok: false, reason: 'not_running' },
+      { ok: false, reason: 'not_running' },
+      { ok: true, baseUrl: 'http://127.0.0.1:1' },
+    ]
+    vi.useFakeTimers()
+    const p = useDaemonOnboardingStore.getState().refresh()
+    await vi.advanceTimersByTimeAsync(600)
+    await p
+    expect(useDaemonOnboardingStore.getState().status).toBe('ready')
+  })
+})

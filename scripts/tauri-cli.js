@@ -5,6 +5,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const { createRustBuildEnv } = require("./rust-build-env");
 const { ensureTeamclawIntrospectSidecar } = require("./ensure-introspect-sidecar");
+const { ensureAmuxdSidecar } = require("./ensure-amuxd-sidecar");
 const { platform } = process;
 
 const args = process.argv.slice(2);
@@ -34,6 +35,7 @@ if (isWindows && (sub === "dev" || sub === "build")) {
 
 const env = createRustBuildEnv(process.env, __dirname);
 ensureTeamclawIntrospectSidecar(env, { logPrefix: "[tauri-cli]" });
+ensureAmuxdSidecar(env, { logPrefix: "[tauri-cli]" });
 
 const desktopDir = path.resolve(__dirname, "..", "apps", "desktop");
 const child = spawn("pnpm", ["exec", "tauri", ...args], {

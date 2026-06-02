@@ -79,7 +79,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/teamclaw-introspect"
+      "binaries/teamclaw-introspect",
+      "binaries/amuxd"
     ],
     "resources": [
       "binaries/teamclaw-askpass.sh"

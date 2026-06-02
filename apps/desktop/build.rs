@@ -170,5 +170,18 @@ fn main() {
     }
     println!("cargo:rerun-if-changed={}", introspect_bin);
 
+    // amuxd sidecar is bundled (built by scripts/ensure-amuxd-sidecar.js before cargo).
+    let amuxd_bin = format!("binaries/amuxd-{}", target_triple);
+    let amuxd_bin_exe = format!("{}.exe", amuxd_bin);
+    let amuxd_exists = std::path::Path::new(&amuxd_bin).exists()
+        || (target_triple.contains("windows") && std::path::Path::new(&amuxd_bin_exe).exists());
+    if !amuxd_exists && !in_ci {
+        panic!(
+            "\n\namuxd sidecar binary not found: {}\nBuild it with: node -e \"require('./scripts/ensure-amuxd-sidecar').ensureAmuxdSidecar(process.env)\"\n\n",
+            amuxd_bin
+        );
+    }
+    println!("cargo:rerun-if-changed={}", amuxd_bin);
+
     tauri_build::build()
 }

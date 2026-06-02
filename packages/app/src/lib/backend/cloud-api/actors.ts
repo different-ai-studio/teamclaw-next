@@ -29,6 +29,8 @@ type CloudActor = {
 type CloudConnectedAgent = CloudActor & {
   agentId?: string | null;
   deviceId?: string | null;
+  permissionLevel?: string | null;
+  isOwner?: boolean | null;
 };
 
 type CloudAgentAccess = {
@@ -70,6 +72,11 @@ function mapConnectedAgent(row: CloudConnectedAgent, teamId: string): ConnectedA
     ...mapActor({ ...row, teamId: row.teamId ?? teamId }),
     agent_id: row.agentId ?? row.id,
     device_id: row.deviceId ?? null,
+    permission_level: row.permissionLevel ?? null,
+    // The connected-agents endpoint computes ownership server-side (owner_member_id
+    // === caller's team actor). Without forwarding it, the onboarding "bind existing"
+    // filter (rows.filter(r => r.is_owner)) silently drops every owned agent.
+    is_owner: row.isOwner === true,
   };
 }
 
@@ -149,6 +156,12 @@ export function createActorsModule(client: CloudApiClient): ActorsBackend {
     },
     async removeAgentAccess(accessId) {
       await client.delete<void>(`/v1/actors/access/${encodeURIComponent(accessId)}`);
+    },
+    async makeAgentPersonal(agentActorId: string): Promise<void> {
+      await client.post<void>(
+        `/v1/agents/${encodeURIComponent(agentActorId)}/make-personal`,
+        {},
+      );
     },
   };
 }

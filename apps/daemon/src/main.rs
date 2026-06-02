@@ -10,10 +10,12 @@ mod http;
 mod mqtt;
 mod nats;
 mod onboarding;
+mod opencode_install;
 mod opencode_settings;
 mod proto;
 mod provider_config;
 mod runtime;
+mod service;
 mod sync;
 mod team_link;
 mod team_shared_env;
@@ -72,6 +74,12 @@ fn main() -> anyhow::Result<()> {
                 // an external select would skip that teardown.
                 server.run(shutdown_signal()).await
             })?;
+        }
+        Commands::InstallService => {
+            cli::service::install()?;
+        }
+        Commands::UninstallService => {
+            cli::service::uninstall()?;
         }
         Commands::Stop => {
             cli::process::run_stop()?;
@@ -160,6 +168,12 @@ fn main() -> anyhow::Result<()> {
                 println!("\n\n--- Done. {} events received ---", count);
                 Ok::<(), anyhow::Error>(())
             })?;
+        }
+        Commands::Doctor => {
+            cli::doctor::run()?;
+        }
+        Commands::InstallOpencode { force } => {
+            cli::install_opencode::run(force)?;
         }
         Commands::Channel(args) => {
             let path = config::DaemonConfig::default_path();

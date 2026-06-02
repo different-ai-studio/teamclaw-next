@@ -8,6 +8,10 @@ import { generateRandomTeamName } from "@/lib/random-team-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
 import { LoginScreen } from "./LoginScreen";
 import { LobsterLoader } from "./LobsterLoader";
+import { SetupWizard } from "@/components/auth/SetupWizard";
+import { useSetupStore } from "@/stores/setup";
+import { DaemonOnboardingWizard } from "@/components/auth/DaemonOnboardingWizard";
+import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -22,6 +26,20 @@ export function AuthGate({ children }: AuthGateProps) {
   const [authHydrated, setAuthHydrated] = useState(false);
   const bootstrappedUserId = useRef<string | null>(null);
 
+  const setupLoaded = useSetupStore((s) => s.loaded);
+  const setupRequiredSatisfied = useSetupStore((s) => s.requiredSatisfied());
+  const listSetup = useSetupStore((s) => s.listRequirements);
+  const [setupAck, setSetupAck] = useState(false);
+
+  const daemonStatus = useDaemonOnboardingStore((s) => s.status);
+  const daemonLoaded = useDaemonOnboardingStore((s) => s.loaded);
+  const refreshDaemonOnboarding = useDaemonOnboardingStore((s) => s.refresh);
+  const [daemonOnboardingAck, setDaemonOnboardingAck] = useState(false);
+
+  useEffect(() => {
+    if (isTauri()) void listSetup();
+  }, [listSetup]);
+
   useEffect(() => {
     let cancelled = false;
     void Promise.resolve(hydrate()).finally(() => {
@@ -35,6 +53,10 @@ export function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     document.getElementById("skeleton")?.remove();
   }, []);
+
+  useEffect(() => {
+    if (isTauri() && session && bootstrap === "ready") void refreshDaemonOnboarding()
+  }, [session, bootstrap, refreshDaemonOnboarding]);
 
   // After auth: ensure the user belongs to at least one team. If not (fresh
   // signup, no invites), auto-create a temporary team so the UI lands
@@ -98,6 +120,16 @@ export function AuthGate({ children }: AuthGateProps) {
     })();
   }, [loading, session]);
 
+  // First-run: in Tauri, ensure local prerequisites (amuxd/opencode) before auth.
+  if (isTauri() && !setupAck) {
+    if (!setupLoaded) {
+      return <div className="flex h-screen items-center justify-center bg-background" />;
+    }
+    if (!setupRequiredSatisfied) {
+      return <SetupWizard onDone={() => setSetupAck(true)} />;
+    }
+  }
+
   if (isTauri() && loading && authFlow === "invite") {
     return <DesktopOnboarding />;
   }
@@ -133,6 +165,24 @@ export function AuthGate({ children }: AuthGateProps) {
         </p>
       </div>
     );
+  }
+
+  // Daemon readiness gate: after login + workspace bootstrap, ensure the local
+  // daemon is bound to the current team AND running with a valid token. Interactive
+  // states (needs-onboard / mismatch) prompt the user; transient states (starting /
+  // error) auto-recover or offer retry. 'ready'/'unknown' fall through.
+  if (isTauri() && !daemonOnboardingAck) {
+    if (!daemonLoaded) {
+      return <div className="flex h-screen items-center justify-center bg-background" />;
+    }
+    if (
+      daemonStatus === 'needs-onboard' ||
+      daemonStatus === 'mismatch' ||
+      daemonStatus === 'starting' ||
+      daemonStatus === 'error'
+    ) {
+      return <DaemonOnboardingWizard onDone={() => setDaemonOnboardingAck(true)} />;
+    }
   }
 
   return <>{children}</>;

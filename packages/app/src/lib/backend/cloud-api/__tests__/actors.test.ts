@@ -48,6 +48,29 @@ describe("actors module", () => {
     expect(out[0].agent_id).toBe("a-1");
   });
 
+  it("listConnectedAgents forwards server-computed isOwner/permissionLevel (onboarding bind relies on it)", async () => {
+    const owned = { ...cloudActor, kind: "agent", agentId: "a-own", isOwner: true, permissionLevel: "admin" };
+    const other = { ...cloudActor, id: "actor-2", kind: "agent", agentId: "a-other", isOwner: false, permissionLevel: "view" };
+    const client = mockClient({
+      "GET /v1/teams/team-1/agents/connected": { items: [owned, other] },
+    });
+    const mod = createActorsModule(client);
+    const out = await mod.listConnectedAgents("team-1");
+    expect(out[0].is_owner).toBe(true);
+    expect(out[0].permission_level).toBe("admin");
+    expect(out[1].is_owner).toBe(false);
+    // Mirrors the onboarding "bind existing" filter.
+    expect(out.filter((r) => r.is_owner).map((r) => r.agent_id)).toEqual(["a-own"]);
+  });
+
+  it("listConnectedAgents defaults is_owner to false when the server omits it", async () => {
+    const cloudAgent = { ...cloudActor, kind: "agent", agentId: "a-1" };
+    const client = mockClient({ "GET /v1/teams/team-1/agents/connected": { items: [cloudAgent] } });
+    const mod = createActorsModule(client);
+    const out = await mod.listConnectedAgents("team-1");
+    expect(out[0].is_owner).toBe(false);
+  });
+
   it("listActorDirectoryByIds returns [] for empty input", async () => {
     const client = mockClient({});
     const mod = createActorsModule(client);

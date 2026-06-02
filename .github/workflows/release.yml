@@ -113,6 +113,17 @@ jobs:
           ) > /tmp/introspect.log 2>&1 &
           PID_INTROSPECT=$!
 
+          # 2b) Build amuxd sidecar (background)
+          (
+            set -e
+            echo "Building amuxd for ${{ matrix.target }}..."
+            cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd --target ${{ matrix.target }}
+            cp apps/desktop/target/${{ matrix.target }}/release/amuxd apps/desktop/binaries/amuxd-${{ matrix.target }}
+            chmod +x apps/desktop/binaries/amuxd-${{ matrix.target }}
+            echo "amuxd ready"
+          ) > /tmp/amuxd.log 2>&1 &
+          PID_AMUXD=$!
+
           # 3) Import Apple certificate (background, fast but independent)
           (
             if [ -z "$APPLE_CERTIFICATE" ]; then
@@ -141,6 +152,7 @@ jobs:
           FAILED=0
           wait $PID_FRONTEND   || { echo "::error::Frontend build failed:"; cat /tmp/frontend.log; FAILED=1; }
           wait $PID_INTROSPECT || { echo "::error::introspect build failed:"; cat /tmp/introspect.log; FAILED=1; }
+          wait $PID_AMUXD      || { echo "::error::amuxd build failed:"; cat /tmp/amuxd.log; FAILED=1; }
           wait $PID_CERT       || { echo "::error::Certificate import failed:"; cat /tmp/cert.log; FAILED=1; }
 
           if [ "$FAILED" -ne 0 ]; then exit 1; fi
@@ -362,6 +374,13 @@ jobs:
           cargo build --release --locked --manifest-path apps/desktop/Cargo.toml -p teamclaw-introspect
           cp apps/desktop/target/release/teamclaw-introspect.exe apps/desktop/binaries/teamclaw-introspect-x86_64-pc-windows-msvc.exe
           echo "teamclaw-introspect ready"
+
+      - name: Build amuxd sidecar
+        shell: bash
+        run: |
+          cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd
+          cp apps/desktop/target/release/amuxd.exe apps/desktop/binaries/amuxd-x86_64-pc-windows-msvc.exe
+          echo "amuxd ready"
 
       # Skip beforeBuildCommand since frontend is already built above
       - name: Finalize tauri.conf.json for build

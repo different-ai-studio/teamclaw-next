@@ -161,9 +161,9 @@ export function useWorkspaceInit() {
         const message =
           probe.reason === "port_file_missing"
             ? i18n.t("daemon.connection.portFileMissing")
-            : probe.reason === "token_exchange_failed"
+            : probe.reason === "token_invalid"
               ? i18n.t("daemon.connection.tokenExchangeFailed")
-              : probe.reason === "health_check_failed"
+              : probe.reason === "not_running"
                 ? i18n.t("daemon.connection.healthCheckFailed")
                 : i18n.t("daemon.connection.notConnected");
         setOpenCodeError(message);
