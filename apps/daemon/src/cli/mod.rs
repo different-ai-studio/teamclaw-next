@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod install_opencode;
 pub mod mcp_server;
 pub mod process;
+pub mod service;
 pub mod test_client;
 
 use clap::{Args, Parser, Subcommand};
@@ -73,6 +74,10 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Register amuxd as a user-level background service (launchd / systemd-user / scheduled task) and start it.
+    InstallService,
+    /// Stop and remove the amuxd background service.
+    UninstallService,
     /// Run the MCP (Model Context Protocol) server on stdio. Spawned by
     /// claude-code via `--mcp-config`; bridges tool calls to amuxd over
     /// `amuxd.sock`. Exposes a single `send` tool that lets the agent

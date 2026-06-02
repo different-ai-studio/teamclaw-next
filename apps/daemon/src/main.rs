@@ -15,6 +15,7 @@ mod opencode_settings;
 mod proto;
 mod provider_config;
 mod runtime;
+mod service;
 mod team_shared_env;
 mod team_shared_git;
 mod teamclaw;
@@ -71,6 +72,12 @@ fn main() -> anyhow::Result<()> {
                 // an external select would skip that teardown.
                 server.run(shutdown_signal()).await
             })?;
+        }
+        Commands::InstallService => {
+            cli::service::install()?;
+        }
+        Commands::UninstallService => {
+            cli::service::uninstall()?;
         }
         Commands::Stop => {
             cli::process::run_stop()?;
