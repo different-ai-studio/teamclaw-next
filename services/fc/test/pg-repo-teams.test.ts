@@ -1,8 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { eq } from "drizzle-orm";
 import { makeTestDb } from "./db/pglite.js";
 import { createPgBusinessRepository } from "../src/lib/pg-repo/index.js";
-import { teams, teamWorkspaceConfig } from "../src/db/schema/index.js";
+import { teams, teamWorkspaceConfig, actors, members, teamMembers, teamInvites, agents } from "../src/db/schema/index.js";
+
+async function seedOwner(db: any) {
+  const [t] = await db.insert(teams).values({ name: "T", slug: `t-${Date.now()}-${Math.random()}` }).returning();
+  const userId = crypto.randomUUID();
+  const [actor] = await db.insert(actors).values({ teamId: t.id, actorType: "member", displayName: "Owner", userId }).returning();
+  await db.insert(members).values({ id: actor.id, status: "active" });
+  await db.insert(teamMembers).values({ teamId: t.id, memberId: actor.id, role: "owner" });
+  return { teamId: t.id, userId, actorId: actor.id };
+}
 
 async function seedTeam(db: any, over: Record<string, any> = {}) {
   const [t] = await db.insert(teams).values({ name: "Acme", slug: "acme", ...over }).returning();
@@ -83,4 +93,37 @@ test("createTeam requires userId context", async () => {
   const { db } = await makeTestDb();
   const repo = createPgBusinessRepository({ db, accessToken: "x" }); // no userId
   await assert.rejects(() => repo.createTeam({ name: "x" }), /userId is required|bad_request/i);
+});
+
+test("pg createTeamInvite persists kind and agentKind for agent invites", async () => {
+  const { db } = await makeTestDb();
+  const { teamId, userId } = await seedOwner(db);
+  const repo = createPgBusinessRepository({ db, userId });
+  const result = await repo.createTeamInvite(teamId, {
+    kind: "agent", displayName: "Build Bot", agentKind: "claude", teamRole: null, targetActorId: null,
+  } as any);
+  assert.ok(result.token, "token present");
+  const [row] = await db.select().from(teamInvites).where(eq(teamInvites.token, result.token));
+  assert.equal(row.kind, "agent");
+  assert.equal(row.agentKind, "claude");
+});
+
+test("pg createTeamInvite rejects re-invite by non-owner and allows owner", async () => {
+  const { db } = await makeTestDb();
+  const { teamId, userId: ownerUser, actorId: ownerActor } = await seedOwner(db);
+  const [agentActor] = await db.insert(actors).values({ teamId, actorType: "agent", displayName: "A1" }).returning();
+  await db.insert(agents).values({ id: agentActor.id, agentKind: "claude", status: "active", visibility: "team", ownerMemberId: ownerActor });
+  const otherUser = crypto.randomUUID();
+  const [otherActor] = await db.insert(actors).values({ teamId, actorType: "member", displayName: "Other", userId: otherUser }).returning();
+  await db.insert(members).values({ id: otherActor.id, status: "active" });
+  await db.insert(teamMembers).values({ teamId, memberId: otherActor.id, role: "member" });
+
+  const otherRepo = createPgBusinessRepository({ db, userId: otherUser });
+  await assert.rejects(
+    () => otherRepo.createTeamInvite(teamId, { kind: "agent", displayName: "x", agentKind: "claude", targetActorId: agentActor.id } as any),
+    /forbidden|owner/i,
+  );
+  const ownerRepo = createPgBusinessRepository({ db, userId: ownerUser });
+  const ok = await ownerRepo.createTeamInvite(teamId, { kind: "agent", displayName: "x", agentKind: "claude", targetActorId: agentActor.id } as any);
+  assert.ok(ok.token);
 });
