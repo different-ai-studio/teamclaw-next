@@ -279,26 +279,20 @@ fn build_team_members(workspace: &str) -> Result<Value, String> {
 // ─── Env vars ────────────────────────────────────────────────────────────────
 
 fn build_env_vars(workspace: &str) -> Result<Value, String> {
-    let config = crate::config::read_teamclaw_config(workspace)?;
-    let raw = config
-        .get("envVars")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    // Only return key, description, category — never values
-    let safe: Vec<Value> = raw
-        .iter()
+    let listings = teamclaw_runtime_env::env_catalog::load_agent_env_listings(
+        std::path::Path::new(workspace),
+        None,
+    );
+    let safe: Vec<Value> = listings
+        .into_iter()
         .map(|entry| {
             let mut out = serde_json::Map::new();
-            if let Some(k) = entry.get("key").and_then(|v| v.as_str()) {
-                out.insert("key".to_string(), Value::String(k.to_string()));
+            out.insert("key".to_string(), Value::String(entry.key));
+            if let Some(description) = entry.description {
+                out.insert("description".to_string(), Value::String(description));
             }
-            if let Some(d) = entry.get("description").and_then(|v| v.as_str()) {
-                out.insert("description".to_string(), Value::String(d.to_string()));
-            }
-            if let Some(c) = entry.get("category") {
-                out.insert("category".to_string(), c.clone());
+            if let Some(category) = entry.category {
+                out.insert("category".to_string(), Value::String(category));
             }
             Value::Object(out)
         })

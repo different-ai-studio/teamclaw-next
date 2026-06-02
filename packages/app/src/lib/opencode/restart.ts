@@ -7,9 +7,9 @@ export interface RestartResult {
 }
 
 // Stop+start the OpenCode sidecar and restore the SDK client URL and ready flags.
-// Provider state (including the team provider) is reconciled by the Rust
-// `ensure_team_provider` step inside `start_opencode` itself, so callers don't
-// need to re-apply team config here.
+// Provider reconciliation for agent runtimes is handled by the daemon via
+// `teamclaw-runtime-env::ensure_team_provider` in `prepare_workspace`; this
+// path only affects the settings `opencode serve` sidecar.
 export async function restartOpencode(workspacePath: string): Promise<RestartResult> {
   const { setOpenCodeBootstrapped, setOpenCodeReady } = useWorkspaceStore.getState()
   setOpenCodeBootstrapped(false)

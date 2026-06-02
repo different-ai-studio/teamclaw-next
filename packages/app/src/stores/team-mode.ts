@@ -189,8 +189,8 @@ export const useTeamModeStore = create<TeamModeState>((set, get) => ({
 
   applyTeamModel: async (workspacePath: string, force?: boolean) => {
     // Refresh in-memory state from `_meta/provider.json`. Disk-side provider
-    // config is owned by Rust `ensure_team_provider`, which runs at agent
-    // startup — we never write the on-disk config from here.
+    // config is owned by daemon `prepare_workspace` / `teamclaw-runtime-env`
+    // (`ensure_team_provider`) — we never write the on-disk config from here.
     const providerFile = await loadTeamProviderFile(workspacePath).catch(() => null)
     if (providerFile?.provider) {
       const syncedModels = providerFile.provider.models

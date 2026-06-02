@@ -1143,6 +1143,7 @@ fn build_acp_process_command(
     args: &[String],
     agent_type: amux::AgentType,
     extra_env: &HashMap<String, String>,
+    force_env_keys: &std::collections::HashSet<String>,
 ) -> tokio::process::Command {
     let mut cmd = if should_use_claude_agent_acp_wrapper(binary) {
         let mut c = tokio::process::Command::new("npx");
@@ -1160,7 +1161,7 @@ fn build_acp_process_command(
         c
     };
     for (key, value) in extra_env {
-        if std::env::var_os(&key).is_none() {
+        if force_env_keys.contains(key) || std::env::var_os(key).is_none() {
             cmd.env(key, value);
         }
     }
@@ -1174,6 +1175,7 @@ pub fn spawn_acp_host(
     args: Vec<String>,
     agent_type: amux::AgentType,
     extra_env: HashMap<String, String>,
+    force_env_override: bool,
     host_ready_tx: oneshot::Sender<Result<(), String>>,
 ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(64);
@@ -1193,6 +1195,7 @@ pub fn spawn_acp_host(
                     args,
                     agent_type,
                     extra_env,
+                    force_env_override,
                     cmd_rx,
                     host_ready_tx,
                 )
@@ -1423,10 +1426,22 @@ async fn run_acp_host(
     args: Vec<String>,
     agent_type: amux::AgentType,
     extra_env: HashMap<String, String>,
+    force_env_override: bool,
     mut cmd_rx: mpsc::Receiver<AcpCommand>,
     host_ready_tx: oneshot::Sender<Result<(), String>>,
 ) -> anyhow::Result<()> {
-    let mut cmd = build_acp_process_command(&binary, &args, agent_type, &extra_env);
+    let force_env_keys: std::collections::HashSet<String> = if force_env_override {
+        extra_env.keys().cloned().collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+    let mut cmd = build_acp_process_command(
+        &binary,
+        &args,
+        agent_type,
+        &extra_env,
+        &force_env_keys,
+    );
     let mut child = cmd
         .current_dir(".")
         .stdin(std::process::Stdio::piped())
@@ -1638,7 +1653,7 @@ pub fn spawn_acp_agent(
     extra_env: HashMap<String, String>,
 ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
     let (host_ready_tx, host_ready_rx) = oneshot::channel();
-    let cmd_tx = spawn_acp_host(binary, args, agent_type, extra_env, host_ready_tx)?;
+    let cmd_tx = spawn_acp_host(binary, args, agent_type, extra_env, false, host_ready_tx)?;
     let host_cmd = cmd_tx.clone();
     std::thread::Builder::new()
         .name("acp-cli-attach".into())

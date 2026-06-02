@@ -112,7 +112,7 @@ export function providerApiKeyName(providerId: string): string {
  *
  * NOTE: The actual API key value is NOT written here — only a `${ref}`
  * placeholder.  The caller must store the real value in the keychain
- * via `env_var_set` using the key name from `providerApiKeyName()`.
+ * via `env_catalog_set` using the key name from `providerApiKeyName()`.
  */
 export async function addCustomProviderToConfig(
   workspacePath: string,

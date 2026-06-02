@@ -14,6 +14,12 @@ mod proto;
 mod provider_config;
 #[path = "../src/runtime/mod.rs"]
 mod runtime;
+#[path = "../src/team_link.rs"]
+mod team_link;
+#[path = "../src/team_shared_git.rs"]
+mod team_shared_git;
+#[path = "../src/team_shared_env.rs"]
+mod team_shared_env;
 
 use std::sync::Arc;
 use std::time::Duration;

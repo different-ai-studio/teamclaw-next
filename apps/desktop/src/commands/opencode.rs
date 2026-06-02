@@ -176,7 +176,7 @@ pub async fn start_opencode(
     // work happens. From this point on, `current_workspace_for_window(&window, ...)`
     // can resolve the right workspace for any command invoked from this window
     // — even if the sidecar start below fails.
-    super::window::register_window_workspace(&registry, window.label(), &config.workspace_path);
+    super::window::bind_window_to_workspace(&registry, window.label(), &config.workspace_path);
 
     // Check if early launch is in progress for this workspace
     {

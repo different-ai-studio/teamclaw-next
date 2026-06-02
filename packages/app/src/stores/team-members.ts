@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 // Device-identity store. Team roles/members now come from the cloud team
 // (useCurrentTeamStore + useTeamPermissions); the legacy git-manifest member
 // system was removed. This store only tracks the local device node id, used by
-// shared-secrets / env-vars for per-device operations.
+// env-vars store for per-device operations (node id for team writes).
 interface DeviceIdentityState {
   /** This device's node id, loaded once and shared across components. */
   currentNodeId: string | null

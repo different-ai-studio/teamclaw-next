@@ -1,4 +1,3 @@
-use crate::config;
 use serde_json::{json, Value};
 
 pub async fn handle(workspace: &str, api_port: u16, arguments: &Value) -> Result<Value, String> {
@@ -9,16 +8,31 @@ pub async fn handle(workspace: &str, api_port: u16, arguments: &Value) -> Result
 
     match action {
         "list" => {
-            let cfg = config::read_teamclaw_config(workspace)?;
-            let entries = cfg
-                .get("envVars")
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
+            let listings = teamclaw_runtime_env::env_catalog::load_agent_env_listings(
+                std::path::Path::new(workspace),
+                None,
+            );
+            let entries: Vec<Value> = listings
+                .into_iter()
+                .map(|entry| {
+                    let mut out = json!({ "key": entry.key });
+                    if let Some(description) = entry.description {
+                        out["description"] = json!(description);
+                    }
+                    if let Some(category) = entry.category {
+                        out["category"] = json!(category);
+                    }
+                    out
+                })
+                .collect();
             Ok(json!({ "env_vars": entries }))
         }
 
         "set" => {
+            let scope = arguments
+                .get("scope")
+                .and_then(|v| v.as_str())
+                .unwrap_or("personal");
             let key = arguments
                 .get("key")
                 .and_then(|v| v.as_str())
@@ -28,22 +42,53 @@ pub async fn handle(workspace: &str, api_port: u16, arguments: &Value) -> Result
                 .and_then(|v| v.as_str())
                 .ok_or("Missing field: value")?;
             let description = arguments.get("description").and_then(|v| v.as_str());
+            let category = arguments.get("category").and_then(|v| v.as_str());
+            let node_id = arguments
+                .get("nodeId")
+                .or_else(|| arguments.get("node_id"))
+                .and_then(|v| v.as_str());
 
-            let mut body = json!({ "key": key, "value": value });
+            let mut body = json!({
+                "scope": scope,
+                "key": key,
+                "value": value,
+            });
             if let Some(d) = description {
                 body["description"] = json!(d);
+            }
+            if let Some(c) = category {
+                body["category"] = json!(c);
+            }
+            if let Some(id) = node_id {
+                body["nodeId"] = json!(id);
             }
 
             post_api(api_port, "/env-var-set", &body).await
         }
 
         "delete" => {
+            let scope = arguments
+                .get("scope")
+                .and_then(|v| v.as_str())
+                .unwrap_or("personal");
             let key = arguments
                 .get("key")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing field: key")?;
 
-            post_api(api_port, "/env-var-delete", &json!({ "key": key })).await
+            let mut body = json!({ "scope": scope, "key": key });
+            if let Some(id) = arguments
+                .get("nodeId")
+                .or_else(|| arguments.get("node_id"))
+                .and_then(|v| v.as_str())
+            {
+                body["nodeId"] = json!(id);
+            }
+            if let Some(role) = arguments.get("role").and_then(|v| v.as_str()) {
+                body["role"] = json!(role);
+            }
+
+            post_api(api_port, "/env-var-delete", &body).await
         }
 
         unknown => Err(format!(

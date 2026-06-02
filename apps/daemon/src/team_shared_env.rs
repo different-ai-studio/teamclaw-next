@@ -5,8 +5,9 @@ use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::HashMap;
-use std::path::Path;
-use tracing::warn;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use tracing::{info, warn};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct EncryptedEnvelope {
@@ -69,20 +70,67 @@ pub fn normalize_env_map(input: HashMap<String, String>) -> HashMap<String, Stri
     out
 }
 
-pub fn load_team_env(
+/// Resolve `_secrets/` for a workspace: prefer `teamclaw-team` (global link),
+/// then configured `sharedDirName`.
+pub fn resolve_team_secrets_dir(
     workspace_root: &Path,
+    team_id: Option<&str>,
     shared_dir_name: &str,
+) -> PathBuf {
+    team_secrets_dir_candidates(workspace_root, team_id, shared_dir_name)
+        .into_iter()
+        .find(|dir| dir.exists())
+        .unwrap_or_else(|| workspace_root.join(shared_dir_name).join("_secrets"))
+}
+
+/// Candidate `_secrets/` directories, most preferred first.
+pub fn team_secrets_dir_candidates(
+    workspace_root: &Path,
+    team_id: Option<&str>,
+    shared_dir_name: &str,
+) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |path: PathBuf| {
+        if seen.insert(path.clone()) {
+            out.push(path);
+        }
+    };
+
+    if let Some(team_id) = team_id.filter(|id| !id.trim().is_empty()) {
+        push(
+            crate::config::global_team_store::resolve_team_dir(workspace_root, team_id)
+                .join("_secrets"),
+        );
+        push(
+            crate::config::global_team_store::global_team_dir(team_id).join("_secrets"),
+        );
+    }
+
+    for path in teamclaw_runtime_env::env_catalog::team_secrets_dir_candidates_workspace(
+        workspace_root,
+        shared_dir_name,
+    ) {
+        push(path);
+    }
+    out
+}
+
+fn read_team_json_shared_dir_name(workspace_root: &Path) -> String {
+    teamclaw_runtime_env::team_provider::resolve_shared_dir_name(workspace_root)
+}
+
+pub fn load_team_env_from_secrets_dir(
+    secrets_dir: &Path,
     env_secret: &str,
 ) -> anyhow::Result<HashMap<String, String>> {
-    let secrets_dir =
-        crate::team_shared_git::shared_dir_path(workspace_root, shared_dir_name)?.join("_secrets");
     if !secrets_dir.exists() {
         return Ok(HashMap::new());
     }
 
     let key = derive_key(env_secret)?;
     let mut env = HashMap::new();
-    for entry in std::fs::read_dir(&secrets_dir)? {
+    for entry in std::fs::read_dir(secrets_dir)? {
         let path = match entry {
             Ok(entry) => entry.path(),
             Err(e) => {
@@ -120,6 +168,63 @@ pub fn load_team_env(
         env.insert(secret.key_id, secret.key);
     }
     Ok(normalize_env_map(env))
+}
+
+pub fn load_team_env(
+    workspace_root: &Path,
+    shared_dir_name: &str,
+    env_secret: &str,
+) -> anyhow::Result<HashMap<String, String>> {
+    let secrets_dir =
+        crate::team_shared_git::shared_dir_path(workspace_root, shared_dir_name)?.join("_secrets");
+    load_team_env_from_secrets_dir(&secrets_dir, env_secret)
+}
+
+/// Load decrypted team shared env for a workspace.
+///
+/// Does not require `team.enabled` in `teamclaw.json`. Git-backed teams usually
+/// keep secrets under `{sharedDirName}/_secrets` (default UI: `teamclaw/_secrets`);
+/// global `teamclaw-team` symlink and `_team_secret.{team_id}` blob are fallbacks.
+pub fn load_team_env_for_workspace(
+    workspace_root: &Path,
+    team_id: Option<&str>,
+) -> HashMap<String, String> {
+    let shared_dir_name = read_team_json_shared_dir_name(workspace_root);
+    let Some(env_secret) =
+        teamclaw_runtime_env::env_catalog::resolve_team_env_secret(workspace_root, team_id)
+    else {
+        if team_id.is_some() {
+            warn!(
+                workspace = %workspace_root.display(),
+                "team env secret missing (team.envSecret or _team_secret blob)"
+            );
+        }
+        return HashMap::new();
+    };
+
+    for secrets_dir in team_secrets_dir_candidates(workspace_root, team_id, &shared_dir_name) {
+        match load_team_env_from_secrets_dir(&secrets_dir, &env_secret) {
+            Ok(env) if !env.is_empty() => {
+                info!(
+                    workspace = %workspace_root.display(),
+                    secrets_dir = %secrets_dir.display(),
+                    count = env.len(),
+                    "loaded team shared environment variables"
+                );
+                return env;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!(
+                    workspace = %workspace_root.display(),
+                    secrets_dir = %secrets_dir.display(),
+                    error = %e,
+                    "failed to load team shared environment variables"
+                );
+            }
+        }
+    }
+    HashMap::new()
 }
 
 #[cfg(test)]
@@ -181,6 +286,118 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let err = load_team_env(tmp.path(), "../outside", &"00".repeat(32)).unwrap_err();
         assert!(err.to_string().contains("shared_dir_name"));
+    }
+
+    #[test]
+    fn resolve_team_secrets_dir_prefers_teamclaw_team_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let secrets_dir = tmp.path().join("teamclaw-team").join("_secrets");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+        std::fs::write(secrets_dir.join("marker"), b"").unwrap();
+
+        let resolved = resolve_team_secrets_dir(tmp.path(), None, "teamclaw");
+        assert_eq!(resolved, secrets_dir);
+    }
+
+    #[test]
+    fn team_secrets_dir_candidates_includes_legacy_teamclaw_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let legacy = tmp.path().join("teamclaw").join("_secrets");
+        std::fs::create_dir_all(&legacy).unwrap();
+
+        let dirs = team_secrets_dir_candidates(tmp.path(), None, "teamclaw-team");
+        assert!(dirs.contains(&legacy));
+    }
+
+    #[test]
+    fn load_team_env_for_workspace_reads_legacy_teamclaw_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env_secret = "33".repeat(32);
+        let config_dir = tmp.path().join(".teamclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("teamclaw.json"),
+            serde_json::json!({
+                "team": { "envSecret": env_secret }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let secrets_dir = tmp.path().join("teamclaw").join("_secrets");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+        std::fs::write(
+            secrets_dir.join("s3_bucket.enc.json"),
+            encrypted_secret_file(&env_secret, "s3_bucket", "my-bucket"),
+        )
+        .unwrap();
+
+        let env = load_team_env_for_workspace(tmp.path(), None);
+        assert_eq!(env.get("s3_bucket"), Some(&"my-bucket".to_string()));
+    }
+
+    #[test]
+    fn load_team_env_for_workspace_reads_git_shared_dir_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().join(".teamclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let env_secret = "44".repeat(32);
+        std::fs::write(
+            config_dir.join("teamclaw.json"),
+            serde_json::json!({
+                "team": {
+                    "gitUrl": "https://example.com/team.git",
+                    "sharedDirName": "teamclaw",
+                    "envSecret": env_secret
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let secrets_dir = tmp.path().join("teamclaw").join("_secrets");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+        std::fs::write(
+            secrets_dir.join("git_team_key.enc.json"),
+            encrypted_secret_file(&env_secret, "git_team_key", "from-git-dir"),
+        )
+        .unwrap();
+
+        let env = load_team_env_for_workspace(tmp.path(), None);
+        assert_eq!(
+            env.get("git_team_key"),
+            Some(&"from-git-dir".to_string())
+        );
+    }
+
+    #[test]
+    fn load_team_env_for_workspace_reads_teamclaw_team_without_git_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().join(".teamclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let env_secret = "22".repeat(32);
+        std::fs::write(
+            config_dir.join("teamclaw.json"),
+            serde_json::json!({
+                "team": {
+                    "enabled": true,
+                    "envSecret": env_secret
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let secrets_dir = tmp.path().join("teamclaw-team").join("_secrets");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+        std::fs::write(
+            secrets_dir.join("log_search_site.enc.json"),
+            encrypted_secret_file(&env_secret, "log_search_site", "https://logs.example"),
+        )
+        .unwrap();
+
+        let env = load_team_env_for_workspace(tmp.path(), None);
+        assert_eq!(
+            env.get("log_search_site"),
+            Some(&"https://logs.example".to_string())
+        );
     }
 
     #[test]

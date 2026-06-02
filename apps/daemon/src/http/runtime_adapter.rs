@@ -651,7 +651,7 @@ impl RuntimeManagerAdapter {
                     model,
                     None,
                     None,
-                    HashMap::new(),
+                    crate::runtime::SpawnRuntimeEnv::default(),
                 )
                 .await
                 .map_err(|e| HttpError::internal(format!("spawn runtime: {e}")))
