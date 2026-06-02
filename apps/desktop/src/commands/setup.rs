@@ -82,6 +82,39 @@ fn locate_bundled_amuxd() -> Option<PathBuf> {
     None
 }
 
+/// Query the bundled `amuxd doctor` for opencode status. Returns (satisfied, machine_version).
+/// `satisfied` = a machine opencode is present AND >= the version amuxd requires.
+/// amuxd resolves opencode by absolute path (~/.opencode/bin), so this works even
+/// when the app/daemon PATH excludes it.
+async fn opencode_doctor<R: Runtime>(app: &AppHandle<R>) -> (bool, Option<String>) {
+    use tauri_plugin_shell::process::CommandEvent;
+    use tauri_plugin_shell::ShellExt;
+    let spawned = app
+        .shell()
+        .sidecar("amuxd")
+        .and_then(|c| c.args(["doctor"]).spawn());
+    let (mut rx, _child) = match spawned {
+        Ok(v) => v,
+        Err(_) => return (false, None),
+    };
+    let mut buf = String::new();
+    while let Some(event) = rx.recv().await {
+        if let CommandEvent::Stdout(bytes) = event {
+            buf.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+    match serde_json::from_str::<serde_json::Value>(buf.trim()) {
+        Ok(v) => {
+            let oc = &v["opencode"];
+            (
+                oc["satisfied"].as_bool().unwrap_or(false),
+                oc["version"].as_str().map(|s| s.to_string()),
+            )
+        }
+        Err(_) => (false, None),
+    }
+}
+
 #[tauri::command]
 pub async fn setup_list_requirements<R: Runtime>(
     app: AppHandle<R>,
@@ -90,7 +123,7 @@ pub async fn setup_list_requirements<R: Runtime>(
 
     let git_version = detect_git();
     let amuxd_present = bin_present(&home, "amuxd", "amuxd.exe");
-    let opencode_present = bin_present(&home, "opencode", "opencode.exe");
+    let (opencode_satisfied, opencode_version) = opencode_doctor(&app).await;
 
     Ok(vec![
         RequirementStatus {
@@ -104,8 +137,8 @@ pub async fn setup_list_requirements<R: Runtime>(
             id: "opencode".into(),
             title: "OpenCode runtime".into(),
             optional: false,
-            present: opencode_present,
-            version: None,
+            present: opencode_satisfied,
+            version: opencode_version,
         },
         RequirementStatus {
             id: "git".into(),
