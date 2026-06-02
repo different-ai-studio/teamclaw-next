@@ -12,10 +12,11 @@ import {
 import { executeJs } from "../../_utils/tauri-mcp-test-utils";
 
 // ── local helpers ────────────────────────────────────────────────────────────
+const RUN_PREFIX = `si-${Date.now().toString(36)}`;
 let runCounter = 0;
 function nextRunId(prefix: string): string {
   runCounter += 1;
-  return `si-${prefix}-${runCounter}`;
+  return `${RUN_PREFIX}-${prefix}-${runCounter}`;
 }
 function id(runId: string, suffix: string): string {
   return `${runId}-${suffix}`;
@@ -27,18 +28,25 @@ async function waitFor<T>(
   predicate: (value: T) => boolean,
   timeoutMs = 30_000,
   intervalMs = 250,
-): Promise<void> {
+): Promise<T> {
   const start = Date.now();
   let last: T | undefined;
+  let lastError: unknown;
   while (Date.now() - start < timeoutMs) {
-    last = await read();
-    if (predicate(last)) return;
+    try {
+      last = await read();
+      if (predicate(last)) return last;
+    } catch (e) {
+      lastError = e;
+    }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
+  if (lastError) throw lastError;
   throw new Error(`waitFor timed out: ${label} (last=${JSON.stringify(last)})`);
 }
 
 async function textOccurrences(selector: string, text: string): Promise<number> {
+  if (!text) throw new Error("textOccurrences: needle must not be empty");
   const code = `
     (() => {
       const el = document.querySelector(${JSON.stringify(selector)});
@@ -73,7 +81,7 @@ async function seedSingleAgentSession(opts: {
       {
         id: opts.sessionId,
         title: opts.title,
-        lastMessageAt: "2026-06-02T00:00:00.000Z",
+        lastMessageAt: new Date().toISOString(),
         lastMessagePreview: "等待输入",
         participantActorIds: [opts.memberId, opts.agentId],
       },
