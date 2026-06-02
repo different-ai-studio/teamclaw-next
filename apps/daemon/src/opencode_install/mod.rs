@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::DaemonConfig;
 
@@ -14,8 +13,16 @@ pub struct OpencodeLock {
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpencodeAsset {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub sha256: Option<String>,
+}
+
+fn empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.filter(|s| !s.is_empty()))
 }
 
 impl OpencodeLock {
@@ -150,12 +157,19 @@ pub fn mirror_url(version: &str, asset: &str) -> Option<String> {
 }
 
 pub async fn download_to(url: &str, dest: &Path) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
     let resp = reqwest::get(url).await?.error_for_status()?;
-    let bytes = resp.bytes().await?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(dest, &bytes)?;
+    let mut file = tokio::fs::File::create(dest).await?;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
     Ok(())
 }
 
@@ -172,6 +186,8 @@ pub async fn download_with_fallback(urls: &[String], dest: &Path) -> anyhow::Res
 
 fn resolve_binary_with(configured: Option<&str>, installed: bool) -> String {
     if let Some(b) = configured {
+        // AgentBackendConfig.binary serde default is "claude" (shared default_claude_binary()).
+        // When [agents.opencode] exists but omits `binary`, the value is "claude" — treat that as "not configured".
         if !b.is_empty() && b != "claude" {
             return b.to_string();
         }
@@ -203,6 +219,15 @@ mod tests {
         let asset = lock.asset_for("aarch64-apple-darwin").unwrap();
         assert_eq!(asset.name, "opencode-darwin-arm64.zip");
         assert_eq!(asset.sha256.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn empty_sha256_becomes_none() {
+        let lock = OpencodeLock::parse(
+            r#"{"version":"v1","assets":{"t":{"name":"a.zip","sha256":""}}}"#,
+        )
+        .unwrap();
+        assert_eq!(lock.asset_for("t").unwrap().sha256, None);
     }
 
     #[test]
