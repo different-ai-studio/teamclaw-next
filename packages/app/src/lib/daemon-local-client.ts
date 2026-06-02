@@ -373,12 +373,16 @@ export async function putDaemonProviderAuth(
   workspaceId: string,
   providerId: string,
   req: DaemonProviderAuthRequest,
-): Promise<DaemonApplyOutcome | null> {
+): Promise<DaemonApplyOutcome> {
   const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
     `/v1/workspaces/${workspaceId}/providers/${encodeURIComponent(providerId)}/auth`,
     { method: 'POST', body: JSON.stringify(req) },
   )
-  return result.ok ? result.data.outcome : null
+  if (!result.ok) {
+    const { detail } = problemDetailFromErrorBody(result.error)
+    throw new Error(detail || `Failed to save provider auth (${result.status})`)
+  }
+  return result.data.outcome
 }
 
 export async function deleteDaemonProviderAuth(

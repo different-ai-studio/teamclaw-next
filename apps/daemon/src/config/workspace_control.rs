@@ -519,21 +519,39 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         let wpath = self.workspace_path(workspace_id)?;
         let _lock = self.write_lock.lock().unwrap();
         let mut cfg = Self::read_opencode_json(&wpath)?;
+        let merged = Self::merged_provider_entries(&wpath)?;
 
-        let entry = cfg
-            .provider
-            .entry(provider_id.to_owned())
-            .or_insert_with(OcProviderEntry::default);
+        let mut entry = merged
+            .get(provider_id)
+            .cloned()
+            .or_else(|| cfg.provider.get(provider_id).cloned())
+            .unwrap_or_default();
 
-        if let Some(name) = req.display_name {
-            entry.name = Some(name);
+        let api_key = if req.api_key.trim().is_empty() {
+            entry
+                .options
+                .get("apiKey")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            req.api_key
+        };
+        if api_key.trim().is_empty() {
+            return Err(WorkspaceControlError::InvalidInput(
+                "api_key must not be empty".to_owned(),
+            ));
         }
-        if entry.npm.is_none() {
+
+        if let Some(name) = req.display_name.as_ref() {
+            entry.name = Some(name.clone());
+        }
+        if entry.npm.is_none() && (req.display_name.is_some() || req.base_url.is_some()) {
             entry.npm = Some("@ai-sdk/openai-compatible".to_owned());
         }
         entry
             .options
-            .insert("apiKey".to_owned(), serde_json::Value::String(req.api_key));
+            .insert("apiKey".to_owned(), serde_json::Value::String(api_key));
         if let Some(base_url) = req.base_url {
             entry
                 .options
@@ -546,6 +564,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             entry.models.insert(model.model_id, model_val);
         }
 
+        cfg.provider.insert(provider_id.to_owned(), entry);
         Self::write_opencode_json(&wpath, &cfg)?;
         Ok(ApplyOutcome::RestartRequired)
     }
@@ -964,6 +983,97 @@ mod tests {
         assert!(p.authenticated);
         assert_eq!(p.base_url.as_deref(), Some("https://api.example.com/v1"));
         assert!(p.models.contains(&"my-llm/gpt-4".to_owned()));
+    }
+
+    #[test]
+    fn put_provider_auth_merges_existing_teamclaw_provider_when_connecting_api_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("teamclaw.json"),
+            r#"{
+  "provider": {
+    "scnet": {
+      "name": "scnet",
+      "options": { "baseURL": "https://api.example.com/v1" },
+      "models": { "MiniMax-M2.5": { "name": "MiniMax-M2.5" } }
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let store = make_store();
+        let wid = ws_id(root);
+
+        store
+            .put_provider_auth(
+                &wid,
+                "scnet",
+                ProviderAuthRequest {
+                    api_key: "sk-live".to_owned(),
+                    base_url: None,
+                    display_name: None,
+                    models: vec![],
+                },
+            )
+            .unwrap();
+
+        let providers = store.get_providers(&wid).unwrap();
+        let scnet = providers.iter().find(|p| p.id == "scnet").unwrap();
+        assert!(scnet.authenticated);
+        assert_eq!(scnet.base_url.as_deref(), Some("https://api.example.com/v1"));
+        assert!(scnet.models.contains(&"MiniMax-M2.5".to_owned()));
+
+        let opencode = std::fs::read_to_string(root.join("opencode.json")).unwrap();
+        assert!(opencode.contains("sk-live"));
+        assert!(!opencode.contains("@ai-sdk/openai-compatible"));
+    }
+
+    #[test]
+    fn put_provider_auth_preserves_existing_api_key_when_update_omits_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store();
+        let wid = ws_id(dir.path());
+
+        store
+            .put_provider_auth(
+                &wid,
+                "my-llm",
+                ProviderAuthRequest {
+                    api_key: "sk-test".to_owned(),
+                    base_url: Some("https://api.example.com/v1".to_owned()),
+                    display_name: Some("My LLM".to_owned()),
+                    models: vec![ProviderModelConfig {
+                        model_id: "gpt-4".to_owned(),
+                        model_name: Some("GPT-4".to_owned()),
+                    }],
+                },
+            )
+            .unwrap();
+
+        store
+            .put_provider_auth(
+                &wid,
+                "my-llm",
+                ProviderAuthRequest {
+                    api_key: String::new(),
+                    base_url: Some("https://api.example.com/v2".to_owned()),
+                    display_name: Some("My LLM v2".to_owned()),
+                    models: vec![ProviderModelConfig {
+                        model_id: "gpt-4o".to_owned(),
+                        model_name: Some("GPT-4o".to_owned()),
+                    }],
+                },
+            )
+            .unwrap();
+
+        let providers = store.get_providers(&wid).unwrap();
+        let provider = providers.iter().find(|p| p.id == "my-llm").unwrap();
+        assert_eq!(provider.display_name, "My LLM v2");
+        assert_eq!(provider.base_url.as_deref(), Some("https://api.example.com/v2"));
+        assert!(provider.authenticated);
+        assert!(provider.models.contains(&"gpt-4o".to_owned()));
     }
 
     #[test]
