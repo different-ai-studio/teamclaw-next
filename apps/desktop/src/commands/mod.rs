@@ -3,6 +3,7 @@ pub mod cron;
 pub mod daemon_http;
 pub mod daemon_installer;
 pub mod deps;
+pub mod setup;
 pub mod device_identity;
 pub mod device_token;
 pub mod env_vars;
