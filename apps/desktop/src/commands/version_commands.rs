@@ -60,7 +60,12 @@ pub async fn team_list_all_versioned_files(
     Ok(Vec::new())
 }
 
-#[tauri::command]
+// NOTE: `#[tauri::command]` intentionally removed here. The unified daemon
+// proxy `team_sync_proxy::team_restore_file_version` now owns this command name;
+// keeping the macro on this (now-unregistered) shim would collide at crate root
+// (`__cmd__team_restore_file_version` defined twice). This whole module is
+// removed in Task 4.
+#[allow(dead_code)]
 pub async fn team_restore_file_version(
     _workspace_path: String,
     _doc_type: String,
