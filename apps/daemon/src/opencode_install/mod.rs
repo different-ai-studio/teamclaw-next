@@ -257,18 +257,20 @@ pub fn doctor() -> DoctorReport {
         version: installed_version().ok().flatten(),
         path: oc_present.then(|| oc_path.to_string_lossy().to_string()),
     };
+    let git_version = probe_version("git", &["--version"]);
     let git = ComponentStatus {
-        present: probe_version("git", &["--version"]).is_some(),
-        version: probe_version("git", &["--version"]),
+        present: git_version.is_some(),
+        version: git_version,
         path: None,
     };
     let amuxd_path = DaemonConfig::config_dir()
         .join("bin")
         .join(if cfg!(windows) { "amuxd.exe" } else { "amuxd" });
+    let amuxd_present = amuxd_path.exists();
     let amuxd = ComponentStatus {
-        present: amuxd_path.exists(),
+        present: amuxd_present,
         version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        path: amuxd_path.exists().then(|| amuxd_path.to_string_lossy().to_string()),
+        path: amuxd_present.then(|| amuxd_path.to_string_lossy().to_string()),
     };
     DoctorReport { opencode, git, amuxd }
 }
