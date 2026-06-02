@@ -55,6 +55,26 @@ pub struct BootstrapMqttOverride {
 #[cfg(test)]
 pub mod mock;
 
+/// A team's share-mode + git configuration, as sourced from the TeamClaw Cloud
+/// API (`GET /v1/teams/:id/share-mode`). `mode == None` means team-share has not
+/// been enabled for this team yet (the daemon should treat this as "no sync").
+///
+/// Note: the FC `share-mode` endpoint does not surface the git branch (the
+/// `git_branch` column lives on `team_workspace_config` and is not selected by
+/// `getShareMode`/`getWorkspaceConfig`), so `git_branch` is presently always
+/// `None`. The field is kept so a future FC endpoint can populate it without a
+/// signature change.
+#[derive(Debug, Clone, Default)]
+pub struct ShareModeConfig {
+    /// `"oss" | "managed_git" | "custom_git"`; `None` when team-share is not
+    /// enabled.
+    pub mode: Option<String>,
+    pub git_remote_url: Option<String>,
+    pub git_branch: Option<String>,
+    /// `"ssh_key" | "https_token"` for `custom_git`; `None` otherwise.
+    pub git_auth_kind: Option<String>,
+}
+
 #[async_trait]
 pub trait Backend: Send + Sync {
     // ── Identity ──────────────────────────────────────────────────────────
@@ -85,6 +105,21 @@ pub trait Backend: Send + Sync {
     /// surface (e.g. mock, Supabase).
     async fn fetch_bootstrap_mqtt(&self) -> BackendResult<Option<BootstrapMqttOverride>> {
         Ok(None)
+    }
+
+    /// Fetch a team's share-mode + git config from the Cloud API. A team that
+    /// has not yet enabled team-share resolves to `ShareModeConfig::default()`
+    /// (all `None`) rather than an error. No default impl: both backends must
+    /// implement it since the semantics differ (HTTP fetch vs. in-memory stub).
+    async fn team_share_config(&self, team_id: &str) -> BackendResult<ShareModeConfig>;
+
+    /// The cloud base URL this backend targets (e.g. `https://cloud.ucar.cc`),
+    /// trailing slash trimmed. Used by the sync dispatcher to point the OSS
+    /// `FcClient` at the same FC the daemon authenticates against. `None` for
+    /// backends with no HTTP surface (mock), so the dispatcher falls back to a
+    /// default endpoint.
+    fn cloud_base_url(&self) -> Option<String> {
+        None
     }
 
     // ── Business operations ───────────────────────────────────────────────
@@ -269,10 +304,7 @@ mod proactive_refresh_tests {
     fn proactive_delay_is_zero_inside_five_minute_buffer() {
         let expiry = Instant::now() + Duration::from_secs(2 * 60);
         assert!(credential_in_proactive_refresh_window(Some(expiry)));
-        assert_eq!(
-            proactive_reconnect_delay(Some(expiry)),
-            Duration::ZERO
-        );
+        assert_eq!(proactive_reconnect_delay(Some(expiry)), Duration::ZERO);
     }
 
     #[test]

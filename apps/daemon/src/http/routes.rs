@@ -16,6 +16,7 @@ use super::observ::request_id_layer;
 use super::sessions;
 use super::state::HttpState;
 use super::team;
+use super::team_sync;
 use super::workspaces;
 
 pub fn build(state: HttpState) -> Router {
@@ -51,8 +52,7 @@ pub fn build(state: HttpState) -> Router {
         )
         .route(
             "/v1/workspaces/:id/providers/:provider_id/auth",
-            post(workspaces::put_provider_auth)
-                .delete(workspaces::delete_provider_auth),
+            post(workspaces::put_provider_auth).delete(workspaces::delete_provider_auth),
         )
         .route(
             "/v1/workspaces/:id/provider-auth-methods",
@@ -86,26 +86,17 @@ pub fn build(state: HttpState) -> Router {
             "/v1/workspaces/:id/roles-skills",
             get(workspaces::get_roles_skills),
         )
-        .route(
-            "/v1/workspaces/:id/skills",
-            get(workspaces::get_skills),
-        )
+        .route("/v1/workspaces/:id/skills", get(workspaces::get_skills))
         .route(
             "/v1/workspaces/:id/skills/:slug",
             put(workspaces::put_skill).delete(workspaces::delete_skill),
         )
-        .route(
-            "/v1/workspaces/:id/roles",
-            get(workspaces::get_roles),
-        )
+        .route("/v1/workspaces/:id/roles", get(workspaces::get_roles))
         .route(
             "/v1/workspaces/:id/roles/:slug",
             put(workspaces::put_role).delete(workspaces::delete_role),
         )
-        .route(
-            "/v1/workspaces/:id/runtime",
-            get(workspaces::get_runtime),
-        )
+        .route("/v1/workspaces/:id/runtime", get(workspaces::get_runtime))
         .route(
             "/v1/workspaces/:id/runtime/reload",
             post(workspaces::reload_runtime),
@@ -113,6 +104,20 @@ pub fn build(state: HttpState) -> Router {
         // Team-share: materialize the global dir + workspace symlink on demand
         // (called by the app right after enabling/joining team-share).
         .route("/v1/team/link", post(team::link_team_workspace))
+        // Daemon-owned team sync: desktop triggers sync + reads status over loopback.
+        .route("/v1/team/sync", post(team_sync::sync_now))
+        .route("/v1/team/sync/status", get(team_sync::sync_status))
+        .route("/v1/team/secrets", post(team_sync::set_secrets))
+        .route("/v1/team/conflicts", get(team_sync::list_conflicts))
+        .route(
+            "/v1/team/conflicts/resolve",
+            post(team_sync::resolve_conflict),
+        )
+        .route("/v1/team/versions", get(team_sync::list_versions))
+        .route(
+            "/v1/team/versions/restore",
+            post(team_sync::restore_version),
+        )
         .layer(body_limit_layer(body_cap))
         .layer(middleware::from_fn_with_state(
             state.clone(),

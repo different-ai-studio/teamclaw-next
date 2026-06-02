@@ -1,6 +1,17 @@
 /**
- * TeamGitConfig - Git repository configuration UI.
- * Extracted from TeamSection.tsx.
+ * TeamGitConfig - Git-mode team-share status panel.
+ *
+ * The desktop now proxies team-sync to the amuxd daemon, and the team's Git
+ * config (remote URL / auth) is provisioned by FC at share-mode enable time —
+ * not entered here. This panel is therefore a status surface:
+ *   - connection / enabled status + last sync time
+ *   - a "Sync now" button (→ team_shared_git_sync proxy; no size precheck)
+ *   - the team LLM service config (owner / manager)
+ *   - runtime details + the TeamSyncPaths view + a repo setup guide
+ *
+ * The old git-URL/token entry form and the `needsConfirmation` size-precheck
+ * dialog have been removed (the daemon always proceeds, and config is no longer
+ * edited locally).
  */
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,16 +24,13 @@ import {
   Unlink,
   CheckCircle2,
   Clock,
-  Eye,
-  EyeOff,
   KeyRound,
   ChevronRight,
   BookOpen,
   Settings,
   Save,
-  Copy,
 } from 'lucide-react'
-import { cn, isTauri, copyToClipboard } from '@/lib/utils'
+import { cn, isTauri } from '@/lib/utils'
 import { ToggleSwitch } from '@/components/settings/shared'
 import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
@@ -37,7 +45,6 @@ import {
   saveTeamProviderFile,
 } from '@/lib/team-provider'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -51,7 +58,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { formatBytes, type SyncPrecheckFile } from './syncPrecheck'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -71,22 +77,13 @@ interface GitCheckResult {
   version: string | null
 }
 
+// The daemon proxy no longer returns a `needsConfirmation` size precheck.
 interface TeamGitResult {
   success: boolean
   message: string
-  needsConfirmation?: boolean
-  newFiles?: SyncPrecheckFile[]
-  totalBytes?: number
 }
 
-type ConnectionState =
-  | 'loading'
-  | 'no-git'
-  | 'unconfigured'
-  | 'connecting'
-  | 'connected'
-  | 'error'
-  | 'syncing'
+type ConnectionState = 'loading' | 'no-git' | 'unconfigured' | 'connected' | 'error' | 'syncing'
 
 async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
@@ -96,29 +93,11 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke<T>(cmd, args)
 }
 
-function generateEnvSecret(): string {
-  const bytes = new Uint8Array(32)
-  globalThis.crypto?.getRandomValues?.(bytes)
-  if (bytes.every((byte) => byte === 0)) {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 256)
-    }
-  }
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-function normalizeEnvSecretInput(value: string): string {
-  return value.trim().toLowerCase()
-}
-
 // ─── Reusable Components (local to git config) ─────────────────────────────
 
 function SettingCard({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn(
-      "rounded-xl border bg-card p-5 transition-all",
-      className
-    )}>
+    <div className={cn('rounded-xl border bg-card p-5 transition-all', className)}>
       {children}
     </div>
   )
@@ -139,26 +118,11 @@ export function TeamGitConfig() {
   const [deviceInfo, setDeviceInfo] = React.useState<{ nodeId: string } | null>(null)
   const [state, setState] = React.useState<ConnectionState>('loading')
   const [teamConfig, setTeamConfig] = React.useState<TeamConfig | null>(null)
-  const [gitUrl, setGitUrl] = React.useState('')
-  const [gitBranch, setGitBranch] = React.useState('')
-  const [gitToken, setGitToken] = React.useState('')
-  const [sharedDirName, setSharedDirName] = React.useState('teamclaw')
-  const [showToken, setShowToken] = React.useState(false)
-  const [envSecretInput, setEnvSecretInput] = React.useState('')
-  const [showEnvSecret, setShowEnvSecret] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
-  const [connectStep, setConnectStep] = React.useState('')
   const [disconnectDialogOpen, setDisconnectDialogOpen] = React.useState(false)
   const [repoGuideOpen, setRepoGuideOpen] = React.useState(false)
-  const [precheckDialog, setPrecheckDialog] = React.useState<
-    | null
-    | { newFiles: SyncPrecheckFile[]; totalBytes: number }
-  >(null)
-  const [pendingUpdateUi, setPendingUpdateUi] = React.useState(true)
-  const [sharedConfigSaving, setSharedConfigSaving] = React.useState(false)
-  const [sharedConfigSaved, setSharedConfigSaved] = React.useState(false)
 
-  // LLM hosting (create form + connected editing share same state)
+  // LLM hosting (connected editing)
   const defaultLlmUrl = buildConfig.team.llm.baseUrl || ''
   const [hostLlm, setHostLlm] = React.useState(!!defaultLlmUrl)
   const [llmUrl, setLlmUrl] = React.useState(defaultLlmUrl)
@@ -167,19 +131,8 @@ export function TeamGitConfig() {
   const [llmSaving, setLlmSaving] = React.useState(false)
   const [llmLoaded, setLlmLoaded] = React.useState(false)
 
-  // Detect if current URL is HTTPS (needs token auth)
-  const isHttpsUrl = gitUrl.trim().startsWith('https://') || gitUrl.trim().startsWith('http://')
-  const effectiveSharedDirName = sharedDirName.trim() || 'teamclaw'
+  const effectiveSharedDirName = (teamConfig?.sharedDirName || 'teamclaw').trim() || 'teamclaw'
   const gitLocalPath = workspacePath ? `${workspacePath}/${effectiveSharedDirName}` : effectiveSharedDirName
-
-  const resolveEnvSecret = React.useCallback((fallback?: string | null) => {
-    const trimmed = normalizeEnvSecretInput(envSecretInput)
-    if (trimmed && !/^[0-9a-f]{64}$/.test(trimmed)) {
-      setErrorMessage(t('settings.team.envSecretInvalid', 'Team Env Secret must be 64 hex characters.'))
-      return null
-    }
-    return trimmed || fallback || generateEnvSecret()
-  }, [envSecretInput, t])
 
   // ─── Initialize: check git + load config ─────────────────────────────────
 
@@ -194,7 +147,6 @@ export function TeamGitConfig() {
       }
 
       // Wait for the workspace to be registered in backend state.
-      // Otherwise get_team_config races startup and throws "No workspace path set".
       if (!workspacePath || !workspaceReady) {
         return
       }
@@ -212,16 +164,10 @@ export function TeamGitConfig() {
           sharedDirName: config.sharedDirName || 'teamclaw',
         }
         setTeamConfig(normalizedConfig)
-        setGitUrl(normalizedConfig.gitUrl)
-        setGitBranch(normalizedConfig.gitBranch ?? '')
-        if (normalizedConfig.gitToken) setGitToken(normalizedConfig.gitToken)
-        setSharedDirName(normalizedConfig.sharedDirName)
-        setEnvSecretInput(normalizedConfig.envSecret ?? '')
-
         setState('connected')
 
         if (normalizedConfig.enabled) {
-          performSync(false, false, normalizedConfig)
+          void performSync(false, normalizedConfig)
         }
       } else {
         setState('unconfigured')
@@ -271,7 +217,7 @@ export function TeamGitConfig() {
     if ((state === 'connected' || state === 'syncing') && isTauri()) {
       tauriInvoke<{ nodeId: string }>('get_device_info').then(setDeviceInfo).catch(() => {})
     }
-  }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state])
 
   const handleSaveLlmConfig = async () => {
     setLlmSaving(true)
@@ -289,13 +235,8 @@ export function TeamGitConfig() {
         if (providerConfig) {
           await saveTeamProviderFile(workspacePath, providerConfig, llmModels[0]?.id)
         } else if (!hostLlm) {
-          // Owner / manager explicitly turned off the team's shared LLM.
-          // This is the ONLY path that should remove the shared provider
-          // file — saveTeamProviderFile no longer auto-deletes on null.
           await removeTeamProviderFile(workspacePath)
         }
-        // Otherwise: hostLlm=true but URL/models incomplete → leave the
-        // existing provider.json intact instead of silently deleting it.
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err))
@@ -304,110 +245,10 @@ export function TeamGitConfig() {
     }
   }
 
-  // ─── Configure current team's shared directory ───────────────────────
-
-  const handleCreate = async () => {
-    if (!gitUrl.trim()) return
-    if (!workspacePath) {
-      setErrorMessage(t('settings.team.noWorkspace', 'No workspace selected'))
-      return
-    }
-    setState('connecting')
-    setErrorMessage(null)
-    try {
-      setConnectStep(t('settings.team.savingConfig', 'Saving configuration...'))
-      const dirName = sharedDirName.trim() || 'teamclaw'
-      const savedGitUrl = gitUrl.trim()
-      const savedGitBranch = gitBranch.trim() || null
-      const savedGitToken = isHttpsUrl && gitToken.trim() ? gitToken.trim() : null
-      const envSecret = resolveEnvSecret(teamConfig?.envSecret)
-      if (!envSecret) {
-        setState('unconfigured')
-        return
-      }
-
-      setConnectStep(t('settings.team.initializingRepo', 'Initializing shared directory...'))
-      await tauriInvoke('team_shared_git_setup', {
-        config: {
-          workspacePath,
-          gitUrl: savedGitUrl,
-          gitBranch: savedGitBranch,
-          gitToken: savedGitToken,
-          sharedDirName: dirName,
-        },
-      })
-
-      const now = new Date().toISOString()
-      const newConfig: TeamConfig = {
-        gitUrl: savedGitUrl,
-        enabled: true,
-        lastSyncAt: now,
-        sharedDirName: dirName,
-        envSecret,
-        gitToken: savedGitToken,
-        gitBranch: savedGitBranch,
-      }
-      await tauriInvoke('save_team_config', { team: newConfig, ...workspaceArgs })
-      if (workspacePath) {
-        await saveTeamProviderFile(workspacePath, buildTeamProviderConfig(hostLlm, llmUrl, llmModels), hostLlm ? llmModels[0]?.id : undefined)
-      }
-
-      setTeamConfig(newConfig)
-      setEnvSecretInput(newConfig.envSecret ?? '')
-      setState('connected')
-
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : String(err))
-      setState('unconfigured')
-    } finally {
-      setConnectStep('')
-    }
-  }
-
-  const handleSaveSharedDirectoryConfig = async () => {
-    if (!teamConfig || !workspacePath) return
-    setErrorMessage(null)
-    setSharedConfigSaved(false)
-    setSharedConfigSaving(true)
-    try {
-      const savedGitUrl = gitUrl.trim()
-      const savedGitBranch = gitBranch.trim() || null
-      const savedGitToken = isHttpsUrl && gitToken.trim() ? gitToken.trim() : null
-      const savedSharedDirName = sharedDirName.trim() || 'teamclaw'
-      const envSecret = resolveEnvSecret(teamConfig.envSecret)
-      if (!envSecret) return
-      await tauriInvoke('team_shared_git_setup', {
-        config: {
-          workspacePath,
-          gitUrl: savedGitUrl,
-          gitBranch: savedGitBranch,
-          gitToken: savedGitToken,
-          sharedDirName: savedSharedDirName,
-        },
-      })
-      const updatedConfig: TeamConfig = {
-        ...teamConfig,
-        gitUrl: savedGitUrl,
-        gitBranch: savedGitBranch,
-        gitToken: savedGitToken,
-        sharedDirName: savedSharedDirName,
-        envSecret,
-      }
-      await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
-      setTeamConfig(updatedConfig)
-      setSharedDirName(updatedConfig.sharedDirName)
-      setEnvSecretInput(updatedConfig.envSecret ?? '')
-      setSharedConfigSaved(true)
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSharedConfigSaving(false)
-    }
-  }
-
   // ─── Sync flow ─────────────────────────────────────────────────────
+  // The daemon proxy always proceeds — no `needsConfirmation` size precheck.
 
-  const performSync = async (updateUi = true, force = false, configForSync: TeamConfig | null = teamConfig) => {
+  const performSync = async (updateUi = true, configForSync: TeamConfig | null = teamConfig) => {
     if (updateUi) {
       setState('syncing')
     }
@@ -425,20 +266,8 @@ export function TeamGitConfig() {
           gitToken: configForSync.gitToken || null,
           sharedDirName: configForSync.sharedDirName || 'teamclaw',
         },
-        force,
+        force: false,
       })
-
-      if (result.needsConfirmation) {
-        setPendingUpdateUi(updateUi)
-        setPrecheckDialog({
-          newFiles: result.newFiles ?? [],
-          totalBytes: result.totalBytes ?? 0,
-        })
-        if (updateUi) {
-          setState('connected')
-        }
-        return
-      }
 
       if (!result.success) {
         console.warn('Team sync skipped:', result.message)
@@ -452,10 +281,7 @@ export function TeamGitConfig() {
       window.dispatchEvent(new CustomEvent(TEAM_SYNCED_EVENT))
 
       const now = new Date().toISOString()
-      const updatedConfig: TeamConfig = {
-        ...configForSync,
-        lastSyncAt: now,
-      }
+      const updatedConfig: TeamConfig = { ...configForSync, lastSyncAt: now }
       await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
       setTeamConfig(updatedConfig)
       const { useTeamModeStore } = await import('@/stores/team-mode')
@@ -482,13 +308,7 @@ export function TeamGitConfig() {
     try {
       await tauriInvoke<TeamGitResult>('team_disconnect_repo', workspaceArgs)
       await tauriInvoke('clear_team_config', workspaceArgs)
-
       setTeamConfig(null)
-      setGitUrl('')
-      setGitToken('')
-      setGitBranch('')
-      setSharedDirName('teamclaw')
-      setEnvSecretInput('')
       setState('unconfigured')
     } catch (err) {
       console.error('Team disconnect error:', err)
@@ -500,7 +320,6 @@ export function TeamGitConfig() {
 
   const handleToggleEnabled = async (enabled: boolean) => {
     if (!teamConfig) return
-
     try {
       const updatedConfig: TeamConfig = { ...teamConfig, enabled }
       await tauriInvoke('save_team_config', { team: updatedConfig, ...workspaceArgs })
@@ -531,67 +350,6 @@ export function TeamGitConfig() {
       return isoString
     }
   }
-
-  const renderEnvSecretInput = (disabled = false) => (
-    <div>
-      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-        {t('settings.team.envSecret', 'Team Env Secret')}
-        <span className="text-muted-foreground/60 font-normal ml-1">({t('settings.team.optional', 'optional')})</span>
-      </label>
-      <div className="relative">
-        <Input
-          type={showEnvSecret ? 'text' : 'password'}
-          value={envSecretInput}
-          onChange={(e) => setEnvSecretInput(e.target.value)}
-          placeholder="64 hex characters"
-          className="bg-background/50 pr-28 font-mono text-xs"
-          disabled={disabled}
-        />
-        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            aria-label={t('settings.team.generateEnvSecret', 'Generate Team Env Secret')}
-            title={t('settings.team.generateEnvSecret', 'Generate Team Env Secret')}
-            disabled={disabled}
-            onClick={() => setEnvSecretInput(generateEnvSecret())}
-          >
-            <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            aria-label={t('common.copy', 'Copy')}
-            title={t('common.copy', 'Copy')}
-            disabled={disabled || !envSecretInput.trim()}
-            onClick={() => {
-              void copyToClipboard(envSecretInput.trim())
-            }}
-          >
-            <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            aria-label={showEnvSecret ? t('settings.team.hideEnvSecret', 'Hide Team Env Secret') : t('settings.team.showEnvSecret', 'Show Team Env Secret')}
-            title={showEnvSecret ? t('settings.team.hideEnvSecret', 'Hide Team Env Secret') : t('settings.team.showEnvSecret', 'Show Team Env Secret')}
-            onClick={() => setShowEnvSecret(!showEnvSecret)}
-          >
-            {showEnvSecret ? <EyeOff className="h-3.5 w-3.5 text-muted-foreground" /> : <Eye className="h-3.5 w-3.5 text-muted-foreground" />}
-          </Button>
-        </div>
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground/60">
-        {t('settings.team.envSecretHint', 'Use the same 64-character secret on every workspace that needs to read encrypted _secrets. Leave blank to generate one for a new shared repository.')}
-      </p>
-    </div>
-  )
 
   return (
     <>
@@ -649,111 +407,31 @@ export function TeamGitConfig() {
         </SettingCard>
       )}
 
-      {/* Unconfigured State - Configure shared directory */}
-      {(state === 'unconfigured' || state === 'connecting') && (
+      {/* Unconfigured — config now comes from FC at share-mode enable time */}
+      {state === 'unconfigured' && (
         <SettingCard>
-          <div className="mb-4 flex items-center gap-2">
-            <Users className="h-4 w-4 text-muted-foreground" />
-            <h4 className="text-[13px] font-semibold text-foreground/90">{t('settings.team.createTeam', 'Configure Team Shared Directory')}</h4>
-          </div>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.gitUrl', 'Git Repository URL')}</label>
-                <Input
-                  value={gitUrl}
-                  onChange={(e) => setGitUrl(e.target.value)}
-                  placeholder="https://github.com/team/shared-workspace.git"
-                  className="bg-background/50 font-mono text-xs"
-                  disabled={state === 'connecting'}
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                  {t('settings.team.gitBranch', 'Branch')}
-                  <span className="text-muted-foreground/60 font-normal ml-1">({t('settings.team.optional', 'optional')})</span>
-                </label>
-                <Input
-                  value={gitBranch}
-                  onChange={(e) => setGitBranch(e.target.value)}
-                  placeholder="main"
-                  className="bg-background/50"
-                  disabled={state === 'connecting'}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                {t('settings.team.sharedDirName', 'Shared Directory')}
-              </label>
-              <Input
-                value={sharedDirName}
-                onChange={(e) => setSharedDirName(e.target.value)}
-                placeholder="teamclaw"
-                className="bg-background/50 font-mono text-xs"
-                disabled={state === 'connecting'}
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                {t('settings.team.personalToken', 'Git Token')}
-                <span className="text-muted-foreground/60 font-normal ml-1">({t('settings.team.optional', 'optional')})</span>
-              </label>
-              <div className="relative">
-                <Input
-                  type={showToken ? 'text' : 'password'}
-                  value={gitToken}
-                  onChange={(e) => setGitToken(e.target.value)}
-                  placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
-                  className="bg-background/50 pr-10"
-                  disabled={state === 'connecting'}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
-                  onClick={() => setShowToken(!showToken)}
-                >
-                  {showToken ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
-                </Button>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground/60">
-                {t('settings.team.tokenHint', 'Required for private HTTPS repositories. SSH URLs use your system keys automatically. The token is stored locally and never shared.')}
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="space-y-1.5">
+              <h4 className="text-[13.5px] font-semibold">
+                {t('settings.team.gitNotConfiguredTitle', 'Team Git sync not configured')}
+              </h4>
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                {t(
+                  'settings.team.gitNotConfiguredDesc',
+                  'The team repository is provisioned when team-share is enabled. Once enabled, sync status and controls appear here.',
+                )}
               </p>
+              <Button variant="outline" size="sm" onClick={initialize} className="mt-1 gap-2">
+                <RefreshCw className="h-3 w-3" />
+                {t('common.retry', 'Retry')}
+              </Button>
             </div>
-            {renderEnvSecretInput(state === 'connecting')}
-            <HostLlmConfig
-              enabled={hostLlm}
-              onEnabledChange={setHostLlm}
-              baseUrl={llmUrl}
-              onBaseUrlChange={setLlmUrl}
-              models={llmModels}
-              onModelsChange={setLlmModels}
-              disabled={state === 'connecting'}
-            />
-            {state === 'connecting' && connectStep && (
-              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {connectStep}
-              </div>
-            )}
-            <Button
-              onClick={handleCreate}
-              disabled={state === 'connecting' || !gitUrl.trim()}
-              className="w-full"
-            >
-              <Users className="mr-2 h-4 w-4" />
-              {state === 'connecting' ? t('settings.team.creating', 'Configuring...') : t('settings.team.createTeam', 'Configure Team Shared Directory')}
-            </Button>
-            <p className="text-xs text-muted-foreground/70 text-center">
-              {t('settings.team.joinHint', 'Use the shared Git repository configured by your team admin.')}
-            </p>
           </div>
         </SettingCard>
       )}
 
-      {/* Connected State */}
+      {/* Connected State — status + sync now + disconnect */}
       {(state === 'connected' || state === 'syncing') && teamConfig && (
         <>
           {/* Status Card */}
@@ -792,17 +470,19 @@ export function TeamGitConfig() {
                         {teamConfig.enabled ? t('settings.llm.connected', 'Connected') : t('settings.team.disabled', 'Disabled')}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-xs text-muted-foreground font-mono truncate max-w-[300px]">
-                        {teamConfig.gitUrl}
-                      </p>
-                      {teamConfig.gitToken && (
-                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                          <KeyRound className="h-2.5 w-2.5" />
-                          {t('settings.team.token', 'Token')}
-                        </span>
-                      )}
-                    </div>
+                    {teamConfig.gitUrl && (
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-muted-foreground font-mono truncate max-w-[300px]">
+                          {teamConfig.gitUrl}
+                        </p>
+                        {teamConfig.gitToken && (
+                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                            <KeyRound className="h-2.5 w-2.5" />
+                            {t('settings.team.token', 'Token')}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <ToggleSwitch
@@ -839,75 +519,6 @@ export function TeamGitConfig() {
                   </Button>
                 </div>
               </div>
-            </div>
-          </SettingCard>
-
-          <SettingCard>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t('settings.team.gitUrl', 'Git Repository URL')}</label>
-                  <Input
-                    value={gitUrl}
-                    onChange={(e) => setGitUrl(e.target.value)}
-                    className="bg-background/50 font-mono text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    {t('settings.team.gitBranch', 'Branch')}
-                  </label>
-                  <Input
-                    value={gitBranch}
-                    onChange={(e) => setGitBranch(e.target.value)}
-                    placeholder="main"
-                    className="bg-background/50"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    {t('settings.team.sharedDirName', 'Shared Directory')}
-                  </label>
-                  <Input
-                    value={sharedDirName}
-                    onChange={(e) => setSharedDirName(e.target.value)}
-                    placeholder="teamclaw"
-                    className="bg-background/50 font-mono text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    {t('settings.team.personalToken', 'Git Token')}
-                  </label>
-                  <Input
-                    type={showToken ? 'text' : 'password'}
-                    value={gitToken}
-                    onChange={(e) => setGitToken(e.target.value)}
-                    className="bg-background/50"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground/60">
-                    {t('settings.team.tokenHint', 'Required for private HTTPS repositories. SSH URLs use your system keys automatically. The token is stored locally and never shared.')}
-                  </p>
-                </div>
-              </div>
-              {renderEnvSecretInput(state === 'syncing')}
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={handleSaveSharedDirectoryConfig}
-                disabled={!gitUrl.trim() || state === 'syncing' || sharedConfigSaving}
-              >
-                {sharedConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                {sharedConfigSaving ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
-              </Button>
-              {sharedConfigSaved && (
-                <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {t('common.saved', 'Saved')}
-                </span>
-              )}
             </div>
           </SettingCard>
 
@@ -1052,71 +663,6 @@ export function TeamGitConfig() {
             <Button variant="destructive" onClick={handleDisconnect} className="gap-2">
               <Unlink className="h-4 w-4" />
               {t('settings.team.disconnect', 'Disconnect')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Pre-sync warning for too many / too large new files */}
-      <Dialog
-        open={precheckDialog !== null}
-        onOpenChange={(open) => {
-          if (!open) setPrecheckDialog(null)
-        }}
-      >
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle>
-              {t('settings.team.syncPrecheckTitle', '检测到较多新文件')}
-            </DialogTitle>
-            <DialogDescription>
-              {precheckDialog &&
-                t('settings.team.syncPrecheckDesc', {
-                  defaultValue: '即将同步 {{count}} 个新文件，共 {{size}}。请确认是否继续。',
-                  count: precheckDialog.newFiles.length,
-                  size: formatBytes(precheckDialog.totalBytes),
-                })}
-            </DialogDescription>
-          </DialogHeader>
-          {precheckDialog && (
-            <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-muted/30 px-3 py-2">
-              <ul className="space-y-1 text-[13px] font-mono">
-                {[...precheckDialog.newFiles]
-                  .sort((a, b) => b.sizeBytes - a.sizeBytes)
-                  .slice(0, 10)
-                  .map((file) => (
-                    <li key={file.path} className="flex items-center justify-between gap-3">
-                      <span className="truncate" title={file.path}>
-                        {file.path}
-                      </span>
-                      <span className="shrink-0 text-muted-foreground">
-                        {formatBytes(file.sizeBytes)}
-                      </span>
-                    </li>
-                  ))}
-                {precheckDialog.newFiles.length > 10 && (
-                  <li className="text-xs text-muted-foreground pt-1">
-                    {t('settings.team.syncPrecheckMore', {
-                      defaultValue: '… 及另外 {{count}} 个文件',
-                      count: precheckDialog.newFiles.length - 10,
-                    })}
-                  </li>
-                )}
-              </ul>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPrecheckDialog(null)}>
-              {t('common.cancel', '取消')}
-            </Button>
-            <Button
-              onClick={() => {
-                const updateUi = pendingUpdateUi
-                setPrecheckDialog(null)
-                void performSync(updateUi, true)
-              }}
-            >
-              {t('settings.team.syncAnyway', '仍然同步')}
             </Button>
           </DialogFooter>
         </DialogContent>

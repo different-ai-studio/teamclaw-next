@@ -188,7 +188,9 @@ async fn handle_team_sync_all(app: &AppHandle, _body: &[u8]) -> Result<String, S
         .ok()
         .and_then(|cw| cw.clone())
         .ok_or_else(|| "No workspace path set. Please select a workspace first.".to_string())?;
-    let result = super::team_sync_all::sync_all(app, &workspace).await;
+    // Plan B Task 8: the desktop sync engine is gone — the daemon owns team
+    // sync now. Forward to the daemon's team-sync endpoint for the workspace.
+    let result = super::team_sync_proxy::daemon_team_sync(&workspace).await?;
     serde_json::to_string(&result).map_err(|e| format!("Serialization error: {e}"))
 }
 
