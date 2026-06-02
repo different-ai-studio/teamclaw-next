@@ -655,3 +655,47 @@ export async function reloadDaemonRuntime(
   )
   return result.ok ? result.data.outcome : null
 }
+
+// ─── Team share ───────────────────────────────────────────────────────────────
+
+export interface DaemonTeamLinkResult {
+  team_id: string
+  /** `symlink` | `junction` | `fallback` | `legacy_retained` */
+  status: 'symlink' | 'junction' | 'fallback' | 'legacy_retained'
+  /** `~/.amuxd/teams/<team_id>/teamclaw-team` */
+  global_dir: string
+}
+
+/**
+ * Ask the local daemon to materialize the team's global dir + this workspace's
+ * `teamclaw-team` symlink *now* — called right after enabling/joining
+ * team-share so the synced directory exists immediately instead of waiting for
+ * the daemon's next start or the first runtime (the AddWorkspace path rides
+ * MQTT, which may not be connected right after onboarding).
+ *
+ * Best-effort: returns `null` when the daemon HTTP is unavailable or the call
+ * fails (e.g. the daemon isn't onboarded to a team). The link is still created
+ * lazily later, so a failure here is non-fatal to enabling team-share.
+ */
+export async function linkDaemonTeamWorkspace(
+  workspacePath: string,
+): Promise<DaemonTeamLinkResult | null> {
+  const path = workspacePath.trim()
+  if (!path) return null
+  try {
+    const result = await daemonFetch<DaemonTeamLinkResult>('/v1/team/link', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    })
+    if (!result.ok) {
+      console.warn('[daemon-local-client] team link failed:', result.error)
+      return null
+    }
+    return result.data
+  } catch (err) {
+    // Network/IPC errors (daemon not running, no HTTP) are expected and
+    // non-fatal — the link is created lazily on the daemon's next start.
+    console.warn('[daemon-local-client] team link unavailable:', err)
+    return null
+  }
+}

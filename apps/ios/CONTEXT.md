@@ -12,7 +12,7 @@ Actor/Session/Workspace 等跨端实体引用 [proto CONTEXT](../../proto/CONTEX
 当用户点击发送，先持久化为 SwiftData `@Model OutboxMessage`，再由 `OutboxSender` 后台 loop 推送至 MQTT + Supabase。
 状态机 `OutboxState`：`pending → inFlight → delivered`，失败回 `pending` 带退避；超过 `maxAttempts` 落 `failed` 等用户手动重试。
 应用被杀掉后重启 sender 可断点续传。
-是 iOS 端 chat 可靠投递的核心模式 —— desktop / Android 应 port 此架构（见 `apps/android/PARITY.md`）。
+是 iOS 端 chat 可靠投递的核心模式 —— desktop / Expo 应 port 此架构。
 
 ### dedup key
 [OutboxMessage](#outboxmessage) 在 publish 时携带的**幂等键**，由 iOS 生成、daemon 使用。

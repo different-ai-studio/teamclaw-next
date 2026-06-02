@@ -56,4 +56,25 @@ public enum ActorCacheSynchronizer {
         }
         try? modelContext.save()
     }
+
+    /// Drop every cached actor that does NOT belong to `teamID`.
+    ///
+    /// The app shows one active team at a time, but the SwiftData store is a
+    /// single shared cache: actors from a previously-viewed team linger after a
+    /// team switch. The Actors/Members views query `CachedActor` without a team
+    /// predicate, so those leftovers show up as phantom members of the current
+    /// team. Purging foreign-team rows on every reload keeps the cache scoped to
+    /// the active team and makes all those unscoped queries correct.
+    public static func deleteForeignTeams(currentTeamID teamID: String,
+                                          modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<CachedActor>(
+            predicate: #Predicate { $0.teamId != teamID }
+        )
+        guard let foreign = try? modelContext.fetch(descriptor) else { return }
+        guard !foreign.isEmpty else { return }
+        for row in foreign {
+            modelContext.delete(row)
+        }
+        try? modelContext.save()
+    }
 }

@@ -25,16 +25,17 @@ import { RoleSkillToolCard, SkillToolCard, TaskToolCard } from "./tool-calls/Tas
 import {
   getStatusConfig,
   getToolIconByKind,
-  isQuestionTool,
-  isWriteTool,
-  isEditTool,
-  isReadTool,
-  isTaskTool,
-  isSkillTool,
-  isRoleSkillTool,
-  isRoleLoadTool,
-  isCommandTool,
-  isTodoTool,
+  matchesQuestionTool,
+  matchesWriteTool,
+  matchesEditTool,
+  matchesReadTool,
+  matchesTaskTool,
+  matchesSkillTool,
+  matchesRoleSkillTool,
+  matchesRoleLoadTool,
+  matchesCommandTool,
+  matchesTodoTool,
+  displayToolName,
   formatToolName,
 } from "./tool-calls/tool-call-utils";
 
@@ -53,7 +54,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
     t(key, { defaultValue: fallback, ...options }),
   )[toolCall.status];
   const StatusIcon = config.icon;
-  const isCommand = isCommandTool(toolCall.name);
+  const isCommand = matchesCommandTool(toolCall);
   const commandText = getCommandText(toolCall.arguments);
   const commandOutput = getToolCallOutputText(toolCall.result, toolCall.arguments).trim();
   const commandDescription = (() => {
@@ -108,12 +109,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
   };
 
   const summary = getSummary();
-  const compactToolName = toolCall.name.toLowerCase();
+  const routeName = displayToolName(toolCall);
+  const compactToolName = routeName.toLowerCase();
+  const isTodo = matchesTodoTool(toolCall);
   const isCompactSearchTool =
     compactToolName.includes("grep") ||
     compactToolName === "glob" ||
     compactToolName === "find";
-  const isTodo = isTodoTool(toolCall.name);
 
   const renderExpandableHeaderSlot = (icon: React.ReactNode, testId?: string) => (
     <span className="relative h-[22px] w-[22px] shrink-0" aria-hidden="true">
@@ -140,7 +142,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
     if (compactToolName === "glob") return t("chat.toolCall.search.glob", "Glob");
     if (compactToolName === "find") return t("chat.toolCall.search.find", "Find");
     if (isTodo) return t("chat.toolCall.todo.title", "Todo");
-    return formatToolName((key, fallback, options) => t(key, { defaultValue: fallback, ...options }), toolCall.name);
+    return formatToolName((key, fallback, options) => t(key, { defaultValue: fallback, ...options }), routeName);
   };
 
   const parseTodoSummary = () => {
@@ -223,39 +225,39 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
   };
 
   // If this is a Write tool, render WriteToolCard
-  if (isWriteTool(toolCall.name)) {
+  if (matchesWriteTool(toolCall)) {
     return <WriteToolCard toolCall={toolCall} />;
   }
 
   // If this is an Edit tool, render EditToolCard
-  if (isEditTool(toolCall.name)) {
+  if (matchesEditTool(toolCall)) {
     return <EditToolCard toolCall={toolCall} />;
   }
 
   // If this is a Read tool, render minimal ReadToolCard
-  if (isReadTool(toolCall.name)) {
+  if (matchesReadTool(toolCall)) {
     return <ReadToolCard toolCall={toolCall} />;
   }
 
   // If this is a Skill tool, render SkillToolCard
-  if (isSkillTool(toolCall.name)) {
+  if (matchesSkillTool(toolCall)) {
     return <SkillToolCard toolCall={toolCall} />;
   }
 
-  if (isRoleSkillTool(toolCall.name)) {
+  if (matchesRoleSkillTool(toolCall)) {
     return <RoleSkillToolCard toolCall={toolCall} />;
   }
 
-  if (isRoleLoadTool(toolCall.name)) {
+  if (matchesRoleLoadTool(toolCall)) {
     return <RoleLoadToolCard toolCall={toolCall} />;
   }
 
   // If this is a Task tool (subagent), render TaskToolCard
-  if (isTaskTool(toolCall.name)) {
+  if (matchesTaskTool(toolCall)) {
     return <TaskToolCard toolCall={toolCall} />;
   }
 
-  if (isQuestionTool(toolCall.name)) {
+  if (matchesQuestionTool(toolCall)) {
     const questionCount = getQuestionCount();
     const isQuestionLoading = questionCount === 0 && (toolCall.status === "calling" || toolCall.status === "waiting");
     const questionCountText = t(
@@ -393,7 +395,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
                 "tool-fallback-icon",
               )}
               <span className="min-w-0 flex-1 text-[13px] font-medium text-[#1f2933] dark:text-foreground">
-                {formatToolName((key, fallback, options) => t(key, { defaultValue: fallback, ...options }), toolCall.name)}
+                {formatToolName((key, fallback, options) => t(key, { defaultValue: fallback, ...options }), routeName)}
               </span>
               {!expanded && fallbackSummary && (
                 <span className="max-w-[18rem] truncate text-[11px] text-[#64748b] dark:text-muted-foreground">
@@ -491,7 +493,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
               {onOpenDetail && (
                 <button
                   onClick={() =>
-                    onOpenDetail(getDetailType(toolCall.name), toolCall)
+                    onOpenDetail(getDetailType(routeName), toolCall)
                   }
                   className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
                 >

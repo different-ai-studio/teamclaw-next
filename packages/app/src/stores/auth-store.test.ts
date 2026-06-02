@@ -26,6 +26,15 @@ const currentTeamMock = {
   reloadAndSwitchTo: vi.fn(),
 };
 
+function storeSessionLike(userId: string) {
+  return {
+    user: { id: userId, email: null },
+    accessToken: `access-${userId}`,
+    refreshToken: `refresh-${userId}`,
+    expiresAt: 99999,
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -232,6 +241,54 @@ describe("auth-store", () => {
     expect(result?.teamId).toBe("team-4");
     expect(useAuthStore.getState().loading).toBe(false);
     expect(useAuthStore.getState().authFlow).toBe("idle");
+  });
+
+  it("sendUpgradeEmailOtp does not flip the global loading flag (AuthGate would tear down the app)", async () => {
+    // Authenticated, app mounted: session present, global loading already false.
+    useAuthStore.setState({ session: storeSessionLike("anon-up"), loading: false, upgradeEmail: null });
+    const pending = deferred<void>();
+    authMock.sendUpgradeEmailOtp.mockReturnValueOnce(pending.promise);
+
+    const resultPromise = useAuthStore.getState().sendUpgradeEmailOtp("taken@example.com");
+
+    // While in-flight the global `loading` must stay false so AuthGate keeps the
+    // app (and the upgrade dialog) mounted; the dedicated flag tracks progress.
+    expect(useAuthStore.getState().loading).toBe(false);
+    expect(useAuthStore.getState().upgradeLoading).toBe(true);
+
+    pending.resolve();
+    await resultPromise;
+    expect(useAuthStore.getState().upgradeLoading).toBe(false);
+  });
+
+  it("sendUpgradeEmailOtp surfaces the error without disturbing global loading on failure", async () => {
+    useAuthStore.setState({ session: storeSessionLike("anon-up"), loading: false, upgradeEmail: null });
+    authMock.sendUpgradeEmailOtp.mockRejectedValueOnce(
+      new Error("A user with this email address has already been registered"),
+    );
+
+    const ok = await useAuthStore.getState().sendUpgradeEmailOtp("taken@example.com");
+
+    expect(ok).toBe(false);
+    expect(useAuthStore.getState().loading).toBe(false);
+    expect(useAuthStore.getState().upgradeLoading).toBe(false);
+    expect(useAuthStore.getState().errorMessage).toMatch(/already been registered/);
+    expect(useAuthStore.getState().upgradeEmail).toBeNull();
+  });
+
+  it("verifyUpgradeEmailOtp does not flip the global loading flag while verifying", async () => {
+    useAuthStore.setState({ session: storeSessionLike("anon-up"), loading: false, upgradeEmail: "taken@example.com" });
+    const pending = deferred<{ user: { id: string } }>();
+    authMock.verifyUpgradeEmailOtp.mockReturnValueOnce(pending.promise);
+
+    const resultPromise = useAuthStore.getState().verifyUpgradeEmailOtp("123456");
+
+    expect(useAuthStore.getState().loading).toBe(false);
+    expect(useAuthStore.getState().upgradeLoading).toBe(true);
+
+    pending.resolve({ user: { id: "anon-up" } });
+    await resultPromise;
+    expect(useAuthStore.getState().upgradeLoading).toBe(false);
   });
 
   it("claimInviteAfterAnonymousSignIn signs out when the invite claim fails", async () => {

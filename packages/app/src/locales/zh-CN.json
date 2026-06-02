@@ -115,10 +115,10 @@
       "supabaseUrl": "Supabase URL",
       "supabaseAnonKey": "Anon key",
       "mqttHost": "MQTT host",
-            "mqttPort": "MQTT port",
-            "mqttUseTls": "使用 TLS (mqtts://)",
-            "mqttUseTlsHint": "当消息服务器要求 mqtts 时开启。",
-            "savingServer": "保存中…",
+      "mqttPort": "MQTT port",
+      "mqttUseTls": "使用 TLS (mqtts://)",
+      "mqttUseTlsHint": "当消息服务器要求 mqtts 时开启。",
+      "savingServer": "保存中…",
       "saveServer": "保存并重启"
     }
   },
@@ -138,7 +138,9 @@
     "actors": "成员",
     "ideas": "想法",
     "hideTabs": "隐藏文件",
-    "restoreTabs": "显示文件"
+    "restoreTabs": "显示文件",
+    "toggleSidebar": "切换侧边栏",
+    "collapseSidebar": "收起侧边栏"
   },
   "panel": {
     "tasks": {
@@ -425,6 +427,37 @@
       "skip": "跳过",
       "send": "发送",
       "createError": "创建会话失败"
+    },
+    "interruptFailed": "无法打断 agent 回复",
+    "interruptAgent": "打断 {{name}}",
+    "acpDebug": {
+      "title": "ACP 流调试",
+      "lineCount": "{{count}} 条",
+      "lineCount_plural": "{{count}} 条",
+      "scopeCurrentSession": "当前会话",
+      "scopeAll": "全部",
+      "copy": "复制",
+      "clear": "清空",
+      "waiting": "等待 {{token}} …"
+    },
+    "toast": {
+      "emptyMessageTitle": "请输入消息内容",
+      "emptyMessageWithAgent": "已选择 Agent 时需要输入文字或附件才会发送。",
+      "mentionRouteFailedTitle": "已 @Agent 但无法路由消息",
+      "mentionRouteFailedBody": "消息未包含可解析的 Agent @-mention，daemon 不会回复。请确认 Agent 已加入此会话。",
+      "sendFirstToCreateSession": "请先发送一条消息创建会话",
+      "mentionNeedsOpenSession": "@ Agent 需要在已打开的会话中使用。"
+    },
+    "imageViewer": {
+      "saveImage": "保存图片",
+      "clickToEnlarge": "点击查看大图",
+      "imagePreview": "图片预览",
+      "downloadImage": "下载图片",
+      "enlargeDiagram": "放大流程图"
+    },
+    "feedback": {
+      "goodResponse": "回答不错",
+      "poorResponse": "回答较差"
     }
   },
   "onboarding": {
@@ -433,6 +466,16 @@
       "back": "上一步",
       "next": "下一步",
       "done": "完成"
+    },
+    "joinTeam": {
+      "checkingStatus": "正在检查团队共享状态…",
+      "initializing": "正在初始化团队工作区…",
+      "joined": "已加入团队",
+      "shareNotOpened": "团队共享未开通，待 owner 开通后即可同步。",
+      "failed": "加入流程失败：{{error}}",
+      "joinedWithMode": "已加入团队（模式：{{mode}}）",
+      "unknownMode": "未知",
+      "enterSecret": "请输入团队密钥以解密共享内容。密钥由邀请人提供。"
     }
   },
   "workspace": {
@@ -479,6 +522,15 @@
       "personalDesc": "独立工作，无需同步",
       "team": "团队共享",
       "teamDesc": "使用团队共享目录，同步共享资源"
+    },
+    "prompt": {
+      "needShareInitTitle": "需要在团队设置中完成共享目录初始化",
+      "needShareInitDesc": "当前工作区还没有 teamclaw-team/，请进入设置 → 团队完成设置。",
+      "teamMismatchConfirm": "该工作区已绑定团队「{{teamName}}」，与当前登录的团队「{{currentTeamName}}」不一致。\n\n继续将删除该工作区中的 teamclaw-team/ 目录并以当前团队重新初始化（其他文件保留不动）。\n\n是否继续？",
+      "teamMismatchConfirmAgain": "再次确认：将删除工作区中的 teamclaw-team/ 目录（仅此一个目录）。该操作不可撤销。\n\n确认删除？",
+      "deleteTeamRepoFailed": "删除 teamclaw-team 失败",
+      "oldTeamRepoClearedTitle": "已清除旧团队目录",
+      "oldTeamRepoClearedDesc": "请进入设置 → 团队完成当前团队的共享目录初始化。"
     }
   },
   "fileExplorer": {
@@ -638,7 +690,8 @@
     "error": "错误",
     "quotaExceeded": "额度已用尽",
     "rateLimited": "请求频率受限",
-    "serverError": "服务器错误"
+    "serverError": "服务器错误",
+    "loginRequired": "请先登录后再操作。"
   },
   "updater": {
     "available": "有可用更新",
@@ -827,30 +880,30 @@
       "chatSuggestions": "聊天建议",
       "chatSuggestionsDesc": "在「开始新对话」页面显示的自定义建议",
       "addSuggestion": "添加",
-    "suggestionPlaceholder": "输入建议文本...",
-    "noCustomSuggestions": "暂无自定义建议",
-    "builtInSuggestions": "内置建议",
-    "mqttBroker": "MQTT Broker",
-    "mqttUsername": "MQTT 用户名",
-    "mqttPassword": "MQTT 密码",
-    "mqttStatus": "MQTT 状态",
-    "mqttStatusUnknown": "未知",
-    "mqttStatusConnected": "已连接",
-    "mqttStatusDisconnected": "未连接",
-    "mqttReconnect": "重连",
-    "mqttReconnecting": "正在重连…",
-    "save": "保存",
-    "saving": "保存中…",
-    "server": "Server",
-    "serverAddress": "服务器地址",
-    "serverAddressHint": "例如: http://localhost:8787",
-    "serverSaved": "Server 已保存",
-    "serverSynced": "Server 已同步",
-    "serverSyncedEmpty": "尚未同步",
-    "serverSyncedHint": "如可用，将从 daemon 读取。",
-    "notifAll": "全部",
-    "notifImportant": "仅重要通知",
-    "notifMute": "静音"
+      "suggestionPlaceholder": "输入建议文本...",
+      "noCustomSuggestions": "暂无自定义建议",
+      "builtInSuggestions": "内置建议",
+      "mqttBroker": "MQTT Broker",
+      "mqttUsername": "MQTT 用户名",
+      "mqttPassword": "MQTT 密码",
+      "mqttStatus": "MQTT 状态",
+      "mqttStatusUnknown": "未知",
+      "mqttStatusConnected": "已连接",
+      "mqttStatusDisconnected": "未连接",
+      "mqttReconnect": "重连",
+      "mqttReconnecting": "正在重连…",
+      "save": "保存",
+      "saving": "保存中…",
+      "server": "Server",
+      "serverAddress": "服务器地址",
+      "serverAddressHint": "例如: http://localhost:8787",
+      "serverSaved": "Server 已保存",
+      "serverSynced": "Server 已同步",
+      "serverSyncedEmpty": "尚未同步",
+      "serverSyncedHint": "如可用，将从 daemon 读取。",
+      "notifAll": "全部",
+      "notifImportant": "仅重要通知",
+      "notifMute": "静音"
     },
     "server": {
       "title": "服务器",
@@ -2415,7 +2468,8 @@
       "detachBeforeDeleteTitle": "请先解绑角色关联",
       "detachBeforeDeleteDetailed": "该技能仍关联到一个或多个角色，请先从这些角色中解绑后再删除。",
       "restartInlineHint": "重启 OpenCode 以应用待生效的技能变更。",
-      "detachBeforeDelete": "该技能已被一个或多个角色引用，请先从这些角色中解绑后再删除。"
+      "detachBeforeDelete": "该技能已被一个或多个角色引用，请先从这些角色中解绑后再删除。",
+      "loadingEditor": "正在加载编辑器…"
     },
     "cron": {
       "advancedOptions": "高级选项",
@@ -2514,7 +2568,8 @@
       "modelSelected": "使用：{{model}}",
       "noModels": "未配置模型。请先在 LLM 设置中配置提供商。",
       "lastHeartbeat": "最后心跳",
-      "useDefaultModel": "使用默认模型"
+      "useDefaultModel": "使用默认模型",
+      "sessionNotFound": "对话不存在或无访问权限 (sessionId: {{id}}...)"
     },
     "deps": {
       "copied": "已复制！",
@@ -2586,6 +2641,58 @@
       "saveAndApply": "保存并应用",
       "saving": "应用中...",
       "title": "权限管理"
+    },
+    "teamShare": {
+      "enableTitle": "开通团队共享",
+      "enableDescription": "选择团队共享模式。开通后不可切换，请谨慎选择。",
+      "shareModeLegend": "共享模式",
+      "modeOssDesc": "使用阿里云 OSS 作为共享后端（默认）",
+      "modeManagedGitLabel": "托管 Git",
+      "modeManagedGitDesc": "使用 TeamClaw 托管的 Git 仓库",
+      "modeCustomGitLabel": "自建 Git",
+      "modeCustomGitDesc": "使用你自己的 Git 仓库（GitHub / GitLab / 自建）",
+      "remoteUrlLabel": "仓库 URL",
+      "authKindLabel": "认证方式",
+      "sshPrivateKey": "SSH 私钥",
+      "sshKeyPlaceholder": "粘贴完整的 OpenSSH 私钥（-----BEGIN ... -----END）",
+      "tokenPlaceholder": "粘贴具有 repo 权限的 Personal Access Token",
+      "branchLabel": "分支（可选，默认 main）",
+      "lockWarning": "⚠️ 开通后不可切换。",
+      "confirmEnable": "确认开通",
+      "title": "团队共享",
+      "lockSubtitle": "团队共享模式一经开通，不可切换。",
+      "signInRequired": "请先登录后再管理团队共享。",
+      "notEnabled": "团队共享未开通",
+      "enable": "开通",
+      "enabledPrefix": "已开通:",
+      "repositoryPrefix": "仓库：",
+      "globalSyncDirPrefix": "全局同步目录：",
+      "workspaceLinkPrefix": "本工作区链接：",
+      "linkStatus": {
+        "linked": "已软链",
+        "pendingMigration": "本地目录（待迁移）",
+        "unlinked": "未链接"
+      },
+      "copyPath": "复制路径",
+      "syncPaths": "同步路径",
+      "realSyncDir": "真实同步目录",
+      "dirExists": "存在",
+      "dirNotCreated": "尚未创建",
+      "workspaceSymlinks": "工作区软链（{{count}}）",
+      "current": "当前"
+    },
+    "teamLlm": {
+      "title": "团队 LiteLLM",
+      "description": "为团队开通共享 LiteLLM 网关，统一管理 AI 模型与额度。",
+      "enabledLabel": "已开通:",
+      "notEnabled": "团队 LiteLLM 未开通",
+      "enableButton": "开通 LiteLLM"
+    },
+    "teamSecret": {
+      "invalidError": "团队密钥必须是 64 位十六进制字符。",
+      "label": "团队密钥（64 位十六进制）",
+      "lengthHint": "需要恰好 64 位十六进制字符。",
+      "savedOk": "已保存。"
     }
   },
   "skillssh": {
@@ -2847,7 +2954,13 @@
     "notFound": "组件未找到"
   },
   "team": {
-    "viewerReadOnly": "只读模式 - 你没有编辑权限"
+    "viewerReadOnly": "只读模式 - 你没有编辑权限",
+    "createDialog": {
+      "title": "创建团队",
+      "description": "创建后请在「设置 → 团队共享」与「LLM 配置」中分别开通共享与 LiteLLM。",
+      "nameLabel": "团队名称",
+      "namePlaceholder": "例如：设计组"
+    }
   },
   "actors": {
     "allTitle": "所有成员",
@@ -3022,5 +3135,49 @@
     "exited": "进程已退出 (code {{code}}) — 按 Enter 重启",
     "spawnFailed": "启动 shell 失败:{{message}}",
     "cwdFallback": "workspace 路径不可用,已回退到 home"
+  },
+  "skills": {
+    "builtinLabel": "内置",
+    "builtinPath": ".teamclaw/skills/（{{app}} 内置）"
+  },
+  "daemon": {
+    "agentRuntime": {
+      "notStartedTitle": "Agent runtime 未启动",
+      "notStartedDesc": "Agent {{shortId}} 的 daemon 未响应 runtimeStart（可能未在线或未加入团队）。",
+      "rpcNotReadyTitle": "MQTT/RPC 未就绪",
+      "rpcNotReadyDesc": "无法向 daemon 发送 runtimeStart。请检查 MQTT 连接与团队登录状态。",
+      "startFailedTitle": "启动 Agent runtime 失败"
+    },
+    "workspace": {
+      "labeledMessage": "{{agentLabel}}：{{message}}",
+      "loadInfoFailedTitle": "无法加载 workspace 信息",
+      "missingPathTitle": "Workspace 缺少路径",
+      "missingPathDesc": "{{agentLabel}}：云端 workspace 未配置本地目录路径。",
+      "listFailedTitle": "无法读取 Agent workspace 列表",
+      "registerFailedTitle": "Agent workspace 注册失败",
+      "registerFailedDesc": "{{agentLabel}}：无法在 daemon 上注册目录 {{cloudPath}}。{{message}}"
+    },
+    "connection": {
+      "portFileMissing": "amuxd daemon 未连接：HTTP 控制面未就绪（~/.amuxd/amuxd.http.port 不存在）。请重启 amuxd，或确认运行的是本分支构建的版本。",
+      "tokenExchangeFailed": "amuxd daemon HTTP 已启动但鉴权失败：请重启 amuxd 后重试。",
+      "healthCheckFailed": "amuxd daemon HTTP 无响应：请确认 amuxd 进程仍在运行。",
+      "notConnected": "amuxd daemon 未连接：请确认 amuxd 已启动且 HTTP 控制面可用",
+      "largeFilesPending": "检测到 {{count}} 个较大的新文件待同步，请在设置 → 团队中确认"
+    }
+  },
+  "search": {
+    "findInPage": "在页面中查找…",
+    "noMatches": "无匹配项",
+    "previousShiftEnter": "上一个 (Shift+Enter)",
+    "nextEnter": "下一个 (Enter)",
+    "find": "查找",
+    "searchFiles": "搜索文件…",
+    "noWorkspaceOpen": "未打开工作区。",
+    "noFilesFound": "未找到文件。"
+  },
+  "webview": {
+    "back": "后退",
+    "forward": "前进",
+    "reload": "重新加载"
   }
 }

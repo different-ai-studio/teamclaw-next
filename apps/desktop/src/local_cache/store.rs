@@ -16,24 +16,7 @@ fn opt_val(v: &Option<String>) -> Value {
 }
 
 fn opencode_db_paths(workspace_path: Option<&str>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(path) = std::env::var("OPENCODE_DB_PATH") {
-        if !path.trim().is_empty() {
-            paths.push(PathBuf::from(path));
-        }
-    }
-    if let Some(workspace_path) = workspace_path.map(str::trim).filter(|p| !p.is_empty()) {
-        paths.push(PathBuf::from(workspace_path).join(".opencode/data/opencode/opencode.db"));
-    }
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".local/share/opencode/opencode.db"));
-    }
-
-    let mut seen = HashSet::new();
-    paths
-        .into_iter()
-        .filter(|path| seen.insert(path.clone()))
-        .collect()
+    crate::opencode_paths::opencode_db_candidates(workspace_path, dirs::home_dir().as_deref())
 }
 
 fn string_at<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {

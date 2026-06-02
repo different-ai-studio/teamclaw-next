@@ -115,10 +115,10 @@
       "supabaseUrl": "Supabase URL",
       "supabaseAnonKey": "Anon key",
       "mqttHost": "MQTT host",
-            "mqttPort": "MQTT port",
-            "mqttUseTls": "Use TLS (mqtts://)",
-            "mqttUseTlsHint": "Turn this on when the broker requires mqtts.",
-            "savingServer": "Saving…",
+      "mqttPort": "MQTT port",
+      "mqttUseTls": "Use TLS (mqtts://)",
+      "mqttUseTlsHint": "Turn this on when the broker requires mqtts.",
+      "savingServer": "Saving…",
       "saveServer": "Save and restart"
     }
   },
@@ -138,7 +138,9 @@
     "actors": "Actors",
     "ideas": "Ideas",
     "hideTabs": "Hide files",
-    "restoreTabs": "Show files"
+    "restoreTabs": "Show files",
+    "toggleSidebar": "Toggle Sidebar",
+    "collapseSidebar": "Collapse sidebar"
   },
   "panel": {
     "tasks": {
@@ -425,6 +427,37 @@
       "skip": "Skip",
       "send": "Send",
       "createError": "Failed to create session"
+    },
+    "interruptFailed": "Unable to interrupt agent response",
+    "interruptAgent": "Interrupt {{name}}",
+    "acpDebug": {
+      "title": "ACP stream debug",
+      "lineCount": "{{count}} line",
+      "lineCount_plural": "{{count}} lines",
+      "scopeCurrentSession": "Current session",
+      "scopeAll": "All",
+      "copy": "Copy",
+      "clear": "Clear",
+      "waiting": "Waiting for {{token}} …"
+    },
+    "toast": {
+      "emptyMessageTitle": "Enter a message",
+      "emptyMessageWithAgent": "When an agent is selected, you must enter text or an attachment to send.",
+      "mentionRouteFailedTitle": "@Agent set but message can't be routed",
+      "mentionRouteFailedBody": "The message contains no resolvable agent @-mention, so the daemon won't reply. Make sure the agent has joined this session.",
+      "sendFirstToCreateSession": "Send a message first to create a session",
+      "mentionNeedsOpenSession": "@ Agent can only be used in an open session."
+    },
+    "imageViewer": {
+      "saveImage": "Save image",
+      "clickToEnlarge": "Click to enlarge",
+      "imagePreview": "Image preview",
+      "downloadImage": "Download image",
+      "enlargeDiagram": "Enlarge diagram"
+    },
+    "feedback": {
+      "goodResponse": "Good response",
+      "poorResponse": "Poor response"
     }
   },
   "onboarding": {
@@ -433,6 +466,16 @@
       "back": "Back",
       "next": "Next",
       "done": "Done"
+    },
+    "joinTeam": {
+      "checkingStatus": "Checking team share status…",
+      "initializing": "Initializing team workspace…",
+      "joined": "Joined the team",
+      "shareNotOpened": "Team share is not enabled yet. You can sync once the owner enables it.",
+      "failed": "Join flow failed: {{error}}",
+      "joinedWithMode": "Joined the team (mode: {{mode}})",
+      "unknownMode": "unknown",
+      "enterSecret": "Enter the team secret to decrypt shared content. The secret is provided by the person who invited you."
     }
   },
   "workspace": {
@@ -479,6 +522,15 @@
       "personalDesc": "Work independently, no sync needed",
       "team": "Team Shared",
       "teamDesc": "Use a team shared directory and sync shared resources"
+    },
+    "prompt": {
+      "needShareInitTitle": "Finish share directory setup in team settings",
+      "needShareInitDesc": "This workspace does not have teamclaw-team/ yet. Go to Settings → Team to finish setup.",
+      "teamMismatchConfirm": "This workspace is already bound to team \"{{teamName}}\", which does not match the currently signed-in team \"{{currentTeamName}}\".\n\nContinuing will delete the teamclaw-team/ directory in this workspace and re-initialize it for the current team (other files are left untouched).\n\nContinue?",
+      "teamMismatchConfirmAgain": "Confirm again: this will delete the teamclaw-team/ directory in the workspace (only this one directory). This action cannot be undone.\n\nConfirm deletion?",
+      "deleteTeamRepoFailed": "Failed to delete teamclaw-team",
+      "oldTeamRepoClearedTitle": "Old team directory cleared",
+      "oldTeamRepoClearedDesc": "Go to Settings → Team to finish share directory setup for the current team."
     }
   },
   "fileExplorer": {
@@ -638,7 +690,8 @@
     "error": "Error",
     "quotaExceeded": "Quota Exceeded",
     "rateLimited": "Rate Limited",
-    "serverError": "Server Error"
+    "serverError": "Server Error",
+    "loginRequired": "Please sign in before continuing."
   },
   "updater": {
     "available": "Update Available",
@@ -828,29 +881,29 @@
       "chatSuggestionsDesc": "Custom suggestions shown on the Start a New Chat page",
       "addSuggestion": "Add",
       "suggestionPlaceholder": "Enter a suggestion text...",
-    "noCustomSuggestions": "No custom suggestions yet",
-    "builtInSuggestions": "Built-in Suggestions",
-    "mqttBroker": "MQTT broker",
-    "mqttUsername": "MQTT username",
-    "mqttPassword": "MQTT password",
-    "mqttStatus": "MQTT status",
-    "mqttStatusUnknown": "Unknown",
-    "mqttStatusConnected": "Connected",
-    "mqttStatusDisconnected": "Disconnected",
-    "mqttReconnect": "Reconnect",
-    "mqttReconnecting": "Reconnecting…",
-    "save": "Save",
-    "saving": "Saving…",
-    "server": "Server",
-    "serverAddress": "Server address",
-    "serverAddressHint": "Example: http://localhost:8787",
-    "serverSaved": "Server saved",
-    "serverSynced": "Server synced",
-    "serverSyncedEmpty": "Not synced yet",
-    "serverSyncedHint": "Loaded from daemon when available.",
-    "notifAll": "All",
-    "notifImportant": "Important only",
-    "notifMute": "Mute"
+      "noCustomSuggestions": "No custom suggestions yet",
+      "builtInSuggestions": "Built-in Suggestions",
+      "mqttBroker": "MQTT broker",
+      "mqttUsername": "MQTT username",
+      "mqttPassword": "MQTT password",
+      "mqttStatus": "MQTT status",
+      "mqttStatusUnknown": "Unknown",
+      "mqttStatusConnected": "Connected",
+      "mqttStatusDisconnected": "Disconnected",
+      "mqttReconnect": "Reconnect",
+      "mqttReconnecting": "Reconnecting…",
+      "save": "Save",
+      "saving": "Saving…",
+      "server": "Server",
+      "serverAddress": "Server address",
+      "serverAddressHint": "Example: http://localhost:8787",
+      "serverSaved": "Server saved",
+      "serverSynced": "Server synced",
+      "serverSyncedEmpty": "Not synced yet",
+      "serverSyncedHint": "Loaded from daemon when available.",
+      "notifAll": "All",
+      "notifImportant": "Important only",
+      "notifMute": "Mute"
     },
     "server": {
       "title": "Server",
@@ -2415,7 +2468,8 @@
       "detachBeforeDeleteTitle": "Detach role links first",
       "detachBeforeDeleteDetailed": "This skill is still linked to one or more roles. Remove it from those roles before deleting.",
       "restartInlineHint": "Restart OpenCode to apply pending skill changes.",
-      "detachBeforeDelete": "This skill is linked to one or more roles. Detach it from those roles before deleting."
+      "detachBeforeDelete": "This skill is linked to one or more roles. Detach it from those roles before deleting.",
+      "loadingEditor": "Loading editor..."
     },
     "cron": {
       "advancedOptions": "Advanced options",
@@ -2514,7 +2568,8 @@
       "modelSelected": "Using: {{model}}",
       "noModels": "No models configured. Please configure providers in LLM Settings first.",
       "lastHeartbeat": "Last heartbeat",
-      "useDefaultModel": "Use default model"
+      "useDefaultModel": "Use default model",
+      "sessionNotFound": "Session not found or access denied (sessionId: {{id}}...)"
     },
     "deps": {
       "copied": "Copied!",
@@ -2586,6 +2641,58 @@
       "saveAndApply": "Save & Apply",
       "saving": "Applying...",
       "title": "Permission Management"
+    },
+    "teamShare": {
+      "enableTitle": "Enable team sharing",
+      "enableDescription": "Choose a team sharing mode. It cannot be changed once enabled, so choose carefully.",
+      "shareModeLegend": "Sharing mode",
+      "modeOssDesc": "Use Alibaba Cloud OSS as the sharing backend (default)",
+      "modeManagedGitLabel": "Managed Git",
+      "modeManagedGitDesc": "Use a TeamClaw-managed Git repository",
+      "modeCustomGitLabel": "Self-hosted Git",
+      "modeCustomGitDesc": "Use your own Git repository (GitHub / GitLab / self-hosted)",
+      "remoteUrlLabel": "Repository URL",
+      "authKindLabel": "Authentication method",
+      "sshPrivateKey": "SSH private key",
+      "sshKeyPlaceholder": "Paste the full OpenSSH private key (-----BEGIN ... -----END)",
+      "tokenPlaceholder": "Paste a Personal Access Token with repo permissions",
+      "branchLabel": "Branch (optional, defaults to main)",
+      "lockWarning": "⚠️ Cannot be changed once enabled.",
+      "confirmEnable": "Confirm and enable",
+      "title": "Team sharing",
+      "lockSubtitle": "Once a team sharing mode is enabled, it cannot be changed.",
+      "signInRequired": "Please sign in to manage team sharing.",
+      "notEnabled": "Team sharing is not enabled",
+      "enable": "Enable",
+      "enabledPrefix": "Enabled:",
+      "repositoryPrefix": "Repository: ",
+      "globalSyncDirPrefix": "Global sync directory: ",
+      "workspaceLinkPrefix": "This workspace link: ",
+      "linkStatus": {
+        "linked": "Linked",
+        "pendingMigration": "Local directory (pending migration)",
+        "unlinked": "Not linked"
+      },
+      "copyPath": "Copy path",
+      "syncPaths": "Sync paths",
+      "realSyncDir": "Real sync directory",
+      "dirExists": "Exists",
+      "dirNotCreated": "Not yet created",
+      "workspaceSymlinks": "Workspace symlinks ({{count}})",
+      "current": "Current"
+    },
+    "teamLlm": {
+      "title": "Team LiteLLM",
+      "description": "Enable a shared LiteLLM gateway for your team to centrally manage AI models and quotas.",
+      "enabledLabel": "Enabled:",
+      "notEnabled": "Team LiteLLM not enabled",
+      "enableButton": "Enable LiteLLM"
+    },
+    "teamSecret": {
+      "invalidError": "The team secret must be 64 hexadecimal characters.",
+      "label": "Team secret (64 hex chars)",
+      "lengthHint": "Requires exactly 64 hexadecimal characters.",
+      "savedOk": "Saved."
     }
   },
   "skillssh": {
@@ -2847,7 +2954,13 @@
     "notFound": "Component not found"
   },
   "team": {
-    "viewerReadOnly": "Read-only mode — you don't have edit permissions"
+    "viewerReadOnly": "Read-only mode — you don't have edit permissions",
+    "createDialog": {
+      "title": "Create Team",
+      "description": "After creating, enable sharing and LiteLLM separately under \"Settings → Team Share\" and \"LLM Config\".",
+      "nameLabel": "Team name",
+      "namePlaceholder": "e.g. Design Team"
+    }
   },
   "actors": {
     "allTitle": "All actors",
@@ -3022,5 +3135,49 @@
     "exited": "Process exited (code {{code}}) — press Enter to restart",
     "spawnFailed": "Failed to start shell: {{message}}",
     "cwdFallback": "Workspace cwd unavailable, using home directory"
+  },
+  "skills": {
+    "builtinLabel": "Built-in",
+    "builtinPath": ".teamclaw/skills/ ({{app}} built-in)"
+  },
+  "daemon": {
+    "agentRuntime": {
+      "notStartedTitle": "Agent runtime not started",
+      "notStartedDesc": "Agent {{shortId}}'s daemon did not respond to runtimeStart (it may be offline or not joined to the team).",
+      "rpcNotReadyTitle": "MQTT/RPC not ready",
+      "rpcNotReadyDesc": "Unable to send runtimeStart to the daemon. Please check the MQTT connection and team sign-in status.",
+      "startFailedTitle": "Failed to start Agent runtime"
+    },
+    "workspace": {
+      "labeledMessage": "{{agentLabel}}: {{message}}",
+      "loadInfoFailedTitle": "Failed to load workspace info",
+      "missingPathTitle": "Workspace is missing a path",
+      "missingPathDesc": "{{agentLabel}}: the cloud workspace has no local directory path configured.",
+      "listFailedTitle": "Failed to read Agent workspace list",
+      "registerFailedTitle": "Failed to register Agent workspace",
+      "registerFailedDesc": "{{agentLabel}}: could not register directory {{cloudPath}} on the daemon. {{message}}"
+    },
+    "connection": {
+      "portFileMissing": "amuxd daemon not connected: the HTTP control plane is not ready (~/.amuxd/amuxd.http.port does not exist). Restart amuxd, or confirm you are running the build from this branch.",
+      "tokenExchangeFailed": "amuxd daemon HTTP started but authentication failed: restart amuxd and try again.",
+      "healthCheckFailed": "amuxd daemon HTTP is not responding: confirm the amuxd process is still running.",
+      "notConnected": "amuxd daemon not connected: confirm amuxd is started and the HTTP control plane is available.",
+      "largeFilesPending": "Detected {{count}} large new file(s) pending sync. Please confirm under Settings → Team."
+    }
+  },
+  "search": {
+    "findInPage": "Find in page...",
+    "noMatches": "No matches",
+    "previousShiftEnter": "Previous (Shift+Enter)",
+    "nextEnter": "Next (Enter)",
+    "find": "Find",
+    "searchFiles": "Search files...",
+    "noWorkspaceOpen": "No workspace open.",
+    "noFilesFound": "No files found."
+  },
+  "webview": {
+    "back": "Back",
+    "forward": "Forward",
+    "reload": "Reload"
   }
 }

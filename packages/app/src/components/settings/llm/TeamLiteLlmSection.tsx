@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { Loader2 } from 'lucide-react'
 
@@ -23,6 +24,7 @@ interface LiteLlmSetupResult {
  * - After success: shows "已开通: {endpoint}".
  */
 export function TeamLiteLlmSection({ teamId, workspacePath, isOwner }: Props) {
+  const { t } = useTranslation()
   const [endpoint, setEndpoint] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,27 +49,27 @@ export function TeamLiteLlmSection({ teamId, workspacePath, isOwner }: Props) {
   return (
     <section className="rounded-xl border border-border-soft bg-panel p-4 space-y-3">
       <div>
-        <h4 className="text-[13.5px] font-semibold">团队 LiteLLM</h4>
+        <h4 className="text-[13.5px] font-semibold">{t('settings.teamLlm.title')}</h4>
         <p className="mt-0.5 text-[12px] text-muted-foreground">
-          为团队开通共享 LiteLLM 网关，统一管理 AI 模型与额度。
+          {t('settings.teamLlm.description')}
         </p>
       </div>
 
       {endpoint ? (
         <p className="text-[12.5px]">
-          已开通:
+          {t('settings.teamLlm.enabledLabel')}
           <span className="ml-1 font-mono break-all">{endpoint}</span>
         </p>
       ) : isOwner ? (
         <div className="flex items-center justify-between gap-3">
-          <p className="text-[12.5px] text-foreground">团队 LiteLLM 未开通</p>
+          <p className="text-[12.5px] text-foreground">{t('settings.teamLlm.notEnabled')}</p>
           <Button size="sm" onClick={handleSetup} disabled={busy}>
             {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            开通 LiteLLM
+            {t('settings.teamLlm.enableButton')}
           </Button>
         </div>
       ) : (
-        <p className="text-[12.5px] text-muted-foreground">团队 LiteLLM 未开通</p>
+        <p className="text-[12.5px] text-muted-foreground">{t('settings.teamLlm.notEnabled')}</p>
       )}
 
       {error && <p className="text-[12px] text-red-500">{error}</p>}

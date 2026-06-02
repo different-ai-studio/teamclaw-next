@@ -1,3 +1,5 @@
+import i18n from '@/lib/i18n'
+
 /**
  * Map raw FC/Tauri command errors into friendly, user-facing copy.
  *
@@ -10,7 +12,7 @@
 export function humanizeFcError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err)
   if (isNotLoggedInError(raw)) {
-    return '请先登录后再操作。'
+    return i18n.t('errors.loginRequired')
   }
   return raw
 }

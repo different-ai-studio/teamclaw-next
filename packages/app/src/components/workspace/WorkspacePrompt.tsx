@@ -17,6 +17,7 @@ import { useWorkspaceStore } from "@/stores/workspace"
 import { useCurrentTeamStore } from "@/stores/current-team"
 import { isTauri } from '@/lib/utils'
 import { DEFAULT_WORKSPACE_PATH } from '@/lib/build-config'
+import i18n from '@/lib/i18n'
 
 interface WorkspaceTeamMeta {
   teamId: string
@@ -61,8 +62,8 @@ async function validateWorkspaceTeam(workspacePath: string): Promise<boolean> {
 
   if (!meta) {
     toast.message(
-      "需要在团队设置中完成共享目录初始化",
-      { description: `当前工作区还没有 teamclaw-team/，请进入设置 → 团队完成设置。` },
+      i18n.t('workspace.prompt.needShareInitTitle'),
+      { description: i18n.t('workspace.prompt.needShareInitDesc') },
     )
     return true
   }
@@ -70,7 +71,10 @@ async function validateWorkspaceTeam(workspacePath: string): Promise<boolean> {
   if (meta.teamId === currentTeam.id) return true
 
   const first = window.confirm(
-    `该工作区已绑定团队「${meta.teamName}」，与当前登录的团队「${currentTeam.name}」不一致。\n\n继续将删除该工作区中的 teamclaw-team/ 目录并以当前团队重新初始化（其他文件保留不动）。\n\n是否继续？`,
+    i18n.t('workspace.prompt.teamMismatchConfirm', {
+      teamName: meta.teamName,
+      currentTeamName: currentTeam.name,
+    }),
   )
   if (!first) {
     await useWorkspaceStore.getState().clearWorkspace()
@@ -78,7 +82,7 @@ async function validateWorkspaceTeam(workspacePath: string): Promise<boolean> {
   }
 
   const second = window.confirm(
-    `再次确认：将删除工作区中的 teamclaw-team/ 目录（仅此一个目录）。该操作不可撤销。\n\n确认删除？`,
+    i18n.t('workspace.prompt.teamMismatchConfirmAgain'),
   )
   if (!second) {
     await useWorkspaceStore.getState().clearWorkspace()
@@ -90,14 +94,14 @@ async function validateWorkspaceTeam(workspacePath: string): Promise<boolean> {
     await invoke("workspace_delete_team_repo", { workspacePath })
   } catch (error) {
     console.error("[Workspace] Failed to delete teamclaw-team:", error)
-    toast.error("删除 teamclaw-team 失败", { description: String(error) })
+    toast.error(i18n.t('workspace.prompt.deleteTeamRepoFailed'), { description: String(error) })
     await useWorkspaceStore.getState().clearWorkspace()
     return false
   }
 
   toast.message(
-    "已清除旧团队目录",
-    { description: "请进入设置 → 团队完成当前团队的共享目录初始化。" },
+    i18n.t('workspace.prompt.oldTeamRepoClearedTitle'),
+    { description: i18n.t('workspace.prompt.oldTeamRepoClearedDesc') },
   )
   return true
 }

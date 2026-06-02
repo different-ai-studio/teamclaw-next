@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -13,10 +14,11 @@ interface Props {
   isOwner: boolean
 }
 
-const MODE_LABEL: Record<Exclude<ShareMode, null>, string> = {
-  oss: 'OSS',
-  managed_git: '托管 Git',
-  custom_git: '自建 Git',
+// OSS is a brand token; the git modes resolve through i18n at render time.
+const MODE_LABEL_KEY: Record<Exclude<ShareMode, null>, string | null> = {
+  oss: null,
+  managed_git: 'settings.teamShare.modeManagedGitLabel',
+  custom_git: 'settings.teamShare.modeCustomGitLabel',
 }
 
 /**
@@ -28,6 +30,7 @@ const MODE_LABEL: Record<Exclude<ShareMode, null>, string> = {
  *   - mode !== null: "已开通：{label}" — locked, no toggle
  */
 export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
+  const { t } = useTranslation()
   const status = useTeamShareStore((s) => s.status)
   const loading = useTeamShareStore((s) => s.loading)
   const lastError = useTeamShareStore((s) => s.lastError)
@@ -52,55 +55,64 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
   return (
     <section className="rounded-xl border border-border-soft bg-panel p-4 space-y-3">
       <div>
-        <h4 className="text-[13.5px] font-semibold">团队共享</h4>
+        <h4 className="text-[13.5px] font-semibold">
+          {t('settings.teamShare.title')}
+        </h4>
         <p className="mt-0.5 text-[12px] text-muted-foreground">
-          团队共享模式一经开通，不可切换。
+          {t('settings.teamShare.lockSubtitle')}
         </p>
       </div>
 
       {!isLoggedIn ? (
         <p className="text-[12.5px] text-muted-foreground">
-          请先登录后再管理团队共享。
+          {t('settings.teamShare.signInRequired')}
         </p>
       ) : loading ? (
         <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          加载中…
+          {t('common.loading')}
         </div>
       ) : status.mode === null ? (
         <div className="flex items-center justify-between gap-3">
-          <p className="text-[12.5px] text-foreground">团队共享未开通</p>
+          <p className="text-[12.5px] text-foreground">
+            {t('settings.teamShare.notEnabled')}
+          </p>
           {isOwner && (
             <Button size="sm" onClick={() => setWizardOpen(true)}>
-              开通
+              {t('settings.teamShare.enable')}
             </Button>
           )}
         </div>
       ) : (
         <div className="space-y-1">
           <p className="text-[12.5px]">
-            已开通:
-            <span className="ml-1 font-medium">{MODE_LABEL[status.mode]}</span>
+            {t('settings.teamShare.enabledPrefix')}
+            <span className="ml-1 font-medium">
+              {MODE_LABEL_KEY[status.mode]
+                ? t(MODE_LABEL_KEY[status.mode]!)
+                : 'OSS'}
+            </span>
           </p>
           {status.gitRemoteUrl && (
             <p className="text-[12px] text-muted-foreground break-all">
-              仓库：{status.gitRemoteUrl}
+              {t('settings.teamShare.repositoryPrefix')}
+              {status.gitRemoteUrl}
             </p>
           )}
           {status.globalPath && (
             <p className="text-[12px] text-muted-foreground break-all">
-              全局同步目录：
+              {t('settings.teamShare.globalSyncDirPrefix')}
               <code className="font-mono">{status.globalPath}</code>
             </p>
           )}
           <p className="text-[12px] text-muted-foreground">
-            本工作区链接：
+            {t('settings.teamShare.workspaceLinkPrefix')}
             <span className="ml-1">
               {status.linkStatus === 'symlink'
-                ? '已软链 ✓'
+                ? `${t('settings.teamShare.linkStatus.linked')} ✓`
                 : status.linkStatus === 'real_dir'
-                  ? '本地目录（待迁移）'
-                  : '未链接'}
+                  ? t('settings.teamShare.linkStatus.pendingMigration')
+                  : t('settings.teamShare.linkStatus.unlinked')}
             </span>
           </p>
         </div>

@@ -20,13 +20,14 @@ function setNavigatorLanguage(language: string) {
   })
 }
 
-describe('number-format system locale fallback', () => {
+describe('number-format default locale', () => {
   beforeEach(() => {
     Object.keys(store).forEach((key) => delete store[key])
     vi.resetModules()
   })
 
-  it('uses the system language when no saved language exists', async () => {
+  it('defaults to English number formatting when no saved language exists', async () => {
+    // System language is intentionally not auto-detected — English is the default.
     setNavigatorLanguage('zh-CN')
 
     const numberFormatSpy = vi.spyOn(Intl, 'NumberFormat')
@@ -34,7 +35,7 @@ describe('number-format system locale fallback', () => {
     const { formatNumber } = await import('../number-format')
     formatNumber(1234)
 
-    expect(numberFormatSpy).toHaveBeenCalledWith('zh-CN', {})
+    expect(numberFormatSpy).toHaveBeenCalledWith('en', {})
 
     numberFormatSpy.mockRestore()
   })

@@ -24,7 +24,7 @@ export function UpgradeAccountDialog({ open, onOpenChange }: Props) {
     verifyUpgradeEmailOtp,
     resetUpgradeOtp,
     upgradeEmail,
-    loading,
+    upgradeLoading: loading,
     errorMessage,
   } = useAuthStore();
   const [email, setEmail] = useState("");

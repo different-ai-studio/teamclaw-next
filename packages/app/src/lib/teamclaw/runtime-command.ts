@@ -1,5 +1,6 @@
 import { create, toBinary } from "@bufbuild/protobuf";
 import {
+  AcpCancelSchema,
   AcpCommandSchema,
   AcpDenyPermissionSchema,
   AcpGrantPermissionSchema,
@@ -26,8 +27,14 @@ export type RuntimePermissionResponseInput = {
   granted: boolean;
 };
 
+export type RuntimeCancelInput = {
+  targetDeviceId: string;
+  runtimeId: string;
+};
+
 export type RuntimeCommandSender = {
   sendPermissionResponse: (input: RuntimePermissionResponseInput) => Promise<void>;
+  sendCancel: (input: RuntimeCancelInput) => Promise<void>;
 };
 
 export type PermissionRuntimeTarget = {
@@ -74,6 +81,35 @@ export function createRuntimeCommandSender(
               value: create(AcpDenyPermissionSchema, { requestId }),
             },
           });
+      const senderActorId = deps.senderActorId?.trim() ?? "";
+      const envelope = create(RuntimeCommandEnvelopeSchema, {
+        runtimeId,
+        deviceId: targetDeviceId,
+        peerId,
+        commandId: deps.commandId?.() ?? crypto.randomUUID(),
+        timestamp: BigInt(Math.floor(deps.nowSeconds?.() ?? Date.now() / 1000)),
+        senderActorId,
+        acpCommand,
+      });
+
+      await deps.mqtt.publish(
+        runtimeCommandsTopic(teamId, targetDeviceId, runtimeId),
+        toBinary(RuntimeCommandEnvelopeSchema, envelope),
+        false,
+      );
+    },
+
+    async sendCancel(input) {
+      const teamId = required(deps.teamId, "team id");
+      const targetDeviceId = required(input.targetDeviceId, "target device id");
+      const runtimeId = required(input.runtimeId, "runtime id");
+      const peerId = required(deps.peerId, "peer id");
+      const acpCommand = create(AcpCommandSchema, {
+        command: {
+          case: "cancel",
+          value: create(AcpCancelSchema, {}),
+        },
+      });
       const senderActorId = deps.senderActorId?.trim() ?? "";
       const envelope = create(RuntimeCommandEnvelopeSchema, {
         runtimeId,

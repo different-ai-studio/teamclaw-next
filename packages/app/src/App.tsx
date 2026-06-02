@@ -107,6 +107,7 @@ import {
   mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
+  registerDiscardPendingStreamReply,
   rememberLiveEventId,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
@@ -646,10 +647,10 @@ function AppContent() {
         duration: Infinity,
         description: t(
           "workspace.daemonUnavailableHint",
-          "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
+          "Start amuxd on this machine (e.g. pnpm daemon:run), confirm the HTTP port/token files exist under ~/.amuxd/, then retry.",
         ),
         action: {
-          label: t("common.retry", "重试"),
+          label: t("common.retry", "Retry"),
           onClick: () => window.location.reload(),
         },
       });
@@ -783,6 +784,18 @@ function AppContent() {
       schedulePendingStreamReplyFallback(sessionId, actorId, pendingReply);
     }, PENDING_AGENT_REPLY_FALLBACK_MS);
   }
+
+  useEffect(() => {
+    registerDiscardPendingStreamReply((sessionId, actorId) => {
+      const streamKey = agentStreamKey(sessionId, actorId);
+      clearPendingStreamReplyTimer(streamKey);
+      delete pendingStreamReplySinceRef.current[streamKey];
+      delete pendingStreamRepliesRef.current[streamKey];
+    });
+    return () => {
+      registerDiscardPendingStreamReply(null);
+    };
+  }, []);
 
   useEffect(() => {
     if (!mqttAuthKey || !userId || !mqttTeamId || !mqttAccessToken) return;

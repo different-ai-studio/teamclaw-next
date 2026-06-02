@@ -44,6 +44,44 @@ final class ActorStoreTests: XCTestCase {
         XCTAssertEqual(cached.avatarURL, "https://example.com/avatar.jpg")
     }
 
+    func testReloadPurgesForeignTeamActors() async throws {
+        let ctx = try makeContext()
+        // Simulate a team the device viewed earlier whose actors are still cached.
+        // The unscoped @Query in the Actors/Members views would otherwise surface
+        // these stale rows alongside the current team's members.
+        ctx.insert(CachedActor(actorId: "ghost-1", teamId: "t-OTHER",
+                               actorType: "member", displayName: "Ghost"))
+        try ctx.save()
+
+        let repo = MockActorRepository()
+        await repo.configure(actors: [sampleMember(id: "a-1")]) // sampleMember is team t-1
+        let store = ActorStore(teamID: "t-1", repository: repo, modelContext: ctx)
+        await store.reload()
+
+        let cached = try ctx.fetch(FetchDescriptor<CachedActor>())
+        XCTAssertEqual(cached.count, 1, "foreign-team actors must be purged from the local cache")
+        XCTAssertEqual(cached.first?.teamId, "t-1")
+        XCTAssertFalse(cached.contains { $0.actorId == "ghost-1" })
+    }
+
+    func testReloadPurgesForeignTeamActorsEvenOnFetchError() async throws {
+        let ctx = try makeContext()
+        ctx.insert(CachedActor(actorId: "ghost-1", teamId: "t-OTHER",
+                               actorType: "member", displayName: "Ghost"))
+        try ctx.save()
+
+        let repo = MockActorRepository()
+        let store = ActorStore(teamID: "t-1", repository: repo, modelContext: ctx)
+        await repo.setNextError(URLError(.notConnectedToInternet))
+        await store.reload()
+
+        // The purge runs before the network fetch, so a failed reload still
+        // leaves no foreign-team rows to flash in the unscoped @Query views.
+        let cached = try ctx.fetch(FetchDescriptor<CachedActor>())
+        XCTAssertFalse(cached.contains { $0.teamId == "t-OTHER" })
+        XCTAssertNotNil(store.errorMessage)
+    }
+
     func testReloadFailureSetsError() async throws {
         let ctx = try makeContext()
         let repo = MockActorRepository()

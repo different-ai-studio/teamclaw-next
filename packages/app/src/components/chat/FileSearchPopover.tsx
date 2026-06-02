@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { FileText, Search } from 'lucide-react'
 import {
   Command,
@@ -48,6 +49,7 @@ export function FileSearchPopover({
   onSearchChange,
   onSelect,
 }: FileSearchPopoverProps) {
+  const { t } = useTranslation()
   const fileTree = useWorkspaceStore(s => s.fileTree)
   const flattenVisibleFileTree = useWorkspaceStore(s => s.flattenVisibleFileTree)
   const workspacePath = useWorkspaceStore(s => s.workspacePath)
@@ -90,17 +92,17 @@ export function FileSearchPopover({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search files..."
+            placeholder={t('search.searchFiles')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
         <CommandList className="max-h-48 overflow-y-auto">
           {!workspacePath ? (
             <div className="py-4 text-center text-sm text-muted-foreground">
-              No workspace open.
+              {t('search.noWorkspaceOpen')}
             </div>
           ) : filteredFiles.length === 0 ? (
-            <CommandEmpty>No files found.</CommandEmpty>
+            <CommandEmpty>{t('search.noFilesFound')}</CommandEmpty>
           ) : (
             <CommandGroup>
               {filteredFiles.map((file) => (

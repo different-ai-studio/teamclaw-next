@@ -8,8 +8,9 @@ info:
     `POST /v1/auth/exchange`.
 
     Provider OAuth is proxied to a per-workspace loopback `opencode serve`
-    instance (XDG under `<workspace>/.opencode/`). ACP `opencode acp` uses the
-    same XDG paths so OAuth credentials apply to chat sessions. After OAuth,
+    instance. OpenCode data (OAuth, DB, cache) is shared globally under the
+    user's default paths. ACP `opencode acp` uses the same global store so
+    OAuth credentials apply to chat sessions. After OAuth,
     API key connect, or disconnect, authorize/callback/delete responses include
     a runtime reload outcome (`reload_required` or `restart_required`).
 

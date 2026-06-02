@@ -1,5 +1,6 @@
 import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
+import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
 
 export const PENDING_AGENT_REPLY_FALLBACK_MS = 1_200;
 export const PENDING_AGENT_REPLY_TOOL_GRACE_MS = 3_000;
@@ -7,6 +8,21 @@ export const PENDING_AGENT_REPLY_HARD_TIMEOUT_MS = 8_000;
 
 export function agentStreamKey(sessionId: string, actorId: string): string {
   return `${sessionId}::${actorId}`;
+}
+
+let discardPendingStreamReplyHandler:
+  | ((sessionId: string, actorId: string) => void)
+  | null = null;
+
+/** App registers a handler to drop parked AGENT_REPLY rows without persisting. */
+export function registerDiscardPendingStreamReply(
+  handler: ((sessionId: string, actorId: string) => void) | null,
+): void {
+  discardPendingStreamReplyHandler = handler;
+}
+
+export function discardPendingStreamReply(sessionId: string, actorId: string): void {
+  discardPendingStreamReplyHandler?.(sessionId, actorId);
 }
 
 const SEEN_LIVE_EVENT_IDS_CAP = 2_000;
@@ -91,29 +107,6 @@ function recordFromValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function toolNameFromKind(kind: string): string {
-  switch (kind) {
-    case "execute":
-      return "bash";
-    case "search":
-      return "grep";
-    case "read":
-      return "read";
-    case "edit":
-      return "edit";
-    case "fetch":
-      return "web_search";
-    case "delete":
-      return "delete";
-    case "move":
-      return "move";
-    case "think":
-      return "think";
-    default:
-      return "";
-  }
-}
-
 export function normalizeToolUseEvent(value: unknown): {
   toolId: string;
   toolName: string;
@@ -131,7 +124,7 @@ export function normalizeToolUseEvent(value: unknown): {
   const explicitToolName = stringField(raw, "toolName", "tool_name");
   return {
     toolId: stringField(raw, "toolId", "tool_id"),
-    toolName: explicitToolName || toolNameFromKind(toolKind) || "unknown",
+    toolName: toolNameFromKind(toolKind) || explicitToolName || "unknown",
     description,
     params,
     toolKind: toolKind || undefined,

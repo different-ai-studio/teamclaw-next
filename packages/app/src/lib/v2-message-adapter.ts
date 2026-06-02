@@ -10,6 +10,7 @@
 
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import { MessageKind } from "@/lib/proto/teamclaw_pb";
+import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
 import type {
   Message as SdkMessage,
   MessagePart,
@@ -196,7 +197,13 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
   const toolCalls: ToolCall[] = toolCallProtos.map((tc) => {
     const md = parseMetadata(tc);
     const toolId = String(md.tool_id ?? "");
-    const toolName = String(md.tool_name ?? "unknown");
+    const toolNameRaw = String(md.tool_name ?? "unknown");
+    const toolKind =
+      typeof md.tool_kind === "string"
+        ? md.tool_kind
+        : typeof md.toolKind === "string"
+          ? md.toolKind
+          : undefined;
     const description = String(md.description ?? "");
     const args = {
       ...paramsFromDescription(description),
@@ -205,7 +212,8 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
     const match = toolId ? resultByToolId.get(toolId) : undefined;
     return {
       id: toolId || tc.messageId,
-      name: toolName,
+      name: toolNameFromKind(toolKind) || toolNameRaw,
+      toolKind,
       status: match ? (match.success ? "completed" : "failed") : "calling",
       arguments: args,
       startTime: new Date(Number(tc.createdAt) * 1000),
