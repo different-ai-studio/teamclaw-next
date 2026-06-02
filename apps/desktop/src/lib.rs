@@ -280,7 +280,6 @@ pub fn run() {
                 tauri::plugin::Builder::<tauri::Wry, ()>::new("tauri-mcp").build()
             }
         })
-        .manage(commands::opencode::OpenCodeState::default())
         .manage(commands::window::WindowRegistry::default())
         .manage(commands::filewatcher::FileWatcherState::default())
         .manage(commands::gateway::GatewayState::default())
@@ -791,11 +790,6 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } => {
                     if let Some(registry) = app.try_state::<std::sync::Arc<crate::terminal::Registry>>() {
                         registry.kill_all();
-                    }
-                    if let Some(oc_state) = app.try_state::<commands::opencode::OpenCodeState>() {
-                        tauri::async_runtime::block_on(async {
-                            let _ = commands::opencode::shutdown_opencode(&oc_state, None).await;
-                        });
                     }
                 }
                 _ => {}

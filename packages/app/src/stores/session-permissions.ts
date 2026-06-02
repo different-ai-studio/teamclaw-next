@@ -7,17 +7,7 @@ import {
   putDaemonToolPermissions,
   type DaemonAllowlistRule,
 } from "@/lib/daemon-local-client";
-// Permissive proxy until the amuxd daemon client is wired up;
-// permission flows are non-functional.
-// TODO(amuxd): wire to daemon
-const getAgentClient: () => any = () =>
-  new Proxy({}, {
-    get() {
-      return () => {
-        throw new Error('Agent client not wired to amuxd daemon yet');
-      };
-    },
-  });
+import { replyPermissionById } from "@/lib/teamclaw/reply-acp-permission";
 import { isTauri } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
 import { notificationService } from "@/lib/notification-service";
@@ -225,53 +215,7 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
   const resolvePermissionSession = async (
     sessionId: string | undefined | null,
   ): Promise<PermissionSessionClassification> => {
-    const knownClassification = classifyPermissionSession(sessionId);
-    if (!sessionId || knownClassification.ownerSessionId) {
-      return knownClassification;
-    }
-
-    const client = getAgentClient();
-    let sessionInfo: SessionLookupInfo | null = null;
-    try {
-      sessionInfo = await client.getSession(sessionId) as SessionLookupInfo;
-    } catch {
-      return knownClassification;
-    }
-
-    if (!sessionInfo || isArchivedSession(sessionInfo)) {
-      return knownClassification;
-    }
-
-    if (!sessionInfo.parentID) {
-      return { isChild: false, childSessionId: null, ownerSessionId: sessionId };
-    }
-
-    const { sessions } = get();
-    const cachedParent =
-      sessions.find((session) => session.id === sessionInfo.parentID) ||
-      getSessionById(sessionInfo.parentID);
-    let parentInfo = cachedParent as SessionLookupInfo | null | undefined;
-    if (!parentInfo) {
-      try {
-        parentInfo = await client.getSession(sessionInfo.parentID) as SessionLookupInfo;
-      } catch {
-        parentInfo = null;
-      }
-    }
-    if (!parentInfo || isArchivedSession(parentInfo)) {
-      return knownClassification;
-    }
-
-    const ownerSessions = appendLookupSession(
-      appendLookupSession(sessions, sessionInfo),
-      parentInfo,
-    );
-    const ownerSessionId = resolveSessionActivityOwner(
-      sessionId,
-      ownerSessions,
-      sessionInfo.parentID,
-    );
-    return { isChild: true, childSessionId: sessionId, ownerSessionId };
+    return classifyPermissionSession(sessionId);
   };
 
   const queuePermission = (
@@ -334,8 +278,7 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
     handlePermissionAsked: (event: PermissionAskedEvent) => {
       // Check permission policy -- auto-authorize if bypass or batch-done
       if (shouldAutoAuthorize()) {
-        const client = getAgentClient();
-        client.replyPermission(event.id, { reply: "always" }).catch((err: unknown) => {
+        replyPermissionById(event.id, "always").catch((err: unknown) => {
           console.error("[Session] Failed to auto-reply permission:", err);
         });
         return;
@@ -343,8 +286,7 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
 
       // Check legacy permission config -- auto-authorize if set to "allow"
       if (event.permission && _permConfigCache?.[event.permission] === "allow") {
-        const client = getAgentClient();
-        client.replyPermission(event.id, { reply: "once" }).catch((err: unknown) => {
+        replyPermissionById(event.id, "allow").catch((err: unknown) => {
           console.error("[Session] Failed to auto-reply permission from config:", err);
         });
         return;
@@ -352,8 +294,7 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
 
       // Check if this permission type was already "Always Allowed" during this session
       if (event.permission && _alwaysAllowedPermissions.has(event.permission)) {
-        const client = getAgentClient();
-        client.replyPermission(event.id, { reply: "always" }).catch((err: unknown) => {
+        replyPermissionById(event.id, "always").catch((err: unknown) => {
           console.error("[Session] Failed to auto-reply always-allowed permission:", err);
         });
         return;
@@ -380,20 +321,11 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
       permissionId: string,
       decision: "allow" | "deny" | "always",
     ) => {
-      const replyMap: Record<string, "once" | "always" | "reject"> = {
-        allow: "once",
-        deny: "reject",
-        always: "always",
-      };
-
       const decisionState: ToolCallPermission["decision"] =
         decision === "deny" ? "denied" : decision === "always" ? "allowlisted" : "approved";
 
       try {
-        const client = getAgentClient();
-        await client.replyPermission(permissionId, {
-          reply: replyMap[decision],
-        });
+        await replyPermissionById(permissionId, decision);
 
         // Persist "always" decisions to the agent runtime DB and cache in memory
         if (decision === "always") {
@@ -492,91 +424,7 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
     },
 
     pollPermissions: async () => {
-      const { activeSessionId } = get();
-      if (!activeSessionId) return;
-
-      try {
-        const client = getAgentClient();
-        const permissions = await client.listPermissions();
-        if (!permissions || permissions.length === 0) return;
-
-        if (shouldAutoAuthorize()) {
-          console.log("[Session] Auto-authorizing polled permissions (policy: bypass/batch-done)");
-          for (const perm of permissions) {
-            client.replyPermission(perm.id, { reply: "always" }).catch((err: unknown) => {
-              console.error("[Session] Failed to auto-reply polled permission:", err);
-            });
-          }
-          return;
-        }
-
-        // Auto-authorize permissions that are set to "allow" in legacy config or already "Always Allowed"
-        {
-          const remaining = permissions.filter((perm: any) => {
-            if (perm.permission && _permConfigCache?.[perm.permission] === "allow") {
-              client.replyPermission(perm.id, { reply: "once" }).catch((err: unknown) => {
-                console.error("[Session] Failed to auto-reply polled permission from config:", err);
-              });
-              return false;
-            }
-            if (perm.permission && _alwaysAllowedPermissions.has(perm.permission)) {
-              client.replyPermission(perm.id, { reply: "always" }).catch((err: unknown) => {
-                console.error("[Session] Failed to auto-reply polled always-allowed permission:", err);
-              });
-              return false;
-            }
-            return true;
-          });
-          if (remaining.length === 0) return;
-        }
-
-        const stalePermissionIds = new Set<string>();
-        for (const permission of permissions) {
-          const classification = await resolvePermissionSession(permission.sessionID);
-          if (!classification.ownerSessionId) {
-            stalePermissionIds.add(permission.id);
-            continue;
-          }
-
-          if (permission.tool?.callID && !classification.isChild) {
-            const session = getSessionById(activeSessionId);
-            const alreadyAttached = session?.messages.some((m) =>
-              m.toolCalls?.some((tc) => tc.permission?.id === permission.id),
-            );
-            if (!alreadyAttached) {
-              const attached = attachPermissionToToolCall(permission);
-              if (!attached) {
-                pendingPermissionBuffer.set(permission.tool.callID, permission);
-              }
-            }
-          }
-
-          const { pendingPermissions } = get();
-          const alreadyPending = pendingPermissions.some((e) => e.permission.id === permission.id);
-          if (!alreadyPending) {
-            set((state) => ({
-              pendingPermissions: [
-                ...state.pendingPermissions,
-                {
-                  permission,
-                  childSessionId: classification.childSessionId,
-                  ownerSessionId: classification.ownerSessionId,
-                },
-              ].slice(-20),
-            }));
-          }
-        }
-
-        if (stalePermissionIds.size > 0) {
-          set((state) => ({
-            pendingPermissions: state.pendingPermissions.filter(
-              (entry) => !stalePermissionIds.has(entry.permission.id),
-            ),
-          }));
-        }
-      } catch {
-        // Silently ignore polling errors
-      }
+      // OpenCode HTTP permission polling removed; v2 uses ACP stream events.
     },
   };
 }

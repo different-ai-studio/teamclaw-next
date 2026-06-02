@@ -33,7 +33,6 @@ vi.mock('@/stores/workspace', () => ({
   }),
 }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }))
-vi.mock('@/lib/opencode/sdk-client', () => ({ initOpenCodeClient: vi.fn() }))
 vi.mock('@/lib/utils', () => ({ cn: (...a: string[]) => a.join(' '), isTauri: () => false }))
 vi.mock('@tauri-apps/plugin-fs', () => ({
   exists: vi.fn(async () => true),

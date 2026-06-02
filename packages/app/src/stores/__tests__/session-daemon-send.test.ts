@@ -53,14 +53,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mocks.invoke,
 }))
 
-vi.mock('@/lib/opencode/sdk-client', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/opencode/sdk-client')>('@/lib/opencode/sdk-client')
-  return {
-    ...actual,
-    getOpenCodeClient: () => mocks.client,
-  }
-})
-
 vi.mock('@/lib/mqtt-bridge', () => ({
   mqttPublish: mocks.mqttPublish,
 }))
@@ -146,6 +138,27 @@ describe('session store daemon send path', () => {
     mocks.listParticipants.mockResolvedValue([])
     mocks.getSessionTeamId.mockResolvedValue('team-1')
     mocks.mqttPublish.mockResolvedValue(undefined)
+  })
+
+  it('never calls OpenCode HTTP client on UUID sessions', async () => {
+    const { useSessionStore } = await import('../session-store')
+
+    useSessionStore.setState({
+      activeSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+      currentSessionId: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+      sessions: [{
+        id: 'a1ca8f06-94ee-4fb5-bdfb-194a5606062f',
+        title: 'Collab Session',
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }],
+    })
+
+    await useSessionStore.getState().sendMessage('hello daemon')
+
+    expect(mocks.client.sendMessageAsync).not.toHaveBeenCalled()
+    expect(mocks.client.createSession).not.toHaveBeenCalled()
   })
 
   it('publishes TeamClaw UUID session messages through MQTT instead of opencode promptAsync', async () => {
