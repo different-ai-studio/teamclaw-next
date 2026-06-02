@@ -465,7 +465,12 @@ pub async fn list_changed(
                 .filter(|(_, f)| f.dirty)
                 .map(|(path, f)| ChangedFile {
                     path,
-                    status: if f.deleted_local { "deleted" } else { "modified" }.to_string(),
+                    status: if f.deleted_local {
+                        "deleted"
+                    } else {
+                        "modified"
+                    }
+                    .to_string(),
                 })
                 .collect()
         })

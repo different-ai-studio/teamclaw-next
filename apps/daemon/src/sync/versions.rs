@@ -91,7 +91,11 @@ pub fn git_list_versions(team_dir: &Path, rel_path: &str) -> Vec<VersionEntry> {
 /// `git show <ref>:<path>` — None if the file doesn't exist at that ref.
 /// `ref` accepts the reserved token "baseline" (resolved to HEAD).
 pub fn git_show(team_dir: &Path, reference: &str, rel_path: &str) -> Option<String> {
-    let r = if reference == "baseline" { "HEAD" } else { reference };
+    let r = if reference == "baseline" {
+        "HEAD"
+    } else {
+        reference
+    };
     let (ok, out) = git(&["show", &format!("{r}:{rel_path}")], team_dir);
     if ok {
         Some(out)
@@ -156,7 +160,12 @@ mod tests {
             .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .unwrap();
-        assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     fn cfg(repo: &Path) {
         run(&["config", "user.email", "t@t"], repo);
@@ -185,8 +194,14 @@ mod tests {
         assert_eq!(versions[1].message.as_deref(), Some("first"));
 
         let older = &versions[1].reference;
-        assert_eq!(git_show(repo, older, "skills/x.md").as_deref(), Some("v1\n"));
-        assert_eq!(git_show(repo, "baseline", "skills/x.md").as_deref(), Some("v2\n"));
+        assert_eq!(
+            git_show(repo, older, "skills/x.md").as_deref(),
+            Some("v1\n")
+        );
+        assert_eq!(
+            git_show(repo, "baseline", "skills/x.md").as_deref(),
+            Some("v2\n")
+        );
         assert_eq!(git_show(repo, "HEAD", "nope.md"), None);
 
         std::fs::write(repo.join("skills/x.md"), "v3-dirty\n").unwrap();
@@ -199,7 +214,9 @@ mod tests {
         std::fs::write(repo.join("skills/中文.md"), "hi\n").unwrap();
         let changed2 = git_changed(repo);
         assert!(
-            changed2.iter().any(|c| c.path == "skills/中文.md" && c.status == "added"),
+            changed2
+                .iter()
+                .any(|c| c.path == "skills/中文.md" && c.status == "added"),
             "expected untracked non-ASCII file, got {:?}",
             changed2
         );
