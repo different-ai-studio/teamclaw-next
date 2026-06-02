@@ -106,6 +106,23 @@ impl DaemonServer {
                 "resume_stored_collab_runtimes: resuming stored runtime with prior ACP session"
             );
 
+            let runtime_env = match self.assemble_spawn_runtime_env_for_worktree(
+                &stored.worktree,
+                &stored.workspace_id,
+            ) {
+                Ok(env) => env,
+                Err(e) => {
+                    warn!(
+                        runtime_id = %stored.runtime_id,
+                        worktree = %stored.worktree,
+                        error = %e,
+                        log_label,
+                        "resume_stored_collab_runtimes: assemble runtime env failed; continuing with empty env"
+                    );
+                    crate::runtime::SpawnRuntimeEnv::default()
+                }
+            };
+
             let resume_res = self
                 .agents
                 .lock()
@@ -119,6 +136,7 @@ impl DaemonServer {
                     remote_workspace_id.as_deref(),
                     Some(cloud_session_id),
                     initial_prompt,
+                    runtime_env,
                 )
                 .await;
 

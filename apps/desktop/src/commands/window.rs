@@ -163,6 +163,13 @@ pub fn register_window_workspace(
         return Err("workspace_path is empty".to_string());
     }
     bind_window_to_workspace(&registry, window.label(), &workspace_path);
+    let device_id = super::device_identity::get_device_id().unwrap_or_default();
+    if let Err(e) = super::env_vars::ensure_system_env_vars(&workspace_path, &device_id) {
+        eprintln!(
+            "[EnvVars] Warning: failed to ensure system env vars on workspace bind: {}",
+            e
+        );
+    }
     Ok(())
 }
 

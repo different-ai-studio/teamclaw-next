@@ -531,7 +531,15 @@ impl RuntimeManager {
         remote_workspace_id: Option<&str>,
         remote_session_id: Option<&str>,
         prompt: &str,
+        runtime_env: SpawnRuntimeEnv,
     ) -> crate::error::Result<String> {
+        let SpawnRuntimeEnv {
+            extra_env,
+            force_env_override,
+            opencode_json_original,
+        } = runtime_env;
+        self.register_opencode_snapshot(worktree, opencode_json_original, &extra_env);
+
         let mut handle = RuntimeHandle::new(
             agent_id.to_string(),
             agent_type,
@@ -546,8 +554,8 @@ impl RuntimeManager {
             .attach_session(
                 agent_type,
                 &launch,
-                HashMap::new(),
-                false,
+                extra_env,
+                force_env_override,
                 worktree.to_string(),
                 Some(acp_session_id.to_string()),
                 None,
