@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, Link2, Sparkles } from "lucide-react";
+import { ArrowLeft, Link2, LogIn } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -143,11 +143,11 @@ function ChooseStep({
         <div className="space-y-3">
           <ChoiceRow
             primary
-            icon={<Sparkles className="h-4 w-4" />}
-            title={t("auth.onboarding.quickTrial", "Quick trial")}
-            caption={loading ? t("auth.onboarding.startingTrial", "Preparing…") : t("auth.onboarding.quickTrialDesc", "Enter anonymously, then join a team or bind an account later.")}
+            icon={<LogIn className="h-4 w-4" />}
+            title={t("auth.onboarding.signInOrRegister", "Sign in or register")}
+            caption={t("auth.onboarding.signInOrRegisterDesc", "Continue with an email code, matching the iOS flow.")}
             disabled={loading}
-            onClick={onQuickTrial}
+            onClick={onLogin}
           />
           <ChoiceRow
             icon={<Link2 className="h-4 w-4" />}
@@ -161,10 +161,12 @@ function ChooseStep({
           <button
             type="button"
             disabled={loading}
-            onClick={onLogin}
+            onClick={onQuickTrial}
             className="rounded-[6px] px-1 py-0.5 underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {t("auth.onboarding.signInOrRegister", "Sign in or register")}
+            {loading
+              ? t("auth.onboarding.startingTrial", "Preparing…")
+              : t("auth.onboarding.quickTrial", "Quick trial")}
           </button>
           <span aria-hidden className="text-faint">·</span>
           <button
