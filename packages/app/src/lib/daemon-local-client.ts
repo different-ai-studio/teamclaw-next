@@ -109,9 +109,16 @@ export function invalidateDaemonConnection(): void {
 
 export type DaemonHttpProbe =
   | { ok: true; baseUrl: string }
-  | { ok: false; reason: 'not_tauri' | 'port_file_missing' | 'token_exchange_failed' | 'health_check_failed' | 'ipc_error' }
+  | {
+      ok: false
+      // 'port_file_missing': ~/.amuxd/amuxd.http.{port,token} absent (never started / cleaned).
+      // 'not_running': port file present but /v1/healthz unreachable (daemon down / stale files).
+      // 'token_invalid': healthz OK but the root token fails /v1/auth/exchange (stale token → restart).
+      reason: 'not_tauri' | 'port_file_missing' | 'not_running' | 'token_invalid' | 'ipc_error'
+    }
 
-/** Probe daemon HTTP and return a specific failure reason for UI messaging. */
+/** Probe daemon HTTP. Checks reachability (healthz) BEFORE auth so callers can
+ * distinguish "daemon not running" from "token invalid" — they need different recovery. */
 export async function probeDaemonHttp(): Promise<DaemonHttpProbe> {
   if (!isTauri()) return { ok: false, reason: 'not_tauri' }
 
@@ -123,28 +130,28 @@ export async function probeDaemonHttp(): Promise<DaemonHttpProbe> {
     return { ok: false, reason: 'ipc_error' }
   }
   if (!info) {
-    console.warn(
-      '[daemon-local-client] ~/.amuxd/amuxd.http.port or amuxd.http.token missing — is amuxd running with HTTP enabled?',
-    )
     return { ok: false, reason: 'port_file_missing' }
   }
 
+  // 1) Running? — unauthenticated healthz. Connection-refused / non-2xx => not running.
+  try {
+    const resp = await fetch(`${info.base_url}/v1/healthz`)
+    if (!resp.ok) {
+      console.warn('[daemon-local-client] healthz returned', resp.status)
+      return { ok: false, reason: 'not_running' }
+    }
+  } catch (err) {
+    console.warn('[daemon-local-client] healthz unreachable (daemon down?):', err)
+    return { ok: false, reason: 'not_running' }
+  }
+
+  // 2) Token valid? — exchange the root token for a scoped session token.
   invalidateDaemonConnection()
   _connection = null
   const conn = await _fetchConnection()
-  if (!conn) return { ok: false, reason: 'token_exchange_failed' }
+  if (!conn) return { ok: false, reason: 'token_invalid' }
 
-  try {
-    const resp = await fetch(`${conn.baseUrl}/v1/healthz`)
-    if (!resp.ok) {
-      console.warn('[daemon-local-client] healthz returned', resp.status)
-      return { ok: false, reason: 'health_check_failed' }
-    }
-    return { ok: true, baseUrl: conn.baseUrl }
-  } catch (err) {
-    console.warn('[daemon-local-client] healthz fetch failed:', err)
-    return { ok: false, reason: 'health_check_failed' }
-  }
+  return { ok: true, baseUrl: conn.baseUrl }
 }
 
 /** True when the local daemon HTTP server responds to `/v1/healthz`. */

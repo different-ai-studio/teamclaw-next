@@ -2,8 +2,15 @@ import { create } from 'zustand'
 import { isTauri } from '@/lib/utils'
 import { getBackend } from '@/lib/backend'
 import { useCurrentTeamStore } from '@/stores/current-team'
+import { probeDaemonHttp, invalidateDaemonConnection } from '@/lib/daemon-local-client'
 
-export type OnboardingStatus = 'unknown' | 'needs-onboard' | 'mismatch' | 'ready'
+// 'unknown'        — no current team yet (don't block)
+// 'needs-onboard'  — daemon not bound to any team -> interactive wizard
+// 'mismatch'       — daemon bound to a different team -> force reset wizard
+// 'starting'       — onboarded to this team but daemon down/token-stale -> auto-recovering
+// 'ready'          — onboarded to this team, running, token valid
+// 'error'          — auto-recovery failed -> show retry
+export type OnboardingStatus = 'unknown' | 'needs-onboard' | 'mismatch' | 'starting' | 'ready' | 'error'
 export type Visibility = 'team' | 'personal'
 
 export type OwnedAgent = { agentId: string; displayName: string; visibility: string }
@@ -56,6 +63,32 @@ async function onboard(teamId: string, displayName: string, targetActorId: strin
   return result.actorId
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** The daemon is onboarded to the current team — ensure it's actually running with a
+ * valid token. Auto-recover (start/restart) and poll until healthy. Returns true if ready. */
+async function ensureHealthy(): Promise<boolean> {
+  let probe = await probeDaemonHttp()
+  if (probe.ok) return true
+  // not_running / port_file_missing / token_invalid all recover the same way:
+  // (re)register + (re)start the service (install-service kickstarts an already-loaded
+  // job, so a stale token gets rewritten). Then poll — the daemon needs a moment to
+  // bind its port and write fresh ~/.amuxd/amuxd.http.{port,token}.
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    await invoke('daemon_install_service')
+  } catch {
+    /* fall through to polling; surfacing the probe failure is more useful */
+  }
+  for (let i = 0; i < 12; i++) {
+    await sleep(500)
+    invalidateDaemonConnection()
+    probe = await probeDaemonHttp()
+    if (probe.ok) return true
+  }
+  return false
+}
+
 export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get) => ({
   status: 'unknown',
   loaded: false,
@@ -70,7 +103,25 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
     }
     const currentTeamId = useCurrentTeamStore.getState().team?.id ?? null
     const dTeam = await daemonTeamId()
-    set({ status: computeOnboardingStatus(dTeam, currentTeamId), loaded: true })
+    const base = computeOnboardingStatus(dTeam, currentTeamId)
+    if (base !== 'ready') {
+      // unknown / needs-onboard / mismatch — team-level, handled by the wizard.
+      set({ status: base, loaded: true })
+      return
+    }
+    // Onboarded to the current team: also verify running + token valid, auto-recover.
+    const first = await probeDaemonHttp()
+    if (first.ok) {
+      set({ status: 'ready', loaded: true })
+      return
+    }
+    set({ status: 'starting', loaded: true, error: null })
+    const ok = await ensureHealthy()
+    set({
+      status: ok ? 'ready' : 'error',
+      loaded: true,
+      error: ok ? null : 'amuxd 启动失败：请确认本机 amuxd 可运行后重试。',
+    })
   },
 
   loadOwnedAgents: async () => {

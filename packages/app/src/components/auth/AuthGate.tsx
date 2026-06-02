@@ -167,13 +167,20 @@ export function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  // Daemon team onboarding: after login + workspace bootstrap, ensure the local
-  // daemon is bound to the current team (new agent / bind existing / force-reset).
+  // Daemon readiness gate: after login + workspace bootstrap, ensure the local
+  // daemon is bound to the current team AND running with a valid token. Interactive
+  // states (needs-onboard / mismatch) prompt the user; transient states (starting /
+  // error) auto-recover or offer retry. 'ready'/'unknown' fall through.
   if (isTauri() && !daemonOnboardingAck) {
     if (!daemonLoaded) {
       return <div className="flex h-screen items-center justify-center bg-background" />;
     }
-    if (daemonStatus === 'needs-onboard' || daemonStatus === 'mismatch') {
+    if (
+      daemonStatus === 'needs-onboard' ||
+      daemonStatus === 'mismatch' ||
+      daemonStatus === 'starting' ||
+      daemonStatus === 'error'
+    ) {
       return <DaemonOnboardingWizard onDone={() => setDaemonOnboardingAck(true)} />;
     }
   }

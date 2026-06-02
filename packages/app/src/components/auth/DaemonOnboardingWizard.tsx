@@ -70,7 +70,34 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
     if (mode === 'bind') void loadOwnedAgents()
   }, [mode, loadOwnedAgents])
 
-  // Loading / transitional states.
+  // Auto-recovery in progress (onboarded but daemon was down / token stale).
+  if (status === 'starting') {
+    return (
+      <Shell title="正在启动 daemon…" subtitle="本机 agent 已绑定,正在确保后台服务运行。">
+        <div className="flex items-center gap-2 py-2 text-[12.5px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> 启动中,请稍候…
+        </div>
+      </Shell>
+    )
+  }
+
+  // Auto-recovery failed.
+  if (status === 'error') {
+    return (
+      <Shell title="无法启动本机 daemon" subtitle="本机 agent 已绑定,但后台服务未能启动。">
+        {error && <ErrorLine error={error} />}
+        <Button
+          className="mt-1 h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
+          disabled={busy}
+          onClick={() => void refresh()}
+        >
+          {busy ? <Spinner label="重试中…" /> : '重试'}
+        </Button>
+      </Shell>
+    )
+  }
+
+  // Other transitional states (unknown / ready-before-onDone).
   if (status !== 'needs-onboard' && status !== 'mismatch') {
     return (
       <Shell>
