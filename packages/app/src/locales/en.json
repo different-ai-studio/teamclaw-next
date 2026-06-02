@@ -2106,6 +2106,7 @@
     },
     "envVars": {
       "title": "Environment Variables",
+      "loadFailed": "Failed to load environment variables",
       "sectionDescription": "Securely store API keys, passwords, and other secrets in your system keychain",
       "count": "{{count}} variable(s) stored",
       "add": "Add Variable",

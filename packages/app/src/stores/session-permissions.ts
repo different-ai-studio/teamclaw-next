@@ -16,7 +16,6 @@ import type { PermissionAskedEvent } from "./session-types";
 import { useWorkspaceStore } from "@/stores/workspace";
 import type {
   PendingPermissionEntry,
-  Session,
   ToolCallPermission,
   SessionState,
 } from "./session-types";
@@ -164,23 +163,6 @@ export function createPermissionActions(set: SessionSet, get: SessionGet) {
     childSessionId: string | null;
     ownerSessionId: string | null;
   };
-  type SessionLookupInfo = Pick<Session, "id" | "parentID"> & {
-    time?: { archived?: number | null };
-  };
-
-  const isArchivedSession = (session: SessionLookupInfo | null | undefined) =>
-    session?.time?.archived != null;
-
-  const appendLookupSession = (
-    sessions: Pick<Session, "id" | "parentID">[],
-    session: SessionLookupInfo | null | undefined,
-  ) => {
-    if (!session?.id || sessions.some((item) => item.id === session.id)) {
-      return sessions;
-    }
-    return [...sessions, { id: session.id, parentID: session.parentID }];
-  };
-
   const classifyPermissionSession = (sessionId: string | undefined | null) => {
     const { activeSessionId, sessions } = get();
     if (!sessionId || sessionId === activeSessionId) {

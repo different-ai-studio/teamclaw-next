@@ -26,19 +26,19 @@ describe('NavRail', () => {
   it('clicking Sessions sets filter to { kind: "all" }', () => {
     useUIStore.setState({ sidebarFilter: { kind: 'pinned' } })
     render(<NavRail />)
-    fireEvent.click(screen.getByRole('button', { name: /Sessions/i }))
+    fireEvent.click(screen.getByRole('button', { name: /会话/ }))
     expect(useUIStore.getState().sidebarFilter).toEqual({ kind: 'all' })
   })
 
   it('clicking Pinned sets filter to { kind: "pinned" }', () => {
     render(<NavRail />)
-    fireEvent.click(screen.getByRole('button', { name: /Pinned/i }))
+    fireEvent.click(screen.getByRole('button', { name: /已置顶/ }))
     expect(useUIStore.getState().sidebarFilter).toEqual({ kind: 'pinned' })
   })
 
   it('clicking Shortcuts sets filter to { kind: "shortcuts" }', () => {
     render(<NavRail />)
-    fireEvent.click(screen.getByRole('button', { name: /Shortcuts/i }))
+    fireEvent.click(screen.getByRole('button', { name: /快捷方式/ }))
     expect(useUIStore.getState().sidebarFilter).toEqual({ kind: 'shortcuts' })
   })
 

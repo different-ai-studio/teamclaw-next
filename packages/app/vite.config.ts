@@ -125,6 +125,11 @@ export default defineConfig({
       // Stub Supabase env vars so supabase-client.ts doesn't throw during test module evaluation
       VITE_SUPABASE_URL: 'https://test.supabase.co',
       VITE_SUPABASE_ANON_KEY: 'test-anon-key',
+      // Match the production default locale (buildConfig.defaults.locale). The
+      // `define` injection of import.meta.env.VITE_LOCALE does not apply under
+      // vitest, so without this the i18n singleton falls back to English and
+      // every test asserting the Chinese-first UI copy fails.
+      VITE_LOCALE: 'zh-CN',
     },
   },
   build: {

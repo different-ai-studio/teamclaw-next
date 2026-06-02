@@ -74,8 +74,8 @@ export function SidebarCollapseToggle({ className }: { className?: string }) {
       size="icon"
       className={cn("h-7 w-7 text-muted-foreground hover:text-foreground", className)}
       onClick={toggleSidebar}
-      title={t("navigation.collapseSidebar")}
-      aria-label={t("navigation.collapseSidebar")}
+      title={t("navigation.collapseSidebar", "Collapse sidebar")}
+      aria-label={t("navigation.collapseSidebar", "Collapse sidebar")}
     >
       <PanelLeftIcon className="h-4 w-4" />
     </Button>

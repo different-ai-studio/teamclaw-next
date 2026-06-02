@@ -297,7 +297,7 @@ export function createMessageActions(set: SessionSet, get: SessionGet) {
     sendMessage: async (content: string, _agent?: string, imageParts?: SendMessageFilePart[]) => {
       if (!content.trim() && (!imageParts || imageParts.length === 0)) return;
 
-      let activeSessionId = await ensureDaemonSessionForSend(content);
+      const activeSessionId = await ensureDaemonSessionForSend(content);
       if (!activeSessionId) {
         console.error("[Session] No active session and could not create Cloud session");
         return;
