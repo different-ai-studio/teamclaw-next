@@ -300,6 +300,48 @@ test("claimInvite agent with targetActorId: rebinds existing agent, no new agent
   assert.equal(after.ownerMemberId, inviterActorId, "ownerMemberId unchanged");
 });
 
+test("claimInvite agent with targetActorId: rotates actor.userId off the old daemon user", async () => {
+  const { repo, db } = await setup();
+  const { teamId, inviterActorId } = await createTeamAndInviter(db);
+  const { agents: agentsTable } = await import("../src/db/schema/index.js");
+
+  // Existing agent already bound to a (stale) daemon user — exercises the
+  // old-user cleanup branch in the rebind path.
+  const oldUserId = `old-daemon-${randomBytes(4).toString("hex")}`;
+  const [agActor] = await db.insert(actors).values({
+    teamId,
+    actorType: "agent",
+    displayName: "Bound Agent",
+    userId: oldUserId,
+  }).returning();
+  await db.insert(agentsTable).values({
+    id: agActor.id,
+    agentKind: "claude",
+    status: "active",
+    visibility: "team",
+    ownerMemberId: inviterActorId,
+  });
+
+  const token = randomBytes(24).toString("base64url");
+  await db.insert(teamInvites).values({
+    teamId,
+    token,
+    kind: "agent",
+    agentKind: "claude",
+    displayName: "Bound Agent",
+    invitedByActorId: inviterActorId,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    targetActorId: agActor.id,
+  });
+
+  const result = await repo.claimInvite(token, {});
+  assert.equal(result.actorId, agActor.id, "rebinds the existing agent actor");
+
+  const [after] = await db.select().from(actors).where(eq(actors.id, agActor.id)).limit(1);
+  assert.ok(after.userId, "actor has a userId after rebind");
+  assert.notEqual(after.userId, oldUserId, "actor.userId rotated off the old daemon user");
+});
+
 test("claimInvite: expired invite throws not_found/expired", async () => {
   const { repo, db } = await setup();
   const { teamId, inviterActorId } = await createTeamAndInviter(db);

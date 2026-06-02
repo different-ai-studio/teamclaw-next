@@ -356,13 +356,16 @@ export function createPgAuthRepository(
           } catch { /* best-effort */ }
         }
 
+        let oldDaemonUserId: string | null = null;
+        let result!: { actorId: string; teamId: string; actorType: "agent"; displayName: string; refreshToken: string | null };
         try {
-          return await (db as any).transaction(async (tx: any) => {
+          result = await (db as any).transaction(async (tx: any) => {
           let actorId: string;
 
           if (invite.targetActorId) {
             // Rebind path: reuse the existing actor + agent rows, just update them.
             const [old] = await tx.select({ userId: actors.userId }).from(actors).where(eq(actors.id, invite.targetActorId)).limit(1);
+            oldDaemonUserId = old?.userId ?? null;
 
             await (tx.update(actors) as any)
               .set({ userId: daemonUser.id, invitedByActorId: invite.invitedByActorId, lastActiveAt: null, updatedAt: new Date() })
@@ -377,16 +380,6 @@ export function createPgAuthRepository(
               .onConflictDoUpdate({ target: [agentMemberAccess.agentId, agentMemberAccess.memberId], set: { permissionLevel: "admin" } });
 
             actorId = invite.targetActorId;
-
-            // Best-effort: clean up old BA user if it was a different daemon user
-            if (old?.userId && old.userId !== daemonUser.id) {
-              try { await ctx2.internalAdapter.deleteSessions(old.userId); } catch { /* ignore */ }
-              try {
-                if (typeof ctx2.internalAdapter.deleteUser === "function") {
-                  await ctx2.internalAdapter.deleteUser(old.userId);
-                }
-              } catch { /* ignore */ }
-            }
           } else {
             // New agent path: insert actor + agents row
             const [actor] = await tx.insert(actors).values({
@@ -432,6 +425,20 @@ export function createPgAuthRepository(
           await compensate();
           throw txErr;
         }
+
+        // Best-effort cleanup of the previous daemon user the agent was bound to.
+        // Done AFTER commit and OUTSIDE the drizzle tx: pglite is single-connection, so a
+        // Better-Auth adapter query issued inside the open tx would deadlock. Idempotent.
+        if (oldDaemonUserId && oldDaemonUserId !== daemonUser.id) {
+          try { await ctx2.internalAdapter.deleteSessions(oldDaemonUserId); } catch { /* ignore */ }
+          try {
+            if (typeof ctx2.internalAdapter.deleteUser === "function") {
+              await ctx2.internalAdapter.deleteUser(oldDaemonUserId);
+            }
+          } catch { /* ignore */ }
+        }
+
+        return result;
       }
 
       throw new ApiError(400, "bad_request", `unsupported invite kind: ${kind}`);
