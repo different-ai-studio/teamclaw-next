@@ -8,6 +8,8 @@ import { generateRandomTeamName } from "@/lib/random-team-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
 import { LoginScreen } from "./LoginScreen";
 import { LobsterLoader } from "./LobsterLoader";
+import { SetupWizard } from "@/components/auth/SetupWizard";
+import { useSetupStore } from "@/stores/setup";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -21,6 +23,15 @@ export function AuthGate({ children }: AuthGateProps) {
   const [bootstrap, setBootstrap] = useState<BootstrapState>("idle");
   const [authHydrated, setAuthHydrated] = useState(false);
   const bootstrappedUserId = useRef<string | null>(null);
+
+  const setupLoaded = useSetupStore((s) => s.loaded);
+  const setupRequiredSatisfied = useSetupStore((s) => s.requiredSatisfied());
+  const listSetup = useSetupStore((s) => s.listRequirements);
+  const [setupAck, setSetupAck] = useState(false);
+
+  useEffect(() => {
+    if (isTauri()) void listSetup();
+  }, [listSetup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +108,16 @@ export function AuthGate({ children }: AuthGateProps) {
       }
     })();
   }, [loading, session]);
+
+  // First-run: in Tauri, ensure local prerequisites (amuxd/opencode) before auth.
+  if (isTauri() && !setupAck) {
+    if (!setupLoaded) {
+      return <div className="flex h-screen items-center justify-center bg-background" />;
+    }
+    if (!setupRequiredSatisfied) {
+      return <SetupWizard onDone={() => setSetupAck(true)} />;
+    }
+  }
 
   if (isTauri() && loading && authFlow === "invite") {
     return <DesktopOnboarding />;

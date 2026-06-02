@@ -50,6 +50,17 @@ vi.mock("@/lib/random-team-name", () => ({
   generateRandomTeamName: () => "Trial Team",
 }));
 
+vi.mock("@/stores/setup", () => ({
+  useSetupStore: (selector: (s: { loaded: boolean; requiredSatisfied: () => boolean; listRequirements: () => void }) => unknown) =>
+    selector({ loaded: true, requiredSatisfied: () => true, listRequirements: () => {} }),
+}));
+
+vi.mock("../SetupWizard", () => ({
+  SetupWizard: ({ onDone }: { onDone: () => void }) => (
+    <button onClick={onDone}>Setup wizard</button>
+  ),
+}));
+
 vi.mock("../DesktopOnboarding", () => ({
   DesktopOnboarding: () => <div>Desktop onboarding</div>,
 }));
