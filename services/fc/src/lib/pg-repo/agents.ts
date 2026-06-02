@@ -15,6 +15,7 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 import { actors, agents, agentMemberAccess } from "../../db/schema/index.js";
 import {
   resolveActorForAgent,
+  resolveActorForTeam,
   checkAgentOwnership,
   checkAgentPermission as authzCheckAgentPermission,
 } from "./authz.js";
@@ -64,7 +65,7 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
         .innerJoin(agents, eq(agents.id, actors.id))
         .where(eq(actors.teamId, teamId));
 
-      const callerActorId = ctx.callerActorId;
+      const callerActorId = ctx.callerActorId ?? (ctx.userId ? await resolveActorForTeam(db, ctx.userId, teamId) ?? undefined : undefined);
       const items = rows
         .filter(
           (r) =>

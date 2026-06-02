@@ -471,3 +471,22 @@ test("updateAgentDefaults: non-owner → 403", async () => {
     (err: any) => err.statusCode === 403,
   );
 });
+
+test("listConnectedAgents marks owner and shows owner's personal agent", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const ownerUser = crypto.randomUUID();
+  const owner = await seedMemberActor(db, team.id, { userId: ownerUser });
+  // Change member role to owner
+  const { teamMembers: tmTable } = await import("../src/db/schema/index.js");
+  const { eq: eqImport } = await import("drizzle-orm");
+  await db.update(tmTable).set({ role: "owner" }).where(eqImport(tmTable.memberId, owner.id));
+
+  const agentActor = await seedAgentActor(db, team.id, owner.id, "personal");
+
+  const repo = createPgBusinessRepository({ db, userId: ownerUser });
+  const result = await repo.listConnectedAgents(team.id);
+  const found = result.items.find((a: any) => a.id === agentActor.id);
+  assert.ok(found, "owner can see their own personal agent");
+  assert.equal(found.isOwner, true, "isOwner is true for the owner");
+});

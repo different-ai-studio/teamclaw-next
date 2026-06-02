@@ -19,6 +19,7 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { actors, members, teamMembers, actorDirectory } from "../../db/schema/index.js";
+import { resolveActorForTeam } from "./authz.js";
 import { ApiError } from "../http-utils.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
@@ -126,7 +127,8 @@ export function makeActorsRepo(db: DbLike, ctx: ActorsCtx = {}) {
      * agent-visibility filter applied at query time.
      */
     async listTeamActors(teamId: string, { kind = null, limit = 200 }: { kind?: string | null; limit?: number } = {}) {
-      const visFilter = visibilityFilter(ctx.callerActorId);
+      const callerActorId = ctx.callerActorId ?? (ctx.userId ? await resolveActorForTeam(db, ctx.userId, teamId) ?? undefined : undefined);
+      const visFilter = visibilityFilter(callerActorId);
       const conditions = [
         eq(actorDirectory.teamId, teamId),
         visFilter!,
@@ -151,7 +153,8 @@ export function makeActorsRepo(db: DbLike, ctx: ActorsCtx = {}) {
      * agent-visibility filter applied at query time.
      */
     async getTeamDirectory(teamId: string) {
-      const visFilter = visibilityFilter(ctx.callerActorId);
+      const callerActorId = ctx.callerActorId ?? (ctx.userId ? await resolveActorForTeam(db, ctx.userId, teamId) ?? undefined : undefined);
+      const visFilter = visibilityFilter(callerActorId);
       const rows = await db
         .select()
         .from(actorDirectory)
