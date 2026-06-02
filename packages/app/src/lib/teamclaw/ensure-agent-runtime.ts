@@ -1,4 +1,5 @@
 import { getBackend } from "@/lib/backend";
+import i18n from "@/lib/i18n";
 import { ensureSessionLiveSubscribed, ensureTeamSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import { startAgentRuntimesAsync, type RuntimeStartFailure } from "@/lib/session-create";
 import { waitForTeamclawRpcReady } from "@/lib/teamclaw-rpc";
@@ -83,11 +84,11 @@ function notifyRuntimeStartFailures(failures: RuntimeStartFailure[]): void {
   void import("sonner").then(({ toast }) => {
     for (const failure of failures) {
       const shortId = failure.agentActorId.slice(0, 8);
-      toast.error("Agent runtime 未启动", {
+      toast.error(i18n.t("daemon.agentRuntime.notStartedTitle"), {
         id: `runtime-start-failed-${failure.agentActorId}`,
         description:
           failure.reason.trim() ||
-          `Agent ${shortId} 的 daemon 未响应 runtimeStart（可能未在线或未加入团队）。`,
+          i18n.t("daemon.agentRuntime.notStartedDesc", { shortId }),
         duration: 8000,
       });
       logDebug(
@@ -151,8 +152,8 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
     if (!rpcReady) {
       logDebug("client:rpc_not_ready", { waitedMs: 20_000 }, { sessionId: args.sessionId });
       void import("sonner").then(({ toast }) => {
-        toast.error("MQTT/RPC 未就绪", {
-          description: "无法向 daemon 发送 runtimeStart。请检查 MQTT 连接与团队登录状态。",
+        toast.error(i18n.t("daemon.agentRuntime.rpcNotReadyTitle"), {
+          description: i18n.t("daemon.agentRuntime.rpcNotReadyDesc"),
         });
       });
       return;
@@ -252,7 +253,7 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
     sessionFlowError("ensure_agent_runtime.failed", error, args);
     logDebug("client:ensure_runtime_failed", { error: String(error) }, { sessionId: args.sessionId });
     void import("sonner").then(({ toast }) => {
-      toast.error("启动 Agent runtime 失败", {
+      toast.error(i18n.t("daemon.agentRuntime.startFailedTitle"), {
         description: error instanceof Error ? error.message : String(error),
       });
     });

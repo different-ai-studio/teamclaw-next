@@ -11,6 +11,7 @@
  *  - Telemetry consent dialog
  */
 import { useEffect, useRef, useState, useCallback } from "react";
+import i18n from "@/lib/i18n";
 import { isTauri } from "@/lib/utils";
 import { useTabsStore } from "@/stores/tabs";
 import { urlToLabel } from "@/lib/webview-utils";
@@ -159,12 +160,12 @@ export function useWorkspaceInit() {
         setOpenCodeReady(false);
         const message =
           probe.reason === "port_file_missing"
-            ? "amuxd daemon 未连接：HTTP 控制面未就绪（~/.amuxd/amuxd.http.port 不存在）。请重启 amuxd，或确认运行的是本分支构建的版本。"
+            ? i18n.t("daemon.connection.portFileMissing")
             : probe.reason === "token_exchange_failed"
-              ? "amuxd daemon HTTP 已启动但鉴权失败：请重启 amuxd 后重试。"
+              ? i18n.t("daemon.connection.tokenExchangeFailed")
               : probe.reason === "health_check_failed"
-                ? "amuxd daemon HTTP 无响应：请确认 amuxd 进程仍在运行。"
-                : "amuxd daemon 未连接：请确认 amuxd 已启动且 HTTP 控制面可用";
+                ? i18n.t("daemon.connection.healthCheckFailed")
+                : i18n.t("daemon.connection.notConnected");
         setOpenCodeError(message);
       }
     })();
@@ -439,7 +440,9 @@ export function useGitReposInit() {
                       );
                       const { toast } = await import("sonner");
                       toast.warning(
-                        `检测到 ${r.newFiles?.length ?? 0} 个较大的新文件待同步，请在设置 → 团队中确认`,
+                        i18n.t("daemon.connection.largeFilesPending", {
+                          count: r.newFiles?.length ?? 0,
+                        }),
                       );
                       return;
                     }

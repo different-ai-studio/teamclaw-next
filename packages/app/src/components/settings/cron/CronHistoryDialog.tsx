@@ -4,6 +4,7 @@
  */
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import i18n from '@/lib/i18n'
 import {
   Clock,
   AlertCircle,
@@ -44,7 +45,9 @@ export async function ensureCronSessionVisible(sessionId: string): Promise<void>
   // Fetch session's team from cloud (always do this to verify access)
   const teamId = await getBackend().sessions.getSessionTeamId(sessionId)
   if (!teamId) {
-    throw new Error(`对话不存在或无访问权限 (sessionId: ${sessionId.slice(0, 8)}...)`)
+    throw new Error(
+      i18n.t('settings.cron.sessionNotFound', { id: sessionId.slice(0, 8) }),
+    )
   }
 
   // Switch teams if needed

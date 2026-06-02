@@ -4,6 +4,7 @@ import type { SkillWithSource, SkillSource } from './types'
 import { INHERENT_SKILL_NAMES, shouldIncludeDesktopControlSkill } from './types'
 import type { ClawHubLockfile } from '@/lib/clawhub/types'
 import { buildConfig } from '@/lib/build-config'
+import i18n from '@/lib/i18n'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -374,7 +375,7 @@ export function getSourceLabel(source: SkillSource): string {
     case 'team':
       return 'Team'
     case 'builtin':
-      return '内置'
+      return i18n.t('skills.builtinLabel')
     case 'plugin':
       return 'Plugin'
     case 'personal':
@@ -404,7 +405,7 @@ export function getSourceDirHint(source: SkillSource): string {
     case 'team':
       return 'teamclaw.json → skills.paths'
     case 'builtin':
-      return `.teamclaw/skills/ (${buildConfig.app.name} 内置)`
+      return i18n.t('skills.builtinPath', { app: buildConfig.app.name })
     case 'plugin':
       return 'teamclaw.json → plugin'
     case 'personal':

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 
 import {
@@ -33,6 +34,7 @@ export function EnableShareWizard({
   workspacePath,
   onSuccess,
 }: Props) {
+  const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('oss')
   const [remoteUrl, setRemoteUrl] = useState('')
   const [authKind, setAuthKind] = useState<AuthKind>('ssh_key')
@@ -95,44 +97,46 @@ export function EnableShareWizard({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>开通团队共享</DialogTitle>
+          <DialogTitle>{t('settings.teamShare.enableTitle')}</DialogTitle>
           <DialogDescription>
-            选择团队共享模式。开通后不可切换，请谨慎选择。
+            {t('settings.teamShare.enableDescription')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <fieldset className="space-y-2">
             <legend className="text-[12.5px] font-medium text-foreground">
-              共享模式
+              {t('settings.teamShare.shareModeLegend')}
             </legend>
             <ModeRadio
               value="oss"
               checked={mode === 'oss'}
               onChange={() => setMode('oss')}
               label="OSS"
-              desc="使用阿里云 OSS 作为共享后端（默认）"
+              desc={t('settings.teamShare.modeOssDesc')}
             />
             <ModeRadio
               value="managed_git"
               checked={mode === 'managed_git'}
               onChange={() => setMode('managed_git')}
-              label="托管 Git"
-              desc="使用 TeamClaw 托管的 Git 仓库"
+              label={t('settings.teamShare.modeManagedGitLabel')}
+              desc={t('settings.teamShare.modeManagedGitDesc')}
             />
             <ModeRadio
               value="custom_git"
               checked={mode === 'custom_git'}
               onChange={() => setMode('custom_git')}
-              label="自建 Git"
-              desc="使用你自己的 Git 仓库（GitHub / GitLab / 自建）"
+              label={t('settings.teamShare.modeCustomGitLabel')}
+              desc={t('settings.teamShare.modeCustomGitDesc')}
             />
           </fieldset>
 
           {mode === 'custom_git' && (
             <div className="space-y-3 rounded-md border border-border-soft bg-surface p-3">
               <div className="space-y-1.5">
-                <Label htmlFor="share-remote-url">仓库 URL</Label>
+                <Label htmlFor="share-remote-url">
+                  {t('settings.teamShare.remoteUrlLabel')}
+                </Label>
                 <Input
                   id="share-remote-url"
                   placeholder="git@github.com:org/repo.git"
@@ -142,29 +146,35 @@ export function EnableShareWizard({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="share-auth-kind">认证方式</Label>
+                <Label htmlFor="share-auth-kind">
+                  {t('settings.teamShare.authKindLabel')}
+                </Label>
                 <select
                   id="share-auth-kind"
                   className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-[13px]"
                   value={authKind}
                   onChange={(e) => setAuthKind(e.target.value as AuthKind)}
                 >
-                  <option value="ssh_key">SSH 私钥</option>
+                  <option value="ssh_key">
+                    {t('settings.teamShare.sshPrivateKey')}
+                  </option>
                   <option value="https_token">HTTPS Token</option>
                 </select>
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="share-credential">
-                  {authKind === 'ssh_key' ? 'SSH 私钥' : 'HTTPS Token'}
+                  {authKind === 'ssh_key'
+                    ? t('settings.teamShare.sshPrivateKey')
+                    : 'HTTPS Token'}
                 </Label>
                 <textarea
                   id="share-credential"
                   className="min-h-[80px] w-full rounded-md border border-input bg-transparent p-2 font-mono text-[12px]"
                   placeholder={
                     authKind === 'ssh_key'
-                      ? '粘贴完整的 OpenSSH 私钥（-----BEGIN ... -----END）'
-                      : '粘贴具有 repo 权限的 Personal Access Token'
+                      ? t('settings.teamShare.sshKeyPlaceholder')
+                      : t('settings.teamShare.tokenPlaceholder')
                   }
                   value={credential}
                   onChange={(e) => setCredential(e.target.value)}
@@ -172,7 +182,9 @@ export function EnableShareWizard({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="share-branch">分支（可选，默认 main）</Label>
+                <Label htmlFor="share-branch">
+                  {t('settings.teamShare.branchLabel')}
+                </Label>
                 <Input
                   id="share-branch"
                   placeholder="main"
@@ -184,7 +196,7 @@ export function EnableShareWizard({
           )}
 
           <p className="text-[12px] text-amber-600">
-            ⚠️ 开通后不可切换。
+            {t('settings.teamShare.lockWarning')}
           </p>
 
           {error && <p className="text-[12px] text-red-500">{error}</p>}
@@ -196,11 +208,11 @@ export function EnableShareWizard({
             onClick={() => onOpenChange(false)}
             disabled={submitting}
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
             {submitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            确认开通
+            {t('settings.teamShare.confirmEnable')}
           </Button>
         </DialogFooter>
       </DialogContent>

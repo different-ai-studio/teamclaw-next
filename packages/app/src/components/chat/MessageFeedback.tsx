@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { ThumbsUp, ThumbsDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTelemetryStore } from '@/stores/telemetry'
@@ -10,6 +11,7 @@ interface MessageFeedbackProps {
 }
 
 export function MessageFeedback({ sessionId, messageId }: MessageFeedbackProps) {
+  const { t } = useTranslation()
   const setFeedback = useTelemetryStore((s) => s.setFeedback)
   const removeFeedback = useTelemetryStore((s) => s.removeFeedback)
   const feedbackCache = useTelemetryStore((s) => s.feedbackCache)
@@ -47,7 +49,7 @@ export function MessageFeedback({ sessionId, messageId }: MessageFeedbackProps) 
             ? 'text-green-500'
             : 'text-muted-foreground/50 hover:text-green-500/70',
         )}
-        title="Good response"
+        title={t('chat.feedback.goodResponse')}
       >
         <ThumbsUp className="h-3.5 w-3.5" />
       </button>
@@ -59,7 +61,7 @@ export function MessageFeedback({ sessionId, messageId }: MessageFeedbackProps) 
             ? 'text-red-500'
             : 'text-muted-foreground/50 hover:text-red-500/70',
         )}
-        title="Poor response"
+        title={t('chat.feedback.poorResponse')}
       >
         <ThumbsDown className="h-3.5 w-3.5" />
       </button>

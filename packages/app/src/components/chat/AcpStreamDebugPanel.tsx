@@ -1,9 +1,11 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Copy, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isAcpDebugPanelVisible, useAcpDebugStore } from "@/stores/acp-debug-store";
 
 export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null }) {
+  const { t } = useTranslation();
   const enabled = useAcpDebugStore((s) => s.enabled);
   const allLines = useAcpDebugStore((s) => s.lines);
   const clear = useAcpDebugStore((s) => s.clear);
@@ -43,18 +45,20 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
     >
       <div className="flex items-center gap-2 px-3 py-1.5">
         <span className="text-[10.5px] font-semibold uppercase tracking-wide text-faint">
-          ACP 流调试
+          {t("chat.acpDebug.title", "ACP 流调试")}
         </span>
         <span className="font-mono text-[10px] text-muted-foreground">
-          {lines.length} 条
-          {sessionId ? " · 当前会话" : " · 全部"}
+          {t("chat.acpDebug.lineCount", "{{count}} 条", { count: lines.length })}
+          {sessionId
+            ? ` · ${t("chat.acpDebug.scopeCurrentSession", "当前会话")}`
+            : ` · ${t("chat.acpDebug.scopeAll", "全部")}`}
         </span>
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
             onClick={() => void copyAll()}
             className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-selected hover:text-foreground"
-            title="复制"
+            title={t("chat.acpDebug.copy", "复制")}
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
@@ -62,7 +66,7 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
             type="button"
             onClick={clear}
             className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-selected hover:text-foreground"
-            title="清空"
+            title={t("chat.acpDebug.clear", "清空")}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -84,7 +88,9 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
           )}
         >
           {lines.length === 0 ? (
-            <p className="py-2 text-muted-foreground">等待 acp.event …</p>
+            <p className="py-2 text-muted-foreground">
+              {t("chat.acpDebug.waiting", "等待 {{token}} …", { token: "acp.event" })}
+            </p>
           ) : (
             lines.map((line) => (
               <pre

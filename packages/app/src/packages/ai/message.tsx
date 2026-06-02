@@ -1,9 +1,11 @@
 import * as React from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { useTranslation } from "react-i18next"
 import { readFile } from "@tauri-apps/plugin-fs"
 import { Download, X, Copy, Check, Maximize2 } from "lucide-react"
 
+import i18n from "@/lib/i18n"
 import { cn, isTauri } from "@/lib/utils"
 import {
   Dialog,
@@ -32,7 +34,7 @@ async function downloadImage(dataUrl: string, filename: string) {
       const filterName = ext.toUpperCase() + " Image"
       const downloads = await downloadDir()
       const dest = await save({
-        title: "保存图片",
+        title: i18n.t("chat.imageViewer.saveImage", "保存图片"),
         defaultPath: `${downloads}/${filename}`,
         filters: [{ name: filterName, extensions: [ext] }],
       })
@@ -318,6 +320,7 @@ function PreviewCanvas({
 
 // Component to load and display local image files with click-to-enlarge
 export function LocalImage({ src, alt, className, onError: onErrorCallback, onLoad: onLoadCallback }: { src: string; alt?: string; className?: string; onError?: () => void; onLoad?: () => void }) {
+  const { t } = useTranslation()
   const [dataUrl, setDataUrl] = React.useState<string | null>(null)
   const [error, setError] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
@@ -377,16 +380,16 @@ export function LocalImage({ src, alt, className, onError: onErrorCallback, onLo
         alt={alt || 'Image'} 
         className={cn(className, "cursor-pointer hover:opacity-90 transition-opacity")}
         onClick={() => setIsOpen(true)}
-        title="点击查看大图"
+        title={t("chat.imageViewer.clickToEnlarge", "点击查看大图")}
       />
-      
+
       {/* Image preview dialog */}
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent 
+        <DialogContent
           className="!max-w-[95vw] max-h-[95vh] w-auto h-auto p-0 overflow-hidden bg-transparent border-0 shadow-none rounded-none gap-0"
           showCloseButton={false}
         >
-          <DialogTitle className="sr-only">{alt || '图片预览'}</DialogTitle>
+          <DialogTitle className="sr-only">{alt || t("chat.imageViewer.imagePreview", "图片预览")}</DialogTitle>
           <div className="absolute right-2 top-2 z-50 flex items-center gap-1.5">
             <button
               onClick={() => {
@@ -394,7 +397,7 @@ export function LocalImage({ src, alt, className, onError: onErrorCallback, onLo
                 downloadImage(dataUrl, filename)
               }}
               className="rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
-              title="下载图片"
+              title={t("chat.imageViewer.downloadImage", "下载图片")}
             >
               <Download className="h-4 w-4" />
             </button>
@@ -529,6 +532,7 @@ function getFileIconName(filename: string): string {
 
 // Clickable image component with preview dialog (for already loaded images like base64)
 export function ClickableImage({ src, alt, className }: { src: string; alt?: string; className?: string }) {
+  const { t } = useTranslation()
   const [isOpen, setIsOpen] = React.useState(false)
 
   return (
@@ -538,15 +542,15 @@ export function ClickableImage({ src, alt, className }: { src: string; alt?: str
         alt={alt || 'Image'} 
         className={cn(className, "cursor-pointer hover:opacity-90 transition-opacity")}
         onClick={() => setIsOpen(true)}
-        title="点击查看大图"
+        title={t("chat.imageViewer.clickToEnlarge", "点击查看大图")}
       />
-      
+
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent 
+        <DialogContent
           className="!max-w-[95vw] max-h-[95vh] w-auto h-auto p-0 overflow-hidden bg-transparent border-0 shadow-none rounded-none gap-0"
           showCloseButton={false}
         >
-          <DialogTitle className="sr-only">{alt || '图片预览'}</DialogTitle>
+          <DialogTitle className="sr-only">{alt || t("chat.imageViewer.imagePreview", "图片预览")}</DialogTitle>
           <div className="absolute right-2 top-2 z-50 flex items-center gap-1.5">
             <button
               onClick={() => {
@@ -554,7 +558,7 @@ export function ClickableImage({ src, alt, className }: { src: string; alt?: str
                 downloadImage(src, filename)
               }}
               className="rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
-              title="下载图片"
+              title={t("chat.imageViewer.downloadImage", "下载图片")}
             >
               <Download className="h-4 w-4" />
             </button>
@@ -643,6 +647,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
 }
 
 function MermaidBlock({ children }: { children: string }) {
+  const { t } = useTranslation()
   const [svg, setSvg] = React.useState<string | null>(null)
   const [hasError, setHasError] = React.useState(false)
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false)
@@ -701,8 +706,8 @@ function MermaidBlock({ children }: { children: string }) {
           <>
             <button
               type="button"
-              aria-label="放大流程图"
-              title="放大流程图"
+              aria-label={t("chat.imageViewer.enlargeDiagram", "放大流程图")}
+              title={t("chat.imageViewer.enlargeDiagram", "放大流程图")}
               onClick={() => setIsPreviewOpen(true)}
               className="absolute right-1.5 top-1.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md border border-border/80 bg-background/90 text-muted-foreground opacity-80 shadow-sm backdrop-blur transition hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
@@ -724,7 +729,7 @@ function MermaidBlock({ children }: { children: string }) {
       {isPreviewOpen && svg ? (
         <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
           <DialogContent className="max-h-[82vh] w-[92vw] !max-w-[92vw] overflow-hidden p-0">
-            <DialogTitle className="sr-only">放大流程图</DialogTitle>
+            <DialogTitle className="sr-only">{t("chat.imageViewer.enlargeDiagram", "放大流程图")}</DialogTitle>
             <div className="max-h-[82vh] overflow-auto bg-background p-4">
               <div
                 className="w-max min-w-full [&_svg]:block [&_svg]:h-auto [&_svg]:min-w-[960px] [&_svg]:max-w-none"
@@ -942,6 +947,7 @@ export function MessageResponse({
 }
 
 function InlineImageCard({ imageName, basePath }: { imageName: string; basePath: string }) {
+  const { t } = useTranslation()
   const [failed, setFailed] = React.useState(false)
   const [imageDataUrl, setImageDataUrl] = React.useState<string | null>(null)
   const imageSrc = resolveImagePath(imageName, basePath)
@@ -981,7 +987,7 @@ function InlineImageCard({ imageName, basePath }: { imageName: string; basePath:
               downloadImage(imageDataUrl, imageName)
             }}
             className="absolute bottom-1 right-1 rounded-full bg-black/60 p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
-            title="下载图片"
+            title={t("chat.imageViewer.downloadImage", "下载图片")}
           >
             <Download className="h-3 w-3" />
           </button>

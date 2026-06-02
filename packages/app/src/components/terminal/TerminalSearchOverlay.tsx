@@ -1,5 +1,6 @@
 import { CaseSensitive, ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 export interface SearchController {
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function TerminalSearchOverlay({ controller, onClose }: Props) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -46,13 +48,13 @@ export function TerminalSearchOverlay({ controller, onClose }: Props) {
             else controller.findNext(query, caseSensitive);
           }
         }}
-        placeholder="Find"
+        placeholder={t("search.find")}
         className="w-44 bg-transparent px-1 text-[12px] outline-none placeholder:text-faint"
       />
       <button
         type="button"
         onClick={() => controller.findPrevious(query, caseSensitive)}
-        title="Previous (Shift+Enter)"
+        title={t("search.previousShiftEnter")}
         className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <ChevronUp className="h-3.5 w-3.5" />
@@ -60,7 +62,7 @@ export function TerminalSearchOverlay({ controller, onClose }: Props) {
       <button
         type="button"
         onClick={() => controller.findNext(query, caseSensitive)}
-        title="Next (Enter)"
+        title={t("search.nextEnter")}
         className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <ChevronDown className="h-3.5 w-3.5" />
