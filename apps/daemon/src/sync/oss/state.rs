@@ -1,8 +1,15 @@
 //! Local sync state — `.teamclaw/sync/state.json` schema (spec §4.2).
+//!
+//! NOTE: `LocalSyncState` load/save/new and `FileState::upsert` are reserved for
+//! the OSS pull/push pipeline; not yet called from the sync dispatcher.
+#![allow(dead_code, clippy::too_many_arguments)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Local config dir name inside a workspace (mirrors desktop `TEAMCLAW_DIR`).
+const TEAMCLAW_DIR: &str = ".teamclaw";
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -76,6 +83,32 @@ impl LocalSyncState {
         Ok(())
     }
 
+    /// Load OSS sync state for a team from the daemon global location
+    /// `~/.amuxd/teams/<team_id>/sync/state.json`.
+    pub fn load_at(team_id: &str) -> Result<Self, String> {
+        let path = crate::config::global_team_store::global_sync_state_path(team_id);
+        match std::fs::read_to_string(&path) {
+            Ok(body) => serde_json::from_str(&body).map_err(|e| format!("parse sync state: {e}")),
+            Err(_) => Ok(Self {
+                schema_version: SCHEMA_VERSION,
+                team_id: team_id.to_string(),
+                last_server_seq: 0,
+                last_sync_at: String::new(),
+                files: HashMap::new(),
+            }),
+        }
+    }
+
+    /// Persist to the daemon global location.
+    pub fn save_at(&self, team_id: &str) -> Result<(), String> {
+        let path = crate::config::global_team_store::global_sync_state_path(team_id);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir sync state: {e}"))?;
+        }
+        let body = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::write(&path, body).map_err(|e| format!("write sync state: {e}"))
+    }
+
     fn new(team_id: &str) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -125,7 +158,7 @@ impl LocalSyncState {
 
 fn state_path(workspace_path: &str) -> PathBuf {
     Path::new(workspace_path)
-        .join(".teamclaw")
+        .join(TEAMCLAW_DIR)
         .join("sync")
         .join("state.json")
 }

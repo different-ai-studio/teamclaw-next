@@ -165,7 +165,7 @@ fn has_conflict_infix(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::oss_sync::state::LocalSyncState;
+    use crate::sync::oss::state::LocalSyncState;
 
     #[test]
     fn test_conflict_detection() {
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_scan_clean_if_mtime_size_match() {
-        use crate::commands::oss_sync::state::FileState;
+        use crate::sync::oss::state::FileState;
         use std::time::UNIX_EPOCH;
 
         let dir = tempfile::tempdir().unwrap();

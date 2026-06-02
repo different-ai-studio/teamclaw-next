@@ -40,20 +40,11 @@ export function KnowledgeBrowser({
     useTeamModeStore.setState({ teamGitSyncing: true })
     try {
       const { invoke } = await import('@tauri-apps/api/core')
+      // The daemon proxy always proceeds (no `needsConfirmation` precheck).
       const result = await invoke<{
         success: boolean
         message: string
-        needsConfirmation?: boolean
-        newFiles?: Array<{ path: string; sizeBytes: number }>
-        totalBytes?: number
       }>('team_sync_repo', { force: false, workspacePath })
-      if (result.needsConfirmation) {
-        toast.warning(t('settings.team.syncPrecheckToast', {
-          count: result.newFiles?.length ?? 0,
-          defaultValue: 'Detected {{count}} large new files to sync. Confirm in Settings > Team.',
-        }))
-        return
-      }
       if (result.success) {
         toast.success(result.message)
         useTeamModeStore.setState({ teamGitLastSyncAt: new Date().toISOString() })
@@ -70,7 +61,7 @@ export function KnowledgeBrowser({
       setSyncing(false)
       useTeamModeStore.setState({ teamGitSyncing: false })
     }
-  }, [syncing, refreshFileTree, t, workspacePath])
+  }, [syncing, refreshFileTree, workspacePath])
 
   if (!workspacePath) return null
 

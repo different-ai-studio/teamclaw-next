@@ -2,12 +2,16 @@ import * as React from 'react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
+// New aggregate shape from the daemon: mode/lastSyncAt/syncing/lastError +
+// pulled/pushed/conflicts counters. No per-file detail (dirtyCount / totalFiles
+// / recentFiles) anymore.
 const oss = vi.hoisted(() => ({
+  mode: 'oss' as string | null,
   lastSyncAt: null as string | null,
-  dirtyCount: 0,
-  totalFiles: 0,
-  recentFiles: [] as Array<{ path: string; syncedVersion: number; dirty: boolean; mtime: number }>,
   syncing: false,
+  pulled: 0,
+  pushed: 0,
+  conflicts: 0,
   lastError: null as string | null,
   refresh: vi.fn().mockResolvedValue(undefined),
   syncNow: vi.fn().mockResolvedValue(undefined),
@@ -32,47 +36,45 @@ vi.mock('@/stores/oss-sync', () => ({
 import { TeamOssSyncStatus } from '../TeamOssSyncStatus'
 
 beforeEach(() => {
+  oss.mode = 'oss'
   oss.lastSyncAt = null
-  oss.dirtyCount = 0
-  oss.totalFiles = 0
-  oss.recentFiles = []
   oss.syncing = false
+  oss.pulled = 0
+  oss.pushed = 0
+  oss.conflicts = 0
   oss.lastError = null
   oss.refresh = vi.fn().mockResolvedValue(undefined)
   oss.syncNow = vi.fn().mockResolvedValue(undefined)
 })
 
 describe('TeamOssSyncStatus', () => {
-  it('renders the OSS sync status and refreshes on mount', async () => {
+  it('renders the aggregate sync status and refreshes on mount', async () => {
     oss.lastSyncAt = '2026-05-29T06:30:00Z'
-    oss.totalFiles = 128
-    oss.dirtyCount = 0
+    oss.pulled = 4
+    oss.pushed = 2
     render(<TeamOssSyncStatus />)
-    expect(screen.getByText('Synced')).toBeInTheDocument()
-    expect(screen.getByText('128')).toBeInTheDocument()
+    expect(screen.getByText('Idle')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText('2')).toBeInTheDocument()
     await waitFor(() => expect(oss.refresh).toHaveBeenCalledWith('/ws'))
   })
 
-  it('shows pending state when there are dirty files', () => {
-    oss.dirtyCount = 3
+  it('shows a syncing indicator while syncing', () => {
+    oss.syncing = true
     render(<TeamOssSyncStatus />)
-    expect(screen.getByText('Out of sync')).toBeInTheDocument()
+    expect(screen.getByText('Syncing…')).toBeInTheDocument()
+  })
+
+  it('surfaces lastError prominently', () => {
+    oss.lastError = 'remote rejected push'
+    render(<TeamOssSyncStatus />)
+    expect(screen.getByText('Error')).toBeInTheDocument()
+    expect(screen.getByText('remote rejected push')).toBeInTheDocument()
   })
 
   it('triggers a manual sync when "Sync now" is clicked', () => {
     render(<TeamOssSyncStatus />)
     fireEvent.click(screen.getByTestId('oss-sync-now'))
     expect(oss.syncNow).toHaveBeenCalledWith('/ws')
-  })
-
-  it('lists recently synced files when present', () => {
-    oss.recentFiles = [
-      { path: 'knowledge/notes.md', syncedVersion: 3, dirty: false, mtime: 1780000000 },
-      { path: 'skills/build.md', syncedVersion: 1, dirty: true, mtime: 1779990000 },
-    ]
-    render(<TeamOssSyncStatus />)
-    expect(screen.getByText('knowledge/notes.md')).toBeInTheDocument()
-    expect(screen.getByText('skills/build.md')).toBeInTheDocument()
-    expect(screen.getByText('Recently synced files')).toBeInTheDocument()
   })
 })

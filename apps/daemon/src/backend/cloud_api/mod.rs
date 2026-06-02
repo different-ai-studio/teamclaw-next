@@ -4,14 +4,14 @@ mod messages;
 
 use super::{
     AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
-    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, StoredMessage, WorkspaceRow,
-    WorkspaceUpsert,
+    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, ShareModeConfig,
+    StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 use crate::provider_config::CloudApiConfig;
 use async_trait::async_trait;
 use client::{
-    cloud_url, decode_response, network_error, refresh_failure_message, request_id,
-    RefreshRequest, TokenResponse,
+    cloud_url, decode_response, network_error, refresh_failure_message, request_id, RefreshRequest,
+    TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -31,6 +31,39 @@ struct BootstrapMqttPayload {
     username: Option<String>,
     #[serde(default)]
     password: Option<String>,
+}
+
+/// Wire shape of `GET /v1/teams/:id/share-mode`. The FC handler returns
+/// `{ mode, enabledAt, gitRemoteUrl, gitAuthKind }` (see
+/// `services/fc/src/lib/pg-repo/teams.ts::getShareMode` and the Supabase repo
+/// equivalent). `enabledAt` is ignored — the daemon only needs the sync config.
+/// The endpoint does not return a git branch.
+#[derive(Debug, Deserialize)]
+struct ShareModeResponse {
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default, rename = "gitRemoteUrl")]
+    git_remote_url: Option<String>,
+    #[serde(default, rename = "gitAuthKind")]
+    git_auth_kind: Option<String>,
+}
+
+impl From<ShareModeResponse> for ShareModeConfig {
+    fn from(r: ShareModeResponse) -> Self {
+        // `mode: null` ⇒ team-share not enabled ⇒ no usable git config; collapse
+        // to the all-`None` default regardless of any stray git fields.
+        if r.mode.is_none() {
+            return ShareModeConfig::default();
+        }
+        ShareModeConfig {
+            mode: r.mode,
+            git_remote_url: r.git_remote_url,
+            // The share-mode endpoint does not surface a branch (see
+            // `ShareModeConfig`); always `None` here.
+            git_branch: None,
+            git_auth_kind: r.git_auth_kind,
+        }
+    }
 }
 
 /// Access token must be refreshed this long before its `expires_at` so an
@@ -240,11 +273,7 @@ impl CloudApiBackend {
         decode_response(resp).await
     }
 
-    pub(super) async fn patch_no_content<Req>(
-        &self,
-        path: &str,
-        body: &Req,
-    ) -> BackendResult<()>
+    pub(super) async fn patch_no_content<Req>(&self, path: &str, body: &Req) -> BackendResult<()>
     where
         Req: Serialize + ?Sized,
     {
@@ -268,11 +297,7 @@ impl CloudApiBackend {
         }
     }
 
-    pub(super) async fn put_no_content<Req>(
-        &self,
-        path: &str,
-        body: &Req,
-    ) -> BackendResult<()>
+    pub(super) async fn put_no_content<Req>(&self, path: &str, body: &Req) -> BackendResult<()>
     where
         Req: Serialize + ?Sized,
     {
@@ -299,8 +324,6 @@ impl CloudApiBackend {
     pub(super) fn cloud_url(&self, path: &str) -> String {
         cloud_url(&self.cfg, path)
     }
-
-
 }
 
 /// Convert an epoch-seconds expiry into a monotonic `Instant`, clamping to "now"
@@ -338,11 +361,23 @@ impl Backend for CloudApiBackend {
         }))
     }
 
+    async fn team_share_config(&self, team_id: &str) -> BackendResult<ShareModeConfig> {
+        let path = format!("/v1/teams/{team_id}/share-mode");
+        match self.get::<ShareModeResponse>(&path).await {
+            Ok(resp) => Ok(resp.into()),
+            // A team that has never enabled team-share (404) is not an error —
+            // it simply has no sync config yet.
+            Err(BackendError::NotFound(_)) => Ok(ShareModeConfig::default()),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn cloud_base_url(&self) -> Option<String> {
+        Some(self.cfg.url.trim_end_matches('/').to_string())
+    }
+
     fn cached_credential_expiry(&self) -> Option<Instant> {
-        self.token
-            .lock()
-            .expect("token state poisoned")
-            .expires_at
+        self.token.lock().expect("token state poisoned").expires_at
     }
 
     fn invalidate_cached_credential(&self) {
@@ -467,7 +502,10 @@ impl Backend for CloudApiBackend {
             .post(self.cloud_url("/v1/agents/types/ensure"))
             .bearer_auth(token)
             .header("x-request-id", request_id())
-            .json(&Body { supported_types, default_agent_type })
+            .json(&Body {
+                supported_types,
+                default_agent_type,
+            })
             .send()
             .await
             .map_err(network_error)?;
@@ -625,7 +663,10 @@ impl Backend for CloudApiBackend {
                 joined_at: p.joined_at.unwrap_or_else(Utc::now),
             })
             .collect();
-        Ok(BackendSessionAndParticipants { session, participants })
+        Ok(BackendSessionAndParticipants {
+            session,
+            participants,
+        })
     }
 
     async fn messages_after_cursor(
@@ -648,7 +689,9 @@ impl Backend for CloudApiBackend {
         }
         self.patch_no_content(
             &format!("/v1/agents/runtimes/{runtime_row_id}/cursor"),
-            &Body { last_processed_message_id },
+            &Body {
+                last_processed_message_id,
+            },
         )
         .await
     }
@@ -678,7 +721,12 @@ impl Backend for CloudApiBackend {
         let r: Resp = self
             .post(
                 "/v1/actors/external",
-                &Body { team_id, source, source_id, display_name },
+                &Body {
+                    team_id,
+                    source,
+                    source_id,
+                    display_name,
+                },
                 None,
             )
             .await?;
@@ -808,8 +856,7 @@ impl Backend for CloudApiBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let body_bytes = resp.bytes().await.map_err(network_error)?;
-            let envelope =
-                serde_json::from_slice::<client::CloudErrorEnvelope>(&body_bytes).ok();
+            let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&body_bytes).ok();
             return Err(client::decode_error(status, envelope));
         }
         #[derive(serde::Deserialize)]
@@ -848,7 +895,10 @@ impl Backend for CloudApiBackend {
         let _: serde_json::Value = self
             .post(
                 &format!("/v1/sessions/{session_id}/participants"),
-                &Body { actor_id, role: "member" },
+                &Body {
+                    actor_id,
+                    role: "member",
+                },
                 None,
             )
             .await?;
@@ -877,7 +927,11 @@ impl Backend for CloudApiBackend {
         let r: Resp = self
             .post(
                 "/v1/sessions/cron",
-                &Body { team_id, primary_agent_actor_id, title },
+                &Body {
+                    team_id,
+                    primary_agent_actor_id,
+                    title,
+                },
                 None,
             )
             .await?;
@@ -968,7 +1022,9 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/auth/refresh"))
-            .and(wiremock::matchers::body_json(serde_json::json!({ "refreshToken": "refresh" })))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({ "refreshToken": "refresh" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
             .mount(&server)
             .await;
@@ -996,7 +1052,10 @@ mod tests {
             .into_iter()
             .filter(|r| r.url.path() == "/v1/auth/refresh")
             .count();
-        assert_eq!(refreshes, 1, "access token should be cached, not re-fetched");
+        assert_eq!(
+            refreshes, 1,
+            "access token should be cached, not re-fetched"
+        );
     }
 
     #[tokio::test]
@@ -1091,8 +1150,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let backend_path = dir.path().join("backend.toml");
-        let backend =
-            CloudApiBackend::with_persist_path(config(&server), backend_path.clone());
+        let backend = CloudApiBackend::with_persist_path(config(&server), backend_path.clone());
 
         assert_eq!(backend.access_token().await.unwrap(), "at-1");
 
@@ -1562,7 +1620,10 @@ mod tests {
             .get_gateway_session_by_acp_id("acp-1")
             .await
             .unwrap();
-        assert_eq!(result, Some(("session-1".to_string(), Some("gw-1".to_string()))));
+        assert_eq!(
+            result,
+            Some(("session-1".to_string(), Some("gw-1".to_string())))
+        );
     }
 
     #[tokio::test]
@@ -1654,5 +1715,69 @@ mod tests {
             .await;
         let backend = CloudApiBackend::new(config(&server));
         backend.heartbeat().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn team_share_config_parses_custom_git_response() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/teams/team-1/share-mode"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mode": "custom_git",
+                "enabledAt": "2026-06-01T00:00:00Z",
+                "gitRemoteUrl": "git@example.com:team/repo.git",
+                "gitAuthKind": "ssh_key"
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let cfg = backend.team_share_config("team-1").await.unwrap();
+        assert_eq!(cfg.mode.as_deref(), Some("custom_git"));
+        assert_eq!(
+            cfg.git_remote_url.as_deref(),
+            Some("git@example.com:team/repo.git")
+        );
+        assert_eq!(cfg.git_auth_kind.as_deref(), Some("ssh_key"));
+        // FC's share-mode endpoint does not return a branch.
+        assert_eq!(cfg.git_branch, None);
+    }
+
+    #[tokio::test]
+    async fn team_share_config_null_mode_is_default() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/teams/team-1/share-mode"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mode": null,
+                "enabledAt": null,
+                "gitRemoteUrl": null,
+                "gitAuthKind": null
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let cfg = backend.team_share_config("team-1").await.unwrap();
+        assert_eq!(cfg.mode, None);
+        assert_eq!(cfg.git_remote_url, None);
+        assert_eq!(cfg.git_auth_kind, None);
+        assert_eq!(cfg.git_branch, None);
+    }
+
+    #[tokio::test]
+    async fn team_share_config_404_is_default_not_error() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/teams/team-1/share-mode"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "not_found", "message": "team not found" }
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let cfg = backend.team_share_config("team-1").await.unwrap();
+        assert_eq!(cfg.mode, None);
     }
 }

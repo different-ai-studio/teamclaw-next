@@ -22,6 +22,7 @@ use crate::commands::oss_sync::error::SyncError;
 use crate::commands::oss_sync::fc_client::FcClient;
 use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
 use crate::commands::team_share::custom_git;
+use crate::commands::team_sync_proxy;
 use crate::commands::{team_secret_store, TEAM_REPO_DIR};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,12 +30,64 @@ use crate::commands::{team_secret_store, TEAM_REPO_DIR};
 pub struct EnableShareResult {
     pub team_id: String,
     pub share_mode: String,
-    /// Non-fatal warning surfaced when the share-mode POST succeeded but
-    /// the subsequent `git clone` did not. The team is enabled server-side;
-    /// the local checkout may be empty or absent. Frontend should surface
-    /// this so the user can retry the clone.
+    /// Non-fatal warning surfaced when the share-mode POST succeeded but the
+    /// subsequent secret-delivery / link to the daemon did not. The team is
+    /// enabled server-side; the daemon may not yet have the secrets it needs to
+    /// sync (e.g. it was momentarily unreachable). Frontend should surface this
+    /// so the user can retry. Named `clone_warning` for frontend compatibility,
+    /// but it now reflects daemon delivery/link rather than a local git clone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clone_warning: Option<String>,
+}
+
+/// Deliver team secret material to the daemon and trigger the link, treating
+/// any daemon error as a non-fatal warning. The FC share-mode POST has already
+/// committed server-side by the time this runs, so a momentarily-unreachable
+/// daemon must not fail the whole enable/join — the daemon's sweep will catch
+/// up once it can be reached and the user can retry.
+///
+/// Returns `Some(warning)` describing the first failure, or `None` on success.
+async fn deliver_secrets_and_link(
+    team_id: &str,
+    workspace_path: &str,
+    oss_team_secret: Option<&str>,
+    git_credential: Option<&str>,
+    git_branch: Option<&str>,
+) -> Option<String> {
+    if let Err(e) = team_sync_proxy::daemon_team_secrets(
+        team_id,
+        oss_team_secret,
+        git_credential,
+        git_branch,
+    )
+    .await
+    {
+        return Some(format!("daemon secret delivery deferred: {e}"));
+    }
+    if let Err(e) = team_sync_proxy::daemon_team_link(workspace_path).await {
+        return Some(format!("daemon link deferred: {e}"));
+    }
+    None
+}
+
+/// Resolve the SSH-key credential value to PEM **content**.
+///
+/// `GitEnableInput.credential` for `ssh_key` is documented as "SSH private key
+/// PEM", but `custom_git::store_credential`'s contract treats the value as a
+/// filesystem *path*. The daemon needs the PEM content. Be defensive: if the
+/// value looks like a path to an existing file, read it; otherwise treat it as
+/// already-PEM content and pass it through.
+fn resolve_ssh_pem_content(credential: &str) -> Result<String, String> {
+    let trimmed = credential.trim();
+    let looks_like_pem = trimmed.starts_with("-----BEGIN");
+    if !looks_like_pem {
+        let p = std::path::Path::new(credential);
+        if p.is_file() {
+            return std::fs::read_to_string(p)
+                .map_err(|e| format!("failed to read SSH key file {credential}: {e}"));
+        }
+    }
+    Ok(credential.to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,46 +118,6 @@ fn generate_team_secret_hex() -> Result<String, String> {
 /// the enable_* call sites are unchanged and to document the ownership move.
 fn ensure_team_repo_dir(_workspace_path: &str) -> Result<(), String> {
     Ok(())
-}
-
-fn team_repo_path(workspace_path: &str) -> std::path::PathBuf {
-    std::path::Path::new(workspace_path).join(TEAM_REPO_DIR)
-}
-
-/// Run `clone_or_init` against the team repo dir. Clone failures are
-/// non-fatal: the share-mode POST has already committed server-side, so
-/// returning an error here would leave the team in a half-enabled state.
-/// Instead, surface the failure as `clone_warning`.
-fn try_clone_team_repo(
-    workspace_path: &str,
-    remote_url: &str,
-    credential_ref: &str,
-    auth_kind: &str,
-) -> Option<String> {
-    let dir = team_repo_path(workspace_path);
-    // If a clone target already has .git we don't re-clone.
-    if dir.join(".git").exists() {
-        return None;
-    }
-    // The cloned target must be empty for `git clone` to succeed.
-    // Use a subdirectory that may or may not exist; create the parent.
-    if let Some(parent) = dir.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match custom_git::clone_or_init(
-        &dir,
-        remote_url,
-        workspace_path,
-        credential_ref,
-        auth_kind,
-        None,
-    ) {
-        Ok(custom_git::CloneOutcome::Cloned) => None,
-        Ok(custom_git::CloneOutcome::InitFallback { reason }) => {
-            Some(format!("git clone failed, used local init: {reason}"))
-        }
-        Err(e) => Some(format!("git clone deferred: {e}")),
-    }
 }
 
 async fn post_share_mode(
@@ -146,10 +159,16 @@ pub async fn enable_oss_impl(
 
     ensure_team_repo_dir(&workspace_path)?;
 
+    // Deliver the OSS team secret to the daemon and link this workspace. The
+    // daemon owns the actual sync/materialization now — desktop no longer
+    // clones or creates the team dir locally. Non-fatal on daemon error.
+    let clone_warning =
+        deliver_secrets_and_link(&team_id, &workspace_path, Some(&secret), None, None).await;
+
     Ok(EnableShareResult {
         team_id,
         share_mode: "oss".to_string(),
-        clone_warning: None,
+        clone_warning,
     })
 }
 
@@ -205,7 +224,12 @@ pub async fn enable_managed_git_impl(
     post_share_mode(&workspace_path, &team_id, &body).await?;
 
     ensure_team_repo_dir(&workspace_path)?;
-    let clone_warning = try_clone_team_repo(&workspace_path, &repo_url, &cred_ref, "https_token");
+
+    // The daemon owns the clone now: deliver the push token as the git
+    // credential and link this workspace. managed_git uses the repo's default
+    // branch, so gitBranch is None. Non-fatal on daemon error.
+    let clone_warning =
+        deliver_secrets_and_link(&team_id, &workspace_path, None, Some(&push_token), None).await;
 
     Ok(EnableShareResult {
         team_id,
@@ -268,12 +292,24 @@ pub async fn enable_custom_git_impl(
     post_share_mode(&workspace_path, &team_id, &body).await?;
 
     ensure_team_repo_dir(&workspace_path)?;
-    let clone_warning = try_clone_team_repo(
+
+    // Deliver the git credential to the daemon. For `https_token` the
+    // credential is the literal token; for `ssh_key` the daemon needs the PEM
+    // *content* (resolve_ssh_pem_content reads the file if input.credential is
+    // a path). Pass the user's branch through; the daemon owns the clone.
+    let git_credential = if input.auth_kind == "ssh_key" {
+        resolve_ssh_pem_content(&input.credential)?
+    } else {
+        input.credential.clone()
+    };
+    let clone_warning = deliver_secrets_and_link(
+        &team_id,
         &workspace_path,
-        &input.remote_url,
-        &cred_ref,
-        &input.auth_kind,
-    );
+        None,
+        Some(&git_credential),
+        input.branch.as_deref(),
+    )
+    .await;
 
     Ok(EnableShareResult {
         team_id,
@@ -293,7 +329,7 @@ pub async fn team_share_enable_custom_git(
 
 // ─── set_team_secret ────────────────────────────────────────────────────
 
-pub fn set_team_secret_impl(
+pub async fn set_team_secret_impl(
     team_id: String,
     secret_hex: String,
     workspace_path: String,
@@ -302,7 +338,18 @@ pub fn set_team_secret_impl(
     if normalized.len() != 64 || !normalized.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("team secret must be exactly 64 hex characters".to_string());
     }
-    team_secret_store::save_team_secret(&workspace_path, &team_id, &normalized)
+    team_secret_store::save_team_secret(&workspace_path, &team_id, &normalized)?;
+
+    // A joiner sets the team secret here; deliver it to the daemon and link
+    // this workspace so the daemon can sync. Non-fatal: saving the local copy
+    // (above) is the contractually-required outcome, and the daemon's sweep
+    // will catch up once reachable.
+    if let Some(warning) =
+        deliver_secrets_and_link(&team_id, &workspace_path, Some(&normalized), None, None).await
+    {
+        eprintln!("team_share_set_team_secret: {warning}");
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -311,7 +358,7 @@ pub async fn team_share_set_team_secret(
     secret_hex: String,
     workspace_path: String,
 ) -> Result<(), String> {
-    set_team_secret_impl(team_id, secret_hex, workspace_path)
+    set_team_secret_impl(team_id, secret_hex, workspace_path).await
 }
 
 // ─── get_share_status ────────────────────────────────────────────────────

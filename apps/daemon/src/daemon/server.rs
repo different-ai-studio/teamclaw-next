@@ -20,17 +20,16 @@ use crate::collab::{AuthManager, AuthResult, PeerState, PeerTracker, PermissionM
 use crate::config::{DaemonConfig, SessionStore, StoredSession, WorkspaceStore};
 use crate::daemon::binding_target::parse_binding_to_target;
 use crate::daemon::prompt_await::parse_prompt_await_payload;
-use crate::daemon::runtime_resolution::{
-    agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
-    supported_agent_type_names,
-};
 use crate::daemon::runtime_cursor::{
     compute_effective_cursor_from_messages, last_unanswered_mention_idx,
     messages_strictly_after_cursor, slice_has_actionable_inbound,
 };
+use crate::daemon::runtime_resolution::{
+    agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
+    supported_agent_type_names,
+};
 use crate::daemon::session_events::{
-    format_idea_prompt, message_attachment_urls, parse_mention_actor_ids,
-    resolve_mention_actor_ids,
+    format_idea_prompt, message_attachment_urls, parse_mention_actor_ids, resolve_mention_actor_ids,
 };
 use crate::daemon::session_resume::resolve_backend_session_id;
 
@@ -122,7 +121,10 @@ pub(crate) use crate::team_link::ensure_team_link;
 /// Pure policy for which team_id (if any) to stamp on a freshly-added
 /// workspace: an existing team_id always wins; otherwise inherit the daemon's
 /// team. An empty/whitespace daemon team yields none.
-pub(crate) fn team_id_to_stamp(existing: Option<&str>, daemon_team: Option<&str>) -> Option<String> {
+pub(crate) fn team_id_to_stamp(
+    existing: Option<&str>,
+    daemon_team: Option<&str>,
+) -> Option<String> {
     if existing.is_some() {
         return None;
     }
@@ -169,6 +171,9 @@ pub struct DaemonServer {
     permissions: PermissionManager,
     workspaces: WorkspaceStore,
     workspaces_path: PathBuf,
+    /// Daemon-owned per-team sync engine (git/OSS). The 300s autonomous timer
+    /// and the HTTP `/v1/team/sync` trigger both run through this dispatcher.
+    sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
     sessions: SessionStore,
     sessions_path: PathBuf,
     history: EventHistory,
@@ -211,8 +216,8 @@ enum SockCommand {
     /// as a child of an ACP agent. `payload` is the raw JSON envelope the
     /// bridge wrote to the sock; the daemon parses out binding + channel
     /// + target overrides + content. `reply_tx` receives a single line of
-    /// JSON (`{ "ok": true, "result": ... }` or
-    /// `{ "ok": false, "error": ... }`) the listener writes back.
+    ///   JSON (`{ "ok": true, "result": ... }` or
+    ///   `{ "ok": false, "error": ... }`) the listener writes back.
     McpSend {
         payload: serde_json::Value,
         reply_tx: oneshot::Sender<String>,
@@ -438,6 +443,10 @@ impl DaemonServer {
             permissions,
             workspaces,
             workspaces_path,
+            sync_dispatcher: crate::sync::dispatch::SyncDispatcher::new(
+                crate::sync::secret_store::SecretStore::new(),
+                Some(backend.clone()),
+            ),
             sessions,
             sessions_path,
             history,
@@ -795,13 +804,9 @@ impl DaemonServer {
                         let actor_id = self.actor_id.clone();
                         let (model, seq) = {
                             let mut mgr = self.agents.lock().await;
-                            let agent_id = mgr
-                                .agent_id_by_acp_session(&acp_sid)
-                                .unwrap_or_default();
-                            let model = mgr
-                                .current_model(&agent_id)
-                                .cloned()
-                                .unwrap_or_default();
+                            let agent_id =
+                                mgr.agent_id_by_acp_session(&acp_sid).unwrap_or_default();
+                            let model = mgr.current_model(&agent_id).cloned().unwrap_or_default();
                             let seq = mgr
                                 .get_handle_mut(&agent_id)
                                 .map(|h| h.next_sequence())
@@ -939,6 +944,10 @@ impl DaemonServer {
         // channel doesn't delay collab connectivity.
         self.start_channels().await;
         self.sync_team_shared_dirs_for_known_workspaces().await;
+        {
+            let grouped = group_workspaces_by_team(&self.workspaces.workspaces);
+            crate::sync::timer::spawn(self.sync_dispatcher.clone(), grouped);
+        }
         self.register_startup_workspace_at(std::env::current_dir())
             .await;
 
@@ -952,11 +961,7 @@ impl DaemonServer {
         // bind loopback with `HttpConfig::default()`. Failure to bind is
         // logged but does NOT abort the daemon — the Unix socket path remains
         // usable for legacy clients.
-        let http_cfg = self
-            .config
-            .http
-            .clone()
-            .unwrap_or_else(crate::config::HttpConfig::default);
+        let http_cfg = self.config.http.clone().unwrap_or_default();
         let _http_handle = {
             let mut meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
             // Expose configured backends so the model-catalog endpoint can
@@ -970,10 +975,11 @@ impl DaemonServer {
                 );
             let runtime_supervisor =
                 Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
-            let workspace_control: Option<std::sync::Arc<dyn crate::config::WorkspaceControlStore>> =
-                Some(std::sync::Arc::new(
-                    crate::config::OpenCodeCompatStore::new(),
-                ));
+            let workspace_control: Option<
+                std::sync::Arc<dyn crate::config::WorkspaceControlStore>,
+            > = Some(std::sync::Arc::new(
+                crate::config::OpenCodeCompatStore::new(),
+            ));
             let opencode_binary = self
                 .config
                 .agents
@@ -991,6 +997,7 @@ impl DaemonServer {
                 workspace_control,
                 runtime_supervisor,
                 opencode_settings,
+                self.sync_dispatcher.clone(),
             )
             .await
             {
@@ -2378,11 +2385,7 @@ impl DaemonServer {
     /// time. If multiple handles leaked into memory (race, stale resume, etc.),
     /// keep the newest and stop the rest before fanning out a prompt.
     async fn coalesce_session_runtimes(&mut self, session_id: &str) -> Vec<String> {
-        let ids = self
-            .agents
-            .lock()
-            .await
-            .runtime_ids_for_session(session_id);
+        let ids = self.agents.lock().await.runtime_ids_for_session(session_id);
         if ids.len() <= 1 {
             return ids;
         }
@@ -2614,11 +2617,7 @@ impl DaemonServer {
             let mut agents = self.agents.lock().await;
             agents.advance_message_cursor(runtime_id, message_id);
         }
-        let row_id = self
-            .agents
-            .lock()
-            .await
-            .backend_runtime_row_id(runtime_id);
+        let row_id = self.agents.lock().await.backend_runtime_row_id(runtime_id);
         if let Some(row_id) = row_id {
             let backend = self.backend.clone();
             let message_id = message_id.to_string();
@@ -2636,29 +2635,26 @@ impl DaemonServer {
     ///
     /// Returns the full session message list when fetch succeeds so
     /// [`Self::catchup_runtime`] can slice locally instead of refetching.
-    async fn reconcile_runtime_cursor(&mut self, runtime_id: &str) -> Option<Vec<crate::backend::StoredMessage>> {
+    async fn reconcile_runtime_cursor(
+        &mut self,
+        runtime_id: &str,
+    ) -> Option<Vec<crate::backend::StoredMessage>> {
         let (session_id, floor) = {
             let agents = self.agents.lock().await;
-            let Some(h) = agents.get_handle(runtime_id) else {
-                return None;
-            };
-            (
-                h.session_id.clone(),
-                h.last_processed_message_id.clone(),
-            )
+            let h = agents.get_handle(runtime_id)?;
+            (h.session_id.clone(), h.last_processed_message_id.clone())
         };
         if session_id.is_empty() {
             return None;
         }
 
-        let messages = match self
-            .backend
-            .messages_after_cursor(&session_id, None)
-            .await
-        {
+        let messages = match self.backend.messages_after_cursor(&session_id, None).await {
             Ok(m) => m,
             Err(e) => {
-                warn!(?e, runtime_id, "reconcile_runtime_cursor: messages fetch failed");
+                warn!(
+                    ?e,
+                    runtime_id, "reconcile_runtime_cursor: messages fetch failed"
+                );
                 return None;
             }
         };
@@ -2667,11 +2663,7 @@ impl DaemonServer {
         }
 
         let floor = floor.as_deref().filter(|s| !s.is_empty());
-        let effective = compute_effective_cursor_from_messages(
-            &messages,
-            &self.actor_id,
-            floor,
-        );
+        let effective = compute_effective_cursor_from_messages(&messages, &self.actor_id, floor);
         if let Some(id) = effective {
             info!(
                 runtime_id,
@@ -3037,7 +3029,10 @@ impl DaemonServer {
                             self.route_session_message(
                                 &session_id,
                                 msg,
-                                &resolve_mention_actor_ids(&env.mention_actor_ids, &msg.metadata_json),
+                                &resolve_mention_actor_ids(
+                                    &env.mention_actor_ids,
+                                    &msg.metadata_json,
+                                ),
                             )
                             .await;
                         }
@@ -3152,7 +3147,7 @@ impl DaemonServer {
         {
             Ok(Some(level)) => match level.as_str() {
                 "admin" => amux::MemberRole::Owner,
-                "write" | _ => amux::MemberRole::Member,
+                _ => amux::MemberRole::Member,
             },
             Ok(None) => {
                 warn!(actor_id = %sender_actor_id, "no agent_member_access grant");
@@ -3898,8 +3893,8 @@ impl DaemonServer {
                 //       existing workspace; the UI calls addWorkspace to
                 //       re-register the path, so we use the absence of a
                 //       local default as the signal to persist it now.
-                let needs_default = outcome.inserted
-                    || self.workspaces.default_workspace_id.is_none();
+                let needs_default =
+                    outcome.inserted || self.workspaces.default_workspace_id.is_none();
                 if needs_default && !ws.remote_workspace_id.is_empty() {
                     if let Err(e) = self
                         .backend
@@ -4096,6 +4091,7 @@ impl DaemonServer {
     ///   - No FAILED publish here — spawn_agent error path returns before any
     ///     runtime_id is allocated, so there is no retained topic to write to.
     ///     Callers may surface the error via their wire envelope.
+    ///
     /// Load a collab session + participants from the backend, cache them in
     /// the teamclaw session manager, and subscribe to `session/{sid}/live`.
     /// Idempotent — safe on every RuntimeStart, including dedup reuse.
@@ -4233,27 +4229,27 @@ impl DaemonServer {
         // and only a single runtime remains to answer. Also protects against
         // misbehaving clients that fire RuntimeStart twice (picker + inline
         // mention race on the desktop client pre-4210aad8).
-        let (existing_runtime, superseded): (Option<String>, Vec<String>) =
-            if session_id.is_empty() {
-                (None, Vec::new())
-            } else {
-                let agents = self.agents.lock().await;
-                let mut reuse: Option<String> = None;
-                let mut stale: Vec<String> = Vec::new();
-                for rid in agents.runtime_ids_for_session(session_id) {
-                    match agents.get_handle(&rid) {
-                        Some(h)
-                            if reuse.is_none()
-                                && h.agent_type == agent_type
-                                && h.workspace_id == ws_id =>
-                        {
-                            reuse = Some(rid);
-                        }
-                        _ => stale.push(rid),
+        let (existing_runtime, superseded): (Option<String>, Vec<String>) = if session_id.is_empty()
+        {
+            (None, Vec::new())
+        } else {
+            let agents = self.agents.lock().await;
+            let mut reuse: Option<String> = None;
+            let mut stale: Vec<String> = Vec::new();
+            for rid in agents.runtime_ids_for_session(session_id) {
+                match agents.get_handle(&rid) {
+                    Some(h)
+                        if reuse.is_none()
+                            && h.agent_type == agent_type
+                            && h.workspace_id == ws_id =>
+                    {
+                        reuse = Some(rid);
                     }
+                    _ => stale.push(rid),
                 }
-                (reuse, stale)
-            };
+            }
+            (reuse, stale)
+        };
 
         if !superseded.is_empty() {
             for rid in &superseded {
@@ -4353,12 +4349,13 @@ impl DaemonServer {
                         .iter()
                         .any(|p| p.actor_id == self.actor_id)
                     {
-                        snap.participants.push(crate::backend::BackendParticipantRow {
-                            session_id: session_id.to_string(),
-                            actor_id: self.actor_id.clone(),
-                            role: Some("agent".to_string()),
-                            joined_at: chrono::Utc::now(),
-                        });
+                        snap.participants
+                            .push(crate::backend::BackendParticipantRow {
+                                session_id: session_id.to_string(),
+                                actor_id: self.actor_id.clone(),
+                                role: Some("agent".to_string()),
+                                joined_at: chrono::Utc::now(),
+                            });
                     }
                     if let Some(tc) = self.teamclaw.as_mut() {
                         if let Err(e) = tc
@@ -5409,6 +5406,10 @@ mod tests {
                 permissions: PermissionManager::new(),
                 workspaces: WorkspaceStore::load(&tmp.path().join("workspaces.toml")).unwrap(),
                 workspaces_path: tmp.path().join("workspaces.toml"),
+                sync_dispatcher: crate::sync::dispatch::SyncDispatcher::new(
+                    crate::sync::secret_store::SecretStore::new(),
+                    None,
+                ),
                 sessions: SessionStore::default(),
                 sessions_path: tmp.path().join("sessions.toml"),
                 history: EventHistory::new(&tmp.path().join("history")),
@@ -6018,10 +6019,7 @@ mod tests {
         assert!(fixture.server.catchup_runtime("rt1").await);
         {
             let agents = fixture.server.agents.lock().await;
-            assert_eq!(
-                agents.last_sent_to("rt1").as_deref(),
-                Some("ask once"),
-            );
+            assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("ask once"),);
             assert_eq!(
                 agents
                     .get_handle("rt1")
@@ -6201,11 +6199,14 @@ mod tests {
             make_stored_session("rt-other", "s1", amux::AgentType::Codex, "ws-1", 150),
         ];
 
-        let (keep, mut superseded) = crate::daemon::session_resume::dedup_resumable_runtimes(stored);
+        let (keep, mut superseded) =
+            crate::daemon::session_resume::dedup_resumable_runtimes(stored);
         superseded.sort();
 
         assert_eq!(
-            keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
+            keep.iter()
+                .map(|s| s.runtime_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["rt-new"],
             "keep only the single newest runtime for the session"
         );
@@ -6232,7 +6233,9 @@ mod tests {
 
         let (keep, superseded) = crate::daemon::session_resume::dedup_resumable_runtimes(stored);
         assert_eq!(
-            keep.iter().map(|s| s.runtime_id.as_str()).collect::<Vec<_>>(),
+            keep.iter()
+                .map(|s| s.runtime_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["rt-a"],
             "newest runtime wins across workspaces"
         );
@@ -6302,13 +6305,16 @@ mod tests {
             "agent-actor",
         ));
         let mut ts = test_server_with_cloud_api(mock.clone());
-        ts.server.workspaces.workspaces.push(crate::config::StoredWorkspace {
-            workspace_id: "existing".to_string(),
-            remote_workspace_id: "remote-existing".to_string(),
-            path: "/tmp/existing".to_string(),
-            display_name: "existing".to_string(),
-            team_id: None,
-        });
+        ts.server
+            .workspaces
+            .workspaces
+            .push(crate::config::StoredWorkspace {
+                workspace_id: "existing".to_string(),
+                remote_workspace_id: "remote-existing".to_string(),
+                path: "/tmp/existing".to_string(),
+                display_name: "existing".to_string(),
+                team_id: None,
+            });
 
         ts.server
             .register_startup_workspace_at(Ok(ts._tmp.path().to_path_buf()))

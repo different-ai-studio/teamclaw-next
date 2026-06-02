@@ -1,0 +1,583 @@
+use serde::Deserialize;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSharedGitConfig {
+    #[serde(default)]
+    pub git_url: Option<String>,
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub git_token: Option<String>,
+    #[serde(default = "default_shared_dir_name")]
+    pub shared_dir_name: String,
+    #[serde(default)]
+    pub env_secret: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+fn default_shared_dir_name() -> String {
+    crate::config::global_team_store::TEAM_LINK_NAME.to_string()
+}
+
+/// Read the enabled `team` section from `{workspace}/.teamclaw/teamclaw.json`.
+pub fn read_team_config(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
+    let path = workspace_root.join(".teamclaw").join("teamclaw.json");
+    let body = std::fs::read_to_string(&path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&body).ok()?;
+    parsed
+        .get("team")
+        .and_then(|team| serde_json::from_value::<TeamSharedGitConfig>(team.clone()).ok())
+        .filter(|team| team.enabled)
+}
+
+/// Enabled git-backed team config (`gitUrl` required).
+pub fn read_git_team_config(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
+    read_team_config(workspace_root).filter(|team| {
+        team.git_url
+            .as_deref()
+            .map(|url| !url.trim().is_empty())
+            .unwrap_or(false)
+    })
+}
+
+/// Credential the daemon injects when talking to the team git remote.
+#[derive(Debug, Clone)]
+pub enum GitCredential {
+    None,
+    HttpsToken(String),
+    /// SSH private key PEM **content** (not a path).
+    SshKey(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GitConflictBackup {
+    /// Relative paths whose local versions were backed up before hard-reset.
+    pub backed_up: Vec<String>,
+    /// Absolute backup dir, e.g. `<team_dir_parent>/.trash/<unix_ts>/`.
+    pub backup_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamSharedGitStatus {
+    pub shared_dir_path: PathBuf,
+    pub configured: bool,
+    pub synced: bool,
+    pub conflict: Option<GitConflictBackup>,
+}
+
+pub fn validate_shared_dir_name(name: &str) -> anyhow::Result<()> {
+    if name.is_empty() || name.len() > 64 {
+        anyhow::bail!("shared_dir_name must be 1-64 characters");
+    }
+    if name == "." || name == ".." || name.starts_with('.') {
+        anyhow::bail!("shared_dir_name cannot be hidden, . or ..");
+    }
+    if name.contains('/') || name.contains('\\') {
+        anyhow::bail!("shared_dir_name cannot contain path separators");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    {
+        anyhow::bail!("shared_dir_name contains unsupported characters");
+    }
+    Ok(())
+}
+
+pub fn shared_dir_path(workspace_root: &Path, shared_dir_name: &str) -> anyhow::Result<PathBuf> {
+    validate_shared_dir_name(shared_dir_name)?;
+    let path = workspace_root.join(shared_dir_name);
+    for component in path.components() {
+        if matches!(component, Component::ParentDir) {
+            anyhow::bail!("shared directory path cannot contain ..");
+        }
+    }
+    if !path.starts_with(workspace_root) {
+        anyhow::bail!("shared directory must stay inside workspace");
+    }
+    Ok(path)
+}
+
+fn git(args: &[&str], cwd: &Path) -> anyhow::Result<(bool, String, String)> {
+    git_env(args, cwd, &[])
+}
+
+fn git_owned(args: &[String], cwd: &Path) -> anyhow::Result<(bool, String, String)> {
+    git_owned_env(args, cwd, &[])
+}
+
+fn git_env(
+    args: &[&str],
+    cwd: &Path,
+    extra_env: &[(String, String)],
+) -> anyhow::Result<(bool, String, String)> {
+    let mut cmd = Command::new("git");
+    cmd.args(args)
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let output = cmd.output()?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
+}
+
+fn git_owned_env(
+    args: &[String],
+    cwd: &Path,
+    extra_env: &[(String, String)],
+) -> anyhow::Result<(bool, String, String)> {
+    let mut cmd = Command::new("git");
+    cmd.args(args)
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let output = cmd.output()?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
+}
+
+/// Single-quote a path for embedding in a shell command. The path is
+/// daemon-controlled so simple `'...'` quoting (escaping embedded quotes) is fine.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Write `pem` to `dir/.ssh_key` (0600 on unix) and build the env vars git
+/// needs to use it: `GIT_SSH_COMMAND` pointing at the key with
+/// `IdentitiesOnly=yes` and `StrictHostKeyChecking=accept-new`.
+fn ssh_env_for_key(pem: &str, dir: &Path) -> anyhow::Result<Vec<(String, String)>> {
+    std::fs::create_dir_all(dir)?;
+    let key_path = dir.join(".ssh_key");
+    std::fs::write(&key_path, pem)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let ssh_cmd = format!(
+        "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+        shell_quote(&key_path.to_string_lossy())
+    );
+    Ok(vec![("GIT_SSH_COMMAND".to_string(), ssh_cmd)])
+}
+
+fn embed_token_in_url(url: &str, token: Option<&str>) -> String {
+    let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else {
+        return url.to_string();
+    };
+    if let Some(rest) = url.strip_prefix("https://") {
+        format!("https://oauth2:{token}@{rest}")
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        format!("http://oauth2:{token}@{rest}")
+    } else {
+        url.to_string()
+    }
+}
+
+fn current_branch(team_dir: &Path, fallback: Option<&str>) -> String {
+    if let Some(branch) = fallback.filter(|b| !b.trim().is_empty()) {
+        return branch.to_string();
+    }
+    let (ok, stdout, _) = git(&["rev-parse", "--abbrev-ref", "HEAD"], team_dir).unwrap_or((
+        false,
+        String::new(),
+        String::new(),
+    ));
+    if ok && !stdout.trim().is_empty() && stdout.trim() != "HEAD" {
+        stdout.trim().to_string()
+    } else {
+        "main".to_string()
+    }
+}
+
+fn ensure_scaffold(team_dir: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(team_dir.join("_secrets"))?;
+    Ok(())
+}
+
+fn unix_ts() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Sync a git-backed team dir at an explicit path (used for the global,
+/// per-team copy). The dir is created/cloned if missing.
+///
+/// Thin wrapper that uses no injected credential (falls back to
+/// `config.git_token` for the HTTPS URL embed, preserving legacy behavior).
+pub fn sync_git_dir(
+    team_dir: &Path,
+    config: &TeamSharedGitConfig,
+) -> anyhow::Result<TeamSharedGitStatus> {
+    sync_git_dir_with_cred(team_dir, config, GitCredential::None)
+}
+
+/// Sync a git-backed team dir at an explicit path, injecting `cred` for remote
+/// access. The dir is created/cloned if missing.
+///
+/// Credential behavior:
+/// - `HttpsToken(tok)`: embed `tok` into the HTTPS clone/remote URL.
+/// - `SshKey(pem)`: keep the raw (ssh) URL, write the key to a 0600 file
+///   OUTSIDE the git work tree (`team_dir.parent()/.ssh_key`) and set
+///   `GIT_SSH_COMMAND` on every git invocation.
+/// - `None`: legacy behavior — embed `config.git_token` if present, else bare.
+pub fn sync_git_dir_with_cred(
+    team_dir: &Path,
+    config: &TeamSharedGitConfig,
+    cred: GitCredential,
+) -> anyhow::Result<TeamSharedGitStatus> {
+    let Some(git_url) = config.git_url.as_deref().filter(|u| !u.trim().is_empty()) else {
+        return Ok(TeamSharedGitStatus {
+            shared_dir_path: team_dir.to_path_buf(),
+            configured: false,
+            synced: false,
+            conflict: None,
+        });
+    };
+
+    let clone_parent = team_dir.parent().unwrap_or(Path::new("."));
+
+    // Resolve the remote URL + any extra env (e.g. GIT_SSH_COMMAND) from the
+    // credential. The SSH key file lives in `clone_parent` (the per-team dir),
+    // OUTSIDE the git work tree `team_dir`.
+    let (remote_url, extra_env): (String, Vec<(String, String)>) = match &cred {
+        GitCredential::HttpsToken(tok) => (embed_token_in_url(git_url, Some(tok)), Vec::new()),
+        GitCredential::SshKey(pem) => {
+            let env = ssh_env_for_key(pem, clone_parent)?;
+            (git_url.to_string(), env)
+        }
+        GitCredential::None => (
+            embed_token_in_url(git_url, config.git_token.as_deref()),
+            Vec::new(),
+        ),
+    };
+    let extra_env = extra_env.as_slice();
+
+    if !team_dir.exists() {
+        std::fs::create_dir_all(clone_parent)?;
+        let mut args = vec!["clone".to_string()];
+        if let Some(branch) = config
+            .git_branch
+            .as_deref()
+            .filter(|b| !b.trim().is_empty())
+        {
+            args.push("-b".to_string());
+            args.push(branch.to_string());
+        }
+        args.push(remote_url);
+        args.push(team_dir.to_string_lossy().to_string());
+        let (ok, _, stderr) = git_owned_env(&args, clone_parent, extra_env)?;
+        if !ok {
+            anyhow::bail!("git clone failed: {}", stderr.trim());
+        }
+    } else if team_dir.join(".git").exists() {
+        let _ = git(&["remote", "set-url", "origin", &remote_url], team_dir);
+    } else {
+        anyhow::bail!(
+            "shared directory {} exists but is not a git repository",
+            team_dir.display()
+        );
+    }
+
+    ensure_scaffold(team_dir)?;
+
+    let (_, status, _) = git(&["status", "--porcelain"], team_dir)?;
+    let had_local_changes = !status.trim().is_empty();
+    if had_local_changes {
+        let _ = git(&["add", "-A"], team_dir);
+        let _ = git(&["commit", "-m", "chore: daemon sync"], team_dir);
+    }
+
+    let branch = current_branch(team_dir, config.git_branch.as_deref());
+    let (ok, _, stderr) = git_env(&["fetch", "origin"], team_dir, extra_env)?;
+    if !ok {
+        anyhow::bail!("git fetch failed: {}", stderr.trim());
+    }
+    let (ok, _, _stderr) = git_env(
+        &["pull", "--rebase", "origin", &branch],
+        team_dir,
+        extra_env,
+    )?;
+    let mut conflict_backup: Option<GitConflictBackup> = None;
+    if !ok {
+        // A rebase conflict left local commits on HEAD diverging from the
+        // fetched remote tip. Back those files up BEFORE we hard-reset, so the
+        // user can recover their local work. The backup dir lives OUTSIDE the
+        // git work tree (team_dir.parent()/.trash) so the next `git add -A`
+        // never stages it.
+        let _ = git(&["rebase", "--abort"], team_dir);
+        let ts = unix_ts();
+        let backup_root = team_dir
+            .parent()
+            .unwrap_or(team_dir)
+            .join(".trash")
+            .join(ts.to_string());
+        let (_, diff, _) = git(
+            &["diff", "--name-only", &format!("origin/{branch}"), "HEAD"],
+            team_dir,
+        )?;
+        let mut backed_up = Vec::new();
+        for rel in diff.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let src = team_dir.join(rel);
+            let dst = backup_root.join(rel);
+            if let Some(p) = dst.parent() {
+                let _ = std::fs::create_dir_all(p);
+            }
+            if std::fs::copy(&src, &dst).is_ok() {
+                backed_up.push(rel.to_string());
+            }
+        }
+        // Belt-and-suspenders: keep the diverged commit reachable.
+        let _ = git_owned(
+            &[
+                "branch".to_string(),
+                format!("teamclaw-conflict-backup/{ts}"),
+                "HEAD".to_string(),
+            ],
+            team_dir,
+        );
+        let (ok2, _, stderr2) = git(&["reset", "--hard", &format!("origin/{branch}")], team_dir)?;
+        if !ok2 {
+            anyhow::bail!("git reset --hard after conflict failed: {}", stderr2.trim());
+        }
+        conflict_backup = Some(GitConflictBackup {
+            backed_up,
+            backup_dir: Some(backup_root.to_string_lossy().into_owned()),
+        });
+        tracing::warn!(
+            team_dir = %team_dir.display(),
+            branch = %branch,
+            "git rebase conflict: backed up local changes, hard-reset to origin"
+        );
+    } else if had_local_changes {
+        // Only push on the clean (non-conflict) path. After a conflict reset the
+        // local work was discarded, so there is nothing to push.
+        let (ok, _, stderr) = git_env(&["push", "origin", &branch], team_dir, extra_env)?;
+        if !ok {
+            anyhow::bail!("git push failed: {}", stderr.trim());
+        }
+    }
+
+    Ok(TeamSharedGitStatus {
+        shared_dir_path: team_dir.to_path_buf(),
+        configured: true,
+        synced: true,
+        conflict: conflict_backup,
+    })
+}
+
+/// Backwards-compatible wrapper: sync the team dir located inside a workspace.
+pub fn setup_or_sync_shared_dir(
+    workspace_root: &Path,
+    config: &TeamSharedGitConfig,
+) -> anyhow::Result<TeamSharedGitStatus> {
+    let team_dir = shared_dir_path(workspace_root, &config.shared_dir_name)?;
+    sync_git_dir(&team_dir, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_git_dir_returns_not_configured_without_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let team_dir = tmp.path().join("teamclaw-team");
+        std::fs::create_dir_all(&team_dir).unwrap();
+        let config: TeamSharedGitConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true
+        }))
+        .unwrap();
+        let status = sync_git_dir(&team_dir, &config).unwrap();
+        assert_eq!(status.shared_dir_path, team_dir);
+        assert!(!status.configured);
+        assert!(!status.synced);
+    }
+
+    #[test]
+    fn ssh_credential_writes_0600_key_and_builds_git_ssh_command() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n";
+        let envs = ssh_env_for_key(pem, tmp.path()).unwrap();
+        let (_, ssh_cmd) = envs
+            .iter()
+            .find(|(k, _)| k == "GIT_SSH_COMMAND")
+            .expect("GIT_SSH_COMMAND");
+        assert!(ssh_cmd.contains("ssh -i "), "ssh_cmd={ssh_cmd}");
+        assert!(ssh_cmd.contains("IdentitiesOnly=yes"), "ssh_cmd={ssh_cmd}");
+        assert!(
+            ssh_cmd.contains("StrictHostKeyChecking=accept-new"),
+            "ssh_cmd={ssh_cmd}"
+        );
+
+        // Extract the key path from `-i <path>` (single-quoted).
+        let after = ssh_cmd.split("ssh -i ").nth(1).expect("`ssh -i ` prefix");
+        let key_path = after
+            .strip_prefix('\'')
+            .and_then(|s| s.split('\'').next())
+            .expect("single-quoted key path");
+        let key_path = std::path::Path::new(key_path);
+        assert!(key_path.exists(), "key file should exist at {key_path:?}");
+        assert_eq!(
+            std::fs::read_to_string(key_path).unwrap(),
+            pem,
+            "key file must contain the PEM"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(key_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "key file must be 0600, got {mode:o}");
+        }
+    }
+
+    #[test]
+    fn rebase_conflict_backs_up_local_before_reset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = tmp.path().join("remote.git");
+        let work_a = tmp.path().join("a");
+        let team_dir = tmp.path().join("team");
+
+        // bare remote
+        run(&["init", "--bare", remote.to_str().unwrap()], tmp.path());
+        // author clone: commit skills/x.md=remoteA, push
+        run(
+            &["clone", remote.to_str().unwrap(), work_a.to_str().unwrap()],
+            tmp.path(),
+        );
+        cfg_identity(&work_a);
+        std::fs::create_dir_all(work_a.join("skills")).unwrap();
+        std::fs::write(work_a.join("skills/x.md"), "remoteA\n").unwrap();
+        run(&["add", "-A"], &work_a);
+        run(&["commit", "-m", "a1"], &work_a);
+        run(&["push", "origin", "HEAD:refs/heads/main"], &work_a);
+        // team clone of main
+        run(
+            &[
+                "clone",
+                "-b",
+                "main",
+                remote.to_str().unwrap(),
+                team_dir.to_str().unwrap(),
+            ],
+            tmp.path(),
+        );
+        cfg_identity(&team_dir);
+        // local DIRTY change (sync_git_dir will commit it, then conflict on pull)
+        std::fs::write(team_dir.join("skills/x.md"), "localB\n").unwrap();
+        // author pushes a conflicting change to the same file
+        std::fs::write(work_a.join("skills/x.md"), "remoteB\n").unwrap();
+        run(&["add", "-A"], &work_a);
+        run(&["commit", "-m", "a2"], &work_a);
+        run(&["push", "origin", "HEAD:refs/heads/main"], &work_a);
+
+        let config = TeamSharedGitConfig {
+            git_url: Some(remote.to_string_lossy().to_string()),
+            git_branch: Some("main".into()),
+            git_token: None,
+            shared_dir_name: "teamclaw".into(),
+            env_secret: None,
+            enabled: true,
+        };
+        let status = sync_git_dir(&team_dir, &config).unwrap();
+        let conflict = status.conflict.expect("expected a conflict backup");
+        assert!(
+            conflict
+                .backed_up
+                .iter()
+                .any(|p| p.ends_with("skills/x.md")),
+            "backed_up={:?}",
+            conflict.backed_up
+        );
+        let backup_dir = conflict.backup_dir.expect("backup dir");
+        let backed = std::path::Path::new(&backup_dir).join("skills/x.md");
+        assert!(backed.exists(), "backup file should exist at {backed:?}");
+        assert_eq!(
+            std::fs::read_to_string(&backed).unwrap(),
+            "localB\n",
+            "backup must preserve LOCAL content"
+        );
+        // working tree now has remote content
+        assert_eq!(
+            std::fs::read_to_string(team_dir.join("skills/x.md")).unwrap(),
+            "remoteB\n"
+        );
+        // backup dir must be OUTSIDE the git work tree
+        assert!(
+            !std::path::Path::new(&backup_dir).starts_with(&team_dir),
+            "backup dir {backup_dir} must live outside the git work tree {team_dir:?}"
+        );
+    }
+
+    // test helpers
+    fn run(args: &[&str], cwd: &std::path::Path) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    fn cfg_identity(repo: &std::path::Path) {
+        run(&["config", "user.email", "t@t"], repo);
+        run(&["config", "user.name", "t"], repo);
+    }
+
+    #[test]
+    fn rejects_unsafe_shared_dir_names() {
+        for value in ["", ".", "..", ".hidden", "../bad", "bad/name"] {
+            assert!(validate_shared_dir_name(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn resolves_shared_dir_under_workspace() {
+        let path = shared_dir_path(Path::new("/tmp/workspace"), "teamclaw").unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/workspace/teamclaw"));
+    }
+
+    #[test]
+    fn deserializes_workspace_team_config_shape() {
+        let config: TeamSharedGitConfig = serde_json::from_value(serde_json::json!({
+            "gitUrl": "https://example.com/repo.git",
+            "gitBranch": "main",
+            "gitToken": "token",
+            "sharedDirName": "teamclaw",
+            "envSecret": "00",
+            "enabled": true
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.git_url.as_deref(),
+            Some("https://example.com/repo.git")
+        );
+        assert_eq!(config.git_branch.as_deref(), Some("main"));
+        assert_eq!(config.git_token.as_deref(), Some("token"));
+        assert_eq!(config.shared_dir_name, "teamclaw");
+        assert_eq!(config.env_secret.as_deref(), Some("00"));
+        assert!(config.enabled);
+    }
+}
