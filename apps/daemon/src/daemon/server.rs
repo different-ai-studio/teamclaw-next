@@ -1060,13 +1060,9 @@ impl DaemonServer {
                 Some(std::sync::Arc::new(
                     crate::config::OpenCodeCompatStore::new(),
                 ));
-            let opencode_binary = self
-                .config
-                .agents
-                .opencode
-                .as_ref()
-                .map(|c| c.binary.clone())
-                .unwrap_or_else(|| "opencode".to_string());
+            let opencode_binary = crate::opencode_install::resolve_binary(
+                self.config.agents.opencode.as_ref().map(|c| c.binary.as_str()),
+            );
             let opencode_settings = Some(std::sync::Arc::new(
                 crate::opencode_settings::OpenCodeSettingsService::new(opencode_binary),
             ));
