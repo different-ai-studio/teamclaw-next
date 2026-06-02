@@ -578,7 +578,6 @@ export const LLMSection = React.memo(function LLMSection() {
           setCustomBaseURL('')
           setCustomApiKey('')
           setCustomModels([{ modelId: '', modelName: '', contextLimit: '', outputLimit: '' }])
-          await connectProvider(providerId, customApiKey.trim())
           await refreshAllProviders()
           await refreshCustomProviderIds(workspacePath)
         }

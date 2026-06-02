@@ -24,6 +24,7 @@ import {
 } from '@/lib/daemon-provider-auth'
 import {
   type CustomProviderConfig,
+  customProviderIdFromName,
   providerApiKeyName,
 } from '@/lib/opencode/config'
 
@@ -68,6 +69,24 @@ function daemonProvidersToConfigured(
   })
 
   return { configuredProviders, providers }
+}
+
+async function persistProviderApiKeyBestEffort(
+  providerId: string,
+  apiKey: string,
+  description: string,
+): Promise<void> {
+  const isRef = /^\$\{?.+\}?$/.test(apiKey)
+  if (!apiKey || isRef) return
+  try {
+    await invoke('env_var_set', {
+      key: providerApiKeyName(providerId),
+      value: apiKey,
+      description,
+    })
+  } catch (err) {
+    console.warn('[LLM] env_var_set failed; continuing with direct provider auth', err)
+  }
 }
 
 async function reloadRuntimeAfterProviderChange(workspacePath: string): Promise<void> {
@@ -479,16 +498,19 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       toast.error('No workspace selected')
       return false
     }
+    const trimmedKey = apiKey.trim()
+    if (!trimmedKey) return false
     try {
-      const isRef = /^\$\{?.+\}?$/.test(apiKey)
-      if (apiKey && !isRef) {
-        await invoke('env_var_set', {
-          key: providerApiKeyName(providerId),
-          value: apiKey,
-          description: `API key for provider ${providerId}`,
-        })
-      }
-      await putDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId, { api_key: apiKey })
+      await persistProviderApiKeyBestEffort(
+        providerId,
+        trimmedKey,
+        `API key for provider ${providerId}`,
+      )
+      // Daemon-backed OpenCode reads literal apiKey from opencode.json; it does
+      // not resolve desktop ${ref} placeholders from the personal secret store.
+      await putDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId, {
+        api_key: trimmedKey,
+      })
       if (providerId !== 'team') {
         toast.success('Provider connected', { description: `Successfully connected ${providerId}` })
       }
@@ -561,21 +583,33 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   // Add a custom OpenAI-compatible provider via daemon workspace-control API.
   addCustomProvider: async (workspacePath: string, config: CustomProviderConfig, apiKey: string) => {
+    const providerId = customProviderIdFromName(config.name)
+    if (!providerId) {
+      toast.error('Failed to add custom provider', {
+        description: 'Provider name must include at least one letter or number.',
+      })
+      return null
+    }
     const wsId = encodeWorkspaceId(workspacePath)
-    const providerId = `custom-${config.name.toLowerCase().replace(/\s+/g, '-')}`
     try {
-      // Store API key in keychain (env_var_set) for ${ref} resolution at startup.
-      const isRef = /^\$\{?.+\}?$/.test(apiKey)
-      if (apiKey && !isRef) {
-        const keyName = providerApiKeyName(providerId)
-        await invoke('env_var_set', { key: keyName, value: apiKey, description: `API key for provider ${config.name}` })
-      }
+      await persistProviderApiKeyBestEffort(
+        providerId,
+        apiKey,
+        `API key for provider ${config.name}`,
+      )
       await putDaemonProviderAuth(wsId, providerId, {
-        api_key: apiKey || '',
+        api_key: apiKey.trim(),
         base_url: config.baseURL || undefined,
         display_name: config.name,
         models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
       })
+      set((state) => {
+        const newDisconnected = new Set(state._disconnectedIds)
+        newDisconnected.delete(providerId)
+        return { _disconnectedIds: newDisconnected }
+      })
+      await reloadRuntimeAfterProviderChange(workspacePath)
+      await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider added', {
         description: `${config.name} has been added. Restarting agent...`,
       })
@@ -593,16 +627,23 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   updateCustomProvider: async (workspacePath: string, providerId: string, config: CustomProviderConfig) => {
     const wsId = encodeWorkspaceId(workspacePath)
     try {
+      let storedApiKey = ''
       if (config.apiKey && !/^\$\{?.+\}?$/.test(config.apiKey)) {
-        const keyName = providerApiKeyName(providerId)
-        await invoke('env_var_set', { key: keyName, value: config.apiKey, description: `API key for provider ${config.name}` })
+        await persistProviderApiKeyBestEffort(
+          providerId,
+          config.apiKey,
+          `API key for provider ${config.name}`,
+        )
+        storedApiKey = config.apiKey.trim()
       }
       await putDaemonProviderAuth(wsId, providerId, {
-        api_key: config.apiKey || '',
+        api_key: storedApiKey,
         base_url: config.baseURL || undefined,
         display_name: config.name,
         models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
       })
+      await reloadRuntimeAfterProviderChange(workspacePath)
+      await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider updated', {
         description: `${config.name} has been updated. Restarting agent...`,
       })

@@ -65,7 +65,7 @@ import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
-import { selectAgentModel } from "@/lib/runtime-state-resolve";
+import { selectAgentModel, providerModelKeyFromOption } from "@/lib/runtime-state-resolve";
 import {
   sessionFlowError,
   sessionFlowLog,
@@ -638,6 +638,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     selectedModelOptionRef.current = found;
     return found;
   }, [currentModelKey, providerModels]);
+
+  const selectedModelKey = React.useMemo(
+    () => (currentModelKey ?? providerModelKeyFromOption(selectedModelOption)) || null,
+    [currentModelKey, selectedModelOption],
+  );
 
   // ── Refs ───────────────────────────────────────────────────────────────
   const messageListRef = React.useRef<MessageListHandle>(null);
@@ -1291,9 +1296,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                   agentId: agentRuntimeIdsForSend[0],
                   available: [],
                   byRuntimeId: useRuntimeStateStore.getState().byRuntimeId,
-                  providerFallback: selectedModelOption?.id,
+                  providerFallback: selectedModelKey ?? undefined,
                 }).modelId || ""
-              : selectedModelOption?.id ?? "";
+              : selectedModelKey ?? "";
           const outgoingMetadata = {
             mention_actor_ids: mentionActorIds,
             ...(displayMentionActorIds.length > 0
@@ -1604,7 +1609,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             sessionId,
             teamId: teamIdForSend,
             agentActorIds: agentIds,
-            modelId: selectedModelOption?.id,
+            modelId: selectedModelKey ?? undefined,
             reason: "session_create",
           });
         });

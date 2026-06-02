@@ -201,9 +201,6 @@ pub async fn put_provider_auth(
     Json(body): Json<ProviderAuthRequest>,
 ) -> Result<(StatusCode, Json<ApplyResponse>), HttpError> {
     require_scope(&principal, "workspace:write")?;
-    if body.api_key.trim().is_empty() {
-        return Err(HttpError::validation("api_key must not be empty"));
-    }
     let store = resolve_store(&state)?;
     let _file_outcome = store
         .put_provider_auth(&workspace_id, &provider_id, body)

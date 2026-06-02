@@ -65,8 +65,14 @@ export function slugifyProviderId(name: string): string {
   return name
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+/** Stable custom-provider id prefix used by the daemon workspace-control API. */
+export function customProviderIdFromName(name: string): string | null {
+  const slug = slugifyProviderId(name)
+  return slug ? `custom-${slug}` : null
 }
 
 /**
