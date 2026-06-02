@@ -165,10 +165,39 @@ pub struct ComponentStatus {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmuxdStatus {
+    /// A daemon binary is installed at ~/.amuxd/bin/amuxd.
+    pub present: bool,
+    /// Version of the installed binary (`amuxd --version`), if present.
+    pub installed_version: Option<String>,
+    /// Version bundled with THIS app build (the doctor binary is the bundled one).
+    pub bundled_version: String,
+    pub path: Option<String>,
+    /// present AND installed_version >= bundled_version (no update needed).
+    pub satisfied: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DoctorReport {
     pub opencode: OpencodeStatus,
     pub git: ComponentStatus,
-    pub amuxd: ComponentStatus,
+    pub amuxd: AmuxdStatus,
+}
+
+/// `<amuxd> --version` -> the first version-like token (clap prints "amuxd X.Y.Z").
+fn amuxd_installed_version(path: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new(path).arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    s.lines()
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .find(|t| parse_semver(t).is_some())
+        .map(|t| t.to_string())
 }
 
 fn probe_version(cmd: &str, args: &[&str]) -> Option<String> {
@@ -207,10 +236,22 @@ pub fn doctor() -> DoctorReport {
         .join("bin")
         .join(if cfg!(windows) { "amuxd.exe" } else { "amuxd" });
     let amuxd_present = amuxd_path.exists();
-    let amuxd = ComponentStatus {
+    let bundled_version = env!("CARGO_PKG_VERSION").to_string();
+    let installed_version = if amuxd_present {
+        amuxd_installed_version(&amuxd_path)
+    } else {
+        None
+    };
+    let amuxd_satisfied = installed_version
+        .as_deref()
+        .map(|v| version_ge(v, &bundled_version))
+        .unwrap_or(false);
+    let amuxd = AmuxdStatus {
         present: amuxd_present,
-        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        installed_version,
+        bundled_version,
         path: amuxd_present.then(|| amuxd_path.to_string_lossy().to_string()),
+        satisfied: amuxd_satisfied,
     };
 
     DoctorReport { opencode, git, amuxd }
@@ -278,12 +319,19 @@ mod tests {
                 satisfied: true,
             },
             git: ComponentStatus { present: false, version: None, path: None },
-            amuxd: ComponentStatus { present: true, version: Some("0.1.0".into()), path: Some("/a".into()) },
+            amuxd: AmuxdStatus {
+                present: true,
+                installed_version: Some("0.1.0".into()),
+                bundled_version: "0.1.0".into(),
+                path: Some("/a".into()),
+                satisfied: true,
+            },
         };
         let v: serde_json::Value = serde_json::to_value(&report).unwrap();
         assert_eq!(v["opencode"]["satisfied"], serde_json::json!(true));
         assert_eq!(v["opencode"]["requiredVersion"], serde_json::json!("1.15.13"));
         assert_eq!(v["git"]["present"], serde_json::json!(false));
-        assert_eq!(v["amuxd"]["version"], serde_json::json!("0.1.0"));
+        assert_eq!(v["amuxd"]["installedVersion"], serde_json::json!("0.1.0"));
+        assert_eq!(v["amuxd"]["satisfied"], serde_json::json!(true));
     }
 }

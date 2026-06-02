@@ -18,12 +18,6 @@ pub struct RequirementStatus {
     pub version: Option<String>,
 }
 
-/// True if `~/.amuxd/bin/<name>` (or the .exe variant on Windows) exists under `home`.
-fn bin_present(home: &Path, name_unix: &str, name_win: &str) -> bool {
-    let name = if cfg!(windows) { name_win } else { name_unix };
-    home.join(AMUXD_DIR).join("bin").join(name).exists()
-}
-
 /// Rust target triple for the current host (matches the sidecar naming convention).
 fn target_triple() -> String {
     let arch = std::env::consts::ARCH;
@@ -82,56 +76,54 @@ fn locate_bundled_amuxd() -> Option<PathBuf> {
     None
 }
 
-/// Query the bundled `amuxd doctor` for opencode status. Returns (satisfied, machine_version).
-/// `satisfied` = a machine opencode is present AND >= the version amuxd requires.
-/// amuxd resolves opencode by absolute path (~/.opencode/bin), so this works even
-/// when the app/daemon PATH excludes it.
-async fn opencode_doctor<R: Runtime>(app: &AppHandle<R>) -> (bool, Option<String>) {
+/// Run the bundled `amuxd doctor` and return its parsed JSON (opencode/git/amuxd
+/// status). amuxd resolves opencode/amuxd by absolute path, so this is accurate
+/// even when the app/daemon PATH excludes those dirs.
+async fn read_doctor<R: Runtime>(app: &AppHandle<R>) -> Option<serde_json::Value> {
     use tauri_plugin_shell::process::CommandEvent;
     use tauri_plugin_shell::ShellExt;
-    let spawned = app
+    let (mut rx, _child) = app
         .shell()
         .sidecar("amuxd")
-        .and_then(|c| c.args(["doctor"]).spawn());
-    let (mut rx, _child) = match spawned {
-        Ok(v) => v,
-        Err(_) => return (false, None),
-    };
+        .and_then(|c| c.args(["doctor"]).spawn())
+        .ok()?;
     let mut buf = String::new();
     while let Some(event) = rx.recv().await {
         if let CommandEvent::Stdout(bytes) = event {
             buf.push_str(&String::from_utf8_lossy(&bytes));
         }
     }
-    match serde_json::from_str::<serde_json::Value>(buf.trim()) {
-        Ok(v) => {
-            let oc = &v["opencode"];
-            (
-                oc["satisfied"].as_bool().unwrap_or(false),
-                oc["version"].as_str().map(|s| s.to_string()),
-            )
-        }
-        Err(_) => (false, None),
-    }
+    serde_json::from_str(buf.trim()).ok()
 }
 
 #[tauri::command]
 pub async fn setup_list_requirements<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<RequirementStatus>, String> {
-    let home = app.path().home_dir().map_err(|e| e.to_string())?;
-
     let git_version = detect_git();
-    let amuxd_present = bin_present(&home, "amuxd", "amuxd.exe");
-    let (opencode_satisfied, opencode_version) = opencode_doctor(&app).await;
+    let doctor = read_doctor(&app).await;
+
+    // `present` = no action needed (installed AND new enough). `version` = the
+    // installed version, so the UI can show 安装 (none) vs 升级 (older) and which.
+    let amuxd = doctor.as_ref().map(|d| &d["amuxd"]);
+    let amuxd_satisfied = amuxd.and_then(|a| a["satisfied"].as_bool()).unwrap_or(false);
+    let amuxd_version = amuxd
+        .and_then(|a| a["installedVersion"].as_str())
+        .map(|s| s.to_string());
+
+    let opencode = doctor.as_ref().map(|d| &d["opencode"]);
+    let opencode_satisfied = opencode.and_then(|o| o["satisfied"].as_bool()).unwrap_or(false);
+    let opencode_version = opencode
+        .and_then(|o| o["version"].as_str())
+        .map(|s| s.to_string());
 
     Ok(vec![
         RequirementStatus {
             id: "amuxd".into(),
             title: "Agent daemon (amuxd)".into(),
             optional: false,
-            present: amuxd_present,
-            version: None,
+            present: amuxd_satisfied,
+            version: amuxd_version,
         },
         RequirementStatus {
             id: "opencode".into(),
@@ -164,8 +156,53 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, p: SetupProgress) {
     let _ = app.emit(SETUP_PROGRESS_EVENT, p);
 }
 
-/// Copy the bundled amuxd binary into ~/.amuxd/bin/amuxd (install only — no service/start).
-fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+/// True if the amuxd background service is already registered (so an amuxd copy is
+/// an in-place UPGRADE that must restart the running service, vs a fresh install).
+fn amuxd_service_registered() -> bool {
+    let Some(home) = dirs::home_dir() else { return false };
+    #[cfg(target_os = "macos")]
+    {
+        return home.join("Library/LaunchAgents/cc.ucar.amuxd.plist").exists();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return home.join(".config/systemd/user/amuxd.service").exists();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = home;
+        false
+    }
+}
+
+/// Run a bundled `amuxd <args>` to completion; Err on non-zero exit.
+async fn run_amuxd_sidecar<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<(), String> {
+    use tauri_plugin_shell::process::CommandEvent;
+    use tauri_plugin_shell::ShellExt;
+    let (mut rx, _child) = app
+        .shell()
+        .sidecar("amuxd")
+        .map_err(|e| format!("sidecar amuxd: {e}"))?
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("spawn amuxd: {e}"))?;
+    let mut code: Option<i32> = None;
+    while let Some(event) = rx.recv().await {
+        if let CommandEvent::Terminated(p) = event {
+            code = Some(p.code.unwrap_or(-1));
+        }
+    }
+    if code != Some(0) {
+        return Err(format!("amuxd {} exited with {:?}", args.join(" "), code));
+    }
+    Ok(())
+}
+
+/// Copy the bundled amuxd binary into ~/.amuxd/bin/amuxd. On a fresh install this
+/// only places the binary (service registration happens after team onboarding). On
+/// an UPGRADE (service already registered) it re-registers + restarts the service so
+/// the new binary takes effect.
+async fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     emit_progress(app, SetupProgress { id: "amuxd".into(), status: "started".into(), line: None, error: None });
     let src = locate_bundled_amuxd().ok_or_else(|| "bundled amuxd binary not found".to_string())?;
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
@@ -179,6 +216,11 @@ fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         let mut perms = std::fs::metadata(&dest).map_err(|e| e.to_string())?.permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&dest, perms).map_err(|e| e.to_string())?;
+    }
+    if amuxd_service_registered() {
+        emit_progress(app, SetupProgress { id: "amuxd".into(), status: "running".into(), line: Some("restarting amuxd service".into()), error: None });
+        // install-service does bootout+bootstrap (i.e. restart) when already registered.
+        run_amuxd_sidecar(app, &["install-service"]).await?;
     }
     emit_progress(app, SetupProgress { id: "amuxd".into(), status: "done".into(), line: None, error: None });
     Ok(())
@@ -267,7 +309,7 @@ fn install_git<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 #[tauri::command]
 pub async fn setup_install<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
     match id.as_str() {
-        "amuxd" => install_amuxd(&app),
+        "amuxd" => install_amuxd(&app).await,
         "opencode" => install_opencode(&app).await,
         "git" => install_git(&app),
         other => Err(format!("unknown requirement: {other}")),
@@ -277,18 +319,6 @@ pub async fn setup_install<R: Runtime>(app: AppHandle<R>, id: String) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn detect_bin_present_and_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path();
-        assert!(!bin_present(home, "amuxd", "amuxd.exe"));
-        let bin = home.join(".amuxd").join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let name = if cfg!(windows) { "amuxd.exe" } else { "amuxd" };
-        std::fs::write(bin.join(name), b"x").unwrap();
-        assert!(bin_present(home, "amuxd", "amuxd.exe"));
-    }
 
     #[test]
     fn target_triple_has_dash() {
