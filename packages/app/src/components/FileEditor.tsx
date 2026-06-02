@@ -34,9 +34,9 @@ import { sendAgentPromptInActiveSession } from "@/lib/session-send-agent";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTeamPermissions } from "@/lib/team-permissions";
 import { useTeamModeStore } from '@/stores/team-mode'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { GitHistoryProvider } from '@/lib/history/git-provider'
 import { OssHistoryProvider } from '@/lib/history/oss-provider'
-import { gitManager } from "@/lib/git/manager";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -432,9 +432,13 @@ export function FileEditor({
       : new OssHistoryProvider(workspacePath, relativeTeamPath)
   }, [teamModeType, teamRepoPath, relativeTeamPath, workspacePath, filePath])
 
-  // Fetch the file's content from git HEAD for gutter decorations (team files only)
+  // Fetch the file's baseline content from the daemon for gutter decorations
+  // (team files only). The daemon's `team_file_content(..., "baseline")` proxy
+  // resolves to git HEAD in git mode and to the last-synced copy in oss mode,
+  // so the gutter works for both team share modes.
   useEffect(() => {
-    if (!isTauri() || !teamRepoPath || !relativeTeamPath || !isTeamFile) {
+    const teamId = useCurrentTeamStore.getState().team?.id;
+    if (!isTauri() || !isTeamFile || !relativeTeamPath || !teamId) {
       setGitHeadContent(null);
       return;
     }
@@ -443,9 +447,14 @@ export function FileEditor({
 
     (async () => {
       try {
-        const headContent = await gitManager.showFile(teamRepoPath, relativeTeamPath);
+        const { invoke } = await import("@tauri-apps/api/core");
+        const res = await invoke<{ content: string | null }>("team_file_content", {
+          teamId,
+          path: relativeTeamPath,
+          ref: "baseline",
+        });
         if (!cancelled) {
-          setGitHeadContent(headContent);
+          setGitHeadContent(res.content);
         }
       } catch {
         if (!cancelled) {
@@ -457,7 +466,7 @@ export function FileEditor({
     return () => {
       cancelled = true;
     };
-  }, [teamRepoPath, relativeTeamPath, isTeamFile]);
+  }, [relativeTeamPath, isTeamFile]);
 
   // Check if this file supports preview
   const previewType = supportsPreview(filename);
