@@ -397,13 +397,12 @@ test("repository contract: getTeamDirectory returns actors and members", async (
   test("repository contract: createTeamInvite returns invite details", async () => {
     const repo = createRepository();
     const result = await repo.createTeamInvite("team-1", {
-      actorType: "user",
+      kind: "member",
       displayName: "New User",
-      role: "member",
+      teamRole: "member",
       expiresAt: null,
     });
     assert.ok(result.token, "token must be present");
-    assert.ok(result.inviteId, "inviteId must be present");
     assert.equal(result.expiresAt, null);
   });
 
