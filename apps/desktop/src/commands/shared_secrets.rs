@@ -1,13 +1,13 @@
-//! Shared secrets manager — in-memory state, file I/O, and Tauri commands.
+//! Shared secrets — team env var storage under `<team_dir>/_secrets/*.enc.json`.
 //!
-//! Secrets are stored encrypted on disk under `<team_dir>/_secrets/<key_id>.enc.json`.
-//! The in-memory HashMap is populated on init and kept in sync after each write/delete.
+//! Writes are routed through `env_catalog_set` / `env_catalog_delete`; this module
+//! owns encryption, in-memory cache, and lazy init from workspace config.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter};
 
 use super::shared_secrets_crypto::{
     decrypt_secret, derive_key, encrypt_secret, EncryptedEnvelope, SecretEntry, SecretMeta,
@@ -252,45 +252,22 @@ pub fn get_secret_value(state: &SharedSecretsState, key_id: &str) -> Option<Stri
 /// Supports configured shared Git directories.
 /// Fast-path returns Ok() immediately when already initialized.
 ///
-/// Called by `shared_secret_set` / `shared_secret_delete` so a user who joined
-/// a team but hasn't yet mounted the TeamGitConfig panel can still save/delete
-/// shared secrets.
+/// Called before team writes so a user who joined a team but hasn't opened
+/// the Team settings panel can still save shared secrets.
 pub fn try_lazy_init_from_workspace(
     state: &SharedSecretsState,
     workspace_path: &str,
 ) -> Result<(), String> {
-    let config_path = format!(
-        "{}/{}/{}",
-        workspace_path,
-        super::TEAMCLAW_DIR,
-        super::CONFIG_FILE_NAME
-    );
-    let content = std::fs::read_to_string(&config_path)
-        .map_err(|_| "No team configured for this workspace".to_string())?;
-    let json: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse teamclaw.json: {e}"))?;
-
-    let team_section = json
-        .get("team")
-        .and_then(|section| section.as_object())
-        .filter(|obj| obj.get("enabled").and_then(|v| v.as_bool()) == Some(true))
-        .ok_or_else(|| "No team configured for this workspace".to_string())?;
-
-    let env_secret = team_section
-        .get("envSecret")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
+    let workspace = Path::new(workspace_path);
+    if !teamclaw_config_path(workspace).exists() {
+        return Err("No team configured for this workspace".to_string());
+    }
+    let env_secret = teamclaw_runtime_env::env_catalog::resolve_team_env_secret(workspace, None)
         .ok_or_else(|| {
             "Team shared environment variables are not initialized for this workspace".to_string()
         })?;
-    let shared_dir_name = team_section
-        .get("sharedDirName")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or("teamclaw");
-    let team_dir =
-        crate::commands::team_shared_git::shared_dir_path(workspace_path, Some(shared_dir_name))?;
-    let derived_key = derive_key(env_secret)?;
+    let team_dir = teamclaw_runtime_env::env_catalog::resolve_team_dir_for_workspace(workspace);
+    let derived_key = derive_key(&env_secret)?;
 
     {
         let current_team_dir = state
@@ -307,20 +284,23 @@ pub fn try_lazy_init_from_workspace(
         }
     }
 
-    init_shared_secrets(state, env_secret, &team_dir)
+    init_shared_secrets(state, &env_secret, &team_dir)
+}
+
+fn teamclaw_config_path(workspace: &Path) -> PathBuf {
+    workspace
+        .join(super::TEAMCLAW_DIR)
+        .join(super::CONFIG_FILE_NAME)
 }
 
 // ---------------------------------------------------------------------------
-// Tauri commands
+// Internal write helpers (used by env_catalog commands)
 // ---------------------------------------------------------------------------
 
-/// Create or update a shared secret: encrypt and write to disk, update HashMap.
-#[tauri::command]
-pub async fn shared_secret_set(
-    app_handle: AppHandle,
-    window: tauri::WebviewWindow,
-    registry: State<'_, super::window::WindowRegistry>,
-    state: State<'_, SharedSecretsState>,
+pub(crate) async fn set_secret_for_workspace(
+    app_handle: &AppHandle,
+    state: &SharedSecretsState,
+    workspace_path: &str,
     key_id: String,
     value: String,
     description: String,
@@ -328,40 +308,29 @@ pub async fn shared_secret_set(
     node_id: String,
 ) -> Result<(), String> {
     validate_key_id(&key_id)?;
-
-    // Lazy-init from workspace config when not yet initialized (e.g. Git teams
-    // whose TeamGitConfig panel hasn't been mounted yet this session).
-    {
-        let workspace_path = super::window::current_workspace_for_window(&window, &registry).ok();
-        if let Some(wp) = workspace_path {
-            if let Err(e) = try_lazy_init_from_workspace(&state, &wp) {
-                log::debug!("shared_secret_set: lazy init skipped: {e}");
-            }
-        }
-    }
+    try_lazy_init_from_workspace(state, workspace_path)?;
 
     let team_dir = {
         let td = state
             .team_dir
             .lock()
-            .map_err(|e| format!("shared_secret_set: lock team_dir: {e}"))?;
+            .map_err(|e| format!("set_secret_for_workspace: lock team_dir: {e}"))?;
         td.clone()
-            .ok_or_else(|| "shared_secret_set: secrets not initialized".to_string())?
+            .ok_or_else(|| "set_secret_for_workspace: secrets not initialized".to_string())?
     };
     let derived_key = {
         let dk = state
             .derived_key
             .lock()
-            .map_err(|e| format!("shared_secret_set: lock derived_key: {e}"))?;
-        dk.ok_or_else(|| "shared_secret_set: derived_key not set".to_string())?
+            .map_err(|e| format!("set_secret_for_workspace: lock derived_key: {e}"))?;
+        dk.ok_or_else(|| "set_secret_for_workspace: derived_key not set".to_string())?
     };
 
-    // Preserve created_by from existing entry on update; set to caller on create
     let created_by = {
         let secrets = state
             .secrets
             .lock()
-            .map_err(|e| format!("shared_secret_set: lock secrets: {e}"))?;
+            .map_err(|e| format!("set_secret_for_workspace: lock secrets: {e}"))?;
         secrets
             .get(&key_id)
             .map(|e| e.created_by.clone())
@@ -386,7 +355,7 @@ pub async fn shared_secret_set(
         let mut secrets = state
             .secrets
             .lock()
-            .map_err(|e| format!("shared_secret_set: lock secrets: {e}"))?;
+            .map_err(|e| format!("set_secret_for_workspace: lock secrets: {e}"))?;
         secrets.insert(key_id.clone(), entry);
     }
 
@@ -395,40 +364,30 @@ pub async fn shared_secret_set(
     Ok(())
 }
 
-/// Delete a shared secret: only the team Owner or the secret's creator can delete.
-#[tauri::command]
-pub async fn shared_secret_delete(
-    app_handle: AppHandle,
-    window: tauri::WebviewWindow,
-    registry: State<'_, super::window::WindowRegistry>,
-    state: State<'_, SharedSecretsState>,
+pub(crate) async fn delete_secret_for_workspace(
+    app_handle: &AppHandle,
+    state: &SharedSecretsState,
+    workspace_path: &str,
     key_id: String,
     node_id: String,
     role: String,
 ) -> Result<(), String> {
     validate_key_id(&key_id)?;
+    try_lazy_init_from_workspace(state, workspace_path)?;
 
-    // Same lazy-init as `shared_secret_set` — needed before the team_dir check below.
-    {
-        let workspace_path = super::window::current_workspace_for_window(&window, &registry).ok();
-        if let Some(wp) = workspace_path {
-            if let Err(e) = try_lazy_init_from_workspace(&state, &wp) {
-                log::debug!("shared_secret_delete: lazy init skipped: {e}");
-            }
-        }
-    }
-
-    // Check permission: Owner can delete any; others can only delete their own
     {
         let secrets = state
             .secrets
             .lock()
-            .map_err(|e| format!("shared_secret_delete: lock secrets: {e}"))?;
+            .map_err(|e| format!("delete_secret_for_workspace: lock secrets: {e}"))?;
         if let Some(entry) = secrets.get(&key_id) {
             let is_owner = role == "owner";
             let is_creator = entry.created_by == node_id;
             if !is_owner && !is_creator {
-                return Err("Permission denied: only the team owner or the secret creator can delete this secret".to_string());
+                return Err(
+                    "Permission denied: only the team owner or the secret creator can delete this secret"
+                        .to_string(),
+                );
             }
         }
     }
@@ -437,9 +396,9 @@ pub async fn shared_secret_delete(
         let td = state
             .team_dir
             .lock()
-            .map_err(|e| format!("shared_secret_delete: lock team_dir: {e}"))?;
+            .map_err(|e| format!("delete_secret_for_workspace: lock team_dir: {e}"))?;
         td.clone()
-            .ok_or_else(|| "shared_secret_delete: secrets not initialized".to_string())?
+            .ok_or_else(|| "delete_secret_for_workspace: secrets not initialized".to_string())?
     };
 
     delete_secret_file(&team_dir, &key_id)?;
@@ -448,28 +407,13 @@ pub async fn shared_secret_delete(
         let mut secrets = state
             .secrets
             .lock()
-            .map_err(|e| format!("shared_secret_delete: lock secrets: {e}"))?;
+            .map_err(|e| format!("delete_secret_for_workspace: lock secrets: {e}"))?;
         secrets.remove(&key_id);
     }
 
     app_handle.emit("secrets-changed", ()).ok();
     log::info!("shared_secrets: deleted secret '{}'", key_id);
     Ok(())
-}
-
-/// List all secrets as metadata (no plaintext values), sorted by key_id.
-#[tauri::command]
-pub async fn shared_secret_list(
-    state: State<'_, SharedSecretsState>,
-) -> Result<Vec<SecretMeta>, String> {
-    let secrets = state
-        .secrets
-        .lock()
-        .map_err(|e| format!("shared_secret_list: lock secrets: {e}"))?;
-
-    let mut list: Vec<SecretMeta> = secrets.values().map(SecretMeta::from).collect();
-    list.sort_by_key(|secret| secret.key_id.clone());
-    Ok(list)
 }
 
 #[cfg(test)]

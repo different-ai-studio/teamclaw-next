@@ -73,7 +73,7 @@ pub async fn link_team_workspace(
         .ok_or_else(|| HttpError::validation("daemon is not onboarded to a team"))?
         .to_string();
 
-    let status = crate::daemon::server::ensure_team_link(&team_id, path);
+    let status = crate::team_link::ensure_team_link(&team_id, path);
     let global_dir = crate::config::global_team_store::global_team_dir(&team_id)
         .to_string_lossy()
         .into_owned();

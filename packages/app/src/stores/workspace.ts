@@ -363,7 +363,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (isTauri()) {
       const wsName = getFolderName(expandedPath);
       import('@tauri-apps/api/core')
-        .then(m => m.invoke('set_window_title', { title: `TeamClaw — ${wsName}` }))
+        .then((m) => Promise.all([
+          m.invoke('set_window_title', { title: `TeamClaw — ${wsName}` }),
+          m.invoke('register_window_workspace', { workspacePath: expandedPath }),
+        ]))
         .catch(() => {});
     }
 

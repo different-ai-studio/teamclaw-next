@@ -8,5 +8,5 @@ pub mod turn_aggregator;
 
 pub use acp_host::AcpHostPool;
 pub use handle::{PendingMessage, RuntimeHandle};
-pub use manager::{AgentLaunchConfig, CheckedOutTurn, RuntimeManager};
+pub use manager::{AgentLaunchConfig, CheckedOutTurn, RuntimeManager, SpawnRuntimeEnv};
 pub use supervisor::RuntimeSupervisor;

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
@@ -31,6 +31,23 @@ impl AgentLaunchConfig {
             backend_type,
         }
     }
+}
+
+/// Environment bundle passed when spawning an ACP-backed agent runtime.
+#[derive(Debug, Clone, Default)]
+pub struct SpawnRuntimeEnv {
+    pub extra_env: HashMap<String, String>,
+    /// When true, all keys in `extra_env` override the ACP host process environment.
+    pub force_env_override: bool,
+    /// Original `opencode.json` before MCP placeholder resolve; restored when the
+    /// last runtime on this worktree stops.
+    pub opencode_json_original: Option<String>,
+}
+
+struct WorktreeOpencodeSnapshot {
+    original: String,
+    secrets: HashMap<String, String>,
+    ref_count: u32,
 }
 
 /// Per-agent runtime state checked out of `RuntimeManager` for the duration
@@ -164,6 +181,8 @@ pub struct RuntimeManager {
     pub aggregators: std::collections::HashMap<String, TurnAggregator>,
     launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
     acp_host_pool: AcpHostPool,
+    /// Per-worktree MCP resolve snapshots; restored when the last agent on the worktree stops.
+    opencode_snapshots: HashMap<String, WorktreeOpencodeSnapshot>,
     /// Tracks the model id currently applied to each agent's ACP session.
     /// Populated on spawn (after the adapter sends the initial set_model)
     /// and updated whenever set_current_model is called. The adapter is
@@ -201,6 +220,7 @@ impl RuntimeManager {
             aggregators: std::collections::HashMap::new(),
             launch_configs,
             acp_host_pool: AcpHostPool::new(),
+            opencode_snapshots: HashMap::new(),
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
             backend,
@@ -314,7 +334,7 @@ impl RuntimeManager {
             None,
             None,
             None,
-            HashMap::new(),
+            SpawnRuntimeEnv::default(),
         )
         .await
     }
@@ -338,9 +358,15 @@ impl RuntimeManager {
         initial_model_override: Option<String>,
         mcp_config_path: Option<PathBuf>,
         resume_acp_session_id: Option<String>,
-        extra_env: HashMap<String, String>,
+        runtime_env: SpawnRuntimeEnv,
     ) -> crate::error::Result<String> {
         let agent_id = Uuid::new_v4().to_string()[..8].to_string();
+        let SpawnRuntimeEnv {
+            extra_env,
+            force_env_override,
+            opencode_json_original,
+        } = runtime_env;
+        self.register_opencode_snapshot(worktree, opencode_json_original, &extra_env);
         let mut handle = RuntimeHandle::new(
             agent_id.clone(),
             agent_type,
@@ -360,6 +386,7 @@ impl RuntimeManager {
                 agent_type,
                 &launch,
                 extra_env,
+                force_env_override,
                 worktree.to_string(),
                 resume_acp_session_id,
                 mcp_config_path,
@@ -520,6 +547,7 @@ impl RuntimeManager {
                 agent_type,
                 &launch,
                 HashMap::new(),
+                false,
                 worktree.to_string(),
                 Some(acp_session_id.to_string()),
                 None,
@@ -593,12 +621,57 @@ impl RuntimeManager {
     pub async fn stop_agent(&mut self, agent_id: &str) -> Option<RuntimeHandle> {
         if let Some(mut handle) = self.agents.remove(agent_id) {
             self.aggregators.remove(agent_id);
+            self.release_opencode_snapshot(&handle.worktree);
             handle.status = amux::AgentStatus::Stopped;
             handle.shutdown().await;
             info!(agent_id, "agent stopped");
             Some(handle)
         } else {
             None
+        }
+    }
+
+    fn register_opencode_snapshot(
+        &mut self,
+        worktree: &str,
+        original: Option<String>,
+        secrets: &HashMap<String, String>,
+    ) {
+        let Some(original) = original else {
+            return;
+        };
+        let entry = self
+            .opencode_snapshots
+            .entry(worktree.to_string())
+            .or_insert_with(|| WorktreeOpencodeSnapshot {
+                original: original.clone(),
+                secrets: secrets.clone(),
+                ref_count: 0,
+            });
+        entry.original = original;
+        entry.secrets = secrets.clone();
+        entry.ref_count = entry.ref_count.saturating_add(1);
+    }
+
+    fn release_opencode_snapshot(&mut self, worktree: &str) {
+        let Some(entry) = self.opencode_snapshots.get_mut(worktree) else {
+            return;
+        };
+        entry.ref_count = entry.ref_count.saturating_sub(1);
+        if entry.ref_count > 0 {
+            return;
+        }
+        let snapshot = self.opencode_snapshots.remove(worktree).expect("entry exists");
+        if let Err(err) = teamclaw_runtime_env::mcp_resolve::restore_config(
+            Path::new(worktree),
+            &Some(snapshot.original),
+            &snapshot.secrets,
+        ) {
+            warn!(
+                worktree,
+                error = %err,
+                "failed to restore opencode.json after runtime stop"
+            );
         }
     }
 
@@ -1420,7 +1493,7 @@ impl RuntimeManager {
                 initial_model,
                 mcp_cfg_path,
                 None,
-                HashMap::new(),
+                SpawnRuntimeEnv::default(),
             )
             .await?;
 
@@ -2002,7 +2075,7 @@ mod tests {
                 None,
                 None,
                 None,
-                HashMap::new(),
+                SpawnRuntimeEnv::default(),
             )
             .await;
 

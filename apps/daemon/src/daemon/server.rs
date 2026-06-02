@@ -62,27 +62,9 @@ struct StartRuntimeError {
 
 fn load_team_runtime_env(
     workspace_root: &Path,
-    config: &TeamSharedGitConfig,
+    team_id: Option<&str>,
 ) -> HashMap<String, String> {
-    let Some(env_secret) = config
-        .env_secret
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return HashMap::new();
-    };
-    match crate::team_shared_env::load_team_env(workspace_root, &config.shared_dir_name, env_secret)
-    {
-        Ok(env) => env,
-        Err(e) => {
-            warn!(
-                shared_dir_name = %config.shared_dir_name,
-                error = %e,
-                "failed to load team shared environment variables"
-            );
-            HashMap::new()
-        }
-    }
+    crate::team_shared_env::load_team_env_for_workspace(workspace_root, team_id)
 }
 
 fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamSharedGitConfig) {
@@ -106,32 +88,8 @@ fn sync_team_shared_dir_for_workspace(workspace_root: &Path, config: &TeamShared
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct WorkspaceTeamclawConfig {
-    team: Option<TeamSharedGitConfig>,
-}
-
 fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
-    let path = workspace_root.join(".teamclaw").join("teamclaw.json");
-    let body = match std::fs::read_to_string(&path) {
-        Ok(body) => body,
-        Err(_) => return None,
-    };
-    let parsed: WorkspaceTeamclawConfig = match serde_json::from_str(&body) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            warn!(path = %path.display(), "failed to parse workspace team shared config: {e}");
-            return None;
-        }
-    };
-    parsed.team.filter(|team| {
-        team.enabled
-            && team
-                .git_url
-                .as_deref()
-                .map(|url| !url.trim().is_empty())
-                .unwrap_or(false)
-    })
+    crate::team_shared_git::read_git_team_config(workspace_root)
 }
 
 /// Group registered workspaces by their `team_id`. Workspaces without a
@@ -157,47 +115,8 @@ pub(crate) fn group_workspaces_by_team(
 }
 
 /// Idempotently materialize a team's global shared dir and a workspace's
-/// `teamclaw-team` symlink into it.
-///
-/// All three share modes converge on one global copy per team at
-/// `~/.amuxd/teams/<team_id>/teamclaw-team`; every member workspace exposes it
-/// via a `teamclaw-team` symlink. This used to run ONLY in the startup sweep,
-/// so any team binding that landed after boot (the normal case — the app
-/// selects/joins a team while the daemon is already running) was never linked
-/// until the next restart. Factored out as a free function so every binding
-/// path (startup sweep, startup registration, AddWorkspace RPC) can trigger it
-/// on demand. Safe to call repeatedly; an empty `team_id` is a no-op.
-///
-/// Link materialization only: this scaffolds the global team dir and links the
-/// workspace into it. It performs NO content sync. All content sync — git AND
-/// OSS — flows through the `SyncDispatcher` (the 300s autonomous timer and the
-/// HTTP `/v1/team/sync` trigger), which sources each team's config from FC.
-pub(crate) fn ensure_team_link(
-    team_id: &str,
-    ws_path: &str,
-) -> crate::config::workspace_link::LinkStatus {
-    use crate::config::workspace_link::LinkStatus;
-    if team_id.trim().is_empty() || ws_path.trim().is_empty() {
-        return LinkStatus::Fallback;
-    }
-    // Create the fixed shared layout if missing (idempotent).
-    if let Err(e) = crate::config::global_team_store::ensure_initialized(team_id) {
-        warn!(team_id, "global team dir init failed: {e}");
-        return LinkStatus::Fallback;
-    }
-    let ws_root = Path::new(ws_path);
-    let status = crate::config::workspace_link::ensure_workspace_link(ws_root, team_id);
-    // The effective dir agents read from — the in-workspace link normally, or
-    // the global dir under the no-link fallback.
-    let effective = crate::config::global_team_store::resolve_team_dir(ws_root, team_id);
-    info!(
-        team_id,
-        workspace = %ws_path,
-        effective = %effective.display(),
-        "team link: {status:?}"
-    );
-    status
-}
+/// `teamclaw-team` symlink. See [`crate::team_link::ensure_team_link`].
+pub(crate) use crate::team_link::ensure_team_link;
 
 /// Pure policy for which team_id (if any) to stamp on a freshly-added
 /// workspace: an existing team_id always wins; otherwise inherit the daemon's
@@ -4514,14 +4433,53 @@ impl DaemonServer {
             );
         }
 
-        let team_shared_config =
-            load_team_shared_config_for_workspace(Path::new(&resolved_worktree));
-        let extra_env = if let Some(config) = team_shared_config.as_ref() {
-            sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), config);
-            load_team_runtime_env(Path::new(&resolved_worktree), config)
-        } else {
-            HashMap::new()
-        };
+        let workspace_team_id = self
+            .workspaces
+            .find_by_id(&ws_id)
+            .or_else(|| {
+                self.workspaces
+                    .workspaces
+                    .iter()
+                    .find(|w| w.path == resolved_worktree)
+            })
+            .and_then(|w| w.team_id.clone())
+            .filter(|team_id| !team_id.trim().is_empty())
+            .or_else(|| {
+                self.config
+                    .team_id
+                    .as_ref()
+                    .map(|id| id.trim().to_string())
+                    .filter(|id| !id.is_empty())
+            });
+
+        if let Some(ref team_id) = workspace_team_id {
+            crate::team_link::ensure_team_link(team_id, &resolved_worktree);
+        }
+
+        if let Some(config) =
+            load_team_shared_config_for_workspace(Path::new(&resolved_worktree))
+        {
+            sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), &config);
+        }
+        let team_env = load_team_runtime_env(
+            Path::new(&resolved_worktree),
+            workspace_team_id.as_deref(),
+        );
+
+        let bundle = teamclaw_runtime_env::assemble_runtime_env(
+            Path::new(&resolved_worktree),
+            team_env,
+            teamclaw_runtime_env::SystemEnvContext {
+                device_id: self.config.device.id.clone(),
+                device_name: self.config.device.name.clone(),
+            },
+        )
+        .map_err(|e| StartRuntimeError {
+            error_code: "ENV_ASSEMBLE_FAILED".to_string(),
+            error_message: format!("assemble_runtime_env failed: {e}"),
+            failed_stage: "env_setup".to_string(),
+        })?;
+        let extra_env = bundle.extra_env;
 
         // Spawn.
         let spawn_res = self
@@ -4538,7 +4496,11 @@ impl DaemonServer {
                 initial_model_override,
                 None,
                 resume_acp_session_id,
-                extra_env,
+                crate::runtime::SpawnRuntimeEnv {
+                    extra_env,
+                    force_env_override: true,
+                    opencode_json_original: bundle.opencode_json_original,
+                },
             )
             .await;
         let new_id = match spawn_res {

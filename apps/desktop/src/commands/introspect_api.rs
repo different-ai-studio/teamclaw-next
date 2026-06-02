@@ -8,8 +8,8 @@
 //   POST /knowledge-add     — save a memory entry
 //   POST /knowledge-list    — list memory entries
 //   POST /knowledge-delete  — delete a memory entry
-//   POST /env-var-set       — create or update an env var
-//   POST /env-var-delete    — delete an env var
+//   POST /env-var-set       — create or update an env var (`scope`: personal | team)
+//   POST /env-var-delete    — delete an env var (`scope`: personal | team)
 //
 // Uses raw TCP + manual HTTP parsing to stay minimal (no axum state needed).
 
@@ -426,6 +426,11 @@ async fn handle_env_var_set(app: &AppHandle, body: &[u8]) -> Result<String, Stri
     let v: serde_json::Value =
         serde_json::from_slice(body).map_err(|e| format!("JSON parse error: {}", e))?;
 
+    let scope = v
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .unwrap_or("personal")
+        .to_string();
     let key = v
         .get("key")
         .and_then(|v| v.as_str())
@@ -440,10 +445,16 @@ async fn handle_env_var_set(app: &AppHandle, body: &[u8]) -> Result<String, Stri
         .get("description")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let category = v
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let node_id = v
+        .get("nodeId")
+        .or_else(|| v.get("node_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    // introspect_api has no calling-window context (it's an HTTP server).
-    // Multi-window workspace selection is out of scope here — falls back to
-    // single-instance inference, which errors in multi-window mode.
     let workspace_path = {
         let registry = app.state::<super::window::WindowRegistry>();
         registry
@@ -453,8 +464,19 @@ async fn handle_env_var_set(app: &AppHandle, body: &[u8]) -> Result<String, Stri
             .and_then(|cw| cw.clone())
             .ok_or_else(|| "No workspace path set. Please select a workspace first.".to_string())?
     };
-    super::env_vars::env_var_set_for_workspace(&workspace_path, key.clone(), value, description)
-        .await?;
+    let shared_secrets = app.state::<super::shared_secrets::SharedSecretsState>();
+    super::env_vars::env_catalog_set_for_workspace(
+        app,
+        &shared_secrets,
+        &workspace_path,
+        &scope,
+        key.clone(),
+        value,
+        description,
+        category,
+        node_id,
+    )
+    .await?;
 
     Ok(format!(r#"{{"ok":true,"key":"{}"}}"#, key))
 }
@@ -463,11 +485,25 @@ async fn handle_env_var_delete(app: &AppHandle, body: &[u8]) -> Result<String, S
     let v: serde_json::Value =
         serde_json::from_slice(body).map_err(|e| format!("JSON parse error: {}", e))?;
 
+    let scope = v
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .unwrap_or("personal")
+        .to_string();
     let key = v
         .get("key")
         .and_then(|v| v.as_str())
         .ok_or("Missing field: key")?
         .to_string();
+    let node_id = v
+        .get("nodeId")
+        .or_else(|| v.get("node_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let role = v
+        .get("role")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     let workspace_path = {
         let registry = app.state::<super::window::WindowRegistry>();
@@ -478,7 +514,17 @@ async fn handle_env_var_delete(app: &AppHandle, body: &[u8]) -> Result<String, S
             .and_then(|cw| cw.clone())
             .ok_or_else(|| "No workspace path set. Please select a workspace first.".to_string())?
     };
-    super::env_vars::env_var_delete_for_workspace(&workspace_path, key.clone()).await?;
+    let shared_secrets = app.state::<super::shared_secrets::SharedSecretsState>();
+    super::env_vars::env_catalog_delete_for_workspace(
+        app,
+        &shared_secrets,
+        &workspace_path,
+        &scope,
+        key.clone(),
+        node_id,
+        role,
+    )
+    .await?;
 
     Ok(format!(r#"{{"ok":true,"key":"{}"}}"#, key))
 }

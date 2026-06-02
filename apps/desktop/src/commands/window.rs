@@ -25,7 +25,7 @@ pub struct WindowRegistry {
 
 /// Insert or update the label → workspace mapping.
 /// Also updates the single-window fallback.
-pub fn register_window_workspace(registry: &WindowRegistry, label: &str, workspace_path: &str) {
+pub fn bind_window_to_workspace(registry: &WindowRegistry, label: &str, workspace_path: &str) {
     if let Ok(mut windows) = registry.windows.lock() {
         windows.insert(label.to_string(), workspace_path.to_string());
     }
@@ -146,6 +146,24 @@ pub async fn create_workspace_window(
     });
 
     Ok(label)
+}
+
+/// Bind the calling window to a workspace path.
+///
+/// Daemon-mode startup no longer goes through `start_opencode`, so the frontend
+/// must call this after `setWorkspace` so window-scoped IPC commands can resolve
+/// the active workspace (env catalog, MCP, etc.).
+#[tauri::command]
+pub fn register_window_workspace(
+    window: WebviewWindow,
+    registry: tauri::State<'_, WindowRegistry>,
+    workspace_path: String,
+) -> Result<(), String> {
+    if workspace_path.trim().is_empty() {
+        return Err("workspace_path is empty".to_string());
+    }
+    bind_window_to_workspace(&registry, window.label(), &workspace_path);
+    Ok(())
 }
 
 /// Update the title of the calling window (used by the frontend after workspace selection).

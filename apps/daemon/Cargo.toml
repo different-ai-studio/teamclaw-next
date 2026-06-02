@@ -19,6 +19,7 @@ prost = { workspace = true }
 prost-types = { workspace = true }
 teamclaw-gateway = { path = "../../crates/teamclaw-gateway" }
 teamclaw-proto = { path = "../../crates/teamclaw-proto" }
+teamclaw-runtime-env = { path = "../../crates/teamclaw-runtime-env" }
 teamclaw-transport = { path = "../../crates/teamclaw-transport" }
 teamclaw-types = { path = "../../crates/teamclaw-types" }
 

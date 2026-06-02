@@ -694,8 +694,8 @@ mod tests {
             None,
             test_dispatcher(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         let base = format!("http://{}", handle.local_addr);
         let root = std::fs::read_to_string(&token_path)
             .unwrap()

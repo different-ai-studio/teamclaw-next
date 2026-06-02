@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::local_secret_store;
 
@@ -458,11 +458,19 @@ fn set_env_vars_in_json(json: &mut serde_json::Value, entries: &[EnvVarEntry]) {
 /// Resolve the workspace_path for the calling window. In multi-window mode this
 /// looks up the window label in `WindowRegistry`; in single-window mode it
 /// falls back to single-instance inference.
-fn get_workspace_path(
+pub(crate) fn get_workspace_path(
     window: &tauri::WebviewWindow,
     registry: &State<'_, super::window::WindowRegistry>,
 ) -> Result<String, String> {
     super::window::current_workspace_for_window(window, registry)
+}
+
+fn resolve_workspace_path(
+    workspace_path: Option<String>,
+    window: &tauri::WebviewWindow,
+    registry: &State<'_, super::window::WindowRegistry>,
+) -> Result<String, String> {
+    super::team::resolve_workspace_path(workspace_path, window, registry)
 }
 
 // ─── Tauri Commands ─────────────────────────────────────────────────────
@@ -503,27 +511,15 @@ pub(crate) async fn env_var_set_for_workspace(
     write_teamclaw_json(workspace_path, &json)
 }
 
-/// Store (or update) an environment variable in the local encrypted store and update the index in teamclaw.json.
-#[tauri::command]
-pub async fn env_var_set(
-    window: tauri::WebviewWindow,
-    registry: State<'_, super::window::WindowRegistry>,
-    key: String,
-    value: String,
-    description: Option<String>,
-) -> Result<(), String> {
-    let workspace_path = get_workspace_path(&window, &registry)?;
-    env_var_set_for_workspace(&workspace_path, key, value, description).await
-}
-
 /// Retrieve an environment variable value from the local encrypted store.
 #[tauri::command]
 pub async fn env_var_get(
     window: tauri::WebviewWindow,
     registry: State<'_, super::window::WindowRegistry>,
     key: String,
+    workspace_path: Option<String>,
 ) -> Result<String, String> {
-    let workspace_path = get_workspace_path(&window, &registry)?;
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
     let blob = tokio::task::spawn_blocking({
         let wp = workspace_path.clone();
         move || read_env_blob(&wp)
@@ -570,26 +566,149 @@ pub(crate) async fn env_var_delete_for_workspace(
     write_teamclaw_json(workspace_path, &json)
 }
 
-/// Delete an environment variable from both the local encrypted store and teamclaw.json index.
+/// Unified env catalog: personal/system defs from `teamclaw.json` plus team
+/// secrets discovered under the same `_secrets/` paths used by the daemon.
 #[tauri::command]
-pub async fn env_var_delete(
+pub async fn env_catalog_list(
     window: tauri::WebviewWindow,
     registry: State<'_, super::window::WindowRegistry>,
-    key: String,
-) -> Result<(), String> {
-    let workspace_path = get_workspace_path(&window, &registry)?;
-    env_var_delete_for_workspace(&workspace_path, key).await
+    workspace_path: Option<String>,
+) -> Result<teamclaw_runtime_env::env_catalog::EnvCatalog, String> {
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
+    Ok(teamclaw_runtime_env::env_catalog::load_env_catalog(
+        Path::new(&workspace_path),
+        None,
+    ))
 }
 
-/// List all registered environment variable keys with descriptions (no values).
+fn parse_env_scope(scope: &str) -> Result<&'static str, String> {
+    match scope {
+        "personal" => Ok("personal"),
+        "team" => Ok("team"),
+        other => Err(format!(
+            "Invalid scope '{other}'. Expected 'personal' or 'team'."
+        )),
+    }
+}
+
+/// Unified write entry point for personal and team env vars.
+pub(crate) async fn env_catalog_set_for_workspace(
+    app_handle: &AppHandle,
+    shared_secrets: &super::shared_secrets::SharedSecretsState,
+    workspace_path: &str,
+    scope: &str,
+    key: String,
+    value: String,
+    description: Option<String>,
+    category: Option<String>,
+    node_id: Option<String>,
+) -> Result<(), String> {
+    match parse_env_scope(scope)? {
+        "personal" => env_var_set_for_workspace(workspace_path, key, value, description).await,
+        "team" => {
+            let node_id = node_id
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| "nodeId is required for team env vars".to_string())?;
+            super::shared_secrets::set_secret_for_workspace(
+                app_handle,
+                shared_secrets,
+                workspace_path,
+                key,
+                value,
+                description.unwrap_or_default(),
+                category.unwrap_or_else(|| "custom".to_string()),
+                node_id,
+            )
+            .await
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Unified delete entry point for personal and team env vars.
+pub(crate) async fn env_catalog_delete_for_workspace(
+    app_handle: &AppHandle,
+    shared_secrets: &super::shared_secrets::SharedSecretsState,
+    workspace_path: &str,
+    scope: &str,
+    key: String,
+    node_id: Option<String>,
+    role: Option<String>,
+) -> Result<(), String> {
+    match parse_env_scope(scope)? {
+        "personal" => env_var_delete_for_workspace(workspace_path, key).await,
+        "team" => {
+            let node_id = node_id
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| "nodeId is required for team env vars".to_string())?;
+            super::shared_secrets::delete_secret_for_workspace(
+                app_handle,
+                shared_secrets,
+                workspace_path,
+                key,
+                node_id,
+                role.unwrap_or_default(),
+            )
+            .await
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Create or update a personal or team environment variable.
 #[tauri::command]
-pub async fn env_var_list(
+pub async fn env_catalog_set(
+    app_handle: AppHandle,
     window: tauri::WebviewWindow,
     registry: State<'_, super::window::WindowRegistry>,
-) -> Result<Vec<EnvVarEntry>, String> {
-    let workspace_path = get_workspace_path(&window, &registry)?;
-    let json = read_teamclaw_json(&workspace_path)?;
-    Ok(get_env_vars_from_json(&json))
+    shared_secrets: State<'_, super::shared_secrets::SharedSecretsState>,
+    scope: String,
+    key: String,
+    value: String,
+    description: Option<String>,
+    category: Option<String>,
+    node_id: Option<String>,
+    workspace_path: Option<String>,
+) -> Result<(), String> {
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
+    env_catalog_set_for_workspace(
+        &app_handle,
+        &shared_secrets,
+        &workspace_path,
+        &scope,
+        key,
+        value,
+        description,
+        category,
+        node_id,
+    )
+    .await
+}
+
+/// Delete a personal or team environment variable.
+#[tauri::command]
+pub async fn env_catalog_delete(
+    app_handle: AppHandle,
+    window: tauri::WebviewWindow,
+    registry: State<'_, super::window::WindowRegistry>,
+    shared_secrets: State<'_, super::shared_secrets::SharedSecretsState>,
+    scope: String,
+    key: String,
+    node_id: Option<String>,
+    role: Option<String>,
+    workspace_path: Option<String>,
+) -> Result<(), String> {
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
+    env_catalog_delete_for_workspace(
+        &app_handle,
+        &shared_secrets,
+        &workspace_path,
+        &scope,
+        key,
+        node_id,
+        role,
+    )
+    .await
 }
 
 /// Resolve `${KEY}` references in a string by replacing them with actual values.
@@ -604,8 +723,9 @@ pub async fn env_var_resolve(
     registry: State<'_, super::window::WindowRegistry>,
     shared_secrets: State<'_, super::shared_secrets::SharedSecretsState>,
     input: String,
+    workspace_path: Option<String>,
 ) -> Result<String, String> {
-    let workspace_path = get_workspace_path(&window, &registry)?;
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
     let re = regex::Regex::new(r"\$\{([^}]+)\}").map_err(|e| format!("Invalid regex: {}", e))?;
 
     let mut result = input.clone();

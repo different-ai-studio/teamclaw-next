@@ -195,6 +195,15 @@ pub fn prepare_workspace(workspace_path: &Path) -> Result<(), WorkspaceControlEr
     ensure_inherent_skills_in_dir(&workspace_path.join(".teamclaw/skills"))?;
     ensure_inherent_skills_in_dir(&workspace_path.join(".opencode/skills"))?;
 
+    if let Err(e) = teamclaw_runtime_env::team_provider::ensure_team_provider(workspace_path) {
+        tracing::warn!(workspace = %workspace_path.display(), error = %e, "failed to ensure team provider");
+    }
+    if let Ok(Some(result)) = teamclaw_runtime_env::opencode_db::maybe_migrate_legacy_opencode_db(workspace_path) {
+        if result.migrated {
+            tracing::info!(workspace = %workspace_path.display(), "migrated legacy isolated OpenCode DB to global");
+        }
+    }
+
     info!(workspace = %workspace_path.display(), "workspace runtime prepared");
     Ok(())
 }

@@ -67,7 +67,7 @@ impl AcpHostPool {
     pub async fn prewarm(&mut self, launch_configs: &HashMap<amux::AgentType, AgentLaunchConfig>) {
         for (&agent_type, launch) in launch_configs {
             if let Err(e) = self
-                .ensure_host(agent_type, launch, HashMap::new())
+                .ensure_host(agent_type, launch, HashMap::new(), false)
                 .await
             {
                 warn!(?agent_type, error = %e, "ACP host prewarm failed");
@@ -82,6 +82,7 @@ impl AcpHostPool {
         agent_type: amux::AgentType,
         launch: &AgentLaunchConfig,
         extra_env: HashMap<String, String>,
+        force_env_override: bool,
     ) -> crate::error::Result<mpsc::Sender<AcpCommand>> {
         let key = HostKey {
             agent_type,
@@ -97,6 +98,7 @@ impl AcpHostPool {
             launch.args.clone(),
             agent_type,
             extra_env,
+            force_env_override,
             host_ready_tx,
         )?;
 
@@ -132,6 +134,7 @@ impl AcpHostPool {
         agent_type: amux::AgentType,
         launch: &AgentLaunchConfig,
         extra_env: HashMap<String, String>,
+        force_env_override: bool,
         worktree: String,
         resume_acp_session_id: Option<String>,
         mcp_config_path: Option<std::path::PathBuf>,
@@ -140,7 +143,9 @@ impl AcpHostPool {
         event_tx: mpsc::Sender<amux::AcpEvent>,
         is_gateway: bool,
     ) -> crate::error::Result<(mpsc::Sender<AcpCommand>, AcpStartupMetadata)> {
-        let host_cmd = self.ensure_host(agent_type, launch, extra_env).await?;
+        let host_cmd = self
+            .ensure_host(agent_type, launch, extra_env, force_env_override)
+            .await?;
         let (startup_tx, startup_rx) =
             oneshot::channel::<Result<AcpStartupMetadata, String>>();
 

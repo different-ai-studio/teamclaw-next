@@ -1,9 +1,10 @@
 /**
- * OpenCode preloader — deduplicates `start_opencode` invocations.
+ * OpenCode preloader — legacy sidecar deduplication for `start_opencode`.
  *
- * On mount we fire `start_opencode` early so that by the time the main app
- * renders and requests it again for the same workspace, we simply return the
- * already-in-flight (or resolved) promise instead of spawning a second sidecar.
+ * Agent runtimes now attach via the local daemon (`opencode acp`); workspace
+ * prep (`ensure_team_provider`, legacy DB migration) runs in daemon
+ * `prepare_workspace` through `teamclaw-runtime-env`. This module remains for
+ * settings `opencode serve` and any callers still invoking `start_opencode`.
  */
 
 export interface PreloadResult {

@@ -79,13 +79,15 @@ async function persistProviderApiKeyBestEffort(
   const isRef = /^\$\{?.+\}?$/.test(apiKey)
   if (!apiKey || isRef) return
   try {
-    await invoke('env_var_set', {
+    await invoke('env_catalog_set', {
+      scope: 'personal',
       key: providerApiKeyName(providerId),
       value: apiKey,
       description,
+      workspacePath: useWorkspaceStore.getState().workspacePath ?? undefined,
     })
   } catch (err) {
-    console.warn('[LLM] env_var_set failed; continuing with direct provider auth', err)
+    console.warn('[LLM] env_catalog_set failed; continuing with direct provider auth', err)
   }
 }
 

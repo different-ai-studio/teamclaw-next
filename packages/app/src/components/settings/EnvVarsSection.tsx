@@ -14,9 +14,11 @@ import {
 } from '@/components/ui/dialog'
 import { SettingCard, SectionHeader } from './shared'
 import { useEnvVarsStore } from '@/stores/env-vars'
-import { useSharedSecretsStore } from '@/stores/shared-secrets'
 import { useTeamMembersStore } from '@/stores/team-members'
 import { useTeamPermissions } from '@/lib/team-permissions'
+import { encodeWorkspaceId, reloadDaemonRuntime } from '@/lib/daemon-local-client'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { toast } from 'sonner'
 import { listen } from '@tauri-apps/api/event'
 
 // ─── Unified type for the combined list ─────────────────────────────────
@@ -99,7 +101,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
       setError(t('settings.envVars.error.valueRequired', 'Please enter the new value'))
       return
     }
-    // shared_secrets requires lowercase keys server-side. For system-shared
+    // shared team keys must be lowercase server-side. For system-shared
     // placeholder rows the displayed key is uppercase (matches the env-var name
     // autoui-mcp reads), but the dialog stores the lowercase form transparently
     // — so we accept either case here and let `onSave` normalize.
@@ -121,7 +123,7 @@ function EnvVarDialog({ open, onOpenChange, editingEntry, onSave }: EnvVarDialog
     try {
       // Lowercase the key when saving a system-shared placeholder as a team
       // secret — the displayed name is uppercase (env-var convention) but
-      // shared_secrets stores lowercase. The agent injects both cases at startup.
+      // Team keys are stored lowercase; the agent injects both cases at startup.
       const outboundKey = isPlaceholder && shared ? trimmedKey.toLowerCase() : trimmedKey
       await onSave(outboundKey, value, description.trim() || '', shared)
       onOpenChange(false)
@@ -458,8 +460,8 @@ function EnvVarRow({ entry, canDelete, onEdit, onDelete }: EnvVarRowProps) {
 
 export const EnvVarsSection = React.memo(function EnvVarsSection() {
   const { t } = useTranslation()
-  const { envVars, isLoading: envLoading, loadEnvVars, setEnvVar, deleteEnvVar } = useEnvVarsStore()
-  const { secrets, isLoading: secretsLoading, loadSecrets, setSecret, deleteSecret, listenForChanges } = useSharedSecretsStore()
+  const { envVars, teamSecrets, isLoading: envLoading, loadEnvCatalog, setCatalogEntry, deleteCatalogEntry } = useEnvVarsStore()
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const currentNodeId = useTeamMembersStore((s) => s.currentNodeId)
   // currentNodeId is hydrated here (and via useAppInit) since the Team panel no longer owns it.
   const loadCurrentNodeId = useTeamMembersStore((s) => s.loadCurrentNodeId)
@@ -470,30 +472,43 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
   const [deleteTarget, setDeleteTarget] = React.useState<UnifiedEntry | null>(null)
   const [dirtyKeys, setDirtyKeys] = React.useState<Set<string>>(new Set())
 
-  const isLoading = envLoading || secretsLoading
+  const isLoading = envLoading
 
   React.useEffect(() => {
-    loadEnvVars()
-    loadSecrets()
+    if (!workspacePath) return
+
+    void (async () => {
+      await loadEnvCatalog()
+      const err = useEnvVarsStore.getState().error
+      if (err) {
+        toast.error(t('settings.envVars.loadFailed', 'Failed to load environment variables'), {
+          description: err,
+        })
+      }
+    })()
+
     loadCurrentNodeId()
-    let unlisten: (() => void) | undefined
-    listenForChanges().then((fn) => { unlisten = fn })
-    // Also listen for secrets-changed from sync to mark as dirty
     let unlistenSync: (() => void) | undefined
     listen<void>('secrets-changed', () => {
-      // Reload secrets list and mark all team secrets as dirty
-      loadSecrets()
+      void (async () => {
+        await loadEnvCatalog()
+        const err = useEnvVarsStore.getState().error
+        if (err) {
+          toast.error(t('settings.envVars.loadFailed', 'Failed to load environment variables'), {
+            description: err,
+          })
+        }
+      })()
       setDirtyKeys((prev) => {
         const next = new Set(prev)
-        next.add('__team_sync__') // sentinel to trigger needsRestart
+        next.add('__team_sync__')
         return next
       })
     }).then((fn) => { unlistenSync = fn })
     return () => {
-      unlisten?.()
       unlistenSync?.()
     }
-  }, [loadEnvVars, loadSecrets, listenForChanges, loadCurrentNodeId])
+  }, [loadEnvCatalog, loadCurrentNodeId, workspacePath, t])
 
   // Build unified list: personal env vars + team secrets, with `system-shared`
   // system defs surfaced as either the matching team secret (uppercase key) or
@@ -510,7 +525,7 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
     // the placeholder when a value already exists.
     const satisfiedLowerKeys = new Set<string>()
 
-    const team: UnifiedEntry[] = secrets.map((s) => {
+    const team: UnifiedEntry[] = teamSecrets.map((s) => {
       const lower = s.keyId.toLowerCase()
       const matched = sharedSystemByLower.get(lower)
       if (matched) {
@@ -560,29 +575,56 @@ export const EnvVarsSection = React.memo(function EnvVarsSection() {
       return a.key.localeCompare(b.key)
     })
     return all
-  }, [envVars, secrets, dirtyKeys, hasSyncDirty])
+  }, [envVars, teamSecrets, dirtyKeys, hasSyncDirty])
+
+  async function reloadRuntimeAfterEnvChange(key: string) {
+    const workspacePath = useWorkspaceStore.getState().workspacePath
+    if (!workspacePath) return
+    try {
+      await reloadDaemonRuntime(encodeWorkspaceId(workspacePath))
+      setDirtyKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        next.delete('__team_sync__')
+        return next
+      })
+    } catch (err) {
+      toast.warning('环境变量已保存，但 Agent 运行时重载失败', {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
 
   const handleSave = async (key: string, value: string, description: string, shared: boolean) => {
     if (shared) {
-      await setSecret(key, value, description, 'custom', currentNodeId ?? '')
+      await setCatalogEntry('team', key, value, {
+        description,
+        category: 'custom',
+        nodeId: currentNodeId ?? '',
+      })
     } else {
-      await setEnvVar(key, value, description || undefined)
+      await setCatalogEntry('personal', key, value, { description: description || undefined })
     }
-    setDirtyKeys((prev) => new Set(prev).add(key))
+    await reloadRuntimeAfterEnvChange(key)
   }
 
   const handleDelete = async () => {
     if (!deleteTarget) return
+    const deletedKey = deleteTarget.key
     if (deleteTarget.scope === 'team') {
-      await deleteSecret(deleteTarget.key, currentNodeId ?? '', isOwner ? 'owner' : 'member')
+      await deleteCatalogEntry('team', deleteTarget.key, {
+        nodeId: currentNodeId ?? '',
+        role: isOwner ? 'owner' : 'member',
+      })
     } else if (deleteTarget.scope === 'personal') {
-      await deleteEnvVar(deleteTarget.key)
+      await deleteCatalogEntry('personal', deleteTarget.key)
     }
     // Placeholders have no backing storage to delete.
     setDeleteTarget(null)
+    await reloadRuntimeAfterEnvChange(deletedKey)
   }
 
-  // Note: the Rust env_var_delete command also enforces the system-var guard server-side.
+  // env_catalog_delete enforces the system-var guard server-side for personal scope.
   const canDeleteEntry = (entry: UnifiedEntry): boolean => {
     if (entry.scope === 'team-placeholder') return false
     if (entry.scope === 'personal' && (entry.category === 'system' || entry.category === 'system-shared')) return false

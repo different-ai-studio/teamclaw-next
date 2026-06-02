@@ -38,35 +38,30 @@ vi.mock('@/components/settings/shared', () => ({
     React.createElement('div', { 'data-testid': 'section-header' }, title),
 }))
 
-const mockLoadEnvVars = vi.fn()
+const mockLoadEnvCatalog = vi.fn()
 
 vi.mock('@/stores/env-vars', () => ({
-  useEnvVarsStore: () => ({
-    envVars: [],
-    isLoading: false,
-    loadEnvVars: mockLoadEnvVars,
-    setEnvVar: vi.fn(),
-    deleteEnvVar: vi.fn(),
-    getEnvVarValue: vi.fn(),
-    hasChanges: false,
-    setHasChanges: vi.fn(),
-  }),
+  useEnvVarsStore: Object.assign(
+    () => ({
+      envVars: [],
+      teamSecrets: [],
+      isLoading: false,
+      loadEnvCatalog: mockLoadEnvCatalog,
+      setCatalogEntry: vi.fn(),
+      deleteCatalogEntry: vi.fn(),
+      getEnvVarValue: vi.fn(),
+      hasChanges: false,
+      setHasChanges: vi.fn(),
+    }),
+    {
+      getState: () => ({ error: null }),
+    },
+  ),
 }))
 
 vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ workspacePath: '/test' }),
-}))
-
-vi.mock('@/stores/shared-secrets', () => ({
-  useSharedSecretsStore: () => ({
-    secrets: [],
-    isLoading: false,
-    loadSecrets: vi.fn(),
-    setSecret: vi.fn(),
-    deleteSecret: vi.fn(),
-    listenForChanges: vi.fn(async () => () => {}),
-  }),
 }))
 
 vi.mock('@/stores/team-members', () => ({
@@ -115,9 +110,9 @@ describe('EnvVarsSection', () => {
     expect(screen.getByText('No environment variables yet')).toBeDefined()
   })
 
-  it('calls loadEnvVars on mount', async () => {
+  it('calls loadEnvCatalog on mount', async () => {
     const { EnvVarsSection } = await import('@/components/settings/EnvVarsSection')
     render(React.createElement(EnvVarsSection))
-    expect(mockLoadEnvVars).toHaveBeenCalled()
+    expect(mockLoadEnvCatalog).toHaveBeenCalled()
   })
 })

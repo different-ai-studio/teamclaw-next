@@ -20,7 +20,28 @@ pub struct TeamSharedGitConfig {
 }
 
 fn default_shared_dir_name() -> String {
-    "teamclaw".to_string()
+    crate::config::global_team_store::TEAM_LINK_NAME.to_string()
+}
+
+/// Read the enabled `team` section from `{workspace}/.teamclaw/teamclaw.json`.
+pub fn read_team_config(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
+    let path = workspace_root.join(".teamclaw").join("teamclaw.json");
+    let body = std::fs::read_to_string(&path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&body).ok()?;
+    parsed
+        .get("team")
+        .and_then(|team| serde_json::from_value::<TeamSharedGitConfig>(team.clone()).ok())
+        .filter(|team| team.enabled)
+}
+
+/// Enabled git-backed team config (`gitUrl` required).
+pub fn read_git_team_config(workspace_root: &Path) -> Option<TeamSharedGitConfig> {
+    read_team_config(workspace_root).filter(|team| {
+        team.git_url
+            .as_deref()
+            .map(|url| !url.trim().is_empty())
+            .unwrap_or(false)
+    })
 }
 
 /// Credential the daemon injects when talking to the team git remote.
