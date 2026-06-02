@@ -102,4 +102,61 @@ describe("V2 PR streaming integrity (spec D8/D9)", () => {
   afterAll(async () => {
     await stopV2E2EApp();
   });
+
+  it("V2-D8: multi-delta stream collapses to a single final message on completion", async () => {
+    const runId = nextRunId("d8");
+    const memberId = id(runId, "member");
+    const agentId = id(runId, "agent");
+    const sessionId = id(runId, "session");
+    const userPrompt = "讲一个一句话故事";
+    const deltas = ["从前", "有一只", "会写代码的", "螃蟹。"];
+    const streamingText = deltas.join("");
+    const finalText = "从前有一只会写代码的螃蟹,它修好了最后一个 bug。";
+
+    await seedSingleAgentSession({ runId, sessionId, memberId, agentId, title: "D8 流式完成" });
+
+    await v2Call("appendMessage", {
+      sessionId,
+      messageId: id(runId, "user-prompt"),
+      senderActorId: memberId,
+      kind: "text",
+      content: userPrompt,
+      createdAt: new Date().toISOString(),
+    });
+    await waitForText(userPrompt);
+
+    for (const delta of deltas) {
+      await v2Call("emitAgentDelta", { sessionId, actorId: agentId, delta });
+    }
+
+    // During streaming: exactly one streaming node showing accumulated deltas.
+    await waitForSelector(
+      `[data-testid="v2-streaming-agent"][data-session-id="${sessionId}"][data-actor-id="${agentId}"]`,
+    );
+    await waitForText(streamingText);
+    expect(
+      await domCount(`[data-testid="v2-streaming-agent"][data-session-id="${sessionId}"]`),
+    ).toBe(1);
+
+    await v2Call("completeRun", {
+      sessionId,
+      actorId: agentId,
+      runId,
+      messageId: id(runId, "final-agent"),
+      content: finalText,
+      model: "e2e-model",
+    });
+
+    // After completion: streaming node clears, final text appears exactly once,
+    // transient delta text is gone (single source of truth principle).
+    await waitForText(finalText);
+    await waitFor(
+      "streaming node cleared after completion",
+      () => domCount(`[data-testid="v2-streaming-agent"][data-session-id="${sessionId}"]`),
+      (count) => count === 0,
+    );
+    expect(await textOccurrences('[data-testid="v2-message-list"]', finalText)).toBe(1);
+    expect(await textOccurrences('[data-testid="v2-message-list"]', streamingText)).toBe(0);
+    expect(await domText('[data-testid="v2-message-list"]')).toContain(userPrompt);
+  });
 });
