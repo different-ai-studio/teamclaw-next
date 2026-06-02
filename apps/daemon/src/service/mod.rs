@@ -34,7 +34,7 @@ Description=amuxd (TeamClaw agent daemon)
 After=network-online.target
 
 [Service]
-ExecStart={exe} start
+ExecStart="{exe}" start
 Restart=always
 RestartSec=3
 
@@ -56,6 +56,7 @@ fn amuxd_exe_path() -> std::path::PathBuf {
 #[cfg(target_os = "macos")]
 pub fn install_service() -> anyhow::Result<()> {
     let exe = amuxd_exe_path();
+    anyhow::ensure!(exe.exists(), "amuxd binary not found at {}", exe.display());
     let plist_dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("no home dir"))?
         .join("Library/LaunchAgents");
@@ -97,11 +98,14 @@ fn nix_uid() -> u32 {
 #[cfg(target_os = "linux")]
 pub fn install_service() -> anyhow::Result<()> {
     let exe = amuxd_exe_path();
+    anyhow::ensure!(exe.exists(), "amuxd binary not found at {}", exe.display());
     let unit_dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("no home dir"))?
         .join(".config/systemd/user");
     std::fs::create_dir_all(&unit_dir)?;
     std::fs::write(unit_dir.join("amuxd.service"), systemd_unit(&exe))?;
+    // Best-effort: keep the user manager running after logout so the service
+    // survives across login sessions (no-op / may fail on headless setups).
     let _ = std::process::Command::new("loginctl")
         .args(["enable-linger"])
         .status();
@@ -127,9 +131,12 @@ pub fn uninstall_service() -> anyhow::Result<()> {
 #[cfg(target_os = "windows")]
 pub fn install_service() -> anyhow::Result<()> {
     let exe = amuxd_exe_path();
+    anyhow::ensure!(exe.exists(), "amuxd binary not found at {}", exe.display());
+    // schtasks /TR wants a bare command line; quote only the exe path (it may
+    // contain spaces), not the whole "<exe> start" string.
     let status = std::process::Command::new("schtasks")
         .args(["/Create", "/F", "/SC", "ONLOGON", "/TN", "amuxd", "/TR"])
-        .arg(format!("\"{} start\"", exe.display()))
+        .arg(format!("\"{}\" start", exe.display()))
         .status()?;
     anyhow::ensure!(status.success(), "schtasks /Create failed");
     let _ = std::process::Command::new("schtasks")
@@ -144,6 +151,16 @@ pub fn uninstall_service() -> anyhow::Result<()> {
         .args(["/Delete", "/F", "/TN", "amuxd"])
         .status();
     Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub fn install_service() -> anyhow::Result<()> {
+    anyhow::bail!("amuxd service registration is not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub fn uninstall_service() -> anyhow::Result<()> {
+    anyhow::bail!("amuxd service registration is not supported on this platform")
 }
 
 #[cfg(test)]
@@ -164,7 +181,7 @@ mod tests {
     #[test]
     fn systemd_unit_contains_execstart_and_restart() {
         let u = systemd_unit(Path::new("/home/x/.amuxd/bin/amuxd"));
-        assert!(u.contains("ExecStart=/home/x/.amuxd/bin/amuxd start"));
+        assert!(u.contains("ExecStart=\"/home/x/.amuxd/bin/amuxd\" start"));
         assert!(u.contains("Restart=always"));
         assert!(u.contains("[Install]"));
         assert!(u.contains("WantedBy=default.target"));
