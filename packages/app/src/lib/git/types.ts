@@ -187,31 +187,3 @@ export interface SkillWithSource {
   /** Whether this is a global skill (from user home directory) */
   isGlobal?: boolean
 }
-
-// --- WebDAV Team Sync Types ---
-
-export interface WebDavConfig {
-  url: string
-  authType: 'basic' | 'bearer'
-  username?: string
-  syncIntervalSecs: number
-  enabled: boolean
-  lastSyncAt: string | null
-  allowInsecure: boolean
-}
-
-export interface WebDavSyncStatus {
-  connected: boolean
-  syncing: boolean
-  lastSyncAt: string | null
-  fileCount: number
-  error: string | null
-}
-
-export interface WebDavSyncResult {
-  filesAdded: number
-  filesUpdated: number
-  filesDeleted: number
-}
-
-export type TeamSyncMode = 'git' | 'webdav' | null

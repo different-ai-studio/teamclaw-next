@@ -354,14 +354,14 @@ export function FileTree({
   }, [effectiveShowGitStatus, gitStatuses, workspacePath]);
 
   // Pre-compute sync status data for team files.
-  // Both team modes feed the same coloring path:
-  //   - git    → teamGitFileSyncStatusMap ('modified' | 'new')
-  //   - webdav → OSS per-file statuses     ('modified' | 'new' | 'conflict')
+  //   - git    → teamGitFileSyncStatusMap ('modified' | 'new') drives per-file coloring
+  //   - oss    → the daemon no longer exposes per-file sync status, so OSS files
+  //              get no per-file sync badges (only the folder spinner / last-sync
+  //              tooltip from the aggregate `syncing` / `lastSyncAt`).
   const teamGitFileSyncStatusMap = useTeamModeStore(s => s.teamGitFileSyncStatusMap);
   const teamModeType = useTeamModeStore(s => s.teamModeType);
   const teamGitSyncing = useTeamModeStore(s => s.teamGitSyncing);
   const teamGitLastSyncAt = useTeamModeStore(s => s.teamGitLastSyncAt);
-  const ossFileStatusMap = useOssSyncStore(s => s.fileStatusMap);
   const ossSyncing = useOssSyncStore(s => s.syncing);
   const ossLastSyncAt = useOssSyncStore(s => s.lastSyncAt);
 
@@ -369,16 +369,9 @@ export function FileTree({
     if (teamModeType === 'git') {
       return teamGitFileSyncStatusMap;
     }
-    if (teamModeType === 'webdav') {
-      const map: Record<string, FileSyncStatusKind> = {};
-      for (const [relPath, entry] of Object.entries(ossFileStatusMap)) {
-        if (entry.status === 'synced') continue;
-        map[relPath] = entry.status;
-      }
-      return map;
-    }
+    // OSS / webdav mode: per-file status is no longer available via the daemon.
     return {};
-  }, [teamModeType, teamGitFileSyncStatusMap, ossFileStatusMap]);
+  }, [teamModeType, teamGitFileSyncStatusMap]);
 
   // Which mode drives the teamclaw-team folder spinner / last-sync tooltip.
   const teamSyncing = teamModeType === 'webdav' ? ossSyncing : teamGitSyncing;

@@ -389,7 +389,6 @@ export function useGitReposInit() {
   const workspaceReady = !!workspacePath;
   const { initialize: initGitRepos, syncAll: syncGitRepos } = useGitReposStore();
   const prevWorkspaceRef = useRef<string | null>(null);
-  const teamSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Local git repos init — re-runs when workspace changes
   useEffect(() => {
@@ -424,28 +423,14 @@ export function useGitReposInit() {
             const teamConfig = config as { enabled?: boolean } | null;
             if (teamConfig?.enabled) {
               const doSync = () => {
+                // The daemon proxy no longer returns a size precheck
+                // (`needsConfirmation`) — it always proceeds.
                 invoke("team_sync_repo", { force: false, workspacePath })
                   .then(async (result: unknown) => {
                     const r = result as {
                       success: boolean;
                       message: string;
-                      needsConfirmation?: boolean;
-                      newFiles?: Array<{ path: string; sizeBytes: number }>;
-                      totalBytes?: number;
                     };
-                    if (r.needsConfirmation) {
-                      console.warn(
-                        "[App] Team sync blocked by precheck — waiting for user confirmation in Settings",
-                        { count: r.newFiles?.length ?? 0, totalBytes: r.totalBytes ?? 0 },
-                      );
-                      const { toast } = await import("sonner");
-                      toast.warning(
-                        i18n.t("daemon.connection.largeFilesPending", {
-                          count: r.newFiles?.length ?? 0,
-                        }),
-                      );
-                      return;
-                    }
                     if (r.success) {
                       const { useTeamModeStore } = await import("@/stores/team-mode");
                       useTeamModeStore.setState({ teamGitLastSyncAt: new Date().toISOString() });
@@ -462,15 +447,11 @@ export function useGitReposInit() {
                   });
               };
 
-              console.log("[App] Team config found, syncing team repo...");
+              // One-time initial sync on workspace open. The amuxd daemon now
+              // runs its own 300s sync timer, so the desktop no longer needs a
+              // redundant 5-minute poll here.
+              console.log("[App] Team config found, syncing team repo (initial)...");
               doSync();
-
-              // Periodic sync every 5 minutes
-              const intervalId = setInterval(() => {
-                console.log("[App] Periodic team repo sync...");
-                doSync();
-              }, 5 * 60 * 1000);
-              teamSyncIntervalRef.current = intervalId;
             }
           })
           .catch((err: unknown) => {
@@ -502,12 +483,6 @@ export function useGitReposInit() {
       }
     })();
 
-    return () => {
-      if (teamSyncIntervalRef.current) {
-        clearInterval(teamSyncIntervalRef.current);
-        teamSyncIntervalRef.current = null;
-      }
-    };
   }, [workspacePath, workspaceReady]);
 
   // Real-time: refresh team-git file status and member roles when team files change

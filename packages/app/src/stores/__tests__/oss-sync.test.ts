@@ -37,8 +37,10 @@ function resetState() {
     syncing: false,
     lastSyncAt: null,
     teamId: null,
-    fileStatusMap: {},
-    conflicts: [],
+    mode: null,
+    pulled: 0,
+    pushed: 0,
+    conflicts: 0,
     lastError: null,
   })
 }
@@ -56,13 +58,17 @@ describe('useOssSyncStore', () => {
   // ── refresh ──────────────────────────────────────────────────────────────
 
   describe('refresh', () => {
-    it('updates teamId and lastSyncAt from oss_sync_status', async () => {
+    it('updates aggregate status from oss_sync_status', async () => {
+      // Daemon aggregate shape: no teamId field — the store keeps the active
+      // team id from the current-team store.
       mockInvoke.mockResolvedValueOnce({
-        teamId: 'team-abc',
-        lastServerSeq: 5,
+        mode: 'oss',
         lastSyncAt: '2026-05-27T12:00:00Z',
-        dirtyCount: 0,
-        totalFiles: 10,
+        syncing: false,
+        lastError: null,
+        pulled: 3,
+        pushed: 1,
+        conflicts: 0,
       })
 
       await useOssSyncStore.getState().refresh('/workspace/path')
@@ -72,8 +78,12 @@ describe('useOssSyncStore', () => {
         teamId: 'team-active',
       })
       const state = useOssSyncStore.getState()
-      expect(state.teamId).toBe('team-abc')
+      expect(state.teamId).toBe('team-active')
+      expect(state.mode).toBe('oss')
       expect(state.lastSyncAt).toBe('2026-05-27T12:00:00Z')
+      expect(state.pulled).toBe(3)
+      expect(state.pushed).toBe(1)
+      expect(state.conflicts).toBe(0)
       expect(state.lastError).toBeNull()
     })
 
@@ -92,11 +102,13 @@ describe('useOssSyncStore', () => {
     it('flips syncing true then false on success', async () => {
       const syncResult = { pulled: 2, pushed: 1, conflicts: 0 }
       const statusResult = {
-        teamId: 'team-xyz',
-        lastServerSeq: 10,
+        mode: 'oss',
         lastSyncAt: '2026-05-27T13:00:00Z',
-        dirtyCount: 0,
-        totalFiles: 5,
+        syncing: false,
+        lastError: null,
+        pulled: 2,
+        pushed: 1,
+        conflicts: 0,
       }
 
       const syncingValues: boolean[] = []
