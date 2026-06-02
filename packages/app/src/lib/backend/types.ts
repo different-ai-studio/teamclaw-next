@@ -461,6 +461,7 @@ export interface ActorsBackend {
     grantedByMemberId: string | null;
   }): Promise<void>;
   removeAgentAccess(accessId: string): Promise<void>;
+  makeAgentPersonal(agentActorId: string): Promise<void>;
 }
 
 export interface SessionMemberCandidate extends ActorDirectoryEntry {

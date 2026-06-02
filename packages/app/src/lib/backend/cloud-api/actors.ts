@@ -150,5 +150,11 @@ export function createActorsModule(client: CloudApiClient): ActorsBackend {
     async removeAgentAccess(accessId) {
       await client.delete<void>(`/v1/actors/access/${encodeURIComponent(accessId)}`);
     },
+    async makeAgentPersonal(agentActorId: string): Promise<void> {
+      await client.post<void>(
+        `/v1/agents/${encodeURIComponent(agentActorId)}/make-personal`,
+        {},
+      );
+    },
   };
 }
