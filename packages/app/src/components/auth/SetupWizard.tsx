@@ -43,6 +43,8 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
         <div className="flex flex-col gap-2">
           {requirements.map((req) => {
             const isInstalling = installing === req.id
+            // present-but-not-ready with a detected version => upgrade; no version => fresh install.
+            const isUpgrade = !req.present && !!req.version
             const lines = output[req.id] ?? []
             const err = errors[req.id]
             return (
@@ -65,12 +67,16 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
                       disabled={installing !== null}
                       onClick={() => void install(req.id)}
                     >
-                      {isInstalling ? '安装中…' : '安装'}
+                      {isInstalling
+                        ? (isUpgrade ? '升级中…' : '安装中…')
+                        : (isUpgrade ? '升级' : '安装')}
                     </Button>
                   )}
                 </div>
                 {req.version && (
-                  <p className="mt-1 font-mono text-[11px] text-faint">{req.version}</p>
+                  <p className="mt-1 font-mono text-[11px] text-faint">
+                    {isUpgrade ? `当前 ${req.version}，需升级` : req.version}
+                  </p>
                 )}
                 {isInstalling && lines.length > 0 && (
                   <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
