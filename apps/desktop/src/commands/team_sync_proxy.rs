@@ -556,6 +556,67 @@ pub async fn oss_sync_set_local_sync_mode(
     set_local_sync_mode_inner(&workspace_path, &mode)
 }
 
+// ─── unified team file/versions/changed proxies (Task 3) ────────────────────
+
+/// `GET /v1/team/versions` — mode-agnostic per-file version list.
+#[tauri::command]
+pub async fn team_file_versions(
+    team_id: String,
+    path: String,
+    cursor: Option<String>,
+) -> Result<serde_json::Value, String> {
+    daemon_team_versions(&team_id, &path, cursor.as_deref()).await
+}
+
+/// `GET /v1/team/file?ref=` — content of a file at a version-ref
+/// ("baseline" = current synced/committed baseline).
+#[tauri::command]
+pub async fn team_file_content(
+    team_id: String,
+    path: String,
+    r#ref: String,
+) -> Result<serde_json::Value, String> {
+    let query = format!(
+        "?teamId={}&path={}&ref={}",
+        urlencode(&team_id),
+        urlencode(&path),
+        urlencode(&r#ref)
+    );
+    daemon_request::<(), _>(
+        reqwest::Method::GET,
+        "/v1/team/file",
+        &query,
+        &["workspace:read"],
+        None,
+    )
+    .await
+}
+
+/// `GET /v1/team/changed` — files with local changes.
+#[tauri::command]
+pub async fn team_changed_files(team_id: String) -> Result<serde_json::Value, String> {
+    let query = format!("?teamId={}", urlencode(&team_id));
+    daemon_request::<(), _>(
+        reqwest::Method::GET,
+        "/v1/team/changed",
+        &query,
+        &["workspace:read"],
+        None,
+    )
+    .await
+}
+
+/// `POST /v1/team/versions/restore` — restore a file to a version-ref.
+/// For the unified model the version-ref IS the oss contentHash (git uses the SHA).
+#[tauri::command]
+pub async fn team_restore_file_version(
+    team_id: String,
+    path: String,
+    r#ref: String,
+) -> Result<(), String> {
+    daemon_team_restore_version(&team_id, &path, &r#ref).await
+}
+
 fn set_local_sync_mode_inner(workspace_path: &str, mode: &str) -> Result<(), String> {
     let config_path = std::path::Path::new(workspace_path)
         .join(crate::commands::TEAMCLAW_DIR)

@@ -10380,7 +10380,6 @@ dependencies = [
  "teamclaw-rag",
  "teamclaw-runtime-env",
  "teamclaw-stt",
- "teamclaw-sync",
  "teamclaw-types",
  "tempfile",
  "thiserror 2.0.18",
@@ -10521,13 +10520,6 @@ dependencies = [
  "tokio",
  "tracing",
  "whisper-rs",
-]
-
-[[package]]
-name = "teamclaw-sync"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]

@@ -296,7 +296,6 @@ pub fn run() {
             wvm
         })
         .manage(commands::window_chrome::MainWindowState::default())
-        .manage(commands::version_commands::VersionStoreState::default())
         .manage(commands::shared_secrets::SharedSecretsState::default())
         .manage::<crate::mqtt::MqttBus>(std::sync::Arc::new(crate::mqtt::MqttBusInner::new()))
         .manage(std::sync::Arc::new(crate::terminal::Registry::new()))
@@ -428,11 +427,12 @@ pub fn run() {
             commands::team_sync_proxy::team_shared_git_validate,
             commands::team_sync_proxy::team_shared_git_setup,
             commands::team_sync_proxy::team_shared_git_sync,
+            commands::team_sync_proxy::team_file_versions,
+            commands::team_sync_proxy::team_file_content,
+            commands::team_sync_proxy::team_changed_files,
+            commands::team_sync_proxy::team_restore_file_version,
             commands::device_identity::get_persistent_device_id,
             commands::device_token::generate_device_token,
-            commands::version_commands::team_list_file_versions,
-            commands::version_commands::team_list_all_versioned_files,
-            commands::version_commands::team_restore_file_version,
             commands::deps::check_dependencies,
             commands::deps::install_dependency,
             commands::env_vars::env_var_get,
