@@ -93,10 +93,12 @@ async function seedSingleAgentSession(opts: {
 async function messageListDistanceFromBottom(): Promise<number> {
   const code = `
     (() => {
-      let el = document.querySelector('[data-testid="v2-message-list"]');
-      if (!el) return "999999";
-      let node = el;
-      while (node) {
+      const list = document.querySelector('[data-testid="v2-message-list"]');
+      if (!list) return "999999";
+      // Walk up from the list element to find the nearest scrollable ancestor.
+      // Bounded by <body> to avoid latching onto unrelated page-level scrollers.
+      let node = list;
+      while (node && node !== document.body) {
         const style = window.getComputedStyle(node);
         const oy = style.overflowY;
         if ((oy === "auto" || oy === "scroll") && node.scrollHeight > node.clientHeight + 1) {
@@ -104,10 +106,13 @@ async function messageListDistanceFromBottom(): Promise<number> {
         }
         node = node.parentElement;
       }
+      // No dedicated scroll container found inside <body> — list fits in viewport.
       return "0";
     })()
   `;
-  return Number(await executeJs(code));
+  const raw = await executeJs(code);
+  const n = Number(raw ?? "999999");
+  return Number.isNaN(n) ? 999999 : n;
 }
 
 describe("V2 PR streaming integrity (spec D8/D9)", () => {
@@ -199,12 +204,14 @@ describe("V2 PR streaming integrity (spec D8/D9)", () => {
     await waitForText("写一段很长的说明");
 
     const line = "这是一段用于撑高消息列表的较长文本,确保内容超过视口高度。";
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 80; i++) {
       await v2Call("emitAgentDelta", { sessionId, actorId: agentId, delta: `${i}. ${line}\n` });
     }
     await waitForSelector(
       `[data-testid="v2-streaming-agent"][data-session-id="${sessionId}"][data-actor-id="${agentId}"]`,
     );
+    // Wait for the last delta line to be rendered before checking scroll position.
+    await waitForText(`79. ${line}`);
 
     await waitFor(
       "message list pinned to bottom during long stream",
