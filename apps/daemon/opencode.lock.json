@@ -1,5 +1,5 @@
 {
-  "version": "v0.0.0-PLACEHOLDER",
+  "version": "v1.15.13",
   "assets": {
     "aarch64-apple-darwin":      { "name": "opencode-darwin-arm64.zip", "sha256": "" },
     "x86_64-apple-darwin":       { "name": "opencode-darwin-x64.zip",   "sha256": "" },

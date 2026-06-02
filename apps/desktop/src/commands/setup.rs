@@ -171,6 +171,9 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
     // loop ends — Terminated is not guaranteed to be the final event, so we keep
     // draining stdout/stderr after it before deciding success/failure.
     let mut last_err: Option<String> = None;
+    // Track the most recent stderr line so a non-zero exit surfaces amuxd's real
+    // reason (e.g. an HTTP 404) instead of a bare exit code.
+    let mut last_stderr: Option<String> = None;
     while let Some(event) = rx.recv().await {
         match event {
             CommandEvent::Stdout(bytes) => {
@@ -182,11 +185,15 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
             CommandEvent::Stderr(bytes) => {
                 let line = String::from_utf8_lossy(&bytes).trim().to_string();
                 if !line.is_empty() {
+                    last_stderr = Some(line.clone());
                     emit_progress(app, SetupProgress { id: "opencode".into(), status: "running".into(), line: Some(line), error: None });
                 }
             }
             CommandEvent::Terminated(payload) if payload.code.unwrap_or(-1) != 0 => {
-                last_err = Some(format!("amuxd install-opencode exited with code {:?}", payload.code));
+                last_err = Some(match &last_stderr {
+                    Some(s) => format!("amuxd install-opencode failed: {s}"),
+                    None => format!("amuxd install-opencode exited with code {:?}", payload.code),
+                });
             }
             _ => {}
         }
