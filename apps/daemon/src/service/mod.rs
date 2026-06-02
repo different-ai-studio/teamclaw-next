@@ -129,7 +129,7 @@ pub fn install_service() -> anyhow::Result<()> {
     let exe = amuxd_exe_path();
     let status = std::process::Command::new("schtasks")
         .args(["/Create", "/F", "/SC", "ONLOGON", "/TN", "amuxd", "/TR"])
-        .arg(format!("\"{}  start\"", exe.display()))
+        .arg(format!("\"{} start\"", exe.display()))
         .status()?;
     anyhow::ensure!(status.success(), "schtasks /Create failed");
     let _ = std::process::Command::new("schtasks")
