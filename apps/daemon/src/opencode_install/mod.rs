@@ -202,6 +202,66 @@ pub fn resolve_binary(configured: Option<&str>) -> String {
     resolve_binary_with(configured, opencode_bin_path().exists())
 }
 
+fn progress(event: &str, message: &str) {
+    println!("{}", serde_json::json!({ "event": event, "message": message }));
+}
+
+fn installed_version() -> anyhow::Result<Option<String>> {
+    let p = version_file_path();
+    if p.exists() {
+        Ok(Some(std::fs::read_to_string(&p)?.trim().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn post_process(path: &Path) {
+    let _ = std::process::Command::new("xattr").arg("-cr").arg(path).status();
+    let _ = std::process::Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(path)
+        .status();
+}
+#[cfg(not(target_os = "macos"))]
+fn post_process(_path: &Path) {}
+
+pub async fn run_install(force: bool) -> anyhow::Result<()> {
+    let lock = OpencodeLock::parse(LOCK_JSON)?;
+    let target = current_target()?;
+    let asset = lock.asset_for(target)?.clone();
+    let dest = opencode_bin_path();
+
+    if !force && dest.exists() && installed_version()? == Some(lock.version.clone()) {
+        progress("ok", &format!("opencode {} already installed", lock.version));
+        return Ok(());
+    }
+
+    progress("download", &format!("downloading opencode {}", lock.version));
+    let archive = install_dir().join(&asset.name);
+    let mut urls = vec![github_url(&lock.version, &asset.name)];
+    if let Some(m) = mirror_url(&lock.version, &asset.name) {
+        urls.push(m);
+    }
+    download_with_fallback(&urls, &archive).await?;
+
+    if let Some(sha) = asset.sha256.as_deref() {
+        if !sha.is_empty() {
+            progress("verify", "verifying checksum");
+            verify_sha256(&archive, sha)?;
+        }
+    }
+
+    progress("extract", "extracting opencode");
+    extract_opencode(&archive, &dest)?;
+    let _ = std::fs::remove_file(&archive);
+    post_process(&dest);
+    std::fs::write(version_file_path(), &lock.version)?;
+
+    progress("ok", &format!("opencode {} installed at {}", lock.version, dest.display()));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
