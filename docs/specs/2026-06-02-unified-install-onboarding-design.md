@@ -26,6 +26,10 @@ TeamClaw 桌面端目前把三块东西完全分离:
 ## 2. 锁定的关键决策
 
 1. **交付策略 = 混合**:第一方 (amuxd) 随包捆绑;第三方 (opencode) 按需下载(带 CN 镜像);git 检测+引导。
+   - **opencode 归 amuxd**(§9 开放问题 1 已查清):#283 之后 opencode 完全由 amuxd 拉起(`opencode serve`
+     做 provider OAuth、`opencode acp` 做聊天会话),desktop 的 `opencode.rs` 是 dead code。因此 opencode 的
+     **下载/校验/版本逻辑放进 amuxd**(`apps/daemon`),装到 `~/.amuxd/bin/opencode`;desktop 首启向导只是
+     **调用捆绑的 amuxd CLI** 触发安装并渲染进度。
 2. **git = 可跳过**:检测不到就引导安装,但允许跳过,不阻断进入 app。
 3. **amuxd = 常驻后台服务**:登录 + invite 之后注册为 launchd / systemd-user / 计划任务,开机自启,app 关闭后继续跑(承载 push/MQTT/cron)。
 4. **实现路线 = 路线 B**:Rust 侧声明式 Setup Engine + 前端只渲染;逻辑同时暴露成 `amuxd doctor` CLI。
@@ -78,8 +82,12 @@ trait Requirement {
 | Requirement | detect | install | optional |
 |---|---|---|---|
 | `GitReq` | `git --version` | mac: 触发 `xcode-select --install` / 提示 brew;win: 引导 winget/installer;linux: 提示发行版包管理器 | ✅ |
-| `OpenCodeReq` | 比对 `.opencode-version` vs `opencode.lock.json` 期望版本 | 见 §5,纯 Rust 下载 | ❌ |
+| `OpenCodeReq` | 调 `amuxd doctor --json` 看 opencode 状态(逻辑在 amuxd) | 调 `amuxd install-opencode`(见 §5),桥接进度到向导 | ❌ |
 | `AmuxdReq` | 捆绑二进制是否已复制到 `~/.amuxd/bin/amuxd`(仅"装好",不查服务) | 把随包的 amuxd 复制到 `~/.amuxd/bin/`,mac 去隔离+ad-hoc 签名 | ❌ |
+
+> **安装顺序**:`AmuxdReq` 必须先于 `OpenCodeReq`——opencode 的安装逻辑在 amuxd CLI 里,得先有 amuxd
+> 二进制可调。向导顺序:amuxd(复制二进制)→ opencode(经 amuxd CLI 下载)→ git(可跳过)。opencode 安装
+> 不需要团队身份,可在阶段一完成。
 
 **对外双入口、共用引擎:**
 - Tauri commands:`setup_list_requirements()` / `setup_install(id)` / `setup_verify_all()` —— 重写替换
@@ -92,11 +100,16 @@ trait Requirement {
 **前端**:新增 onboarding 向导组件(参考现有 `DesktopOnboarding.tsx` 的位置),只负责拉 requirement
 列表、展示状态、触发 install、轮询进度。
 
-## 5. opencode 下载器 + CN 镜像 + 版本固定
+## 5. opencode 下载器 + CN 镜像 + 版本固定(归 amuxd)
+
+opencode 由 amuxd 拉起,所以下载/校验/版本逻辑放进 **amuxd**(`apps/daemon/src/opencode_install/` 之类),
+对外暴露为 CLI:`amuxd install-opencode` / `amuxd doctor`(只读检测)。desktop 首启向导经捆绑的 amuxd CLI
+调它并渲染进度;同一逻辑也供任意客户端 / 纯 CLI 复用。
 
 现有 `download-opencode.sh` 依赖 `gh` CLI(终端用户没有)且无 Windows target,运行期必须纯 Rust 直连。
 
-**版本固定 (single source of truth)**:新增 `apps/desktop/opencode.lock.json`:
+**版本固定 (single source of truth)**:新增 `apps/daemon/opencode.lock.json`(随 amuxd 编译进二进制或随
+`~/.amuxd/` 分发):
 
 ```json
 {
@@ -114,18 +127,22 @@ trait Requirement {
 > ⚠️ **风险**: 需确认 `anomalyco/opencode` 是否发布 Windows / linux-arm64 资产。若没有,Windows 平台的
 > opencode 步骤需降级为"暂不支持/手动"或推动上游出包。
 
-**`OpenCodeReq.install()` (纯 Rust):**
+**`amuxd install-opencode` (纯 Rust,amuxd 内):**
 1. 选源:默认 `github.com/anomalyco/opencode/releases/download/<ver>/<asset>`;CN 走阿里云 OSS 镜像
    (复用 `install-mac-cn.sh` 的 OSS 链路,发版时把 opencode 资产一并镜像)。
-2. 下载到临时目录,**进度回调** → 向导进度条;**校验 sha256**。
-3. 解压 (zip / tar.gz),把 `opencode` 放到 **app data 稳定路径**(非 app bundle 内部,只读且升级会丢)。
+2. 下载到临时目录,**进度输出**(stdout JSON 行 → desktop 桥接到向导进度条);**校验 sha256**。
+3. 解压 (zip / tar.gz),把 `opencode` 放到 **`~/.amuxd/bin/opencode`**(amuxd 能发现的稳定路径)。
 4. macOS:`xattr -cr` + `codesign --force --sign -`(照搬脚本 line 81-83)。
-5. 写 `.opencode-version`,`verify()` 跑 `opencode --version`。
+5. 写 `~/.amuxd/.opencode-version`,跑 `opencode --version` 复检。
+
+**amuxd 二进制发现**:amuxd 现在用 `command -v opencode`(PATH)或 daemon.toml `[agents.opencode].binary`
+绝对路径(`pool.rs:142` / `server.rs:1042`)。需让 amuxd **优先选 `~/.amuxd/bin/opencode`**(若存在),或在
+`amuxd init` 时把该绝对路径写入 `daemon.toml [agents.opencode].binary`,确保装到的 opencode 一定被用上。
 
 **镜像选择**:先试官方源,超时/失败自动 fallback 到 OSS 镜像;或在向导给"中国大陆网络"开关。
 
-**opencode 归属待确认**(见 §9 开放问题 1):若 #283 之后 opencode 由 amuxd 拉起,则落点应面向 amuxd
-(`~/.amuxd/bin/`),`OpenCodeReq` 可能归 daemon 侧。
+**清理**:desktop 的 `apps/desktop/src/commands/opencode.rs` 已是 dead code(命令未在 `lib.rs` 导出、
+`externalBin` 无 opencode),本设计落地时一并删除或标记 legacy。
 
 ## 6. amuxd 捆绑 + 服务注册 + 团队 onboarding
 
@@ -199,25 +216,30 @@ invite,返回 `{ agentId, inviteToken }`。
 ## 8. 受影响 / 新增文件清单
 
 新增:
-- `apps/desktop/src/setup/`(mod + 三个 Requirement + Tauri commands)
-- `apps/desktop/opencode.lock.json`
+- `apps/desktop/src/setup/`(mod + 三个 Requirement + Tauri commands;OpenCodeReq 委托 amuxd CLI)
+- `apps/daemon/src/opencode_install/`(纯 Rust 下载器)+ `apps/daemon/opencode.lock.json`
 - `scripts/ensure-amuxd-sidecar.js`
-- amuxd CLI:`doctor` / `install-service` 子命令(`apps/daemon/src/cli/` + 服务注册模块)
+- amuxd CLI 子命令:`doctor`(只读检测) / `install-opencode`(下载 opencode) / `install-service`
+  (注册后台服务)/ `clear`(已存在,重置用)(`apps/daemon/src/cli/` + 服务注册模块)
 - 前端 onboarding 向导组件 + daemon onboarding 状态机 store
 - FC:端点 A / B 的 openapi + contract + 路由 + repo + 测试
 
 改动:
 - `apps/desktop/src/commands/daemon_installer.rs`(三个 `not_implemented` → 实装,或迁入 setup 模块)
+- `apps/desktop/src/commands/opencode.rs`(dead code,删除或标记 legacy)
 - `apps/desktop/tauri.conf.json`(`externalBin` 加 amuxd)
+- `apps/daemon/src/daemon/server.rs` / `opencode_settings/pool.rs`(opencode 二进制发现优先 `~/.amuxd/bin/`)
 - `.github/workflows/release.yml`(amuxd 双 arch 编译)
 - `packages/app/src/components/settings/DaemonGeneralSection.tsx`(team mismatch 升级为强制重置入口)
 - `docs/openapi/teamclaw-api.v1.yaml`
 
 ## 9. 开放问题 / 风险
 
-1. **opencode 归属**:#283 "no desktop OpenCode sidecar" + build.rs 注释 "agent runtime is owned by
-   amuxd" 表明 opencode 可能已改由 amuxd 拉起。需确认 #283 之后谁在何处 spawn opencode,以定 `OpenCodeReq`
-   落点(desktop vs amuxd `~/.amuxd/bin/`)与归属。**实现前必须查清**。
+1. ~~**opencode 归属**~~ **[已查清 2026-06-02]**:#283 之后 opencode **完全由 amuxd 拉起**——
+   `opencode serve`(provider OAuth/发现,`opencode_settings/pool.rs:83`)+ `opencode acp`(聊天会话,
+   `runtime/adapter.rs:1151`);amuxd 经 `command -v opencode` 或 daemon.toml `[agents.opencode].binary`
+   发现。desktop 的 `opencode.rs` 是 dead code。**结论:opencode 安装器归 amuxd,落 `~/.amuxd/bin/opencode`**
+   (已并入 §2 决策 1、§4、§5、§8)。
 2. **opencode Windows/linux-arm64 资产**:上游是否发布?否则对应平台步骤需降级。
 3. **后端 Supabase vs Postgres**:FC 去 Supabase 化进行中(`BACKEND_KIND=postgres`),端点 A/B 需在两条
    后端路径都实现(或至少 supabase passthrough + 进行中的 postgres)。
