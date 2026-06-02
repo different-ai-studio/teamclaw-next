@@ -1,5 +1,6 @@
 pub mod acp_host;
 pub mod adapter;
+pub mod env_assembly;
 mod handle;
 mod manager;
 pub mod models;

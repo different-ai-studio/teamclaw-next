@@ -35,6 +35,8 @@ use crate::daemon::session_resume::resolve_backend_session_id;
 
 #[path = "collab_runtime_ensure.rs"]
 mod collab_runtime_ensure;
+#[path = "runtime_env.rs"]
+mod runtime_env;
 use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
@@ -3286,6 +3288,21 @@ impl DaemonServer {
                                 (!w.remote_workspace_id.is_empty())
                                     .then_some(w.remote_workspace_id.clone())
                             });
+                        let runtime_env = match self.assemble_spawn_runtime_env_for_worktree(
+                            &worktree,
+                            &ws_id,
+                        ) {
+                            Ok(env) => env,
+                            Err(e) => {
+                                warn!(
+                                    agent_id,
+                                    worktree = %worktree,
+                                    error = %e,
+                                    "lazy-resume: assemble runtime env failed; continuing with empty env"
+                                );
+                                crate::runtime::SpawnRuntimeEnv::default()
+                            }
+                        };
                         let resume_res = self
                             .agents
                             .lock()
@@ -3299,6 +3316,7 @@ impl DaemonServer {
                                 remote_workspace_id.as_deref(),
                                 (!session_id.is_empty()).then_some(session_id.as_str()),
                                 &prompt.text,
+                                runtime_env,
                             )
                             .await;
                         match resume_res {
@@ -4433,24 +4451,7 @@ impl DaemonServer {
             );
         }
 
-        let workspace_team_id = self
-            .workspaces
-            .find_by_id(&ws_id)
-            .or_else(|| {
-                self.workspaces
-                    .workspaces
-                    .iter()
-                    .find(|w| w.path == resolved_worktree)
-            })
-            .and_then(|w| w.team_id.clone())
-            .filter(|team_id| !team_id.trim().is_empty())
-            .or_else(|| {
-                self.config
-                    .team_id
-                    .as_ref()
-                    .map(|id| id.trim().to_string())
-                    .filter(|id| !id.is_empty())
-            });
+        let workspace_team_id = self.resolve_workspace_team_id(&resolved_worktree, &ws_id);
 
         if let Some(ref team_id) = workspace_team_id {
             crate::team_link::ensure_team_link(team_id, &resolved_worktree);
@@ -4461,26 +4462,14 @@ impl DaemonServer {
         {
             sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), &config);
         }
-        let team_env = load_team_runtime_env(
-            Path::new(&resolved_worktree),
-            workspace_team_id.as_deref(),
-        );
 
-        let bundle = teamclaw_runtime_env::assemble_runtime_env(
-            Path::new(&resolved_worktree),
-            team_env,
-            teamclaw_runtime_env::SystemEnvContext {
-                device_id: self.config.device.id.clone(),
-                device_name: self.config.device.name.clone(),
-            },
-        )
-        .map_err(|e| StartRuntimeError {
-            error_code: "ENV_ASSEMBLE_FAILED".to_string(),
-            error_message: format!("assemble_runtime_env failed: {e}"),
-            failed_stage: "env_setup".to_string(),
-        })?;
-        let extra_env = bundle.extra_env;
-
+        let runtime_env = self
+            .assemble_spawn_runtime_env_for_worktree(&resolved_worktree, &ws_id)
+            .map_err(|e| StartRuntimeError {
+                error_code: "ENV_ASSEMBLE_FAILED".to_string(),
+                error_message: format!("assemble_runtime_env failed: {e}"),
+                failed_stage: "env_setup".to_string(),
+            })?;
         // Spawn.
         let spawn_res = self
             .agents
@@ -4496,11 +4485,7 @@ impl DaemonServer {
                 initial_model_override,
                 None,
                 resume_acp_session_id,
-                crate::runtime::SpawnRuntimeEnv {
-                    extra_env,
-                    force_env_override: true,
-                    opencode_json_original: bundle.opencode_json_original,
-                },
+                runtime_env,
             )
             .await;
         let new_id = match spawn_res {
