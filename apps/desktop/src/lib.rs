@@ -366,6 +366,8 @@ pub fn run() {
             commands::daemon_installer::install_local_daemon,
             commands::daemon_installer::daemon_status,
             commands::daemon_installer::uninstall_local_daemon,
+            commands::setup::setup_list_requirements,
+            commands::setup::setup_install,
             commands::clawhub::clawhub_search,
             commands::clawhub::clawhub_explore,
             commands::clawhub::clawhub_get_skill,
