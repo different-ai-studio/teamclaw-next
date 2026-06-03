@@ -285,6 +285,7 @@ async function loadDaemonProviderSnapshot(
   disconnectedIds: Set<string>,
   runtimeSuppressedProviderIds: Set<string>,
 ): Promise<{
+  daemonProviders: DaemonProviderInfo[]
   configuredProviders: ConfiguredProvider[]
   providers: ProviderEntry[]
   nextRuntimeSuppressedProviderIds: Set<string>
@@ -302,6 +303,7 @@ async function loadDaemonProviderSnapshot(
     runtimeModelsToConfigured(disconnectedIds, nextRuntimeSuppressedProviderIds),
   )
   return {
+    daemonProviders: daemonProviders ?? [],
     configuredProviders,
     providers: mergeProviderEntries(snapshot.providers, configuredProviders),
     nextRuntimeSuppressedProviderIds,
@@ -805,8 +807,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
           configuredProviders: snapshot.configuredProviders,
           models: flattenConfiguredProviders(snapshot.configuredProviders),
           _runtimeSuppressedProviderIds: snapshot.nextRuntimeSuppressedProviderIds,
-          customProviderIds: snapshot.providers
-            .filter((p) => p.id !== 'team' && p.configured)
+          customProviderIds: snapshot.daemonProviders
+            .filter((p) => p.id !== 'team' && p.authenticated)
             .map((p) => p.id),
         })
       } catch (err) {

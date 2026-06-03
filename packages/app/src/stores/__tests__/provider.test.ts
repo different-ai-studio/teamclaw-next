@@ -127,6 +127,42 @@ describe('provider store initAll', () => {
     })
   })
 
+  it('does not classify built-in runtime providers as custom providers', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'custom-openai',
+        display_name: 'Custom OpenAI',
+        authenticated: true,
+        models: ['my-model'],
+      },
+    ])
+    mocks.runtimeById = {
+      'runtime-1': {
+        info: {
+          agentType: 2,
+          availableModels: [
+            { id: 'openai/gpt-4o', displayName: 'GPT-4o' },
+            { id: 'opencode/qwen3.6-plus-free', displayName: 'OpenCode Zen/Qwen3.6 Plus Free' },
+          ],
+          currentModel: 'openai/gpt-4o',
+        },
+      },
+    }
+
+    const { useProviderStore } = await import('../provider')
+
+    await useProviderStore.getState().initAll()
+
+    expect(useProviderStore.getState().providers).toEqual(
+      expect.arrayContaining([
+        { id: 'openai', name: 'OpenAI', configured: true },
+        { id: 'opencode', name: 'OpenCode', configured: true },
+        { id: 'custom-openai', name: 'Custom OpenAI', configured: true },
+      ]),
+    )
+    expect(useProviderStore.getState().customProviderIds).toEqual(['custom-openai'])
+  })
+
   it('loads OAuth auth methods from daemon HTTP', async () => {
     const { useProviderStore } = await import('../provider')
     await useProviderStore.getState().refreshAuthMethods()
