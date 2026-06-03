@@ -316,7 +316,7 @@ impl RuntimeSupervisor {
             ready: backend_ready,
             backend,
             current_model,
-            refresh: Some(refresh),
+            refresh,
         })
     }
 
@@ -388,7 +388,7 @@ mod tests {
         coordinator.mark_apply_failed("ws-1", "reload failed").await;
 
         let status = supervisor.runtime_status("ws-1", dir.path()).await.unwrap();
-        let refresh = status.refresh.expect("refresh dto should be present");
+        let refresh = status.refresh;
         assert_eq!(refresh.status, "failed");
         assert_eq!(refresh.recommended_action, "apply_changes");
         assert_eq!(refresh.change_kinds, vec!["skills".to_string()]);
@@ -405,7 +405,10 @@ mod tests {
             .runtime_status("ws-clean", dir.path())
             .await
             .unwrap();
-        let refresh = status.refresh.expect("clean refresh dto should be present");
+        let json = serde_json::to_value(&status).unwrap();
+        assert!(json.get("refresh").is_some());
+
+        let refresh = status.refresh;
         assert_eq!(refresh.status, "clean");
         assert_eq!(refresh.recommended_action, "none");
         assert!(refresh.change_kinds.is_empty());

@@ -201,7 +201,7 @@ pub struct RuntimeStatus {
     pub ready: bool,
     pub backend: String,
     pub current_model: Option<String>,
-    pub refresh: Option<RuntimeRefreshDto>,
+    pub refresh: RuntimeRefreshDto,
 }
 
 // ── WorkspaceControlStore trait ───────────────────────────────────────────────
@@ -697,7 +697,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             ready: false,
             backend: "opencode".to_owned(),
             current_model: None,
-            refresh: Some(RuntimeRefreshDto::clean()),
+            refresh: RuntimeRefreshDto::clean(),
         })
     }
 
