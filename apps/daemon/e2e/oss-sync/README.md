@@ -15,6 +15,21 @@
 5. 三节点：`RUN_THREE_NODE=1 ...`（09 基础 / 16 三节点冲突）。
 6. **重场景**（多文件 / 多步：10 嵌套多前缀、11 重命名、12 离线追赶、13 删后重建）：`RUN_HEAVY=1 ...`。
 
+### 并发安全（每个用例隔离）
+`node --test` 把**每个测试文件**跑在独立子进程里。harness 据此给每个进程分配**唯一 compose
+project**（`amuxd-oss-e2e-<pid>-<rand>`，见 `harness/docker.mjs` 的 `composeProject()`）+
+**临时 host 端口**（compose 发 `127.0.0.1::8787`，跑完用 `docker compose port` 动态发现），
+所以场景**可安全并行**——容器名 / 端口 / `/root/.amuxd` 互不冲突。
+
+- 默认 `pnpm test:scenarios` 按 runner 默认并发（≈CPU 核数）跑;**打 prod cloud.ucar.cc 时建议降并发或串行**以免放大限流:`--test-concurrency=1`(串行)或 `--test-concurrency=2`。
+- 对**本地非限流 FC 栈**,并行能大幅加速(尤其重场景)。
+- 想用固定 project / 端口调试单个用例:`COMPOSE_PROJECT_NAME=amuxd-oss-e2e-dbg node --env-file=.env.local --test tests/01-one-way.test.mjs`,再 `docker compose -p amuxd-oss-e2e-dbg port node-a 8787` 看端口。
+
+> 历史踩坑:此前所有场景共用固定 project + 固定容器名(node-a/node-b)+ 固定端口
+> (18081/18082)+ 共享 `/root/.amuxd`,并行跑必撞("container name already in use" /
+> 端口占用 / 共享 daemon.toml 出现重复 `[http]` 致 `load daemon config` 500 / before-hook
+> 超时),整套 0 通过。隔离后此问题消除。
+
 ## ⚠️ prod FC 限流约束（重要）
 cloud.ucar.cc **限流非常激进**。单个场景一拍会发多次 FC 调用（signup + 建 team + 2 invite + 2 claim + 多次 sync，每次 sync 内含 manifest/upload/download 多次调用）。
 

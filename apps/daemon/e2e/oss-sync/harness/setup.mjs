@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as fc from "./fc-client.mjs";
 import * as dc from "./daemon-client.mjs";
-import { composeUp, composeDown, lsContentRoot } from "./docker.mjs";
+import { composeUp, composeDown, lsContentRoot, publishedPort } from "./docker.mjs";
 import { genTeamSecret } from "./secret.mjs";
 
 function env(name, fallback) {
@@ -28,11 +28,6 @@ export async function provisionTwoNodeTeam({ threeNode = false } = {}) {
   await fc.lockOss(base, ownerToken, teamId);
 
   const services = threeNode ? ["node-a", "node-b", "node-c"] : ["node-a", "node-b"];
-  const ports = {
-    "node-a": env("HOST_PORT_A", "18081"),
-    "node-b": env("HOST_PORT_B", "18082"),
-    "node-c": env("HOST_PORT_C", "18083"),
-  };
 
   await composeUp(threeNode ? ["three-node"] : []);
 
@@ -40,7 +35,9 @@ export async function provisionTwoNodeTeam({ threeNode = false } = {}) {
   const nodes = {};
   for (const svc of services) {
     const invite = await fc.createAgentInvite(base, ownerToken, teamId, svc);
-    const node = dc.nodeHandle(svc, ports[svc]);
+    // Discover the ephemeral host port compose assigned this container's 8787.
+    const hostPort = await publishedPort(svc);
+    const node = dc.nodeHandle(svc, hostPort);
     await dc.initNode(node, invite);
     if (node.teamId !== teamId) {
       throw new Error(`node ${svc} joined ${node.teamId}, expected ${teamId}`);

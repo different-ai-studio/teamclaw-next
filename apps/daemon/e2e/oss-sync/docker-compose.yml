@@ -1,3 +1,5 @@
+# Default project name for manual `docker compose` use. The harness overrides
+# it with a unique per-process `-p` so parallel scenarios stay isolated.
 name: amuxd-oss-e2e
 services:
   node-a:
@@ -7,15 +9,18 @@ services:
     image: amuxd-oss-e2e:latest
     environment:
       TEAMCLAW_CLOUD_API_URL: ${CLOUD_API_URL:-https://cloud.ucar.cc}
+    # Ephemeral loopback host port (container 8787). The harness discovers the
+    # actual port via `docker compose port`, so concurrent scenarios never
+    # collide on a fixed host port.
     ports:
-      - "${HOST_PORT_A:-18081}:8787"
+      - "127.0.0.1::8787"
     command: ["sleep", "infinity"]
   node-b:
     image: amuxd-oss-e2e:latest      # 复用 node-a 构建的镜像
     environment:
       TEAMCLAW_CLOUD_API_URL: ${CLOUD_API_URL:-https://cloud.ucar.cc}
     ports:
-      - "${HOST_PORT_B:-18082}:8787"
+      - "127.0.0.1::8787"
     command: ["sleep", "infinity"]
     depends_on: [node-a]
   node-c:
@@ -23,7 +28,7 @@ services:
     environment:
       TEAMCLAW_CLOUD_API_URL: ${CLOUD_API_URL:-https://cloud.ucar.cc}
     ports:
-      - "${HOST_PORT_C:-18083}:8787"
+      - "127.0.0.1::8787"
     command: ["sleep", "infinity"]
     depends_on: [node-a]
     profiles: ["three-node"]
