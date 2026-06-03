@@ -66,16 +66,16 @@ impl<'a> Publisher<'a> {
             .await
     }
 
-    /// Publishes DeviceState (online/offline) to the retained
-    /// device/{id}/state topic. Phase 3 retired the legacy /status topic
-    /// and retargeted LWT here, so this is the single authoritative
-    /// retained channel for daemon presence.
-    pub async fn publish_device_state(
+    /// Publishes ActorPresence (online/offline) to the retained
+    /// amux/{team}/{actor}/state topic. The legacy /status topic was retired
+    /// and LWT retargeted here, so this is the single authoritative retained
+    /// channel for daemon presence.
+    pub async fn publish_actor_presence(
         &self,
-        state: &amux::DeviceState,
+        state: &amux::ActorPresence,
     ) -> Result<(), teamclaw_transport::PublisherError> {
         let payload = state.encode_to_vec();
-        self.publish_message(self.topics.device_state(), true, payload)
+        self.publish_message(self.topics.actor_state(), true, payload)
             .await
     }
 
@@ -100,7 +100,8 @@ impl<'a> Publisher<'a> {
         self.publish_runtime_state(runtime_id, &info).await
     }
 
-    /// Publishes a Notify hint to the daemon's own device/{id}/notify topic.
+    /// Publishes a Notify hint to the daemon's own actor notify topic
+    /// (`amux/{team}/{actor}/notify`).
     /// Ephemeral (no retain) — receivers react by re-fetching authoritative
     /// state from the cloud backend or daemon RPC.
     pub async fn publish_notify(
@@ -113,7 +114,7 @@ impl<'a> Publisher<'a> {
             refresh_hint: refresh_hint.to_string(),
             sent_at: chrono::Utc::now().timestamp(),
         };
-        self.publish_message(self.topics.device_notify(), false, notify.encode_to_vec())
+        self.publish_message(self.topics.actor_notify(), false, notify.encode_to_vec())
             .await
     }
 }

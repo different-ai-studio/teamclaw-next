@@ -9,7 +9,7 @@ import { sessionFlowLog } from '@/lib/session-flow-log'
  *
  * Storage shape:
  *  - Primary key: the topic's `{runtimeId}` segment (8-char spawn id).
- *  - Mirror key:  the topic's `{daemonDeviceId}` segment (agent actor UUID).
+ *  - Mirror key:  the topic's `{daemonActorId}` segment (agent actor UUID).
  *    Resolvers look up by agent UUID first; without the mirror they'd
  *    have to linear-scan every retain.
  *
@@ -27,19 +27,19 @@ import { sessionFlowLog } from '@/lib/session-flow-log'
 
 export type RuntimeStateEntry = {
   info: RuntimeInfo
-  daemonDeviceId: string
+  daemonActorId: string
   lastUpdated: number // ms epoch
 }
 
 interface RuntimeStateState {
   byRuntimeId: Record<string, RuntimeStateEntry>
-  upsert: (runtimeId: string, daemonDeviceId: string, info: RuntimeInfo) => void
+  upsert: (runtimeId: string, daemonActorId: string, info: RuntimeInfo) => void
   clear: () => void
 }
 
 export const useRuntimeStateStore = createZustand<RuntimeStateState>((set, get) => ({
   byRuntimeId: {},
-  upsert: (runtimeId, daemonDeviceId, info) => {
+  upsert: (runtimeId, daemonActorId, info) => {
     const prev = get().byRuntimeId[runtimeId]
     let merged = info
     if (
@@ -53,7 +53,7 @@ export const useRuntimeStateStore = createZustand<RuntimeStateState>((set, get) 
     }
 
     const lastUpdated = Date.now()
-    const entry: RuntimeStateEntry = { info: merged, daemonDeviceId, lastUpdated }
+    const entry: RuntimeStateEntry = { info: merged, daemonActorId, lastUpdated }
 
     const next = { ...get().byRuntimeId, [runtimeId]: entry }
 
@@ -62,7 +62,7 @@ export const useRuntimeStateStore = createZustand<RuntimeStateState>((set, get) 
     // if (a) the agent key is currently empty, or (b) the existing mirror
     // points at a stale entry (older `lastUpdated`) — this prevents broker
     // retain-flush re-ordering from regressing the live spawn's state.
-    const agentKey = daemonDeviceId.trim()
+    const agentKey = daemonActorId.trim()
     if (agentKey && agentKey !== runtimeId) {
       const existingMirror = get().byRuntimeId[agentKey]
       if (!existingMirror || existingMirror.lastUpdated <= lastUpdated) {
@@ -76,14 +76,13 @@ export const useRuntimeStateStore = createZustand<RuntimeStateState>((set, get) 
 
 export function parseRuntimeStateTopic(
   topic: string
-): { teamId: string; daemonDeviceId: string; runtimeId: string } | null {
+): { teamId: string; daemonActorId: string; runtimeId: string } | null {
   const parts = topic.split('/')
-  if (parts.length !== 7) return null
+  if (parts.length !== 6) return null
   if (parts[0] !== 'amux') return null
-  if (parts[2] !== 'device') return null
-  if (parts[4] !== 'runtime') return null
-  if (parts[6] !== 'state') return null
-  return { teamId: parts[1], daemonDeviceId: parts[3], runtimeId: parts[5] }
+  if (parts[3] !== 'runtime') return null
+  if (parts[5] !== 'state') return null
+  return { teamId: parts[1], daemonActorId: parts[2], runtimeId: parts[4] }
 }
 
 let unlisten: (() => void) | null = null
@@ -94,7 +93,7 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
     console.info('[runtime-state] init skipped: already initialized', { teamId })
     return
   }
-  const topic = `amux/${teamId}/device/+/runtime/+/state`
+  const topic = `amux/${teamId}/+/runtime/+/state`
   await mqttSubscribe(topic)
   console.info('[runtime-state] subscribed', { teamId, topic })
   unlisten = await listenForEnvelopes((env: IncomingEnvelope) => {
@@ -117,7 +116,7 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
     }
     sessionFlowLog('runtime_state.retain.received', {
       teamId: parsed.teamId,
-      daemonDeviceId: parsed.daemonDeviceId,
+      daemonActorId: parsed.daemonActorId,
       runtimeId: parsed.runtimeId,
       infoRuntimeId: info.runtimeId,
       agentType: info.agentType,
@@ -129,7 +128,7 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
     })
     console.info('[runtime-state] retained RuntimeInfo received', {
       topic: env.topic,
-      daemonDeviceId: parsed.daemonDeviceId,
+      daemonActorId: parsed.daemonActorId,
       runtimeIdFromTopic: parsed.runtimeId,
       runtimeIdFromInfo: info.runtimeId,
       commandCount: info.availableCommands.length,
@@ -138,11 +137,11 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
       state: info.state,
       status: info.status,
     })
-    useRuntimeStateStore.getState().upsert(parsed.runtimeId, parsed.daemonDeviceId, info)
+    useRuntimeStateStore.getState().upsert(parsed.runtimeId, parsed.daemonActorId, info)
     void import('@/stores/acp-debug-store').then(({ useAcpDebugStore }) => {
       useAcpDebugStore.getState().append({
         topic: env.topic,
-        actorId: parsed.daemonDeviceId,
+        actorId: parsed.daemonActorId,
         eventCase: 'runtime_state',
         payload: {
           runtimeId: info.runtimeId,

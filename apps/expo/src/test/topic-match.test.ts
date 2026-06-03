@@ -6,15 +6,15 @@ describe("topicMatches", () => {
     expect(topicMatches("amux/t/session/s/live", "amux/t/session/s/live")).toBe(true);
   });
   it("matches single-level wildcard", () => {
-    expect(topicMatches("amux/t/device/d/runtime/+/state",
-                        "amux/t/device/d/runtime/r1/state")).toBe(true);
+    expect(topicMatches("amux/t/a/runtime/+/state",
+                        "amux/t/a/runtime/r1/state")).toBe(true);
   });
   it("rejects when segment count differs", () => {
-    expect(topicMatches("amux/t/device/+/runtime/+",
-                        "amux/t/device/d/runtime/r/state")).toBe(false);
+    expect(topicMatches("amux/t/+/runtime/+",
+                        "amux/t/a/runtime/r/state")).toBe(false);
   });
   it("matches multi-level wildcard", () => {
-    expect(topicMatches("amux/t/#", "amux/t/device/d/runtime/r/state")).toBe(true);
+    expect(topicMatches("amux/t/#", "amux/t/a/runtime/r/state")).toBe(true);
   });
   it("multi-level wildcard requires at least one segment", () => {
     expect(topicMatches("amux/t/#", "amux/t")).toBe(false);
@@ -25,10 +25,10 @@ describe("extractWildcards", () => {
   it("extracts segment values matched by + wildcards in order", () => {
     expect(
       extractWildcards(
-        "amux/+/device/+/runtime/+/state",
-        "amux/teamA/device/devB/runtime/rtC/state",
+        "amux/+/+/runtime/+/state",
+        "amux/teamA/actorB/runtime/rtC/state",
       ),
-    ).toEqual(["teamA", "devB", "rtC"]);
+    ).toEqual(["teamA", "actorB", "rtC"]);
   });
   it("returns null when topic does not match", () => {
     expect(

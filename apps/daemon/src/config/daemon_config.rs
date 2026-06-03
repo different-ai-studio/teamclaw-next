@@ -3,7 +3,12 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonConfig {
-    pub device: DeviceConfig,
+    /// Actor identity for this daemon. `id` is the actor_id (routing
+    /// identity used in `amux/{team}/{actor}/...` topics); `name` is a
+    /// human host/daemon label. Accepts the legacy `[device]` section via
+    /// serde alias so existing `daemon.toml` files keep parsing.
+    #[serde(rename = "actor", alias = "device")]
+    pub actor: ActorConfig,
     pub mqtt: MqttConfig,
     /// Transport selector. Defaults to MQTT when omitted so existing
     /// `daemon.toml` files keep working unchanged. Set
@@ -160,8 +165,11 @@ fn default_scopes() -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceConfig {
+pub struct ActorConfig {
+    /// Actor id — the routing identity for this daemon. Used in topic
+    /// paths `amux/{team}/{actor}/...`.
     pub id: String,
+    /// Human-friendly host/daemon label (e.g. machine name).
     pub name: String,
 }
 
@@ -362,7 +370,7 @@ mod channels_tests {
     #[test]
     fn channels_roundtrip_wecom() {
         let toml_src = r#"
-[device]
+[actor]
 id = "d1"
 name = "Mac"
 
@@ -389,5 +397,20 @@ encoding_aes_key = "k"
                 .map(|c| (c.binary.clone(), c.default_flags.clone())),
             Some(("opencode".to_string(), vec!["acp".to_string()]))
         );
+    }
+
+    #[test]
+    fn legacy_device_section_still_parses_via_alias() {
+        let toml_src = r#"
+[device]
+id = "legacy-actor"
+name = "Old Mac"
+
+[mqtt]
+broker_url = "tcp://localhost:1883"
+"#;
+        let cfg: DaemonConfig = toml::from_str(toml_src).unwrap();
+        assert_eq!(cfg.actor.id, "legacy-actor");
+        assert_eq!(cfg.actor.name, "Old Mac");
     }
 }

@@ -36,7 +36,7 @@ impl MqttClient {
             opts.set_transport(Transport::tls_with_config(TlsConfiguration::default()));
         }
 
-        let lwt_topic = super::topics::device_state(&cfg.team_id, &cfg.client_id);
+        let lwt_topic = super::topics::actor_state(&cfg.team_id, &cfg.client_id);
         let lwt_payload = serde_json::json!({"status":"offline"})
             .to_string()
             .into_bytes();

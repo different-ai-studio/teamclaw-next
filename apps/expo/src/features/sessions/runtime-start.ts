@@ -12,7 +12,6 @@ export type RuntimeStartAgent = {
 
 export type RuntimeStartConnectedAgent = {
   agentId: string;
-  deviceId: string | null;
 };
 
 export type RuntimeStartWorkspace = {
@@ -28,7 +27,7 @@ export type RuntimeStartSelection = {
 
 export type RuntimeStartPlan = {
   agentActorId: string;
-  targetDeviceId: string;
+  targetActorId: string;
   workspaceId: string;
   worktree: string;
   agentType: AgentType;
@@ -128,16 +127,17 @@ export function resolveAgentRuntimeStartPlans({
   );
 
   return agents.map((agent) => {
+    // An agent's routing actor id IS its actorId; it must be connected (the
+    // daemon publishes presence) before we can route a runtime_start to it.
     const connected = connectedByAgentId.get(agent.actorId);
-    const targetDeviceId = connected?.deviceId?.trim() ?? "";
-    if (!targetDeviceId) {
+    if (!connected) {
       throw new Error(`${agent.displayName || "Agent"} daemon is offline — wait for it to reconnect.`);
     }
 
     const workspace = pickWorkspace(agent, workspaces, explicitSelection);
     return {
       agentActorId: agent.actorId,
-      targetDeviceId,
+      targetActorId: agent.actorId,
       workspaceId: workspace.id,
       worktree: workspace.path ?? "",
       agentType: pickAgentType(agent, explicitSelection),
@@ -152,8 +152,7 @@ export function resolveAgentRuntimeRestartPlan({
   workspaces,
 }: ResolveRuntimeRestartPlanInput): RuntimeRestartPlan {
   const connected = connectedAgents.find((candidate) => candidate.agentId === agent.actorId);
-  const targetDeviceId = connected?.deviceId?.trim() ?? "";
-  if (!targetDeviceId) {
+  if (!connected) {
     throw new Error(`${agent.displayName || "Agent"} daemon is offline — wait for it to reconnect.`);
   }
 
@@ -165,7 +164,7 @@ export function resolveAgentRuntimeRestartPlan({
 
   return {
     agentActorId: agent.actorId,
-    targetDeviceId,
+    targetActorId: agent.actorId,
     runtimeIdToStop: runtime.runtimeId?.trim() ?? "",
     workspaceId: workspace.id,
     worktree: workspace.path ?? "",

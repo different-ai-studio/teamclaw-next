@@ -1,7 +1,7 @@
 import Foundation
 
 /// Request/response RPC client over the daemon's
-/// `device/{deviceID}/rpc/req` and `rpc/res` topic pair.
+/// `{team}/{actor}/rpc/req` and `{team}/{actor}/rpc/res` topic pair.
 ///
 /// `TeamclawService` used to inline this pattern at every call site —
 /// build a stream, publish, iterate filtering by `requestID`, time out
@@ -22,21 +22,31 @@ public struct TeamclawRPCClient: Sendable {
         self.hub = hub
     }
 
-    /// Publish `request` to `device/{targetDeviceID}/rpc/req` for the
-    /// given team and await a response with matching `requestID` on the
-    /// paired `rpc/res` topic, up to `timeout`. Returns the matched
+    /// Publish `request` to `{team}/{targetActorID}/rpc/req` for the given
+    /// team and await a response with matching `requestID` on the
+    /// REQUESTER's `rpc/res` topic, up to `timeout`. Returns the matched
     /// `Teamclaw_RpcResponse`, or nil on timeout / serialization failure.
     ///
-    /// The caller is responsible for stamping `request.requestID` and
-    /// `request.method`; this method does not mutate the request.
+    /// The response is awaited on `{team}/{request.requesterActorID}/rpc/res`,
+    /// NOT the target's response topic: the daemon routes RPC replies to the
+    /// requester's actor (apps/daemon/src/teamclaw/rpc.rs:50-53,
+    /// server.rs:2909 — `amux/{team}/{requester_actor_id}/rpc/res`). Callers
+    /// MUST stamp `request.requesterActorID` with the signed-in user's actor
+    /// id, or no response will ever arrive.
+    ///
+    /// The caller is responsible for stamping `request.requestID`,
+    /// `request.method`, and `request.requesterActorID`; this method does
+    /// not mutate the request.
     public func invoke(
         request: Teamclaw_RpcRequest,
         teamID: String,
-        targetDeviceID: String,
+        targetActorID: String,
         timeout: TimeInterval = 10
     ) async -> Teamclaw_RpcResponse? {
-        let reqTopic = MQTTTopics.deviceRpcRequest(teamID: teamID, deviceID: targetDeviceID)
-        let resTopic = MQTTTopics.deviceRpcResponse(teamID: teamID, deviceID: targetDeviceID)
+        let reqTopic = MQTTTopics.actorRpcRequest(teamID: teamID, actorID: targetActorID)
+        // Subscribe on the REQUESTER's actor — the daemon replies there
+        // (rpc.rs:50-53), not on the target actor's response topic.
+        let resTopic = MQTTTopics.actorRpcResponse(teamID: teamID, actorID: request.requesterActorID)
 
         let stream = await hub.messages(topic: resTopic)
         guard let data = try? request.serializedData() else { return nil }

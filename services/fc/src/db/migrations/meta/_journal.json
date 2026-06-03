@@ -50,6 +50,13 @@
       "when": 1780219119367,
       "tag": "0006_living_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780474112354,
+      "tag": "0007_bizarre_the_executioner",
+      "breakpoints": true
     }
   ]
 }

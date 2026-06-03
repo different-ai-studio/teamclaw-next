@@ -159,7 +159,7 @@ export function AgentSelectorDock({
   const retainSignature = React.useMemo(() => {
     const ids = engagedAgents.map((a) => a.id)
     return Object.entries(runtimeStates)
-      .filter(([, e]) => ids.includes(e.daemonDeviceId))
+      .filter(([, e]) => ids.includes(e.daemonActorId))
       .map(([rid]) => rid)
       .sort()
       .join(',')
@@ -467,7 +467,7 @@ function AgentPill({
     // startAgentRuntimesAsync → setModel.
     try {
       const result = await setModel({
-        targetDeviceId: agent.id, // daemon device_id == agent actor_id convention
+        targetActorId: agent.id, // route by the agent's actor_id
         runtimeId: liveRuntimeId,
         modelId: rpcModelId,
       })
@@ -492,7 +492,7 @@ function AgentPill({
           if (!retryRuntimeId || retryRuntimeId === liveRuntimeId) return false
           try {
             await setModel({
-              targetDeviceId: agent.id,
+              targetActorId: agent.id,
               runtimeId: retryRuntimeId,
               modelId: rpcModelId,
             })

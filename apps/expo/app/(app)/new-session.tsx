@@ -143,7 +143,6 @@ export default function NewSessionRoute() {
                   connectedAgents:
                     connectedAgentsStore?.getState().agents.map((agent) => ({
                       agentId: agent.agentId,
-                      deviceId: agent.deviceId,
                     })) ?? [],
                   explicitSelection: agentConfig,
                   workspaces: workspaces.map((workspace) => ({
@@ -205,7 +204,7 @@ export default function NewSessionRoute() {
               const actorName =
                 actorById.get(plan.agentActorId)?.displayName ?? "Agent";
               void runtimeRpc.runtimeStart({
-                targetDeviceId: plan.targetDeviceId,
+                targetActorId: plan.targetActorId,
                 workspaceId: plan.workspaceId,
                 worktree: plan.worktree,
                 sessionId,

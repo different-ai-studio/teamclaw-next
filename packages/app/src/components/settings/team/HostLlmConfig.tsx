@@ -117,7 +117,7 @@ export const HostLlmConfig = React.memo(function HostLlmConfig({
           </div>
 
           <p className="text-xs text-muted-foreground/60">
-            {t('settings.team.llmApiKeyHint', 'API key is read from env var')} <code className="rounded bg-muted px-1 py-0.5 font-mono">tc_api_key</code>{t('settings.team.llmApiKeyDefault', ', defaults to device ID')}
+            {t('settings.team.llmApiKeyHint', 'API key is read from env var')} <code className="rounded bg-muted px-1 py-0.5 font-mono">tc_api_key</code>{t('settings.team.llmApiKeyDefault', '.')}
           </p>
         </div>
       )}

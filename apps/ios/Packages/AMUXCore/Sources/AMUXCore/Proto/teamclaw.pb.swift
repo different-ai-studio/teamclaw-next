@@ -499,18 +499,12 @@ public struct Teamclaw_RpcRequest: Sendable {
 
   public var requestID: String = String()
 
-  /// legacy; kept during migration, equivalent to requester_device_id
-  public var senderDeviceID: String = String()
-
   /// Identity fields — spec "Addressing and Identity". Receivers on the shared
   /// rpc/res topic filter by whichever one is populated. Empty = not applicable.
   public var requesterClientID: String = String()
 
   /// Supabase actor id of signed-in user
   public var requesterActorID: String = String()
-
-  /// populated when another daemon is the caller
-  public var requesterDeviceID: String = String()
 
   public var method: Teamclaw_RpcRequest.OneOf_Method? = nil
 
@@ -735,11 +729,6 @@ public struct Teamclaw_RpcResponse: @unchecked Sendable {
     set {_uniqueStorage()._requesterActorID = newValue}
   }
 
-  public var requesterDeviceID: String {
-    get {_storage._requesterDeviceID}
-    set {_uniqueStorage()._requesterDeviceID = newValue}
-  }
-
   public var result: OneOf_Result? {
     get {return _storage._result}
     set {_uniqueStorage()._result = newValue}
@@ -909,7 +898,7 @@ public struct Teamclaw_CreateSessionRequest: Sendable {
   public var ideaID: String = String()
 
   /// Canonical actor id of the creator. Prefer member_id for humans.
-  /// If empty, the daemon falls back to sender_device_id for backward compat.
+  /// Required: the daemon has no device-id fallback.
   public var senderActorID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1037,7 +1026,7 @@ public struct Teamclaw_CreateIdeaRequest: Sendable {
   public var parentID: String = String()
 
   /// Member id of the actor creating this idea. Used by the daemon as
-  /// `created_by`; if empty, the daemon falls back to sender_device_id.
+  /// `created_by`; required, no device-id fallback.
   public var senderActorID: String = String()
 
   public var workspaceID: String = String()
@@ -1057,7 +1046,7 @@ public struct Teamclaw_ClaimIdeaRequest: Sendable {
   public var ideaID: String = String()
 
   /// Canonical actor id of the claimant. Prefer member_id for humans.
-  /// If empty, the daemon falls back to sender_device_id for backward compat.
+  /// Required: the daemon has no device-id fallback.
   public var senderActorID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1077,7 +1066,7 @@ public struct Teamclaw_SubmitIdeaRequest: Sendable {
   public var content: String = String()
 
   /// Canonical actor id of the submitter. Prefer member_id for humans.
-  /// If empty, the daemon falls back to sender_device_id for backward compat.
+  /// Required: the daemon has no device-id fallback.
   public var senderActorID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1117,7 +1106,7 @@ public struct Teamclaw_UpdateIdeaRequest: Sendable {
 }
 
 /// Request the daemon spawn a new Claude Code subprocess.
-/// Accepted-only reply — actual lifecycle flows on device/{id}/runtime/{id}/state.
+/// Accepted-only reply — actual lifecycle flows on {team}/{actor}/runtime/{rid}/state.
 /// See spec "Runtime lifecycle" section for the state machine.
 public struct Teamclaw_RuntimeStartRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -1429,7 +1418,7 @@ public struct Teamclaw_FetchWorkspacesResult: Sendable {
   public init() {}
 }
 
-/// Hint-only invalidation payload. See spec "New envelope" + "device/notify vs
+/// Hint-only invalidation payload. See spec "New envelope" + "actor notify vs
 /// user/notify scoping". Receivers route by event_type, not by message type.
 /// Authoritative data lives in Supabase (or daemon RPC for peers).
 public struct Teamclaw_Notify: Sendable {
@@ -2107,7 +2096,7 @@ extension Teamclaw_LiveEventEnvelope: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 extension Teamclaw_RpcRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RpcRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}sender_device_id\0\u{3}requester_client_id\0\u{3}requester_actor_id\0\u{3}requester_device_id\0\u{4}\u{5}create_session\0\u{3}join_session\0\u{3}fetch_session\0\u{3}add_participant\0\u{3}remove_participant\0\u{3}create_idea\0\u{3}claim_idea\0\u{3}submit_idea\0\u{3}update_idea\0\u{4}\u{2}fetch_session_messages\0\u{4}\u{a}runtime_start\0\u{3}runtime_stop\0\u{3}set_model\0\u{4}\u{8}announce_peer\0\u{3}disconnect_peer\0\u{3}remove_member\0\u{3}add_workspace\0\u{3}remove_workspace\0\u{3}fetch_peers\0\u{3}fetch_workspaces\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{4}\u{2}requester_client_id\0\u{3}requester_actor_id\0\u{4}\u{6}create_session\0\u{3}join_session\0\u{3}fetch_session\0\u{3}add_participant\0\u{3}remove_participant\0\u{3}create_idea\0\u{3}claim_idea\0\u{3}submit_idea\0\u{3}update_idea\0\u{4}\u{2}fetch_session_messages\0\u{4}\u{a}runtime_start\0\u{3}runtime_stop\0\u{3}set_model\0\u{4}\u{8}announce_peer\0\u{3}disconnect_peer\0\u{3}remove_member\0\u{3}add_workspace\0\u{3}remove_workspace\0\u{3}fetch_peers\0\u{3}fetch_workspaces\0\u{c}\u{2}\u{1}\u{c}\u{5}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2116,10 +2105,8 @@ extension Teamclaw_RpcRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.requestID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.senderDeviceID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.requesterClientID) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.requesterActorID) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self.requesterDeviceID) }()
       case 10: try {
         var v: Teamclaw_CreateSessionRequest?
         var hadOneofValue = false
@@ -2393,17 +2380,11 @@ extension Teamclaw_RpcRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     if !self.requestID.isEmpty {
       try visitor.visitSingularStringField(value: self.requestID, fieldNumber: 1)
     }
-    if !self.senderDeviceID.isEmpty {
-      try visitor.visitSingularStringField(value: self.senderDeviceID, fieldNumber: 2)
-    }
     if !self.requesterClientID.isEmpty {
       try visitor.visitSingularStringField(value: self.requesterClientID, fieldNumber: 3)
     }
     if !self.requesterActorID.isEmpty {
       try visitor.visitSingularStringField(value: self.requesterActorID, fieldNumber: 4)
-    }
-    if !self.requesterDeviceID.isEmpty {
-      try visitor.visitSingularStringField(value: self.requesterDeviceID, fieldNumber: 5)
     }
     switch self.method {
     case .createSession?: try {
@@ -2493,10 +2474,8 @@ extension Teamclaw_RpcRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
   public static func ==(lhs: Teamclaw_RpcRequest, rhs: Teamclaw_RpcRequest) -> Bool {
     if lhs.requestID != rhs.requestID {return false}
-    if lhs.senderDeviceID != rhs.senderDeviceID {return false}
     if lhs.requesterClientID != rhs.requesterClientID {return false}
     if lhs.requesterActorID != rhs.requesterActorID {return false}
-    if lhs.requesterDeviceID != rhs.requesterDeviceID {return false}
     if lhs.method != rhs.method {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -2505,7 +2484,7 @@ extension Teamclaw_RpcRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 extension Teamclaw_RpcResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RpcResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{1}error\0\u{3}requester_client_id\0\u{3}requester_actor_id\0\u{3}requester_device_id\0\u{4}\u{4}session_info\0\u{1}idea\0\u{1}claim\0\u{1}submission\0\u{3}session_message_page\0\u{4}\u{6}runtime_start_result\0\u{3}runtime_stop_result\0\u{3}set_model_result\0\u{4}\u{8}announce_peer_result\0\u{3}disconnect_peer_result\0\u{3}remove_member_result\0\u{3}add_workspace_result\0\u{3}remove_workspace_result\0\u{3}fetch_peers_result\0\u{3}fetch_workspaces_result\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{1}error\0\u{3}requester_client_id\0\u{3}requester_actor_id\0\u{4}\u{5}session_info\0\u{1}idea\0\u{1}claim\0\u{1}submission\0\u{3}session_message_page\0\u{4}\u{6}runtime_start_result\0\u{3}runtime_stop_result\0\u{3}set_model_result\0\u{4}\u{8}announce_peer_result\0\u{3}disconnect_peer_result\0\u{3}remove_member_result\0\u{3}add_workspace_result\0\u{3}remove_workspace_result\0\u{3}fetch_peers_result\0\u{3}fetch_workspaces_result\0\u{c}\u{6}\u{1}")
 
   fileprivate class _StorageClass {
     var _requestID: String = String()
@@ -2513,7 +2492,6 @@ extension Teamclaw_RpcResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     var _error: String = String()
     var _requesterClientID: String = String()
     var _requesterActorID: String = String()
-    var _requesterDeviceID: String = String()
     var _result: Teamclaw_RpcResponse.OneOf_Result?
 
       // This property is used as the initial default value for new instances of the type.
@@ -2530,7 +2508,6 @@ extension Teamclaw_RpcResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       _error = source._error
       _requesterClientID = source._requesterClientID
       _requesterActorID = source._requesterActorID
-      _requesterDeviceID = source._requesterDeviceID
       _result = source._result
     }
   }
@@ -2555,7 +2532,6 @@ extension Teamclaw_RpcResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
         case 3: try { try decoder.decodeSingularStringField(value: &_storage._error) }()
         case 4: try { try decoder.decodeSingularStringField(value: &_storage._requesterClientID) }()
         case 5: try { try decoder.decodeSingularStringField(value: &_storage._requesterActorID) }()
-        case 6: try { try decoder.decodeSingularStringField(value: &_storage._requesterDeviceID) }()
         case 10: try {
           var v: Teamclaw_SessionInfo?
           var hadOneofValue = false
@@ -2778,9 +2754,6 @@ extension Teamclaw_RpcResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       if !_storage._requesterActorID.isEmpty {
         try visitor.visitSingularStringField(value: _storage._requesterActorID, fieldNumber: 5)
       }
-      if !_storage._requesterDeviceID.isEmpty {
-        try visitor.visitSingularStringField(value: _storage._requesterDeviceID, fieldNumber: 6)
-      }
       switch _storage._result {
       case .sessionInfo?: try {
         guard case .sessionInfo(let v)? = _storage._result else { preconditionFailure() }
@@ -2858,7 +2831,6 @@ extension Teamclaw_RpcResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
         if _storage._error != rhs_storage._error {return false}
         if _storage._requesterClientID != rhs_storage._requesterClientID {return false}
         if _storage._requesterActorID != rhs_storage._requesterActorID {return false}
-        if _storage._requesterDeviceID != rhs_storage._requesterDeviceID {return false}
         if _storage._result != rhs_storage._result {return false}
         return true
       }

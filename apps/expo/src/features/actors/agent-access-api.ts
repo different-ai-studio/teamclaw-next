@@ -6,10 +6,9 @@ import type {
 
 /**
  * Cloud-only agent-access provider. Mirrors the iOS CloudAPIAgentAccessRepository:
- * connected agents (with deviceId + isOwner), authorized-human grants, agent
- * visibility, plus the two on-demand lookups that replace fields the actor
- * directory dropped — getAgentDeviceId (device routing) and canManageAgent
- * (owner-gating via the permission endpoint).
+ * connected agents (with isOwner), authorized-human grants, agent visibility,
+ * plus canManageAgent (owner-gating via the permission endpoint). Daemon routing
+ * uses the agent's actor id (== agentId); there is no separate device id lookup.
  */
 
 // FC connected-agent item shape (mapConnectedAgent).
@@ -21,7 +20,6 @@ type CloudConnectedAgent = {
   permissionLevel?: string | null;
   visibility?: string | null;
   isOwner?: boolean | null;
-  deviceId?: string | null;
   lastActiveAt?: string | null;
 };
 
@@ -47,7 +45,6 @@ function toConnectedAgent(row: CloudConnectedAgent): ConnectedAgent {
     permissionLevel: row.permissionLevel ?? "prompt",
     visibility: row.visibility === "personal" ? "personal" : "team",
     isOwner: Boolean(row.isOwner),
-    deviceId: row.deviceId ?? null,
     lastActiveAt: row.lastActiveAt ?? null,
   };
 }
@@ -64,8 +61,6 @@ export type AgentAccessApi = {
     grantedByMemberId: string,
   ) => Promise<void>;
   revokeAuthorizedHuman: (agentId: string, memberId: string) => Promise<void>;
-  /** Daemon device id for an agent, fetched on demand (directory drops it). */
-  getAgentDeviceId: (agentId: string) => Promise<string | null>;
   /** Owner-gating: true when the caller owns the agent (permission endpoint). */
   canManageAgent: (agentId: string, memberActorId: string) => Promise<boolean>;
 };
@@ -125,13 +120,6 @@ export function createAgentAccessApi(args: {
       await client.del(
         `/v1/agents/${encodeURIComponent(agentId)}/access/${encodeURIComponent(memberId)}`,
       );
-    },
-
-    async getAgentDeviceId(agentId) {
-      const result = await client.get<{ deviceId?: string | null }>(
-        `/v1/agents/${encodeURIComponent(agentId)}/device-id`,
-      );
-      return result?.deviceId ?? null;
     },
 
     async canManageAgent(agentId, memberActorId) {

@@ -22,8 +22,8 @@ pub struct RuntimeEnvBundle {
 
 #[derive(Debug, Clone)]
 pub struct SystemEnvContext {
-    pub device_id: String,
-    pub device_name: String,
+    pub actor_id: String,
+    pub display_name: String,
 }
 
 pub fn assemble_runtime_env(

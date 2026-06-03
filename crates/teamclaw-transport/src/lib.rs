@@ -157,8 +157,8 @@ impl Transport for rumqttc::AsyncClient {
     }
 }
 
-/// Encode an MQTT topic (`amux/team/device/d1/state`) to a NATS subject
-/// (`amux.team.device.d1.state`).
+/// Encode an MQTT topic (`amux/team/d1/state`) to a NATS subject
+/// (`amux.team.d1.state`).
 ///
 /// MQTT wildcards: `+` → single-level `*`, `#` → multi-level `>`.
 /// Subjects with empty segments (e.g. `//`) are not supported by NATS;
@@ -245,23 +245,23 @@ mod tests {
     #[test]
     fn encode_subject_translates_slash_to_dot() {
         assert_eq!(
-            encode_subject("amux/team1/device/dev-a/state"),
-            "amux.team1.device.dev-a.state"
+            encode_subject("amux/team1/actor-a/state"),
+            "amux.team1.actor-a.state"
         );
     }
 
     #[test]
     fn encode_subject_translates_mqtt_wildcards() {
         assert_eq!(
-            encode_subject("amux/team1/device/dev-a/runtime/+/commands"),
-            "amux.team1.device.dev-a.runtime.*.commands"
+            encode_subject("amux/team1/actor-a/runtime/+/commands"),
+            "amux.team1.actor-a.runtime.*.commands"
         );
         assert_eq!(encode_subject("amux/team1/#"), "amux.team1.>");
     }
 
     #[test]
     fn decode_subject_is_inverse_for_concrete_subjects() {
-        let topic = "amux/team1/device/dev-a/state";
+        let topic = "amux/team1/actor-a/state";
         assert_eq!(decode_subject(&encode_subject(topic)), topic);
     }
 }

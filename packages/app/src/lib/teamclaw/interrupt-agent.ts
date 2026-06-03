@@ -86,7 +86,7 @@ export async function interruptAgentActor(args: {
   sessionFlowLog("interrupt.begin", {
     sessionId,
     agentActorId,
-    targetDeviceId: target.deviceId,
+    targetActorId: target.actorId,
     runtimeId: target.runtimeId,
     sessionRuntimeId:
       sessionRuntimeRows.find((row) => row.agent_id?.trim() === agentActorId)?.runtime_id ??
@@ -103,7 +103,7 @@ export async function interruptAgentActor(args: {
 
   try {
     await sender.sendCancel({
-      targetDeviceId: target.deviceId,
+      targetActorId: target.actorId,
       runtimeId: target.runtimeId,
     });
   } catch (error) {

@@ -130,12 +130,6 @@ export function registerActors(router) {
     return { statusCode: 204, body: null };
   });
 
-  router.get("/v1/agents/:agentActorId/device-id", async (ctx) => {
-    const agentActorId = decodeURIComponent(ctx.params.agentActorId);
-    const out = await ctx.repository.getAgentDeviceId(agentActorId);
-    return { body: out };
-  });
-
   router.delete("/v1/agents/:agentActorId/access/:actorId", async (ctx) => {
     const agentActorId = decodeURIComponent(ctx.params.agentActorId);
     const actorId = decodeURIComponent(ctx.params.actorId);

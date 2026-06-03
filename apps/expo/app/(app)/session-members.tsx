@@ -193,7 +193,6 @@ export default function SessionMembersRoute() {
               connectedAgents:
                 connectedAgentsStore?.getState().agents.map((agent) => ({
                   agentId: agent.agentId,
-                  deviceId: agent.deviceId,
                 })) ?? [],
               workspaces: workspaces.map((workspace) => ({
                 id: workspace.id,
@@ -214,7 +213,7 @@ export default function SessionMembersRoute() {
           const actorName =
             actorById.get(plan.agentActorId)?.displayName ?? "Agent";
           void runtimeRpc.runtimeStart({
-            targetDeviceId: plan.targetDeviceId,
+            targetActorId: plan.targetActorId,
             workspaceId: plan.workspaceId,
             worktree: plan.worktree,
             sessionId,
@@ -300,7 +299,6 @@ export default function SessionMembersRoute() {
           connectedAgents:
             connectedAgentsStore?.getState().agents.map((agent) => ({
               agentId: agent.agentId,
-              deviceId: agent.deviceId,
             })) ?? [],
           workspaces: workspaces.map((workspace) => ({
             id: workspace.id,
@@ -316,7 +314,7 @@ export default function SessionMembersRoute() {
 
         if (plan.runtimeIdToStop) {
           await runtimeRpc.runtimeStop({
-            targetDeviceId: plan.targetDeviceId,
+            targetActorId: plan.targetActorId,
             runtimeId: plan.runtimeIdToStop,
           }).catch(() => {
             // Stop is best-effort; a stale runtime id should not block the fresh start.
@@ -324,7 +322,7 @@ export default function SessionMembersRoute() {
         }
 
         const result = await runtimeRpc.runtimeStart({
-          targetDeviceId: plan.targetDeviceId,
+          targetActorId: plan.targetActorId,
           workspaceId: plan.workspaceId,
           worktree: plan.worktree,
           sessionId,

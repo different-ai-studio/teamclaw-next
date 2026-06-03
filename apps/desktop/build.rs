@@ -113,22 +113,6 @@ fn main() {
         println!("cargo:warning=Using UPDATER_PUBKEY={}", pubkey);
     }
 
-    // Export device JWT secret for HS256 token generation.
-    // Priority: DEVICE_JWT_SECRET env var (CI secret) > build.config.json device.jwtSecret
-    let device_jwt_secret = std::env::var("DEVICE_JWT_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            config["device"]["jwtSecret"]
-                .as_str()
-                .unwrap_or("")
-                .to_string()
-        });
-    println!("cargo:rustc-env=DEVICE_JWT_SECRET={}", device_jwt_secret);
-    if device_jwt_secret.is_empty() {
-        println!("cargo:warning=device.jwtSecret is not set — device token generation will fail at runtime");
-    }
-
     let target_triple = std::env::var("TARGET").unwrap_or_default();
     let in_ci = std::env::var("CI").is_ok();
 

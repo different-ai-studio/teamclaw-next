@@ -6,9 +6,9 @@ import Foundation
 /// composition + protobuf encode + MQTT publish) lives in one place.
 ///
 /// The VM still owns the user-facing concerns (caching `runtime`,
-/// resolving the daemon device id, surfacing error toasts) — the
+/// resolving the routing actor id, surfacing error toasts) — the
 /// sender is a pure transport-side primitive: give it the runtime id,
-/// device id, and a closure that fills the `Amux_AcpCommand`, get an
+/// actor id, and a closure that fills the `Amux_AcpCommand`, get an
 /// in-flight publish back.
 public struct RuntimeCommandSender: Sendable {
     public let mqtt: MQTTService
@@ -21,13 +21,13 @@ public struct RuntimeCommandSender: Sendable {
         self.peerID = peerID
     }
 
-    /// Publishes a single ACP command for the given runtime/device pair.
+    /// Publishes a single ACP command for the given runtime/actor pair.
     ///
     /// - Parameters:
     ///   - runtimeID: 8-char daemon runtime id (segment in the topic).
     ///     Empty throws `.runtimeIdEmpty`.
-    ///   - deviceID: daemon device id (topic prefix). Empty throws
-    ///     `.daemonDeviceIdUnresolved`.
+    ///   - actorID: routing actor id of the target daemon/agent (topic
+    ///     prefix). Empty throws `.routeActorIdUnresolved`.
     ///   - currentHumanActorID: stamped onto `senderActorID` so the daemon
     ///     can resolve the sender's permission level via
     ///     `agent_member_access` instead of falling back to the legacy
@@ -36,16 +36,16 @@ public struct RuntimeCommandSender: Sendable {
     ///   - makeCommand: closure that fills the inner `Amux_AcpCommand`.
     public func send(
         runtimeID: String,
-        deviceID: String,
+        actorID: String,
         currentHumanActorID: String?,
         makeCommand: (inout Amux_AcpCommand) -> Void
     ) async throws {
         guard !runtimeID.isEmpty else { throw SendCommandError.runtimeIdEmpty }
-        guard !deviceID.isEmpty else { throw SendCommandError.daemonDeviceIdUnresolved }
+        guard !actorID.isEmpty else { throw SendCommandError.routeActorIdUnresolved }
 
         var envelope = Amux_RuntimeCommandEnvelope()
         envelope.runtimeID = runtimeID
-        envelope.deviceID = deviceID
+        envelope.actorID = actorID
         envelope.peerID = peerID
         envelope.commandID = UUID().uuidString
         envelope.timestamp = Int64(Date().timeIntervalSince1970)
@@ -59,7 +59,7 @@ public struct RuntimeCommandSender: Sendable {
         let data = try ProtoMQTTCoder.encode(envelope)
         try await mqtt.publish(
             topic: MQTTTopics.runtimeCommands(teamID: teamID,
-                                              deviceID: deviceID,
+                                              actorID: actorID,
                                               runtimeID: runtimeID),
             payload: data
         )
@@ -69,7 +69,7 @@ public struct RuntimeCommandSender: Sendable {
 public enum SendCommandError: LocalizedError, Sendable {
     case noRuntime
     case runtimeIdEmpty
-    case daemonDeviceIdUnresolved
+    case routeActorIdUnresolved
 
     public var errorDescription: String? {
         switch self {
@@ -77,8 +77,8 @@ public enum SendCommandError: LocalizedError, Sendable {
             return "Runtime not resolved yet — try again in a moment."
         case .runtimeIdEmpty:
             return "Runtime id missing — daemon hasn't published runtime state yet."
-        case .daemonDeviceIdUnresolved:
-            return "Daemon device id not resolved — primary agent may be offline."
+        case .routeActorIdUnresolved:
+            return "Route actor id not resolved — primary agent may be offline."
         }
     }
 }

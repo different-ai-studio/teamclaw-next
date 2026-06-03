@@ -9,7 +9,7 @@ pub mod provider_auth;
 pub mod workspace_control;
 
 pub use daemon_config::{
-    AgentsConfig, DaemonConfig, DeviceConfig, DiscordChannel, EmailChannel, FeishuChannel,
+    AgentsConfig, ActorConfig, DaemonConfig, DiscordChannel, EmailChannel, FeishuChannel,
     HttpConfig, KookChannel, MqttConfig, TransportKind, WeChatChannel, WeComChannel,
 };
 // Constructed only by the test suite (runtime_resolution / server tests).

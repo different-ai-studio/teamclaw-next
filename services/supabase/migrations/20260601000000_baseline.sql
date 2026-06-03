@@ -3037,7 +3037,7 @@ alter table public.idea_external_refs
 -- `device_id` is the daemon's MQTT device identifier — the UUID from
 -- daemon.toml [device].id. It's a property of the daemon (= agent actor
 -- with agent_kind='daemon'), not a per-session runtime detail.
--- iOS consumes this to route MQTT publishes at `amux/{device_id}/…`.
+-- iOS consumes this to route MQTT publishes at `amux/{actor_id}/…`.
 alter table public.agents add column if not exists device_id text;
 
 create index if not exists agents_device_id_idx on public.agents(device_id);
@@ -3540,12 +3540,12 @@ as $$
     from (values
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
-      ('sub', format('amux/%s/device/+/state',              p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/state',    p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/events',   p_team)),
-      ('sub', format('amux/%s/device/+/rpc/res',            p_team)),
-      ('pub', format('amux/%s/device/+/rpc/req',            p_team)),
-      ('pub', format('amux/%s/device/+/runtime/+/commands', p_team))
+      ('sub', format('amux/%s/+/state',              p_team)),
+      ('sub', format('amux/%s/+/runtime/+/state',    p_team)),
+      ('sub', format('amux/%s/+/runtime/+/events',   p_team)),
+      ('sub', format('amux/%s/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/+/rpc/req',            p_team)),
+      ('pub', format('amux/%s/+/runtime/+/commands', p_team))
     ) as r(action, topic)
    where p_type = 'member'
 
@@ -3555,16 +3555,16 @@ as $$
   -- inbox; pub rpc/res is scoped to its team (in-team RPC only).
   select action, topic
     from (values
-      ('pub', format('amux/%s/device/%s/state',             p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/state',   p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/events',  p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
-      ('pub', format('amux/%s/device/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/%s/state',             p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/state',   p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/events',  p_team, p_actor)),
+      ('pub', format('amux/%s/%s/notify',            p_team, p_actor)),
+      ('pub', format('amux/%s/+/rpc/res',            p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/user/+/notify',               p_team)),
-      ('sub', format('amux/%s/device/%s/runtime/+/commands',p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/rpc/req',           p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
+      ('sub', format('amux/%s/%s/runtime/+/commands',p_team, p_actor)),
+      ('sub', format('amux/%s/%s/rpc/req',           p_team, p_actor)),
+      ('sub', format('amux/%s/%s/notify',            p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor))
     ) as r(action, topic)
@@ -3725,12 +3725,12 @@ as $$
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
-      ('sub', format('amux/%s/device/+/state',              p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/state',    p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/events',   p_team)),
-      ('sub', format('amux/%s/device/+/rpc/res',            p_team)),
-      ('pub', format('amux/%s/device/+/rpc/req',            p_team)),
-      ('pub', format('amux/%s/device/+/runtime/+/commands', p_team))
+      ('sub', format('amux/%s/+/state',              p_team)),
+      ('sub', format('amux/%s/+/runtime/+/state',    p_team)),
+      ('sub', format('amux/%s/+/runtime/+/events',   p_team)),
+      ('sub', format('amux/%s/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/+/rpc/req',            p_team)),
+      ('pub', format('amux/%s/+/runtime/+/commands', p_team))
     ) as r(action, topic)
    where p_type = 'member'
 
@@ -3739,16 +3739,16 @@ as $$
   -- Agent (daemon): unchanged.
   select action, topic
     from (values
-      ('pub', format('amux/%s/device/%s/state',             p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/state',   p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/events',  p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
-      ('pub', format('amux/%s/device/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/%s/state',             p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/state',   p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/events',  p_team, p_actor)),
+      ('pub', format('amux/%s/%s/notify',            p_team, p_actor)),
+      ('pub', format('amux/%s/+/rpc/res',            p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/user/+/notify',               p_team)),
-      ('sub', format('amux/%s/device/%s/runtime/+/commands',p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/rpc/req',           p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
+      ('sub', format('amux/%s/%s/runtime/+/commands',p_team, p_actor)),
+      ('sub', format('amux/%s/%s/rpc/req',           p_team, p_actor)),
+      ('sub', format('amux/%s/%s/notify',            p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor))
     ) as r(action, topic)
@@ -4190,12 +4190,12 @@ as $$
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
-      ('sub', format('amux/%s/device/+/state',              p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/state',    p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/events',   p_team)),
-      ('sub', format('amux/%s/device/+/rpc/res',            p_team)),
-      ('pub', format('amux/%s/device/+/rpc/req',            p_team)),
-      ('pub', format('amux/%s/device/+/runtime/+/commands', p_team))
+      ('sub', format('amux/%s/+/state',              p_team)),
+      ('sub', format('amux/%s/+/runtime/+/state',    p_team)),
+      ('sub', format('amux/%s/+/runtime/+/events',   p_team)),
+      ('sub', format('amux/%s/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/+/rpc/req',            p_team)),
+      ('pub', format('amux/%s/+/runtime/+/commands', p_team))
     ) as r(action, topic)
    where p_type = 'member'
 
@@ -4205,17 +4205,17 @@ as $$
   -- responses to RPC calls this daemon initiates.
   select action, topic
     from (values
-      ('pub', format('amux/%s/device/%s/state',             p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/state',   p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/events',  p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
-      ('pub', format('amux/%s/device/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/%s/state',             p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/state',   p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/events',  p_team, p_actor)),
+      ('pub', format('amux/%s/%s/notify',            p_team, p_actor)),
+      ('pub', format('amux/%s/+/rpc/res',            p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/user/+/notify',               p_team)),
-      ('sub', format('amux/%s/device/%s/runtime/+/commands',p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/rpc/req',           p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/rpc/res',           p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
+      ('sub', format('amux/%s/%s/runtime/+/commands',p_team, p_actor)),
+      ('sub', format('amux/%s/%s/rpc/req',           p_team, p_actor)),
+      ('sub', format('amux/%s/%s/rpc/res',           p_team, p_actor)),
+      ('sub', format('amux/%s/%s/notify',            p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor))
     ) as r(action, topic)
@@ -4290,13 +4290,13 @@ as $$
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
-      ('sub', format('amux/%s/device/+/state',              p_team)),
-      ('sub', format('amux/%s/device/+/notify',             p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/state',    p_team)),
-      ('sub', format('amux/%s/device/+/runtime/+/events',   p_team)),
-      ('sub', format('amux/%s/device/+/rpc/res',            p_team)),
-      ('pub', format('amux/%s/device/+/rpc/req',            p_team)),
-      ('pub', format('amux/%s/device/+/runtime/+/commands', p_team))
+      ('sub', format('amux/%s/+/state',              p_team)),
+      ('sub', format('amux/%s/+/notify',             p_team)),
+      ('sub', format('amux/%s/+/runtime/+/state',    p_team)),
+      ('sub', format('amux/%s/+/runtime/+/events',   p_team)),
+      ('sub', format('amux/%s/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/+/rpc/req',            p_team)),
+      ('pub', format('amux/%s/+/runtime/+/commands', p_team))
     ) as r(action, topic)
    where p_type = 'member'
 
@@ -4305,17 +4305,17 @@ as $$
   -- Agent (daemon): unchanged from 202605080002.
   select action, topic
     from (values
-      ('pub', format('amux/%s/device/%s/state',             p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/state',   p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/runtime/+/events',  p_team, p_actor)),
-      ('pub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
-      ('pub', format('amux/%s/device/+/rpc/res',            p_team)),
+      ('pub', format('amux/%s/%s/state',             p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/state',   p_team, p_actor)),
+      ('pub', format('amux/%s/%s/runtime/+/events',  p_team, p_actor)),
+      ('pub', format('amux/%s/%s/notify',            p_team, p_actor)),
+      ('pub', format('amux/%s/+/rpc/res',            p_team)),
       ('pub', format('amux/%s/session/+/live',              p_team)),
       ('pub', format('amux/%s/user/+/notify',               p_team)),
-      ('sub', format('amux/%s/device/%s/runtime/+/commands',p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/rpc/req',           p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/rpc/res',           p_team, p_actor)),
-      ('sub', format('amux/%s/device/%s/notify',            p_team, p_actor)),
+      ('sub', format('amux/%s/%s/runtime/+/commands',p_team, p_actor)),
+      ('sub', format('amux/%s/%s/rpc/req',           p_team, p_actor)),
+      ('sub', format('amux/%s/%s/rpc/res',           p_team, p_actor)),
+      ('sub', format('amux/%s/%s/notify',            p_team, p_actor)),
       ('sub', format('amux/%s/session/+/live',              p_team)),
       ('sub', format('amux/%s/user/%s/notify',              p_team, p_actor))
     ) as r(action, topic)

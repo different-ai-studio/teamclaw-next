@@ -115,7 +115,7 @@ describe('AgentSelectorDock', () => {
     ]
     mocks.runtimeStates = {
       'a-1': {
-        daemonDeviceId: 'a-1',
+        daemonActorId: 'a-1',
         lastUpdated: Date.now(),
         info: {
           agentType: 2,
@@ -144,7 +144,7 @@ describe('AgentSelectorDock', () => {
     ]
     mocks.runtimeStates = {
       'runtime-new': {
-        daemonDeviceId: 'a-1',
+        daemonActorId: 'a-1',
         lastUpdated: Date.now(),
         info: {
           availableModels: [],
@@ -152,7 +152,7 @@ describe('AgentSelectorDock', () => {
         },
       },
       'runtime-old': {
-        daemonDeviceId: 'a-1',
+        daemonActorId: 'a-1',
         lastUpdated: Date.now() - 1,
         info: {
           availableModels: [],
@@ -178,7 +178,7 @@ describe('AgentSelectorDock', () => {
   it('does not refetch runtime hints in a loop when retain payload changes but runtime ids stay the same', async () => {
     mocks.agentRuntimeRows = []
     const retainEntry = {
-      daemonDeviceId: 'a-1',
+      daemonActorId: 'a-1',
       lastUpdated: Date.now(),
       info: {
         availableModels: [{ id: 'm-1', displayName: 'Model One' }],
@@ -223,7 +223,7 @@ describe('AgentSelectorDock', () => {
     ]
     mocks.runtimeStates = {
       'runtime-1': {
-        daemonDeviceId: 'a-1',
+        daemonActorId: 'a-1',
         lastUpdated: Date.now(),
         info: {
           availableModels: [],

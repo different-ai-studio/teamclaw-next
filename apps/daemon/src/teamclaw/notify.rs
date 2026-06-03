@@ -16,7 +16,7 @@ impl NotifyPublisher {
 
     pub async fn publish_membership_refresh(
         &self,
-        target_device_id: &str,
+        target_actor_id: &str,
         session_id: &str,
         reason: &str,
     ) -> crate::error::Result<()> {
@@ -31,7 +31,7 @@ impl NotifyPublisher {
         }
         .encode_to_vec();
 
-        let topic = Topics::new(&self.team_id, target_device_id).device_notify();
+        let topic = Topics::new(&self.team_id, target_actor_id).actor_notify();
         self.client
             .publish(&topic, payload, false, DeliveryGuarantee::AtLeastOnce)
             .await?;

@@ -409,7 +409,6 @@ export interface ActorDirectoryEntry {
 
 export interface ConnectedAgentRow extends ActorDirectoryEntry {
   agent_id?: string | null;
-  device_id?: string | null;
   agent_types?: string[] | null;
   default_agent_type?: string | null;
   permission_level?: string | null;

@@ -1,8 +1,8 @@
 //! NATS adapter for the [`Transport`](crate::Transport) trait.
 //!
-//! The daemon uses MQTT topic strings (`amux/team/device/.../state`)
+//! The daemon uses MQTT topic strings (`amux/team/actor/.../state`)
 //! everywhere; this adapter transparently encodes them to NATS subjects
-//! (`amux.team.device....state`) on publish and decodes back on receive
+//! (`amux.team.actor....state`) on publish and decodes back on receive
 //! via [`SubscribedMessage::frame`].
 //!
 //! The MQTT `retain` flag has no native equivalent on NATS core. Callers
@@ -109,9 +109,9 @@ mod tests {
     /// `apps/daemon/tests/nats_transport.rs`.
     #[test]
     fn subject_encoding_roundtrip_matches_topic_shape() {
-        let topic = "amux/team1/device/dev-a/runtime/r1/state";
+        let topic = "amux/team1/actor-a/runtime/r1/state";
         let subject = encode_subject(topic);
-        assert_eq!(subject, "amux.team1.device.dev-a.runtime.r1.state");
+        assert_eq!(subject, "amux.team1.actor-a.runtime.r1.state");
         assert_eq!(crate::decode_subject(&subject), topic);
     }
 }

@@ -460,21 +460,20 @@ struct ActorDetailView: View {
     @State private var isSavingDefaults = false
     @State private var defaultsErrorMessage: String?
 
-    /// Daemon `device_id` for the agent being viewed — only meaningful when
+    /// Routing actor id for the agent being viewed (== its id) — only meaningful when
     /// `actor` is itself an agent. Empty for humans (where workspace
     /// management isn't offered) or when ConnectedAgentsStore hasn't yet
     /// resolved this agent's row.
-    private var daemonDeviceID: String {
+    private var routeActorID: String {
         guard !actor.isMember,
-              let agent = connectedAgentsStore?.agents.first(where: { $0.id == actor.actorId }),
-              let id = agent.deviceID else {
+              let agent = connectedAgentsStore?.agents.first(where: { $0.id == actor.actorId }) else {
             return ""
         }
-        return id.trimmingCharacters(in: .whitespacesAndNewlines)
+        return agent.id.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var canManageWorkspaces: Bool {
-        !daemonDeviceID.isEmpty &&
+        !routeActorID.isEmpty &&
         mqtt.connectionState == .connected
     }
 
@@ -631,7 +630,7 @@ struct ActorDetailView: View {
                         )
                     }
 
-                    if daemonDeviceID.isEmpty {
+                    if routeActorID.isEmpty {
                         Text("Daemon routing is unavailable. Set the daemon device ID in Settings before adding workspaces.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -830,7 +829,7 @@ struct ActorDetailView: View {
         let path = newWorkspacePath.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else { return }
 
-        guard !daemonDeviceID.isEmpty else {
+        guard !routeActorID.isEmpty else {
             workspaceErrorMessage = "Missing daemon device ID."
             return
         }
@@ -846,9 +845,9 @@ struct ActorDetailView: View {
         isAddingWorkspace = true
         workspaceErrorMessage = nil
 
-        let target = daemonDeviceID
+        let target = routeActorID
         Task {
-            let (ok, err) = await teamclawService.addWorkspaceRpc(targetDeviceID: target, path: path)
+            let (ok, err) = await teamclawService.addWorkspaceRpc(targetActorID: target, path: path)
             await MainActor.run {
                 isAddingWorkspace = false
                 if ok {

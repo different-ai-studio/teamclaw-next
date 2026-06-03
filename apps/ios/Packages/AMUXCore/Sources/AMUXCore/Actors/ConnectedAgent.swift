@@ -11,15 +11,10 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
     public let visibility: String
     public let isOwner: Bool
     public let lastActiveAt: Date?
-    /// The daemon's MQTT device identifier, taken from `agents.device_id`.
-    /// Nil when the daemon hasn't registered one yet (old daemon or offline
-    /// since before the column existed).
-    public let deviceID: String?
 
     public init(id: String, displayName: String, agentTypes: [String] = [], agentKind: String = "",
                 defaultAgentType: String? = nil,
                 permissionLevel: String, lastActiveAt: Date?,
-                deviceID: String? = nil,
                 visibility: String = "team",
                 isOwner: Bool = false) {
         self.id = id
@@ -31,7 +26,6 @@ public struct ConnectedAgent: Identifiable, Hashable, Sendable {
         self.visibility = visibility
         self.isOwner = isOwner
         self.lastActiveAt = lastActiveAt
-        self.deviceID = deviceID
     }
 
     public var isOnline: Bool {

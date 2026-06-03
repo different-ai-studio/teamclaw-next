@@ -22,7 +22,6 @@ export function createConnectedAgentsCache(db: ConnectedAgentsCacheDb): Connecte
         permissionLevel: String(r.permission_level),
         visibility: r.visibility === "personal" ? "personal" : "team",
         isOwner: r.is_owner === 1 || r.is_owner === true,
-        deviceId: r.device_id != null ? String(r.device_id) : null,
         lastActiveAt: r.last_active_at != null ? new Date(Number(r.last_active_at)).toISOString() : null,
       }));
     },
@@ -37,7 +36,9 @@ export function createConnectedAgentsCache(db: ConnectedAgentsCacheDb): Connecte
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           teamId, a.agentId, a.displayName, JSON.stringify(a.agentTypes), a.defaultAgentType, a.permissionLevel,
           a.visibility, a.isOwner ? 1 : 0,
-          a.deviceId,
+          // legacy device_id column retained in the local cache schema; routing
+          // now uses agentId (== actor id), so this is no longer populated.
+          null,
           a.lastActiveAt ? Date.parse(a.lastActiveAt) : null,
           null, null, now,
         );

@@ -311,7 +311,7 @@ function contractRepo() {
       assert.equal(teamId, "team-1");
       return {
         items: [
-          { id: "agent-1", teamId: "team-1", kind: "agent", displayName: "Test Agent", avatarUrl: null, metadata: null, deviceId: "device-1", lastSeenAt: "2026-05-27T01:00:00Z", agentType: "claude" },
+          { id: "agent-1", teamId: "team-1", kind: "agent", displayName: "Test Agent", avatarUrl: null, metadata: null, lastSeenAt: "2026-05-27T01:00:00Z", agentType: "claude" },
         ],
       };
     },
@@ -323,9 +323,6 @@ function contractRepo() {
     },
     async makeAgentPersonal(agentActorId) {
       assert.ok(typeof agentActorId === "string");
-    },
-    async getAgentDeviceId(agentActorId) {
-      return { deviceId: "device-1" };
     },
     async updateAgentDefaults(agentActorId, patch) {
       assert.equal(agentActorId, "agent-1");
@@ -536,7 +533,6 @@ function contractRepo() {
     },
     async updateRuntimeCursor(runtimeRowId, { lastProcessedMessageId }) {},
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {},
-    async setAgentDeviceId(agentActorId, { deviceId }) {},
     async submitFeedback(body) {
       const row = {
         messageId: body.messageId,

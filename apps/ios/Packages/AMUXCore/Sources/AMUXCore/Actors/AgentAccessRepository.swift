@@ -20,9 +20,6 @@ public protocol AgentAccessRepository: Sendable {
     /// Hide an owned team agent from the Actors directory and revoke non-owner grants.
     func makeAgentPersonal(agentID: String) async throws
 
-    /// Resolve the current daemon device for a specific agent.
-    func deviceID(for agentID: String) async throws -> String?
-
     /// Total number of agent actors in this team (regardless of which member
     /// has access). Used to decide whether to show the "add the team's first
     /// agent" reminder.

@@ -86,10 +86,4 @@ export function registerRuntime(router) {
     return { body: { items } };
   });
 
-  router.put("/v1/agents/:agentActorId/device", async (ctx) => {
-    const body = ctx.json ?? {};
-    if (!body.deviceId) throw new ApiError(400, "validation_failed", "deviceId is required");
-    await ctx.repository.setAgentDeviceId(ctx.params.agentActorId, { deviceId: body.deviceId });
-    return { statusCode: 204, body: null };
-  });
 }

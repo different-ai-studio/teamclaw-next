@@ -1,5 +1,5 @@
 //! Live JetStream KV roundtrip — proves daemon's `nats::RetainedKv` can
-//! create/bind the `amux_state` bucket and round-trip device-state payloads.
+//! create/bind the `amux_state` bucket and round-trip actor-presence payloads.
 //!
 //! Skipped by default; set `AMUXD_NATS_TEST_URL` (e.g.
 //! `nats://127.0.0.1:14222`) to enable. Launch the matching server first:
@@ -16,7 +16,7 @@ fn server_url() -> Option<String> {
 }
 
 #[tokio::test]
-async fn jetstream_kv_roundtrip_for_device_state() {
+async fn jetstream_kv_roundtrip_for_actor_state() {
     let Some(url) = server_url() else {
         eprintln!("AMUXD_NATS_TEST_URL not set; skipping live JetStream test");
         return;
@@ -45,7 +45,7 @@ async fn jetstream_kv_roundtrip_for_device_state() {
         })
         .expect("create bucket");
 
-    let key = "amux_team1_device_dev-a_state";
+    let key = "amux_team1_actor-a_state";
     bucket
         .put(key, b"hello-state".to_vec().into())
         .await

@@ -18,8 +18,6 @@ export type Actor = {
   ownerMemberId?: string | null;
   /** Agent visibility in the team directory. */
   visibility?: "team" | "personal" | null;
-  /** Daemon device id for RPC-backed agent management. */
-  deviceId?: string | null;
   /** Deprecated UI alias: defaultAgentType ?? agentTypes[0]. */
   agentKind: string | null;
 };

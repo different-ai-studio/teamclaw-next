@@ -48,7 +48,6 @@ describe("WebViewContent", () => {
     })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
-      if (command === "get_persistent_device_id") return Promise.resolve("node-123")
       if (command === "get_device_hostname") return Promise.resolve("matts-mac")
       if (command === "webview_create") return Promise.resolve()
       if (command === "webview_hide") return Promise.resolve()
@@ -61,17 +60,18 @@ describe("WebViewContent", () => {
       expect(invokeMock).toHaveBeenCalledWith(
         "webview_create",
         expect.objectContaining({
-          deviceNo: "node-123",
+          deviceNo: undefined,
           deviceName: "Matt",
         }),
       )
     })
+    // The deleted get_persistent_device_id command must not be invoked.
+    expect(invokeMock).not.toHaveBeenCalledWith("get_persistent_device_id")
   })
 
   it("falls back to device hostname when team member name is unavailable", async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
-      if (command === "get_persistent_device_id") return Promise.resolve("node-123")
       if (command === "get_device_hostname") return Promise.resolve("matts-mac")
       if (command === "webview_create") return Promise.resolve()
       if (command === "webview_hide") return Promise.resolve()
@@ -84,42 +84,40 @@ describe("WebViewContent", () => {
       expect(invokeMock).toHaveBeenCalledWith(
         "webview_create",
         expect.objectContaining({
-          deviceNo: "node-123",
+          deviceNo: undefined,
           deviceName: "matts-mac",
         }),
       )
     })
   })
 
-  it("uses device hostname with the persistent device id outside team mode", async () => {
+  it("omits deviceNo entirely outside team mode", async () => {
     useTeamModeStore.setState({ teamModeType: null })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
-      if (command === "get_persistent_device_id") return Promise.resolve("persisted-node")
       if (command === "get_device_hostname") return Promise.resolve("standalone-mac")
       if (command === "webview_create") return Promise.resolve()
       if (command === "webview_hide") return Promise.resolve()
       throw new Error(`unexpected command: ${command}`)
     })
 
-    render(<WebViewContent url="https://example.test/persistent-device-name" />)
+    render(<WebViewContent url="https://example.test/standalone-name" />)
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
         "webview_create",
         expect.objectContaining({
-          deviceNo: "persisted-node",
+          deviceNo: undefined,
           deviceName: "standalone-mac",
         }),
       )
     })
   })
 
-  it("still passes deviceNo when get_device_hostname fails (does not gate injection on name)", async () => {
+  it("still creates the webview when get_device_hostname fails (does not gate on name)", async () => {
     useTeamModeStore.setState({ teamModeType: null })
     invokeMock.mockImplementation((command: string) => {
       if (command === "webview_set_bounds") return Promise.resolve()
-      if (command === "get_persistent_device_id") return Promise.resolve("persisted-node")
       if (command === "get_device_hostname") return Promise.reject(new Error("hostname failed"))
       if (command === "webview_create") return Promise.resolve()
       if (command === "webview_hide") return Promise.resolve()
@@ -132,7 +130,7 @@ describe("WebViewContent", () => {
       expect(invokeMock).toHaveBeenCalledWith(
         "webview_create",
         expect.objectContaining({
-          deviceNo: "persisted-node",
+          deviceNo: undefined,
           deviceName: "",
         }),
       )

@@ -3,7 +3,7 @@ import i18n from "@/lib/i18n";
 import { ensureSessionLiveSubscribed, ensureTeamSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import { startAgentRuntimesAsync, type RuntimeStartFailure } from "@/lib/session-create";
 import { waitForTeamclawRpcReady } from "@/lib/teamclaw-rpc";
-import { useDevicePresenceStore } from "@/stores/device-presence-store";
+import { useActorPresenceStore } from "@/stores/actor-presence-store";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { resolveRuntimeStateEntryForAgent } from "@/lib/runtime-state-resolve";
 import { resolveSessionWorkspaceHintForRuntimeStart } from "@/lib/teamclaw/resolve-runtime-start-workspace";
@@ -17,8 +17,8 @@ export type AgentDevicePresence = "online" | "offline" | "unknown";
 /**
  * Resolve whether an agent's daemon is reachable.
  *
- * MQTT retained DeviceState can arrive slightly after subscribe — `undefined`
- * in device-presence-store means "not yet known", not offline (see
+ * MQTT retained ActorPresence can arrive slightly after subscribe — `undefined`
+ * in actor-presence-store means "not yet known", not offline (see
  * SessionActorSheet computeDotStateAndAnimation). Only explicit `online:
  * false` (LWT) counts as offline. For the local desktop agent, HTTP probe
  * is used as a bootstrap when MQTT retain hasn't landed yet.
@@ -31,21 +31,21 @@ export async function resolveAgentDevicePresence(
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const entry = useDevicePresenceStore.getState().byDeviceId[agentActorId];
+    const entry = useActorPresenceStore.getState().byActorId[agentActorId];
     if (entry?.online === true) return "online";
     if (entry?.online === false) return "offline";
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  const entry = useDevicePresenceStore.getState().byDeviceId[agentActorId];
+  const entry = useActorPresenceStore.getState().byActorId[agentActorId];
   if (entry?.online === true) return "online";
   if (entry?.online === false) return "offline";
 
   const { isTauri } = await import("@/lib/utils");
   if (isTauri()) {
-    const { getLocalDaemonDeviceId } = await import("@/lib/daemon-agent-admin");
+    const { getLocalDaemonActorId } = await import("@/lib/daemon-agent-admin");
     const { probeDaemonHttp } = await import("@/lib/daemon-local-client");
-    const localId = await getLocalDaemonDeviceId();
+    const localId = await getLocalDaemonActorId();
     if (localId === agentActorId) {
       const probe = await probeDaemonHttp();
       return probe.ok ? "online" : "offline";

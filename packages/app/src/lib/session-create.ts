@@ -481,7 +481,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
     if (workspaceId) {
       try {
         const ensured = await ensureDaemonWorkspaceRegistered({
-          targetDeviceId: agentActorId,
+          targetActorId: agentActorId,
           teamId: args.teamId,
           cloudWorkspaceId: workspaceId,
           agentLabel: agentActorId.slice(0, 8),
@@ -518,11 +518,10 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         workspaceId,
         runtimeWorkspaceId,
       })
-      // Current amuxd convention: daemon device_id == its actor_id, so the
-      // RPC topic is amux/{team}/device/{agentActorId}/rpc/req. Multi-daemon
-      // teams would need a separate (actor -> deviceId) lookup.
+      // RPC topic is amux/{team}/{agentActorId}/rpc/req — the routing segment
+      // is the agent's actor_id.
       const result = await runtimeStart({
-        targetDeviceId: agentActorId,
+        targetActorId: agentActorId,
         ...runtimeStartWorkspaceArgs(runtimeWorkspaceId),
         sessionId: args.sessionId,
         agentType,
@@ -558,7 +557,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
           runtimeId: result.runtimeId,
         })
         seedRuntimeStateAfterStart({
-          daemonDeviceId: agentActorId,
+          daemonActorId: agentActorId,
           runtimeId: result.runtimeId,
           agentType,
         })
@@ -578,7 +577,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
           })
           try {
             await setModel({
-              targetDeviceId: agentActorId,
+              targetActorId: agentActorId,
               runtimeId: result.runtimeId,
               modelId: normalizedModelId,
             })

@@ -83,7 +83,7 @@ export function useActorDisplayName(actorId: string | undefined | null): string 
   return name ?? actorId.slice(0, 8);
 }
 
-/** Find the current model an agent is using by matching daemonDeviceId
+/** Find the current model an agent is using by matching daemonActorId
  * (== actor_id by daemon convention) against runtime-state-store entries.
  * Returns "" when no runtime is known for this actor. */
 export function useAgentModelByActor(actorId: string | undefined | null): string {
@@ -91,7 +91,7 @@ export function useAgentModelByActor(actorId: string | undefined | null): string
   return React.useMemo(() => {
     if (!actorId) return "";
     for (const entry of Object.values(byRuntimeId)) {
-      if (entry.daemonDeviceId === actorId) {
+      if (entry.daemonActorId === actorId) {
         return entry.info.currentModel ?? "";
       }
     }

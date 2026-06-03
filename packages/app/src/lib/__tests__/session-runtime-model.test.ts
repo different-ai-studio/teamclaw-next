@@ -35,12 +35,12 @@ describe('applySessionRuntimeModel', () => {
 
     expect(mockSetModel).toHaveBeenCalledTimes(2)
     expect(mockSetModel).toHaveBeenCalledWith({
-      targetDeviceId: 'agent-1',
+      targetActorId: 'agent-1',
       runtimeId: 'rt-1',
       modelId: 'claude-opus-4-7',
     })
     expect(mockSetModel).toHaveBeenCalledWith({
-      targetDeviceId: 'agent-2',
+      targetActorId: 'agent-2',
       runtimeId: 'rt-2',
       modelId: 'claude-opus-4-7',
     })
@@ -61,7 +61,7 @@ describe('applySessionRuntimeModel', () => {
 
     expect(listRuntimeTargetsForSession).toHaveBeenCalledWith('sess-1', [])
     expect(mockSetModel).toHaveBeenCalledWith({
-      targetDeviceId: 'agent-1',
+      targetActorId: 'agent-1',
       runtimeId: 'rt-1',
       modelId: 'claude-sonnet-4-6',
     })

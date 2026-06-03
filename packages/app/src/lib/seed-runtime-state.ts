@@ -13,16 +13,16 @@ import { useRuntimeStateStore } from "@/stores/runtime-state-store";
  * only from daemon ACP `available_models` on the retain — never seeded here.
  */
 export function seedRuntimeStateAfterStart(args: {
-  daemonDeviceId: string;
+  daemonActorId: string;
   runtimeId: string;
   agentType: number;
 }): void {
-  const daemonDeviceId = args.daemonDeviceId.trim();
+  const daemonActorId = args.daemonActorId.trim();
   const runtimeId = args.runtimeId.trim();
-  if (!daemonDeviceId || !runtimeId) return;
+  if (!daemonActorId || !runtimeId) return;
 
   const store = useRuntimeStateStore.getState();
-  const existing = store.byRuntimeId[runtimeId] ?? store.byRuntimeId[daemonDeviceId];
+  const existing = store.byRuntimeId[runtimeId] ?? store.byRuntimeId[daemonActorId];
   if (existing) return;
 
   const info: RuntimeInfo = create(RuntimeInfoSchema, {
@@ -33,8 +33,8 @@ export function seedRuntimeStateAfterStart(args: {
     availableModels: [],
   });
 
-  store.upsert(runtimeId, daemonDeviceId, info);
-  if (runtimeId !== daemonDeviceId) {
-    store.upsert(daemonDeviceId, daemonDeviceId, info);
+  store.upsert(runtimeId, daemonActorId, info);
+  if (runtimeId !== daemonActorId) {
+    store.upsert(daemonActorId, daemonActorId, info);
   }
 }

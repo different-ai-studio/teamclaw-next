@@ -18,10 +18,10 @@ pub struct LivePublisher {
 }
 
 impl LivePublisher {
-    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, device_id: String) -> Self {
+    pub fn new(client: Arc<dyn MessagePublisher>, team_id: String, actor_id: String) -> Self {
         Self {
             client,
-            topics: Topics::new(&team_id, &device_id),
+            topics: Topics::new(&team_id, &actor_id),
         }
     }
 
@@ -56,7 +56,7 @@ impl LivePublisher {
     /// `LiveEventEnvelope` with `event_type = "acp.event"`. iOS subscribes by
     /// session_id (which it owns), so this replaces the legacy per-runtime
     /// `runtime/{id}/events` topic that required iOS to know the daemon's
-    /// device_id and the daemon-generated runtime_id.
+    /// actor_id and the daemon-generated runtime_id.
     pub async fn publish_acp_event(
         &self,
         session_id: &str,

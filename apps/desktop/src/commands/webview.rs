@@ -160,21 +160,15 @@ impl Default for WebviewManager {
     }
 }
 
-fn build_teamclaw_identity_script(
-    device_no: &str,
-    device_name: &str,
-    device_token: Option<String>,
-) -> String {
+fn build_teamclaw_identity_script(device_no: &str, device_name: &str) -> String {
     let escaped_no = serde_json::to_string(device_no).unwrap_or_else(|_| "\"\"".to_string());
     let escaped_name = serde_json::to_string(device_name).unwrap_or_else(|_| "\"\"".to_string());
-    let escaped_token = match device_token {
-        Some(token) => serde_json::to_string(&token).unwrap_or_else(|_| "null".to_string()),
-        None => "null".to_string(),
-    };
 
     format!(
         r#"(function(){{
-  var __next = {{ deviceNo: {no}, deviceName: {name}, deviceToken: {token} }};
+  // deviceToken (master-data-api JWT) was seeded by the removed random-hex
+  // device identity; the getter is kept on window.teamclaw but is always null.
+  var __next = {{ deviceNo: {no}, deviceName: {name}, deviceToken: null }};
   if (typeof window.__TEAMCLAW_SET_IDENTITY__ !== 'function') {{
     var __state = {{ deviceNo: '', deviceName: '', deviceToken: null }};
     Object.defineProperty(window, '__TEAMCLAW_SET_IDENTITY__', {{
@@ -222,19 +216,7 @@ fn build_teamclaw_identity_script(
 }})();"#,
         no = escaped_no,
         name = escaped_name,
-        token = escaped_token,
     )
-}
-
-fn build_teamclaw_identity_script_with_fresh_token(device_no: &str, device_name: &str) -> String {
-    let device_token = match super::device_token::generate(device_no, "") {
-        Ok(token) => Some(token),
-        Err(e) => {
-            eprintln!("[Webview] device_token generation skipped: {}", e);
-            None
-        }
-    };
-    build_teamclaw_identity_script(device_no, device_name, device_token)
 }
 
 #[cfg(target_os = "macos")]
@@ -526,7 +508,7 @@ pub async fn webview_create(
         .map(|dno| (dno.to_string(), device_name.clone().unwrap_or_default()));
     let initial_identity_script = identity
         .as_ref()
-        .map(|(dno, dname)| build_teamclaw_identity_script_with_fresh_token(dno, dname));
+        .map(|(dno, dname)| build_teamclaw_identity_script(dno, dname));
 
     // Page load progress via on_page_load callback (no JS injection needed —
     // child webviews don't have __TAURI_INTERNALS__)
@@ -548,8 +530,7 @@ pub async fn webview_create(
             );
 
             if let Some((device_no, device_name)) = &identity {
-                let script =
-                    build_teamclaw_identity_script_with_fresh_token(device_no, device_name);
+                let script = build_teamclaw_identity_script(device_no, device_name);
                 match payload.event() {
                     tauri::webview::PageLoadEvent::Started => {
                         add_document_start_script(&webview, &script);
@@ -860,20 +841,20 @@ mod tests {
 
     #[test]
     fn teamclaw_identity_script_is_refreshable() {
-        let script =
-            build_teamclaw_identity_script("device-1", "Alice", Some("token-1".to_string()));
+        let script = build_teamclaw_identity_script("device-1", "Alice");
 
         assert!(script.contains("__TEAMCLAW_SET_IDENTITY__"));
         assert!(script.contains("get deviceToken()"));
         assert!(script.contains("configurable: true"));
         assert!(script.contains("\"device-1\""));
         assert!(script.contains("\"Alice\""));
-        assert!(script.contains("\"token-1\""));
+        // deviceToken is always null now (master-data JWT removed).
+        assert!(script.contains("deviceToken: null"));
     }
 
     #[test]
-    fn teamclaw_identity_script_escapes_values_and_allows_missing_token() {
-        let script = build_teamclaw_identity_script("device\"quoted", "name\nline", None);
+    fn teamclaw_identity_script_escapes_values() {
+        let script = build_teamclaw_identity_script("device\"quoted", "name\nline");
 
         assert!(script.contains("device\\\"quoted"));
         assert!(script.contains("name\\nline"));

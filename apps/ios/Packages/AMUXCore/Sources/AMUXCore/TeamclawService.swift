@@ -24,10 +24,16 @@ public final class TeamclawService {
     private var peerId: String = ""
     private var connectedAgentsStore: ConnectedAgentsStore?
     private var messagesRepository: (any MessagesRepository)?
-    /// Daemon device-ids whose `rpc/res` and `notify` topics are currently
+    /// Connected-agent actor-ids whose `notify` topics are currently
     /// subscribed. Kept in sync with `connectedAgentsStore.agents` via the
-    /// observer task that `start()` launches.
-    private var subscribedDeviceIDs: Set<String> = []
+    /// observer task that `start()` launches. An agent's routing actor IS its
+    /// actor id (== `ConnectedAgent.id`).
+    private var subscribedActorIDs: Set<String> = []
+    /// Whether our own actor's `rpc/res` topic is subscribed. The daemon
+    /// replies to every RPC on `amux/{team}/{requesterActorId}/rpc/res`
+    /// (apps/daemon/src/teamclaw/rpc.rs:48-53), so we subscribe to our own
+    /// actor's response topic once rather than per-target.
+    private var ownRpcResSubscribed = false
     private var agentObserverTask: Task<Void, Never>?
     /// Member id of the local actor, resolved from the retained device peer
     /// list by matching our own peer_id. Populated once
@@ -50,6 +56,12 @@ public final class TeamclawService {
     public var currentHumanActorId: String? {
         localMemberId.isEmpty ? nil : localMemberId
     }
+
+    /// The signed-in user's actor id, used to stamp `requesterActorID` on every
+    /// outgoing RPC. The daemon replies on `amux/{team}/{requesterActorId}/rpc/res`
+    /// (apps/daemon/src/teamclaw/rpc.rs:48-53), so this MUST be set or the
+    /// response never routes back to us.
+    private var requesterActorID: String { localMemberId }
 
     public init() {}
 
@@ -106,8 +118,8 @@ public final class TeamclawService {
                 }
             }
 
-            // Main listener wants both device/notify and session/live topics
-            // (parseDeviceNotifyTopic + the session/{id}/live shape check).
+            // Main listener wants both actor/notify and session/live topics
+            // (parseActorNotifyTopic + the session/{id}/live shape check).
             // Hub fan-out delivers only matching messages; RPC awaiters
             // attach their own per-response-topic filtered streams below.
             let stream = await hub.messages(matching: { msg in
@@ -163,26 +175,44 @@ public final class TeamclawService {
             mqtt?.unsubscribeForLifecycleStop(topic)
         }
         foregroundSessionIDsSet.removeAll()
-        subscribedDeviceIDs.removeAll()
+        subscribedActorIDs.removeAll()
+        ownRpcResSubscribed = false
+    }
+
+    /// Subscribes our own actor's rpc/res topic exactly once. The daemon replies
+    /// to every RPC on the requester's own actor response topic (rpc.rs:48-53),
+    /// independent of which agent we target, so this standing subscription must
+    /// stay up for the lifetime of the service. Idempotent: a no-op after the
+    /// first successful subscribe. Callers issuing an RPC should invoke this
+    /// before `rpcClient.invoke` so the very first call (before any resync has
+    /// run) still has the response topic subscribed — but must NEVER pair it
+    /// with a per-call unsubscribe, which would clobber the shared sub.
+    private func ensureOwnRpcResSubscribed() async {
+        guard let mqtt, !ownRpcResSubscribed, !localMemberId.isEmpty else { return }
+        try? await mqtt.subscribe(MQTTTopics.actorRpcResponse(teamID: teamId, actorID: localMemberId))
+        ownRpcResSubscribed = true
     }
 
     private func resyncDaemonSubscriptions() async {
         guard let mqtt else { return }
+        // The daemon replies to RPCs on our own actor's response topic
+        // (rpc.rs:48-53), so subscribe to it once, independent of which agent
+        // we target.
+        await ensureOwnRpcResSubscribed()
         let desired: Set<String> = {
             guard let store = connectedAgentsStore else { return [] }
-            return Set(store.agents.compactMap(\.deviceID).filter { !$0.isEmpty })
+            // An agent's routing actor IS its actor id (== ConnectedAgent.id).
+            return Set(store.agents.map(\.id).filter { !$0.isEmpty })
         }()
-        let toAdd = desired.subtracting(subscribedDeviceIDs)
-        let toRemove = subscribedDeviceIDs.subtracting(desired)
+        let toAdd = desired.subtracting(subscribedActorIDs)
+        let toRemove = subscribedActorIDs.subtracting(desired)
         for id in toAdd {
-            try? await mqtt.subscribe(MQTTTopics.deviceNotify(teamID: teamId, deviceID: id))
-            try? await mqtt.subscribe(MQTTTopics.deviceRpcResponse(teamID: teamId, deviceID: id))
+            try? await mqtt.subscribe(MQTTTopics.actorNotify(teamID: teamId, actorID: id))
         }
         for id in toRemove {
-            try? await mqtt.unsubscribe(MQTTTopics.deviceNotify(teamID: teamId, deviceID: id))
-            try? await mqtt.unsubscribe(MQTTTopics.deviceRpcResponse(teamID: teamId, deviceID: id))
+            try? await mqtt.unsubscribe(MQTTTopics.actorNotify(teamID: teamId, actorID: id))
         }
-        subscribedDeviceIDs = desired
+        subscribedActorIDs = desired
 
         // FetchPeers needs at least one subscribed daemon to be able to issue
         // the RPC. The one-shot fetch in `start()` runs before
@@ -211,14 +241,14 @@ public final class TeamclawService {
     }
 
     /// Fans FetchPeers RPCs across every known daemon and concatenates the
-    /// results. Pre-multi-daemon code only queried `self.deviceId`; we mirror
+    /// results. Pre-multi-daemon code only queried a single daemon; we mirror
     /// the same intent (resolve our peer record for `localMemberId`) but no
     /// longer require a single privileged daemon. Returns an empty array if no
     /// daemons are subscribed yet.
     private func fetchPeersAcrossDaemons() async -> [Amux_PeerInfo] {
         var combined: [Amux_PeerInfo] = []
-        for id in subscribedDeviceIDs.sorted() {
-            combined.append(contentsOf: await fetchPeers(targetDeviceID: id))
+        for id in subscribedActorIDs.sorted() {
+            combined.append(contentsOf: await fetchPeers(targetActorID: id))
         }
         return combined
     }
@@ -228,9 +258,9 @@ public final class TeamclawService {
     private func handleIncoming(_ incoming: MQTTIncoming, modelContext: ModelContext) async {
         let topic = incoming.topic
 
-        if let notifyDeviceID = parseDeviceNotifyTopic(topic) {
+        if let notifyActorID = parseActorNotifyTopic(topic) {
             guard let notify = try? Teamclaw_Notify(serializedBytes: incoming.payload) else {
-                print("[TeamclawService] failed to decode device/notify payload as Notify")
+                print("[TeamclawService] failed to decode actor/notify payload as Notify")
                 return
             }
 
@@ -242,11 +272,11 @@ public final class TeamclawService {
             case "peers.changed":
                 // Refresh peers from the daemon that emitted the notify, since
                 // its peer set is the authority for joins/leaves in its scope.
-                let peers = await fetchPeers(targetDeviceID: notifyDeviceID)
+                let peers = await fetchPeers(targetActorID: notifyActorID)
                 syncPeers(peers)
             case "workspaces.changed":
                 // Placeholder: Task 6 wires the returned array into state.
-                _ = await fetchWorkspaces(targetDeviceID: notifyDeviceID)
+                _ = await fetchWorkspaces(targetActorID: notifyActorID)
             default:
                 break
             }
@@ -749,9 +779,9 @@ public final class TeamclawService {
         return createReq
     }
 
-    public func createIdea(targetDeviceID: String, description: String, workspaceId: String = "") async -> Bool {
+    public func createIdea(targetActorID: String, description: String, workspaceId: String = "") async -> Bool {
         guard let rpcClient else { return false }
-        guard !targetDeviceID.isEmpty else { return false }
+        guard !targetActorID.isEmpty else { return false }
 
         let title: String
         if description.count <= 50 {
@@ -778,10 +808,10 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .createIdea(createReq)
 
-        let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID)
+        let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID)
         return response?.success ?? false
     }
 
@@ -792,9 +822,9 @@ public final class TeamclawService {
     /// `syncIdeaEvent`. The call site typically flips `archived` on the
     /// SwiftData model first for optimistic UI; if the RPC fails, the next
     /// broadcast will reinstate the prior value.
-    public func archiveIdea(targetDeviceID: String, ideaId: String, sessionId: String, archived: Bool) async {
+    public func archiveIdea(targetActorID: String, ideaId: String, sessionId: String, archived: Bool) async {
         guard let mqtt else { return }
-        guard !targetDeviceID.isEmpty else { return }
+        guard !targetActorID.isEmpty else { return }
 
         var update = Teamclaw_UpdateIdeaRequest()
         update.sessionID = sessionId
@@ -803,10 +833,10 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .updateIdea(update)
 
-        let topic = MQTTTopics.deviceRpcRequest(teamID: teamId, deviceID: targetDeviceID)
+        let topic = MQTTTopics.actorRpcRequest(teamID: teamId, actorID: targetActorID)
         guard let data = try? rpcReq.serializedData() else { return }
         try? await mqtt.publish(topic: topic, payload: data, retain: false)
     }
@@ -821,9 +851,9 @@ public final class TeamclawService {
     /// - Parameter status: one of `"open"`, `"in_progress"`, `"done"`.
     ///   Any other value is sent as `.unknown` (which SwiftProtobuf skips,
     ///   producing a no-op update on the daemon side).
-    public func updateIdeaStatus(targetDeviceID: String, ideaId: String, sessionId: String, status: String) async {
+    public func updateIdeaStatus(targetActorID: String, ideaId: String, sessionId: String, status: String) async {
         guard let mqtt else { return }
-        guard !targetDeviceID.isEmpty else { return }
+        guard !targetActorID.isEmpty else { return }
 
         var update = Teamclaw_UpdateIdeaRequest()
         update.sessionID = sessionId
@@ -832,10 +862,10 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .updateIdea(update)
 
-        let topic = MQTTTopics.deviceRpcRequest(teamID: teamId, deviceID: targetDeviceID)
+        let topic = MQTTTopics.actorRpcRequest(teamID: teamId, actorID: targetActorID)
         guard let data = try? rpcReq.serializedData() else { return }
         try? await mqtt.publish(topic: topic, payload: data, retain: false)
     }
@@ -845,7 +875,7 @@ public final class TeamclawService {
     /// passed (SwiftProtobuf treats empty strings as "unset" on the
     /// daemon side). Status omitted when `nil`. Fire-and-forget.
     public func updateIdea(
-        targetDeviceID: String,
+        targetActorID: String,
         ideaId: String,
         sessionId: String,
         title: String? = nil,
@@ -853,7 +883,7 @@ public final class TeamclawService {
         status: String? = nil
     ) async {
         guard let mqtt else { return }
-        guard !targetDeviceID.isEmpty else { return }
+        guard !targetActorID.isEmpty else { return }
 
         var update = Teamclaw_UpdateIdeaRequest()
         update.sessionID = sessionId
@@ -864,10 +894,10 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .updateIdea(update)
 
-        let topic = MQTTTopics.deviceRpcRequest(teamID: teamId, deviceID: targetDeviceID)
+        let topic = MQTTTopics.actorRpcRequest(teamID: teamId, actorID: targetActorID)
         guard let data = try? rpcReq.serializedData() else { return }
         try? await mqtt.publish(topic: topic, payload: data, retain: false)
     }
@@ -933,13 +963,13 @@ public final class TeamclawService {
         guard let session = (try? modelContext.fetch(descriptor))?.first else {
             return
         }
-        let resolvedDeviceID: String?
-        if let cached = resolveDeviceID(forPrimaryAgentID: session.primaryAgentId) {
-            resolvedDeviceID = cached
+        let resolvedActorID: String?
+        if let cached = resolveActorID(forPrimaryAgentID: session.primaryAgentId) {
+            resolvedActorID = cached
         } else {
-            resolvedDeviceID = await rpcTargetDeviceID(for: session.primaryAgentId)
+            resolvedActorID = await rpcTargetActorID(for: session.primaryAgentId)
         }
-        guard let targetDeviceID = resolvedDeviceID else {
+        guard let targetActorID = resolvedActorID else {
             return
         }
 
@@ -948,10 +978,10 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .fetchSession(req)
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID),
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID),
               response.success,
               case .sessionInfo(let info) = response.result else {
             return
@@ -968,13 +998,13 @@ public final class TeamclawService {
             predicate: #Predicate { $0.sessionId == sessionId }
         )
         guard let session = (try? ctx.fetch(descriptor))?.first else { return }
-        let resolvedDeviceID: String?
-        if let cached = resolveDeviceID(forPrimaryAgentID: session.primaryAgentId) {
-            resolvedDeviceID = cached
+        let resolvedActorID: String?
+        if let cached = resolveActorID(forPrimaryAgentID: session.primaryAgentId) {
+            resolvedActorID = cached
         } else {
-            resolvedDeviceID = await rpcTargetDeviceID(for: session.primaryAgentId)
+            resolvedActorID = await rpcTargetActorID(for: session.primaryAgentId)
         }
-        guard let targetDeviceID = resolvedDeviceID else {
+        guard let targetActorID = resolvedActorID else {
             return
         }
 
@@ -985,10 +1015,10 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .fetchSessionMessages(req)
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID),
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID),
               response.success,
               case .sessionMessagePage(let page) = response.result else {
             return
@@ -1002,18 +1032,18 @@ public final class TeamclawService {
     /// RPC. Phase 2b replacement for the retained devicePeers topic subscription.
     /// Returns empty array on timeout or decode error — the retained topic
     /// semantics degraded the same way, and callers are idempotent.
-    public func fetchPeers(targetDeviceID: String) async -> [Amux_PeerInfo] {
+    public func fetchPeers(targetActorID: String) async -> [Amux_PeerInfo] {
         guard let rpcClient else { return [] }
-        guard !targetDeviceID.isEmpty else { return [] }
+        guard !targetActorID.isEmpty else { return [] }
 
         let fetch = Teamclaw_FetchPeersRequest()  // empty request
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .fetchPeers(fetch)
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return []
         }
         if case let .fetchPeersResult(result)? = response.result {
@@ -1024,18 +1054,18 @@ public final class TeamclawService {
 
     /// Fetches a single daemon's workspace set via FetchWorkspaces RPC.
     /// Phase 2b replacement for the retained deviceWorkspaces topic subscription.
-    public func fetchWorkspaces(targetDeviceID: String) async -> [Amux_WorkspaceInfo] {
+    public func fetchWorkspaces(targetActorID: String) async -> [Amux_WorkspaceInfo] {
         guard let rpcClient else { return [] }
-        guard !targetDeviceID.isEmpty else { return [] }
+        guard !targetActorID.isEmpty else { return [] }
 
         let fetch = Teamclaw_FetchWorkspacesRequest()  // empty request
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .fetchWorkspaces(fetch)
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return []
         }
         if case let .fetchWorkspacesResult(result)? = response.result {
@@ -1049,8 +1079,8 @@ public final class TeamclawService {
     /// know which daemon owns which workspace yet.
     public func fetchWorkspaces() async -> [Amux_WorkspaceInfo] {
         var combined: [Amux_WorkspaceInfo] = []
-        for id in subscribedDeviceIDs.sorted() {
-            combined.append(contentsOf: await fetchWorkspaces(targetDeviceID: id))
+        for id in subscribedActorIDs.sorted() {
+            combined.append(contentsOf: await fetchWorkspaces(targetActorID: id))
         }
         return combined
     }
@@ -1064,19 +1094,19 @@ public final class TeamclawService {
     /// `sync_workspace_to_supabase` round-trip surfaces as the daemon's real
     /// success/error rather than a phantom client-side "timeout" while the
     /// add eventually succeeds and reappears via `workspaces.changed` notify.
-    public func addWorkspaceRpc(targetDeviceID: String, path: String) async -> (Bool, String) {
+    public func addWorkspaceRpc(targetActorID: String, path: String) async -> (Bool, String) {
         guard let rpcClient else { return (false, "mqtt not configured") }
-        guard !targetDeviceID.isEmpty else { return (false, "no target device id") }
+        guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var add = Teamclaw_AddWorkspaceRequest()
         add.path = path
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .addWorkspace(add)
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID, timeout: 25) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID, timeout: 25) else {
             return (false, "timeout")
         }
         return (response.success, response.error)
@@ -1087,13 +1117,13 @@ public final class TeamclawService {
     /// Supabase is the source of truth and must be updated separately by the
     /// caller. Returns `(success, error)`. 10s timeout.
     ///
-    /// Mirrors `runtimeStartRpc`'s on-demand subscribe pattern so responses
-    /// from off-team or not-yet-tracked daemons aren't dropped.
-    public func removeParticipantRpc(targetDeviceID: String,
+    /// The RPC response lands on our own actor's persistently-subscribed
+    /// rpc/res topic, so no per-target subscription is needed.
+    public func removeParticipantRpc(targetActorID: String,
                                      sessionID: String,
                                      actorID: String) async -> (Bool, String) {
-        guard let mqtt, let rpcClient else { return (false, "mqtt not configured") }
-        guard !targetDeviceID.isEmpty else { return (false, "no target device id") }
+        guard let rpcClient else { return (false, "mqtt not configured") }
+        guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var remove = Teamclaw_RemoveParticipantRequest()
         remove.sessionID = sessionID
@@ -1101,21 +1131,17 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .removeParticipant(remove)
 
-        let resTopic = MQTTTopics.deviceRpcResponse(teamID: teamId, deviceID: targetDeviceID)
-        let needsTargetSubscribe = !subscribedDeviceIDs.contains(targetDeviceID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // The RPC response arrives on our own actor's rpc/res topic, which is
+        // persistently subscribed by `resyncDaemonSubscriptions()`. Ensure that
+        // standing subscription exists (no-op after the first time) instead of
+        // a per-call subscribe/unsubscribe of the response topic — unsubscribing
+        // it would tear down the shared standing sub for every other RPC.
+        await ensureOwnRpcResSubscribed()
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
         }
         return (response.success, response.error)
@@ -1124,32 +1150,26 @@ public final class TeamclawService {
     /// Stops a runtime on the target daemon. The daemon's runtime/{id}/state
     /// retained topic transitions to STOPPED; that's the canonical "it
     /// terminated" signal. This RPC's `(success, error)` is the synchronous
-    /// accept gate. Mirrors `runtimeStartRpc`'s on-demand subscribe pattern.
-    public func runtimeStopRpc(targetDeviceID: String,
+    /// accept gate. The response lands on our own actor's persistently-subscribed
+    /// rpc/res topic.
+    public func runtimeStopRpc(targetActorID: String,
                                runtimeID: String) async -> (Bool, String) {
-        guard let mqtt, let rpcClient else { return (false, "mqtt not configured") }
-        guard !targetDeviceID.isEmpty else { return (false, "no target device id") }
+        guard let rpcClient else { return (false, "mqtt not configured") }
+        guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var stop = Teamclaw_RuntimeStopRequest()
         stop.runtimeID = runtimeID
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .runtimeStop(stop)
 
-        let resTopic = MQTTTopics.deviceRpcResponse(teamID: teamId, deviceID: targetDeviceID)
-        let needsTargetSubscribe = !subscribedDeviceIDs.contains(targetDeviceID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // Response arrives on our own actor's rpc/res (persistently subscribed);
+        // ensure that standing sub without a harmful per-call unsubscribe.
+        await ensureOwnRpcResSubscribed()
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
         }
         return (response.success, response.error)
@@ -1159,12 +1179,12 @@ public final class TeamclawService {
     /// into its `current_model_per_agent` map and re-publishes the retained
     /// `runtime/{id}/state`, so subscribers see `current_model` flip without
     /// a separate roundtrip. `(success, error)` is the synchronous accept gate.
-    /// Mirrors `runtimeStopRpc`'s on-demand subscribe pattern.
-    public func setModelRpc(targetDeviceID: String,
+    /// The response lands on our own actor's persistently-subscribed rpc/res topic.
+    public func setModelRpc(targetActorID: String,
                             runtimeID: String,
                             modelID: String) async -> (Bool, String) {
-        guard let mqtt, let rpcClient else { return (false, "mqtt not configured") }
-        guard !targetDeviceID.isEmpty else { return (false, "no target device id") }
+        guard let rpcClient else { return (false, "mqtt not configured") }
+        guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var setModel = Teamclaw_SetModelRequest()
         setModel.runtimeID = runtimeID
@@ -1172,21 +1192,14 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .setModel(setModel)
 
-        let resTopic = MQTTTopics.deviceRpcResponse(teamID: teamId, deviceID: targetDeviceID)
-        let needsTargetSubscribe = !subscribedDeviceIDs.contains(targetDeviceID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // Response arrives on our own actor's rpc/res (persistently subscribed);
+        // ensure that standing sub without a harmful per-call unsubscribe.
+        await ensureOwnRpcResSubscribed()
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
         }
         return (response.success, response.error)
@@ -1194,19 +1207,19 @@ public final class TeamclawService {
 
     /// Removes a workspace via daemon RPC. Same `(success, error)` semantics as
     /// `addWorkspaceRpc`.
-    public func removeWorkspaceRpc(targetDeviceID: String, workspaceId: String) async -> (Bool, String) {
+    public func removeWorkspaceRpc(targetActorID: String, workspaceId: String) async -> (Bool, String) {
         guard let rpcClient else { return (false, "mqtt not configured") }
-        guard !targetDeviceID.isEmpty else { return (false, "no target device id") }
+        guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var remove = Teamclaw_RemoveWorkspaceRequest()
         remove.workspaceID = workspaceId
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .removeWorkspace(remove)
 
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID) else {
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
         }
         return (response.success, response.error)
@@ -1224,15 +1237,15 @@ public final class TeamclawService {
     /// Returns `.accepted(runtimeID, sessionID)` or `.rejected(reason)`.
     /// Times out at 15s with `.rejected("timeout")`.
     public func runtimeStartRpc(
-        targetDeviceID: String,
+        targetActorID: String,
         agentType: Amux_AgentType,
         workspaceId: String,
         worktree: String,
         sessionId: String,
         initialPrompt: String
     ) async -> RuntimeStartOutcome {
-        guard let mqtt, let rpcClient else { return .rejected("mqtt not configured") }
-        guard !targetDeviceID.isEmpty else { return .rejected("no target device id") }
+        guard let rpcClient else { return .rejected("mqtt not configured") }
+        guard !targetActorID.isEmpty else { return .rejected("no target actor id") }
 
         var start = Teamclaw_RuntimeStartRequest()
         start.agentType = agentType
@@ -1243,26 +1256,19 @@ public final class TeamclawService {
 
         var rpcReq = Teamclaw_RpcRequest()
         rpcReq.requestID = String(UUID().uuidString.prefix(8)).lowercased()
-        rpcReq.senderDeviceID = targetDeviceID
+        rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .runtimeStart(start)
 
-        // If target daemon hasn't been folded into the standing per-agent
-        // subscription set yet (e.g. ConnectedAgentsStore hasn't reloaded),
-        // subscribe ad-hoc so the response isn't dropped.
-        let resTopic = MQTTTopics.deviceRpcResponse(teamID: teamId, deviceID: targetDeviceID)
-        let needsTargetSubscribe = !subscribedDeviceIDs.contains(targetDeviceID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // The response arrives on our own actor's rpc/res topic, which is
+        // persistently subscribed by `resyncDaemonSubscriptions()`. Ensure that
+        // standing subscription is up (no-op after the first call) rather than a
+        // per-call subscribe/unsubscribe of the response topic — unsubscribing it
+        // would tear down the shared sub used by every other RPC.
+        await ensureOwnRpcResSubscribed()
 
         let requestId = rpcReq.requestID
-        print("[runtimeStartRpc] publishing requestID=\(requestId) → device=\(targetDeviceID)")
-        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetDeviceID: targetDeviceID, timeout: 15) else {
+        print("[runtimeStartRpc] publishing requestID=\(requestId) → actor=\(targetActorID)")
+        guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID, timeout: 15) else {
             print("[runtimeStartRpc] TIMEOUT waiting for response to requestID=\(requestId)")
             return .rejected("timeout")
         }
@@ -1305,40 +1311,37 @@ public final class TeamclawService {
         self.messagesRepository = messagesRepository
     }
 
-    /// Resolves `agents.device_id` for `primaryAgentId` against the in-memory
-    /// `ConnectedAgentsStore`. Cheap fast path used before falling back to a
-    /// fresh Supabase query (`rpcTargetDeviceID`).
-    private func resolveDeviceID(forPrimaryAgentID primaryAgentId: String?) -> String? {
+    /// Resolves the routing actor id for `primaryAgentId` against the in-memory
+    /// `ConnectedAgentsStore`. An agent's routing actor IS its actor id
+    /// (== `ConnectedAgent.id`), so this just confirms the agent is known.
+    private func resolveActorID(forPrimaryAgentID primaryAgentId: String?) -> String? {
         guard let primaryAgentId, !primaryAgentId.isEmpty,
               let store = connectedAgentsStore,
-              let agent = store.agents.first(where: { $0.id == primaryAgentId }),
-              let id = agent.deviceID, !id.isEmpty else {
+              let agent = store.agents.first(where: { $0.id == primaryAgentId }) else {
             return nil
         }
-        return id
+        return agent.id
     }
 
-    /// Returns the daemon device-id when `topic` matches
-    /// `amux/{team}/device/{deviceID}/notify`. Nil otherwise.
-    private func parseDeviceNotifyTopic(_ topic: String) -> String? {
+    /// Returns the routing actor id when `topic` matches
+    /// `amux/{team}/{actorID}/notify` (4 segments). Nil otherwise.
+    private func parseActorNotifyTopic(_ topic: String) -> String? {
         let parts = topic.split(separator: "/")
-        guard parts.count == 5,
+        guard parts.count == 4,
               parts[0] == "amux",
-              parts[2] == "device",
-              parts[4] == "notify" else { return nil }
+              parts[3] == "notify" else { return nil }
         let normalizedTeam = MQTTTopics.normalizedTeamID(teamId)
         guard parts[1] == Substring(normalizedTeam) else { return nil }
-        return String(parts[3])
+        return String(parts[2])
     }
 
-    private func rpcTargetDeviceID(for primaryAgentId: String?) async -> String? {
+    private func rpcTargetActorID(for primaryAgentId: String?) async -> String? {
         guard let primaryAgentId, !primaryAgentId.isEmpty else { return nil }
-        // Resolve from the already-loaded connected-agents list (each agent
-        // carries its daemon device id) instead of a direct backend query.
-        guard let deviceID = connectedAgentsStore?.agents
-            .first(where: { $0.id == primaryAgentId })?.deviceID,
-              !deviceID.isEmpty else { return nil }
-        return deviceID
+        // An agent's routing actor IS its actor id (== ConnectedAgent.id).
+        guard let agent = connectedAgentsStore?.agents
+            .first(where: { $0.id == primaryAgentId }),
+              !agent.id.isEmpty else { return nil }
+        return agent.id
     }
 
     private func rehydrateForegroundSessionSubscriptions(on mqtt: MQTTService) async {

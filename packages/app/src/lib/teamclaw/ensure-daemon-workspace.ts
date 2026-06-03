@@ -6,7 +6,7 @@ import { workspacePathsMatch } from '@/stores/session-utils'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 
 export type EnsureDaemonWorkspaceArgs = {
-  targetDeviceId: string
+  targetActorId: string
   teamId: string
   cloudWorkspaceId: string
   /** Shown in desktop error toasts. */
@@ -48,13 +48,13 @@ export async function ensureDaemonWorkspaceRegistered(
   args: EnsureDaemonWorkspaceArgs,
 ): Promise<EnsureDaemonWorkspaceResult> {
   const cloudId = args.cloudWorkspaceId.trim()
-  const targetDeviceId = args.targetDeviceId.trim()
+  const targetActorId = args.targetActorId.trim()
   if (!cloudId) return { runtimeWorkspaceId: '' }
-  if (!targetDeviceId) {
-    throw new Error('ensureDaemonWorkspaceRegistered: targetDeviceId is required')
+  if (!targetActorId) {
+    throw new Error('ensureDaemonWorkspaceRegistered: targetActorId is required')
   }
 
-  const agentLabel = args.agentLabel?.trim() || targetDeviceId.slice(0, 8)
+  const agentLabel = args.agentLabel?.trim() || targetActorId.slice(0, 8)
 
   let cloudPath = ''
   try {
@@ -64,7 +64,7 @@ export async function ensureDaemonWorkspaceRegistered(
     sessionFlowError('daemon_workspace.cloud_lookup.failed', error, {
       teamId: args.teamId,
       cloudWorkspaceId: cloudId,
-      targetDeviceId,
+      targetActorId,
     })
     const message = error instanceof Error ? error.message : String(error)
     await notifyDaemonWorkspaceError(
@@ -79,7 +79,7 @@ export async function ensureDaemonWorkspaceRegistered(
     sessionFlowLog('daemon_workspace.cloud_path_missing', {
       teamId: args.teamId,
       cloudWorkspaceId: cloudId,
-      targetDeviceId,
+      targetActorId,
     }, 'warn')
     await notifyDaemonWorkspaceError(
       i18n.t('daemon.workspace.missingPathTitle'),
@@ -92,25 +92,25 @@ export async function ensureDaemonWorkspaceRegistered(
     teamId: args.teamId,
     cloudWorkspaceId: cloudId,
     cloudPath,
-    targetDeviceId,
+    targetActorId,
   })
 
   let daemonWorkspaces: WorkspaceInfo[]
   try {
-    const fetched = await fetchWorkspaces({ targetDeviceId })
+    const fetched = await fetchWorkspaces({ targetActorId })
     daemonWorkspaces = fetched.workspaces ?? []
   } catch (error) {
     sessionFlowError('daemon_workspace.fetch.failed', error, {
       teamId: args.teamId,
       cloudWorkspaceId: cloudId,
-      targetDeviceId,
+      targetActorId,
     })
     const message = error instanceof Error ? error.message : String(error)
     await notifyDaemonWorkspaceError(
       i18n.t('daemon.workspace.listFailedTitle'),
       i18n.t('daemon.workspace.labeledMessage', { agentLabel, message }),
     )
-    throw new Error(`fetchWorkspaces failed for ${targetDeviceId}: ${message}`, { cause: error })
+    throw new Error(`fetchWorkspaces failed for ${targetActorId}: ${message}`, { cause: error })
   }
 
   const existing = daemonWorkspaces.find((ws) => daemonWorkspaceMatchesCloud(ws, cloudId, cloudPath))
@@ -121,7 +121,7 @@ export async function ensureDaemonWorkspaceRegistered(
       cloudWorkspaceId: cloudId,
       runtimeWorkspaceId,
       daemonPath: existing.path,
-      targetDeviceId,
+      targetActorId,
     })
     return { runtimeWorkspaceId }
   }
@@ -130,11 +130,11 @@ export async function ensureDaemonWorkspaceRegistered(
     teamId: args.teamId,
     cloudWorkspaceId: cloudId,
     cloudPath,
-    targetDeviceId,
+    targetActorId,
   })
 
   try {
-    const added = await addWorkspace({ targetDeviceId, path: cloudPath })
+    const added = await addWorkspace({ targetActorId, path: cloudPath })
     const workspace = added.workspace
     const runtimeWorkspaceId = workspace?.workspaceId?.trim()
     if (!runtimeWorkspaceId) {
@@ -145,7 +145,7 @@ export async function ensureDaemonWorkspaceRegistered(
       cloudWorkspaceId: cloudId,
       runtimeWorkspaceId,
       daemonPath: workspace?.path ?? cloudPath,
-      targetDeviceId,
+      targetActorId,
     })
     return { runtimeWorkspaceId }
   } catch (error) {
@@ -153,13 +153,13 @@ export async function ensureDaemonWorkspaceRegistered(
       teamId: args.teamId,
       cloudWorkspaceId: cloudId,
       cloudPath,
-      targetDeviceId,
+      targetActorId,
     })
     const message = error instanceof Error ? error.message : String(error)
     await notifyDaemonWorkspaceError(
       i18n.t('daemon.workspace.registerFailedTitle'),
       i18n.t('daemon.workspace.registerFailedDesc', { agentLabel, cloudPath, message }),
     )
-    throw new Error(`addWorkspace failed for ${targetDeviceId} path ${cloudPath}: ${message}`, { cause: error })
+    throw new Error(`addWorkspace failed for ${targetActorId} path ${cloudPath}: ${message}`, { cause: error })
   }
 }

@@ -32,7 +32,6 @@ import {
 } from 'lucide-react'
 import { cn, isTauri } from '@/lib/utils'
 import { ToggleSwitch } from '@/components/settings/shared'
-import { DeviceIdDisplay } from '@/components/settings/DeviceIdDisplay'
 import { HostLlmConfig } from './HostLlmConfig'
 import { TeamSyncPaths } from './TeamSyncPaths'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -115,7 +114,6 @@ export function TeamGitConfig() {
     () => (workspacePath ? { workspacePath } : {}),
     [workspacePath],
   )
-  const [deviceInfo, setDeviceInfo] = React.useState<{ nodeId: string } | null>(null)
   const [state, setState] = React.useState<ConnectionState>('loading')
   const [teamConfig, setTeamConfig] = React.useState<TeamConfig | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
@@ -211,13 +209,6 @@ export function TeamGitConfig() {
       setLlmLoaded(true)
     }
   }, [state, llmLoaded, workspaceArgs])
-
-  // Load device info when connected
-  React.useEffect(() => {
-    if ((state === 'connected' || state === 'syncing') && isTauri()) {
-      tauriInvoke<{ nodeId: string }>('get_device_info').then(setDeviceInfo).catch(() => {})
-    }
-  }, [state])
 
   const handleSaveLlmConfig = async () => {
     setLlmSaving(true)
@@ -565,7 +556,7 @@ export function TeamGitConfig() {
                 </div>
                 <div>
                   <p className="text-[13px] font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
-                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory, Git URL, and this device identity')}</p>
+                  <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory and Git URL')}</p>
                 </div>
               </div>
 
@@ -591,13 +582,6 @@ export function TeamGitConfig() {
                   </code>
                 </div>
               </div>
-
-              {deviceInfo && (
-                <div className="pt-2 border-t">
-                  <p className="text-xs text-muted-foreground mb-1.5">{t('settings.team.myDeviceId', 'My Device ID')}</p>
-                  <DeviceIdDisplay nodeId={deviceInfo.nodeId} />
-                </div>
-              )}
             </div>
           </SettingCard>
 

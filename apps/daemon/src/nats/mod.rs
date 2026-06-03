@@ -6,7 +6,7 @@
 //!
 //! - [`client`]: connect + topic-bound publish/subscribe glue
 //! - [`retained`]: JetStream KV bucket that replaces MQTT retained messages
-//!   for device/runtime state
+//!   for actor/runtime state
 //!
 //! Note: this module does not yet drive the daemon's main loop — that swap
 //! is staged as a follow-up commit so the MQTT path stays intact and

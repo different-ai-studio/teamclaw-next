@@ -182,7 +182,7 @@ mod tests {
     fn env(seq: u64, turn_id: &str) -> Envelope {
         Envelope {
             runtime_id: "agent".into(),
-            device_id: "dev".into(),
+            actor_id: "actor".into(),
             source_peer_id: String::new(),
             timestamp: 0,
             sequence: seq,

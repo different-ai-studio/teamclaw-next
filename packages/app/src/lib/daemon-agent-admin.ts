@@ -7,7 +7,6 @@ export type AgentVisibility = 'personal' | 'team'
 export interface CurrentDaemonAgent {
   id: string
   displayName: string
-  deviceId: string | null
   visibility: AgentVisibility
   permissionLevel: AgentPermissionLevel | null
   isOwner: boolean
@@ -40,17 +39,34 @@ function normalizeAgentTypes(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string')
 }
 
-export async function getLocalDaemonDeviceId(): Promise<string | null> {
+/**
+ * The local daemon's `actor_id`, read from its HTTP `GET /v1/info` endpoint
+ * (`get_daemon_http_info` IPC → `{ base_url }`). This is the routing identity
+ * the daemon persists in `~/.amuxd/backend.toml`. Returns `null` outside Tauri
+ * or when the daemon is not running / not yet onboarded.
+ *
+ * NOTE: the legacy `get_device_info` Tauri command was deleted (device_id is
+ * gone; the value was always actor_id), so this is the only frontend source
+ * for the local routing identity.
+ */
+export async function getLocalDaemonActorId(): Promise<string | null> {
+  const { isTauri } = await import('@/lib/utils')
+  if (!isTauri()) return null
   try {
-    const info = await invoke<{ nodeId: string }>('get_device_info')
-    return info.nodeId || null
+    const info = await invoke<{ base_url: string } | null>('get_daemon_http_info')
+    if (!info?.base_url) return null
+    const resp = await fetch(`${info.base_url}/v1/info`)
+    if (!resp.ok) return null
+    const body: { actor_id?: string } = await resp.json()
+    const actorId = body.actor_id?.trim()
+    return actorId || null
   } catch {
     return null
   }
 }
 
 export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaemonAgent | null> {
-  const deviceId = await getLocalDaemonDeviceId()
+  const localActorId = await getLocalDaemonActorId()
   const backend = getBackend()
   const rows = await backend.actors.listConnectedAgents(teamId) as Array<{
     id?: string
@@ -61,13 +77,15 @@ export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaem
     permission_level: AgentPermissionLevel | null
     visibility: AgentVisibility
     is_owner: boolean
-    device_id: string | null
     last_active_at: string | null
   }>
 
+  // Prefer the row that matches this machine's daemon actor_id. Fall back to
+  // the owner row (the daemon owns its own agent), then the first connected
+  // agent. device_id matching was removed — device_id == actor_id and FC no
+  // longer returns it.
   const row =
-    rows.find((item) => deviceId && item.device_id === deviceId) ??
-    rows.find((item) => deviceId && item.agent_id === deviceId) ??
+    rows.find((item) => localActorId && item.agent_id === localActorId) ??
     rows.find((item) => item.is_owner) ??
     rows[0]
 
@@ -78,7 +96,6 @@ export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaem
   return {
     id: row.agent_id,
     displayName: directoryRow?.display_name || row.display_name || row.agent_id,
-    deviceId: row.device_id ?? null,
     visibility: row.visibility,
     permissionLevel: row.permission_level,
     isOwner: row.is_owner,

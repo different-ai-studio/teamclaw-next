@@ -40,7 +40,7 @@ describe("actors module", () => {
   });
 
   it("listConnectedAgents calls /v1/teams/:teamId/agents/connected", async () => {
-    const cloudAgent = { ...cloudActor, kind: "agent", agentId: "a-1", deviceId: "dev-1" };
+    const cloudAgent = { ...cloudActor, kind: "agent", agentId: "a-1" };
     const client = mockClient({ "GET /v1/teams/team-1/agents/connected": { items: [cloudAgent] } });
     const mod = createActorsModule(client);
     const out = await mod.listConnectedAgents("team-1");

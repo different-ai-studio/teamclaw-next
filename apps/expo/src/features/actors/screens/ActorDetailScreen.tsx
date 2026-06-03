@@ -570,7 +570,10 @@ function AgentWorkspacesSection({
   workspaces: ReadonlyArray<AgentWorkspaceChoice>;
 }) {
   const [path, setPath] = useState("");
-  const canAdd = Boolean(onAdd) && Boolean(actor.deviceId) && path.trim().length > 0 && !isAdding;
+  // An agent's daemon is addressed by its actor id; routing is available
+  // whenever this is an agent actor.
+  const canRoute = actor.actorType === "agent";
+  const canAdd = Boolean(onAdd) && canRoute && path.trim().length > 0 && !isAdding;
   return (
     <View style={styles.section}>
       <SectionEyebrow
@@ -594,10 +597,10 @@ function AgentWorkspacesSection({
                   <Pressable
                     accessibilityLabel={`Remove ${workspaceLabel(workspace)}`}
                     accessibilityRole="button"
-                    disabled={isRemoving || !actor.deviceId}
+                    disabled={isRemoving || !canRoute}
                     hitSlop={6}
                     onPress={() => onRemove(workspace.id)}
-                    style={isRemoving || !actor.deviceId ? styles.optionChipDisabled : null}
+                    style={isRemoving || !canRoute ? styles.optionChipDisabled : null}
                   >
                     <Ionicons color={hai.cinnabar} name="trash-outline" size={19} />
                   </Pressable>
@@ -614,7 +617,7 @@ function AgentWorkspacesSection({
               <TextInput
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!isAdding && Boolean(actor.deviceId)}
+                editable={!isAdding && canRoute}
                 onChangeText={setPath}
                 placeholder="/Users/me/project"
                 placeholderTextColor={colors.slate}
@@ -646,9 +649,9 @@ function AgentWorkspacesSection({
                 </Text>
               </Pressable>
             </View>
-            {!actor.deviceId ? (
+            {!canRoute ? (
               <Text style={styles.workspaceHint}>
-                Daemon device id is unavailable for this agent.
+                Daemon routing is unavailable for this actor.
               </Text>
             ) : null}
           </>

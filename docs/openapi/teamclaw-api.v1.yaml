@@ -1686,33 +1686,6 @@ paths:
           description: OK
         "401":
           $ref: "#/components/responses/Error"
-  /v1/agents/{agentActorId}/device:
-    put:
-      operationId: setAgentDeviceId
-      summary: Set agent device ID
-      tags: [Agents]
-      parameters:
-        - in: path
-          name: agentActorId
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [deviceId]
-              properties:
-                deviceId:
-                  type: string
-      responses:
-        "204":
-          description: OK
-        "401":
-          $ref: "#/components/responses/Error"
   /v1/attachments:
     post:
       operationId: uploadAttachment
@@ -3744,10 +3717,6 @@ components:
         - $ref: "#/components/schemas/Actor"
         - type: object
           properties:
-            deviceId:
-              type:
-                - string
-                - "null"
             lastSeenAt:
               type:
                 - string

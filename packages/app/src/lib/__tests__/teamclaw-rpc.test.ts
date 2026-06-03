@@ -36,10 +36,10 @@ describe('teamclaw-rpc', () => {
     const { initTeamclawRpc, runtimeStart } = await import('../teamclaw-rpc')
     await initTeamclawRpc('team-1')
 
-    expect(mockSubscribe).toHaveBeenCalledWith('amux/team-1/device/+/rpc/res')
+    expect(mockSubscribe).toHaveBeenCalledWith('amux/team-1/+/rpc/res')
 
     const promise = runtimeStart({
-      targetDeviceId: 'dev-a',
+      targetActorId: 'dev-a',
       workspaceId: 'ws-1',
       worktree: '/tmp/x',
       sessionId: 'sess-1',
@@ -50,7 +50,7 @@ describe('teamclaw-rpc', () => {
     // mqttPublish should have been called once
     expect(mockPublish).toHaveBeenCalledTimes(1)
     const [topic, bytes] = mockPublish.mock.calls[0] as [string, Uint8Array]
-    expect(topic).toBe('amux/team-1/device/dev-a/rpc/req')
+    expect(topic).toBe('amux/team-1/dev-a/rpc/req')
 
     // Decode the request to extract its id
     const { fromBinary } = await import('@bufbuild/protobuf')
@@ -58,7 +58,8 @@ describe('teamclaw-rpc', () => {
     const decoded = fromBinary(RpcRequestSchema, bytes)
     const reqId = decoded.requestId
     expect(reqId).toBeTruthy()
-    expect(decoded.senderDeviceId).toBe(decoded.requesterClientId)
+    expect(decoded.requesterActorId).toBe('user-1')
+    expect(decoded.requesterClientId).toMatch(/^teamclaw-user-1-/)
     expect(decoded.method.case).toBe('runtimeStart')
 
     // Simulate matching response
@@ -76,7 +77,7 @@ describe('teamclaw-rpc', () => {
     })
 
     envelopeHandler!({
-      topic: 'amux/team-1/device/dev-a/rpc/res',
+      topic: 'amux/team-1/dev-a/rpc/res',
       bytes: Array.from(toBinary(RpcResponseSchema, response)),
     })
 
@@ -90,7 +91,7 @@ describe('teamclaw-rpc', () => {
     await initTeamclawRpc('team-1')
 
     const promise = runtimeStart({
-      targetDeviceId: 'dev-a',
+      targetActorId: 'dev-a',
       workspaceId: '',
       worktree: '',
       sessionId: 'sess-1',
@@ -106,7 +107,7 @@ describe('teamclaw-rpc', () => {
     await initTeamclawRpc('team-1')
 
     const promise = runtimeStart({
-      targetDeviceId: 'dev-a',
+      targetActorId: 'dev-a',
       workspaceId: '',
       worktree: '',
       sessionId: 'sess-1',

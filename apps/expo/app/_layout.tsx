@@ -324,8 +324,8 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
         mqtt,
         teamId: state.currentTeam!.id,
         decode: decodeRuntimeInfo,
-        onRuntimeInfo: (deviceId, runtimeId, info) =>
-          connectedAgentsStoreRef.current?.handleRuntimeInfo(deviceId, runtimeId, info),
+        onRuntimeInfo: (actorId, runtimeId, info) =>
+          connectedAgentsStoreRef.current?.handleRuntimeInfo(actorId, runtimeId, info),
       });
       const store = createConnectedAgentsStore({
         teamId: state.currentTeam!.id,

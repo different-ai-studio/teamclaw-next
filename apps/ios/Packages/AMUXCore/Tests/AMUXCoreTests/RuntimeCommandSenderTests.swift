@@ -20,7 +20,7 @@ struct RuntimeCommandSenderTests {
         do {
             try await sender.send(
                 runtimeID: "",
-                deviceID: "device-1",
+                actorID: "device-1",
                 currentHumanActorID: nil,
                 makeCommand: { $0.command = .cancel(Amux_AcpCancel()) }
             )
@@ -32,8 +32,8 @@ struct RuntimeCommandSenderTests {
         #expect(after.isEmpty, "no publish should fire when runtimeID is empty")
     }
 
-    @Test("empty deviceID throws daemonDeviceIdUnresolved before any publish")
-    func emptyDeviceIDThrows() async throws {
+    @Test("empty actorID throws routeActorIdUnresolved before any publish")
+    func emptyActorIDThrows() async throws {
         let published = ConcurrencyBox<[(String, Data, Bool)]>(value: [])
         let mqtt = MQTTService(
             subscribeHook: { _ in },
@@ -47,12 +47,12 @@ struct RuntimeCommandSenderTests {
         do {
             try await sender.send(
                 runtimeID: "rt-1",
-                deviceID: "",
+                actorID: "",
                 currentHumanActorID: nil,
                 makeCommand: { $0.command = .cancel(Amux_AcpCancel()) }
             )
-            Issue.record("expected daemonDeviceIdUnresolved")
-        } catch SendCommandError.daemonDeviceIdUnresolved {
+            Issue.record("expected routeActorIdUnresolved")
+        } catch SendCommandError.routeActorIdUnresolved {
             // expected
         }
         let after = await published.value
@@ -75,7 +75,7 @@ struct RuntimeCommandSenderTests {
         g.requestID = "perm-1"
         try await sender.send(
             runtimeID: "rt-abcd",
-            deviceID: "dev-7",
+            actorID: "dev-7",
             currentHumanActorID: "human-actor-1",
             makeCommand: { $0.command = .grantPermission(g) }
         )
@@ -85,12 +85,12 @@ struct RuntimeCommandSenderTests {
         let (topic, data, retain) = try #require(snapshot.first)
         #expect(retain == false)
         #expect(topic == MQTTTopics.runtimeCommands(teamID: "team-x",
-                                                   deviceID: "dev-7",
+                                                   actorID: "dev-7",
                                                    runtimeID: "rt-abcd"))
 
         let envelope = try Amux_RuntimeCommandEnvelope(serializedBytes: data)
         #expect(envelope.runtimeID == "rt-abcd")
-        #expect(envelope.deviceID == "dev-7")
+        #expect(envelope.actorID == "dev-7")
         #expect(envelope.peerID == "peer-42")
         #expect(envelope.senderActorID == "human-actor-1")
         #expect(envelope.hasAcpCommand)
@@ -113,7 +113,7 @@ struct RuntimeCommandSenderTests {
         )
         let sender = RuntimeCommandSender(mqtt: mqtt, teamID: "team", peerID: "peer")
         try await sender.send(
-            runtimeID: "rt", deviceID: "dev",
+            runtimeID: "rt", actorID: "dev",
             currentHumanActorID: "",
             makeCommand: { $0.command = .cancel(Amux_AcpCancel()) }
         )

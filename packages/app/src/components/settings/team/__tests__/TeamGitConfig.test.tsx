@@ -60,10 +60,6 @@ vi.mock('@/components/settings/shared', () => ({
   ToggleSwitch: ({ enabled: _enabled, ...props }: any) => <button {...props} />,
 }))
 
-vi.mock('@/components/settings/DeviceIdDisplay', () => ({
-  DeviceIdDisplay: () => <div>Device ID</div>,
-}))
-
 vi.mock('@/components/ui/button', () => ({
   Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
 }))
@@ -104,7 +100,6 @@ describe('TeamGitConfig status panel', () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'team_check_git_installed') return { installed: true, version: 'git version 2.0.0' }
       if (cmd === 'get_team_config') return null
-      if (cmd === 'get_device_info') return { nodeId: 'node-123' }
       return null
     })
   })
@@ -141,7 +136,6 @@ describe('TeamGitConfig status panel', () => {
         }
       }
       if (cmd === 'get_team_status') return { active: true, llm: null }
-      if (cmd === 'get_device_info') return { nodeId: 'node-123' }
       return null
     })
 
@@ -175,7 +169,6 @@ describe('TeamGitConfig status panel', () => {
       if (cmd === 'team_shared_git_sync') return { success: true, message: 'Synced' }
       if (cmd === 'save_team_config') return null
       if (cmd === 'get_team_status') return { active: true, llm: null }
-      if (cmd === 'get_device_info') return { nodeId: 'node-123' }
       return null
     })
 

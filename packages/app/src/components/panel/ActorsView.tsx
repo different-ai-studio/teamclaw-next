@@ -21,7 +21,7 @@ import { useCurrentTeamStore } from '@/stores/current-team'
 import { useUIStore } from '@/stores/ui'
 import { cn, isTauri } from '@/lib/utils'
 import { loadActorsForTeam, upsertActorsBatch, type ActorRow as CachedActorRow } from '@/lib/local-cache'
-import { useDevicePresenceStore } from '@/stores/device-presence-store'
+import { useActorPresenceStore } from '@/stores/actor-presence-store'
 
 export type ActorRow = {
   id: string
@@ -187,12 +187,12 @@ function ActorRowView({ actor, onViewProfile }: { actor: ActorRow; onViewProfile
   const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
   // Members: heartbeat-based — last_active_at within 5min.
-  // Agents: authoritative MQTT presence from device-presence-store
+  // Agents: authoritative MQTT presence from actor-presence-store
   // (daemon LWT flips this to offline within seconds of disconnect).
   // For an agent with no presence entry at all (daemon never connected
   // since the app launched), fall back to last_active_at so freshly-loaded
   // sessions don't show every agent as gray during the first second.
-  const agentPresence = useDevicePresenceStore((s) => isAgent ? s.byDeviceId[actor.id] : undefined)
+  const agentPresence = useActorPresenceStore((s) => isAgent ? s.byActorId[actor.id] : undefined)
   const online = isAgent
     ? (agentPresence ? agentPresence.online : isActorOnline(actor.last_active_at))
     : isActorOnline(actor.last_active_at)

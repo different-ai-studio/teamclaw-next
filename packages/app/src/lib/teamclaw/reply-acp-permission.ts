@@ -81,7 +81,7 @@ export async function replyAcpPermission(args: {
     agentActorId: args.agentActorId,
     requestId: args.requestId,
     granted,
-    targetDeviceId: target.deviceId,
+    targetActorId: target.actorId,
     runtimeId: target.runtimeId,
     sessionRuntimeId:
       sessionRuntimeRows.find((row) => row.agent_id?.trim() === args.agentActorId)?.runtime_id ??
@@ -98,7 +98,7 @@ export async function replyAcpPermission(args: {
 
   try {
     await sender.sendPermissionResponse({
-      targetDeviceId: target.deviceId,
+      targetActorId: target.actorId,
       runtimeId: target.runtimeId,
       requestId: args.requestId,
       granted,

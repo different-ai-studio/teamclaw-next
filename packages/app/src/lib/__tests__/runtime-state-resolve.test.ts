@@ -20,7 +20,7 @@ function entry(
   models: Array<{ id: string; displayName: string }> = [],
 ): RuntimeStateEntry {
   return {
-    daemonDeviceId: agentId,
+    daemonActorId: agentId,
     lastUpdated: Date.now(),
     info: {
       runtimeId,
@@ -240,7 +240,7 @@ describe("resolvePermissionCommandTarget", () => {
       sessionRuntimeRows: [{ agent_id: "agent-a", runtime_id: "live-spawn" }],
       byRuntimeId,
     });
-    expect(target).toEqual({ deviceId: "agent-a", runtimeId: "live-spawn" });
+    expect(target).toEqual({ actorId: "agent-a", runtimeId: "live-spawn" });
   });
 });
 

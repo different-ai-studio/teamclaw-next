@@ -1,13 +1,13 @@
 // packages/app/src/stores/team-members.ts
 import { create } from 'zustand'
-import { invoke } from '@tauri-apps/api/core'
 
-// Device-identity store. Team roles/members now come from the cloud team
+// Local-identity store. Team roles/members now come from the cloud team
 // (useCurrentTeamStore + useTeamPermissions); the legacy git-manifest member
-// system was removed. This store only tracks the local device node id, used by
-// env-vars store for per-device operations (node id for team writes).
+// system was removed. This store tracks the local daemon's actor_id, used by
+// the env-vars store to scope per-actor team env writes. (`get_device_info`
+// was deleted — device_id == actor_id, sourced from the daemon's /v1/info.)
 interface DeviceIdentityState {
-  /** This device's node id, loaded once and shared across components. */
+  /** This machine's daemon actor_id, loaded once and shared across components. */
   currentNodeId: string | null
   loadCurrentNodeId: () => Promise<void>
   reset: () => void
@@ -19,10 +19,12 @@ export const useTeamMembersStore = create<DeviceIdentityState>((set, get) => ({
   loadCurrentNodeId: async () => {
     if (get().currentNodeId) return
     try {
-      const info = await invoke<{ nodeId: string }>('get_device_info')
-      set({ currentNodeId: info.nodeId })
+      const { getLocalDaemonActorId } = await import('@/lib/daemon-agent-admin')
+      const actorId = await getLocalDaemonActorId()
+      if (actorId) set({ currentNodeId: actorId })
     } catch {
-      // Device identity can be unavailable during early startup; retry next call.
+      // Local identity can be unavailable during early startup (daemon not yet
+      // running / onboarded); retry next call.
     }
   },
 

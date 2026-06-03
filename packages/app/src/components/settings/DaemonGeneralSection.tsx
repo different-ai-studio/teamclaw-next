@@ -287,7 +287,7 @@ export function DaemonGeneralSection() {
             <div className="space-y-5">
               <div>
                 <p className="text-[13px] font-semibold">{t('settings.daemonGeneral.basicInfo', 'Agent info')}</p>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent matched to the local device id.')}</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent running on this machine.')}</p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -357,8 +357,6 @@ export function DaemonGeneralSection() {
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-2.5 border-t border-border-soft pt-4 text-[12px]">
                 <dt className="text-muted-foreground">{t('settings.daemonGeneral.agentId', 'Agent ID')}</dt>
                 <dd className="truncate font-mono text-foreground">{agent.id}</dd>
-                <dt className="text-muted-foreground">{t('settings.daemonGeneral.deviceId', 'Device ID')}</dt>
-                <dd className="truncate font-mono text-foreground">{agent.deviceId || '—'}</dd>
                 <dt className="text-muted-foreground">{t('settings.daemonGeneral.lastActive', 'Last active')}</dt>
                 <dd className="font-mono text-ink-2">{formatRelative(agent.lastActiveAt)}</dd>
               </dl>

@@ -339,41 +339,6 @@ impl CloudApiBackend {
         unreachable!("cloud_api patch retry loop exhausted")
     }
 
-    pub(super) async fn put_no_content<Req>(&self, path: &str, body: &Req) -> BackendResult<()>
-    where
-        Req: Serialize + ?Sized,
-    {
-        for is_retry in [false, true] {
-            let token = self.access_token().await?;
-            let resp = self
-                .http
-                .put(self.cloud_url(path))
-                .bearer_auth(token)
-                .header("x-request-id", request_id())
-                .json(body)
-                .send()
-                .await
-                .map_err(network_error)?;
-            if resp.status().is_success() {
-                return Ok(());
-            }
-            let status = resp.status();
-            let bytes = resp.bytes().await.map_err(network_error)?;
-            let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
-            match client::decode_error(status, envelope) {
-                BackendError::Auth(_) if !is_retry => {
-                    tracing::debug!(
-                        path,
-                        "cloud_api: 401 unauthorized, invalidating cached access token and retrying once"
-                    );
-                    self.invalidate_access_token_cache();
-                }
-                err => return Err(err),
-            }
-        }
-        unreachable!("cloud_api put retry loop exhausted")
-    }
-
     pub(super) fn cloud_url(&self, path: &str) -> String {
         cloud_url(&self.cfg, path)
     }
@@ -568,19 +533,6 @@ impl Backend for CloudApiBackend {
             let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
             Err(client::decode_error(status, envelope))
         }
-    }
-
-    async fn set_agent_device_id(&self, device_id: &str) -> BackendResult<()> {
-        #[derive(serde::Serialize)]
-        struct Body<'a> {
-            #[serde(rename = "deviceId")]
-            device_id: &'a str,
-        }
-        self.put_no_content(
-            &format!("/v1/agents/{}/device", self.cfg.actor_id),
-            &Body { device_id },
-        )
-        .await
     }
 
     async fn check_agent_permission(
@@ -1473,19 +1425,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(url, "https://example.com/uploads/file.txt");
-    }
-
-    #[tokio::test]
-    async fn set_agent_device_id_puts_to_cloud_api() {
-        let server = MockServer::start().await;
-        mount_refresh(&server).await;
-        Mock::given(method("PUT"))
-            .and(path("/v1/agents/agent-1/device"))
-            .respond_with(ResponseTemplate::new(204))
-            .mount(&server)
-            .await;
-        let backend = CloudApiBackend::new(config(&server));
-        backend.set_agent_device_id("device-abc").await.unwrap();
     }
 
     #[tokio::test]

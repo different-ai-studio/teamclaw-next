@@ -130,7 +130,6 @@ pub struct RecordedWorkspaceUpsert {
 pub struct MockState {
     // ── Recorded writes ────────────────────────────────────────────────
     pub upserted_runtimes: Vec<RecordedRuntimeUpsert>,
-    pub set_device_ids: Vec<String>,
     pub heartbeats: usize,
     pub upserted_workspaces: Vec<RecordedWorkspaceUpsert>,
     pub session_participants_upserted: Vec<(String, String)>,
@@ -279,15 +278,6 @@ impl Backend for MockBackend {
             .unwrap()
             .ensured_agent_types
             .push((supported_types.to_vec(), default_agent_type.to_string()));
-        Ok(())
-    }
-
-    async fn set_agent_device_id(&self, device_id: &str) -> BackendResult<()> {
-        self.state
-            .lock()
-            .unwrap()
-            .set_device_ids
-            .push(device_id.to_string());
         Ok(())
     }
 

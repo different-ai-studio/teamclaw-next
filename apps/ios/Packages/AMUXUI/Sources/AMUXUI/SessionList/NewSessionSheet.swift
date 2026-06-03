@@ -392,13 +392,13 @@ public struct NewSessionSheet: View {
         teamID.isEmpty ? "teamclaw" : teamID
     }
 
-    /// Returns the daemon device ID for the given agent actor ID, resolved
-    /// from ConnectedAgentsStore.
-    private func deviceID(forAgentActorID actorID: String) -> String {
+    /// Returns the routing actor id for the given agent actor (== its id),
+    /// resolved from ConnectedAgentsStore.
+    private func routeActorID(forAgentActorID actorID: String) -> String {
         guard let agent = connectedAgentsStore?.agents.first(where: { $0.id == actorID }),
-              let id = agent.deviceID, !id.isEmpty
+              !agent.id.isEmpty
         else { return "" }
-        return id
+        return agent.id
     }
 
     private func createSession(text: String, title: String) {
@@ -413,7 +413,7 @@ public struct NewSessionSheet: View {
 
         // Verify all selected agents have reachable daemons before starting.
         for (agentActorID, _) in agentConfigs {
-            if deviceID(forAgentActorID: agentActorID).isEmpty {
+            if routeActorID(forAgentActorID: agentActorID).isEmpty {
                 errorMessage = "An agent's daemon is offline. Wait for it to reconnect."
                 return
             }
@@ -433,12 +433,12 @@ public struct NewSessionSheet: View {
         )
 
         let agentSpawns: [SessionCreationInput.AgentSpawn] = agentConfigs.compactMap { agentActorID, cfg in
-            let routeDevice = deviceID(forAgentActorID: agentActorID)
-            guard !routeDevice.isEmpty else { return nil }
+            let routeActor = routeActorID(forAgentActorID: agentActorID)
+            guard !routeActor.isEmpty else { return nil }
             let wsPath = workspaces.first(where: { $0.id == cfg.workspaceID })?.path ?? ""
             return SessionCreationInput.AgentSpawn(
                 actorID: agentActorID,
-                routeDeviceID: routeDevice,
+                routeActorID: routeActor,
                 workspaceID: cfg.workspaceID,
                 workspacePath: wsPath,
                 agentType: cfg.agentType.asAmuxAgentType

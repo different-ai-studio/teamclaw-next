@@ -8,7 +8,7 @@ package amux;
 // Downstream: daemon → clients
 message Envelope {
   string runtime_id = 1;
-  string device_id = 2;
+  string actor_id = 2;            // routing identity == actor_id
   string source_peer_id = 3;      // Who triggered (empty if agent-initiated)
   int64 timestamp = 4;
   uint64 sequence = 5;            // Monotonic per agent, for ordering
@@ -26,10 +26,10 @@ message Envelope {
   }
 }
 
-// Upstream: clients → daemon (sent to device/{id}/runtime/{id}/commands topic).
+// Upstream: clients → daemon (sent to {team}/{actor}/runtime/{rid}/commands topic).
 message RuntimeCommandEnvelope {
   string runtime_id = 1;
-  string device_id = 2;
+  string actor_id = 2;
   string peer_id = 3;
   string command_id = 4;
   int64 timestamp = 5;
@@ -37,10 +37,10 @@ message RuntimeCommandEnvelope {
   // uses it to look up `agent_member_access.permission_level` instead of
   // the legacy MQTT token-derived role.
   string sender_actor_id = 6;
-  // Device-scoped reply target. When set, command results should be routed
-  // back to this device's reply topic instead of the daemon's own device
+  // Actor-scoped reply target. When set, command results should be routed
+  // back to this actor's reply topic instead of the daemon's own actor
   // namespace.
-  string reply_to_device_id = 7;
+  string reply_to_actor_id = 7;
 
   AcpCommand acp_command = 10;
 }
@@ -263,14 +263,14 @@ message RemoveMember {
 }
 
 // ═══════════════════════════════════════════
-//  Device status (LWT support)
+//  Actor presence (LWT support)
 // ═══════════════════════════════════════════
 
-// Payload of device/{id}/state (retained, LWT-backed from Phase 3 onward).
+// Payload of {team}/{actor}/state (retained, LWT-backed from Phase 3 onward).
 // See spec: docs/superpowers/specs/2026-04-24-mqtt-topic-redesign-design.md
-message DeviceState {
+message ActorPresence {
   bool online = 1;
-  string device_name = 2;
+  string display_name = 2;
   int64 timestamp = 3;
 }
 
@@ -305,7 +305,7 @@ enum AgentStatus {
 }
 
 // Lifecycle state for a Claude Code runtime (subprocess).
-// Published on device/{id}/runtime/{id}/state topic.
+// Published on {team}/{actor}/runtime/{rid}/state topic.
 // See spec: docs/superpowers/specs/2026-04-24-mqtt-topic-redesign-design.md#runtime-lifecycle
 enum RuntimeLifecycle {
   RUNTIME_LIFECYCLE_UNKNOWN = 0;
@@ -315,7 +315,7 @@ enum RuntimeLifecycle {
   RUNTIME_LIFECYCLE_STOPPED = 4;
 }
 
-// Payload of device/{id}/runtime/{id}/state (retained).
+// Payload of {team}/{actor}/runtime/{rid}/state (retained).
 // See spec: docs/superpowers/specs/2026-04-24-mqtt-topic-redesign-design.md
 message RuntimeInfo {
   string runtime_id = 1;

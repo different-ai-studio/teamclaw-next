@@ -493,7 +493,7 @@ export default function SessionDetailRoute() {
 
     try {
       await permissionCommandSender.sendPermissionResponse({
-        targetDeviceId: target.deviceId,
+        targetActorId: target.actorId,
         runtimeId: target.runtimeId,
         requestId,
         granted,

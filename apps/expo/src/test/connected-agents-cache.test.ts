@@ -38,7 +38,7 @@ describe("connected-agents cache", () => {
       { agentId: "a1", displayName: "Claude", agentTypes: ["claude"],
         defaultAgentType: "claude",
         permissionLevel: "team", visibility: "team", isOwner: true,
-        deviceId: "d1", lastActiveAt: "2026-05-20T10:00:00.000Z" },
+        lastActiveAt: "2026-05-20T10:00:00.000Z" },
     ]);
     expect(db.rows.length).toBe(1);
     await cache.saveCache("t1", []);

@@ -241,7 +241,6 @@ pub fn run() {
                 // Suppress noisy third-party crate logs
                 let target = metadata.target();
                 !(target.starts_with("tracing::span")
-                    || target.starts_with("iroh")
                     || target.starts_with("hyper_util")
                     || target.starts_with("hyper::")
                     || target.starts_with("tauri_plugin_aptabase")
@@ -431,8 +430,6 @@ pub fn run() {
             commands::team_sync_proxy::team_file_content,
             commands::team_sync_proxy::team_changed_files,
             commands::team_sync_proxy::team_restore_file_version,
-            commands::device_identity::get_persistent_device_id,
-            commands::device_token::generate_device_token,
             commands::deps::check_dependencies,
             commands::deps::install_dependency,
             commands::env_vars::env_var_get,

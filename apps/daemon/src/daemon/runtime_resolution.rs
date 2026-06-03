@@ -100,7 +100,7 @@ mod tests {
 
     fn base_config() -> DaemonConfig {
         DaemonConfig {
-            device: crate::config::DeviceConfig {
+            actor: crate::config::ActorConfig {
                 id: "dev-1".to_string(),
                 name: "Mac".to_string(),
             },

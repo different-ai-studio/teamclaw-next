@@ -21,14 +21,14 @@ type RuntimeCommandSenderDeps = {
 };
 
 export type RuntimePermissionResponseInput = {
-  targetDeviceId: string;
+  targetActorId: string;
   runtimeId: string;
   requestId: string;
   granted: boolean;
 };
 
 export type RuntimeCancelInput = {
-  targetDeviceId: string;
+  targetActorId: string;
   runtimeId: string;
 };
 
@@ -39,7 +39,7 @@ export type RuntimeCommandSender = {
 
 export type PermissionRuntimeTarget = {
   agentId: string;
-  deviceId: string;
+  actorId: string;
   runtimeId: string;
 };
 
@@ -54,8 +54,8 @@ function required(value: string | null | undefined, label: string): string {
   return trimmed;
 }
 
-export function runtimeCommandsTopic(teamId: string, deviceId: string, runtimeId: string): string {
-  return `amux/${teamId}/device/${deviceId}/runtime/${runtimeId}/commands`;
+export function runtimeCommandsTopic(teamId: string, actorId: string, runtimeId: string): string {
+  return `amux/${teamId}/${actorId}/runtime/${runtimeId}/commands`;
 }
 
 export function createRuntimeCommandSender(
@@ -64,7 +64,7 @@ export function createRuntimeCommandSender(
   return {
     async sendPermissionResponse(input) {
       const teamId = required(deps.teamId, "team id");
-      const targetDeviceId = required(input.targetDeviceId, "target device id");
+      const targetActorId = required(input.targetActorId, "target actor id");
       const runtimeId = required(input.runtimeId, "runtime id");
       const requestId = required(input.requestId, "request id");
       const peerId = required(deps.peerId, "peer id");
@@ -84,7 +84,7 @@ export function createRuntimeCommandSender(
       const senderActorId = deps.senderActorId?.trim() ?? "";
       const envelope = create(RuntimeCommandEnvelopeSchema, {
         runtimeId,
-        deviceId: targetDeviceId,
+        actorId: targetActorId,
         peerId,
         commandId: deps.commandId?.() ?? crypto.randomUUID(),
         timestamp: BigInt(Math.floor(deps.nowSeconds?.() ?? Date.now() / 1000)),
@@ -93,7 +93,7 @@ export function createRuntimeCommandSender(
       });
 
       await deps.mqtt.publish(
-        runtimeCommandsTopic(teamId, targetDeviceId, runtimeId),
+        runtimeCommandsTopic(teamId, targetActorId, runtimeId),
         toBinary(RuntimeCommandEnvelopeSchema, envelope),
         false,
       );
@@ -101,7 +101,7 @@ export function createRuntimeCommandSender(
 
     async sendCancel(input) {
       const teamId = required(deps.teamId, "team id");
-      const targetDeviceId = required(input.targetDeviceId, "target device id");
+      const targetActorId = required(input.targetActorId, "target actor id");
       const runtimeId = required(input.runtimeId, "runtime id");
       const peerId = required(deps.peerId, "peer id");
       const acpCommand = create(AcpCommandSchema, {
@@ -113,7 +113,7 @@ export function createRuntimeCommandSender(
       const senderActorId = deps.senderActorId?.trim() ?? "";
       const envelope = create(RuntimeCommandEnvelopeSchema, {
         runtimeId,
-        deviceId: targetDeviceId,
+        actorId: targetActorId,
         peerId,
         commandId: deps.commandId?.() ?? crypto.randomUUID(),
         timestamp: BigInt(Math.floor(deps.nowSeconds?.() ?? Date.now() / 1000)),
@@ -122,7 +122,7 @@ export function createRuntimeCommandSender(
       });
 
       await deps.mqtt.publish(
-        runtimeCommandsTopic(teamId, targetDeviceId, runtimeId),
+        runtimeCommandsTopic(teamId, targetActorId, runtimeId),
         toBinary(RuntimeCommandEnvelopeSchema, envelope),
         false,
       );
@@ -156,7 +156,7 @@ function fallbackRuntimeForAgent(
 export function resolvePermissionRuntimeTarget(args: {
   requestingActorId?: string | null;
   agentParticipantIds: ReadonlyArray<string>;
-  connectedAgents: ReadonlyArray<{ agentId: string; deviceId: string | null | undefined }>;
+  connectedAgents: ReadonlyArray<{ agentId: string; actorId: string | null | undefined }>;
   runtimeInfoByAgentId: ReadonlyMap<string, { runtimeId: string }>;
   fallbackRuntime: PermissionRuntimeFallback;
 }): PermissionRuntimeTarget | null {
@@ -173,22 +173,22 @@ export function resolvePermissionRuntimeTarget(args: {
     ...agentParticipantIds,
   ].filter((id) => id && participantSet.has(id)));
 
-  const connectedByAgentId = new Map<string, { agentId: string; deviceId: string }>();
+  const connectedByAgentId = new Map<string, { agentId: string; actorId: string }>();
   for (const agent of args.connectedAgents) {
-    const deviceId = agent.deviceId?.trim() ?? "";
-    if (agent.agentId && deviceId) connectedByAgentId.set(agent.agentId, { agentId: agent.agentId, deviceId });
+    const actorId = agent.actorId?.trim() ?? "";
+    if (agent.agentId && actorId) connectedByAgentId.set(agent.agentId, { agentId: agent.agentId, actorId });
   }
 
   for (const agentId of candidates) {
-    const deviceId = connectedByAgentId.get(agentId)?.deviceId?.trim() ?? "";
-    if (!deviceId) continue;
+    const actorId = connectedByAgentId.get(agentId)?.actorId?.trim() ?? "";
+    if (!actorId) continue;
 
     const runtimeId =
       args.runtimeInfoByAgentId.get(agentId)?.runtimeId?.trim() ||
       fallbackRuntimeForAgent(args.fallbackRuntime, agentId, agentParticipantIds.length);
     if (!runtimeId) continue;
 
-    return { agentId, deviceId, runtimeId };
+    return { agentId, actorId, runtimeId };
   }
 
   return null;

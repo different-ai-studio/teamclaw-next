@@ -64,7 +64,7 @@ describe("sessionIdFromTopic", () => {
     expect(sessionIdFromTopic("amux/team1/session/+/live")).toBeNull();
   });
   it("returns null for non-session topics", () => {
-    expect(sessionIdFromTopic("amux/team1/device/d1/state")).toBeNull();
+    expect(sessionIdFromTopic("amux/team1/d1/state")).toBeNull();
   });
 });
 

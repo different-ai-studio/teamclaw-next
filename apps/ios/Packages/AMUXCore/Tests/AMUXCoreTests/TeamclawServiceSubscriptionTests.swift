@@ -17,20 +17,16 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         func grantAuthorizedHuman(agentID: String, memberID: String, permissionLevel: String) async throws {}
         func shareAgentToTeam(agentID: String) async throws {}
         func makeAgentPersonal(agentID: String) async throws {}
-        func deviceID(for agentID: String) async throws -> String? {
-            agents.first(where: { $0.id == agentID })?.deviceID
-        }
         func teamAgentCount(teamID: String) async throws -> Int { agents.count }
     }
 
-    private func makeStore(deviceID: String) async -> ConnectedAgentsStore {
+    private func makeStore(actorID: String) async -> ConnectedAgentsStore {
         let agent = ConnectedAgent(
-            id: "agent-\(deviceID)",
+            id: actorID,
             displayName: "Test",
             agentKind: "daemon",
             permissionLevel: "owner",
-            lastActiveAt: .now,
-            deviceID: deviceID
+            lastActiveAt: .now
         )
         let repo = FakeAgentAccessRepository(agents: [agent])
         let store = ConnectedAgentsStore(teamID: "team1", repository: repo)
@@ -58,7 +54,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         let service = TeamclawService()
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: firstMQTT,
@@ -82,7 +78,8 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
             teamId: "team1",
             peerId: "peer1",
             modelContext: modelContext,
-            connectedAgentsStore: store
+            connectedAgentsStore: store,
+            currentActorID: "member1"
         )
 
         await Task.yield()
@@ -93,8 +90,10 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         XCTAssertEqual(
             Set(restartedMQTT.subscribedTopics),
             Set([
-                MQTTTopics.deviceNotify(teamID: "team1", deviceID: "device1"),
-                MQTTTopics.deviceRpcResponse(teamID: "team1", deviceID: "device1"),
+                // notify per connected-agent actor
+                MQTTTopics.actorNotify(teamID: "team1", actorID: "actor1"),
+                // RPC responses on OUR OWN actor (daemon replies to requester)
+                MQTTTopics.actorRpcResponse(teamID: "team1", actorID: "member1"),
                 liveTopic,
             ])
         )
@@ -110,7 +109,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -126,7 +125,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
 
         await service.handleIncomingForTesting(
             MQTTIncoming(
-                topic: MQTTTopics.deviceNotify(teamID: "team1", deviceID: "device1"),
+                topic: MQTTTopics.actorNotify(teamID: "team1", actorID: "actor1"),
                 payload: try notify.serializedData(),
                 retained: false
             )
@@ -143,7 +142,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -159,7 +158,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
 
         await service.handleIncomingForTesting(
             MQTTIncoming(
-                topic: MQTTTopics.deviceNotify(teamID: "team1", deviceID: "device1"),
+                topic: MQTTTopics.actorNotify(teamID: "team1", actorID: "actor1"),
                 payload: try notify.serializedData(),
                 retained: false
             )
@@ -178,7 +177,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -197,7 +196,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
 
         await service.handleIncomingForTesting(
             MQTTIncoming(
-                topic: MQTTTopics.deviceNotify(teamID: "team1", deviceID: "device1"),
+                topic: MQTTTopics.actorNotify(teamID: "team1", actorID: "actor1"),
                 payload: try notify.serializedData(),
                 retained: false
             )
@@ -216,7 +215,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -255,7 +254,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -292,7 +291,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -336,7 +335,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,
@@ -370,7 +369,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
         )
         let service = TeamclawService()
         let container = try makeModelContainer()
-        let store = await makeStore(deviceID: "device1")
+        let store = await makeStore(actorID: "actor1")
 
         service.configureRuntimeForTesting(
             mqtt: mqtt,

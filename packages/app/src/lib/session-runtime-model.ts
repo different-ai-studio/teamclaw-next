@@ -79,20 +79,20 @@ export async function applySessionRuntimeModel(args: ApplySessionRuntimeModelArg
       const modelId = resolveSetModelId(row.agent_id, args.modelId, byRuntimeId)
       sessionFlowLog('runtime_model.set_model.begin', {
         sessionId: args.sessionId,
-        targetDeviceId: row.agent_id,
+        targetActorId: row.agent_id,
         runtimeId,
         dbRuntimeId: row.runtime_id,
         modelId,
       })
       try {
         const result = await setModel({
-          targetDeviceId: row.agent_id,
+          targetActorId: row.agent_id,
           runtimeId,
           modelId,
         })
         sessionFlowLog('runtime_model.set_model.ok', {
           sessionId: args.sessionId,
-          targetDeviceId: row.agent_id,
+          targetActorId: row.agent_id,
           runtimeId,
           modelId,
           result,
@@ -100,7 +100,7 @@ export async function applySessionRuntimeModel(args: ApplySessionRuntimeModelArg
       } catch (error) {
         sessionFlowError('runtime_model.set_model.failed', error, {
           sessionId: args.sessionId,
-          targetDeviceId: row.agent_id,
+          targetActorId: row.agent_id,
           runtimeId,
           modelId,
         })

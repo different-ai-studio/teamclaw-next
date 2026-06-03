@@ -132,7 +132,6 @@ export function DaemonWorkspacesSection() {
     agentId: string,
     workspaceId: string,
     workspacePath: string,
-    deviceId: string | null | undefined,
   ): Promise<{ daemonRegistered: boolean; daemonError?: string }> => {
     const trimmedPath = workspacePath.trim()
     let daemonRegistered = false
@@ -140,16 +139,17 @@ export function DaemonWorkspacesSection() {
 
     // Register path on daemon first. addWorkspace used to PATCH cloud default with a
     // stale remote_workspace_id when the path already existed locally — apply after
-    // cloud default is set so the user's choice wins.
-    if (deviceId && trimmedPath) {
+    // cloud default is set so the user's choice wins. Route by the agent's
+    // actor_id (the daemon's routing identity).
+    if (agentId && trimmedPath) {
       try {
-        await addWorkspace({ targetDeviceId: deviceId, path: trimmedPath, timeoutMs: 10_000 })
+        await addWorkspace({ targetActorId: agentId, path: trimmedPath, timeoutMs: 10_000 })
         daemonRegistered = true
       } catch (err) {
         daemonError = err instanceof Error ? err.message : String(err)
       }
     } else if (trimmedPath) {
-      daemonError = t('settings.daemonWorkspaces.noDaemonDevice', 'No local daemon device is connected.')
+      daemonError = t('settings.daemonWorkspaces.noDaemonDevice', 'No local daemon agent is connected.')
     }
 
     await setAgentDefaultWorkspace(agentId, workspaceId)
@@ -185,7 +185,7 @@ export function DaemonWorkspacesSection() {
         path: trimmedPath,
       })
       if (setAsDefaultOnAdd) {
-        const registration = await registerDefaultOnDaemon(team.id, agent.id, created.id, trimmedPath, agent.deviceId)
+        const registration = await registerDefaultOnDaemon(team.id, agent.id, created.id, trimmedPath)
         await load()
         if (!registration.daemonRegistered && registration.daemonError) {
           notifyDaemonRegistrationWarning(registration.daemonError)
@@ -210,7 +210,7 @@ export function DaemonWorkspacesSection() {
     setSettingDefaultWorkspaceId(workspaceId)
     setError(null)
     try {
-      const registration = await registerDefaultOnDaemon(team.id, agentId, workspaceId, workspacePath, agent?.deviceId)
+      const registration = await registerDefaultOnDaemon(team.id, agentId, workspaceId, workspacePath)
       await load()
       if (!registration.daemonRegistered && registration.daemonError) {
         notifyDaemonRegistrationWarning(registration.daemonError)

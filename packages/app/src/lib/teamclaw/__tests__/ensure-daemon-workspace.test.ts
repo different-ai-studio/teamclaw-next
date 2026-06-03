@@ -44,7 +44,7 @@ describe('ensureDaemonWorkspaceRegistered', () => {
   it('returns empty runtimeWorkspaceId when cloud id is empty', async () => {
     const { ensureDaemonWorkspaceRegistered } = await import('../ensure-daemon-workspace')
     const result = await ensureDaemonWorkspaceRegistered({
-      targetDeviceId: 'agent-1',
+      targetActorId: 'agent-1',
       teamId: 'team-1',
       cloudWorkspaceId: '',
     })
@@ -59,7 +59,7 @@ describe('ensureDaemonWorkspaceRegistered', () => {
 
     const { ensureDaemonWorkspaceRegistered } = await import('../ensure-daemon-workspace')
     const result = await ensureDaemonWorkspaceRegistered({
-      targetDeviceId: 'agent-1',
+      targetActorId: 'agent-1',
       teamId: 'team-1',
       cloudWorkspaceId: 'cloud-ws-1',
     })
@@ -71,14 +71,14 @@ describe('ensureDaemonWorkspaceRegistered', () => {
   it('calls addWorkspace when daemon has no matching workspace', async () => {
     const { ensureDaemonWorkspaceRegistered } = await import('../ensure-daemon-workspace')
     const result = await ensureDaemonWorkspaceRegistered({
-      targetDeviceId: 'agent-1',
+      targetActorId: 'agent-1',
       teamId: 'team-1',
       cloudWorkspaceId: 'cloud-ws-1',
       agentLabel: 'My Agent',
     })
 
     expect(mockAddWorkspace).toHaveBeenCalledWith({
-      targetDeviceId: 'agent-1',
+      targetActorId: 'agent-1',
       path: '/Users/me/Proj',
     })
     expect(result).toEqual({ runtimeWorkspaceId: 'local01' })
@@ -90,7 +90,7 @@ describe('ensureDaemonWorkspaceRegistered', () => {
     const { ensureDaemonWorkspaceRegistered } = await import('../ensure-daemon-workspace')
     await expect(
       ensureDaemonWorkspaceRegistered({
-        targetDeviceId: 'agent-1',
+        targetActorId: 'agent-1',
         teamId: 'team-1',
         cloudWorkspaceId: 'cloud-ws-1',
         agentLabel: 'My Agent',
@@ -111,7 +111,7 @@ describe('ensureDaemonWorkspaceRegistered', () => {
     const { ensureDaemonWorkspaceRegistered } = await import('../ensure-daemon-workspace')
     await expect(
       ensureDaemonWorkspaceRegistered({
-        targetDeviceId: 'agent-1',
+        targetActorId: 'agent-1',
         teamId: 'team-1',
         cloudWorkspaceId: 'cloud-ws-1',
       }),

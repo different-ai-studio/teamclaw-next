@@ -3,9 +3,9 @@ import type { TeamMqttClient } from "../../lib/mqtt/team-mqtt";
 import type { RuntimeInfo } from "./connected-agent-types";
 
 export type RuntimeStateSubscriber = {
-  watchDevice: (deviceId: string) => void;
-  unwatchDevice: (deviceId: string) => void;
-  watchedDevices: () => Set<string>;
+  watchActor: (actorId: string) => void;
+  unwatchActor: (actorId: string) => void;
+  watchedActors: () => Set<string>;
   dispose: () => void;
 };
 
@@ -13,38 +13,38 @@ type Deps = {
   mqtt: TeamMqttClient;
   teamId: string;
   decode: (payload: Uint8Array) => RuntimeInfo | null;
-  onRuntimeInfo: (deviceId: string, runtimeId: string, info: RuntimeInfo) => void;
+  onRuntimeInfo: (actorId: string, runtimeId: string, info: RuntimeInfo) => void;
 };
 
 export function createRuntimeStateSubscriber(deps: Deps): RuntimeStateSubscriber {
   const unsubscribes = new Map<string, () => void>();
 
-  function topicFor(deviceId: string) {
-    return `amux/${deps.teamId}/device/${deviceId}/runtime/+/state`;
+  function topicFor(actorId: string) {
+    return `amux/${deps.teamId}/${actorId}/runtime/+/state`;
   }
 
   return {
-    watchDevice(deviceId) {
-      if (unsubscribes.has(deviceId)) return;
-      const filter = topicFor(deviceId);
+    watchActor(actorId) {
+      if (unsubscribes.has(actorId)) return;
+      const filter = topicFor(actorId);
       const off = deps.mqtt.subscribe(filter, (payload, topic) => {
         const segments = extractWildcards(
-          `amux/${deps.teamId}/device/+/runtime/+/state`,
+          `amux/${deps.teamId}/+/runtime/+/state`,
           topic,
         );
         if (!segments) return;
         const [, runtimeId] = segments;
         const info = deps.decode(payload);
         if (!info) return;
-        deps.onRuntimeInfo(deviceId, runtimeId, info);
+        deps.onRuntimeInfo(actorId, runtimeId, info);
       });
-      unsubscribes.set(deviceId, off);
+      unsubscribes.set(actorId, off);
     },
-    unwatchDevice(deviceId) {
-      const off = unsubscribes.get(deviceId);
-      if (off) { off(); unsubscribes.delete(deviceId); }
+    unwatchActor(actorId) {
+      const off = unsubscribes.get(actorId);
+      if (off) { off(); unsubscribes.delete(actorId); }
     },
-    watchedDevices() {
+    watchedActors() {
       return new Set(unsubscribes.keys());
     },
     dispose() {

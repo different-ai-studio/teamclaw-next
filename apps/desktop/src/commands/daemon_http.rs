@@ -113,6 +113,44 @@ pub async fn get_daemon_team_id() -> Result<Option<String>, String> {
         .filter(|t| !t.is_empty()))
 }
 
+/// Minimal view of `~/.amuxd/backend.toml` — just the actor_id field.
+#[derive(Debug, serde::Deserialize)]
+struct BackendCloudApi {
+    #[serde(default)]
+    actor_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BackendConfig {
+    #[serde(default)]
+    cloud_api: Option<BackendCloudApi>,
+}
+
+/// The daemon's actor_id, read from `~/.amuxd/backend.toml` (`[cloud_api]
+/// actor_id`). This is the single routing identity persisted by `amuxd init`.
+/// Returns an empty string when the daemon hasn't been onboarded (no config /
+/// no actor_id) or the file can't be read — callers treat empty as "not ready".
+pub(crate) fn read_daemon_actor_id() -> String {
+    let config_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join(".amuxd")
+        .join("backend.toml");
+
+    let body = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+    let parsed: BackendConfig = match toml::from_str(&body) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    parsed
+        .cloud_api
+        .and_then(|c| c.actor_id)
+        .map(|a| a.trim().to_owned())
+        .unwrap_or_default()
+}
+
 /// Return the daemon's local workspace registry from `~/.amuxd/workspaces.toml`.
 ///
 /// This is intentionally local state, not cloud `public.workspaces`: cron runs
