@@ -227,15 +227,29 @@ export function makeIdeasRepo(db: DbLike, ctx: IdeasCtx = {}) {
     },
 
     // ── Sync ──────────────────────────────────────────────────────────────
+    // Snake_case wire shape — consumed directly by the client's lib/sync/idea-sync.ts
+    // (no client mapper). Matches supabase-repo's listIdeasForSync SELECT columns.
     async listIdeasForSync(teamId: string, updatedAfter: string | null) {
-      let query = db.select().from(ideas).where(eq(ideas.teamId, teamId)) as any;
-      if (updatedAfter) {
-        query = db
-          .select()
-          .from(ideas)
-          .where(and(eq(ideas.teamId, teamId), gt(ideas.updatedAt, new Date(updatedAfter))));
-      }
-      return query;
+      const rows = updatedAfter
+        ? await db
+            .select()
+            .from(ideas)
+            .where(and(eq(ideas.teamId, teamId), gt(ideas.updatedAt, new Date(updatedAfter))))
+        : await db.select().from(ideas).where(eq(ideas.teamId, teamId));
+      return rows.map((r: any) => ({
+        id: r.id,
+        team_id: r.teamId,
+        workspace_id: r.workspaceId ?? null,
+        parent_idea_id: r.parentIdeaId ?? null,
+        title: r.title,
+        description: r.description ?? null,
+        status: r.status ?? null,
+        created_by_actor_id: r.createdByActorId ?? null,
+        archived: r.archived === true,
+        sort_order: r.sortOrder ?? 0,
+        created_at: iso(r.createdAt),
+        updated_at: iso(r.updatedAt),
+      }));
     },
   };
 }

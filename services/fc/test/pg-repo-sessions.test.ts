@@ -403,6 +403,10 @@ test("listSessionsForTeamSince returns sessions updated after timestamp", async 
   const rows = await repo.listSessionsForTeamSince(team.id, before);
   assert.ok(Array.isArray(rows));
   assert.ok(rows.length >= 1);
+  // Sync rows are snake_case (consumed directly by the client's lib/sync/*).
+  const r = rows[0];
+  assert.ok("team_id" in r && "created_at" in r && "primary_agent_id" in r, "must be snake_case");
+  assert.ok(!("teamId" in r), "must not leak camelCase keys");
 });
 
 // ── listSessionDisplayRows ────────────────────────────────────────────────────
@@ -508,5 +512,7 @@ test("listSessionParticipantsForSync returns participant rows", async () => {
   const rows = await repo.listSessionParticipantsForSync(s.id, null);
   assert.ok(Array.isArray(rows));
   assert.ok(rows.length >= 1);
-  assert.ok(rows[0].sessionId ?? rows[0].session_id, "session_id should be present");
+  const r = rows[0];
+  assert.ok("session_id" in r && "actor_id" in r && "joined_at" in r, "must be snake_case");
+  assert.ok(!("sessionId" in r), "must not leak camelCase keys");
 });

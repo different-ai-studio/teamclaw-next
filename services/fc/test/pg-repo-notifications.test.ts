@@ -40,66 +40,68 @@ async function seedSession(db: any, teamId: string) {
 
 // ── getNotificationPrefs ──────────────────────────────────────────────────────
 
-test("getNotificationPrefs returns defaults when no row exists", async () => {
+test("getNotificationPrefs returns null when no row exists", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
   const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
+  // No row yet → null, so clients fall back to their own DEFAULT_PREFS.
   const prefs = await repo.getNotificationPrefs();
-  assert.ok(prefs.userId === null || typeof prefs.userId === "string");
-  assert.equal(typeof prefs.pushEnabled, "boolean");
-  assert.equal(typeof prefs.emailEnabled, "boolean");
-  assert.ok(["off", "daily", "weekly"].includes(prefs.digestFrequency));
+  assert.equal(prefs, null);
 });
 
 // ── putNotificationPrefs ──────────────────────────────────────────────────────
 
-test("putNotificationPrefs upserts and returns updated prefs", async () => {
+test("putNotificationPrefs upserts and returns snake_case prefs incl. DND", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
   const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
   const input = {
-    userId: actor.userId,
-    pushEnabled: false,
-    emailEnabled: true,
-    digestFrequency: "daily" as const,
+    user_id: actor.userId,
+    enabled: false,
+    dnd_start_min: 1320,
+    dnd_end_min: 480,
+    dnd_tz: "Asia/Shanghai",
   };
   const out = await repo.putNotificationPrefs(input);
-  assert.equal(out.userId, actor.userId);
-  assert.equal(out.pushEnabled, false);
-  assert.equal(out.emailEnabled, true);
-  assert.equal(out.digestFrequency, "daily");
+  assert.equal(out.user_id, actor.userId);
+  assert.equal(out.enabled, false);
+  assert.equal(out.dnd_start_min, 1320);
+  assert.equal(out.dnd_end_min, 480);
+  assert.equal(out.dnd_tz, "Asia/Shanghai");
 });
 
-test("putNotificationPrefs round-trips multiple upserts", async () => {
+test("putNotificationPrefs round-trips multiple upserts and preserves unset dnd_tz", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
   const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
-  await repo.putNotificationPrefs({ userId: actor.userId, pushEnabled: true, emailEnabled: false, digestFrequency: "weekly" });
-  const out = await repo.putNotificationPrefs({ userId: actor.userId, pushEnabled: false, emailEnabled: true, digestFrequency: "off" });
-  assert.equal(out.pushEnabled, false);
-  assert.equal(out.emailEnabled, true);
-  assert.equal(out.digestFrequency, "off");
+  await repo.putNotificationPrefs({ user_id: actor.userId, enabled: true, dnd_start_min: 60, dnd_end_min: 120, dnd_tz: "UTC" });
+  // Second upsert omits dnd_tz → it must keep the previously persisted value.
+  const out = await repo.putNotificationPrefs({ user_id: actor.userId, enabled: false, dnd_start_min: null, dnd_end_min: null });
+  assert.equal(out.enabled, false);
+  assert.equal(out.dnd_start_min, null);
+  assert.equal(out.dnd_end_min, null);
+  assert.equal(out.dnd_tz, "UTC", "dnd_tz must be preserved when not provided");
 });
 
-test("getNotificationPrefs reflects persisted pushEnabled after put", async () => {
+test("getNotificationPrefs reflects persisted enabled + DND after put", async () => {
   const { db } = await makeTestDb();
   const team = await seedTeam(db);
   const actor = await seedActor(db, team.id);
   const repo = createPgBusinessRepository({ db, userId: actor.userId });
 
-  // putNotificationPrefs persists only pushEnabled (enabled col).
-  // emailEnabled and digestFrequency are NOT stored; get returns defaults.
-  await repo.putNotificationPrefs({ userId: actor.userId, pushEnabled: false, emailEnabled: true, digestFrequency: "daily" });
+  await repo.putNotificationPrefs({ user_id: actor.userId, enabled: false, dnd_start_min: 1320, dnd_end_min: 480, dnd_tz: "Asia/Tokyo" });
   const prefs = await repo.getNotificationPrefs();
-  assert.equal(prefs.pushEnabled, false, "pushEnabled must reflect persisted value");
-  assert.equal(prefs.emailEnabled, false, "emailEnabled is not persisted — always default false");
-  assert.equal(prefs.digestFrequency, "off", "digestFrequency is not persisted — always default off");
+  assert.ok(prefs, "prefs row must exist after put");
+  assert.equal(prefs.enabled, false, "enabled must reflect persisted value");
+  assert.equal(prefs.dnd_start_min, 1320, "dnd_start_min must be persisted");
+  assert.equal(prefs.dnd_end_min, 480, "dnd_end_min must be persisted");
+  assert.equal(prefs.dnd_tz, "Asia/Tokyo", "dnd_tz must be persisted");
 });
 
 // ── muteSession / unmuteSession / listMutedSessions ──────────────────────────
