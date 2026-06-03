@@ -138,6 +138,21 @@ export function mapSupabaseError(error) {
     if (pgCode === "PGRST116") {
       return new ApiError(404, "not_found", message, { cause: error });
     }
+    // PGRST3xx is the JWT / authentication error group: PGRST300 (JWSError /
+    // misconfigured secret), PGRST301 ("JWT expired" / invalid token),
+    // PGRST302 (anonymous access disabled). PostgREST returns these as HTTP
+    // 401, but supabase-js surfaces them with only the `code` (no numeric
+    // status), so they used to fall through to the schema_drift catch-all
+    // below and surface as an opaque 500. That hid token expiry from clients
+    // and — critically — stopped the daemon from refreshing the token, since
+    // it keys re-auth off the 401 status. Classify them as 401 so the cause is
+    // visible and clients can refresh.
+    if (/^PGRST3\d\d$/.test(pgCode)) {
+      return new ApiError(401, "unauthorized", message, {
+        cause: error,
+        details: { upstreamCode: pgCode },
+      });
+    }
     // PGRST202 (function not found in schema cache), PGRST203 (ambiguous
     // overload), PGRST204 (column not found), etc. almost always mean
     // server-side schema drift / a missing migration. Surface the cause and

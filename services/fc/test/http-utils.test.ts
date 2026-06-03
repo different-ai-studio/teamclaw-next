@@ -96,6 +96,25 @@ test("mapSupabaseError maps PGRST116 (no rows) to not_found", () => {
   assert.equal(mapped.code, "not_found");
 });
 
+test("mapSupabaseError maps PGRST3xx (JWT/auth) to 401, not schema_drift", () => {
+  // An expired bearer token makes PostgREST return code "PGRST301" with
+  // message "JWT expired" and NO numeric status. It must surface as a 401 so
+  // the daemon's re-auth path (which keys off the 401 status) refreshes the
+  // token, instead of an opaque schema_drift 500 dead-end.
+  const expired = mapSupabaseError({ code: "PGRST301", message: "JWT expired" });
+  assert.equal(expired.statusCode, 401);
+  assert.equal(expired.code, "unauthorized");
+  assert.equal(expired.message, "JWT expired");
+  assert.deepEqual(expired.details, { upstreamCode: "PGRST301" });
+
+  // Whole PGRST3xx group is auth-class (PGRST300 JWSError, PGRST302 anon
+  // disabled), all 401.
+  assert.equal(mapSupabaseError({ code: "PGRST302", message: "anon disabled" }).statusCode, 401);
+
+  // Guard the boundary: PGRST2xx schema-cache codes stay schema_drift 500.
+  assert.equal(mapSupabaseError({ code: "PGRST202", message: "missing fn" }).code, "schema_drift");
+});
+
 test("normalizeError surfaces the real message instead of opaque 'Internal server error'", () => {
   // A plain Error that no classifier recognises must still reach the client
   // with its real message + any upstream code, not a generic 500 body that
