@@ -20,7 +20,7 @@ describe('resolveSessionModelFromRuntimeRows', () => {
       ],
       {
         'rt-old': {
-          daemonDeviceId: 'agent-1',
+          daemonActorId: 'agent-1',
           info: {
             currentModel: 'opencode/qwen3.6-plus-free',
           },

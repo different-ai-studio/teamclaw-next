@@ -76,7 +76,7 @@ pnpm ios:test               # iOS UI tests
 
 **Monorepo layout:**
 - `packages/app/` — React 19 frontend (TypeScript, Tailwind 4, Zustand, Vite)
-- `apps/desktop/` — Rust/Tauri backend (commands, RAG via Tantivy, STT via Whisper, P2P via iroh)
+- `apps/desktop/` — Rust/Tauri backend (commands, RAG via Tantivy, STT via Whisper)
 - `apps/daemon/` — amuxd daemon (ACP runtime, MQTT/Supabase bridge)
 - `apps/ios/` — iOS app, Xcode project, and Swift packages
 - `services/supabase/` — Supabase migrations, seed, and database tests
@@ -133,7 +133,9 @@ Single source of truth principle — **never mix content sources**:
 
 ## Team Collaboration
 
-- **P2P mode**: iroh-based (Linux/macOS only)
+Team sync is owned by the amuxd daemon (git + OSS engine). The legacy
+iroh-based P2P mode has been removed.
+
 - **S3/OSS mode**: Alibaba OSS with WebDAV
 - Shared: `skills/`, `.mcp/`, `knowledge/`
 

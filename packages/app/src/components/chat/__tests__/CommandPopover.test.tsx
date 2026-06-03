@@ -76,7 +76,7 @@ describe('CommandPopover', () => {
     ]
     mocks.runtimeStates = {
       'rt-1': {
-        daemonDeviceId: 'agent-1',
+        daemonActorId: 'agent-1',
         lastUpdated: Date.now(),
         info: {
           availableCommands: [
@@ -111,7 +111,7 @@ describe('CommandPopover', () => {
     ]
     mocks.runtimeStates = {
       'rt-1': {
-        daemonDeviceId: 'agent-1',
+        daemonActorId: 'agent-1',
         lastUpdated: Date.now(),
         info: {
           availableCommands: [
@@ -167,7 +167,7 @@ describe('CommandPopover', () => {
     ]
     mocks.runtimeStates = {
       'rt-1': {
-        daemonDeviceId: 'agent-1',
+        daemonActorId: 'agent-1',
         lastUpdated: Date.now(),
         info: {
           availableCommands: [

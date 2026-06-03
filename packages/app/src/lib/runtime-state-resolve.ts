@@ -11,7 +11,7 @@ import { useAgentModelPickStore } from "@/stores/agent-model-pick-store";
  *   agentActorId   — UUID. The agent's team `actor_id`. Stable forever.
  *                    Used in: @-mentions, RPC `targetActorId`, MQTT topic
  *                    `amux/{team}/{X}/...`, pick store keys.
- *                    By current daemon convention, daemonDeviceId == agentActorId.
+ *                    By current daemon convention, daemonActorId == agentActorId.
  *
  *   runtimeSpawnId — 8-char hex. Assigned by `RuntimeManager` per spawn.
  *                    Used in: `setModel.runtimeId`, `runtimeStop.runtimeId`,
@@ -53,7 +53,7 @@ export function resolveRuntimeStateEntryForAgent(
     const hinted = byRuntimeId[dbId];
     if (
       hinted &&
-      (hinted.daemonDeviceId === trimmedAgent ||
+      (hinted.daemonActorId === trimmedAgent ||
         hinted.info.runtimeId === trimmedAgent ||
         hinted.info.runtimeId === dbId)
     ) {
@@ -62,7 +62,7 @@ export function resolveRuntimeStateEntryForAgent(
   }
 
   for (const entry of Object.values(byRuntimeId)) {
-    if (entry.daemonDeviceId !== trimmedAgent && entry.info.runtimeId !== trimmedAgent) continue;
+    if (entry.daemonActorId !== trimmedAgent && entry.info.runtimeId !== trimmedAgent) continue;
     best = considerRuntimeEntry(best, entry);
   }
 
@@ -98,7 +98,7 @@ export function resolvePermissionCommandTarget(args: {
   if (sessionRuntimeId) {
     const retain = byRuntimeId[sessionRuntimeId];
     const runtimeId =
-      retain?.daemonDeviceId.trim() === trimmedAgent
+      retain?.daemonActorId.trim() === trimmedAgent
         ? retain.info.runtimeId?.trim() || sessionRuntimeId
         : sessionRuntimeId;
     return { actorId: trimmedAgent, runtimeId };

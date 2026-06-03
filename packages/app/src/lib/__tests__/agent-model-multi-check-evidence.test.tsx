@@ -35,7 +35,7 @@ function entry(
   currentModel: string,
 ): RuntimeStateEntry {
   return {
-    daemonDeviceId: agentId,
+    daemonActorId: agentId,
     lastUpdated: Date.now(),
     info: {
       runtimeId,
@@ -264,7 +264,7 @@ describe("agent model multi-check UI evidence", () => {
     ];
     uiMocks.runtimeStates = {
       "agent-mac": {
-        daemonDeviceId: "agent-mac",
+        daemonActorId: "agent-mac",
         lastUpdated: Date.now(),
         info: {
           agentType: 2,

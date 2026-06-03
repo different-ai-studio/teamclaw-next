@@ -12,12 +12,8 @@ pub fn merge_env_maps(
 
     if !system.actor_id.is_empty() {
         merged.insert("actor_id".to_string(), system.actor_id.clone());
-        let id = &system.actor_id;
-        let prefix_len = id.len().min(40);
-        merged.insert(
-            "tc_api_key".to_string(),
-            format!("sk-tc-{}", &id[..prefix_len]),
-        );
+        let suffix: String = system.actor_id.chars().take(40).collect();
+        merged.insert("tc_api_key".to_string(), format!("sk-tc-{suffix}"));
     }
     if !system.display_name.is_empty() {
         merged.insert("display_name".to_string(), system.display_name.clone());

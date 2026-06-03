@@ -159,7 +159,7 @@ export function AgentSelectorDock({
   const retainSignature = React.useMemo(() => {
     const ids = engagedAgents.map((a) => a.id)
     return Object.entries(runtimeStates)
-      .filter(([, e]) => ids.includes(e.daemonDeviceId))
+      .filter(([, e]) => ids.includes(e.daemonActorId))
       .map(([rid]) => rid)
       .sort()
       .join(',')

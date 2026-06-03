@@ -20,7 +20,7 @@ function entry(
   models: Array<{ id: string; displayName: string }> = [],
 ): RuntimeStateEntry {
   return {
-    daemonDeviceId: agentId,
+    daemonActorId: agentId,
     lastUpdated: Date.now(),
     info: {
       runtimeId,

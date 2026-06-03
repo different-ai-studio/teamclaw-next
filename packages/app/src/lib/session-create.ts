@@ -557,7 +557,7 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
           runtimeId: result.runtimeId,
         })
         seedRuntimeStateAfterStart({
-          daemonDeviceId: agentActorId,
+          daemonActorId: agentActorId,
           runtimeId: result.runtimeId,
           agentType,
         })

@@ -56,7 +56,7 @@ describe('runtime-state-store', () => {
 
     const entry = useRuntimeStateStore.getState().byRuntimeId['rt-1']
     expect(entry).toBeTruthy()
-    expect(entry.daemonDeviceId).toBe('dev-a')
+    expect(entry.daemonActorId).toBe('dev-a')
     expect(entry.info.runtimeId).toBe('rt-1')
     expect(entry.info.currentModel).toBe('claude-opus-4-7')
   })
