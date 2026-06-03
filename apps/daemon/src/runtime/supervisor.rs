@@ -406,7 +406,7 @@ mod tests {
             .await
             .unwrap();
         let json = serde_json::to_value(&status).unwrap();
-        assert!(json.get("refresh").is_some());
+        assert!(json.get("refresh").is_some_and(|value| value.is_object()));
 
         let refresh = status.refresh;
         assert_eq!(refresh.status, "clean");
