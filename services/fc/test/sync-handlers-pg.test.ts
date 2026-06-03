@@ -26,6 +26,11 @@ import {
   handleSyncVersions,
   handleSyncSetMode,
   handleSyncTeamMode,
+  handleSyncUploadPrepareBatch,
+  handleSyncUploadCompleteBatch,
+  handleSyncDownloadBatch,
+  handleSyncDeleteBatch,
+  MAX_SYNC_BATCH,
 } from "../src/lib/sync-handlers.js";
 
 // ---------------------------------------------------------------------------
@@ -521,5 +526,221 @@ describe("sync-handlers postgres path", () => {
 
     assert.equal(res.statusCode, 409);
     assert.equal(JSON.parse(res.body).reason, "cas-mismatch");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch endpoints (postgres path) — per-item independence is the iron rule.
+// ---------------------------------------------------------------------------
+
+const h32 = (c: string) => c.repeat(32).slice(0, 32);
+const ossKeyFor = (teamId: string, h: string) =>
+  `teams/${teamId}/blobs/sha256/${h.slice(0, 2)}/${h.slice(2, 4)}/${h}`;
+
+describe("sync batch endpoints postgres path", () => {
+  test("prepare-batch: N items → N results, same order, whole request 200", async () => {
+    const { db } = await makeTestDb();
+    const repo = makeOssSyncRepo(db);
+    const team = await seedTeam(db);
+    const actor = await seedMember(db, team.id);
+
+    const s3State: MockS3State = { objects: new Map() }; // no blobs yet
+    const s3 = makeMockS3WithPresign(s3State);
+
+    const items = [
+      { path: "skills/a.md", parentVersion: 0, contentHash: h32("a"), size: 10 },
+      { path: "skills/b.md", parentVersion: 0, contentHash: h32("b"), size: 20 },
+      { path: "skills/c.md", parentVersion: 0, contentHash: h32("c"), size: 30 },
+    ];
+
+    const res = await handleSyncUploadPrepareBatch(
+      makeCaller(team.id, actor.id),
+      { items },
+      { db, repo, s3: s3 as any, bucket: "test-bucket" }
+    );
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.results.length, 3, "results length == items length");
+    body.results.forEach((r: any) => {
+      assert.equal(r.ok, true);
+      assert.ok(r.uploadSessionId, "each item gets a session");
+      assert.equal(r.requiresUpload, true);
+      assert.ok(r.presignedPut);
+    });
+  });
+
+  test("complete-batch: 3 items, 1 conflict — siblings still commit (no whole-batch rollback)", async () => {
+    const { db } = await makeTestDb();
+    const repo = makeOssSyncRepo(db);
+    const team = await seedTeam(db);
+    const actor = await seedMember(db, team.id);
+    const caller = makeCaller(team.id, actor.id);
+
+    const hA = h32("1");
+    const hB = h32("2");
+    const sizeA = 11;
+    const sizeB = 22;
+    const s3State: MockS3State = {
+      objects: new Map([
+        [ossKeyFor(team.id, hA), sizeA],
+        [ossKeyFor(team.id, hB), sizeB],
+      ]),
+    };
+    const s3 = makeMockS3WithPresign(s3State);
+    const deps = { db, repo, s3: s3 as any, bucket: "test-bucket" };
+
+    // Prepare: A (fresh), B (will be completed first → bumps to v1),
+    //          B2 (stale pv0 session on same path → must conflict at complete).
+    const prep = async (path: string, hash: string, size: number, pv: number) =>
+      JSON.parse(
+        (await handleSyncUploadPrepare(caller, { path, parentVersion: pv, contentHash: hash, size }, deps)).body
+      ).uploadSessionId;
+
+    const sessA = await prep("skills/batch-a.md", hA, sizeA, 0);
+    const sessB = await prep("skills/batch-b.md", hB, sizeB, 0);
+    const sessB2 = await prep("skills/batch-b.md", hB, sizeB, 0); // stale once B → v1
+
+    // Land B first so sessB2's parentVersion(0) is stale.
+    const firstB = await handleSyncUploadComplete(caller, { uploadSessionId: sessB }, deps);
+    assert.equal(firstB.statusCode, 200);
+
+    // Batch: [A ok, B2 conflict, plus a bogus session → error]. Whole request 200.
+    const res = await handleSyncUploadCompleteBatch(
+      caller,
+      { items: [
+        { uploadSessionId: sessA },
+        { uploadSessionId: sessB2 },
+        { uploadSessionId: "00000000-0000-0000-0000-000000000000" },
+      ] },
+      deps
+    );
+
+    assert.equal(res.statusCode, 200, "whole batch is always 200");
+    const { results } = JSON.parse(res.body);
+    assert.equal(results.length, 3);
+
+    // Item 0: A committed independently.
+    assert.equal(results[0].ok, true);
+    assert.equal(results[0].version, 1);
+
+    // Item 1: B2 is a CAS conflict — does NOT roll back item 0.
+    assert.equal(results[1].ok, false);
+    assert.equal(results[1].status, 409);
+    assert.equal(results[1].reason, "cas-mismatch");
+
+    // Item 2: missing session → per-item error, still no abort.
+    assert.equal(results[2].ok, false);
+    assert.ok(results[2].status >= 400);
+
+    // Confirm A actually persisted despite siblings failing.
+    const mRes = await handleSyncManifest(caller, { afterSeq: 0 }, { db, repo });
+    const items = JSON.parse(mRes.body).items;
+    assert.ok(items.find((i: any) => i.path === "skills/batch-a.md"), "A persisted");
+  });
+
+  test("download-batch: mixed found / not-found per item", async () => {
+    const { db } = await makeTestDb();
+    const repo = makeOssSyncRepo(db);
+    const team = await seedTeam(db);
+    const actor = await seedMember(db, team.id);
+    const caller = makeCaller(team.id, actor.id);
+
+    const hash = h32("d");
+    const size = 64;
+    const s3State: MockS3State = { objects: new Map([[ossKeyFor(team.id, hash), size]]) };
+    const s3 = makeMockS3WithPresign(s3State);
+    const deps = { db, repo, s3: s3 as any, bucket: "test-bucket" };
+
+    // Register one verified blob via prepare+complete.
+    const pr = await handleSyncUploadPrepare(
+      caller, { path: "skills/dl.bin", parentVersion: 0, contentHash: hash, size }, deps
+    );
+    await handleSyncUploadComplete(caller, { uploadSessionId: JSON.parse(pr.body).uploadSessionId }, deps);
+
+    const res = await handleSyncDownloadBatch(
+      caller,
+      { items: [{ contentHash: hash }, { contentHash: h32("e") /* unknown */ }] },
+      deps
+    );
+
+    assert.equal(res.statusCode, 200);
+    const { results } = JSON.parse(res.body);
+    assert.equal(results.length, 2);
+    assert.equal(results[0].ok, true);
+    assert.ok(results[0].downloadUrl);
+    assert.equal(results[1].ok, false);
+    assert.equal(results[1].status, 404);
+  });
+
+  test("delete-batch: per-item tombstone + independent CAS conflict", async () => {
+    const { db } = await makeTestDb();
+    const repo = makeOssSyncRepo(db);
+    const team = await seedTeam(db);
+    const actor = await seedMember(db, team.id);
+    const caller = makeCaller(team.id, actor.id);
+
+    const hash = h32("f");
+    const size = 9;
+    const s3State: MockS3State = { objects: new Map([[ossKeyFor(team.id, hash), size]]) };
+    const s3 = makeMockS3WithPresign(s3State);
+    const deps = { db, repo, s3: s3 as any, bucket: "test-bucket" };
+
+    // Upload one file so it can be tombstoned at v1.
+    const pr = await handleSyncUploadPrepare(
+      caller, { path: "skills/del.md", parentVersion: 0, contentHash: hash, size }, deps
+    );
+    await handleSyncUploadComplete(caller, { uploadSessionId: JSON.parse(pr.body).uploadSessionId }, deps);
+
+    const res = await handleSyncDeleteBatch(
+      caller,
+      { items: [
+        { path: "skills/del.md", parentVersion: 1 },          // ok → v2 tombstone
+        { path: "skills/del.md", parentVersion: 0 },          // stale → 409
+        { path: "skills/never-existed.md", parentVersion: 0 } // missing → 404
+      ] },
+      { db, repo }
+    );
+
+    assert.equal(res.statusCode, 200);
+    const { results } = JSON.parse(res.body);
+    assert.equal(results.length, 3);
+    assert.equal(results[0].ok, true);
+    assert.equal(results[0].version, 2);
+    assert.equal(results[1].ok, false);
+    assert.equal(results[1].status, 409);
+    assert.equal(results[2].ok, false);
+    assert.equal(results[2].status, 404);
+  });
+
+  test("batch: oversized request rejected with 400 batch_too_large", async () => {
+    const { db } = await makeTestDb();
+    const repo = makeOssSyncRepo(db);
+    const team = await seedTeam(db);
+    const actor = await seedMember(db, team.id);
+
+    const items = Array.from({ length: MAX_SYNC_BATCH + 1 }, (_, i) => ({
+      path: `skills/x${i}.md`, parentVersion: 0, contentHash: h32("a"), size: 1,
+    }));
+    const res = await handleSyncUploadPrepareBatch(
+      makeCaller(team.id, actor.id), { items }, { db, repo }
+    );
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).code, "batch_too_large");
+  });
+
+  test("batch: non-array items rejected with 400; empty array → empty results", async () => {
+    const { db } = await makeTestDb();
+    const repo = makeOssSyncRepo(db);
+    const team = await seedTeam(db);
+    const actor = await seedMember(db, team.id);
+    const caller = makeCaller(team.id, actor.id);
+
+    const bad = await handleSyncDownloadBatch(caller, { items: "nope" as any }, { db, repo });
+    assert.equal(bad.statusCode, 400);
+
+    const empty = await handleSyncDownloadBatch(caller, { items: [] }, { db, repo });
+    assert.equal(empty.statusCode, 200);
+    assert.deepEqual(JSON.parse(empty.body).results, []);
   });
 });

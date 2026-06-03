@@ -67,6 +67,55 @@ pub struct DownloadResult {
     pub ttl_sec: u64,
 }
 
+/// Success payload of one /sync/delete(-batch) item.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteResult {
+    pub version: i32,
+    pub change_seq: i64,
+}
+
+// ── Batch endpoint types ──────────────────────────────────────────────────────
+
+/// One item of a /sync/upload/prepare-batch request.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareBatchItem {
+    pub path: String,
+    pub parent_version: i32,
+    pub content_hash: String,
+    pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+}
+
+/// One item of a /sync/delete-batch request.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBatchItem {
+    pub path: String,
+    pub parent_version: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+}
+
+/// Outcome of a single item inside a batch response. Mirrors the FC per-item
+/// envelope: `{ ok:true, … }` → `Ok`; `{ ok:false, status:409, … }` → `Conflict`;
+/// any other `{ ok:false, status, … }` → `Err`. Items are independent: one
+/// `Conflict`/`Err` never affects its siblings (FC runs each as its own atomic op).
+#[derive(Debug, Clone)]
+pub enum BatchItemOutcome<T> {
+    Ok(T),
+    Conflict {
+        remote_version: Option<i32>,
+        remote_cipher_hash: Option<String>,
+    },
+    Err {
+        status: u16,
+        message: String,
+    },
+}
+
 /// One version history entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,6 +339,131 @@ impl FcClient {
         Ok(())
     }
 
+    // ── Batch endpoints ───────────────────────────────────────────────────────
+    //
+    // Each returns one outcome per input item, in order, same length. A whole-
+    // request failure (rate-limit 429, oversized, 5xx) surfaces as SyncError so
+    // the caller's is_transient backoff applies to the entire batch. A 404 means
+    // the FC is too old to know the endpoint → SyncError::BatchUnsupported, the
+    // signal to fall back to the per-file path.
+
+    /// POST /sync/upload/prepare-batch
+    pub async fn upload_prepare_batch(
+        &self,
+        team_id: &str,
+        items: &[PrepareBatchItem],
+    ) -> Result<Vec<BatchItemOutcome<PrepareResult>>, SyncError> {
+        let body = serde_json::json!({ "teamId": team_id, "items": items });
+        let results = self
+            .post_batch_raw("/sync/upload/prepare-batch", &body, items.len())
+            .await?;
+        Ok(results.iter().map(parse_batch_item).collect())
+    }
+
+    /// POST /sync/upload/complete-batch
+    pub async fn upload_complete_batch(
+        &self,
+        team_id: &str,
+        session_ids: &[String],
+    ) -> Result<Vec<BatchItemOutcome<CompleteResult>>, SyncError> {
+        let items: Vec<Value> = session_ids
+            .iter()
+            .map(|s| serde_json::json!({ "uploadSessionId": s }))
+            .collect();
+        let body = serde_json::json!({ "teamId": team_id, "items": items });
+        let results = self
+            .post_batch_raw("/sync/upload/complete-batch", &body, session_ids.len())
+            .await?;
+        Ok(results.iter().map(parse_batch_item).collect())
+    }
+
+    /// POST /sync/download-batch
+    pub async fn download_batch(
+        &self,
+        team_id: &str,
+        content_hashes: &[String],
+    ) -> Result<Vec<BatchItemOutcome<DownloadResult>>, SyncError> {
+        let items: Vec<Value> = content_hashes
+            .iter()
+            .map(|h| serde_json::json!({ "contentHash": h }))
+            .collect();
+        let body = serde_json::json!({ "teamId": team_id, "items": items });
+        let results = self
+            .post_batch_raw("/sync/download-batch", &body, content_hashes.len())
+            .await?;
+        Ok(results.iter().map(parse_batch_item).collect())
+    }
+
+    /// POST /sync/delete-batch
+    pub async fn delete_batch(
+        &self,
+        team_id: &str,
+        items: &[DeleteBatchItem],
+    ) -> Result<Vec<BatchItemOutcome<DeleteResult>>, SyncError> {
+        let body = serde_json::json!({ "teamId": team_id, "items": items });
+        let results = self
+            .post_batch_raw("/sync/delete-batch", &body, items.len())
+            .await?;
+        Ok(results.iter().map(parse_batch_item).collect())
+    }
+
+    /// POST a batch body, returning the `results[]` array. Enforces the
+    /// equal-length invariant; maps 404 → BatchUnsupported and other non-2xx →
+    /// SyncError (preserving the HTTP status text so is_transient can detect 429).
+    async fn post_batch_raw(
+        &self,
+        path: &str,
+        body: &Value,
+        expected_len: usize,
+    ) -> Result<Vec<Value>, SyncError> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.jwt))
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        let status = resp.status();
+        if status.as_u16() == 404 {
+            return Err(SyncError::BatchUnsupported);
+        }
+
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if !status.is_success() {
+            let body: Value = serde_json::from_slice(&bytes).unwrap_or_default();
+            let msg = body["error"].as_str().unwrap_or("<no error message>");
+            return Err(SyncError::Internal(format!(
+                "FC returned HTTP {status}: {msg}"
+            )));
+        }
+
+        let parsed: Value = serde_json::from_slice(&bytes)
+            .map_err(|e| SyncError::Internal(format!("batch response parse failed: {e}")))?;
+        let results = parsed
+            .get("results")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .ok_or_else(|| SyncError::Internal("batch response missing results[]".into()))?;
+
+        if results.len() != expected_len {
+            return Err(SyncError::Internal(format!(
+                "batch results length {} != items {}",
+                results.len(),
+                expected_len
+            )));
+        }
+
+        Ok(results)
+    }
+
     /// GET /sync/versions — returns (versions, nextCursor).
     pub async fn list_versions(
         &self,
@@ -447,6 +621,44 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// Parse one batch `results[i]` JSON object into a typed outcome. The success
+/// payload deserializes into `T` (the extra `ok` field is ignored by serde).
+fn parse_batch_item<T: serde::de::DeserializeOwned>(v: &Value) -> BatchItemOutcome<T> {
+    let ok = v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false);
+    if ok {
+        match serde_json::from_value::<T>(v.clone()) {
+            Ok(t) => BatchItemOutcome::Ok(t),
+            Err(e) => BatchItemOutcome::Err {
+                status: 500,
+                message: format!("item parse failed: {e}"),
+            },
+        }
+    } else {
+        let status = v.get("status").and_then(|s| s.as_u64()).unwrap_or(500) as u16;
+        if status == 409 {
+            BatchItemOutcome::Conflict {
+                remote_version: v
+                    .get("remoteVersion")
+                    .and_then(|x| x.as_i64())
+                    .map(|x| x as i32),
+                remote_cipher_hash: v
+                    .get("remoteHash")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string()),
+            }
+        } else {
+            BatchItemOutcome::Err {
+                status,
+                message: v
+                    .get("error")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("batch item error")
+                    .to_string(),
+            }
+        }
+    }
+}
+
 fn urlencoding_simple(s: &str) -> String {
     s.chars()
         .flat_map(|c| {
@@ -457,4 +669,96 @@ fn urlencoding_simple(s: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_batch_item_ok_payload() {
+        let v = json!({
+            "ok": true,
+            "version": 3,
+            "contentHash": "abc",
+            "changeSeq": 42,
+        });
+        match parse_batch_item::<CompleteResult>(&v) {
+            BatchItemOutcome::Ok(r) => {
+                assert_eq!(r.version, 3);
+                assert_eq!(r.content_hash, "abc");
+                assert_eq!(r.change_seq, 42);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_batch_item_conflict_carries_remote() {
+        let v = json!({
+            "ok": false,
+            "status": 409,
+            "reason": "cas-mismatch",
+            "remoteVersion": 7,
+            "remoteHash": "deadbeef",
+        });
+        match parse_batch_item::<CompleteResult>(&v) {
+            BatchItemOutcome::Conflict {
+                remote_version,
+                remote_cipher_hash,
+            } => {
+                assert_eq!(remote_version, Some(7));
+                assert_eq!(remote_cipher_hash.as_deref(), Some("deadbeef"));
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_batch_item_conflict_without_remote_fields() {
+        // FC may omit remoteVersion/remoteHash (postgres path returns undefined).
+        let v = json!({ "ok": false, "status": 409, "reason": "cas-mismatch" });
+        match parse_batch_item::<CompleteResult>(&v) {
+            BatchItemOutcome::Conflict {
+                remote_version,
+                remote_cipher_hash,
+            } => {
+                assert_eq!(remote_version, None);
+                assert_eq!(remote_cipher_hash, None);
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_batch_item_other_error_keeps_status() {
+        let v = json!({ "ok": false, "status": 410, "error": "session expired" });
+        match parse_batch_item::<CompleteResult>(&v) {
+            BatchItemOutcome::Err { status, message } => {
+                assert_eq!(status, 410);
+                assert_eq!(message, "session expired");
+            }
+            other => panic!("expected Err, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_batch_item_prepare_ignores_ok_field() {
+        let v = json!({
+            "ok": true,
+            "uploadSessionId": "sess-1",
+            "ossKey": "teams/t/blobs/…",
+            "requiresUpload": true,
+            "presignedPut": "https://oss/put",
+        });
+        match parse_batch_item::<PrepareResult>(&v) {
+            BatchItemOutcome::Ok(r) => {
+                assert_eq!(r.upload_session_id, "sess-1");
+                assert!(r.requires_upload);
+                assert_eq!(r.presigned_put.as_deref(), Some("https://oss/put"));
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
 }

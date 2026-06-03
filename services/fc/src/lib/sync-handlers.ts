@@ -64,6 +64,69 @@ function resolveRepo(deps: SyncHandlerDeps): OssSyncRepo {
 }
 
 // ---------------------------------------------------------------------------
+// Batch fan-out (§ batch endpoints)
+//
+// The batch endpoints (`/sync/upload/prepare-batch`, `…/complete-batch`,
+// `/sync/download-batch`, `/sync/delete-batch`) are thin fan-outs over the
+// single-item handlers: same auth, same per-item logic, same backends. This
+// guarantees single/batch parity — batch literally invokes the single handler.
+//
+// Iron rule: NO whole-batch transaction. Each item runs its own atomic op and
+// produces an independent per-item result. The whole HTTP response is always
+// 200; per-item status lives inside each `results[i]`. One item's conflict
+// never rolls back its siblings.
+// ---------------------------------------------------------------------------
+
+/** Defensive server-side cap. The daemon pre-splits larger sets into chunks. */
+export const MAX_SYNC_BATCH = 200;
+
+type SyncEnvelope = { statusCode: number; headers: Record<string, string>; body: string };
+
+/**
+ * Run `perItem` over `items`, collecting one independent result per item.
+ *
+ * Each `results[i]` is `{ ok: true, ...payload }` on 2xx, otherwise
+ * `{ ok: false, status, ...errorBody }`. A thrown item becomes
+ * `{ ok: false, status: 500, error }` — it never aborts the rest.
+ */
+async function runSyncBatch(
+  items: unknown,
+  perItem: (item: Record<string, unknown>) => Promise<SyncEnvelope>,
+) {
+  if (!Array.isArray(items)) {
+    return json(400, { error: 'items must be an array' });
+  }
+  if (items.length > MAX_SYNC_BATCH) {
+    return json(400, {
+      error: `batch too large: ${items.length} > ${MAX_SYNC_BATCH}`,
+      code: 'batch_too_large',
+    });
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  for (const item of items) {
+    try {
+      const env = await perItem((item ?? {}) as Record<string, unknown>);
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = env.body ? JSON.parse(env.body) : {};
+      } catch {
+        parsed = {};
+      }
+      if (env.statusCode >= 200 && env.statusCode < 300) {
+        results.push({ ok: true, ...parsed });
+      } else {
+        results.push({ ok: false, status: env.statusCode, ...parsed });
+      }
+    } catch (e: any) {
+      results.push({ ok: false, status: 500, error: e?.message ?? 'batch item failed' });
+    }
+  }
+
+  return json(200, { results });
+}
+
+// ---------------------------------------------------------------------------
 // §3.1  POST /sync/manifest
 // ---------------------------------------------------------------------------
 
@@ -845,4 +908,50 @@ export async function handleSyncTeamMode(
   }
 
   return json(200, { mode: data ?? null });
+}
+
+// ---------------------------------------------------------------------------
+// Batch endpoints — fan-outs over the single-item handlers above.
+//
+// Body shape: { teamId, items: [ <single-item body minus teamId>, … ] }
+// Response:   200 { results: [ { ok, … } per item, same order/length ] }
+//
+// `teamId` + auth are resolved once by the router (legacy-sync.ts) and shared
+// across all items via `caller`. See runSyncBatch for the per-item contract.
+// ---------------------------------------------------------------------------
+
+/** POST /sync/upload/prepare-batch — N prepare ops in one round-trip. */
+export async function handleSyncUploadPrepareBatch(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
+  return runSyncBatch(body?.items, (item) => handleSyncUploadPrepare(caller, item, deps));
+}
+
+/** POST /sync/upload/complete-batch — N CAS completes; per-item ok/conflict/error. */
+export async function handleSyncUploadCompleteBatch(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
+  return runSyncBatch(body?.items, (item) => handleSyncUploadComplete(caller, item, deps));
+}
+
+/** POST /sync/download-batch — N presigned GET URLs in one round-trip. */
+export async function handleSyncDownloadBatch(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
+  return runSyncBatch(body?.items, (item) => handleSyncDownload(caller, item, deps));
+}
+
+/** POST /sync/delete-batch — N tombstone CAS ops; per-item ok/conflict/error. */
+export async function handleSyncDeleteBatch(
+  caller: { userId: string; teamId: string; actorId: string },
+  body: Record<string, unknown> | undefined,
+  deps: SyncHandlerDeps = {},
+) {
+  return runSyncBatch(body?.items, (item) => handleSyncDelete(caller, item, deps));
 }
