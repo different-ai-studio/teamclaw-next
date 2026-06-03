@@ -102,10 +102,13 @@ pub async fn tick(
         if item.deleted {
             // Server says file is deleted.
             if let Some(ref ls) = local {
-                if !ls.dirty {
-                    // Local is clean — remove it.
+                if !ls.dirty && !ls.deleted_local {
+                    // Local is clean and not already tombstoned — remove it and
+                    // record the tombstone version (so a later re-create CAS-es
+                    // correctly). Skipping when already deleted_local keeps this
+                    // idempotent and avoids removing a file re-created locally.
                     let _ = tokio::fs::remove_file(&abs_path).await;
-                    state.mark_deleted(&item.path);
+                    state.mark_tombstoned(&item.path, item.version);
                 }
                 // If dirty: leave local file, do NOT delete. User-local edits survive.
             }
@@ -173,9 +176,23 @@ pub async fn tick(
         .map(|s| s.rel_path.clone())
         .collect();
 
+    // Re-created files: a path we previously tombstoned (deleted_local) that is
+    // back on disk. It must be pushed to resurrect it server-side — push_phase
+    // CAS-es against the stored tombstone version. Included regardless of the cheap
+    // dirty check, since an identical re-create wouldn't trip mtime+size.
+    let present: std::collections::HashSet<&str> =
+        scan.iter().map(|s| s.rel_path.as_str()).collect();
+    let mut readd_paths: Vec<String> = state
+        .files
+        .iter()
+        .filter(|(p, f)| f.deleted_local && present.contains(p.as_str()))
+        .map(|(p, _)| p.clone())
+        .collect();
+
     let all_dirty: Vec<String> = {
         let mut v = dirty_paths;
         v.append(&mut extra_dirty);
+        v.append(&mut readd_paths);
         v.sort();
         v.dedup();
         v
@@ -822,8 +839,8 @@ async fn delete_phase(
             Err(SyncError::BatchUnsupported) => {
                 for (p, v) in chunk {
                     match delete_file_retrying(fc, team_id, p, *v).await {
-                        Ok(()) => {
-                            state.mark_deleted(p);
+                        Ok(version) => {
+                            state.mark_tombstoned(p, version);
                             stats.pushed += 1;
                         }
                         Err(SyncError::Conflict { .. }) => stats.conflicts += 1,
@@ -852,8 +869,8 @@ async fn delete_phase(
 
         for ((p, _v), oc) in chunk.iter().zip(outcomes.into_iter()) {
             match oc {
-                BatchItemOutcome::Ok(_) => {
-                    state.mark_deleted(p);
+                BatchItemOutcome::Ok(r) => {
+                    state.mark_tombstoned(p, r.version);
                     stats.pushed += 1;
                 }
                 // Remote advanced since our last sync; leave the entry so the next
@@ -1034,7 +1051,7 @@ async fn delete_file_retrying(
     team_id: &str,
     path: &str,
     parent_version: i32,
-) -> Result<(), SyncError> {
+) -> Result<i32, SyncError> {
     let mut attempt = 0u32;
     loop {
         match fc.delete_file(team_id, path, parent_version, None).await {
@@ -1305,5 +1322,48 @@ mod tests {
         .await;
         assert_eq!(r.unwrap(), 7);
         assert_eq!(calls.get(), 2, "one transient retry then success");
+    }
+
+    // ── re-add after delete ────────────────────────────────────────────────────
+
+    #[test]
+    fn mark_tombstoned_retains_entry_with_version() {
+        let mut state = empty_state();
+        state.files.insert("skills/a.md".into(), synced_file(3));
+        // Delete bumps the server tombstone to v4.
+        state.mark_tombstoned("skills/a.md", 4);
+        let f = state
+            .files
+            .get("skills/a.md")
+            .expect("entry must be RETAINED, not removed");
+        assert!(f.deleted_local, "tombstone flagged deleted_local");
+        assert_eq!(f.synced_version, 4, "tombstone version recorded");
+        assert!(!f.dirty);
+    }
+
+    #[test]
+    fn readd_after_tombstone_cas_against_tombstone_version_not_zero() {
+        // Regression: re-creating a deleted path must CAS against the tombstone
+        // version, not parentVersion=0 (which conflicts forever and never resurrects).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+
+        let mut state = empty_state();
+        // File was synced at v1, then deleted → server tombstone at v2.
+        state.files.insert("skills/x.md".into(), synced_file(1));
+        state.mark_tombstoned("skills/x.md", 2);
+
+        // User re-creates the same path.
+        std::fs::write(dir.path().join("skills/x.md"), b"reborn\n").unwrap();
+
+        // The tombstoned-but-present entry is selected for push (the all_dirty
+        // readd filter), and it CAS-es against v2.
+        assert!(state.files["skills/x.md"].deleted_local);
+        let pu = prepare_upload(root, "skills/x.md", &[9u8; 32], &state).unwrap();
+        assert_eq!(
+            pu.parent_version, 2,
+            "re-add must CAS against the tombstone version, not 0"
+        );
     }
 }
