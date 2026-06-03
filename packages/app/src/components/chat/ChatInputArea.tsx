@@ -31,6 +31,7 @@ import { CommandPopover } from "./CommandPopover";
 import type { Command as ChatCommand } from "./CommandPopover";
 import { FileInputButton } from "./FileInputButton";
 import { ContextUsageBadge } from "./ContextUsageBadge";
+import { PermissionApprovalModeSelect } from "./PermissionApprovalModeSelect";
 import { type QueuedMessage, useSessionStore } from "@/stores/session";
 import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -475,6 +476,7 @@ export function ChatInputArea({
           <PromptInputFooter>
             <PromptInputTools>
               <FileInputButton onFilesSelected={onFilesChange} />
+              <PermissionApprovalModeSelect sessionId={activeSessionId} />
 
               {/* Engaged agent pills — model is chosen per agent on each pill. */}
               <AgentSelectorDock

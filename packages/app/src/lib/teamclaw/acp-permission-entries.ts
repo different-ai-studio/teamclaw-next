@@ -1,5 +1,6 @@
 import type { PendingPermissionEntry } from "@/stores/session-types";
 import type { StreamingPermissionRequest } from "@/stores/v2-streaming-store";
+import { shouldAutoAllowSessionPermissions } from "@/lib/session-permission-mode";
 
 function inferPermissionType(toolName: string): string {
   const n = toolName.toLowerCase();
@@ -51,6 +52,7 @@ export function collectAcpStreamingPermissions(
   >,
 ): PendingPermissionEntry[] {
   if (!activeSessionId) return [];
+  if (shouldAutoAllowSessionPermissions(activeSessionId)) return [];
   const out: PendingPermissionEntry[] = [];
   for (const entry of Object.values(byKey)) {
     if (entry.sessionId !== activeSessionId) continue;

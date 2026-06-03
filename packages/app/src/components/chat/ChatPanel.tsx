@@ -45,6 +45,7 @@ import { MessageList, type MessageListHandle } from "./MessageList";
 import { SessionErrorAlert } from "./SessionErrorAlert";
 import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
+import { useSessionPermissionMode } from "@/lib/session-permission-mode";
 import {
   interruptAgentActor,
   interruptAllActiveAgents,
@@ -172,6 +173,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   // ── Session store selectors (reactive state only) ────────────────────
   const activeSessionId = useSessionSelectionStore(s => s.activeSessionId);
+  const sessionPermissionMode = useSessionPermissionMode(activeSessionId);
   const error = useSessionStore(s => s.error);
   const errorSessionId = useSessionStore(s => s.errorSessionId);
   const isConnected = useSessionStore(s => s.isConnected);
@@ -296,6 +298,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       sessions,
       pendingPermissions,
       acpPendingForTodo,
+      sessionPermissionMode,
     );
   }, [
     activeSessionId,
@@ -304,6 +307,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     isViewingChild,
     messageQueue.length,
     pendingPermissions,
+    sessionPermissionMode,
     sessions,
     todos,
     planTodos.length,
