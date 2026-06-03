@@ -104,6 +104,7 @@ import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/l
 import {
   PENDING_AGENT_REPLY_FALLBACK_MS,
   agentStreamKey,
+  isAgentActiveStatus,
   isTerminalAgentStatus,
   mergePendingAgentReplies,
   normalizeToolResultEvent,
@@ -1108,7 +1109,9 @@ function AppContent() {
               }, 500);
             } else if (event?.case === "statusChange") {
               const sc = event.value as { newStatus?: number };
-              if (isTerminalAgentStatus(sc.newStatus)) {
+              if (isAgentActiveStatus(sc.newStatus)) {
+                useV2StreamingStore.getState().beginPlanningPlaceholder(sid, actorId);
+              } else if (isTerminalAgentStatus(sc.newStatus)) {
                 if (!flushPendingStreamReply(sid, actorId)) {
                   const streamEntry = useV2StreamingStore.getState().byKey[
                     agentStreamKey(sid, actorId)

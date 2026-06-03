@@ -214,15 +214,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     [v2StreamsByKey, v2StreamsArchived, activeSessionId],
   );
 
-  /** Live streaming only — finalized turns belong in the main message list. */
-  const activeV2Streams = React.useMemo(
-    () =>
-      Object.values(v2StreamsByKey).filter(
-        (e) => e.sessionId === activeSessionId && e.active,
-      ),
-    [v2StreamsByKey, activeSessionId],
-  );
-
   // Plan entries from the active agent's stream surface in the TodoList dock
   // above the prompt input (v1 style) rather than inline in the message
   // bubble. Render only the most-recently-updated stream's plan to avoid
@@ -1753,12 +1744,29 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       ? error
       : null;
 
+  // Keep inactive current-turn streams visible until releaseActorAfterPersist
+  // moves artifacts into the persisted ChatMessage (see StreamingAgentBubble).
+  const displayV2Streams = React.useMemo(() => {
+    if (!displaySessionId) return [];
+    const current = Object.values(v2StreamsByKey).filter(
+      (e) => e.sessionId === displaySessionId,
+    );
+    const archived = v2StreamsArchived.filter(
+      (e) => e.sessionId === displaySessionId,
+    );
+    return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
+  }, [v2StreamsByKey, v2StreamsArchived, displaySessionId]);
+
   const messageBottomContent = !isViewingChild &&
-    (activeV2Streams.length > 0 || visibleSessionError || visibleError) ? (
+    (displayV2Streams.length > 0 || visibleSessionError || visibleError) ? (
     <>
-      {activeV2Streams.map((entry) => (
+      {displayV2Streams.map((entry) => (
         <StreamingAgentBubble
-          key={`current::${entry.actorId}`}
+          key={
+            "archiveId" in entry && entry.archiveId
+              ? `archived::${entry.archiveId}`
+              : `current::${entry.actorId}::${entry.streamId}`
+          }
           entry={entry}
         />
       ))}

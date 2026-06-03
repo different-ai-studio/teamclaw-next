@@ -1,6 +1,11 @@
 import { AlertCircle } from "lucide-react";
-import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
+import { useTranslation } from "react-i18next";
+import {
+  streamEntryHasVisibleContent,
+  type AgentStreamEntry,
+} from "@/stores/v2-streaming-store";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
+import { useStreamAwaitingNextEvent } from "@/hooks/useStreamAwaitingNextEvent";
 import { useStreamRevealText } from "@/hooks/useStreamRevealText";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
@@ -26,6 +31,27 @@ function StreamRevealedResponse({
 // the TodoList dock above the prompt input (v1 style) — see `planTodos`
 // in ChatPanel.tsx. Removed from the bubble to keep the message stream
 // focused on conversation content rather than ephemeral planner state.
+
+function AgentStreamLoadingDots() {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      className="inline-flex items-center gap-[3px] pl-1 py-1"
+      data-testid="v2-streaming-planning"
+      role="status"
+      aria-label={t("common.loading", "Loading…")}
+    >
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className="stream-loading-dot h-1.5 w-1.5 rounded-full bg-muted-foreground/70"
+          style={{ animationDelay: `${index * 160}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function ErrorCard({ message, details }: { message: string; details: string }) {
   return (
@@ -122,7 +148,22 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
     }
   }
 
-  if (!hasVisibleOrderedParts && !showOutput && !hasFallbackToolCalls && !hasThinking && !hasError) {
+  const awaitingNextEvent = useStreamAwaitingNextEvent(entry.active, entry.lastUpdate);
+  const hasVisibleContent = streamEntryHasVisibleContent(entry);
+  const showPlanningInitial =
+    entry.active && !hasError && !hasVisibleContent && awaitingNextEvent;
+  const showPlanningAfterPause =
+    entry.active && !hasError && hasVisibleContent && awaitingNextEvent;
+
+  if (
+    !showPlanningInitial &&
+    !showPlanningAfterPause &&
+    !hasVisibleOrderedParts &&
+    !showOutput &&
+    !hasFallbackToolCalls &&
+    !hasThinking &&
+    !hasError
+  ) {
     return null;
   }
 
@@ -137,6 +178,8 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
+          {showPlanningInitial && <AgentStreamLoadingDots />}
+
           {hasThinking && (
             <ThinkingBlock
               content={entry.thinkingText}
@@ -179,6 +222,12 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
 
           {showOutput && (
             <StreamRevealedResponse text={entry.outputText} reveal={entry.active} />
+          )}
+
+          {showPlanningAfterPause && (
+            <div className="mt-1.5">
+              <AgentStreamLoadingDots />
+            </div>
           )}
 
           {hasError && (

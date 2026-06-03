@@ -850,3 +850,21 @@ input,
     -webkit-text-fill-color: transparent;
     animation: shimmer-sweep 2.5s ease-in-out infinite;
 }
+
+/* Bouncing dots while waiting for the next ACP stream event */
+@keyframes stream-loading-dot {
+    0%,
+    60%,
+    100% {
+        opacity: 0.35;
+        transform: translateY(0);
+    }
+    30% {
+        opacity: 1;
+        transform: translateY(-2px);
+    }
+}
+
+.stream-loading-dot {
+    animation: stream-loading-dot 1s ease-in-out infinite;
+}

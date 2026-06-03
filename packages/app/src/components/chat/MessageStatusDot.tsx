@@ -1,7 +1,25 @@
 import { AlertCircle, Check, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import {
+  sessionHasAgentStreamActivitySince,
+  sessionHasMentionedRuntimeActiveSince,
+} from "@/lib/outbox-ui-display";
 import { useOutboxStore } from "@/stores/outbox-store";
+import { useRuntimeStateStore } from "@/stores/runtime-state-store";
+import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { cn } from "@/lib/utils";
+
+function DeliveredCheck({ title }: { title: string }) {
+  return (
+    <span
+      className="inline-flex h-4 w-4 items-center justify-center"
+      title={title}
+      data-testid="msg-status-delivered"
+    >
+      <Check className="h-3 w-3 text-muted-foreground/60" />
+    </span>
+  );
+}
 
 /** Per-bubble outbox status dot. Reads the live outbox entry for `messageId`;
  * if none exists the message has either never been outboxed (historical row
@@ -10,19 +28,29 @@ import { cn } from "@/lib/utils";
 export function MessageStatusDot({ messageId }: { messageId: string }) {
   const entry = useOutboxStore((s) => s.byId[messageId]);
   const retry = useOutboxStore((s) => s.retry);
+  const cloudPersisted = useOutboxStore((s) => Boolean(s.cloudPersistedIds[messageId]));
+  const streamsByKey = useV2StreamingStore((s) => s.byKey);
+  const streamsArchived = useV2StreamingStore((s) => s.archived);
+  const runtimeById = useRuntimeStateStore((s) => s.byRuntimeId);
   const { t } = useTranslation();
   if (!entry) return null;
 
-  if (entry.state === "delivered") {
-    return (
-      <span
-        className="inline-flex h-4 w-4 items-center justify-center"
-        title={t("chat.sendStatus.delivered", "Delivered")}
-        data-testid="msg-status-delivered"
-      >
-        <Check className="h-3 w-3 text-muted-foreground/60" />
-      </span>
-    );
+  const deliveredTitle = t("chat.sendStatus.delivered", "Delivered");
+  const inTransit = entry.state === "pending" || entry.state === "inFlight";
+  const agentTurnVisible =
+    inTransit &&
+    (sessionHasAgentStreamActivitySince(entry.sessionId, entry.createdAt, {
+      byKey: streamsByKey,
+      archived: streamsArchived,
+    }) ||
+      sessionHasMentionedRuntimeActiveSince(
+        entry.mentionActorIds,
+        entry.createdAt,
+        runtimeById,
+      ));
+
+  if (entry.state === "delivered" || cloudPersisted || agentTurnVisible) {
+    return <DeliveredCheck title={deliveredTitle} />;
   }
 
   if (entry.state === "failed") {
