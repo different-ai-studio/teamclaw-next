@@ -505,7 +505,7 @@ pub async fn team_shared_git_setup(config: serde_json::Value) -> Result<serde_js
 // directly. Moved here so they survive the Task 8 deletion of oss_sync/mod.rs.
 
 use crate::commands::oss_sync::fc_client::FcClient;
-use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::oss_sync::get_fc_endpoint;
 
 /// Switch the team's sync_mode on the server (owner-only) and persist the new
 /// mode into local teamclaw.json so the periodic tick dispatches to the correct
@@ -515,13 +515,13 @@ pub async fn oss_sync_set_team_sync_mode(
     workspace_path: String,
     team_id: String,
     mode: String,
+    access_token: String,
 ) -> Result<String, String> {
     if mode != "git" && mode != "oss" {
         return Err(format!("invalid sync_mode: {}", mode));
     }
 
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token);
     let returned_mode = fc
         .set_team_sync_mode(&team_id, &mode)
         .await
@@ -537,9 +537,9 @@ pub async fn oss_sync_set_team_sync_mode(
 pub async fn oss_sync_get_team_sync_mode(
     workspace_path: String,
     team_id: String,
+    access_token: String,
 ) -> Result<Option<String>, String> {
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token);
     fc.get_team_sync_mode(&team_id)
         .await
         .map_err(|e| e.to_string())

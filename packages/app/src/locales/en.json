@@ -3142,7 +3142,8 @@
       "notStartedDesc": "Agent {{shortId}}'s daemon did not respond to runtimeStart (it may be offline or not joined to the team).",
       "rpcNotReadyTitle": "MQTT/RPC not ready",
       "rpcNotReadyDesc": "Unable to send runtimeStart to the daemon. Please check the MQTT connection and team sign-in status.",
-      "startFailedTitle": "Failed to start Agent runtime"
+      "startFailedTitle": "Failed to start Agent runtime",
+      "emptyReply": "Agent returned no output. The selected model may be unavailable or misconfigured."
     },
     "workspace": {
       "labeledMessage": "{{agentLabel}}: {{message}}",

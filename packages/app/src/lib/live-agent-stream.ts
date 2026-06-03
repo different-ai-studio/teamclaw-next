@@ -70,8 +70,35 @@ export function mergePendingAgentReplies(
     }
     chunks.push(text);
   }
-  if (chunks.length === 0) return last;
+  if (chunks.length === 0) return null;
   return { ...last, content: chunks.join("\n\n") };
+}
+
+type StreamVisibilityEntry = {
+  outputText?: string;
+  thinkingText?: string;
+  toolCalls?: Array<unknown>;
+  parts?: Array<{
+    type?: string;
+    text?: string;
+    content?: string;
+    toolCall?: unknown;
+  }>;
+  pendingPermission?: unknown;
+};
+
+export function streamEntryHasVisibleContent(
+  entry: StreamVisibilityEntry | undefined,
+): boolean {
+  if (!entry) return false;
+  if (entry.outputText?.trim()) return true;
+  if (entry.thinkingText?.trim()) return true;
+  if (entry.pendingPermission) return true;
+  if ((entry.toolCalls?.length ?? 0) > 0) return true;
+  return (entry.parts ?? []).some((part) => {
+    if (part.type === "tool-call") return Boolean(part.toolCall);
+    return Boolean(part.text?.trim() || part.content?.trim());
+  });
 }
 
 function stringField(record: Record<string, unknown>, ...keys: string[]): string {

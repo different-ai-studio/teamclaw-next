@@ -10,7 +10,6 @@ import {
 } from '@/lib/daemon-local-client'
 import { loadTeamProviderFormState, TEAM_SHARED_PROVIDER_ID } from '@/lib/team-provider'
 import { workspacePathsMatch } from '@/stores/session-utils'
-import { loadConfiguredProvidersForWorkspace } from '@/stores/provider'
 import type { ConfiguredProvider } from '@/stores/provider'
 import type { CronScope } from '@/stores/cron'
 import { isTauri } from '@/lib/utils'
@@ -72,12 +71,6 @@ async function waitForDaemonHttpReady(timeoutMs = 8000): Promise<boolean> {
   return false
 }
 
-async function loadDaemonProvidersForPath(workspacePath: string): Promise<ConfiguredProvider[] | null> {
-  const snapshot = await loadConfiguredProvidersForWorkspace(workspacePath)
-  if (!snapshot) return null
-  return snapshot.configuredProviders
-}
-
 async function loadTeamSharedProvider(workspacePath: string): Promise<ConfiguredProvider | null> {
   const teamState = await loadTeamProviderFormState(workspacePath).catch(() => null)
   if (!teamState?.enabled || teamState.models.length === 0) return null
@@ -118,7 +111,8 @@ function teamSharedGroup(teamShared: ConfiguredProvider | null): CronModelGroup 
 }
 
 /** Fetch the daemon model catalog for a resolved workspace path and fold in the
- *  optional team-shared group. Returns `null` when the daemon is unreachable. */
+ *  optional team-shared group. OpenCode models come from the same ACP probe as
+ *  runtime attach (`configOptions[id=model]`). Returns `null` when unreachable. */
 async function loadCatalogGroupsForPath(workspacePath: string): Promise<{
   groups: CronModelGroup[]
   automationDefaultBackend: string | null
@@ -142,27 +136,6 @@ async function loadCatalogGroupsForPath(workspacePath: string): Promise<{
     groups,
     automationDefaultBackend: catalog.automation_default_backend,
   }
-}
-
-/**
- * Workspace models for the cron job dialog — daemon HTTP providers plus optional
- * team shared from `{teamclaw-team}/_meta/provider.json`.
- */
-export async function loadCronDialogProviders(workspacePath: string): Promise<ConfiguredProvider[]> {
-  const [daemonProviders, teamShared] = await Promise.all([
-    loadDaemonProvidersForPath(workspacePath),
-    loadTeamSharedProvider(workspacePath),
-  ])
-
-  if (daemonProviders === null) return teamShared ? [teamShared] : []
-
-  const workspaceProviders = daemonProviders.filter((p) => p.id !== TEAM_SHARED_PROVIDER_ID)
-
-  if (workspaceProviders.length > 0) {
-    return teamShared ? [teamShared, ...workspaceProviders] : workspaceProviders
-  }
-  if (teamShared) return [teamShared]
-  return []
 }
 
 export type CronDialogModelLoadResult = {

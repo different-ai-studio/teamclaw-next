@@ -14,6 +14,10 @@ interface ImportMetaEnv {
   readonly VITE_MQTT_USE_TLS?: string;
   readonly VITE_MQTT_USERNAME?: string;
   readonly VITE_MQTT_PASSWORD?: string;
+  /** Set by scripts/tauri-cli.js for `pnpm tauri:dev -- --skip-setup`. */
+  readonly VITE_TEAMCLAW_SKIP_SETUP?: string;
+  /** Set by scripts/tauri-cli.js for `pnpm tauri:dev -- --skip-daemon-onboarding`. */
+  readonly VITE_TEAMCLAW_SKIP_DAEMON_ONBOARDING?: string;
 }
 
 interface ImportMeta {

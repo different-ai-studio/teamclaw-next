@@ -1,7 +1,6 @@
 import { SessionDiffPanel } from '@/components/chat/SessionDiffPanel'
 import { SessionList } from '@/components/chat/SessionList'
 import { SessionActorPanel } from '@/components/chat/SessionActorSheet'
-import { FileBrowser } from '@/components/workspace/FileBrowser'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { KnowledgeBrowser } from '@/components/knowledge/KnowledgeBrowser'
 import { ActorsView } from '@/components/panel/ActorsView'
@@ -15,7 +14,7 @@ import type { ComponentProps } from 'react'
 interface RightPanelProps {
   diff?: FileDiff[]
   // Override the active tab from store
-  defaultTab?: 'diff' | 'files' | 'session' | 'shortcuts' | 'knowledge' | 'actors'
+  defaultTab?: 'diff' | 'session' | 'shortcuts' | 'knowledge' | 'actors'
   // Compact mode for file mode layout
   compact?: boolean
   knowledgeBrowserProps?: ComponentProps<typeof KnowledgeBrowser>
@@ -34,15 +33,12 @@ export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }:
   const diffData = diff ?? sessionDiff
 
   return (
-    <div className={`h-full overflow-auto ${activeTab === 'files' || activeTab === 'session' || activeTab === 'actors' ? '' : (compact ? 'p-1' : 'p-2')}`}>
+    <div className={`h-full overflow-auto ${activeTab === 'session' || activeTab === 'actors' ? '' : (compact ? 'p-1' : 'p-2')}`}>
       {activeTab === 'shortcuts' && (
         <ShortcutsPanel />
       )}
       {activeTab === 'diff' && (
         <DiffTab diff={diffData} compact={compact} />
-      )}
-      {activeTab === 'files' && (
-        <FileBrowser variant={compact ? 'panel' : 'default'} />
       )}
       {activeTab === 'session' && (
         <SessionList compact={compact} />

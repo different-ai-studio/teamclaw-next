@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { getFreshAccessToken } from '@/lib/auth/session-store'
 
 interface Props {
   teamId: string
@@ -34,9 +35,11 @@ export function TeamLiteLlmSection({ teamId, workspacePath, isOwner }: Props) {
     setBusy(true)
     setError(null)
     try {
+      const accessToken = await getFreshAccessToken()
       const result = await invoke<LiteLlmSetupResult>('team_litellm_setup', {
         teamId,
         workspacePath,
+        accessToken,
       })
       setEndpoint(result.aiGatewayEndpoint)
     } catch (e) {

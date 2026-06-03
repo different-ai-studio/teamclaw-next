@@ -20,7 +20,7 @@ use serde_json::json;
 
 use crate::commands::oss_sync::error::SyncError;
 use crate::commands::oss_sync::fc_client::FcClient;
-use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::oss_sync::get_fc_endpoint;
 use crate::commands::team_share::custom_git;
 use crate::commands::team_sync_proxy;
 use crate::commands::{team_secret_store, TEAM_REPO_DIR};
@@ -120,9 +120,9 @@ async fn post_share_mode(
     workspace_path: &str,
     team_id: &str,
     body: &serde_json::Value,
+    access_token: &str,
 ) -> Result<(), String> {
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(workspace_path), access_token.to_string());
     let path = format!("/v1/teams/{}/share-mode", team_id);
     // The /v1 share-mode endpoint returns 409 once a team's mode is locked.
     // FcClient::map_fc_response maps any 409 to SyncError::Conflict (its CAS
@@ -143,12 +143,19 @@ async fn post_share_mode(
 pub async fn enable_oss_impl(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<EnableShareResult, String> {
     // Lock the share mode on the server FIRST. If it is already locked (409),
     // post_share_mode returns a clear error and we bail out BEFORE mutating any
     // local state — otherwise we would overwrite the existing team secret and
     // break decryption of data already synced under the original secret.
-    post_share_mode(&workspace_path, &team_id, &json!({ "mode": "oss" })).await?;
+    post_share_mode(
+        &workspace_path,
+        &team_id,
+        &json!({ "mode": "oss" }),
+        &access_token,
+    )
+    .await?;
 
     let secret = generate_team_secret_hex()?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
@@ -172,8 +179,9 @@ pub async fn enable_oss_impl(
 pub async fn team_share_enable_oss(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<EnableShareResult, String> {
-    enable_oss_impl(team_id, workspace_path).await
+    enable_oss_impl(team_id, workspace_path, access_token).await
 }
 
 // ─── enable_managed_git ──────────────────────────────────────────────────
@@ -181,33 +189,49 @@ pub async fn team_share_enable_oss(
 pub async fn enable_managed_git_impl(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<EnableShareResult, String> {
     let secret = generate_team_secret_hex()?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token.clone());
 
     // Provision the managed git repo via FC.
     let create_resp = fc
         .post_json("/managed-git/create-repo", &json!({ "teamId": team_id }))
         .await
         .map_err(|e| format!("/managed-git/create-repo failed: {e}"))?;
+    // FC returns the bare CodeUp HTTPS clone URL plus the bot's git credential
+    // (`pat`) and `botUsername`. CodeUp HTTPS auth expects `<username>:<token>`,
+    // so we store the credential in that combined form; the daemon embeds it
+    // verbatim into the remote URL (see `embed_token_in_url`).
     let repo_url = create_resp
-        .get("repo_url")
+        .get("repoHttpUrl")
+        .or_else(|| create_resp.get("repo_url"))
         .or_else(|| create_resp.get("repoUrl"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "managed-git/create-repo: missing repo_url".to_string())?
+        .ok_or_else(|| "managed-git/create-repo: missing repoHttpUrl".to_string())?
         .to_string();
-    let push_token = create_resp
-        .get("push_token")
+    let pat = create_resp
+        .get("pat")
+        .or_else(|| create_resp.get("push_token"))
         .or_else(|| create_resp.get("pushToken"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "managed-git/create-repo: missing push_token".to_string())?
+        .ok_or_else(|| "managed-git/create-repo: missing pat".to_string())?
         .to_string();
+    let bot_username = create_resp
+        .get("botUsername")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    // Combined `user:token` userinfo when a bot username is present; otherwise
+    // the bare token (daemon falls back to an `oauth2:<token>` embed).
+    let git_credential = match bot_username {
+        Some(user) => format!("{user}:{pat}"),
+        None => pat,
+    };
 
     let cred_ref = format!("managed_git:{}", team_id);
-    custom_git::store_credential(&workspace_path, &cred_ref, "https_token", &push_token)?;
+    custom_git::store_credential(&workspace_path, &cred_ref, "https_token", &git_credential)?;
 
     let body = json!({
         "mode": "managed_git",
@@ -217,15 +241,16 @@ pub async fn enable_managed_git_impl(
             "credentialRef": cred_ref,
         }
     });
-    post_share_mode(&workspace_path, &team_id, &body).await?;
+    post_share_mode(&workspace_path, &team_id, &body, &access_token).await?;
 
     ensure_team_repo_dir(&workspace_path)?;
 
-    // The daemon owns the clone now: deliver the push token as the git
-    // credential and link this workspace. managed_git uses the repo's default
-    // branch, so gitBranch is None. Non-fatal on daemon error.
+    // The daemon owns the clone now: deliver the git credential and link this
+    // workspace. managed_git uses the repo's default branch, so gitBranch is
+    // None. Non-fatal on daemon error.
     let clone_warning =
-        deliver_secrets_and_link(&team_id, &workspace_path, None, Some(&push_token), None).await;
+        deliver_secrets_and_link(&team_id, &workspace_path, None, Some(&git_credential), None)
+            .await;
 
     Ok(EnableShareResult {
         team_id,
@@ -238,8 +263,9 @@ pub async fn enable_managed_git_impl(
 pub async fn team_share_enable_managed_git(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<EnableShareResult, String> {
-    enable_managed_git_impl(team_id, workspace_path).await
+    enable_managed_git_impl(team_id, workspace_path, access_token).await
 }
 
 // ─── enable_custom_git ──────────────────────────────────────────────────
@@ -248,6 +274,7 @@ pub async fn enable_custom_git_impl(
     team_id: String,
     workspace_path: String,
     input: GitEnableInput,
+    access_token: String,
 ) -> Result<EnableShareResult, String> {
     if input.auth_kind != "ssh_key" && input.auth_kind != "https_token" {
         return Err(format!(
@@ -285,7 +312,7 @@ pub async fn enable_custom_git_impl(
         "mode": "custom_git",
         "gitConfig": git_config,
     });
-    post_share_mode(&workspace_path, &team_id, &body).await?;
+    post_share_mode(&workspace_path, &team_id, &body, &access_token).await?;
 
     ensure_team_repo_dir(&workspace_path)?;
 
@@ -319,8 +346,9 @@ pub async fn team_share_enable_custom_git(
     team_id: String,
     workspace_path: String,
     input: GitEnableInput,
+    access_token: String,
 ) -> Result<EnableShareResult, String> {
-    enable_custom_git_impl(team_id, workspace_path, input).await
+    enable_custom_git_impl(team_id, workspace_path, input, access_token).await
 }
 
 // ─── set_team_secret ────────────────────────────────────────────────────
@@ -388,9 +416,9 @@ pub(crate) fn global_team_dir_display(team_id: &str) -> Option<String> {
 pub async fn get_share_status_impl(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<serde_json::Value, String> {
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token);
     let path = format!("/v1/teams/{}/share-mode", team_id);
     let mut value = fc.get_json(&path).await.map_err(|e| e.to_string())?;
     // Augment the server share-mode payload with local link + global-path info
@@ -412,8 +440,9 @@ pub async fn get_share_status_impl(
 pub async fn team_share_get_status(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<serde_json::Value, String> {
-    get_share_status_impl(team_id, workspace_path).await
+    get_share_status_impl(team_id, workspace_path, access_token).await
 }
 
 // ─── team_sync_paths ───────────────────────────────────────────────────────

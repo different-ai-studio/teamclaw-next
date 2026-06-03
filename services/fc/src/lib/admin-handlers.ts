@@ -815,9 +815,13 @@ export async function handleManagedGitSetupLitellm(body: any) {
 }
 
 export async function handleManagedGitCreateRepo(body: any) {
-  const { teamName } = body;
-  if (!teamName) {
-    return json(400, { error: "Missing teamName" });
+  // The desktop client only has the (globally unique) team id on hand, so the
+  // repo name is derived from `teamId` — this also guarantees uniqueness and
+  // avoids 409 name-collision races between teams that picked the same name.
+  // `teamName` is optional and only used for the human-readable description.
+  const { teamId, teamName } = body;
+  if (!teamId) {
+    return json(400, { error: "Missing teamId" });
   }
 
   const orgId = CODEUP_ORG_ID();
@@ -827,7 +831,7 @@ export async function handleManagedGitCreateRepo(body: any) {
     return json(500, { error: "Managed Git not configured (missing CODEUP_ORG_ID or CODEUP_PAT)" });
   }
 
-  const repoName = `tc-${teamName.toLowerCase().replace(/[^a-z0-9一-鿿-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")}`;
+  const repoName = `tc-${String(teamId).toLowerCase().replace(/[^a-z0-9一-鿿-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")}`;
 
   const res = await codeupFetch(
     `/oapi/v1/codeup/organizations/${orgId}/repositories`,
@@ -836,14 +840,14 @@ export async function handleManagedGitCreateRepo(body: any) {
       name: repoName,
       path: repoName,
       visibility: "private",
-      description: `TeamClaw managed team repo: ${teamName}`,
+      description: `TeamClaw managed team repo: ${teamName || teamId}`,
     }
   );
 
   if (!res.ok) {
     if (res.status === 409) {
       console.error(`[managed-git] Repo name conflict: ${repoName}`);
-      return json(409, { error: "Team name already exists, please choose a different name" });
+      return json(409, { error: "Managed git repo already exists for this team" });
     }
     console.error(`[managed-git] CodeUp error:`, res.data);
     return json(502, { error: "Failed to create repository", detail: res.data });

@@ -56,6 +56,7 @@ import { TodoList } from "./TodoList";
 import { QuestionInputDock } from "./QuestionInputDock";
 import { SessionContinueBanner } from "./SessionContinueBanner";
 import {
+  isStreamInterruptible,
   useV2StreamingStore,
   selectPersistedPlanForSession,
   type StreamingPlanEntry,
@@ -477,7 +478,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     const seen = new Set<string>();
     const agents: Array<{ actorId: string; displayName?: string }> = [];
     for (const entry of v2Streams) {
-      if (!entry.active || seen.has(entry.actorId)) continue;
+      if (!isStreamInterruptible(entry) || seen.has(entry.actorId)) continue;
       seen.add(entry.actorId);
       const engaged = engagedAgents.find((agent) => agent.id === entry.actorId);
       agents.push({

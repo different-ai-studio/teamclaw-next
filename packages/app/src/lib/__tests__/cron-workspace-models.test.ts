@@ -42,7 +42,6 @@ vi.mock('@/lib/utils', () => ({
 
 import {
   resolveDaemonWorkspacePath,
-  loadCronDialogProviders,
   loadCronDialogModels,
 } from '@/lib/cron-workspace-models'
 
@@ -71,52 +70,6 @@ describe('resolveDaemonWorkspacePath', () => {
       '~/projects/MyApp',
     )
     expect(resolved).toBe('/Users/me/projects/MyApp')
-  })
-})
-
-describe('loadCronDialogProviders', () => {
-  beforeEach(() => {
-    mocks.loadConfiguredProvidersForWorkspace.mockReset()
-    mocks.loadTeamProviderFormState.mockReset()
-    mocks.loadTeamProviderFormState.mockResolvedValue(null)
-  })
-
-  it('loads models from daemon configured providers', async () => {
-    mocks.loadConfiguredProvidersForWorkspace.mockResolvedValue({
-      configuredProviders: [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          models: [{ id: 'claude-sonnet-4-6', name: 'claude-sonnet-4-6' }],
-        },
-      ],
-      models: [],
-    })
-
-    const providers = await loadCronDialogProviders('/Users/me/projects/MyApp')
-    expect(providers.map((p) => p.id)).toEqual(['anthropic'])
-    expect(providers[0].models[0].id).toBe('claude-sonnet-4-6')
-  })
-
-  it('includes team shared from provider.json alongside daemon providers', async () => {
-    mocks.loadConfiguredProvidersForWorkspace.mockResolvedValue({
-      configuredProviders: [
-        {
-          id: 'custom',
-          name: 'Custom',
-          models: [{ id: 'my-model', name: 'my-model' }],
-        },
-      ],
-      models: [],
-    })
-    mocks.loadTeamProviderFormState.mockResolvedValue({
-      enabled: true,
-      baseUrl: 'https://llm.example',
-      models: [{ id: 'shared-1', name: 'Shared 1' }],
-    })
-
-    const providers = await loadCronDialogProviders('/ws')
-    expect(providers.map((p) => p.id)).toEqual(['team', 'custom'])
   })
 })
 

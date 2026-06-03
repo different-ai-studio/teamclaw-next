@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
 import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
+import { RuntimeLifecycle } from '@/lib/proto/amux_pb'
 
 const mocks = vi.hoisted(() => ({
   agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null; session_id?: string | null }>,
@@ -216,7 +217,7 @@ describe('AgentSelectorDock', () => {
     expect(mocks.queriedTeamIds.length).toBe(callsAfterMount)
   })
 
-  it('shows loading when runtime has not advertised ACP models yet', async () => {
+  it('shows no-models hint when ACP retain has no available_models and runtime is active', async () => {
     mocks.agentRuntimeRows = [
       { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'session-1' },
     ]
@@ -227,6 +228,7 @@ describe('AgentSelectorDock', () => {
         info: {
           availableModels: [],
           currentModel: '',
+          state: RuntimeLifecycle.ACTIVE,
         },
       },
     }
@@ -240,6 +242,44 @@ describe('AgentSelectorDock', () => {
     )
 
     await userEvent.click(await screen.findByRole('button', { name: /OpenCode Bot/i }))
-    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    expect(await screen.findByText('No models advertised')).toBeInTheDocument()
+  })
+
+  it('lists only models from ACP retain on the runtime', async () => {
+    mocks.agentRuntimeRows = [
+      {
+        agent_id: 'a-1',
+        runtime_id: 'runtime-1',
+        backend_type: 'opencode',
+        session_id: 'session-1',
+      },
+    ]
+    mocks.runtimeStates = {
+      'runtime-1': {
+        daemonDeviceId: 'a-1',
+        lastUpdated: Date.now(),
+        info: {
+          availableModels: [
+            { id: 'opencode/big-pickle', displayName: 'Big Pickle' },
+            { id: 'openai/gpt-5.2', displayName: 'GPT 5.2' },
+          ],
+          currentModel: 'opencode/big-pickle',
+          state: RuntimeLifecycle.ACTIVE,
+        },
+      },
+    }
+
+    render(
+      <AgentSelectorDock
+        activeSessionId="session-1"
+        engagedAgents={[{ id: 'a-1', displayName: 'OpenCode Bot' }]}
+        onRemoveAgent={vi.fn()}
+      />,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: /OpenCode Bot/i }))
+    expect((await screen.findAllByText('Big Pickle')).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('GPT 5.2')).toBeInTheDocument()
+    expect(screen.queryByText('mimo-v2.5-free')).not.toBeInTheDocument()
   })
 })

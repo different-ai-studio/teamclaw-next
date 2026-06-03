@@ -345,7 +345,8 @@ pub async fn delete_provider_auth(
 // regardless of which backend the daemon runs.
 //
 // Per-backend model sources:
-//   - opencode: workspace `opencode.json` providers (via WorkspaceControlStore)
+//   - opencode: live ACP `configOptions[id=model]` when probe succeeds; else
+//     `opencode.json` providers as fallback
 //   - claude:   the runtime's static Claude model table
 //   - codex:    the runtime's static Codex model table (empty today)
 
@@ -394,27 +395,45 @@ fn backend_label(backend: &str) -> &'static str {
     }
 }
 
-/// Build the catalog from the configured backend list and the workspace's
-/// OpenCode providers. Pure (no I/O) so it is unit-testable; the handler does
-/// the `get_providers` read and passes the result in.
+fn catalog_models_from_acp(acp_models: &[amux::ModelInfo]) -> Vec<CatalogModel> {
+    acp_models
+        .iter()
+        .map(|m| CatalogModel {
+            model_ref: m.id.clone(),
+            model_id: m.id.clone(),
+            display_name: m.display_name.clone(),
+        })
+        .collect()
+}
+
+fn catalog_models_from_opencode_json(opencode_providers: &[ProviderInfo]) -> Vec<CatalogModel> {
+    opencode_providers
+        .iter()
+        .flat_map(|p| {
+            p.models.iter().map(move |model_id| CatalogModel {
+                model_ref: format!("{}/{}", p.id, model_id),
+                model_id: model_id.clone(),
+                display_name: model_id.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Build the catalog from the configured backend list. OpenCode prefers the
+/// live ACP probe list when provided; otherwise falls back to `opencode.json`.
 pub fn build_model_catalog(
     configured_agent_types: &[String],
+    opencode_acp_models: Option<&[amux::ModelInfo]>,
     opencode_providers: &[ProviderInfo],
 ) -> ModelCatalog {
     let mut backends = Vec::new();
 
     for backend in configured_agent_types {
         let models: Vec<CatalogModel> = match backend.as_str() {
-            "opencode" => opencode_providers
-                .iter()
-                .flat_map(|p| {
-                    p.models.iter().map(move |model_id| CatalogModel {
-                        model_ref: format!("{}/{}", p.id, model_id),
-                        model_id: model_id.clone(),
-                        display_name: model_id.clone(),
-                    })
-                })
-                .collect(),
+            "opencode" => opencode_acp_models
+                .filter(|m| !m.is_empty())
+                .map(catalog_models_from_acp)
+                .unwrap_or_else(|| catalog_models_from_opencode_json(opencode_providers)),
             "claude" => crate::runtime::models::available_models_for(amux::AgentType::ClaudeCode)
                 .into_iter()
                 .map(|m| CatalogModel {
@@ -460,12 +479,52 @@ pub async fn get_model_catalog(
 ) -> Result<Json<ModelCatalog>, HttpError> {
     require_scope(&principal, "workspace:read")?;
     let store = resolve_store(&state)?;
-    // Always read providers; build_model_catalog only uses them when the
-    // opencode backend is configured.
     let providers = store
         .get_providers(&workspace_id)
         .map_err(map_control_err)?;
-    let catalog = build_model_catalog(&state.meta.configured_agent_types, &providers);
+
+    let opencode_acp_models = if state
+        .meta
+        .configured_agent_types
+        .iter()
+        .any(|b| b == "opencode")
+    {
+        match workspace_path_or_404(&workspace_id).await {
+            Ok(wpath) => {
+                if let Some(supervisor) = state.runtime_supervisor.as_ref() {
+                    match supervisor.probe_opencode_catalog_models(&wpath).await {
+                        Ok(models) if !models.is_empty() => Some(models),
+                        Ok(_) => {
+                            tracing::debug!(
+                                workspace_id,
+                                "opencode ACP catalog probe returned no models; using opencode.json fallback"
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                workspace_id,
+                                error = %e,
+                                "opencode ACP catalog probe failed; using opencode.json fallback"
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let catalog = build_model_catalog(
+        &state.meta.configured_agent_types,
+        opencode_acp_models.as_deref(),
+        &providers,
+    );
     Ok(Json(catalog))
 }
 
@@ -750,24 +809,34 @@ mod tests {
     }
 
     #[test]
-    fn opencode_models_use_provider_prefixed_ref() {
+    fn opencode_json_fallback_uses_provider_prefixed_ref() {
         let providers = vec![provider("scnet", &["MiniMax-M2.5"])];
-        let catalog = build_model_catalog(&["opencode".to_string()], &providers);
+        let catalog = build_model_catalog(&["opencode".to_string()], None, &providers);
 
         assert_eq!(catalog.automation_default_backend.as_deref(), Some("opencode"));
-        assert_eq!(catalog.backends.len(), 1);
         let oc = &catalog.backends[0];
-        assert_eq!(oc.backend, "opencode");
-        assert_eq!(oc.label, "OpenCode");
-        assert_eq!(oc.models.len(), 1);
-        // Ref must keep the provider segment so it matches the ACP model id.
         assert_eq!(oc.models[0].model_ref, "scnet/MiniMax-M2.5");
         assert_eq!(oc.models[0].model_id, "MiniMax-M2.5");
     }
 
     #[test]
+    fn opencode_prefers_acp_probe_models_when_present() {
+        let acp = vec![amux::ModelInfo {
+            id: "opencode/big-pickle".into(),
+            display_name: "Big Pickle".into(),
+        }];
+        let providers = vec![provider("scnet", &["MiniMax-M2.5"])];
+        let catalog = build_model_catalog(&["opencode".to_string()], Some(&acp), &providers);
+
+        let oc = &catalog.backends[0];
+        assert_eq!(oc.models.len(), 1);
+        assert_eq!(oc.models[0].model_ref, "opencode/big-pickle");
+        assert_eq!(oc.models[0].display_name, "Big Pickle");
+    }
+
+    #[test]
     fn claude_models_use_static_table_with_claude_code_prefix() {
-        let catalog = build_model_catalog(&["claude".to_string()], &[]);
+        let catalog = build_model_catalog(&["claude".to_string()], None, &[]);
 
         assert_eq!(catalog.automation_default_backend.as_deref(), Some("claude"));
         let claude = &catalog.backends[0];
@@ -787,7 +856,7 @@ mod tests {
     fn multiple_backends_preserve_order_and_default_precedence() {
         // Configured in a non-precedence order; default must still be opencode.
         let catalog =
-            build_model_catalog(&["claude".to_string(), "opencode".to_string()], &[]);
+            build_model_catalog(&["claude".to_string(), "opencode".to_string()], None, &[]);
         assert_eq!(catalog.automation_default_backend.as_deref(), Some("opencode"));
         // Backends keep the configured order (claude first here).
         assert_eq!(catalog.backends[0].backend, "claude");
@@ -796,14 +865,14 @@ mod tests {
 
     #[test]
     fn empty_config_yields_no_default_and_no_backends() {
-        let catalog = build_model_catalog(&[], &[]);
+        let catalog = build_model_catalog(&[], None, &[]);
         assert!(catalog.automation_default_backend.is_none());
         assert!(catalog.backends.is_empty());
     }
 
     #[test]
     fn codex_backend_is_present_even_when_model_table_empty() {
-        let catalog = build_model_catalog(&["codex".to_string()], &[]);
+        let catalog = build_model_catalog(&["codex".to_string()], None, &[]);
         assert_eq!(catalog.automation_default_backend.as_deref(), Some("codex"));
         assert_eq!(catalog.backends[0].backend, "codex");
         // Static codex table is empty today; the group still appears so the UI

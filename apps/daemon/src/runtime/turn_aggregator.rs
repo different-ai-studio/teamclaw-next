@@ -182,7 +182,7 @@ impl TurnAggregator {
     /// We only persist `AgentReply` (per design — the cloud backend is the
     /// durable canonical conversation log, not an audit trail).
     pub fn cloud_persistent(msg: &EmittedMessage) -> bool {
-        matches!(msg.kind, MessageKind::AgentReply)
+        matches!(msg.kind, MessageKind::AgentReply) && !msg.content.trim().is_empty()
     }
 
     /// Current per-turn correlation id, or `None` between turns. Read by the
@@ -353,6 +353,27 @@ mod tests {
         assert_eq!(emitted[0].kind, MessageKind::AgentReply);
         assert!(emitted[0].content.is_empty());
         assert!(!emitted[0].turn_id.is_empty());
+    }
+
+    #[test]
+    fn empty_agent_reply_is_not_cloud_persistent() {
+        let mut agg = TurnAggregator::new();
+        agg.ingest(&status_change(
+            amux::AgentStatus::Idle,
+            amux::AgentStatus::Active,
+        ));
+        agg.ingest(&thinking_chunk("Need todos"));
+        agg.ingest(&tool_use("t1", "todowrite", "{}"));
+        agg.ingest(&tool_result("t1", true, "ok"));
+
+        let emitted = agg.ingest(&status_change(
+            amux::AgentStatus::Active,
+            amux::AgentStatus::Idle,
+        ));
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].kind, MessageKind::AgentReply);
+        assert!(emitted[0].content.is_empty());
+        assert!(!TurnAggregator::cloud_persistent(&emitted[0]));
     }
 
     #[test]

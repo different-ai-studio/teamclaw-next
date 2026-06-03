@@ -1,8 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, AlertTriangle, Bot, Check, Loader2, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Bot, Check, Loader2, RefreshCw, RotateCcw, Save, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DaemonOnboardingWizard } from '@/components/auth/DaemonOnboardingWizard'
+import { useDaemonOnboardingStore } from '@/stores/daemon-onboarding'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import {
   getCurrentDaemonAgent,
@@ -53,26 +55,31 @@ export function DaemonGeneralSection() {
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [daemonTeamId, setDaemonTeamId] = React.useState<string | null>(null)
+  // When set, render the existing daemon onboarding wizard as an overlay to
+  // re-bind the local daemon to the current team.
+  const [rebinding, setRebinding] = React.useState(false)
+  // Surfaced so the overlay can offer a safe cancel *before* the daemon binding
+  // is cleared (status 'mismatch'); once re-init starts there's no going back.
+  const onboardingStatus = useDaemonOnboardingStore((s) => s.status)
+  const onboardingBusy = useDaemonOnboardingStore((s) => s.busy)
 
   // The local daemon is single-team (its team_id is fixed at `amuxd init`).
   // Read it so we can warn when it diverges from the app's selected team —
   // team-share content syncs/links under the daemon's team, not the app's.
-  React.useEffect(() => {
+  const loadDaemonTeamId = React.useCallback(async () => {
     if (!isTauri()) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        const id = await invoke<string | null>('get_daemon_team_id')
-        if (!cancelled) setDaemonTeamId(id ?? null)
-      } catch {
-        // Best-effort: no daemon config / not onboarded → no warning.
-      }
-    })()
-    return () => {
-      cancelled = true
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const id = await invoke<string | null>('get_daemon_team_id')
+      setDaemonTeamId(id ?? null)
+    } catch {
+      // Best-effort: no daemon config / not onboarded → no warning.
     }
   }, [])
+
+  React.useEffect(() => {
+    void loadDaemonTeamId()
+  }, [loadDaemonTeamId])
 
   const teamMismatch = !!daemonTeamId && !!team?.id && daemonTeamId !== team.id
 
@@ -194,6 +201,7 @@ export function DaemonGeneralSection() {
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <SectionHeader
@@ -244,6 +252,18 @@ export function DaemonGeneralSection() {
                 </dt>
                 <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{team.id}</dd>
               </dl>
+              <div className="pt-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 border-amber-500/40 bg-transparent text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+                  onClick={() => setRebinding(true)}
+                  disabled={rebinding}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t('settings.daemonGeneral.rebind', '重新绑定到当前团队')}
+                </Button>
+              </div>
             </div>
           </div>
         </SettingCard>
@@ -421,5 +441,29 @@ export function DaemonGeneralSection() {
         </>
       )}
     </div>
+
+      {rebinding && (
+        <div className="fixed inset-0 z-50">
+          {onboardingStatus === 'mismatch' && !onboardingBusy && (
+            <button
+              type="button"
+              onClick={() => setRebinding(false)}
+              className="absolute right-5 top-5 z-10 rounded-[8px] px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-panel hover:text-foreground"
+            >
+              {t('common.cancel', '取消')}
+            </button>
+          )}
+          <DaemonOnboardingWizard
+            onDone={() => {
+              setRebinding(false)
+              // Daemon is now bound to the current team — clear the warning and
+              // reload the agent profile/access for the freshly-bound team.
+              void loadDaemonTeamId()
+              void load()
+            }}
+          />
+        </div>
+      )}
+    </>
   )
 }
