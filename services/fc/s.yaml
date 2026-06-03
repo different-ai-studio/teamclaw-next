@@ -47,7 +47,7 @@ resources:
         MQTT_PASSWORD: ${env('MQTT_PASSWORD')}
         MQTT_USE_TLS: ${env('MQTT_USE_TLS', '')}
         DATABASE_URL: ${env('DATABASE_URL', '')}
-        BACKEND_KIND: ${env('BACKEND_KIND', '')}
+        BACKEND_KIND: ${env('BACKEND_KIND', 'supabase')}
         AUTH_SECRET: ${env('AUTH_SECRET', '')}
         AUTH_BASE_URL: ${env('AUTH_BASE_URL', 'https://cloud.ucar.cc')}
         PG_POOL_MAX: ${env('PG_POOL_MAX', '1')}

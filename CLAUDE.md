@@ -68,8 +68,8 @@ pnpm daemon:test            # Daemon tests
 pnpm ios:test:core          # AMUXCore SwiftPM tests
 pnpm ios:test               # iOS UI tests
 
-# FC deploy
-bash .claude/skills/fc-deploy/deploy.sh
+# FC deploy — via GitHub Action only (push to main touching services/fc/**,
+# or manually: gh workflow run fc-deploy.yml)
 ```
 
 ## Architecture
@@ -164,7 +164,12 @@ Single source of truth principle — **never mix content sources**:
 
 FC function `teamclaw-sync` is deployed to Alibaba Cloud cn-shenzhen region.
 
-Deploy: use the `fc-deploy` skill (`.claude/skills/fc-deploy/deploy.sh`).
+Deploy: GitHub Action only — `.github/workflows/fc-deploy.yml` runs on every
+push to `main` that touches `services/fc/**`, or manually via
+`gh workflow run fc-deploy.yml`. Local deploy scripts have been removed; do not
+deploy FC from a workstation. Runtime config comes from repo **secrets**
+(credentials/keys) and **variables** (e.g. `BACKEND_KIND`, defaults to
+`supabase`).
 
 Production endpoint: `https://cloud.ucar.cc`
 
