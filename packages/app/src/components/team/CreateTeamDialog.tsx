@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { getFreshAccessToken } from '@/lib/auth/session-store'
 import { Label } from '@/components/ui/label'
 
 export interface CreateTeamDialogResult {
@@ -54,9 +55,11 @@ export function CreateTeamDialog({
     setBusy(true)
     setError(null)
     try {
+      const accessToken = await getFreshAccessToken()
       const r = await invoke<CreateTeamDialogResult>('team_share_create', {
         name: trimmed,
         workspacePath,
+        accessToken,
       })
       onCreated?.(r)
       setName('')

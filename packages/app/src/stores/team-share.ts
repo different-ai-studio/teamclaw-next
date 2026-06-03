@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/lib/utils'
-import { ensureJwtSynced } from '@/lib/jwt-bridge'
+import { getFreshAccessToken } from '@/lib/auth/session-store'
 import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
 
 // ---------------------------------------------------------------------------
@@ -82,12 +82,13 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
     if (!isTauri()) return
     set({ loading: true, lastError: null })
     try {
-      // Make sure the Supabase JWT is in teamclaw.json before the FC call, in
-      // case the background bridge hasn't written it yet this session.
-      await ensureJwtSynced(workspacePath)
+      // Design 2: Tauri uses the user's own fresh session token (not a stale
+      // cached JWT); pass it straight into the FC-calling command.
+      const accessToken = await getFreshAccessToken()
       const raw = await invoke<ShareStatus>('team_share_get_status', {
         teamId,
         workspacePath,
+        accessToken,
       })
       set({
         status: {
@@ -107,10 +108,11 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   },
 
   async enableOss(teamId, workspacePath) {
-    await ensureJwtSynced(workspacePath)
+    const accessToken = await getFreshAccessToken()
     const res = await invoke<EnableShareResult>('team_share_enable_oss', {
       teamId,
       workspacePath,
+      accessToken,
     })
     // Materialize the daemon's global dir + workspace symlink now (best-effort)
     // so the synced directory exists immediately instead of after a restart.
@@ -120,10 +122,10 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   },
 
   async enableManagedGit(teamId, workspacePath) {
-    await ensureJwtSynced(workspacePath)
+    const accessToken = await getFreshAccessToken()
     const res = await invoke<EnableShareResult>(
       'team_share_enable_managed_git',
-      { teamId, workspacePath },
+      { teamId, workspacePath, accessToken },
     )
     await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)
@@ -131,10 +133,10 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   },
 
   async enableCustomGit(teamId, workspacePath, input) {
-    await ensureJwtSynced(workspacePath)
+    const accessToken = await getFreshAccessToken()
     const res = await invoke<EnableShareResult>(
       'team_share_enable_custom_git',
-      { teamId, workspacePath, input },
+      { teamId, workspacePath, input, accessToken },
     )
     await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)

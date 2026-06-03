@@ -9,7 +9,8 @@
 //!   error.rs          — SyncError unified error type
 //!   path_validator.rs — client-side mirror of FC validateSyncPath (referenced
 //!                       by error.rs's From impl)
-//!   get_fc_endpoint_and_jwt() — reads teamclaw.json for FC endpoint + JWT
+//!   get_fc_endpoint() — reads teamclaw.json for the FC endpoint (callers
+//!                       supply their own fresh user JWT; see Design 2)
 //!
 //! The deleted engine submodules were: engine, scanner, state, manifest,
 //! conflict, crypto — plus the blob-transfer/version methods on FcClient and
@@ -24,7 +25,17 @@ pub mod path_validator;
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, String), String> {
+/// Read the FC endpoint from the workspace's `teamclaw.json` (falling back to
+/// the production URL).
+///
+/// The FC JWT is **not** read here anymore. Each Tauri command receives the
+/// caller's own fresh user session token (from the frontend `getSession()`,
+/// which is kept current by the session-store auto-refresh) and passes it to
+/// `FcClient`. The previous behaviour read a `supabase_jwt` cached in
+/// `teamclaw.json` that nothing refreshed after the daemon-owns-team-sync
+/// refactor (#296) gutted the JWT bridge — so it went stale and FC returned
+/// 401. Tauri uses its own token; the daemon uses its own; neither crosses.
+pub(crate) fn get_fc_endpoint(workspace_path: &str) -> String {
     // Read teamclaw.json to get fc_endpoint (falls back to default production URL).
     let config_path = std::path::Path::new(workspace_path)
         .join(crate::commands::TEAMCLAW_DIR)
@@ -35,20 +46,9 @@ pub(crate) fn get_fc_endpoint_and_jwt(workspace_path: &str) -> Result<(String, S
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    let base_url = json
-        .get("fc_endpoint")
+    json.get("fc_endpoint")
         .and_then(|v| v.as_str())
         .unwrap_or("https://cloud.ucar.cc")
         .trim_end_matches('/')
-        .to_string();
-
-    // JWT is the Supabase session token stored in env_blob.
-    let jwt = json
-        .get("supabase_jwt")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("SUPABASE_JWT").ok())
-        .ok_or_else(|| "supabase_jwt not found — user not logged in".to_string())?;
-
-    Ok((base_url, jwt))
+        .to_string()
 }

@@ -329,6 +329,40 @@ export function refreshSession(): Promise<Session> {
   return inFlightRefresh;
 }
 
+/**
+ * Return a guaranteed-fresh user access token for direct FC calls made from
+ * Tauri commands (Design 2: "Tauri uses its own token; the daemon uses its
+ * own; neither crosses"). Reads the current session and, if it is within the
+ * refresh leeway of expiry, proactively refreshes before returning. Throws
+ * "not logged in" when there is no session (humanized by `lib/fc-error.ts`).
+ *
+ * This replaces the old flow where the Rust side read a `supabase_jwt` cached
+ * in `teamclaw.json` that nothing refreshed after the JWT bridge was removed.
+ */
+export async function getFreshAccessToken(): Promise<string> {
+  let session = getSession();
+  if (!session?.access_token) {
+    throw new Error("not logged in");
+  }
+  const expiresAtMs = session.expires_at ? session.expires_at * 1000 : null;
+  if (
+    expiresAtMs !== null &&
+    expiresAtMs - Date.now() < REFRESH_LEEWAY_SECONDS * 1000
+  ) {
+    try {
+      session = await refreshSession();
+    } catch {
+      // Refresh failed (e.g. offline). Fall back to the current token; if it is
+      // truly expired the FC call surfaces a 401 and the UI can re-auth.
+      session = getSession() ?? session;
+    }
+  }
+  if (!session?.access_token) {
+    throw new Error("not logged in");
+  }
+  return session.access_token;
+}
+
 /** Test-only: reset all module state. */
 export function __resetSessionStoreForTests() {
   clearRefreshTimer();

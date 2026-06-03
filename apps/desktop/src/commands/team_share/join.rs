@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::commands::oss_sync::fc_client::FcClient;
-use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::oss_sync::get_fc_endpoint;
 use crate::commands::team_sync_proxy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,9 +31,9 @@ pub struct JoinExistingResult {
 pub async fn team_share_join_existing_impl(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<JoinExistingResult, String> {
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token);
     let cfg: serde_json::Value = fc
         .get_json(&format!("/v1/teams/{}/workspace-config", team_id))
         .await
@@ -79,6 +79,7 @@ pub async fn team_share_join_existing_impl(
 pub async fn team_share_join_existing(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<JoinExistingResult, String> {
-    team_share_join_existing_impl(team_id, workspace_path).await
+    team_share_join_existing_impl(team_id, workspace_path, access_token).await
 }

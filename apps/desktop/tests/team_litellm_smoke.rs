@@ -55,9 +55,10 @@ async fn team_litellm_setup_calls_fc_and_writes_config() {
     let tmp = TempDir::new().expect("tempdir");
     let workspace = seed_workspace(&tmp, &server.uri());
 
-    let result = team_litellm::setup_impl("t1".to_string(), workspace.clone())
-        .await
-        .expect("setup_impl should succeed");
+    let result =
+        team_litellm::setup_impl("t1".to_string(), workspace.clone(), "test-jwt".to_string())
+            .await
+            .expect("setup_impl should succeed");
 
     assert_eq!(result.ai_gateway_endpoint, "https://gw/");
     assert_eq!(result.litellm_key, "sk-xyz");
