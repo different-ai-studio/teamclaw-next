@@ -7,15 +7,28 @@
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use futures::StreamExt;
+
 use super::{
     conflict::write_conflict_sidecar,
     crypto::{decrypt_blob, encrypt_blob, sha256_hex},
     error::SyncError,
-    fc_client::{FcClient, ManifestItem},
+    fc_client::{
+        BatchItemOutcome, CompleteResult, DeleteBatchItem, FcClient, ManifestItem, PrepareBatchItem,
+    },
     path_validator::{validate, validate_no_symlink_escape},
     scanner::{scan_workspace, ScannedFile},
     state::LocalSyncState,
 };
+
+/// Chunk size for batch FC calls — must not exceed the FC server cap
+/// (`MAX_SYNC_BATCH`). The daemon auto-splits larger working sets into chunks.
+const MAX_BATCH: usize = 200;
+
+/// Max concurrent direct-to-OSS blob transfers (PUT on push, GET on pull). OSS
+/// presigned transfers bypass FC and are not rate-limited, but we still cap the
+/// connection fan-out.
+const BLOB_CONCURRENCY: usize = 16;
 
 /// Summary returned by `tick()`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -66,8 +79,11 @@ pub async fn tick(
         }
     }
 
-    let mut pulled = 0u32;
     let mut pull_conflicts = 0u32;
+    // Decide per item what needs downloading (and write conflict sidecars for
+    // dirty-vs-newer files) here — this mutates `state`/disk and must stay
+    // sequential. The actual blob downloads are then batched by `pull_phase`.
+    let mut pull_items: Vec<PullItem> = Vec::new();
 
     for item in &all_items {
         // Spec §4.3: path-validate all manifest items (defense vs. malicious remote).
@@ -123,22 +139,15 @@ pub async fn tick(
             }
         }
 
-        // Download and overwrite.
-        match download_and_write(
-            content_root,
-            &item.path,
-            &remote_cipher_hash,
-            item.version,
-            &key,
-            fc,
-            &mut state,
-        )
-        .await
-        {
-            Ok(_) => pulled += 1,
-            Err(e) => tracing::warn!("[oss_sync] pull {}: {e}", item.path),
-        }
+        pull_items.push(PullItem {
+            path: item.path.clone(),
+            cipher_hash: remote_cipher_hash,
+            version: item.version,
+        });
     }
+
+    // Batched download (with per-file fallback on a pre-batch FC).
+    let pulled = pull_phase(content_root, &key, fc, &mut state, pull_items).await;
 
     // Only advance high-water mark after fully draining cursor (spec §4.3).
     if let Some(seq) = snapshot_seq {
@@ -172,88 +181,23 @@ pub async fn tick(
         v
     };
 
-    let mut pushed = 0u32;
-    let mut push_conflicts = 0u32;
-    // Transient (rate-limit / 503) failures that survived in-call retries. We leave
-    // such files dirty (no upsert) so they retry next tick, and surface the
-    // condition via the returned error rather than silently dropping the change.
-    let mut deferred = 0u32;
-    let mut last_transient: Option<SyncError> = None;
-
-    for path in all_dirty {
-        match upload_one_retrying(content_root, &path, team_id, &key, fc, &mut state).await {
-            Ok(_) => pushed += 1,
-            Err(SyncError::Conflict {
-                remote_version,
-                remote_cipher_hash,
-            }) => {
-                push_conflicts += 1;
-                tracing::warn!(
-                    "[oss_sync] push conflict {}: remote_version={:?}",
-                    path,
-                    remote_version
-                );
-                // Write local content as conflict sidecar.
-                let abs_path = Path::new(content_root).join(&path);
-                if let Ok(local_bytes) = std::fs::read(&abs_path) {
-                    let local_cipher_hash = state
-                        .files
-                        .get(&path)
-                        .map(|f| f.synced_cipher_hash.as_str())
-                        .unwrap_or("unknown");
-                    let _ =
-                        write_conflict_sidecar(&abs_path, &local_bytes, local_cipher_hash).await;
-                }
-                // Download the remote version that beat us.
-                if let Some(hash) = remote_cipher_hash {
-                    let version = remote_version.unwrap_or(0);
-                    let _ = download_and_write(
-                        content_root,
-                        &path,
-                        &hash,
-                        version,
-                        &key,
-                        fc,
-                        &mut state,
-                    )
-                    .await;
-                }
-            }
-            Err(e) => {
-                if is_transient(&e) {
-                    deferred += 1;
-                    last_transient = Some(e);
-                } else {
-                    tracing::warn!("[oss_sync] push {}: {e}", path);
-                }
-            }
-        }
-    }
+    // Batched PUSH (upload) — collect → prepare-batch → concurrent blob PUT →
+    // complete-batch → per-item apply. Falls back to per-file on a pre-batch FC.
+    let push_stats = push_phase(content_root, team_id, &key, fc, &mut state, all_dirty).await;
 
     // Propagate local deletions: a previously-synced file that is absent from the
     // current scan was deleted locally → emit a server-side tombstone so other
-    // nodes pull the deletion. `fc.delete_file` does a parentVersion CAS.
-    for (path, synced_version) in locally_deleted_paths(&state, &scan) {
-        match delete_file_retrying(fc, team_id, &path, synced_version).await {
-            Ok(()) => {
-                state.mark_deleted(&path);
-                pushed += 1;
-            }
-            Err(SyncError::Conflict { .. }) => {
-                // Remote advanced since our last sync; leave the entry so the next
-                // pull reconciles rather than deleting a file someone else changed.
-                push_conflicts += 1;
-            }
-            Err(e) => {
-                if is_transient(&e) {
-                    deferred += 1;
-                    last_transient = Some(e);
-                } else {
-                    tracing::warn!("[oss_sync] delete {}: {e}", path);
-                }
-            }
-        }
-    }
+    // nodes pull the deletion. Each tombstone is a parentVersion CAS.
+    let dels = locally_deleted_paths(&state, &scan);
+    let del_stats = delete_phase(team_id, fc, &mut state, dels).await;
+
+    let pushed = push_stats.pushed + del_stats.pushed;
+    let push_conflicts = push_stats.conflicts + del_stats.conflicts;
+    // Transient (rate-limit / 503) failures that survived in-call retries. We leave
+    // such files dirty (no upsert) so they retry next tick, and surface the
+    // condition via the returned error rather than silently dropping the change.
+    let deferred = push_stats.deferred + del_stats.deferred;
+    let last_transient = push_stats.last_transient.or(del_stats.last_transient);
 
     state.touch_sync_at();
     state.save_at(team_id).map_err(SyncError::State)?;
@@ -287,6 +231,617 @@ pub async fn tick(
     );
 
     Ok(result)
+}
+
+// ── Batch phase plumbing ───────────────────────────────────────────────────────
+
+/// A manifest item that needs its blob downloaded (decided in the PULL pre-loop).
+struct PullItem {
+    path: String,
+    cipher_hash: String,
+    version: i32,
+}
+
+/// Front half of an upload — read + encrypt + hash, with no network. Computed
+/// before the prepare/complete batch round-trips so the blob is ready to PUT.
+struct PreparedUpload {
+    path: String,
+    /// sha256 of the plaintext (what local dirty-detection compares against).
+    plain_hash: String,
+    /// encrypted bytes uploaded to OSS.
+    blob: Vec<u8>,
+    /// sha256 of `blob` — the content hash the FC CAS keys on.
+    cipher_hash: String,
+    parent_version: i32,
+    /// ciphertext length — the `size` the FC HEAD-check verifies on the OSS blob.
+    size: u64,
+}
+
+/// Result of one concurrent PULL transfer, applied to `state` after the join.
+struct WriteResult {
+    path: String,
+    version: i32,
+    cipher_hash: String,
+    plain_hash: String,
+    mtime: u64,
+    size: u64,
+}
+
+/// Per-phase tallies, merged into the tick summary.
+#[derive(Default)]
+struct PhaseStats {
+    pushed: u32,
+    conflicts: u32,
+    deferred: u32,
+    last_transient: Option<SyncError>,
+}
+
+/// Retry a whole-batch FC call on transient (rate-limit / 503) errors, reusing
+/// the per-file backoff schedule. `BatchUnsupported` (404) is NOT retried — it is
+/// terminal and signals the caller to fall back to the per-file path.
+async fn with_batch_retry<T, F, Fut>(mut f: F) -> Result<T, SyncError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, SyncError>>,
+{
+    let mut attempt = 0u32;
+    loop {
+        match f().await {
+            Err(e) if is_transient(&e) && attempt < MAX_TRANSIENT_RETRIES => {
+                attempt += 1;
+                backoff_sleep(attempt).await;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Classify a per-item batch error: transient (429/503/timeout) → defer for the
+/// next tick; anything else → log and drop (the file stays dirty and retries).
+fn record_item_error(stats: &mut PhaseStats, label: &str, path: &str, status: u16, message: &str) {
+    let e = SyncError::Internal(format!("FC item HTTP {status}: {message}"));
+    if is_transient(&e) {
+        stats.deferred += 1;
+        stats.last_transient = Some(e);
+    } else {
+        tracing::warn!("[oss_sync] {label} {path} HTTP {status}: {message}");
+    }
+}
+
+/// Encrypt + hash one local file in preparation for upload (no network).
+fn prepare_upload(
+    content_root: &str,
+    rel_path: &str,
+    key: &[u8; 32],
+    state: &LocalSyncState,
+) -> Result<PreparedUpload, SyncError> {
+    let abs_path = Path::new(content_root).join(rel_path);
+    let plaintext = std::fs::read(&abs_path).map_err(|e| SyncError::Io(e.to_string()))?;
+    let plain_hash = sha256_hex(&plaintext);
+    let blob = encrypt_blob(&plaintext, key).map_err(SyncError::Crypto)?;
+    let cipher_hash = sha256_hex(&blob);
+    let parent_version = state
+        .files
+        .get(rel_path)
+        .map(|f| f.synced_version)
+        .unwrap_or(0);
+    let size = blob.len() as u64;
+    Ok(PreparedUpload {
+        path: rel_path.to_string(),
+        plain_hash,
+        blob,
+        cipher_hash,
+        parent_version,
+        size,
+    })
+}
+
+/// Batched PULL: sign N GET URLs in one FC round-trip, then fetch + decrypt +
+/// write blobs concurrently straight from OSS. Returns the number pulled.
+async fn pull_phase(
+    content_root: &str,
+    key: &[u8; 32],
+    fc: &FcClient,
+    state: &mut LocalSyncState,
+    items: Vec<PullItem>,
+) -> u32 {
+    if items.is_empty() {
+        return 0;
+    }
+    let team_id = state.team_id.clone();
+    let key_copy = *key;
+    let mut pulled = 0u32;
+
+    for chunk in items.chunks(MAX_BATCH) {
+        let hashes: Vec<String> = chunk.iter().map(|i| i.cipher_hash.clone()).collect();
+        let outcomes = match with_batch_retry(|| fc.download_batch(&team_id, &hashes)).await {
+            Ok(o) => o,
+            Err(SyncError::BatchUnsupported) => {
+                // Per-file fallback (pre-batch FC).
+                for it in chunk {
+                    match download_and_write(
+                        content_root,
+                        &it.path,
+                        &it.cipher_hash,
+                        it.version,
+                        key,
+                        fc,
+                        state,
+                    )
+                    .await
+                    {
+                        Ok(_) => pulled += 1,
+                        Err(e) => tracing::warn!("[oss_sync] pull {}: {e}", it.path),
+                    }
+                }
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!("[oss_sync] download-batch: {e}");
+                continue;
+            }
+        };
+
+        // Collect signed targets, then fetch+decrypt+write concurrently. Downloads
+        // never CAS-conflict; a per-item error just skips that file.
+        let mut targets: Vec<(String, String, i32, String)> = Vec::new();
+        for (it, oc) in chunk.iter().zip(outcomes.into_iter()) {
+            match oc {
+                BatchItemOutcome::Ok(dl) => targets.push((
+                    it.path.clone(),
+                    it.cipher_hash.clone(),
+                    it.version,
+                    dl.download_url,
+                )),
+                BatchItemOutcome::Conflict { .. } => {}
+                BatchItemOutcome::Err { status, message } => {
+                    tracing::warn!("[oss_sync] download {} HTTP {status}: {message}", it.path)
+                }
+            }
+        }
+
+        let writes: Vec<Result<WriteResult, SyncError>> =
+            futures::stream::iter(targets.into_iter().map(
+                |(path, cipher_hash, version, url)| async move {
+                    let blob = fc.get_blob(&url, &cipher_hash).await?;
+                    let plaintext = decrypt_blob(&blob, &key_copy).map_err(SyncError::Crypto)?;
+                    let abs = Path::new(content_root).join(&path);
+                    if let Some(parent) = abs.parent() {
+                        tokio::fs::create_dir_all(parent)
+                            .await
+                            .map_err(|e| SyncError::Io(e.to_string()))?;
+                    }
+                    tokio::fs::write(&abs, &plaintext)
+                        .await
+                        .map_err(|e| SyncError::Io(e.to_string()))?;
+                    let meta = std::fs::metadata(&abs).map_err(SyncError::from)?;
+                    let mtime = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let size = meta.len();
+                    let plain_hash = sha256_hex(&plaintext);
+                    Ok(WriteResult {
+                        path,
+                        version,
+                        cipher_hash,
+                        plain_hash,
+                        mtime,
+                        size,
+                    })
+                },
+            ))
+            .buffer_unordered(BLOB_CONCURRENCY)
+            .collect()
+            .await;
+
+        // Apply upserts sequentially (needs &mut state).
+        for w in writes {
+            match w {
+                Ok(w) => {
+                    state.upsert(
+                        &w.path,
+                        w.version,
+                        w.cipher_hash,
+                        w.plain_hash.clone(),
+                        w.plain_hash,
+                        w.mtime,
+                        w.size,
+                    );
+                    pulled += 1;
+                }
+                Err(e) => tracing::warn!("[oss_sync] pull transfer: {e}"),
+            }
+        }
+    }
+    pulled
+}
+
+/// Batched PUSH: encrypt locally → prepare-batch → concurrent blob PUT →
+/// complete-batch → per-item apply. Per-file fallback on a pre-batch FC.
+async fn push_phase(
+    content_root: &str,
+    team_id: &str,
+    key: &[u8; 32],
+    fc: &FcClient,
+    state: &mut LocalSyncState,
+    paths: Vec<String>,
+) -> PhaseStats {
+    let mut stats = PhaseStats::default();
+    if paths.is_empty() {
+        return stats;
+    }
+
+    for chunk in paths.chunks(MAX_BATCH) {
+        // Stage 0: encrypt + hash. Unreadable files are skipped (stay dirty).
+        let mut prepared: Vec<PreparedUpload> = Vec::new();
+        for p in chunk {
+            match prepare_upload(content_root, p, key, state) {
+                Ok(pu) => prepared.push(pu),
+                Err(e) => tracing::warn!("[oss_sync] encrypt {p}: {e}"),
+            }
+        }
+        if prepared.is_empty() {
+            continue;
+        }
+
+        // Stage 1: prepare-batch (session + presigned PUT per item).
+        let items: Vec<PrepareBatchItem> = prepared
+            .iter()
+            .map(|pu| PrepareBatchItem {
+                path: pu.path.clone(),
+                parent_version: pu.parent_version,
+                content_hash: pu.cipher_hash.clone(),
+                size: pu.size,
+                node_id: None,
+            })
+            .collect();
+
+        let prep_outcomes = match with_batch_retry(|| fc.upload_prepare_batch(team_id, &items))
+            .await
+        {
+            Ok(o) => o,
+            Err(SyncError::BatchUnsupported) => {
+                for p in chunk {
+                    apply_push_per_file(content_root, p, team_id, key, fc, state, &mut stats).await;
+                }
+                continue;
+            }
+            Err(e) => {
+                if is_transient(&e) {
+                    stats.deferred += prepared.len() as u32;
+                    stats.last_transient = Some(e);
+                } else {
+                    tracing::warn!("[oss_sync] prepare-batch: {e}");
+                }
+                continue;
+            }
+        };
+
+        // Stage 2: PUT blobs concurrently for items that prepared OK and require
+        // upload. Items whose blob already exists in OSS (requires_upload=false)
+        // are immediately ready to complete. Prepare never CAS-conflicts.
+        struct Ready {
+            idx: usize,
+            session_id: String,
+        }
+        let mut ready: Vec<Ready> = Vec::new();
+        let mut put_futs = Vec::new();
+        for (idx, (pu, oc)) in prepared.iter().zip(prep_outcomes.into_iter()).enumerate() {
+            match oc {
+                BatchItemOutcome::Ok(pr) => {
+                    if pr.requires_upload {
+                        match pr.presigned_put {
+                            Some(url) => {
+                                let blob = pu.blob.clone();
+                                let sess = pr.upload_session_id;
+                                put_futs.push(async move {
+                                    let r = fc.put_blob(&url, blob).await;
+                                    (idx, sess, r)
+                                });
+                            }
+                            None => tracing::warn!(
+                                "[oss_sync] prepare {} requires upload but no presigned URL",
+                                pu.path
+                            ),
+                        }
+                    } else {
+                        ready.push(Ready {
+                            idx,
+                            session_id: pr.upload_session_id,
+                        });
+                    }
+                }
+                BatchItemOutcome::Conflict { .. } => { /* prepare does not CAS */ }
+                BatchItemOutcome::Err { status, message } => {
+                    record_item_error(&mut stats, "prepare", &pu.path, status, &message)
+                }
+            }
+        }
+
+        let put_results: Vec<(usize, String, Result<(), SyncError>)> =
+            futures::stream::iter(put_futs)
+                .buffer_unordered(BLOB_CONCURRENCY)
+                .collect()
+                .await;
+        for (idx, sess, r) in put_results {
+            match r {
+                Ok(()) => ready.push(Ready {
+                    idx,
+                    session_id: sess,
+                }),
+                Err(e) => {
+                    if is_transient(&e) {
+                        stats.deferred += 1;
+                        stats.last_transient = Some(e);
+                    } else {
+                        tracing::warn!("[oss_sync] put {}: {e}", prepared[idx].path);
+                    }
+                }
+            }
+        }
+
+        // Stage 3: complete-batch (CAS) for everything whose blob is in place.
+        if ready.is_empty() {
+            continue;
+        }
+        let session_ids: Vec<String> = ready.iter().map(|r| r.session_id.clone()).collect();
+        let comp_outcomes =
+            match with_batch_retry(|| fc.upload_complete_batch(team_id, &session_ids)).await {
+                Ok(o) => o,
+                Err(SyncError::BatchUnsupported) => {
+                    // prepare-batch worked but complete-batch 404 — vanishingly
+                    // unlikely, but degrade per-item rather than lose the uploads.
+                    for r in &ready {
+                        let pu = &prepared[r.idx];
+                        match fc.upload_complete(team_id, &r.session_id).await {
+                            Ok(c) => finalize_upload(content_root, pu, c, state, &mut stats),
+                            Err(SyncError::Conflict {
+                                remote_version,
+                                remote_cipher_hash,
+                            }) => {
+                                handle_push_conflict(
+                                    content_root,
+                                    &pu.path,
+                                    remote_version,
+                                    remote_cipher_hash,
+                                    key,
+                                    fc,
+                                    state,
+                                    &mut stats,
+                                )
+                                .await
+                            }
+                            Err(e) => {
+                                if is_transient(&e) {
+                                    stats.deferred += 1;
+                                    stats.last_transient = Some(e);
+                                } else {
+                                    tracing::warn!("[oss_sync] complete {}: {e}", pu.path);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Err(e) => {
+                    if is_transient(&e) {
+                        stats.deferred += ready.len() as u32;
+                        stats.last_transient = Some(e);
+                    } else {
+                        tracing::warn!("[oss_sync] complete-batch: {e}");
+                    }
+                    continue;
+                }
+            };
+
+        for (r, oc) in ready.iter().zip(comp_outcomes.into_iter()) {
+            let pu = &prepared[r.idx];
+            match oc {
+                BatchItemOutcome::Ok(c) => finalize_upload(content_root, pu, c, state, &mut stats),
+                BatchItemOutcome::Conflict {
+                    remote_version,
+                    remote_cipher_hash,
+                } => {
+                    handle_push_conflict(
+                        content_root,
+                        &pu.path,
+                        remote_version,
+                        remote_cipher_hash,
+                        key,
+                        fc,
+                        state,
+                        &mut stats,
+                    )
+                    .await
+                }
+                BatchItemOutcome::Err { status, message } => {
+                    record_item_error(&mut stats, "complete", &pu.path, status, &message)
+                }
+            }
+        }
+    }
+    stats
+}
+
+/// Apply a successful upload-complete to local state (non-dirty), re-statting the
+/// file for the current plaintext mtime/size (the basis for dirty detection).
+fn finalize_upload(
+    content_root: &str,
+    pu: &PreparedUpload,
+    c: CompleteResult,
+    state: &mut LocalSyncState,
+    stats: &mut PhaseStats,
+) {
+    let abs_path = Path::new(content_root).join(&pu.path);
+    let (mtime, size) = match std::fs::metadata(&abs_path) {
+        Ok(meta) => {
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            (mtime, meta.len())
+        }
+        Err(_) => (0, pu.size),
+    };
+    state.upsert(
+        &pu.path,
+        c.version,
+        c.content_hash,
+        pu.plain_hash.clone(),
+        pu.plain_hash.clone(),
+        mtime,
+        size,
+    );
+    stats.pushed += 1;
+}
+
+/// Handle a push CAS conflict: save local content as a sidecar, then pull the
+/// remote version that beat us. Mirrors the per-file conflict path.
+#[allow(clippy::too_many_arguments)]
+async fn handle_push_conflict(
+    content_root: &str,
+    path: &str,
+    remote_version: Option<i32>,
+    remote_cipher_hash: Option<String>,
+    key: &[u8; 32],
+    fc: &FcClient,
+    state: &mut LocalSyncState,
+    stats: &mut PhaseStats,
+) {
+    stats.conflicts += 1;
+    tracing::warn!("[oss_sync] push conflict {path}: remote_version={remote_version:?}");
+    let abs_path = Path::new(content_root).join(path);
+    if let Ok(local_bytes) = std::fs::read(&abs_path) {
+        let local_cipher_hash = state
+            .files
+            .get(path)
+            .map(|f| f.synced_cipher_hash.as_str())
+            .unwrap_or("unknown");
+        let _ = write_conflict_sidecar(&abs_path, &local_bytes, local_cipher_hash).await;
+    }
+    if let Some(hash) = remote_cipher_hash {
+        let version = remote_version.unwrap_or(0);
+        let _ = download_and_write(content_root, path, &hash, version, key, fc, state).await;
+    }
+}
+
+/// Per-file PUSH fallback (pre-batch FC): one prepare/put/complete per file with
+/// in-call transient retry, identical to the pre-batch engine behavior.
+async fn apply_push_per_file(
+    content_root: &str,
+    path: &str,
+    team_id: &str,
+    key: &[u8; 32],
+    fc: &FcClient,
+    state: &mut LocalSyncState,
+    stats: &mut PhaseStats,
+) {
+    match upload_one_retrying(content_root, path, team_id, key, fc, state).await {
+        Ok(_) => stats.pushed += 1,
+        Err(SyncError::Conflict {
+            remote_version,
+            remote_cipher_hash,
+        }) => {
+            handle_push_conflict(
+                content_root,
+                path,
+                remote_version,
+                remote_cipher_hash,
+                key,
+                fc,
+                state,
+                stats,
+            )
+            .await
+        }
+        Err(e) => {
+            if is_transient(&e) {
+                stats.deferred += 1;
+                stats.last_transient = Some(e);
+            } else {
+                tracing::warn!("[oss_sync] push {path}: {e}");
+            }
+        }
+    }
+}
+
+/// Batched DELETE: tombstone N locally-deleted files in one FC round-trip.
+/// Per-file fallback on a pre-batch FC.
+async fn delete_phase(
+    team_id: &str,
+    fc: &FcClient,
+    state: &mut LocalSyncState,
+    dels: Vec<(String, i32)>,
+) -> PhaseStats {
+    let mut stats = PhaseStats::default();
+    if dels.is_empty() {
+        return stats;
+    }
+
+    for chunk in dels.chunks(MAX_BATCH) {
+        let items: Vec<DeleteBatchItem> = chunk
+            .iter()
+            .map(|(p, v)| DeleteBatchItem {
+                path: p.clone(),
+                parent_version: *v,
+                node_id: None,
+            })
+            .collect();
+
+        let outcomes = match with_batch_retry(|| fc.delete_batch(team_id, &items)).await {
+            Ok(o) => o,
+            Err(SyncError::BatchUnsupported) => {
+                for (p, v) in chunk {
+                    match delete_file_retrying(fc, team_id, p, *v).await {
+                        Ok(()) => {
+                            state.mark_deleted(p);
+                            stats.pushed += 1;
+                        }
+                        Err(SyncError::Conflict { .. }) => stats.conflicts += 1,
+                        Err(e) => {
+                            if is_transient(&e) {
+                                stats.deferred += 1;
+                                stats.last_transient = Some(e);
+                            } else {
+                                tracing::warn!("[oss_sync] delete {p}: {e}");
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            Err(e) => {
+                if is_transient(&e) {
+                    stats.deferred += chunk.len() as u32;
+                    stats.last_transient = Some(e);
+                } else {
+                    tracing::warn!("[oss_sync] delete-batch: {e}");
+                }
+                continue;
+            }
+        };
+
+        for ((p, _v), oc) in chunk.iter().zip(outcomes.into_iter()) {
+            match oc {
+                BatchItemOutcome::Ok(_) => {
+                    state.mark_deleted(p);
+                    stats.pushed += 1;
+                }
+                // Remote advanced since our last sync; leave the entry so the next
+                // pull reconciles rather than deleting a file someone else changed.
+                BatchItemOutcome::Conflict { .. } => stats.conflicts += 1,
+                BatchItemOutcome::Err { status, message } => {
+                    record_item_error(&mut stats, "delete", p, status, &message)
+                }
+            }
+        }
+    }
+    stats
 }
 
 /// Download a remote blob, verify cipher_hash, decrypt, write to disk,
@@ -637,5 +1192,94 @@ mod tests {
         // still detects the change and uploads it.
         assert_eq!(fs.mtime, 111, "refresh_dirty must not mutate mtime");
         assert_eq!(fs.size, 5, "refresh_dirty must not mutate size");
+    }
+
+    // ── batch helpers ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn record_item_error_defers_transient_only() {
+        let mut s = PhaseStats::default();
+        record_item_error(&mut s, "complete", "a.md", 429, "Too Many Requests");
+        assert_eq!(s.deferred, 1, "429 must defer for next-tick retry");
+        assert!(s.last_transient.is_some());
+
+        let mut s2 = PhaseStats::default();
+        record_item_error(&mut s2, "complete", "a.md", 410, "session gone");
+        assert_eq!(s2.deferred, 0, "410 is terminal, not deferred");
+        assert!(s2.last_transient.is_none());
+    }
+
+    #[test]
+    fn prepare_then_finalize_marks_synced_non_dirty() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+        std::fs::write(dir.path().join("skills/x.md"), b"hello world\n").unwrap();
+
+        let key = [7u8; 32];
+        let mut state = empty_state();
+
+        let pu = prepare_upload(root, "skills/x.md", &key, &state).unwrap();
+        assert_eq!(pu.parent_version, 0, "new file → parentVersion 0");
+        assert!(!pu.blob.is_empty(), "blob is the encrypted ciphertext");
+        assert_ne!(pu.cipher_hash, pu.plain_hash, "cipher hash != plain hash");
+
+        let c = CompleteResult {
+            version: 1,
+            content_hash: pu.cipher_hash.clone(),
+            change_seq: 5,
+        };
+        let mut stats = PhaseStats::default();
+        finalize_upload(root, &pu, c, &mut state, &mut stats);
+
+        assert_eq!(stats.pushed, 1);
+        let fs = &state.files["skills/x.md"];
+        assert_eq!(fs.synced_version, 1);
+        assert!(!fs.dirty, "just-synced file must be clean");
+        assert_eq!(fs.synced_cipher_hash, pu.cipher_hash);
+        assert_eq!(fs.synced_plain_hash, pu.plain_hash);
+    }
+
+    #[tokio::test]
+    async fn with_batch_retry_does_not_retry_batch_unsupported() {
+        let calls = std::cell::Cell::new(0);
+        let r: Result<(), SyncError> = with_batch_retry(|| {
+            calls.set(calls.get() + 1);
+            async { Err(SyncError::BatchUnsupported) }
+        })
+        .await;
+        assert!(matches!(r, Err(SyncError::BatchUnsupported)));
+        assert_eq!(calls.get(), 1, "404 is terminal — exactly one attempt");
+    }
+
+    #[tokio::test]
+    async fn with_batch_retry_does_not_retry_non_transient() {
+        let calls = std::cell::Cell::new(0);
+        let r: Result<(), SyncError> = with_batch_retry(|| {
+            calls.set(calls.get() + 1);
+            async { Err(SyncError::Auth("forbidden".into())) }
+        })
+        .await;
+        assert!(matches!(r, Err(SyncError::Auth(_))));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn with_batch_retry_retries_transient_then_succeeds() {
+        let calls = std::cell::Cell::new(0);
+        let r: Result<u8, SyncError> = with_batch_retry(|| {
+            let n = calls.get();
+            calls.set(n + 1);
+            async move {
+                if n == 0 {
+                    Err(SyncError::Network("HTTP 429 Too Many Requests".into()))
+                } else {
+                    Ok(7u8)
+                }
+            }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(calls.get(), 2, "one transient retry then success");
     }
 }
