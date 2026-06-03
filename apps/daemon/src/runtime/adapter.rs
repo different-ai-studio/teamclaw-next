@@ -1254,53 +1254,55 @@ async fn attach_acp_session_on_conn(
     };
 
     let t_session = Instant::now();
-    let (session_id, acp_model_state): (acp::SessionId, Option<acp::SessionModelState>) =
-        if let Some(ref resume_id) = resume_acp_session_id {
-            let resume_req = acp::ResumeSessionRequest::new(
-                acp::SessionId::new(resume_id.clone()),
-                worktree_path.clone(),
-            );
-            match conn.resume_session(resume_req).await {
-                Ok(resp) => {
-                    let sid = acp::SessionId::new(resume_id.clone());
-                    info!(
-                        session_id = %sid,
-                        resume_ms = t_session.elapsed().as_millis() as u64,
-                        "ACP session resumed on host"
-                    );
-                    (sid, resp.models)
-                }
-                Err(e) => {
-                    warn!(
-                        resume_id,
-                        "ACP resume_session failed ({}), falling back to new_session", e
-                    );
-                    let resp = conn
-                        .new_session(build_new_req(worktree_path.clone()))
-                        .await
-                        .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
-                    let sid = resp.session_id.clone();
-                    info!(
-                        session_id = %sid,
-                        new_session_ms = t_session.elapsed().as_millis() as u64,
-                        "ACP session created on host (fallback)"
-                    );
-                    (sid, resp.models)
-                }
+    let (session_id, acp_lists) = if let Some(ref resume_id) = resume_acp_session_id {
+        let resume_req = acp::ResumeSessionRequest::new(
+            acp::SessionId::new(resume_id.clone()),
+            worktree_path.clone(),
+        );
+        match conn.resume_session(resume_req).await {
+            Ok(resp) => {
+                let sid = acp::SessionId::new(resume_id.clone());
+                info!(
+                    session_id = %sid,
+                    resume_ms = t_session.elapsed().as_millis() as u64,
+                    "ACP session resumed on host"
+                );
+                (
+                    sid,
+                    (resp.models, resp.config_options),
+                )
             }
-        } else {
-            let resp = conn
-                .new_session(build_new_req(worktree_path))
-                .await
-                .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
-            let sid = resp.session_id.clone();
-            info!(
-                session_id = %sid,
-                new_session_ms = t_session.elapsed().as_millis() as u64,
-                "ACP session created on host"
-            );
-            (sid, resp.models)
-        };
+            Err(e) => {
+                warn!(
+                    resume_id,
+                    "ACP resume_session failed ({}), falling back to new_session", e
+                );
+                let resp = conn
+                    .new_session(build_new_req(worktree_path.clone()))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
+                let sid = resp.session_id.clone();
+                info!(
+                    session_id = %sid,
+                    new_session_ms = t_session.elapsed().as_millis() as u64,
+                    "ACP session created on host (fallback)"
+                );
+                (sid, (resp.models, resp.config_options))
+            }
+        }
+    } else {
+        let resp = conn
+            .new_session(build_new_req(worktree_path))
+            .await
+            .map_err(|e| anyhow::anyhow!("ACP new_session failed: {}", e))?;
+        let sid = resp.session_id.clone();
+        info!(
+            session_id = %sid,
+            new_session_ms = t_session.elapsed().as_millis() as u64,
+            "ACP session created on host"
+        );
+        (sid, (resp.models, resp.config_options))
+    };
 
     let acp_session_key = session_id.to_string();
     registry.borrow_mut().sessions.insert(
@@ -1314,16 +1316,22 @@ async fn attach_acp_session_on_conn(
         },
     );
 
-    let acp_current_model_id: Option<String> = acp_model_state
-        .as_ref()
-        .map(|s| s.current_model_id.0.to_string());
-    let available_models: Vec<amux::ModelInfo> = match acp_model_state.as_ref() {
-        Some(state) => crate::runtime::models::acp_models_to_proto(state),
-        None => crate::runtime::models::available_models_for(agent_type),
-    };
+    let (acp_model_state, acp_config_options) = acp_lists;
+    let acp_current_model_id = crate::runtime::models::resolve_current_model_id(
+        acp_model_state.as_ref(),
+        acp_config_options.as_deref(),
+    );
+    let available_models = crate::runtime::models::resolve_available_models(
+        agent_type,
+        acp_model_state.as_ref(),
+        acp_config_options.as_deref(),
+    );
     info!(
         agent_type = ?agent_type,
-        source = if acp_model_state.is_some() { "acp" } else { "fallback" },
+        source = crate::runtime::models::available_models_source_label(
+            acp_model_state.as_ref(),
+            acp_config_options.as_deref(),
+        ),
         count = available_models.len(),
         "available models resolved",
     );
