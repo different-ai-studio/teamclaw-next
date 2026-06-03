@@ -1,3 +1,4 @@
+pub mod acp_catalog_probe;
 pub mod acp_host;
 pub mod adapter;
 mod agent_trace;

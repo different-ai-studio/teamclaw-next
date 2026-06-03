@@ -348,7 +348,9 @@ function AgentPill({
     () => resolveAgentAvailableModels(liveRuntimeInfo),
     [liveRuntimeInfo],
   )
-  const runtimeInfoLoading = availableModels.length === 0
+  const runtimeInfoLoading =
+    availableModels.length === 0 &&
+    (!liveRuntimeInfo || liveRuntimeInfo.state === RuntimeLifecycle.STARTING)
   // Subscribe to the pick entry so explicit user picks immediately drive the
   // pill — selectAgentModel reads the same store but via getState() and would
   // otherwise miss a re-render trigger.
