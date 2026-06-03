@@ -228,6 +228,10 @@ test("listMessagesForSessionSince returns messages updated after timestamp", asy
   const rows = await repo.listMessagesForSessionSince(session.id, before);
   assert.ok(Array.isArray(rows));
   assert.ok(rows.length >= 1, "should return at least one message");
+  // Sync rows are snake_case (consumed directly by the client's lib/sync/message-sync).
+  const r = rows[0];
+  assert.ok("team_id" in r && "session_id" in r && "turn_id" in r && "created_at" in r, "must be snake_case");
+  assert.ok(!("sessionId" in r), "must not leak camelCase keys");
 });
 
 test("listMessagesForSessionSince with null updatedAfter returns all messages", async () => {

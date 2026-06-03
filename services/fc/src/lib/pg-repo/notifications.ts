@@ -9,8 +9,12 @@
  *  - registerDevicePushToken: keyed by user_id + device_id + provider.
  *  - writeForegroundPresence: keyed by user_id + device_id.
  *
- * Default shapes for getNotificationPrefs (when no row exists):
- *   { userId: null, pushEnabled: true, emailEnabled: false, digestFrequency: "off" }
+ * Wire shape (snake_case) — matches supabase-repo + the desktop/iOS clients,
+ * which consume the raw row directly (no client-side mapper for prefs):
+ *   { user_id, enabled, dnd_start_min, dnd_end_min, dnd_tz, updated_at }
+ * getNotificationPrefs returns null when no row exists so callers fall back to
+ * their own DEFAULT_PREFS. The push pipeline reads prefs via push-targets.ts
+ * (already snake_case), not through this method.
  */
 
 import { eq, and } from "drizzle-orm";
@@ -40,62 +44,60 @@ export function makeNotificationsRepo(db: DbLike, ctx: NotificationsCtx = {}) {
     // ── getNotificationPrefs ────────────────────────────────────────────────
     async getNotificationPrefs() {
       const userId = ctx.userId ?? null;
-      if (!userId) {
-        return {
-          userId: null,
-          pushEnabled: true,
-          emailEnabled: false,
-          digestFrequency: "off" as const,
-        };
-      }
+      if (!userId) return null;
       const rows = await db
         .select()
         .from(notificationPrefs)
         .where(eq(notificationPrefs.userId, userId))
         .limit(1);
       const row = rows[0];
-      if (!row) {
-        return {
-          userId,
-          pushEnabled: true,
-          emailEnabled: false,
-          digestFrequency: "off" as const,
-        };
-      }
-      return mapNotificationPrefs(row);
+      return row ? mapNotificationPrefs(row) : null;
     },
 
     // ── putNotificationPrefs ────────────────────────────────────────────────
+    // Accepts the snake_case prefs row the client POSTs:
+    //   { user_id, enabled, dnd_start_min, dnd_end_min, dnd_tz, updated_at }
+    // Identity is taken from the caller (ctx.userId), never the client body.
     async putNotificationPrefs(input: {
-      userId?: string | null;
-      pushEnabled?: boolean;
-      emailEnabled?: boolean;
-      digestFrequency?: string;
+      user_id?: string | null;
+      enabled?: boolean;
+      dnd_start_min?: number | null;
+      dnd_end_min?: number | null;
+      dnd_tz?: string | null;
     }) {
-      const userId = requireUserId(input.userId);
-      const pushEnabled = input.pushEnabled ?? true;
-      const emailEnabled = input.emailEnabled ?? false;
-      const digestFrequency = input.digestFrequency ?? "off";
+      const userId = requireUserId(input.user_id);
+      const enabled = input.enabled ?? true;
+      const dndStartMin = input.dnd_start_min ?? null;
+      const dndEndMin = input.dnd_end_min ?? null;
+      const now = new Date();
 
-      // Persist only the real schema columns: enabled (= pushEnabled).
-      // emailEnabled and digestFrequency have no columns in the real schema —
-      // they are accepted from the caller and echoed back as defaults only.
-      // dnd_tz is reserved for its real purpose (DnD timezone string).
-      await (db.insert(notificationPrefs) as any)
-        .values({
-          userId,
-          enabled: pushEnabled,
-        })
+      const insertValues: Record<string, unknown> = {
+        userId,
+        enabled,
+        dndStartMin,
+        dndEndMin,
+        updatedAt: now,
+      };
+      const updateSet: Record<string, unknown> = {
+        enabled,
+        dndStartMin,
+        dndEndMin,
+        updatedAt: now,
+      };
+      // dnd_tz has a NOT NULL default; only override it when the caller sends one.
+      if (input.dnd_tz != null) {
+        insertValues.dndTz = input.dnd_tz;
+        updateSet.dndTz = input.dnd_tz;
+      }
+
+      const [row] = await (db.insert(notificationPrefs) as any)
+        .values(insertValues)
         .onConflictDoUpdate({
           target: notificationPrefs.userId,
-          set: {
-            enabled: pushEnabled,
-            updatedAt: new Date(),
-          },
-        });
-      // Echo back the full input shape (emailEnabled/digestFrequency are not
-      // persisted but are returned to satisfy the contract's echo semantics).
-      return { userId, pushEnabled, emailEnabled, digestFrequency };
+          set: updateSet,
+        })
+        .returning();
+      return mapNotificationPrefs(row);
     },
 
     // ── muteSession ─────────────────────────────────────────────────────────
@@ -186,13 +188,17 @@ export function makeNotificationsRepo(db: DbLike, ctx: NotificationsCtx = {}) {
 function mapNotificationPrefs(row: {
   userId: string;
   enabled: boolean;
+  dndStartMin: number | null;
+  dndEndMin: number | null;
+  dndTz: string | null;
+  updatedAt: Date | string | null;
 }) {
-  // emailEnabled and digestFrequency are not stored in the real schema.
-  // Return non-persisted defaults alongside the real persisted columns.
   return {
-    userId: row.userId,
-    pushEnabled: row.enabled,
-    emailEnabled: false,
-    digestFrequency: "off" as const,
+    user_id: row.userId,
+    enabled: row.enabled,
+    dnd_start_min: row.dndStartMin ?? null,
+    dnd_end_min: row.dndEndMin ?? null,
+    dnd_tz: row.dndTz ?? null,
+    updated_at: row.updatedAt ? new Date(row.updatedAt).toISOString() : null,
   };
 }

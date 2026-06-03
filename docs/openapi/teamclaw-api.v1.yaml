@@ -3884,55 +3884,82 @@ components:
             $ref: "#/components/schemas/TeamMember"
     NotificationPrefs:
       type: object
-      required: [userId, pushEnabled, emailEnabled, digestFrequency]
+      # Returned as the raw snake_case row; clients consume it directly (no
+      # mapper) and fall back to their own defaults when the response is null.
+      required: [enabled]
       properties:
-        userId:
-          type: string
-          format: uuid
-        pushEnabled:
-          type: boolean
-        emailEnabled:
-          type: boolean
-        digestFrequency:
-          type: string
-          enum: [off, daily, weekly]
-    Shortcut:
-      type: object
-      required: [id, teamId, kind, label, position]
-      properties:
-        id:
-          type: string
-          format: uuid
-        teamId:
-          type: string
-          format: uuid
-        parentId:
+        user_id:
           type:
             - string
             - "null"
           format: uuid
-        kind:
-          type: string
-        label:
-          type: string
-        payload:
+        enabled:
+          type: boolean
+        dnd_start_min:
           type:
-            - object
+            - integer
             - "null"
-          additionalProperties: true
-        position:
-          type: integer
-        visibleRoleIds:
-          type: array
-          items:
-            type: string
-            format: uuid
-        createdAt:
+          description: Quiet-hours start as local minute-of-day (0..1439).
+        dnd_end_min:
+          type:
+            - integer
+            - "null"
+          description: Quiet-hours end as local minute-of-day (0..1439).
+        dnd_tz:
+          type:
+            - string
+            - "null"
+          description: IANA timezone used to evaluate quiet hours.
+        updated_at:
           type:
             - string
             - "null"
           format: date-time
-        updatedAt:
+    Shortcut:
+      type: object
+      # Returned as the raw snake_case row; the desktop client consumes it
+      # directly (no mapper). Role visibility is exposed separately via
+      # GET /v1/teams/{teamId}/shortcut-role-bindings.
+      required: [id, team_id, node_type, label, order]
+      properties:
+        id:
+          type: string
+          format: uuid
+        scope:
+          type: string
+        label:
+          type: string
+        owner_member_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        team_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        parent_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        icon:
+          type:
+            - string
+            - "null"
+        order:
+          type: integer
+        node_type:
+          type: string
+        target:
+          type: string
+        created_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        updated_at:
           type:
             - string
             - "null"

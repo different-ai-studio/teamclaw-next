@@ -46,20 +46,25 @@ interface ShortcutsCtx {
   userId?: string;
 }
 
-function mapShortcut(r: any, visibleRoleIds: string[] = []) {
+// Snake_case wire shape — matches supabase-repo's mapShortcutRow and the
+// desktop client's ShortcutRow (consumed directly, no client-side mapper).
+// Role visibility is exposed separately via listShortcutRoleBindings, so it is
+// intentionally NOT part of the shortcut row (mirrors supabase). The unused
+// roleIds param is retained so existing call sites stay unchanged.
+function mapShortcut(r: any, _visibleRoleIds: string[] = []) {
   return {
     id: r.id,
-    teamId: r.teamId,
-    // nodeType is the DB column name; contract uses "kind"
-    kind: r.nodeType,
+    scope: r.scope,
     label: r.label,
-    parentId: r.parentId ?? null,
-    // target is the DB column; contract uses "payload"
-    payload: r.target ?? null,
-    position: r.order ?? 0,
-    visibleRoleIds,
-    createdAt: iso(r.createdAt)!,
-    updatedAt: iso(r.updatedAt)!,
+    owner_member_id: r.ownerMemberId ?? null,
+    team_id: r.teamId ?? null,
+    parent_id: r.parentId ?? null,
+    icon: r.icon ?? null,
+    order: r.order ?? 0,
+    node_type: r.nodeType,
+    target: r.target ?? "",
+    created_at: iso(r.createdAt),
+    updated_at: iso(r.updatedAt),
   };
 }
 

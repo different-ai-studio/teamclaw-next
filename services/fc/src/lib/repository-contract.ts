@@ -411,28 +411,35 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     await repo.removeTeamActor("team-1", "actor-to-remove");
   });
 
-  test("repository contract: getNotificationPrefs returns defaults when absent", async () => {
+  test("repository contract: getNotificationPrefs returns a snake_case prefs row or null", async () => {
     const repo = createRepository();
     const prefs = await repo.getNotificationPrefs();
-    assert.ok(prefs.userId === null || typeof prefs.userId === "string");
-    assert.equal(typeof prefs.pushEnabled, "boolean");
-    assert.equal(typeof prefs.emailEnabled, "boolean");
-    assert.ok(["off", "daily", "weekly"].includes(prefs.digestFrequency));
+    // Clients consume the raw snake_case row directly and fall back to their own
+    // DEFAULT_PREFS when null. DND fields drive quiet-hours filtering.
+    if (prefs !== null) {
+      assert.ok(prefs.user_id === null || typeof prefs.user_id === "string");
+      assert.equal(typeof prefs.enabled, "boolean");
+      assert.ok("dnd_start_min" in prefs, "must expose dnd_start_min");
+      assert.ok("dnd_end_min" in prefs, "must expose dnd_end_min");
+      assert.ok("dnd_tz" in prefs, "must expose dnd_tz");
+    }
   });
 
-  test("repository contract: putNotificationPrefs upserts prefs", async () => {
+  test("repository contract: putNotificationPrefs upserts snake_case prefs incl. DND", async () => {
     const repo = createRepository();
     const input = {
-      userId: "user-1",
-      pushEnabled: false,
-      emailEnabled: true,
-      digestFrequency: "daily",
+      user_id: "user-1",
+      enabled: false,
+      dnd_start_min: 1320,
+      dnd_end_min: 480,
+      dnd_tz: "Asia/Shanghai",
     };
     const out = await repo.putNotificationPrefs(input);
-    assert.deepEqual(out.userId, "user-1");
-    assert.equal(out.pushEnabled, false);
-    assert.equal(out.emailEnabled, true);
-    assert.equal(out.digestFrequency, "daily");
+    assert.equal(out.user_id, "user-1");
+    assert.equal(out.enabled, false);
+    assert.equal(out.dnd_start_min, 1320);
+    assert.equal(out.dnd_end_min, 480);
+    assert.equal(out.dnd_tz, "Asia/Shanghai");
   });
 
   test("repository contract: muteSession succeeds", async () => {
@@ -460,17 +467,21 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.ok(Array.isArray(result), "result must be an array");
     assert.ok(result.length >= 1, "contract fixture must include at least one shortcut");
     const shortcut = result[0];
+    // snake_case row — consumed directly by the desktop client's ShortcutRow.
+    // Role visibility is a separate endpoint (listShortcutRoleBindings).
     assert.deepEqual(Object.keys(shortcut).sort(), [
-      "createdAt",
+      "created_at",
+      "icon",
       "id",
-      "kind",
       "label",
-      "parentId",
-      "payload",
-      "position",
-      "teamId",
-      "updatedAt",
-      "visibleRoleIds",
+      "node_type",
+      "order",
+      "owner_member_id",
+      "parent_id",
+      "scope",
+      "target",
+      "team_id",
+      "updated_at",
     ].sort());
   });
 
@@ -483,8 +494,8 @@ test("repository contract: getTeamDirectory returns actors and members", async (
       position: 100,
     });
     assert.ok(shortcut.id, "shortcut must have id");
-    assert.equal(shortcut.teamId, "team-1");
-    assert.equal(shortcut.kind, "link");
+    assert.equal(shortcut.team_id, "team-1");
+    assert.equal(shortcut.node_type, "link");
     assert.equal(shortcut.label, "New Shortcut");
   });
 

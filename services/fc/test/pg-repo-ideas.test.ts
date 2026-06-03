@@ -228,6 +228,10 @@ test("listIdeasForSync returns all team ideas", async () => {
   const rows = await repo.listIdeasForSync(team.id, null);
   assert.ok(Array.isArray(rows));
   assert.equal(rows.length, 2);
+  // Sync rows are snake_case (consumed directly by the client's lib/sync/idea-sync).
+  const r = rows[0];
+  assert.ok("team_id" in r && "sort_order" in r && "created_by_actor_id" in r && "created_at" in r, "must be snake_case");
+  assert.ok(!("teamId" in r), "must not leak camelCase keys");
 });
 
 // ── authz test ────────────────────────────────────────────────────────────────

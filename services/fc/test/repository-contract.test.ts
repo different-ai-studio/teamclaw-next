@@ -58,8 +58,8 @@ test("golden response: GET /v1/ideas", async () => {
 });
 
 function contractRepo() {
-  const shortcutStore = [
-    { id: "shortcut-1", teamId: "team-1", parentId: null, kind: "link", label: "Home", payload: null, position: 0, visibleRoleIds: [], createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+  const shortcutStore: any[] = [
+    { id: "shortcut-1", scope: "team", label: "Home", owner_member_id: null, team_id: "team-1", parent_id: null, icon: null, order: 0, node_type: "link", target: "", created_at: "2026-05-01T00:00:00Z", updated_at: "2026-05-01T00:00:00Z" },
   ];
   const roleStore = [
     { id: "role-1", teamId: "team-1", code: "admin", name: "Admin" },
@@ -355,14 +355,16 @@ function contractRepo() {
       return { items: ["actor-1"] };
     },
     async getNotificationPrefs() {
-      return { userId: null, pushEnabled: true, emailEnabled: false, digestFrequency: "off" };
+      return { user_id: null, enabled: true, dnd_start_min: null, dnd_end_min: null, dnd_tz: "Asia/Shanghai", updated_at: null };
     },
     async putNotificationPrefs(input) {
       return {
-        userId: input.userId ?? "user-1",
-        pushEnabled: input.pushEnabled ?? true,
-        emailEnabled: input.emailEnabled ?? false,
-        digestFrequency: input.digestFrequency ?? "off",
+        user_id: input.user_id ?? "user-1",
+        enabled: input.enabled ?? true,
+        dnd_start_min: input.dnd_start_min ?? null,
+        dnd_end_min: input.dnd_end_min ?? null,
+        dnd_tz: input.dnd_tz ?? "Asia/Shanghai",
+        updated_at: null,
       };
     },
     async registerDevicePushToken(input) {
@@ -459,24 +461,26 @@ function contractRepo() {
       assert.ok(Array.isArray(ideaIds));
     },
     async listShortcuts(teamId: any, { parentId }: any = {}) {
-      let items = shortcutStore.filter(s => s.teamId === teamId);
+      let items = shortcutStore.filter(s => s.team_id === teamId);
       if (parentId !== undefined) {
-        items = items.filter(s => s.parentId === parentId);
+        items = items.filter(s => s.parent_id === parentId);
       }
       return items;
     },
     async createShortcut(body) {
       const s = {
         id: body.id ?? "shortcut-new",
-        teamId: body.teamId,
-        parentId: body.parentId ?? null,
-        kind: body.kind,
+        scope: body.scope ?? "team",
         label: body.label,
-        payload: body.payload ?? null,
-        position: body.position ?? 0,
-        visibleRoleIds: body.visibleRoleIds ?? [],
-        createdAt: "2026-05-27T01:00:00Z",
-        updatedAt: "2026-05-27T01:00:00Z",
+        owner_member_id: null,
+        team_id: body.teamId,
+        parent_id: body.parentId ?? null,
+        icon: body.icon ?? null,
+        order: body.position ?? 0,
+        node_type: body.kind,
+        target: body.payload ?? "",
+        created_at: "2026-05-27T01:00:00Z",
+        updated_at: "2026-05-27T01:00:00Z",
       };
       shortcutStore.push(s);
       return s;
@@ -485,10 +489,10 @@ function contractRepo() {
       const s = shortcutStore.find(s => s.id === shortcutId);
       if (!s) return null;
       if (patch.label !== undefined) s.label = patch.label;
-      if (patch.payload !== undefined) s.payload = patch.payload;
-      if (patch.parentId !== undefined) s.parentId = patch.parentId;
-      if (patch.position !== undefined) s.position = patch.position;
-      s.updatedAt = "2026-05-27T02:00:00Z";
+      if (patch.payload !== undefined) s.target = patch.payload;
+      if (patch.parentId !== undefined) s.parent_id = patch.parentId;
+      if (patch.position !== undefined) s.order = patch.position;
+      s.updated_at = "2026-05-27T02:00:00Z";
       return s;
     },
     async deleteShortcut(shortcutId) {

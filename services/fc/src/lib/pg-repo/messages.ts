@@ -52,6 +52,25 @@ function mapMessage(r: any) {
   };
 }
 
+// Snake_case sync wire shape — consumed directly by the client's
+// lib/sync/message-sync.ts (no client mapper). Matches supabase MESSAGE_SYNC_COLUMNS.
+function mapMessageSyncRow(r: any) {
+  return {
+    id: r.id,
+    team_id: r.teamId,
+    session_id: r.sessionId,
+    turn_id: r.turnId ?? null,
+    sender_actor_id: r.senderActorId ?? null,
+    reply_to_message_id: r.replyToMessageId ?? null,
+    kind: r.kind ?? "text",
+    content: r.content ?? "",
+    metadata: r.metadata ?? null,
+    model: r.model ?? null,
+    created_at: iso(r.createdAt),
+    updated_at: iso(r.updatedAt),
+  };
+}
+
 function isPkViolation(err: any): boolean {
   // pglite surfaces the code directly on the error object
   const code = err?.code ?? err?.cause?.code;
@@ -149,18 +168,18 @@ export function makeMessagesRepo(db: DbLike, deps?: MessagesRepoDeps) {
 
     // ── listMessagesForSessionSince ───────────────────────────────────────────
     async listMessagesForSessionSince(sessionId: string, updatedAfter: string | null) {
-      if (updatedAfter) {
-        return db
-          .select()
-          .from(messages)
-          .where(
-            and(
-              eq(messages.sessionId, sessionId),
-              gt(messages.updatedAt, new Date(updatedAfter)),
-            ),
-          );
-      }
-      return db.select().from(messages).where(eq(messages.sessionId, sessionId));
+      const rows = updatedAfter
+        ? await db
+            .select()
+            .from(messages)
+            .where(
+              and(
+                eq(messages.sessionId, sessionId),
+                gt(messages.updatedAt, new Date(updatedAfter)),
+              ),
+            )
+        : await db.select().from(messages).where(eq(messages.sessionId, sessionId));
+      return rows.map(mapMessageSyncRow);
     },
   };
 }

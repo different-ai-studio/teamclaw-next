@@ -82,6 +82,37 @@ function mapParticipant(r: any) {
   };
 }
 
+// ── Sync wire shapes (snake_case) ──────────────────────────────────────────
+// Consumed directly by the desktop client's lib/sync/* (no client-side mapper),
+// so these must match supabase-repo's sync SELECT columns exactly.
+function mapSessionSyncRow(r: any) {
+  return {
+    id: r.id,
+    team_id: r.teamId,
+    title: r.title ?? null,
+    mode: r.mode ?? null,
+    primary_agent_id: r.primaryAgentId ?? null,
+    idea_id: r.ideaId ?? null,
+    summary: r.summary ?? null,
+    last_message_preview: r.lastMessagePreview ?? null,
+    last_message_at: iso(r.lastMessageAt),
+    created_by_actor_id: r.createdByActorId ?? null,
+    created_at: iso(r.createdAt),
+    updated_at: iso(r.updatedAt),
+  };
+}
+
+function mapSessionParticipantSyncRow(r: any) {
+  return {
+    id: r.id,
+    session_id: r.sessionId,
+    actor_id: r.actorId,
+    joined_at: iso(r.joinedAt),
+    created_at: iso(r.createdAt),
+    updated_at: iso(r.updatedAt),
+  };
+}
+
 export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
   // Resolve every actor id that belongs to the authenticated user (one per team).
   // Mirrors `app.current_actor_id()` semantics but across ALL the user's actors
@@ -537,14 +568,13 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
 
     // ── listSessionsForTeamSince ──────────────────────────────────────────────
     async listSessionsForTeamSince(teamId: string, updatedAfter: string | null) {
-      let query = db.select().from(sessions).where(eq(sessions.teamId, teamId)) as any;
-      if (updatedAfter) {
-        query = db
-          .select()
-          .from(sessions)
-          .where(and(eq(sessions.teamId, teamId), gt(sessions.updatedAt, new Date(updatedAfter))));
-      }
-      return query;
+      const rows = updatedAfter
+        ? await db
+            .select()
+            .from(sessions)
+            .where(and(eq(sessions.teamId, teamId), gt(sessions.updatedAt, new Date(updatedAfter))))
+        : await db.select().from(sessions).where(eq(sessions.teamId, teamId));
+      return rows.map(mapSessionSyncRow);
     },
 
     // ── listSessionDisplayRows ────────────────────────────────────────────────
@@ -615,22 +645,18 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
 
     // ── listSessionParticipantsForSync ────────────────────────────────────────
     async listSessionParticipantsForSync(sessionId: string, updatedAfter: string | null) {
-      let query = db
-        .select()
-        .from(sessionParticipants)
-        .where(eq(sessionParticipants.sessionId, sessionId)) as any;
-      if (updatedAfter) {
-        query = db
-          .select()
-          .from(sessionParticipants)
-          .where(
-            and(
-              eq(sessionParticipants.sessionId, sessionId),
-              gt(sessionParticipants.updatedAt, new Date(updatedAfter)),
-            ),
-          );
-      }
-      return query;
+      const rows = updatedAfter
+        ? await db
+            .select()
+            .from(sessionParticipants)
+            .where(
+              and(
+                eq(sessionParticipants.sessionId, sessionId),
+                gt(sessionParticipants.updatedAt, new Date(updatedAfter)),
+              ),
+            )
+        : await db.select().from(sessionParticipants).where(eq(sessionParticipants.sessionId, sessionId));
+      return rows.map(mapSessionParticipantSyncRow);
     },
   };
 }

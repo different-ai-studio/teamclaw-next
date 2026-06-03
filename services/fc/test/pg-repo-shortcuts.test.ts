@@ -100,8 +100,8 @@ test("listShortcuts returns items with canonical contract keys", async () => {
   assert.ok(result.length >= 1);
   const shortcut = result[0];
   assert.deepEqual(Object.keys(shortcut).sort(), [
-    "createdAt", "id", "kind", "label", "parentId",
-    "payload", "position", "teamId", "updatedAt", "visibleRoleIds",
+    "created_at", "icon", "id", "label", "node_type", "order",
+    "owner_member_id", "parent_id", "scope", "target", "team_id", "updated_at",
   ].sort());
 });
 
@@ -138,8 +138,8 @@ test("createShortcut returns shortcut with canonical keys", async () => {
   });
 
   assert.ok(shortcut.id);
-  assert.equal(shortcut.teamId, team.id);
-  assert.equal(shortcut.kind, "link");
+  assert.equal(shortcut.team_id, team.id);
+  assert.equal(shortcut.node_type, "link");
   assert.equal(shortcut.label, "New Shortcut");
 });
 
@@ -342,18 +342,21 @@ test("setShortcutVisibleRoles swaps permission_roles for the shortcut", async ()
   // Set role1
   await repo.setShortcutVisibleRoles(shortcut.id, { roleIds: [role1.id] });
 
-  // Verify via listShortcuts that visibleRoleIds reflects the change
-  const items = await repo.listShortcuts(team.id, {});
-  const s = items.find((x: any) => x.id === shortcut.id);
-  assert.ok(s);
-  assert.ok(s.visibleRoleIds.includes(role1.id), "role1 should appear in visibleRoleIds");
+  // Role visibility is verified via listShortcutRoleBindings (the canonical
+  // endpoint). The shortcut row itself no longer carries visible_roles — it now
+  // mirrors supabase's snake_case row shape consumed directly by the client.
+  const roleIdsFor = async (sid: string): Promise<string[]> => {
+    const bindings = await repo.listShortcutRoleBindings(team.id);
+    const b = bindings.find((x: any) => x.resource_id === sid);
+    return (b?.permission_roles ?? []).map((x: any) => x.role_id);
+  };
+  assert.ok((await roleIdsFor(shortcut.id)).includes(role1.id), "role1 should be bound");
 
   // Swap to role2 only
   await repo.setShortcutVisibleRoles(shortcut.id, { roleIds: [role2.id] });
-  const items2 = await repo.listShortcuts(team.id, {});
-  const s2 = items2.find((x: any) => x.id === shortcut.id);
-  assert.ok(!s2.visibleRoleIds.includes(role1.id), "role1 should be removed");
-  assert.ok(s2.visibleRoleIds.includes(role2.id), "role2 should appear");
+  const after = await roleIdsFor(shortcut.id);
+  assert.ok(!after.includes(role1.id), "role1 should be removed");
+  assert.ok(after.includes(role2.id), "role2 should appear");
 });
 
 test("setShortcutVisibleRoles clears all roles when roleIds is empty", async () => {
@@ -369,10 +372,10 @@ test("setShortcutVisibleRoles clears all roles when roleIds is empty", async () 
   await repo.setShortcutVisibleRoles(shortcut.id, { roleIds: [role.id] });
   await repo.setShortcutVisibleRoles(shortcut.id, { roleIds: [] });
 
-  const items = await repo.listShortcuts(team.id, {});
-  const s = items.find((x: any) => x.id === shortcut.id);
-  assert.ok(s);
-  assert.deepEqual(s.visibleRoleIds, [], "all roles should be cleared");
+  const bindings = await repo.listShortcutRoleBindings(team.id);
+  const binding = bindings.find((x: any) => x.resource_id === shortcut.id);
+  const roleIds = (binding?.permission_roles ?? []).map((x: any) => x.role_id);
+  assert.deepEqual(roleIds, [], "all roles should be cleared");
 });
 
 // ── listShortcutsByScope ──────────────────────────────────────────────────────
@@ -388,7 +391,7 @@ test("listShortcutsByScope filters by scope=team", async () => {
 
   const teamScoped = await repo.listShortcutsByScope({ scope: "team", teamId: team.id });
   assert.ok(Array.isArray(teamScoped));
-  assert.ok(teamScoped.every((s: any) => s.kind !== undefined), "items must be shortcut shapes");
+  assert.ok(teamScoped.every((s: any) => s.node_type !== undefined), "items must be shortcut shapes");
   // All results should come from the right team
   assert.ok(teamScoped.find((s: any) => s.label === "TeamScope"), "team-scope shortcut should appear");
   assert.ok(!teamScoped.find((s: any) => s.label === "PersonalScope"), "personal shortcut should not appear in team scope");
