@@ -1,6 +1,7 @@
 import { create as createProto } from "@bufbuild/protobuf";
 import { ActorSchema, ActorType, MessageKind, MessageSchema, type Message } from "@/lib/proto/teamclaw_pb";
 import {
+  setLocalCacheCurrentTeam,
   upsertActorsBatch,
   upsertMessagesBatch,
   upsertSessionParticipantsBatch,
@@ -629,6 +630,11 @@ const control: V2E2EControl = {
     );
 
     if (isTauri()) {
+      // Point the local-cache team gate at the seeded team. installCurrentTeam
+      // above only updates the frontend store; without this the Rust gate stays
+      // on whatever the persisted dev login set (a real team), and every upsert
+      // batch below is rejected with "team gate mismatch".
+      await setLocalCacheCurrentTeam(input.teamId);
       const timestamp = nowIso();
       const actorRows: ActorRow[] = actors.map((actor) => ({
         id: actor.id,
