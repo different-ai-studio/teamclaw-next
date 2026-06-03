@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { getBackend } from "@/lib/backend";
 import { isTauri } from "@/lib/utils";
+import { devSkipDaemonOnboarding, devSkipSetup } from "@/lib/dev-onboarding-flags";
 import { generateRandomTeamName } from "@/lib/random-team-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
 import { LoginScreen } from "./LoginScreen";
@@ -29,12 +30,12 @@ export function AuthGate({ children }: AuthGateProps) {
   const setupLoaded = useSetupStore((s) => s.loaded);
   const setupRequiredSatisfied = useSetupStore((s) => s.requiredSatisfied());
   const listSetup = useSetupStore((s) => s.listRequirements);
-  const [setupAck, setSetupAck] = useState(false);
+  const [setupAck, setSetupAck] = useState(() => devSkipSetup());
 
   const daemonStatus = useDaemonOnboardingStore((s) => s.status);
   const daemonLoaded = useDaemonOnboardingStore((s) => s.loaded);
   const refreshDaemonOnboarding = useDaemonOnboardingStore((s) => s.refresh);
-  const [daemonOnboardingAck, setDaemonOnboardingAck] = useState(false);
+  const [daemonOnboardingAck, setDaemonOnboardingAck] = useState(() => devSkipDaemonOnboarding());
 
   useEffect(() => {
     if (isTauri()) void listSetup();
