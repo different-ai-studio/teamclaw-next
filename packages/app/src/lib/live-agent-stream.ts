@@ -180,6 +180,11 @@ export function isTerminalAgentStatus(status: AgentStatus | number | undefined):
   );
 }
 
+/** Daemon emits `statusChange` with `newStatus=ACTIVE` when a prompt turn starts. */
+export function isAgentActiveStatus(status: AgentStatus | number | undefined): boolean {
+  return status === AgentStatus.ACTIVE;
+}
+
 type PendingReplyStreamLike = {
   toolCalls?: Array<{ id?: string; status?: string }>;
   parts?: Array<{

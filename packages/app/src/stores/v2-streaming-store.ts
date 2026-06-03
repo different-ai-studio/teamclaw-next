@@ -79,6 +79,8 @@ interface State {
   finishSessionActor: (sessionId: string, actorId: string) => void;
   /** Re-open live rendering after statusChange marked the turn inactive too early. */
   markActorStreamActive: (sessionId: string, actorId: string) => void;
+  /** Empty active stream for statusChange ACTIVE — shows planning placeholder in UI. */
+  beginPlanningPlaceholder: (sessionId: string, actorId: string) => void;
   /** Drop live byKey; archive tools/thinking only when parts_json did not persist them. */
   releaseActorAfterPersist: (
     sessionId: string,
@@ -142,6 +144,19 @@ function persistSessionPlan(
 
 function entryParts(entry: AgentStreamEntry): MessagePart[] {
   return Array.isArray(entry.parts) ? entry.parts : [];
+}
+
+/** True when the stream already has thinking, output, tools, or errors to render. */
+export function streamEntryHasVisibleContent(entry: AgentStreamEntry): boolean {
+  if (entry.errorMessage) return true;
+  if (entry.thinkingText.length > 0 || entry.outputText.length > 0) return true;
+  if (entry.toolCalls.length > 0) return true;
+  return entryParts(entry).some(
+    (part) =>
+      (part.type === "reasoning" && Boolean(part.text || part.content)) ||
+      (part.type === "text" && Boolean(part.text || part.content)) ||
+      (part.type === "tool-call" && Boolean(part.toolCall)),
+  );
 }
 
 /** True when persisted parts_json already carries tool/thinking for ChatMessage. */
@@ -835,6 +850,34 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           lastUpdate: Date.now(),
         },
       },
+    });
+  },
+
+  beginPlanningPlaceholder: (sessionId, actorId) => {
+    const state = get();
+    const key = k(sessionId, actorId);
+    const existing = state.byKey[key];
+    if (existing?.active && streamEntryHasVisibleContent(existing)) return;
+
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    set({
+      byKey: {
+        ...state.byKey,
+        [key]: {
+          ...entry,
+          outputText: "",
+          thinkingText: "",
+          parts: [],
+          toolCalls: [],
+          planEntries: entry.planEntries,
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: Date.now(),
+          active: true,
+        },
+      },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
     });
   },
 

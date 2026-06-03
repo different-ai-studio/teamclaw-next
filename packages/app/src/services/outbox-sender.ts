@@ -137,6 +137,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       teamId: entry.teamId,
       duplicateAlreadyInserted,
     });
+    store.markCloudPersisted(entry.messageId);
 
     if (entry.mentionActorIds.length > 0) {
       const participants = await getBackend().sessionMembers.listParticipants(

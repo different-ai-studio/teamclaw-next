@@ -10,6 +10,12 @@ vi.mock('@/components/sidebar/IdeasSection', () => ({
 vi.mock('@/components/sidebar/ActorsSection', () => ({
   ActorsSection: () => <div data-testid="actors-section" />,
 }))
+vi.mock('@/components/sidebar/NewChatSplitButton', () => ({
+  NewChatSplitButton: () => <div data-testid="new-chat-split" />,
+}))
+vi.mock('@/lib/daemon-agent-admin', () => ({
+  getCurrentDaemonAgent: vi.fn().mockResolvedValue({ id: 'a1', displayName: 'Agent' }),
+}))
 vi.mock('sonner', () => ({
   toast: vi.fn(),
 }))

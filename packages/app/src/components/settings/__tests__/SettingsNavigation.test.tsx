@@ -124,7 +124,6 @@ describe('Settings navigation', () => {
       'LLM Model',
       'Env Variables',
       'Prompt',
-      'Permissions',
       'MCP',
       'Roles',
       'Role Skills',

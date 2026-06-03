@@ -371,6 +371,26 @@ describe("v2-streaming-store", () => {
     expect(finalized.parts[2].text).toBe("Updated final answer.");
   });
 
+  it("beginPlanningPlaceholder opens an empty active stream for statusChange ACTIVE", () => {
+    const store = useV2StreamingStore.getState();
+    store.beginPlanningPlaceholder("s1", "a1");
+
+    const entry = useV2StreamingStore.getState().byKey["s1::a1"];
+    expect(entry.active).toBe(true);
+    expect(entry.outputText).toBe("");
+    expect(entry.thinkingText).toBe("");
+    expect(entry.parts).toHaveLength(0);
+  });
+
+  it("beginPlanningPlaceholder does not clobber an in-flight stream with content", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendThinking("s1", "a1", "Already thinking");
+    store.beginPlanningPlaceholder("s1", "a1");
+
+    const entry = useV2StreamingStore.getState().byKey["s1::a1"];
+    expect(entry.thinkingText).toBe("Already thinking");
+  });
+
   it("markActorStreamActive re-opens a stream after finishSessionActor", () => {
     const store = useV2StreamingStore.getState();
     store.appendOutput("s1", "a1", "Hello");
