@@ -27,9 +27,10 @@ fn parse_init_outcome(stdout: &str) -> Option<DaemonInitResult> {
         }
     }
     match (actor_id, team_id) {
-        (Some(a), Some(t)) if !a.is_empty() && !t.is_empty() => {
-            Some(DaemonInitResult { actor_id: a, team_id: t })
-        }
+        (Some(a), Some(t)) if !a.is_empty() && !t.is_empty() => Some(DaemonInitResult {
+            actor_id: a,
+            team_id: t,
+        }),
         _ => None,
     }
 }

@@ -106,13 +106,17 @@ pub async fn setup_list_requirements<R: Runtime>(
     // `present` = no action needed (installed AND new enough). `version` = the
     // installed version, so the UI can show 安装 (none) vs 升级 (older) and which.
     let amuxd = doctor.as_ref().map(|d| &d["amuxd"]);
-    let amuxd_satisfied = amuxd.and_then(|a| a["satisfied"].as_bool()).unwrap_or(false);
+    let amuxd_satisfied = amuxd
+        .and_then(|a| a["satisfied"].as_bool())
+        .unwrap_or(false);
     let amuxd_version = amuxd
         .and_then(|a| a["installedVersion"].as_str())
         .map(|s| s.to_string());
 
     let opencode = doctor.as_ref().map(|d| &d["opencode"]);
-    let opencode_satisfied = opencode.and_then(|o| o["satisfied"].as_bool()).unwrap_or(false);
+    let opencode_satisfied = opencode
+        .and_then(|o| o["satisfied"].as_bool())
+        .unwrap_or(false);
     let opencode_version = opencode
         .and_then(|o| o["version"].as_str())
         .map(|s| s.to_string());
@@ -159,14 +163,17 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, p: SetupProgress) {
 /// True if the amuxd background service is already registered (so an amuxd copy is
 /// an in-place UPGRADE that must restart the running service, vs a fresh install).
 fn amuxd_service_registered() -> bool {
-    let Some(home) = dirs::home_dir() else { return false };
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
     #[cfg(target_os = "macos")]
     {
-        return home.join("Library/LaunchAgents/cc.ucar.amuxd.plist").exists();
+        home.join("Library/LaunchAgents/cc.ucar.amuxd.plist")
+            .exists()
     }
     #[cfg(target_os = "linux")]
     {
-        return home.join(".config/systemd/user/amuxd.service").exists();
+        home.join(".config/systemd/user/amuxd.service").exists()
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -203,7 +210,15 @@ async fn run_amuxd_sidecar<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Res
 /// an UPGRADE (service already registered) it re-registers + restarts the service so
 /// the new binary takes effect.
 async fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    emit_progress(app, SetupProgress { id: "amuxd".into(), status: "started".into(), line: None, error: None });
+    emit_progress(
+        app,
+        SetupProgress {
+            id: "amuxd".into(),
+            status: "started".into(),
+            line: None,
+            error: None,
+        },
+    );
     let src = locate_bundled_amuxd().ok_or_else(|| "bundled amuxd binary not found".to_string())?;
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let bin_dir = home.join(AMUXD_DIR).join("bin");
@@ -213,16 +228,34 @@ async fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&dest).map_err(|e| e.to_string())?.permissions();
+        let mut perms = std::fs::metadata(&dest)
+            .map_err(|e| e.to_string())?
+            .permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&dest, perms).map_err(|e| e.to_string())?;
     }
     if amuxd_service_registered() {
-        emit_progress(app, SetupProgress { id: "amuxd".into(), status: "running".into(), line: Some("restarting amuxd service".into()), error: None });
+        emit_progress(
+            app,
+            SetupProgress {
+                id: "amuxd".into(),
+                status: "running".into(),
+                line: Some("restarting amuxd service".into()),
+                error: None,
+            },
+        );
         // install-service does bootout+bootstrap (i.e. restart) when already registered.
         run_amuxd_sidecar(app, &["install-service"]).await?;
     }
-    emit_progress(app, SetupProgress { id: "amuxd".into(), status: "done".into(), line: None, error: None });
+    emit_progress(
+        app,
+        SetupProgress {
+            id: "amuxd".into(),
+            status: "done".into(),
+            line: None,
+            error: None,
+        },
+    );
     Ok(())
 }
 
@@ -231,7 +264,15 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
     use tauri_plugin_shell::process::CommandEvent;
     use tauri_plugin_shell::ShellExt;
 
-    emit_progress(app, SetupProgress { id: "opencode".into(), status: "started".into(), line: None, error: None });
+    emit_progress(
+        app,
+        SetupProgress {
+            id: "opencode".into(),
+            status: "started".into(),
+            line: None,
+            error: None,
+        },
+    );
     // `_child_guard` must stay alive until `rx` is fully drained: dropping the
     // CommandChild early can terminate the sidecar before install finishes.
     let (mut rx, _child_guard) = app
@@ -254,14 +295,30 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
             CommandEvent::Stdout(bytes) => {
                 let line = String::from_utf8_lossy(&bytes).trim().to_string();
                 if !line.is_empty() {
-                    emit_progress(app, SetupProgress { id: "opencode".into(), status: "running".into(), line: Some(line), error: None });
+                    emit_progress(
+                        app,
+                        SetupProgress {
+                            id: "opencode".into(),
+                            status: "running".into(),
+                            line: Some(line),
+                            error: None,
+                        },
+                    );
                 }
             }
             CommandEvent::Stderr(bytes) => {
                 let line = String::from_utf8_lossy(&bytes).trim().to_string();
                 if !line.is_empty() {
                     last_stderr = Some(line.clone());
-                    emit_progress(app, SetupProgress { id: "opencode".into(), status: "running".into(), line: Some(line), error: None });
+                    emit_progress(
+                        app,
+                        SetupProgress {
+                            id: "opencode".into(),
+                            status: "running".into(),
+                            line: Some(line),
+                            error: None,
+                        },
+                    );
                 }
             }
             CommandEvent::Terminated(payload) if payload.code.unwrap_or(-1) != 0 => {
@@ -274,10 +331,26 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
         }
     }
     if let Some(e) = last_err {
-        emit_progress(app, SetupProgress { id: "opencode".into(), status: "failed".into(), line: None, error: Some(e.clone()) });
+        emit_progress(
+            app,
+            SetupProgress {
+                id: "opencode".into(),
+                status: "failed".into(),
+                line: None,
+                error: Some(e.clone()),
+            },
+        );
         return Err(e);
     }
-    emit_progress(app, SetupProgress { id: "opencode".into(), status: "done".into(), line: None, error: None });
+    emit_progress(
+        app,
+        SetupProgress {
+            id: "opencode".into(),
+            status: "done".into(),
+            line: None,
+            error: None,
+        },
+    );
     Ok(())
 }
 
@@ -289,14 +362,32 @@ async fn install_opencode<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
 /// tools are already installed (we intentionally don't treat that as an error).
 /// The caller should re-poll `setup_list_requirements` to confirm git presence.
 fn install_git<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    emit_progress(app, SetupProgress { id: "git".into(), status: "started".into(), line: None, error: None });
+    emit_progress(
+        app,
+        SetupProgress {
+            id: "git".into(),
+            status: "started".into(),
+            line: None,
+            error: None,
+        },
+    );
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("xcode-select")
             .arg("--install")
             .status()
             .map_err(|e| format!("xcode-select: {e}"))?;
-        emit_progress(app, SetupProgress { id: "git".into(), status: "running".into(), line: Some("Follow the macOS installer dialog to install Command Line Tools.".into()), error: None });
+        emit_progress(
+            app,
+            SetupProgress {
+                id: "git".into(),
+                status: "running".into(),
+                line: Some(
+                    "Follow the macOS installer dialog to install Command Line Tools.".into(),
+                ),
+                error: None,
+            },
+        );
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
