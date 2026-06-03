@@ -179,15 +179,26 @@ public final class TeamclawService {
         ownRpcResSubscribed = false
     }
 
+    /// Subscribes our own actor's rpc/res topic exactly once. The daemon replies
+    /// to every RPC on the requester's own actor response topic (rpc.rs:48-53),
+    /// independent of which agent we target, so this standing subscription must
+    /// stay up for the lifetime of the service. Idempotent: a no-op after the
+    /// first successful subscribe. Callers issuing an RPC should invoke this
+    /// before `rpcClient.invoke` so the very first call (before any resync has
+    /// run) still has the response topic subscribed — but must NEVER pair it
+    /// with a per-call unsubscribe, which would clobber the shared sub.
+    private func ensureOwnRpcResSubscribed() async {
+        guard let mqtt, !ownRpcResSubscribed, !localMemberId.isEmpty else { return }
+        try? await mqtt.subscribe(MQTTTopics.actorRpcResponse(teamID: teamId, actorID: localMemberId))
+        ownRpcResSubscribed = true
+    }
+
     private func resyncDaemonSubscriptions() async {
         guard let mqtt else { return }
         // The daemon replies to RPCs on our own actor's response topic
         // (rpc.rs:48-53), so subscribe to it once, independent of which agent
         // we target.
-        if !ownRpcResSubscribed, !localMemberId.isEmpty {
-            try? await mqtt.subscribe(MQTTTopics.actorRpcResponse(teamID: teamId, actorID: localMemberId))
-            ownRpcResSubscribed = true
-        }
+        await ensureOwnRpcResSubscribed()
         let desired: Set<String> = {
             guard let store = connectedAgentsStore else { return [] }
             // An agent's routing actor IS its actor id (== ConnectedAgent.id).
@@ -1106,12 +1117,12 @@ public final class TeamclawService {
     /// Supabase is the source of truth and must be updated separately by the
     /// caller. Returns `(success, error)`. 10s timeout.
     ///
-    /// Mirrors `runtimeStartRpc`'s on-demand subscribe pattern so responses
-    /// from off-team or not-yet-tracked daemons aren't dropped.
+    /// The RPC response lands on our own actor's persistently-subscribed
+    /// rpc/res topic, so no per-target subscription is needed.
     public func removeParticipantRpc(targetActorID: String,
                                      sessionID: String,
                                      actorID: String) async -> (Bool, String) {
-        guard let mqtt, let rpcClient else { return (false, "mqtt not configured") }
+        guard let rpcClient else { return (false, "mqtt not configured") }
         guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var remove = Teamclaw_RemoveParticipantRequest()
@@ -1123,16 +1134,12 @@ public final class TeamclawService {
         rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .removeParticipant(remove)
 
-        let resTopic = MQTTTopics.actorRpcResponse(teamID: teamId, actorID: requesterActorID)
-        let needsTargetSubscribe = !subscribedActorIDs.contains(targetActorID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // The RPC response arrives on our own actor's rpc/res topic, which is
+        // persistently subscribed by `resyncDaemonSubscriptions()`. Ensure that
+        // standing subscription exists (no-op after the first time) instead of
+        // a per-call subscribe/unsubscribe of the response topic — unsubscribing
+        // it would tear down the shared standing sub for every other RPC.
+        await ensureOwnRpcResSubscribed()
 
         guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
@@ -1143,10 +1150,11 @@ public final class TeamclawService {
     /// Stops a runtime on the target daemon. The daemon's runtime/{id}/state
     /// retained topic transitions to STOPPED; that's the canonical "it
     /// terminated" signal. This RPC's `(success, error)` is the synchronous
-    /// accept gate. Mirrors `runtimeStartRpc`'s on-demand subscribe pattern.
+    /// accept gate. The response lands on our own actor's persistently-subscribed
+    /// rpc/res topic.
     public func runtimeStopRpc(targetActorID: String,
                                runtimeID: String) async -> (Bool, String) {
-        guard let mqtt, let rpcClient else { return (false, "mqtt not configured") }
+        guard let rpcClient else { return (false, "mqtt not configured") }
         guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var stop = Teamclaw_RuntimeStopRequest()
@@ -1157,16 +1165,9 @@ public final class TeamclawService {
         rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .runtimeStop(stop)
 
-        let resTopic = MQTTTopics.actorRpcResponse(teamID: teamId, actorID: requesterActorID)
-        let needsTargetSubscribe = !subscribedActorIDs.contains(targetActorID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // Response arrives on our own actor's rpc/res (persistently subscribed);
+        // ensure that standing sub without a harmful per-call unsubscribe.
+        await ensureOwnRpcResSubscribed()
 
         guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
@@ -1178,11 +1179,11 @@ public final class TeamclawService {
     /// into its `current_model_per_agent` map and re-publishes the retained
     /// `runtime/{id}/state`, so subscribers see `current_model` flip without
     /// a separate roundtrip. `(success, error)` is the synchronous accept gate.
-    /// Mirrors `runtimeStopRpc`'s on-demand subscribe pattern.
+    /// The response lands on our own actor's persistently-subscribed rpc/res topic.
     public func setModelRpc(targetActorID: String,
                             runtimeID: String,
                             modelID: String) async -> (Bool, String) {
-        guard let mqtt, let rpcClient else { return (false, "mqtt not configured") }
+        guard let rpcClient else { return (false, "mqtt not configured") }
         guard !targetActorID.isEmpty else { return (false, "no target actor id") }
 
         var setModel = Teamclaw_SetModelRequest()
@@ -1194,16 +1195,9 @@ public final class TeamclawService {
         rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .setModel(setModel)
 
-        let resTopic = MQTTTopics.actorRpcResponse(teamID: teamId, actorID: requesterActorID)
-        let needsTargetSubscribe = !subscribedActorIDs.contains(targetActorID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // Response arrives on our own actor's rpc/res (persistently subscribed);
+        // ensure that standing sub without a harmful per-call unsubscribe.
+        await ensureOwnRpcResSubscribed()
 
         guard let response = await rpcClient.invoke(request: rpcReq, teamID: teamId, targetActorID: targetActorID) else {
             return (false, "timeout")
@@ -1250,7 +1244,7 @@ public final class TeamclawService {
         sessionId: String,
         initialPrompt: String
     ) async -> RuntimeStartOutcome {
-        guard let mqtt, let rpcClient else { return .rejected("mqtt not configured") }
+        guard let rpcClient else { return .rejected("mqtt not configured") }
         guard !targetActorID.isEmpty else { return .rejected("no target actor id") }
 
         var start = Teamclaw_RuntimeStartRequest()
@@ -1265,19 +1259,12 @@ public final class TeamclawService {
         rpcReq.requesterActorID = requesterActorID
         rpcReq.method = .runtimeStart(start)
 
-        // If target daemon hasn't been folded into the standing per-agent
-        // subscription set yet (e.g. ConnectedAgentsStore hasn't reloaded),
-        // subscribe ad-hoc so the response isn't dropped.
-        let resTopic = MQTTTopics.actorRpcResponse(teamID: teamId, actorID: requesterActorID)
-        let needsTargetSubscribe = !subscribedActorIDs.contains(targetActorID)
-        if needsTargetSubscribe {
-            try? await mqtt.subscribe(resTopic)
-        }
-        defer {
-            if needsTargetSubscribe {
-                Task { try? await mqtt.unsubscribe(resTopic) }
-            }
-        }
+        // The response arrives on our own actor's rpc/res topic, which is
+        // persistently subscribed by `resyncDaemonSubscriptions()`. Ensure that
+        // standing subscription is up (no-op after the first call) rather than a
+        // per-call subscribe/unsubscribe of the response topic — unsubscribing it
+        // would tear down the shared sub used by every other RPC.
+        await ensureOwnRpcResSubscribed()
 
         let requestId = rpcReq.requestID
         print("[runtimeStartRpc] publishing requestID=\(requestId) → actor=\(targetActorID)")
