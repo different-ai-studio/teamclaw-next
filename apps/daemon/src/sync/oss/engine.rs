@@ -11,7 +11,7 @@ use futures::StreamExt;
 
 use super::{
     conflict::write_conflict_sidecar,
-    crypto::{decrypt_blob, encrypt_blob, sha256_hex},
+    crypto::{decrypt_blob, encrypt_blob, encrypt_blob_compressed, sha256_hex},
     error::SyncError,
     fc_client::{
         BatchItemOutcome, CompleteResult, DeleteBatchItem, FcClient, ManifestItem, PrepareBatchItem,
@@ -308,6 +308,30 @@ fn record_item_error(stats: &mut PhaseStats, label: &str, path: &str, status: u1
     }
 }
 
+/// Whether to write compressed (v2) blobs on upload. OFF by default — flip on
+/// (env `AMUXD_OSS_COMPRESS=1`) only after the whole fleet runs a v2-read-capable
+/// daemon (this build reads v2). Old daemons reject version-2 blobs, so writing
+/// must not precede fleet-wide read support. Cached once at first use.
+fn compress_uploads() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        matches!(
+            std::env::var("AMUXD_OSS_COMPRESS").ok().as_deref(),
+            Some("1") | Some("true")
+        )
+    })
+}
+
+/// Encrypt a blob for the OSS upload path, compressing (v2) when the gate is on.
+fn encrypt_blob_for_upload(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
+    if compress_uploads() {
+        encrypt_blob_compressed(plaintext, key)
+    } else {
+        encrypt_blob(plaintext, key)
+    }
+}
+
 /// Encrypt + hash one local file in preparation for upload (no network).
 fn prepare_upload(
     content_root: &str,
@@ -318,7 +342,7 @@ fn prepare_upload(
     let abs_path = Path::new(content_root).join(rel_path);
     let plaintext = std::fs::read(&abs_path).map_err(|e| SyncError::Io(e.to_string()))?;
     let plain_hash = sha256_hex(&plaintext);
-    let blob = encrypt_blob(&plaintext, key).map_err(SyncError::Crypto)?;
+    let blob = encrypt_blob_for_upload(&plaintext, key).map_err(SyncError::Crypto)?;
     let cipher_hash = sha256_hex(&blob);
     let parent_version = state
         .files
@@ -910,7 +934,7 @@ async fn upload_one(
         .map_err(|e| SyncError::Io(e.to_string()))?;
     let plain_hash = sha256_hex(&plaintext);
 
-    let blob = encrypt_blob(&plaintext, key).map_err(SyncError::Crypto)?;
+    let blob = encrypt_blob_for_upload(&plaintext, key).map_err(SyncError::Crypto)?;
     let remote_cipher_hash = sha256_hex(&blob);
 
     let parent_version = state

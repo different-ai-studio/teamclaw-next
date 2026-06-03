@@ -21,6 +21,22 @@ import { getDb, type Db } from '../db/client.js';
 import { ApiError } from './http-utils.js';
 import { teamWorkspaceConfig, amuxcUploadSessions } from '../db/schema/index.js';
 import { eq } from 'drizzle-orm';
+import { cdnEnabled, signCdnUrl } from './cdn.js';
+
+const DOWNLOAD_TTL_SEC = 900;
+
+/**
+ * Signed GET URL for a blob: a CDN "type A" URL when the CDN is configured
+ * (cheaper, cache-deduped egress for the (N-1)x fan-out), else an OSS presigned
+ * GET (fallback, current behaviour). Uploads are unaffected.
+ */
+async function signedDownloadUrl(s3: S3Client, bucket: string, ossKey: string): Promise<string> {
+  if (cdnEnabled()) {
+    return signCdnUrl(ossKey, DOWNLOAD_TTL_SEC);
+  }
+  const getCmd = new GetObjectCommand({ Bucket: bucket, Key: ossKey });
+  return getSignedUrl(s3 as any, getCmd, { expiresIn: DOWNLOAD_TTL_SEC });
+}
 
 // ---------------------------------------------------------------------------
 // Injectable deps — production callers omit these; tests inject stubs.
@@ -582,10 +598,9 @@ export async function handleSyncDownload(
     if (!blob) return json(404, { error: 'blob not found' });
     if (!blob.verified) return json(404, { error: 'blob not yet verified (upload not completed)' });
 
-    const getCmd = new GetObjectCommand({ Bucket: bucket, Key: blob.ossKey });
-    const downloadUrl = await getSignedUrl(s3 as any, getCmd, { expiresIn: 900 });
+    const downloadUrl = await signedDownloadUrl(s3, bucket, blob.ossKey);
 
-    return json(200, { downloadUrl, size: blob.size, ttlSec: 900 });
+    return json(200, { downloadUrl, size: blob.size, ttlSec: DOWNLOAD_TTL_SEC });
   }
 
   // --- supabase path (unchanged) ---
@@ -605,10 +620,9 @@ export async function handleSyncDownload(
     return json(404, { error: 'blob not yet verified (upload not completed)' });
   }
 
-  const getCmd = new GetObjectCommand({ Bucket: bucket, Key: (blob as any).oss_key });
-  const downloadUrl = await getSignedUrl(s3 as any, getCmd, { expiresIn: 900 });
+  const downloadUrl = await signedDownloadUrl(s3, bucket, (blob as any).oss_key);
 
-  return json(200, { downloadUrl, size: (blob as any).size, ttlSec: 900 });
+  return json(200, { downloadUrl, size: (blob as any).size, ttlSec: DOWNLOAD_TTL_SEC });
 }
 
 // ---------------------------------------------------------------------------

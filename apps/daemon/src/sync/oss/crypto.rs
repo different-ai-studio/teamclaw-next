@@ -1,55 +1,83 @@
 //! AMXC blob envelope — client-side AES-256-GCM encryption for OSS blobs.
 //!
-//! Wire layout (spec §3.-1):
-//!   offset  0: "AMXC" (4 bytes magic)
-//!   offset  4: version u8 = 1
-//!   offset  5: nonce[12] (random)
-//!   offset 17: ciphertext (AES-GCM encrypted plaintext, tag appended by aes-gcm crate)
-//!   offset 17+N: AES-GCM tag (16 bytes, included in ciphertext slice by aes-gcm)
+//! Two on-the-wire versions, both decodable by [`decrypt_blob`]:
 //!
-//! `content_hash` (on the wire) = sha256(blob bytes).
-//! `plain_hash`   (local only)  = sha256(plaintext).
+//! **v1** (uncompressed; what [`encrypt_blob`] writes):
+//!   0: "AMXC" magic (4) · 4: version=1 (1) · 5: nonce (12) · 17: ciphertext
+//!   ciphertext = AES-256-GCM(plaintext)
+//!
+//! **v2** (optional deflate; what [`encrypt_blob_compressed`] writes):
+//!   0: "AMXC" magic (4) · 4: version=2 (1) · 5: flags (1) · 6: nonce (12) · 18: ciphertext
+//!   ciphertext = AES-256-GCM(payload), where payload = deflate(plaintext) if
+//!   `flags & FLAG_DEFLATE`, else plaintext. Compression is applied BEFORE
+//!   encryption so it actually reduces blob/egress size; the flag is the only
+//!   thing it leaks ("is this deflated"), which is not sensitive.
+//!
+//! `content_hash` (wire) = sha256(blob bytes); `plain_hash` (local) = sha256(plaintext).
+//!
+//! Rollout: this daemon can READ v1 and v2 unconditionally. Writing v2 is opt-in
+//! (callers use [`encrypt_blob_compressed`]) and must only be enabled once the
+//! whole fleet runs a v2-read-capable daemon — old daemons reject version 2.
+
+use std::io::{Read, Write};
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
 use sha2::{Digest, Sha256};
 
 const MAGIC: &[u8; 4] = b"AMXC";
-const VERSION: u8 = 1;
+const VERSION_V1: u8 = 1;
+const VERSION_V2: u8 = 2;
 const NONCE_LEN: usize = 12;
-const HEADER_LEN: usize = 4 + 1 + NONCE_LEN; // 17
+const HEADER_LEN_V1: usize = 4 + 1 + NONCE_LEN; // 17
+const HEADER_LEN_V2: usize = 4 + 1 + 1 + NONCE_LEN; // 18
 
-/// Encrypt plaintext into an AMXC blob using the given 32-byte key.
-/// Returns the raw blob bytes.
+/// `flags` bit: payload was deflate-compressed before encryption.
+const FLAG_DEFLATE: u8 = 0x01;
+
+/// Encrypt plaintext into a v1 (uncompressed) AMXC blob. Kept for callers that
+/// must not depend on fleet-wide v2 support (e.g. the local secret store).
 pub fn encrypt_blob(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| format!("crypto: nonce generation failed: {e}"))?;
-
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| format!("crypto: cipher init failed: {e}"))?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
-    let ciphertext = cipher
-        .encrypt(nonce, plaintext)
-        .map_err(|e| format!("crypto: AES-GCM encrypt failed: {e}"))?;
-
-    let mut blob = Vec::with_capacity(HEADER_LEN + ciphertext.len());
+    let (nonce_bytes, ciphertext) = aes_encrypt(plaintext, key)?;
+    let mut blob = Vec::with_capacity(HEADER_LEN_V1 + ciphertext.len());
     blob.extend_from_slice(MAGIC);
-    blob.push(VERSION);
+    blob.push(VERSION_V1);
     blob.extend_from_slice(&nonce_bytes);
     blob.extend_from_slice(&ciphertext);
     Ok(blob)
 }
 
-/// Decrypt an AMXC blob, returning plaintext.
+/// Encrypt plaintext into a v2 AMXC blob, deflating the plaintext first when that
+/// actually shrinks it (incompressible input is stored raw to avoid negative
+/// gains). Reduces OSS blob/egress size for text-y content.
+pub fn encrypt_blob_compressed(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
+    let mut flags = 0u8;
+    let payload = match deflate(plaintext) {
+        Ok(c) if c.len() < plaintext.len() => {
+            flags |= FLAG_DEFLATE;
+            c
+        }
+        // Compression failed or didn't help → store raw.
+        _ => plaintext.to_vec(),
+    };
+
+    let (nonce_bytes, ciphertext) = aes_encrypt(&payload, key)?;
+    let mut blob = Vec::with_capacity(HEADER_LEN_V2 + ciphertext.len());
+    blob.extend_from_slice(MAGIC);
+    blob.push(VERSION_V2);
+    blob.push(flags);
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ciphertext);
+    Ok(blob)
+}
+
+/// Decrypt an AMXC blob (v1 or v2), returning plaintext.
 pub fn decrypt_blob(blob: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
-    if blob.len() < HEADER_LEN {
-        return Err(format!(
-            "crypto: blob too short: {} bytes (need at least {})",
-            blob.len(),
-            HEADER_LEN
-        ));
+    if blob.len() < 5 {
+        return Err(format!("crypto: blob too short: {} bytes", blob.len()));
     }
     if &blob[..4] != MAGIC {
         return Err(format!(
@@ -57,28 +85,79 @@ pub fn decrypt_blob(blob: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
             &blob[..4]
         ));
     }
-    if blob[4] != VERSION {
-        return Err(format!(
-            "crypto: unsupported version: expected {}, got {}",
-            VERSION, blob[4]
-        ));
+    match blob[4] {
+        VERSION_V1 => {
+            if blob.len() < HEADER_LEN_V1 {
+                return Err(format!("crypto: v1 blob too short: {} bytes", blob.len()));
+            }
+            let nonce_bytes = &blob[5..17];
+            let ciphertext = &blob[HEADER_LEN_V1..];
+            aes_decrypt(nonce_bytes, ciphertext, key)
+        }
+        VERSION_V2 => {
+            if blob.len() < HEADER_LEN_V2 {
+                return Err(format!("crypto: v2 blob too short: {} bytes", blob.len()));
+            }
+            let flags = blob[5];
+            let nonce_bytes = &blob[6..18];
+            let ciphertext = &blob[HEADER_LEN_V2..];
+            let payload = aes_decrypt(nonce_bytes, ciphertext, key)?;
+            if flags & FLAG_DEFLATE != 0 {
+                inflate(&payload)
+            } else {
+                Ok(payload)
+            }
+        }
+        other => Err(format!(
+            "crypto: unsupported version: expected 1 or 2, got {other}"
+        )),
     }
-    let nonce_bytes = &blob[5..17];
-    let ciphertext = &blob[HEADER_LEN..];
-
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| format!("crypto: cipher init failed: {e}"))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
-
-    cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|e| format!("crypto: AES-GCM decrypt failed: {e}"))
 }
 
 /// sha256(bytes) → hex string
 pub fn sha256_hex(data: &[u8]) -> String {
     let digest = Sha256::digest(data);
     hex::encode(digest)
+}
+
+// ── internals ────────────────────────────────────────────────────────────────
+
+fn aes_encrypt(payload: &[u8], key: &[u8; 32]) -> Result<([u8; NONCE_LEN], Vec<u8>), String> {
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    getrandom::getrandom(&mut nonce_bytes)
+        .map_err(|e| format!("crypto: nonce generation failed: {e}"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("crypto: cipher init failed: {e}"))?;
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, payload)
+        .map_err(|e| format!("crypto: AES-GCM encrypt failed: {e}"))?;
+    Ok((nonce_bytes, ciphertext))
+}
+
+fn aes_decrypt(nonce_bytes: &[u8], ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("crypto: cipher init failed: {e}"))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| format!("crypto: AES-GCM decrypt failed: {e}"))
+}
+
+fn deflate(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(data)
+        .map_err(|e| format!("crypto: deflate failed: {e}"))?;
+    enc.finish()
+        .map_err(|e| format!("crypto: deflate failed: {e}"))
+}
+
+fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    DeflateDecoder::new(data)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("crypto: inflate failed: {e}"))?;
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -120,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn test_version_mismatch_fails() {
+    fn test_unsupported_version_fails() {
         let key = test_key();
         let mut blob = encrypt_blob(b"data", &key).unwrap();
         blob[4] = 99; // unsupported version
@@ -136,7 +215,6 @@ mod tests {
 
     #[test]
     fn test_sha256_hex() {
-        // SHA-256 of empty string
         let h = sha256_hex(b"");
         assert_eq!(
             h,
@@ -151,10 +229,69 @@ mod tests {
         let blob = encrypt_blob(plaintext, &key).unwrap();
         let cipher_hash = sha256_hex(&blob);
         let plain_hash = sha256_hex(plaintext);
-        // They must differ (encrypted != plaintext)
         assert_ne!(cipher_hash, plain_hash);
-        // Decrypt and verify
         let decrypted = decrypt_blob(&blob, &key).unwrap();
         assert_eq!(sha256_hex(&decrypted), plain_hash);
+    }
+
+    // ── v2 / compression ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_v2_compressed_roundtrip_and_shrinks() {
+        let key = test_key();
+        // Highly compressible text (skills/knowledge are text-y).
+        let plaintext = "the quick brown fox ".repeat(500);
+        let pt = plaintext.as_bytes();
+        let v2 = encrypt_blob_compressed(pt, &key).expect("encrypt_compressed failed");
+        assert_eq!(&v2[..4], b"AMXC");
+        assert_eq!(v2[4], 2, "should be v2");
+        assert_eq!(v2[5] & FLAG_DEFLATE, FLAG_DEFLATE, "should be deflated");
+        // v2 compressed blob must be meaningfully smaller than the v1 blob.
+        let v1 = encrypt_blob(pt, &key).unwrap();
+        assert!(
+            v2.len() < v1.len() / 2,
+            "compressed {} should be < half of v1 {}",
+            v2.len(),
+            v1.len()
+        );
+        assert_eq!(decrypt_blob(&v2, &key).unwrap(), pt);
+    }
+
+    #[test]
+    fn test_v2_incompressible_stored_raw() {
+        let key = test_key();
+        // Random bytes don't deflate → must be stored raw (flag unset), no negative gain.
+        let mut buf = vec![0u8; 4096];
+        getrandom::getrandom(&mut buf).unwrap();
+        let v2 = encrypt_blob_compressed(&buf, &key).unwrap();
+        assert_eq!(v2[4], 2);
+        assert_eq!(v2[5] & FLAG_DEFLATE, 0, "incompressible must be stored raw");
+        assert_eq!(decrypt_blob(&v2, &key).unwrap(), buf);
+    }
+
+    #[test]
+    fn test_v2_empty_roundtrip() {
+        let key = test_key();
+        let v2 = encrypt_blob_compressed(b"", &key).unwrap();
+        assert_eq!(decrypt_blob(&v2, &key).unwrap(), b"");
+    }
+
+    #[test]
+    fn test_decrypt_handles_both_v1_and_v2() {
+        let key = test_key();
+        let pt = b"mixed-fleet content that both formats must round-trip";
+        let v1 = encrypt_blob(pt, &key).unwrap();
+        let v2 = encrypt_blob_compressed(pt, &key).unwrap();
+        assert_eq!(decrypt_blob(&v1, &key).unwrap(), pt);
+        assert_eq!(decrypt_blob(&v2, &key).unwrap(), pt);
+    }
+
+    #[test]
+    fn test_v2_wrong_key_fails() {
+        let key = test_key();
+        let wrong =
+            derive_key("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").unwrap();
+        let v2 = encrypt_blob_compressed(b"secret payload here", &key).unwrap();
+        assert!(decrypt_blob(&v2, &wrong).is_err());
     }
 }

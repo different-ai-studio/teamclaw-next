@@ -331,6 +331,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs 6.0.0",
+ "flate2",
  "futures",
  "futures-util",
  "getrandom 0.2.17",
