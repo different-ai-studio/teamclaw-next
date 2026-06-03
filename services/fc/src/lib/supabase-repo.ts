@@ -839,14 +839,6 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
     },
 
-    async setAgentDeviceId(agentActorId, { deviceId }) {
-      const { error } = await supabase
-        .from("agents")
-        .update({ device_id: deviceId })
-        .eq("id", agentActorId);
-      if (error) throw error;
-    },
-
     async uploadAttachment({ path, mime, bytes, bucket }) {
       const targetBucket = bucket || DEFAULT_ATTACHMENT_BUCKET;
       const { error } = await supabase.storage
@@ -1681,7 +1673,6 @@ export function createSupabaseBusinessRepository(options) {
           createdAt: row.created_at ?? null,
           updatedAt: row.updated_at ?? null,
           agentId: row.agent_id ?? id,
-          deviceId: row.device_id ?? null,
           // Fields the list_connected_agents RPC computes that clients need
           // (iOS ConnectedAgent: permission level, visibility, ownership).
           permissionLevel: row.permission_level ?? null,
@@ -1700,16 +1691,6 @@ export function createSupabaseBusinessRepository(options) {
     async makeAgentPersonal(agentActorId) {
       const { error } = await supabase.rpc("make_agent_personal", { p_agent_id: agentActorId });
       if (error) throw error;
-    },
-
-    async getAgentDeviceId(agentActorId) {
-      const { data, error } = await supabase
-        .from("agents")
-        .select("id, device_id")
-        .eq("id", agentActorId)
-        .maybeSingle();
-      if (error) throw error;
-      return { deviceId: data?.device_id ?? null };
     },
 
     async updateOwnedAgentProfile(agentActorId, patch) {

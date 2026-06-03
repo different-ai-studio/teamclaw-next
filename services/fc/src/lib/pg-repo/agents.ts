@@ -57,7 +57,6 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
           agentTypes: agents.agentTypes,
           defaultAgentType: agents.defaultAgentType,
           defaultWorkspaceId: agents.defaultWorkspaceId,
-          deviceId: agents.deviceId,
           createdAt: agents.createdAt,
           updatedAt: agents.updatedAt,
         })
@@ -87,7 +86,6 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
           defaultAgentType: r.defaultAgentType ?? null,
           defaultWorkspaceId: r.defaultWorkspaceId ?? null,
           agentId: r.id,
-          deviceId: r.deviceId ?? null,
           permissionLevel: null,
           createdAt: iso(r.createdAt),
           updatedAt: iso(r.updatedAt),
@@ -249,18 +247,6 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
     },
 
     /**
-     * Returns the device_id for an agent.
-     */
-    async getAgentDeviceId(agentActorId: string) {
-      const rows = await db
-        .select({ deviceId: agents.deviceId })
-        .from(agents)
-        .where(eq(agents.id, agentActorId))
-        .limit(1);
-      return { deviceId: rows[0]?.deviceId ?? null };
-    },
-
-    /**
      * Updates the display_name / visibility of an owned agent.
      * Uses team-scoped owner resolution — not global current_member_id().
      *
@@ -347,15 +333,6 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
       await (db.update(agents) as any)
         .set({ agentTypes: supportedTypes, defaultAgentType, updatedAt: new Date() })
         .where(eq(agents.id, ctx.callerActorId));
-    },
-
-    /**
-     * Sets the device_id for an agent.
-     */
-    async setAgentDeviceId(agentActorId: string, opts: { deviceId: string }) {
-      await (db.update(agents) as any)
-        .set({ deviceId: opts.deviceId, updatedAt: new Date() })
-        .where(eq(agents.id, agentActorId));
     },
 
     /**

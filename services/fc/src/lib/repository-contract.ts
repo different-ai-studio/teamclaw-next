@@ -933,11 +933,6 @@ export function runAuthRepositoryContract({ test, assert, createAuthRepository, 
     const repo = createRepository();
     await repo.ensureAgentTypes({ supportedTypes: ["openai", "claude"], defaultAgentType: "claude" });
   });
-
-  test("repository contract: setAgentDeviceId succeeds", async () => {
-    const repo = createRepository();
-    await repo.setAgentDeviceId("actor-1", { deviceId: "device-abc" });
-  });
 }
 
 function compareSessionRows(left, right) {

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, unique } from "drizzle-orm/pg-core";
 import { actors, members } from "./teams.js";
 
 export const agents = pgTable("agents", {
@@ -12,12 +12,9 @@ export const agents = pgTable("agents", {
   ownerMemberId: uuid("owner_member_id").references(() => members.id, { onDelete: "set null" }),
   agentTypes: jsonb("agent_types").notNull().default([]),
   defaultAgentType: text("default_agent_type"),
-  deviceId: text("device_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => ({
-  deviceIdIdx: index("agents_device_id_idx").on(t.deviceId),
-}));
+});
 
 export const agentMemberAccess = pgTable("agent_member_access", {
   id: uuid("id").primaryKey().defaultRandom(),

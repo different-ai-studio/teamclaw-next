@@ -116,6 +116,14 @@ async function ossPut(key: string, data: unknown) {
 
 // ---------------------------------------------------------------------------
 // STS policies
+//
+// IDENTITY: the per-node seed used for OSS ACL paths and LiteLLM virtual keys
+// is the member/agent **actor_id**. Clients send it in the `actorId` wire field
+// (legacy `nodeId`/`node_id` accepted as a fallback). The desktop runtime
+// derives its LiteLLM token as `sk-tc-{actor_id[..40]}`, so FC MUST seed the
+// LiteLLM key from the same actor_id for the keys to match. The historical
+// random-hex "device id" is abandoned; old keys/paths re-provision naturally on
+// next onboarding (no migration).
 // ---------------------------------------------------------------------------
 function memberPolicy(teamId: string, nodeId: string) {
   return JSON.stringify({
@@ -404,7 +412,10 @@ async function codeupFetch(path: string, method: string, body?: unknown) {
 // Route handlers
 // ---------------------------------------------------------------------------
 export async function handleRegister(body: any) {
-  const { teamSecret, ownerNodeId, teamName, ownerName, ownerEmail } = body;
+  // ownerActorId is the owner's actor_id (the value used to seed OSS/LiteLLM).
+  // Accept legacy ownerNodeId as a fallback.
+  const { teamSecret, teamName, ownerName, ownerEmail } = body;
+  const ownerNodeId = body.ownerActorId ?? body.ownerNodeId;
   if (!teamSecret || !ownerNodeId || !teamName) {
     return json(400, { error: "Missing required fields" });
   }
@@ -445,7 +456,9 @@ export async function handleRegister(body: any) {
 }
 
 export async function handleToken(body: any) {
-  const { teamId, teamSecret, nodeId } = body;
+  // nodeId carries the caller's actor_id (legacy field name kept on the wire).
+  const { teamId, teamSecret } = body;
+  const nodeId = body.actorId ?? body.nodeId;
   if (!teamId || !teamSecret || !nodeId) {
     return json(400, { error: "Missing required fields" });
   }
@@ -490,7 +503,8 @@ export async function handleToken(body: any) {
 }
 
 export async function handleResetSecret(body: any) {
-  const { teamId, oldSecret, newSecret, ownerNodeId } = body;
+  const { teamId, oldSecret, newSecret } = body;
+  const ownerNodeId = body.ownerActorId ?? body.ownerNodeId;
   if (!teamId || !oldSecret || !newSecret || !ownerNodeId) {
     return json(400, { error: "Missing required fields" });
   }
@@ -518,7 +532,8 @@ export async function handleResetSecret(body: any) {
 }
 
 export async function handleApply(body: any) {
-  const { teamId, teamSecret, nodeId, name, email, note, platform, arch, hostname } = body;
+  const { teamId, teamSecret, name, email, note, platform, arch, hostname } = body;
+  const nodeId = body.actorId ?? body.nodeId;
   if (!teamId || !teamSecret || !nodeId || !name || !email) {
     return json(400, { error: "Missing required fields" });
   }
@@ -579,14 +594,17 @@ export async function handleAiSetupTeam(body: any) {
 }
 
 export async function handleAiAddMember(body: any) {
-  const { teamId, teamSecret, nodeId, memberName } = body;
-  if (!nodeId) return json(400, { error: "Missing nodeId" });
+  // actorId is the member's actor_id; the LiteLLM key is seeded from it so that
+  // it matches the desktop runtime's tc_api_key = sk-tc-{actor_id[..40]}.
+  const { teamId, teamSecret, memberName } = body;
+  const actorId = body.actorId ?? body.nodeId;
+  if (!actorId) return json(400, { error: "Missing actorId" });
   const v = await verifyTeam(teamId, teamSecret);
   if (v.error) return v.error;
 
   const litellmTeamId = `tc-${teamId}`;
-  const keyAlias = `${memberName || "member"}-${nodeId.slice(0, 8)}`;
-  const keyValue = `sk-tc-${nodeId.slice(0, 40)}`;
+  const keyAlias = `${memberName || "member"}-${actorId.slice(0, 8)}`;
+  const keyValue = `sk-tc-${actorId.slice(0, 40)}`;
 
   const res = await litellmFetch("/key/generate", "POST", {
     key: keyValue,
@@ -599,17 +617,19 @@ export async function handleAiAddMember(body: any) {
     return json(502, { error: "Failed to create LiteLLM key", detail: res.data });
   }
 
-  console.log(`[ai/add-member] Created key for ${nodeId.slice(0, 8)} in team ${litellmTeamId}`);
+  console.log(`[ai/add-member] Created key for ${actorId.slice(0, 8)} in team ${litellmTeamId}`);
   return json(200, { success: true, key: keyValue, keyAlias });
 }
 
 export async function handleAiRemoveMember(body: any) {
-  const { teamId, teamSecret, ownerNodeId, nodeId } = body;
-  if (!nodeId) return json(400, { error: "Missing nodeId" });
+  const { teamId, teamSecret } = body;
+  const ownerNodeId = body.ownerActorId ?? body.ownerNodeId;
+  const actorId = body.actorId ?? body.nodeId;
+  if (!actorId) return json(400, { error: "Missing actorId" });
   const v = await verifyTeam(teamId, teamSecret, ownerNodeId);
   if (v.error) return v.error;
 
-  const keyValue = `sk-tc-${nodeId.slice(0, 40)}`;
+  const keyValue = `sk-tc-${actorId.slice(0, 40)}`;
   const res = await litellmFetch("/key/delete", "POST", { keys: [keyValue] });
 
   if (!res.ok) {
@@ -617,7 +637,7 @@ export async function handleAiRemoveMember(body: any) {
     return json(502, { error: "Failed to delete LiteLLM key", detail: res.data });
   }
 
-  console.log(`[ai/remove-member] Deleted key for ${nodeId.slice(0, 8)}`);
+  console.log(`[ai/remove-member] Deleted key for ${actorId.slice(0, 8)}`);
   return json(200, { success: true });
 }
 
@@ -645,7 +665,8 @@ export async function handleAiKeys(body: any) {
 }
 
 export async function handleAiUsage(body: any) {
-  const { teamId, teamSecret, nodeId, startDate, endDate } = body;
+  const { teamId, teamSecret, startDate, endDate } = body;
+  const actorId = body.actorId ?? body.nodeId;
   const v = await verifyTeam(teamId, teamSecret);
   if (v.error) return v.error;
 
@@ -653,8 +674,8 @@ export async function handleAiUsage(body: any) {
   const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const end = endDate || new Date().toISOString().slice(0, 10);
 
-  if (nodeId) {
-    const keyValue = `sk-tc-${nodeId.slice(0, 40)}`;
+  if (actorId) {
+    const keyValue = `sk-tc-${actorId.slice(0, 40)}`;
     const keyRes = await litellmFetch(`/key/info`, "POST", { key: keyValue });
 
     if (!keyRes.ok) {
@@ -665,7 +686,7 @@ export async function handleAiUsage(body: any) {
     const info = (keyRes.data as any).info || keyRes.data;
     return json(200, {
       teamId: litellmTeamId,
-      nodeId,
+      actorId,
       startDate: start,
       endDate: end,
       spend: info.spend || 0,
@@ -699,7 +720,8 @@ export async function handleAiUsage(body: any) {
 }
 
 export async function handleAiBudget(body: any) {
-  const { teamId, teamSecret, ownerNodeId, maxBudget } = body;
+  const { teamId, teamSecret, maxBudget } = body;
+  const ownerNodeId = body.ownerActorId ?? body.ownerNodeId;
   const v = await verifyTeam(teamId, teamSecret, ownerNodeId);
   if (v.error) return v.error;
 
@@ -723,9 +745,12 @@ export async function handleAiBudget(body: any) {
 }
 
 export async function handleManagedGitSetupLitellm(body: any) {
-  const { teamId, teamSecret, teamName, ownerNodeId, ownerName } = body;
+  // ownerActorId is the owner's actor_id; the owner LiteLLM key is seeded from
+  // it (sk-tc-{actor_id[..40]}) to match the desktop runtime token.
+  const { teamId, teamSecret, teamName, ownerName } = body;
+  const ownerNodeId = body.ownerActorId ?? body.ownerNodeId;
   if (!teamId || !teamSecret || !ownerNodeId) {
-    return json(400, { error: "Missing teamId, teamSecret, or ownerNodeId" });
+    return json(400, { error: "Missing teamId, teamSecret, or ownerActorId" });
   }
 
   const teamSecretHash = sha256(teamSecret);
