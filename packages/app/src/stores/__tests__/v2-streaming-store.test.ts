@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useV2StreamingStore, selectStreamsForSession } from "../v2-streaming-store";
+import {
+  isStreamInterruptible,
+  useV2StreamingStore,
+  selectStreamsForSession,
+} from "../v2-streaming-store";
 
 beforeEach(() => {
   // Reset to a clean state
@@ -399,6 +403,17 @@ describe("v2-streaming-store", () => {
     expect(stream.toolCalls[0].status).toBe("failed");
     expect(stream.toolCalls[0].result).toBe("Stream ended before this tool returned a result.");
     expect(stream.parts[0].toolCall?.status).toBe("failed");
+  });
+
+  it("treats errored streams as visible but not interruptible", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Partial output");
+    store.setError("s1", "a1", "No output", "Model misconfigured");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.active).toBe(true);
+    expect(stream.errorMessage).toBe("No output");
+    expect(isStreamInterruptible(stream)).toBe(false);
   });
 
   it("creates a completed placeholder when tool result arrives without tool use", () => {

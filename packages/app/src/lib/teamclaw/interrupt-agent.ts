@@ -6,7 +6,7 @@ import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
 import { createRuntimeCommandSender } from "@/lib/teamclaw/runtime-command";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
-import { useV2StreamingStore } from "@/stores/v2-streaming-store";
+import { isStreamInterruptible, useV2StreamingStore } from "@/stores/v2-streaming-store";
 
 function isAgentActorType(actorType: string | null | undefined): boolean {
   const t = (actorType ?? "").toLowerCase();
@@ -24,7 +24,7 @@ export function listActiveAgentActorIdsForSession(sessionId: string): string[] {
   const seen = new Set<string>();
   const actorIds: string[] = [];
   for (const entry of Object.values(useV2StreamingStore.getState().byKey)) {
-    if (entry.sessionId !== trimmedSessionId || !entry.active) continue;
+    if (entry.sessionId !== trimmedSessionId || !isStreamInterruptible(entry)) continue;
     if (seen.has(entry.actorId)) continue;
     seen.add(entry.actorId);
     actorIds.push(entry.actorId);

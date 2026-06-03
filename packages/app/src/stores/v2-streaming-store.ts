@@ -967,6 +967,10 @@ export function selectStreamsForSession(state: State, sessionId: string): AgentS
   return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
 }
 
+export function isStreamInterruptible(entry: AgentStreamEntry): boolean {
+  return entry.active && !entry.errorMessage;
+}
+
 export function selectPersistedPlanForSession(
   state: State,
   sessionId: string | null,

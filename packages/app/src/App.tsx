@@ -110,6 +110,7 @@ import {
   normalizeToolUseEvent,
   registerDiscardPendingStreamReply,
   rememberLiveEventId,
+  streamEntryHasVisibleContent,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 import { useUIStore } from "@/stores/ui";
@@ -1109,7 +1110,22 @@ function AppContent() {
               const sc = event.value as { newStatus?: number };
               if (isTerminalAgentStatus(sc.newStatus)) {
                 if (!flushPendingStreamReply(sid, actorId)) {
-                  useV2StreamingStore.getState().finishSessionActor(sid, actorId);
+                  const streamEntry = useV2StreamingStore.getState().byKey[
+                    agentStreamKey(sid, actorId)
+                  ];
+                  if (streamEntryHasVisibleContent(streamEntry)) {
+                    useV2StreamingStore.getState().finishSessionActor(sid, actorId);
+                  } else {
+                    useV2StreamingStore.getState().setError(
+                      sid,
+                      actorId,
+                      t(
+                        "daemon.agentRuntime.emptyReply",
+                        "Agent returned no output. The selected model may be unavailable or misconfigured.",
+                      ),
+                      "",
+                    );
+                  }
                 }
               }
             } else if (event?.case === "error") {
