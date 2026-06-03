@@ -4,7 +4,7 @@ import { AlertCircle, Archive, ArrowLeft, Bot, Loader2, RefreshCw, X } from "luc
 import { invoke } from "@tauri-apps/api/core";
 import { cn, isTauri } from "@/lib/utils";
 
-import { SKILLS_CHANGED_EVENT } from "@/hooks/useAppInit";
+import { RuntimeRefreshSessionHint } from "@/components/chat/RuntimeRefreshSessionHint";
 import { useSessionStore } from "@/stores/session";
 import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useOutboxStore } from "@/stores/outbox-store";
@@ -554,8 +554,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     });
   }, [activeSessionId, sheetTeamId, engagedAgents]);
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
-  const [hasSkillRestartPrompt, setHasSkillRestartPrompt] = React.useState(false);
-  const [isRestartingSkillsRuntime, setIsRestartingSkillsRuntime] = React.useState(false);
   const [isRestoringArchived, setIsRestoringArchived] = React.useState(false);
   const isRestoringArchivedRef = React.useRef(false);
 
@@ -797,12 +795,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [workspaceReady, workspacePath]);
-
-  React.useEffect(() => {
-    const onSkillsChanged = () => setHasSkillRestartPrompt(true);
-    window.addEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
-    return () => window.removeEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
-  }, []);
 
   // Sync selected model to session store
   React.useEffect(() => {
@@ -1639,12 +1631,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     [setInputValue],
   );
 
-  const handleRestartSkillsRuntime = React.useCallback(async () => {
-    // Agent restart is handled by the amuxd daemon now; no-op for the legacy path.
-    setIsRestartingSkillsRuntime(false);
-    setHasSkillRestartPrompt(false);
-  }, []);
-
   const handleCloseArchivedSession = React.useCallback(() => {
     closeArchivedSession();
     setViewingChildSession?.(null);
@@ -1784,44 +1770,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         compact ? "h-full w-full relative" : "absolute inset-0",
       )}
     >
-      {hasSkillRestartPrompt && (
-        <div className="absolute top-2 left-1/2 z-20 flex w-[min(92vw,640px)] -translate-x-1/2 items-center gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-sm">
-          <AlertCircle className="h-4 w-4 shrink-0 text-sky-600" />
-          <div className="min-w-0 flex-1">
-            <p className="font-medium">{t("chat.skillRestartTitle", "Detected new skills")}</p>
-            <p className="text-xs text-sky-700">
-              {t("chat.skillRestartBody", "New or updated skills were detected. Restart the agent now to load them in the current runtime.")}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => void handleRestartSkillsRuntime()}
-            disabled={isRestartingSkillsRuntime}
-            className="gap-2"
-          >
-            {isRestartingSkillsRuntime ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {t("settings.mcp.restarting", "Restarting...")}
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-3 w-3" />
-                {t("settings.mcp.restart", "Restart")}
-              </>
-            )}
-          </Button>
-          <button
-            type="button"
-            onClick={() => setHasSkillRestartPrompt(false)}
-            className="rounded p-1 text-sky-700 hover:bg-sky-100"
-            aria-label={t("common.close", "Close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
       {/* Actors panel mounts in RightPanel for the 'actors' tab; trigger
        *  lives in App.tsx header alongside Knowledge / Changes. */}
 
@@ -1980,7 +1928,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             bottomOffsetPx={terminalBottomOffset}
           />
         ) : (
-          <ChatInputArea
+          <>
+            {activeSessionId ? (
+              <div className="shrink-0 px-3 pt-2">
+                <RuntimeRefreshSessionHint />
+              </div>
+            ) : null}
+            <ChatInputArea
             activeSessionId={activeSessionId}
             compact={compact}
             inputValue={inputValue}
@@ -2041,6 +1995,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
               </>
             }
           />
+          </>
         )
       )}
 

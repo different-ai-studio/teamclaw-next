@@ -1,10 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use tokio::sync::RwLock;
 use tokio::time::MissedTickBehavior;
 use tracing::warn;
 use walkdir::WalkDir;
+
+use crate::runtime::RuntimeSupervisor;
 
 use super::{RefreshChangeKind, RefreshSource, RuntimeRefreshCoordinator};
 
@@ -22,6 +27,46 @@ pub struct ClassifiedChange {
     pub workspace_id: String,
     pub workspace_path: PathBuf,
     pub kind: RefreshChangeKind,
+}
+
+#[derive(Debug)]
+pub struct RefreshWatchRegistry {
+    workspaces: RwLock<HashMap<PathBuf, WatchedWorkspace>>,
+}
+
+impl RefreshWatchRegistry {
+    pub fn new(initial: Vec<WatchedWorkspace>) -> Arc<Self> {
+        Arc::new(Self {
+            workspaces: RwLock::new(
+                initial
+                    .into_iter()
+                    .map(|workspace| (workspace.workspace_path.clone(), workspace))
+                    .collect(),
+            ),
+        })
+    }
+
+    pub async fn upsert_workspace(&self, workspace: WatchedWorkspace) {
+        self.workspaces
+            .write()
+            .await
+            .insert(workspace.workspace_path.clone(), workspace);
+    }
+
+    pub async fn remove_workspace_path(&self, workspace_path: &Path) {
+        self.workspaces.write().await.remove(workspace_path);
+    }
+
+    async fn snapshot(&self) -> Vec<WatchedWorkspace> {
+        self.workspaces.read().await.values().cloned().collect()
+    }
+
+    #[cfg(test)]
+    pub async fn workspace_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<_> = self.workspaces.read().await.keys().cloned().collect();
+        paths.sort();
+        paths
+    }
 }
 
 #[derive(Debug)]
@@ -66,6 +111,8 @@ pub fn classify_change_path(
     let is_global_skill_path = home.is_some_and(|home_dir| {
         path.starts_with(home_dir.join(".config/teamclaw/skills"))
             || path.starts_with(home_dir.join(".config/opencode/skills"))
+            || path.starts_with(home_dir.join(".claude/skills"))
+            || path.starts_with(home_dir.join(".agents/skills"))
     });
 
     for workspace in workspaces {
@@ -73,6 +120,8 @@ pub fn classify_change_path(
             Some(RefreshChangeKind::OpencodeJson)
         } else if path.starts_with(workspace.workspace_path.join(".teamclaw/skills"))
             || path.starts_with(workspace.workspace_path.join(".opencode/skills"))
+            || path.starts_with(workspace.workspace_path.join(".claude/skills"))
+            || path.starts_with(workspace.workspace_path.join(".agents/skills"))
             || is_global_skill_path
         {
             Some(RefreshChangeKind::Skills)
@@ -177,6 +226,14 @@ fn watch_roots(workspaces: &[WatchedWorkspace], home: Option<&Path>) -> Vec<Watc
             path: workspace.workspace_path.join(".opencode/skills"),
             recursive: true,
         });
+        roots.push(WatchRoot {
+            path: workspace.workspace_path.join(".claude/skills"),
+            recursive: true,
+        });
+        roots.push(WatchRoot {
+            path: workspace.workspace_path.join(".agents/skills"),
+            recursive: true,
+        });
     }
     if let Some(home_dir) = home {
         roots.push(WatchRoot {
@@ -185,6 +242,14 @@ fn watch_roots(workspaces: &[WatchedWorkspace], home: Option<&Path>) -> Vec<Watc
         });
         roots.push(WatchRoot {
             path: home_dir.join(".config/opencode/skills"),
+            recursive: true,
+        });
+        roots.push(WatchRoot {
+            path: home_dir.join(".claude/skills"),
+            recursive: true,
+        });
+        roots.push(WatchRoot {
+            path: home_dir.join(".agents/skills"),
             recursive: true,
         });
     }
@@ -224,36 +289,33 @@ async fn record_classified_changes(
 }
 
 pub fn start_refresh_watchers(
-    refresh: std::sync::Arc<RuntimeRefreshCoordinator>,
+    refresh: Arc<RuntimeRefreshCoordinator>,
     workspaces: Vec<WatchedWorkspace>,
     home: Option<PathBuf>,
-) {
-    if workspaces.is_empty() {
-        return;
-    }
-
-    let roots = watch_roots(&workspaces, home.as_deref());
-    if roots.is_empty() {
-        return;
-    }
-
+) -> Arc<RefreshWatchRegistry> {
+    let registry = RefreshWatchRegistry::new(workspaces);
+    let watch_registry = Arc::clone(&registry);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(WATCH_POLL_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut snapshots: HashMap<PathBuf, HashMap<PathBuf, PathStamp>> = roots
-            .iter()
-            .map(|root| (root.path.clone(), snapshot_root(root)))
-            .collect();
+        let mut snapshots: HashMap<PathBuf, HashMap<PathBuf, PathStamp>> = HashMap::new();
         let mut debounce = RefreshDebounce::new(WATCH_DEBOUNCE_WINDOW);
 
         loop {
             interval.tick().await;
 
+            let workspaces = watch_registry.snapshot().await;
+            let roots = watch_roots(&workspaces, home.as_deref());
+            let active_roots: HashSet<_> = roots.iter().map(|root| root.path.clone()).collect();
+            snapshots.retain(|path, _| active_roots.contains(path));
+
             let mut changed_paths = Vec::new();
             for root in &roots {
                 let next = snapshot_root(root);
-                let previous = snapshots.entry(root.path.clone()).or_default();
+                let previous = snapshots
+                    .entry(root.path.clone())
+                    .or_insert_with(|| next.clone());
                 changed_paths.extend(diff_paths(previous, &next));
                 *previous = next;
             }
@@ -274,11 +336,19 @@ pub fn start_refresh_watchers(
             }
         }
     });
+
+    registry
+}
+
+pub fn workspace_runtime_id(workspace_path: &Path) -> String {
+    URL_SAFE_NO_PAD.encode(workspace_path.to_string_lossy().as_bytes())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::RuntimeManager;
+    use tokio::sync::Mutex as AsyncMutex;
 
     fn watched_workspace(id: &str, path: &str) -> WatchedWorkspace {
         WatchedWorkspace {
@@ -307,6 +377,22 @@ mod tests {
             ),
             (
                 Path::new("/Users/tester/.config/opencode/skills/global-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/tmp/ws-1/.claude/skills/demo-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/tmp/ws-1/.agents/skills/demo-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/Users/tester/.claude/skills/global-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/Users/tester/.agents/skills/global-skill/SKILL.md"),
                 RefreshChangeKind::Skills,
             ),
             (
@@ -365,5 +451,56 @@ mod tests {
         assert!(state.change_kinds.contains(&RefreshChangeKind::Skills));
         assert_eq!(state.sources.len(), 1);
         assert!(state.sources.contains(&RefreshSource::FilesystemWatch));
+    }
+
+    #[tokio::test]
+    async fn watcher_state_surfaces_through_runtime_status_with_http_workspace_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_runtime_id(dir.path());
+        let workspaces = vec![WatchedWorkspace {
+            workspace_id: workspace_id.clone(),
+            workspace_path: dir.path().to_path_buf(),
+        }];
+        let manager = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
+        let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(manager)));
+        let mut debounce = RefreshDebounce::new(Duration::from_millis(250));
+
+        record_classified_changes(
+            &supervisor.refresh_coordinator(),
+            &mut debounce,
+            &workspaces,
+            None,
+            &dir.path().join(".teamclaw/skills/demo-skill/SKILL.md"),
+            Instant::now(),
+        )
+        .await;
+
+        let status = supervisor
+            .runtime_status(&workspace_id, dir.path())
+            .await
+            .unwrap();
+        assert_eq!(status.refresh.status, "pending");
+        assert_eq!(status.refresh.change_kinds, vec!["skills".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn watch_registry_supports_add_and_remove() {
+        let registry = RefreshWatchRegistry::new(Vec::new());
+        registry
+            .upsert_workspace(watched_workspace("ws-1", "/tmp/ws-1"))
+            .await;
+        registry
+            .upsert_workspace(watched_workspace("ws-2", "/tmp/ws-2"))
+            .await;
+        assert_eq!(
+            registry.workspace_paths().await,
+            vec![PathBuf::from("/tmp/ws-1"), PathBuf::from("/tmp/ws-2")]
+        );
+
+        registry.remove_workspace_path(Path::new("/tmp/ws-1")).await;
+        assert_eq!(
+            registry.workspace_paths().await,
+            vec![PathBuf::from("/tmp/ws-2")]
+        );
     }
 }

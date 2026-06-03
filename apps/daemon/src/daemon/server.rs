@@ -62,10 +62,7 @@ struct StartRuntimeError {
     failed_stage: String,
 }
 
-fn load_team_runtime_env(
-    workspace_root: &Path,
-    team_id: Option<&str>,
-) -> HashMap<String, String> {
+fn load_team_runtime_env(workspace_root: &Path, team_id: Option<&str>) -> HashMap<String, String> {
     crate::team_shared_env::load_team_env_for_workspace(workspace_root, team_id)
 }
 
@@ -192,6 +189,8 @@ pub struct DaemonServer {
     /// hits the "absent → create" branch, but the lookup-first shape stays
     /// so future code can adopt session reuse without changing the handler.
     cron_sessions: std::collections::HashMap<String, String>,
+    refresh_watch_registry:
+        Option<std::sync::Arc<crate::runtime::refresh::refresh_watch::RefreshWatchRegistry>>,
 }
 
 /// Single control command parsed off `amuxd.sock`. Variants correspond to the
@@ -457,6 +456,7 @@ impl DaemonServer {
             actor_id,
             channel_mgr: None,
             cron_sessions: std::collections::HashMap::new(),
+            refresh_watch_registry: None,
         })
     }
 
@@ -978,27 +978,36 @@ impl DaemonServer {
             // The HTTP workspace runtime endpoints share this supervisor's
             // refresh coordinator for status + apply-intent semantics.
             let runtime_supervisor = crate::runtime::RuntimeSupervisor::new(self.agents.clone());
-            crate::runtime::refresh::refresh_watch::start_refresh_watchers(
-                runtime_supervisor.refresh_coordinator(),
-                self.workspaces
-                    .workspaces
-                    .iter()
-                    .map(
-                        |workspace| crate::runtime::refresh::refresh_watch::WatchedWorkspace {
-                            workspace_id: workspace.workspace_id.clone(),
-                            workspace_path: PathBuf::from(&workspace.path),
-                        },
-                    )
-                    .collect(),
-                dirs::home_dir(),
-            );
+            let refresh_watch_registry =
+                crate::runtime::refresh::refresh_watch::start_refresh_watchers(
+                    runtime_supervisor.refresh_coordinator(),
+                    self.workspaces
+                        .workspaces
+                        .iter()
+                        .map(
+                            |workspace| crate::runtime::refresh::refresh_watch::WatchedWorkspace {
+                                workspace_id:
+                                    crate::runtime::refresh::refresh_watch::workspace_runtime_id(
+                                        Path::new(&workspace.path),
+                                    ),
+                                workspace_path: PathBuf::from(&workspace.path),
+                            },
+                        )
+                        .collect(),
+                    dirs::home_dir(),
+                );
+            self.refresh_watch_registry = Some(refresh_watch_registry);
             let workspace_control: Option<
                 std::sync::Arc<dyn crate::config::WorkspaceControlStore>,
             > = Some(std::sync::Arc::new(
                 crate::config::OpenCodeCompatStore::new(),
             ));
             let opencode_binary = crate::opencode_install::resolve_binary(
-                self.config.agents.opencode.as_ref().map(|c| c.binary.as_str()),
+                self.config
+                    .agents
+                    .opencode
+                    .as_ref()
+                    .map(|c| c.binary.as_str()),
             );
             let opencode_settings = Some(std::sync::Arc::new(
                 crate::opencode_settings::OpenCodeSettingsService::new(opencode_binary),
@@ -3325,10 +3334,9 @@ impl DaemonServer {
                                 (!w.remote_workspace_id.is_empty())
                                     .then_some(w.remote_workspace_id.clone())
                             });
-                        let runtime_env = match self.assemble_spawn_runtime_env_for_worktree(
-                            &worktree,
-                            &ws_id,
-                        ) {
+                        let runtime_env = match self
+                            .assemble_spawn_runtime_env_for_worktree(&worktree, &ws_id)
+                        {
                             Ok(env) => env,
                             Err(e) => {
                                 warn!(
@@ -3981,6 +3989,19 @@ impl DaemonServer {
                 if let Some(team_id) = ws.team_id.clone() {
                     ensure_team_link(&team_id, &ws.path);
                 }
+                if let Some(registry) = self.refresh_watch_registry.as_ref() {
+                    registry
+                        .upsert_workspace(
+                            crate::runtime::refresh::refresh_watch::WatchedWorkspace {
+                                workspace_id:
+                                    crate::runtime::refresh::refresh_watch::workspace_runtime_id(
+                                        Path::new(&ws.path),
+                                    ),
+                                workspace_path: PathBuf::from(&ws.path),
+                            },
+                        )
+                        .await;
+                }
                 info!(workspace_id = %ws.workspace_id, path = %ws.path, "workspace added");
                 let info = amux::WorkspaceInfo {
                     workspace_id: ws.workspace_id,
@@ -3998,7 +4019,17 @@ impl DaemonServer {
 
     /// Applies a workspace remove. Returns (success, error_text).
     async fn apply_remove_workspace(&mut self, remove: &amux::RemoveWorkspace) -> (bool, String) {
+        let workspace_path = self
+            .workspaces
+            .find_by_id(&remove.workspace_id)
+            .map(|workspace| PathBuf::from(&workspace.path));
         if self.workspaces.remove(&remove.workspace_id) {
+            if let (Some(registry), Some(workspace_path)) = (
+                self.refresh_watch_registry.as_ref(),
+                workspace_path.as_deref(),
+            ) {
+                registry.remove_workspace_path(workspace_path).await;
+            }
             let _ = self.workspaces.save(&self.workspaces_path);
             info!(workspace_id = %remove.workspace_id, "workspace removed");
             (true, String::new())
@@ -4494,9 +4525,7 @@ impl DaemonServer {
             crate::team_link::ensure_team_link(team_id, &resolved_worktree);
         }
 
-        if let Some(config) =
-            load_team_shared_config_for_workspace(Path::new(&resolved_worktree))
-        {
+        if let Some(config) = load_team_shared_config_for_workspace(Path::new(&resolved_worktree)) {
             sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), &config);
         }
 
@@ -5440,6 +5469,7 @@ mod tests {
                 actor_id: "agent-actor".to_string(),
                 channel_mgr: None,
                 cron_sessions: HashMap::new(),
+                refresh_watch_registry: None,
             },
             _tmp: tmp,
         }
@@ -6524,6 +6554,36 @@ mod tests {
             mock.state().default_workspace_ids,
             vec!["remote-ws-1".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn apply_add_and_remove_workspace_updates_refresh_watch_registry() {
+        let mut ts = test_server();
+        let registry =
+            crate::runtime::refresh::refresh_watch::RefreshWatchRegistry::new(Vec::new());
+        ts.server.refresh_watch_registry = Some(registry.clone());
+
+        let workspace_dir = ts._tmp.path().join("watch-me");
+        std::fs::create_dir_all(&workspace_dir).unwrap();
+
+        let add = amux::AddWorkspace {
+            path: workspace_dir.to_string_lossy().to_string(),
+        };
+        let (accepted, error, workspace) = ts.server.apply_add_workspace(&add).await;
+        assert!(accepted, "add workspace failed: {error}");
+
+        assert_eq!(
+            registry.workspace_paths().await,
+            vec![workspace_dir.canonicalize().unwrap()]
+        );
+
+        let workspace_id = workspace.unwrap().workspace_id;
+        let (accepted, error) = ts
+            .server
+            .apply_remove_workspace(&amux::RemoveWorkspace { workspace_id })
+            .await;
+        assert!(accepted, "remove workspace failed: {error}");
+        assert!(registry.workspace_paths().await.is_empty());
     }
 
     #[tokio::test]

@@ -28,6 +28,7 @@ import {
   useChannelGatewayInit,
   useGitReposInit,
   useCronInit,
+  useWorkspaceRuntimeRefreshPoll,
   useOpenCodePreload,
 
   useExternalLinkHandler,
@@ -70,6 +71,7 @@ import { SetupGuide } from "@/components/SetupGuide";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
 import { WorkspacePrompt } from "@/components/workspace";
 import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
+import { RuntimeRefreshWorkspaceBanner } from "@/components/workspace/RuntimeRefreshBanner";
 import { useSessionStore } from "@/stores/session";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useSessionMessageStore } from "@/stores/session-message-store";
@@ -664,6 +666,7 @@ function AppContent() {
   useChannelGatewayInit();
   useGitReposInit();
   useCronInit();
+  useWorkspaceRuntimeRefreshPoll();
   useMCPFileWatcher(workspacePath);
   useExternalLinkHandler();
   usePanelAutoOpen();
@@ -1695,6 +1698,8 @@ function AppContent() {
               )}
             </div>
           </header>
+
+          <RuntimeRefreshWorkspaceBanner />
 
           {/* Main content - Chat or file preview */}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">

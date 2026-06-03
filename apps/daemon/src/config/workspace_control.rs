@@ -10,8 +10,8 @@
 //! implementation.
 
 pub use super::roles_skills::{
-    delete_role, delete_skill, upsert_role, upsert_skill, ManagedSkillDto, RoleRecordDto,
-    RolesSkillsStateDto, UpsertRoleRequest, UpsertSkillRequest, scan_roles_skills_state,
+    delete_role, delete_skill, scan_roles_skills_state, upsert_role, upsert_skill, ManagedSkillDto,
+    RoleRecordDto, RolesSkillsStateDto, UpsertRoleRequest, UpsertSkillRequest,
 };
 
 use std::collections::HashMap;
@@ -172,12 +172,36 @@ pub struct McpServerConfig {
 // ── Runtime status ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
+pub struct RuntimeRefreshDto {
+    pub status: String,
+    pub change_kinds: Vec<String>,
+    pub recommended_action: String,
+    pub auto_apply_blocked_by_active_runtime: bool,
+    pub last_detected_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
+impl RuntimeRefreshDto {
+    pub fn clean() -> Self {
+        Self {
+            status: "clean".to_owned(),
+            change_kinds: Vec::new(),
+            recommended_action: "none".to_owned(),
+            auto_apply_blocked_by_active_runtime: false,
+            last_detected_at: None,
+            last_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct RuntimeStatus {
     pub workspace_id: String,
     /// Whether an agent runtime is currently running for this workspace.
     pub ready: bool,
     pub backend: String,
     pub current_model: Option<String>,
+    pub refresh: RuntimeRefreshDto,
 }
 
 // ── WorkspaceControlStore trait ───────────────────────────────────────────────
@@ -237,15 +261,10 @@ pub trait WorkspaceControlStore: Send + Sync {
         workspace_id: &str,
     ) -> Result<RolesSkillsStateDto, WorkspaceControlError>;
 
-    fn get_skills(
-        &self,
-        workspace_id: &str,
-    ) -> Result<Vec<ManagedSkillDto>, WorkspaceControlError>;
+    fn get_skills(&self, workspace_id: &str)
+        -> Result<Vec<ManagedSkillDto>, WorkspaceControlError>;
 
-    fn get_roles(
-        &self,
-        workspace_id: &str,
-    ) -> Result<Vec<RoleRecordDto>, WorkspaceControlError>;
+    fn get_roles(&self, workspace_id: &str) -> Result<Vec<RoleRecordDto>, WorkspaceControlError>;
 
     fn put_skill(
         &self,
@@ -393,8 +412,8 @@ impl OpenCodeCompatStore {
         if !path.exists() {
             return Ok(OpencodeJson::default());
         }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
         serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
     }
 
@@ -406,8 +425,8 @@ impl OpenCodeCompatStore {
         if !path.exists() {
             return Ok(OpencodeJson::default());
         }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
         serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
     }
 
@@ -436,8 +455,8 @@ impl OpenCodeCompatStore {
         if !path.exists() {
             return Ok(vec![]);
         }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
         serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
     }
 
@@ -594,9 +613,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             .permission
             .skill
             .iter()
-            .filter_map(|(k, v)| {
-                Self::parse_permission_action(v).map(|action| (k.clone(), action))
-            })
+            .filter_map(|(k, v)| Self::parse_permission_action(v).map(|action| (k.clone(), action)))
             .collect();
 
         let tools = cfg
@@ -673,6 +690,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             ready: false,
             backend: "opencode".to_owned(),
             current_model: None,
+            refresh: RuntimeRefreshDto::clean(),
         })
     }
 
@@ -722,10 +740,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         Ok(self.get_roles_skills_state(workspace_id)?.skills)
     }
 
-    fn get_roles(
-        &self,
-        workspace_id: &str,
-    ) -> Result<Vec<RoleRecordDto>, WorkspaceControlError> {
+    fn get_roles(&self, workspace_id: &str) -> Result<Vec<RoleRecordDto>, WorkspaceControlError> {
         Ok(self.get_roles_skills_state(workspace_id)?.roles)
     }
 
@@ -822,10 +837,7 @@ impl WorkspaceControlStore for NullWorkspaceControlStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
-    fn get_mcp(
-        &self,
-        id: &str,
-    ) -> Result<HashMap<String, McpServerConfig>, WorkspaceControlError> {
+    fn get_mcp(&self, id: &str) -> Result<HashMap<String, McpServerConfig>, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
     fn put_mcp(
@@ -835,7 +847,10 @@ impl WorkspaceControlStore for NullWorkspaceControlStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
-    fn get_roles_skills_state(&self, id: &str) -> Result<RolesSkillsStateDto, WorkspaceControlError> {
+    fn get_roles_skills_state(
+        &self,
+        id: &str,
+    ) -> Result<RolesSkillsStateDto, WorkspaceControlError> {
         Err(WorkspaceControlError::WorkspaceNotFound(id.to_owned()))
     }
     fn get_skills(&self, id: &str) -> Result<Vec<ManagedSkillDto>, WorkspaceControlError> {
@@ -1022,7 +1037,10 @@ mod tests {
         let providers = store.get_providers(&wid).unwrap();
         let scnet = providers.iter().find(|p| p.id == "scnet").unwrap();
         assert!(scnet.authenticated);
-        assert_eq!(scnet.base_url.as_deref(), Some("https://api.example.com/v1"));
+        assert_eq!(
+            scnet.base_url.as_deref(),
+            Some("https://api.example.com/v1")
+        );
         assert!(scnet.models.contains(&"MiniMax-M2.5".to_owned()));
 
         let opencode = std::fs::read_to_string(root.join("opencode.json")).unwrap();
@@ -1071,7 +1089,10 @@ mod tests {
         let providers = store.get_providers(&wid).unwrap();
         let provider = providers.iter().find(|p| p.id == "my-llm").unwrap();
         assert_eq!(provider.display_name, "My LLM v2");
-        assert_eq!(provider.base_url.as_deref(), Some("https://api.example.com/v2"));
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://api.example.com/v2")
+        );
         assert!(provider.authenticated);
         assert!(provider.models.contains(&"gpt-4o".to_owned()));
     }
