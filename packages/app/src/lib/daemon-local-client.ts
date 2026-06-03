@@ -395,12 +395,24 @@ export async function putDaemonProviderAuth(
 export async function deleteDaemonProviderAuth(
   workspaceId: string,
   providerId: string,
-): Promise<DaemonApplyOutcome | null> {
+): Promise<
+  | { ok: true; outcome: DaemonApplyOutcome }
+  | { ok: false; status: number; code?: string; message: string }
+> {
   const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
     `/v1/workspaces/${workspaceId}/providers/${encodeURIComponent(providerId)}/auth`,
     { method: 'DELETE' },
   )
-  return result.ok ? result.data.outcome : null
+  if (result.ok) {
+    return { ok: true, outcome: result.data.outcome }
+  }
+  const problem = problemDetailFromErrorBody(result.error)
+  return {
+    ok: false,
+    status: result.status,
+    code: problem.code,
+    message: problem.detail,
+  }
 }
 
 // ─── Permissions ──────────────────────────────────────────────────────────────

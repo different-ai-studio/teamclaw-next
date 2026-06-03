@@ -131,6 +131,17 @@ function runtimeModelsToConfigured(
   disconnectedIds: Set<string>,
   suppressedProviderIds: Set<string> = new Set(),
 ): ConfiguredProvider[] {
+  const runtimeProviders = collectRuntimeProviders()
+  return Array.from(runtimeProviders.entries())
+    .filter(([providerId]) => !disconnectedIds.has(providerId) && !suppressedProviderIds.has(providerId))
+    .map(([providerId, provider]) => ({
+      id: providerId,
+      name: provider.name,
+      models: provider.models,
+    }))
+}
+
+function collectRuntimeProviders(): Map<string, ConfiguredProvider> {
   const byProvider = new Map<string, ConfiguredProvider>()
   const entries = Object.values(useRuntimeStateStore.getState().byRuntimeId)
 
@@ -143,12 +154,7 @@ function runtimeModelsToConfigured(
       if (!modelRef) continue
 
       const [providerId, modelId] = splitRuntimeModelId(agentType, modelRef)
-      if (
-        !providerId ||
-        !modelId ||
-        disconnectedIds.has(providerId) ||
-        suppressedProviderIds.has(providerId)
-      ) continue
+      if (!providerId || !modelId) continue
 
       let provider = byProvider.get(providerId)
       if (!provider) {
@@ -168,7 +174,40 @@ function runtimeModelsToConfigured(
     }
   }
 
-  return Array.from(byProvider.values())
+  return byProvider
+}
+
+function sameModelIds(
+  left: Array<{ id: string }>,
+  right: string[],
+): boolean {
+  if (left.length !== right.length) return false
+  const leftIds = [...left.map((model) => model.id)].sort()
+  const rightIds = [...right].sort()
+  return leftIds.every((id, index) => id === rightIds[index])
+}
+
+function reconcileSuppressedProviders(
+  daemonProviders: DaemonProviderInfo[],
+  runtimeProviders: Map<string, ConfiguredProvider>,
+  suppressedProviderIds: Set<string>,
+): Set<string> {
+  const next = new Set<string>()
+
+  for (const providerId of suppressedProviderIds) {
+    const daemonProvider = daemonProviders.find((provider) => provider.id === providerId)
+    const runtimeProvider = runtimeProviders.get(providerId)
+
+    const recovered = daemonProvider
+      ? sameModelIds(runtimeProvider?.models ?? [], daemonProvider.models)
+      : !runtimeProvider
+
+    if (!recovered) {
+      next.add(providerId)
+    }
+  }
+
+  return next
 }
 
 function mergeConfiguredProviders(
@@ -248,16 +287,24 @@ async function loadDaemonProviderSnapshot(
 ): Promise<{
   configuredProviders: ConfiguredProvider[]
   providers: ProviderEntry[]
+  nextRuntimeSuppressedProviderIds: Set<string>
 } | null> {
   const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
+  const runtimeProviders = collectRuntimeProviders()
+  const nextRuntimeSuppressedProviderIds = reconcileSuppressedProviders(
+    daemonProviders ?? [],
+    runtimeProviders,
+    runtimeSuppressedProviderIds,
+  )
   const snapshot = daemonProvidersToConfigured(daemonProviders ?? [], disconnectedIds)
   const configuredProviders = mergeConfiguredProviders(
     snapshot.configuredProviders,
-    runtimeModelsToConfigured(disconnectedIds, runtimeSuppressedProviderIds),
+    runtimeModelsToConfigured(disconnectedIds, nextRuntimeSuppressedProviderIds),
   )
   return {
     configuredProviders,
     providers: mergeProviderEntries(snapshot.providers, configuredProviders),
+    nextRuntimeSuppressedProviderIds,
   }
 }
 
@@ -265,7 +312,7 @@ async function loadDaemonProviderSnapshot(
 export async function loadConfiguredProvidersForWorkspace(
   workspacePath: string,
 ): Promise<{ configuredProviders: ConfiguredProvider[]; models: ModelOption[] } | null> {
-  const snapshot = await loadDaemonProviderSnapshot(workspacePath, new Set())
+  const snapshot = await loadDaemonProviderSnapshot(workspacePath, new Set(), new Set())
   if (!snapshot) return null
   return {
     configuredProviders: snapshot.configuredProviders,
@@ -458,7 +505,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         set({ providersLoading: false })
         return
       }
-      set({ providers: snapshot.providers, providersLoading: false })
+      set({
+        providers: snapshot.providers,
+        providersLoading: false,
+        _runtimeSuppressedProviderIds: snapshot.nextRuntimeSuppressedProviderIds,
+      })
     } catch (err) {
       console.error('Failed to load providers:', err)
       set({ providersLoading: false })
@@ -486,6 +537,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         configuredProviders: snapshot.configuredProviders,
         models: flattenConfiguredProviders(snapshot.configuredProviders),
         configuredProvidersLoading: false,
+        _runtimeSuppressedProviderIds: snapshot.nextRuntimeSuppressedProviderIds,
       })
     } catch (err) {
       console.error('Failed to load configured providers:', err)
@@ -543,7 +595,10 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       return false
     }
     try {
-      await deleteDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId)
+      const result = await deleteDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId)
+      if (!result.ok) {
+        throw new Error(result.message || `Failed to disconnect provider (${result.status})`)
+      }
       toast.success('Provider disconnected', { description: `Successfully disconnected ${providerId}` })
       set((state) => {
         const newDisconnected = new Set(state._disconnectedIds)
@@ -685,7 +740,10 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   removeCustomProvider: async (workspacePath: string, providerId: string) => {
     const wsId = encodeWorkspaceId(workspacePath)
     try {
-      await deleteDaemonProviderAuth(wsId, providerId)
+      const result = await deleteDaemonProviderAuth(wsId, providerId)
+      if (!result.ok) {
+        throw new Error(result.message || `Failed to remove custom provider (${result.status})`)
+      }
       set((state) => {
         const next = new Set(state._runtimeSuppressedProviderIds)
         next.add(providerId)
@@ -736,21 +794,19 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     if (workspacePath) {
       set({ providersLoading: true, configuredProvidersLoading: true })
       try {
-        const daemonProviders = await loadDaemonProvidersForWorkspace(workspacePath)
-        const baseSnapshot = daemonProvidersToConfigured(daemonProviders ?? [], get()._disconnectedIds)
-        const configuredProviders = mergeConfiguredProviders(
-          baseSnapshot.configuredProviders,
-          runtimeModelsToConfigured(
-            get()._disconnectedIds,
-            get()._runtimeSuppressedProviderIds,
-          ),
+        const snapshot = await loadDaemonProviderSnapshot(
+          workspacePath,
+          get()._disconnectedIds,
+          get()._runtimeSuppressedProviderIds,
         )
+        if (!snapshot) return
         set({
-          providers: mergeProviderEntries(baseSnapshot.providers, configuredProviders),
-          configuredProviders,
-          models: flattenConfiguredProviders(configuredProviders),
-          customProviderIds: (daemonProviders ?? [])
-            .filter((p) => p.id !== 'team' && p.authenticated)
+          providers: snapshot.providers,
+          configuredProviders: snapshot.configuredProviders,
+          models: flattenConfiguredProviders(snapshot.configuredProviders),
+          _runtimeSuppressedProviderIds: snapshot.nextRuntimeSuppressedProviderIds,
+          customProviderIds: snapshot.providers
+            .filter((p) => p.id !== 'team' && p.configured)
             .map((p) => p.id),
         })
       } catch (err) {

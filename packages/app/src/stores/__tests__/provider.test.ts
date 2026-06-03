@@ -83,7 +83,7 @@ describe('provider store initAll', () => {
       openai: [{ type: 'oauth', label: 'Browser login' }],
     })
     daemonMocks.deleteDaemonProviderAuth.mockReset()
-    daemonMocks.deleteDaemonProviderAuth.mockResolvedValue('restart_required')
+    daemonMocks.deleteDaemonProviderAuth.mockResolvedValue({ ok: true, outcome: 'restart_required' })
     daemonMocks.putDaemonProviderAuth.mockReset()
     daemonMocks.putDaemonProviderAuth.mockResolvedValue('restart_required')
   })
@@ -210,6 +210,19 @@ describe('provider store initAll', () => {
     expect(useProviderStore.getState().providers).toEqual([
       { id: 'openai', name: 'OpenAI', configured: false },
     ])
+  })
+
+  it('does not report disconnect success when daemon delete fails', async () => {
+    daemonMocks.deleteDaemonProviderAuth.mockResolvedValue({
+      ok: false,
+      status: 503,
+      message: 'daemon unavailable',
+    })
+
+    const { useProviderStore } = await import('../provider')
+    const ok = await useProviderStore.getState().disconnectProvider('openai')
+
+    expect(ok).toBe(false)
   })
 
   it('keeps an explicit selected model when daemon reports a different catalog', async () => {
@@ -428,5 +441,110 @@ describe('provider store initAll', () => {
     expect(useProviderStore.getState().configuredProviders).toEqual([])
     expect(useProviderStore.getState().models).toEqual([])
     expect(useProviderStore.getState().providers.some((provider) => provider.id === 'custom-openai')).toBe(false)
+  })
+
+  it('does not report custom-provider remove success when daemon delete fails', async () => {
+    daemonMocks.deleteDaemonProviderAuth.mockResolvedValue({
+      ok: false,
+      status: 500,
+      message: 'delete failed',
+    })
+
+    const { useProviderStore } = await import('../provider')
+    const ok = await useProviderStore.getState().removeCustomProvider('/workspace/demo', 'custom-openai')
+
+    expect(ok).toBe(false)
+  })
+
+  it('recovers runtime suppression after updated runtime models catch up', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'custom-openai',
+        display_name: 'Custom OpenAI',
+        authenticated: true,
+        models: ['fresh-model'],
+      },
+    ])
+    mocks.runtimeById = {
+      'runtime-1': {
+        info: {
+          agentType: 2,
+          availableModels: [
+            { id: 'custom-openai/stale-model', displayName: 'Stale Model' },
+          ],
+          currentModel: 'custom-openai/stale-model',
+        },
+      },
+    }
+
+    const { useProviderStore } = await import('../provider')
+    const updated = await useProviderStore.getState().updateCustomProvider('/workspace/demo', 'custom-openai', {
+      name: 'Custom OpenAI',
+      baseURL: 'https://api.example.test',
+      models: [{ modelId: 'fresh-model', modelName: 'Fresh Model' }],
+    })
+
+    expect(updated).toBe(true)
+    expect(useProviderStore.getState().models).toEqual([
+      { provider: 'custom-openai', id: 'fresh-model', name: 'fresh-model' },
+    ])
+
+    mocks.runtimeById = {
+      'runtime-1': {
+        info: {
+          agentType: 2,
+          availableModels: [
+            { id: 'custom-openai/fresh-model', displayName: 'Fresh Model' },
+          ],
+          currentModel: 'custom-openai/fresh-model',
+        },
+      },
+    }
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'custom-openai',
+        display_name: 'Custom OpenAI',
+        authenticated: true,
+        models: ['fresh-model'],
+      },
+    ])
+
+    await useProviderStore.getState().refreshConfiguredProviders()
+
+    expect(useProviderStore.getState().configuredProviders).toEqual([
+      {
+        id: 'custom-openai',
+        name: 'Custom OpenAI',
+        models: [{ id: 'fresh-model', name: 'fresh-model' }],
+      },
+    ])
+    expect(useProviderStore.getState()._runtimeSuppressedProviderIds.size).toBe(0)
+  })
+
+  it('recovers remove suppression after runtime provider disappears', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([])
+    mocks.runtimeById = {
+      'runtime-1': {
+        info: {
+          agentType: 2,
+          availableModels: [
+            { id: 'custom-openai/stale-model', displayName: 'Stale Model' },
+          ],
+          currentModel: 'custom-openai/stale-model',
+        },
+      },
+    }
+
+    const { useProviderStore } = await import('../provider')
+    const removed = await useProviderStore.getState().removeCustomProvider('/workspace/demo', 'custom-openai')
+
+    expect(removed).toBe(true)
+    expect(useProviderStore.getState()._runtimeSuppressedProviderIds.has('custom-openai')).toBe(true)
+
+    mocks.runtimeById = {}
+    await useProviderStore.getState().refreshConfiguredProviders()
+
+    expect(useProviderStore.getState().configuredProviders).toEqual([])
+    expect(useProviderStore.getState()._runtimeSuppressedProviderIds.size).toBe(0)
   })
 })
