@@ -29,6 +29,7 @@ use crate::config::workspace_control::{
     WorkspaceControlStore,
 };
 use crate::proto::amux;
+use crate::runtime::refresh::{RefreshChangeKind, RefreshSource};
 use std::collections::HashMap;
 
 use super::auth::{require_scope, Principal};
@@ -90,28 +91,38 @@ async fn workspace_path_or_404(workspace_id: &str) -> Result<std::path::PathBuf,
     Ok(wpath)
 }
 
-/// Reload workspace runtimes so ACP picks up provider credential changes (OAuth / apiKey).
-async fn reload_runtime_after_provider_auth(
+async fn record_refresh_change(
     state: &HttpState,
     workspace_id: &str,
     workspace_path: &std::path::Path,
-) -> ApplyOutcome {
-    if let Some(supervisor) = state.runtime_supervisor.as_ref() {
-        match supervisor
-            .reload_workspace(workspace_id, workspace_path)
+) -> Result<(), HttpError> {
+    record_refresh_change_kind(
+        state,
+        workspace_id,
+        workspace_path,
+        RefreshChangeKind::ProviderAuth,
+    )
+    .await
+}
+
+async fn record_refresh_change_kind(
+    state: &HttpState,
+    workspace_id: &str,
+    workspace_path: &std::path::Path,
+    kind: RefreshChangeKind,
+) -> Result<(), HttpError> {
+    if let Some(refresh) = state.runtime_refresh.as_ref() {
+        refresh
+            .record_change(
+                workspace_id,
+                workspace_path,
+                kind,
+                RefreshSource::UiMutation,
+            )
             .await
-        {
-            Ok(outcome) => return outcome,
-            Err(e) => {
-                tracing::warn!(
-                    workspace_id = %workspace_id,
-                    error = %e,
-                    "runtime reload after provider auth failed"
-                );
-            }
-        }
+            .map_err(map_control_err)?;
     }
-    ApplyOutcome::ReloadRequired
+    Ok(())
 }
 
 // ── Shared response wrapper ───────────────────────────────────────────────────
@@ -202,13 +213,12 @@ pub async fn put_provider_auth(
 ) -> Result<(StatusCode, Json<ApplyResponse>), HttpError> {
     require_scope(&principal, "workspace:write")?;
     let store = resolve_store(&state)?;
-    let _file_outcome = store
+    store
         .put_provider_auth(&workspace_id, &provider_id, body)
         .map_err(map_control_err)?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
-    let outcome =
-        reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
-    Ok((StatusCode::OK, apply_ok(outcome)))
+    record_refresh_change(&state, &workspace_id, &wpath).await?;
+    Ok((StatusCode::OK, apply_ok(ApplyOutcome::ReloadRequired)))
 }
 
 /// `GET /v1/workspaces/:id/provider-auth-methods`
@@ -303,9 +313,8 @@ pub async fn post_provider_oauth_callback(
         )
         .await
         .map_err(map_settings_err)?;
-    let outcome =
-        reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
-    Ok(apply_ok(outcome))
+    record_refresh_change(&state, &workspace_id, &wpath).await?;
+    Ok(apply_ok(ApplyOutcome::ReloadRequired))
 }
 
 /// `DELETE /v1/workspaces/:id/providers/:provider_id/auth`
@@ -327,13 +336,12 @@ pub async fn delete_provider_auth(
             }
         }
     }
-    let _file_outcome = store
+    store
         .delete_provider_auth(&workspace_id, &provider_id)
         .map_err(map_control_err)?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
-    let outcome =
-        reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
-    Ok((StatusCode::OK, apply_ok(outcome)))
+    record_refresh_change(&state, &workspace_id, &wpath).await?;
+    Ok((StatusCode::OK, apply_ok(ApplyOutcome::ReloadRequired)))
 }
 
 // ── Model catalog ─────────────────────────────────────────────────────────────
@@ -556,6 +564,14 @@ pub async fn put_permissions(
     let outcome = store
         .put_permissions(&workspace_id, body)
         .map_err(map_control_err)?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
+    record_refresh_change_kind(
+        &state,
+        &workspace_id,
+        &wpath,
+        RefreshChangeKind::Permissions,
+    )
+    .await?;
     Ok(apply_ok(outcome))
 }
 
@@ -587,6 +603,14 @@ pub async fn put_allowlist(
     let outcome = store
         .put_allowlist(&workspace_id, body)
         .map_err(map_control_err)?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
+    record_refresh_change_kind(
+        &state,
+        &workspace_id,
+        &wpath,
+        RefreshChangeKind::Permissions,
+    )
+    .await?;
     Ok(apply_ok(outcome))
 }
 
@@ -826,9 +850,6 @@ mod tests {
 
     use crate::config::{workspace_control::OpenCodeCompatStore, HttpConfig};
     use crate::http::{routes, runtime_adapter::StubRuntimeAdapter, state::DaemonMetadata};
-    use crate::runtime::refresh::{
-        RefreshChangeKind, RefreshSource,
-    };
     use crate::runtime::{RuntimeManager, RuntimeSupervisor};
 
     fn provider(id: &str, models: &[&str]) -> ProviderInfo {
@@ -944,6 +965,21 @@ mod tests {
             .unwrap()
     }
 
+    fn auth_json_request(
+        token: &str,
+        method: &str,
+        uri: String,
+        body: serde_json::Value,
+    ) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
     fn runtime_test_app_with_supervisor() -> (axum::Router, String, Arc<RuntimeSupervisor>) {
         let runtime = StubRuntimeAdapter::new(32);
         let token_dir = tempfile::tempdir().unwrap();
@@ -1041,5 +1077,36 @@ mod tests {
         assert_eq!(refresh.recommended_action, "none");
         assert!(refresh.change_kinds.is_empty());
         assert_eq!(refresh.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn provider_auth_mutation_records_provider_auth_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_id(dir.path());
+        let (app, token, supervisor) = runtime_test_app_with_supervisor();
+
+        let response = app
+            .clone()
+            .oneshot(auth_json_request(
+                &token,
+                "POST",
+                format!("/v1/workspaces/{workspace_id}/providers/openai/auth"),
+                serde_json::json!({
+                    "api_key": "sk-test",
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["outcome"], "reload_required");
+
+        let refresh = supervisor.refresh_coordinator();
+        let state = refresh.runtime_refresh_dto(&workspace_id).await;
+        assert_eq!(state.status, "pending");
+        assert_eq!(state.recommended_action, "apply_changes");
+        assert_eq!(state.change_kinds, vec!["provider_auth".to_string()]);
     }
 }

@@ -15,7 +15,6 @@ import {
   getDaemonProviderAuthMethods,
   postDaemonProviderOAuthAuthorize,
   postDaemonProviderOAuthCallback,
-  reloadDaemonRuntime,
   type DaemonProviderInfo,
 } from '@/lib/daemon-local-client'
 import {
@@ -88,19 +87,6 @@ async function persistProviderApiKeyBestEffort(
     })
   } catch (err) {
     console.warn('[LLM] env_catalog_set failed; continuing with direct provider auth', err)
-  }
-}
-
-async function reloadRuntimeAfterProviderChange(workspacePath: string): Promise<void> {
-  try {
-    const outcome = await reloadDaemonRuntime(encodeWorkspaceId(workspacePath))
-    if (outcome === 'restart_required') {
-      toast.info('Agent restart required', {
-        description: 'Provider credentials changed. Start a new session to use the updated connection.',
-      })
-    }
-  } catch (err) {
-    console.warn('[LLM] runtime reload after provider change failed:', err)
   }
 }
 
@@ -440,7 +426,6 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       return { _disconnectedIds: newDisconnected }
     })
     toast.success('Provider connected', { description: `Successfully connected ${providerId}` })
-    await reloadRuntimeAfterProviderChange(workspacePath)
     await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
     return true
   },
@@ -521,7 +506,6 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         newDisconnected.delete(providerId)
         return { _disconnectedIds: newDisconnected }
       })
-      await reloadRuntimeAfterProviderChange(workspacePath)
       await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       return true
     } catch (err) {
@@ -541,7 +525,6 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
     try {
       await deleteDaemonProviderAuth(encodeWorkspaceId(workspacePath), providerId)
-      await reloadRuntimeAfterProviderChange(workspacePath)
       toast.success('Provider disconnected', { description: `Successfully disconnected ${providerId}` })
       set((state) => {
         const newDisconnected = new Set(state._disconnectedIds)
@@ -610,10 +593,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         newDisconnected.delete(providerId)
         return { _disconnectedIds: newDisconnected }
       })
-      await reloadRuntimeAfterProviderChange(workspacePath)
       await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider added', {
-        description: `${config.name} has been added. Restarting agent...`,
+        description: `${config.name} has been added.`,
       })
       return providerId
     } catch (err) {
@@ -644,10 +626,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         display_name: config.name,
         models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
       })
-      await reloadRuntimeAfterProviderChange(workspacePath)
       await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider updated', {
-        description: `${config.name} has been updated. Restarting agent...`,
+        description: `${config.name} has been updated.`,
       })
       return true
     } catch (err) {
@@ -681,8 +662,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     const wsId = encodeWorkspaceId(workspacePath)
     try {
       await deleteDaemonProviderAuth(wsId, providerId)
+      await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider removed', {
-        description: `Provider has been removed. Restarting agent...`,
+        description: 'Provider has been removed.',
       })
       return true
     } catch (err) {

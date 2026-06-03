@@ -14,6 +14,7 @@ vi.mock('sonner', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    info: vi.fn(),
   },
 }))
 
@@ -178,15 +179,17 @@ describe('provider store initAll', () => {
     expect(result).toMatchObject({ message: 'opencode serve unavailable' })
   })
 
-  it('reloads runtime after successful OAuth callback', async () => {
-    mocks.postDaemonProviderOAuthCallback.mockResolvedValue({ ok: true })
-    mocks.reloadDaemonRuntime.mockResolvedValue('reload_required')
+  it('does not own runtime reload messaging after successful OAuth callback when shared refresh is pending', async () => {
+    mocks.postDaemonProviderOAuthCallback.mockResolvedValue({
+      ok: true,
+      outcome: 'reload_required',
+    })
 
     const { useProviderStore } = await import('../provider')
     const ok = await useProviderStore.getState().completeOAuthCallback('openai', 0, 'code-123')
 
     expect(ok).toBe(true)
-    expect(mocks.reloadDaemonRuntime).toHaveBeenCalledWith('/workspace/demo')
+    expect(mocks.reloadDaemonRuntime).not.toHaveBeenCalled()
   })
 
   it('disconnects via daemon without OpenCode sidecar', async () => {
