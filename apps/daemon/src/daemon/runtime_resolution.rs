@@ -57,6 +57,13 @@ pub(crate) fn runtime_start_initial_model_override(
     (!model_id.is_empty()).then(|| model_id.to_string())
 }
 
+pub(crate) fn session_message_model_override(
+    message: &crate::proto::teamclaw::Message,
+) -> Option<String> {
+    let model_id = message.model.trim();
+    (!model_id.is_empty()).then(|| model_id.to_string())
+}
+
 /// Map a backend name (as emitted by `supported_agent_type_names` and stored on
 /// cron jobs) to its `amux::AgentType`. Returns `None` for unknown/empty names
 /// so callers can fall back to the daemon default. Accepts the common aliases
@@ -244,6 +251,29 @@ mod tests {
             runtime_start_initial_model_override(&start).as_deref(),
             Some("opencode/deepseek-v4-flash-free")
         );
+    }
+
+    #[test]
+    fn message_model_becomes_route_override() {
+        let message = crate::proto::teamclaw::Message {
+            model: "opencode/deepseek-v4-flash-free".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            session_message_model_override(&message).as_deref(),
+            Some("opencode/deepseek-v4-flash-free")
+        );
+    }
+
+    #[test]
+    fn empty_message_model_has_no_route_override() {
+        let message = crate::proto::teamclaw::Message {
+            model: "   ".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(session_message_model_override(&message), None);
     }
 
     #[test]

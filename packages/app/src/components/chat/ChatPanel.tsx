@@ -64,6 +64,7 @@ import {
 import { StreamingAgentBubble } from "./StreamingAgentBubble";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { loadSessionActiveModel } from "@/lib/session-active-model";
+import { syncSessionRuntimeModelIfNeeded } from "@/lib/session-runtime-model-sync";
 import { ensureSessionLiveSubscribed } from "@/lib/session-live-subscriptions";
 import { resolveActorIdsFromAtText } from "@/lib/resolve-text-mentions";
 import { selectAgentModel, providerModelKeyFromOption } from "@/lib/runtime-state-resolve";
@@ -651,6 +652,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     () => (currentModelKey ?? providerModelKeyFromOption(selectedModelOption)) || null,
     [currentModelKey, selectedModelOption],
   );
+  const lastImmediateRuntimeModelSyncRef = React.useRef<string | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────
   const messageListRef = React.useRef<MessageListHandle>(null);
@@ -830,6 +832,29 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       console.warn("[ChatPanel] Failed to sync gateway session model:", error);
     });
   }, [activeSessionId, selectedModelOption]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const nextKey = await syncSessionRuntimeModelIfNeeded({
+        sessionId: activeSessionId,
+        modelId: selectedModelKey,
+        lastAppliedKey: lastImmediateRuntimeModelSyncRef.current,
+      }).catch((error) => {
+        console.warn("[ChatPanel] Failed to sync selected model to active runtimes:", error);
+        return lastImmediateRuntimeModelSyncRef.current;
+      });
+
+      if (!cancelled) {
+        lastImmediateRuntimeModelSyncRef.current = nextKey;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, selectedModelKey]);
 
   // ── Per-actor draft persistence ──────────────────────────────────────
   // When the user taps an actor in the Actors tab without sending anything

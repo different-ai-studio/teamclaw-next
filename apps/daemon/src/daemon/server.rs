@@ -26,7 +26,7 @@ use crate::daemon::runtime_cursor::{
 };
 use crate::daemon::runtime_resolution::{
     agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
-    supported_agent_type_names,
+    session_message_model_override, supported_agent_type_names,
 };
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids, resolve_mention_actor_ids,
@@ -974,9 +974,8 @@ impl DaemonServer {
                 );
             // The HTTP workspace runtime endpoints share this supervisor's
             // refresh coordinator for status + apply-intent semantics.
-            let runtime_supervisor = Some(crate::runtime::RuntimeSupervisor::new(
-                self.agents.clone(),
-            ));
+            let runtime_supervisor =
+                Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
             let workspace_control: Option<
                 std::sync::Arc<dyn crate::config::WorkspaceControlStore>,
             > = Some(std::sync::Arc::new(
@@ -2563,6 +2562,32 @@ impl DaemonServer {
                     session_id = %session_id,
                     "route_session_message: delivering mentioned prompt to runtime"
                 );
+                if let Some(desired_model) = session_message_model_override(message) {
+                    let current = self
+                        .agents
+                        .lock()
+                        .await
+                        .current_model(&runtime_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    if desired_model != current {
+                        let mut agents = self.agents.lock().await;
+                        match agents.send_set_model(&runtime_id, &desired_model).await {
+                            Ok(()) => {
+                                agents.set_current_model(&runtime_id, &desired_model);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    runtime_id = %runtime_id,
+                                    message_id = %message.message_id,
+                                    model_id = %desired_model,
+                                    err = %e,
+                                    "route_session_message: send_set_model failed"
+                                );
+                            }
+                        }
+                    }
+                }
                 let send_res = self
                     .agents
                     .lock()
@@ -6273,6 +6298,50 @@ mod tests {
 
         let agents = fixture.server.agents.lock().await;
         assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn live_message_model_override_is_applied_before_prompt_routing() {
+        let mut fixture = test_server();
+
+        let msg = crate::proto::teamclaw::Message {
+            message_id: "msg-model-1".to_string(),
+            session_id: "session-1".to_string(),
+            sender_actor_id: "human-actor".to_string(),
+            kind: 0,
+            content: "which model?".to_string(),
+            created_at: 1,
+            model: "opencode/deepseek-v4-flash-free".to_string(),
+            ..Default::default()
+        };
+        let msg_env = crate::proto::teamclaw::SessionMessageEnvelope {
+            message: Some(msg),
+            mention_actor_ids: vec!["agent-actor".to_string()],
+            ..Default::default()
+        };
+        let live = crate::proto::teamclaw::LiveEventEnvelope {
+            event_id: "event-model-1".to_string(),
+            event_type: "message.created".to_string(),
+            session_id: "session-1".to_string(),
+            actor_id: "human-actor".to_string(),
+            sent_at: 1,
+            body: msg_env.encode_to_vec(),
+        };
+
+        fixture
+            .server
+            .handle_incoming(subscriber::IncomingMessage::TeamclawSessionLive {
+                session_id: "session-1".to_string(),
+                payload: live.encode_to_vec(),
+            })
+            .await;
+
+        let agents = fixture.server.agents.lock().await;
+        assert_eq!(
+            agents.current_model("rt1").map(|s| s.as_str()),
+            Some("opencode/deepseek-v4-flash-free")
+        );
+        assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("which model?"));
     }
 
     #[tokio::test]
