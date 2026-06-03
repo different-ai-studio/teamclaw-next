@@ -201,21 +201,37 @@ pub async fn enable_managed_git_impl(
         .post_json("/managed-git/create-repo", &json!({ "teamId": team_id }))
         .await
         .map_err(|e| format!("/managed-git/create-repo failed: {e}"))?;
+    // FC returns the bare CodeUp HTTPS clone URL plus the bot's git credential
+    // (`pat`) and `botUsername`. CodeUp HTTPS auth expects `<username>:<token>`,
+    // so we store the credential in that combined form; the daemon embeds it
+    // verbatim into the remote URL (see `embed_token_in_url`).
     let repo_url = create_resp
-        .get("repo_url")
+        .get("repoHttpUrl")
+        .or_else(|| create_resp.get("repo_url"))
         .or_else(|| create_resp.get("repoUrl"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "managed-git/create-repo: missing repo_url".to_string())?
+        .ok_or_else(|| "managed-git/create-repo: missing repoHttpUrl".to_string())?
         .to_string();
-    let push_token = create_resp
-        .get("push_token")
+    let pat = create_resp
+        .get("pat")
+        .or_else(|| create_resp.get("push_token"))
         .or_else(|| create_resp.get("pushToken"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "managed-git/create-repo: missing push_token".to_string())?
+        .ok_or_else(|| "managed-git/create-repo: missing pat".to_string())?
         .to_string();
+    let bot_username = create_resp
+        .get("botUsername")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    // Combined `user:token` userinfo when a bot username is present; otherwise
+    // the bare token (daemon falls back to an `oauth2:<token>` embed).
+    let git_credential = match bot_username {
+        Some(user) => format!("{user}:{pat}"),
+        None => pat,
+    };
 
     let cred_ref = format!("managed_git:{}", team_id);
-    custom_git::store_credential(&workspace_path, &cred_ref, "https_token", &push_token)?;
+    custom_git::store_credential(&workspace_path, &cred_ref, "https_token", &git_credential)?;
 
     let body = json!({
         "mode": "managed_git",
@@ -229,11 +245,12 @@ pub async fn enable_managed_git_impl(
 
     ensure_team_repo_dir(&workspace_path)?;
 
-    // The daemon owns the clone now: deliver the push token as the git
-    // credential and link this workspace. managed_git uses the repo's default
-    // branch, so gitBranch is None. Non-fatal on daemon error.
+    // The daemon owns the clone now: deliver the git credential and link this
+    // workspace. managed_git uses the repo's default branch, so gitBranch is
+    // None. Non-fatal on daemon error.
     let clone_warning =
-        deliver_secrets_and_link(&team_id, &workspace_path, None, Some(&push_token), None).await;
+        deliver_secrets_and_link(&team_id, &workspace_path, None, Some(&git_credential), None)
+            .await;
 
     Ok(EnableShareResult {
         team_id,
